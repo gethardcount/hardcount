@@ -20,11 +20,36 @@ import (
 // non-clock-pinned path, so a recovered scheduler resumes the cadence from the
 // recovery instant.
 func TestProcessDueRuns_WallClockCadenceAfterDowntime(t *testing.T) {
+	t.Run("no resolver", func(t *testing.T) { testWallClockCadenceAfterDowntime(t, false) })
+	// Production wires the engine as resolver, and it resolves a wall-clock
+	// invoice to a clock-less Sim at now. The clamp must still apply: keying
+	// on "the resolver bound something" made every production run look
+	// simulated, so it never did (found walking FLOW I10, 2026-10-11).
+	t.Run("production resolver, wall-clock invoice", func(t *testing.T) { testWallClockCadenceAfterDowntime(t, true) })
+}
+
+// wallClockResolver resolves every invoice the way billing.Engine resolves an
+// unpinned one: an instant, no clock id.
+type wallClockResolver struct{ now time.Time }
+
+func (r wallClockResolver) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{At: r.now}, nil
+}
+func (r wallClockResolver) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{At: r.now}, nil
+}
+func (r wallClockResolver) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{At: r.now}, nil
+}
+
+func testWallClockCadenceAfterDowntime(t *testing.T, withResolver bool) {
 	recoveryNow := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
 	store := newMemStore()
-	// No resolver wired → pinned=false; pure wall-clock path.
 	svc := NewService(store, &failingRetrier{}, clock.NewFake(recoveryNow))
+	if withResolver {
+		svc.SetResolver(wallClockResolver{now: recoveryNow})
+	}
 	ctx := context.Background()
 
 	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", recoveryNow.Add(-30*24*time.Hour), domain.DunningCausePaymentFailed)

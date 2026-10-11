@@ -615,8 +615,15 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		return nil // Skip paused runs
 	}
 
-	var pinned bool
-	ctx, pinned = clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: run.InvoiceID})
+	ctx, _ = clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: run.InvoiceID})
+	// Simulated means a test clock is bound, not merely that the resolver
+	// bound an instant: BindEffectiveNow reports true for a wall-clock invoice
+	// too (the engine resolves it to a clock-less Sim at now). Keying on that
+	// bool made every production run look simulated, so anchorInstant's
+	// downtime clamp never ran and a late retry left every later retry in the
+	// past, fired one per tick (found walking FLOW I10, 2026-10-11: VLX-000081
+	// retried "Oct 4" then "Oct 7" on consecutive ticks on Oct 11).
+	_, simulated := clock.SimOf(ctx)
 
 	// Retries exhausted on entry: an exhaustion that was interrupted after the
 	// final retry (its lease expired), an action_failed re-attempt, or a policy
@@ -627,7 +634,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		if run.NextActionAt == nil { // unreachable: both pickers select on next_action_at
 			return fmt.Errorf("exhaust-on-entry: run %s has no next_action_at", run.ID)
 		}
-		attemptAt := anchorInstant(s.clock.Now(ctx), run.NextActionAt, isCatchup || pinned)
+		attemptAt := anchorInstant(s.clock.Now(ctx), run.NextActionAt, isCatchup || simulated)
 		lease := leaseFrom(attemptAt)
 		won, err := s.store.ClaimExhaustion(ctx, tenantID, run.ID, run.AttemptCount, *run.NextActionAt, lease)
 		if err != nil {
@@ -648,7 +655,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	prevLastAttemptAt := run.LastAttemptAt // for the transient-skip rewind below
 	prevNextActionAt := run.NextActionAt   // ditto: the final attempt replaces it with the lease
 	// Anchor this attempt's instant on the contracted one (see anchorInstant).
-	now := anchorInstant(s.clock.Now(ctx), run.NextActionAt, isCatchup || pinned)
+	now := anchorInstant(s.clock.Now(ctx), run.NextActionAt, isCatchup || simulated)
 	run.LastAttemptAt = &now
 
 	// Rebind ctx's instant to the anchored retry time while keeping the

@@ -2,6 +2,7 @@ package billing_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,8 @@ import (
 	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
@@ -321,5 +324,59 @@ func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) 
 	}
 	if want := issued.Add(3 * 24 * time.Hour); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
 		t.Errorf("first retry = %v, want %v (simulated issue + 3d)", run.NextActionAt, want)
+	}
+}
+
+type decliningRetrier struct{}
+
+func (decliningRetrier) RetryPayment(context.Context, string, string, string) error {
+	return fmt.Errorf("card declined")
+}
+
+// A wall-clock retry that runs late — the scheduler was down, or its first
+// retry was mis-anchored in the past — schedules the next one from when it
+// ran, not from when it was due. With the production resolver wired, every
+// run used to read as simulated, so each later retry was dated in the past
+// too and fired on the next tick (VLX-000081: "Oct 4" then "Oct 7", both on
+// Oct 11).
+func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
+	h := newCollectHarness(t)
+	dstore := dunning.NewPostgresStore(h.db)
+	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
+		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "120h"}, MaxRetryAttempts: 3,
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+	}); err != nil {
+		t.Fatalf("upsert policy: %v", err)
+	}
+	before := time.Now().UTC() // the engine's clock is fixed when it is built
+	svc := dunning.NewService(dstore, decliningRetrier{}, nil)
+	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
+	resolver.SetCustomerReader(customer.NewPostgresStore(h.db))
+	resolver.SetTestClockReader(testclock.NewPostgresStore(h.db))
+	svc.SetResolver(resolver)
+
+	inv := h.seed(t, "INV-CADENCE-1")
+	run, err := svc.StartDunning(h.ctx, h.tenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCausePaymentFailed)
+	if err != nil {
+		t.Fatalf("start dunning: %v", err)
+	}
+	// The first retry is ten days overdue.
+	overdue := time.Now().UTC().Add(-10 * 24 * time.Hour)
+	execTx(t, h.db, h.ctx, h.tenantID, `UPDATE invoice_dunning_runs SET next_action_at = $1 WHERE id = $2`, overdue, run.ID)
+
+	tick := leadertest.Token(t, testutil.AdminPool(t), h.ctx, leader.RoleDunning) // a led dunning tick, as the scheduler runs it
+	if _, errs := svc.ProcessDueRuns(tick, h.tenantID, 20); len(errs) > 0 {
+		t.Fatalf("process due runs: %v", errs)
+	}
+	got, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, inv.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.AttemptCount != 1 {
+		t.Fatalf("attempt_count = %d, want 1 (one retry per tick)", got.AttemptCount)
+	}
+	if got.NextActionAt == nil || got.NextActionAt.Before(before.Add(72*time.Hour)) {
+		t.Errorf("next retry = %v, want at least %v (when this retry ran + 72h); %v would fire on the next tick",
+			got.NextActionAt, before.Add(72*time.Hour), overdue.Add(72*time.Hour))
 	}
 }

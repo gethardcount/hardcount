@@ -270,15 +270,30 @@ backfill sweep).
 invoice's time domain (`clock.SimOf`). Inside an Advance the catchup
 binding says so; outside one, the engine resolver does.
 
+**The same walk found the retry chain had the matching hole.** Section 2's
+`processRun` anchors each retry on its scheduled `next_action_at`, which is
+right for simulated time. The wall-clock path is meant to clamp that to
+`max(now, scheduled)`, so a late retry (scheduler downtime, or the
+mis-anchored first retry above) restarts the cadence from now. The clamp
+was keyed on the bool from `clock.BindEffectiveNow`, but that reports
+"an instant was bound", and the engine resolver binds a clock-less instant
+for every wall-clock invoice. With the resolver wired, as in production,
+every run read as simulated and the clamp never ran. VLX-000081 retried
+"Oct 4" then "Oct 7" on consecutive ticks on Oct 11. `processRun` now keys
+on `clock.SimOf` (a test clock is bound), the same test `StartDunning` uses.
+The unit test for the clamp wired no resolver, so it could not see this.
+
 **Accepted residual:** a simulated invoice first charged on a later
 Advance (a card attached after issue) still counts from its issue instant,
 so its first retry runs on that Advance. It is test-clock only.
 
 **Test locks:** `TestStartDunning_FirstRetryAnchor`,
 `TestCollector_FirstRetryCountsFromTheFailure_RealStore` and
-`TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore`. Each is
-mutation-verified against the old anchor and against dropping the
-clock-pinned branch.
+`TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore`,
+`TestProcessDueRuns_WallClockCadenceAfterDowntime` (now also with a
+production-shaped resolver) and
+`TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore`. Each is
+mutation-verified against the code it replaced.
 
 ## References
 
