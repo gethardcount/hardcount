@@ -126,9 +126,12 @@ they exclude each other:
   (a charge on its way to Stripe is still `pending`), and while a
   `completed` session's payment is unrecorded.
 - **The hosted sweep** (`payment/reconciler_hosted.go`, part of the
-  payment reconciler) replaces the deferred session reconciler above. It
-  asks Stripe how each expired, unresolved session ended, and settles any
-  `completed` session whose invoice is still unpaid. It calls
+  payment reconciler) replaces the deferred session reconciler above. On
+  every run it asks Stripe about each unresolved session that has gone 5
+  minutes unchecked (the webhook's head start): a paid session is final at
+  Stripe as soon as the customer pays, so it is recorded on the next run
+  rather than after expiry. It also settles any `completed` session whose
+  invoice is still unpaid. It calls
   `SettleSucceeded` directly, so a hosted payment on an invoice Velox
   already charged raises `payment.duplicate_charge` even when no webhook
   ever arrived, and skips a payment the webhook already escalated (the
@@ -151,9 +154,10 @@ pay only on manual-collection invoices. Lago delays the first automatic
 charge 10 minutes, which narrows the race without closing it. A hold column
 with its own release reconciler and operator action was designed and
 rejected as heavier than the risk: the session table already carries the
-state. A wait lasts until the session's expiry plus the sweep's 5-minute
-grace plus one scheduler tick (hourly in production), with the 24-hour cap
-as the backstop.
+state. An abandoned page blocks Velox charges until the first reconciler
+run after its expiry (runs are hourly in production); a paid one until the
+payment is recorded, by its webhook or the next run. The 24-hour cap is the
+backstop.
 
 **Residual.** An operator records an offline payment while the customer
 completes a hosted session and that payment's webhook is lost: the

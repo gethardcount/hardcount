@@ -281,8 +281,9 @@ func waitForLockWait(t *testing.T, db *postgres.DB, ctx context.Context) {
 }
 
 // TestListHostedToReconcile_Selection: the sweep looks at sessions whose
-// outcome Velox has not recorded, and only once they are final at Stripe;
-// completed sessions only while their invoice is still unpaid.
+// outcome Velox has not recorded, once the webhook has had 5 minutes to
+// record it first; completed sessions only while their invoice is still
+// unpaid.
 func TestListHostedToReconcile_Selection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -299,14 +300,17 @@ func TestListHostedToReconcile_Selection(t *testing.T) {
 	with := func(status string, r hostedRow) hostedRow { r.status = status; return r }
 
 	want := map[string]bool{
-		seedHostedRow(t, db, ctx, tenantID, unpaid(), with("open", old)):                                                                                       true,
-		seedHostedRow(t, db, ctx, tenantID, unpaid(), with("superseded", old)):                                                                                 true,
-		seedHostedRow(t, db, ctx, tenantID, paid(), with("invoice_settled", old)):                                                                              true,
-		seedHostedRow(t, db, ctx, tenantID, unpaid(), with("completed", old)):                                                                                  true,
-		seedHostedRow(t, db, ctx, tenantID, paid(), with("completed", old)):                                                                                    false, // recorded
-		seedHostedRow(t, db, ctx, tenantID, unpaid(), with("expired", old)):                                                                                    false,
-		seedHostedRow(t, db, ctx, tenantID, unpaid(), hostedRow{status: "open", created: -2 * time.Hour}):                                                      false, // never recorded
-		seedHostedRow(t, db, ctx, tenantID, unpaid(), hostedRow{status: "open", recorded: true, created: -10 * time.Minute, expires: ahead(50 * time.Minute)}): false, // still live
+		seedHostedRow(t, db, ctx, tenantID, unpaid(), with("open", old)):                                  true,
+		seedHostedRow(t, db, ctx, tenantID, unpaid(), with("superseded", old)):                            true,
+		seedHostedRow(t, db, ctx, tenantID, paid(), with("invoice_settled", old)):                         true,
+		seedHostedRow(t, db, ctx, tenantID, unpaid(), with("completed", old)):                             true,
+		seedHostedRow(t, db, ctx, tenantID, paid(), with("completed", old)):                               false, // recorded
+		seedHostedRow(t, db, ctx, tenantID, unpaid(), with("expired", old)):                               false,
+		seedHostedRow(t, db, ctx, tenantID, unpaid(), hostedRow{status: "open", created: -2 * time.Hour}): false, // never recorded
+		// A live session is checked too (a paid session is final at Stripe
+		// at once), but only after the webhook's head start.
+		seedHostedRow(t, db, ctx, tenantID, unpaid(), hostedRow{status: "open", recorded: true, created: -10 * time.Minute, expires: ahead(50 * time.Minute)}): true,
+		seedHostedRow(t, db, ctx, tenantID, unpaid(), hostedRow{status: "open", recorded: true, created: -2 * time.Minute, expires: ahead(58 * time.Minute)}):  false,
 	}
 
 	got, err := sessions.ListHostedToReconcile(ctx, time.Now().Add(-5*time.Minute), 100)

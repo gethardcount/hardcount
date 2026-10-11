@@ -12,7 +12,7 @@ import (
 // HostedSessionLedger is the slice of the checkout-session ledger the hosted
 // sweep needs. *CheckoutSessionStore implements it.
 type HostedSessionLedger interface {
-	ListHostedToReconcile(ctx context.Context, expiredBefore time.Time, limit int) ([]CheckoutClaim, error)
+	ListHostedToReconcile(ctx context.Context, checkedBefore time.Time, limit int) ([]CheckoutClaim, error)
 	MarkSessionCompleted(ctx context.Context, tenantID, claimID string) error
 	MarkExpired(ctx context.Context, tenantID, claimID string) error
 	TouchReconcile(ctx context.Context, tenantID, claimID string) error
@@ -32,10 +32,9 @@ type CheckoutSessionResult struct {
 	PaymentIntentID string
 }
 
-// hostedSweepGrace is how long after a session's expiry the sweep waits
-// before asking Stripe. The session is final at Stripe by then, and the
-// payment_intent.succeeded webhook for a last-second payment has had time to
-// win, so the sweep only does work the webhook did not.
+// hostedSweepGrace is how long a session must sit unchecked (since it was
+// created, filled or last looked at) before the sweep asks Stripe about it,
+// so the payment_intent.succeeded webhook records an ordinary payment first.
 const hostedSweepGrace = 5 * time.Minute
 
 // SetHostedSessions wires the hosted-page sweep. Unwired (tests, Stripe not
@@ -45,11 +44,11 @@ func (r *Reconciler) SetHostedSessions(ledger HostedSessionLedger, reader Checko
 	r.hostedReader = reader
 }
 
-// sweepHostedSessions asks Stripe how each finished hosted Checkout session
-// ended. It exists for the payment no webhook reported: the hosted PI is not
-// on the invoice until it settles, so the PI sweeps above can never find it,
-// and the invoice would stay unpaid while Velox's own retries charge the card
-// again.
+// sweepHostedSessions asks Stripe how each unresolved hosted Checkout
+// session stands. It exists for the payment no webhook reported: the hosted
+// PI is not on the invoice until it settles, so the PI sweeps above can never
+// find it, and the invoice would stay unpaid (and blocked from Velox charges)
+// until someone noticed.
 //
 //   - complete and paid -> settle through the shared primitive. That records
 //     the payment, or, when the invoice was paid by another PaymentIntent in

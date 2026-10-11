@@ -354,16 +354,21 @@ var ErrSessionCompleted = errors.New("checkout session already completed")
 // ListHostedToReconcile is the hosted sweep's input (reconciler_hosted.go):
 //   - recorded sessions whose outcome Velox has not seen ('open',
 //     'superseded', and 'invoice_settled', where the customer may have paid in
-//     the same moment the invoice was settled another way), once expired at
-//     Stripe; and
+//     the same moment the invoice was settled another way); and
 //   - 'completed' sessions whose invoice is still unpaid: the
 //     checkout.session.completed webhook arrived but the payment's own did
 //     not. They leave this list when the payment settles.
 //
+// Each row waits until it is checkedBefore old (created, filled or last
+// looked at), so the ordinary webhook records a payment first and the sweep
+// spends no call on it. Not until the session expires: a paid session is
+// final at Stripe as soon as the customer pays, so waiting would only leave
+// the invoice unpaid longer. An unpaid session reads 'open' and is touched to
+// the back of the queue until it is paid or expires.
+//
 // Cross-tenant (TxBypass) for the ctx's mode, least recently looked at first
-// so a session that keeps erroring cannot hold the head of the queue
-// (TouchReconcile rotates it).
-func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, expiredBefore time.Time, limit int) ([]CheckoutClaim, error) {
+// so a session that keeps erroring cannot hold the head of the queue.
+func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, checkedBefore time.Time, limit int) ([]CheckoutClaim, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -378,9 +383,10 @@ func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, expire
 		FROM checkout_sessions cs
 		WHERE cs.stripe_session_id IS NOT NULL
 		  AND cs.livemode = $2
+		  AND cs.updated_at < $1
 		  AND (
-		    (cs.status IN ('open', 'superseded', 'invoice_settled') AND cs.expires_at < $1)
-		    OR (cs.status = 'completed' AND cs.updated_at < $1
+		    cs.status IN ('open', 'superseded', 'invoice_settled')
+		    OR (cs.status = 'completed'
 		      AND EXISTS (
 		        SELECT 1 FROM invoices i
 		        WHERE i.id = cs.invoice_id
@@ -390,7 +396,7 @@ func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, expire
 		  )
 		ORDER BY cs.updated_at ASC
 		LIMIT $3
-	`, expiredBefore, postgres.Livemode(ctx), limit)
+	`, checkedBefore, postgres.Livemode(ctx), limit)
 	if err != nil {
 		return nil, err
 	}
