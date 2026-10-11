@@ -167,25 +167,79 @@ func TestImmediateCancel_GraduatedTiersContinueAcrossFire_RealStore(t *testing.T
 	}
 }
 
-// A pricing rule pinned to the meter's own default version makes the fire's
-// line ambiguous (lines carry no pricing-rule id): the close refuses loudly
-// instead of guessing whose tiers to continue.
+// A pricing rule whose version resolves to the same version as the meter's
+// default binding makes the fire's line ambiguous (lines carry no
+// pricing-rule id): the close refuses loudly instead of guessing whose tiers
+// to continue. Pinned to v1 (the binding itself) and to v2 (a different pin
+// that resolves to the same graduated version) — the guard must compare
+// RESOLVED versions.
 func TestThresholdCycle_AmbiguousSeedFailsLoud_RealStore(t *testing.T) {
-	p := p21FireAt700(t, "P21 Ambiguous Seed", func(p *p21Fire) {
+	for _, pin := range []string{"v1", "v2"} {
+		t.Run("rule pinned to "+pin, func(t *testing.T) {
+			p := p21FireAt700(t, "P21 Ambiguous Seed "+pin, func(p *p21Fire) {
+				id := p.v1.ID
+				if pin == "v2" {
+					id = p.v2.ID
+				}
+				if _, err := p.f.pricingSvc.UpsertMeterPricingRule(p.ctx, p.f.tenantID, pricing.UpsertMeterPricingRuleInput{
+					MeterID: p.f.meterID, RatingRuleVersionID: id,
+					DimensionMatch: map[string]any{"model": "gpt"}, AggregationMode: domain.AggSum,
+				}); err != nil {
+					t.Fatalf("pricing rule: %v", err)
+				}
+			})
+			newEnd := p.fireUpper.Add(2 * time.Second).Truncate(time.Microsecond)
+			p.seedAfterFire(t, 600, &newEnd)
+			if wait := time.Until(newEnd.Add(500 * time.Millisecond)); wait > 0 {
+				time.Sleep(wait)
+			}
+			generated, failures := p.f.engine.RunCycleForTenant(p.ctx, p.f.tenantID, 50)
+			if generated != 0 || len(failures) == 0 || !strings.Contains(failures[0].Error(), "resolve to rating rule") {
+				t.Fatalf("cycle: generated=%d failures=%v, want the ambiguous-seed error and no invoice", generated, failures)
+			}
+		})
+	}
+}
+
+// The multi-dim close path (a meter with pricing rules) continues the
+// unclaimed bucket's ladder too: a pricing rule on a DIFFERENT graduated rule
+// key keeps the buckets unambiguous, so the default bucket (no dimensions)
+// continues from the fire's 700 units.
+func TestThresholdCycle_MultiDimBucketContinuesAcrossFire_RealStore(t *testing.T) {
+	p := p21FireAt700(t, "P21 Multi-dim", func(p *p21Fire) {
+		other, err := p.f.pricingSvc.CreateRatingRule(p.ctx, p.f.tenantID, pricing.CreateRatingRuleInput{
+			RuleKey: "gpt_calls", Name: "GPT Calls", Mode: domain.PricingGraduated, Currency: "USD",
+			GraduatedTiers: []domain.RatingTier{{UpTo: 100, UnitAmountCents: decimal.NewFromInt(50)}, {UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)}},
+		})
+		if err != nil {
+			t.Fatalf("other rule: %v", err)
+		}
+		backdateRuleVersion(t, p.f, p.ctx, other.ID, p.f.cycleStart.Add(-2*time.Hour))
 		if _, err := p.f.pricingSvc.UpsertMeterPricingRule(p.ctx, p.f.tenantID, pricing.UpsertMeterPricingRuleInput{
-			MeterID: p.f.meterID, RatingRuleVersionID: p.v1.ID,
+			MeterID: p.f.meterID, RatingRuleVersionID: other.ID,
 			DimensionMatch: map[string]any{"model": "gpt"}, AggregationMode: domain.AggSum,
 		}); err != nil {
-			t.Fatalf("pricing rule on the default version: %v", err)
+			t.Fatalf("pricing rule: %v", err)
 		}
 	})
+	if p.fireTotal != 7000 {
+		t.Fatalf("fire usage = %d, want 7000 (the unclaimed bucket on v2)", p.fireTotal)
+	}
 	newEnd := p.fireUpper.Add(2 * time.Second).Truncate(time.Microsecond)
 	p.seedAfterFire(t, 600, &newEnd)
 	if wait := time.Until(newEnd.Add(500 * time.Millisecond)); wait > 0 {
 		time.Sleep(wait)
 	}
 	generated, failures := p.f.engine.RunCycleForTenant(p.ctx, p.f.tenantID, 50)
-	if generated != 0 || len(failures) == 0 || !strings.Contains(failures[0].Error(), "resolve to rating rule") {
-		t.Fatalf("cycle: generated=%d failures=%v, want the ambiguous-seed error and no invoice", generated, failures)
+	if len(failures) > 0 || generated != 1 {
+		t.Fatalf("cycle: generated=%d failures=%v, want 1", generated, failures)
+	}
+	for _, inv := range p.f.listInvoices(t, p.ctx) {
+		if inv.ID == p.fireID {
+			continue
+		}
+		if got, _ := usageLineTotal(t, p.f, p.ctx, inv.ID); got != 3600 {
+			t.Errorf("multi-dim close usage = %d, want 3600 (continuing the ladder); 6000 is the restarted ladder", got)
+		}
 	}
 }

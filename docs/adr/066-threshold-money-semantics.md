@@ -172,12 +172,23 @@ one ladder across a mid-period threshold invoice. Cycle resets
 
 **Decision: marginal pricing per additive bucket, seeded from the fire.**
 The closers (cycle close and immediate cancel, multi-dim and single-rule)
-keep one ladder per bucket. The seed is the fire's usage line for the same
-(meter, resolved rating rule version): its quantity and its billed amount.
-Each later slice bills `max(0, F(quantity so far + q) − amount billed so
-far)`.
+keep one ladder per bucket. The seed is the quantity on the fire's usage
+line for the same (meter, resolved rating rule version). Each later slice
+bills `max(0, F(quantity so far + q) − F billed so far)`, where the seed's
+share is F(seed) recomputed under the rule.
 
-- **Exact for flat and graduated.** The fire and the close sum to F(total).
+- **Exact for graduated.** The fire and the close sum to F(total).
+- **The seed amount is recomputed, never read from the line.** In
+  tax-inclusive mode `ApplyTaxToLineItems` rewrites the line's AmountCents to
+  the net amount. Subtracting that from a gross F would bill the fire's tax
+  again (found by review: 20% inclusive VAT overbilled by exactly the fire's
+  tax).
+- **Flat rules keep per-slice pricing.** Flat pricing is linear, so the seed
+  changes nothing. Leaving flat untouched keeps it exact, as it already was.
+- **A usage cap turns the ladder off.** The fire is uncapped, while the
+  close scales its quantities by the cap. Continuing an uncapped seed would
+  price the capped units at the top tier, making the existing cap+threshold
+  gap worse. Capped closes price as before.
 - **Package pricing can be non-monotone.** Nothing checks
   `overage × size ≤ package price`, so a larger quantity can cost less. A
   slice is then clamped at 0, and the period bills max(F(fire), F(total)).
@@ -188,7 +199,7 @@ far)`.
   up by the resolved id. A version published before the period opens leaves
   the binding on the old id while both invoices carry the new one, so a key
   on the binding would silently restart tiers.
-- **Ambiguous configs fail loudly.** Lines carry no pricing-rule id. So the
+- **Ambiguous configs fail loudly** (graduated and package only). Lines carry no pricing-rule id. So the
   seed lookup is ambiguous when two buckets of one meter resolve to the same
   version. That happens with the meter's default binding plus a pricing rule
   pinned to it, or with two pricing rules pinned to versions of one rule

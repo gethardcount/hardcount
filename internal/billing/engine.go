@@ -2860,7 +2860,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	}
 	// One tier ladder per usage bucket for the whole close, continuing from
 	// what a threshold fire already billed (P21, ADR-066 amendment).
-	ladder := newUsageLadder(wm)
+	ladder := newUsageLadder(wm, !capScale.Equal(one))
 	for meterID := range meterIDSet {
 		meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 		if err != nil {
@@ -2884,7 +2884,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 		for _, r := range pricingRules {
 			rulesByID[r.ID] = r
 		}
-		if err := e.checkLadderSeeds(ctx, sub, meterID, pricingRules, periodStart, wm); err != nil {
+		if err := e.checkLadderSeeds(ctx, sub, meterID, pricingRules, periodStart, ladder); err != nil {
 			return nil, 0, nil, err
 		}
 
@@ -4085,7 +4085,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		nonAdditiveOnly bool
 	}
 	// Same per-bucket tier ladder as the cycle close (P21, ADR-066 amendment).
-	ladder := newUsageLadder(wm)
+	ladder := newUsageLadder(wm, !capScale.Equal(capOne))
 	for meterID := range cancelMeterIDSet {
 		// Does this meter price via dimension-match pricing rules (the
 		// multi-dim shape: e.g. the AI `tokens` meter, one rule per
@@ -4100,7 +4100,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		if err != nil {
 			return nil, 0, fmt.Errorf("list pricing rules for meter %s on cancel: %w", meterID, err)
 		}
-		if err := e.checkLadderSeeds(ctx, sub, meterID, pricingRules, periodStart, wm); err != nil {
+		if err := e.checkLadderSeeds(ctx, sub, meterID, pricingRules, periodStart, ladder); err != nil {
 			return nil, 0, err
 		}
 
