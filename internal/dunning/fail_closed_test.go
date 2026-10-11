@@ -168,3 +168,106 @@ func TestResolveRun_InvoiceActionFailureLeavesRunActive(t *testing.T) {
 		})
 	}
 }
+
+// resolveVia drives the operator resolve endpoint for run id.
+func resolveVia(h *Handler, id string, resolution domain.DunningResolution) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(resolveInput{Resolution: string(resolution)})
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	r = r.WithContext(context.WithValue(auth.WithTenantID(r.Context(), "t1"), chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	h.resolveRun(rec, r)
+	return rec
+}
+
+// An invoice already in the requested end state is done, not an error: the
+// operator's retry after a failed run update (or a race with a webhook) must
+// close the run — an escalated run has no tick that would. The writer that
+// would refuse ("already paid" / "already voided") is never called.
+func TestResolveRun_InvoiceAlreadyInEndStateResolves(t *testing.T) {
+	for resolution, status := range map[domain.DunningResolution]domain.InvoiceStatus{
+		domain.ResolutionPaymentRecovered: domain.InvoicePaid,
+		domain.ResolutionInvoiceVoided:    domain.InvoiceVoided,
+	} {
+		t.Run(string(resolution), func(t *testing.T) {
+			ctx := context.Background()
+			store := newMemStore()
+			svc := NewService(store, &noopRetrier{}, nil)
+			run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+			if err != nil {
+				t.Fatalf("StartDunning: %v", err)
+			}
+			inv := unpaidInv()
+			inv.Status = status
+			svc.SetSubscriptionPauser(&recordingPauser{}, &seqInvGet{steps: []stubInvGet{{inv: inv}}})
+			voider := &recordingVoider{err: errs.InvalidState("invoice is already " + string(status))}
+			h := NewHandler(svc, HandlerDeps{})
+			h.SetInvoiceVoider(voider)
+
+			if rec := resolveVia(h, run.ID, resolution); rec.Code != http.StatusOK {
+				t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
+			}
+			if voider.calls+voider.recordCalls != 0 {
+				t.Errorf("writer called %d time(s) on an invoice already %s", voider.calls+voider.recordCalls, status)
+			}
+			if got := store.runs[run.ID]; got.State != domain.DunningResolved || got.Resolution != resolution {
+				t.Errorf("run = %s/%s, want resolved/%s", got.State, got.Resolution, resolution)
+			}
+		})
+	}
+}
+
+// A failed write-off leaves the run open (it used to resolve the run first,
+// leaving an open invoice nothing revisits); an invoice already written off
+// resolves without writing again.
+func TestResolveRun_NotCollectibleWritesOffFirst(t *testing.T) {
+	ctx := context.Background()
+	start := func(t *testing.T, status domain.InvoiceStatus, markErr error) (*memStore, *Service, *capturingUncollect, string) {
+		store := newMemStore()
+		svc := NewService(store, &noopRetrier{}, nil)
+		run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+		if err != nil {
+			t.Fatalf("StartDunning: %v", err)
+		}
+		inv := unpaidInv()
+		inv.Status = status
+		svc.SetSubscriptionPauser(&recordingPauser{}, &seqInvGet{steps: []stubInvGet{{inv: inv}}})
+		u := &capturingUncollect{err: markErr}
+		svc.SetInvoiceUncollectibleMarker(u)
+		return store, svc, u, run.ID
+	}
+
+	store, svc, _, id := start(t, domain.InvoiceFinalized, errBlip)
+	if _, err := svc.ResolveRun(ctx, "t1", id, domain.ResolutionInvoiceNotCollectible); !errors.Is(err, errBlip) {
+		t.Fatalf("err = %v, want the write-off error", err)
+	}
+	if got := store.runs[id]; got.State != domain.DunningActive {
+		t.Errorf("run state = %s after a failed write-off, want active", got.State)
+	}
+
+	store, svc, u, id := start(t, domain.InvoiceUncollectible, nil)
+	if _, err := svc.ResolveRun(ctx, "t1", id, domain.ResolutionInvoiceNotCollectible); err != nil {
+		t.Fatalf("already written off: %v", err)
+	}
+	if len(u.calls) != 0 || store.runs[id].State != domain.DunningResolved {
+		t.Errorf("write-off calls = %d, run = %s; want 0 and resolved", len(u.calls), store.runs[id].State)
+	}
+}
+
+// A policy with no terminal actions: an unreadable invoice fails the tick
+// (re-checked next tick) instead of escalating or recording action_failed.
+func TestExhaust_NoActionPolicyReadErrorRetries(t *testing.T) {
+	store := newMemStore()
+	twoAxisPolicy(store, domain.SubActionNone, domain.InvActionNone)
+	svc := NewService(store, &noopRetrier{}, nil)
+	svc.SetSubscriptionPauser(&recordingPauser{}, &seqInvGet{steps: []stubInvGet{{inv: unpaidInv()}, {err: errBlip}}})
+	run := exhaustedRun(t, store, svc)
+	_, runErrs := svc.ProcessDueRuns(context.Background(), "t1", 20)
+	if len(runErrs) == 0 {
+		t.Fatal("want the tick to fail on an unreadable invoice")
+	}
+	if got := store.runs[run.ID]; got.State != domain.DunningActive || got.Resolution == domain.ResolutionActionFailed {
+		t.Errorf("run = %s/%s, want active with no action_failed label", got.State, got.Resolution)
+	}
+}

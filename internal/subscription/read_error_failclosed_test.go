@@ -192,3 +192,74 @@ func TestRemoveItem_ItemReadErrorFailsWithNothingRemoved(t *testing.T) {
 		t.Fatalf("item gone after a failed remove: %v", err)
 	}
 }
+
+// Update-item: a subscription read error used to leave the remaining days at
+// 0, so the change applied with proration silently off.
+func TestUpdateItem_SubReadErrorFailsWithNothingChanged(t *testing.T) {
+	h, store, subID, itemID := prorationHandler(t)
+	store.failGet = true
+	q := int64(3)
+	body, _ := json.Marshal(UpdateItemInput{Quantity: &q})
+	req := withTenantRoute(httptest.NewRequestWithContext(proCtx(), http.MethodPatch, "/subscriptions/"+subID+"/items/"+itemID, bytes.NewReader(body)), "t1", map[string]string{"id": subID, "itemID": itemID})
+	rr := httptest.NewRecorder()
+	h.updateItem(rr, req)
+	if rr.Code < 500 {
+		t.Fatalf("status = %d, want 5xx. body=%s", rr.Code, rr.Body.String())
+	}
+	if it, _ := store.memStore.GetItem(context.Background(), "t1", itemID); it.Quantity != 1 {
+		t.Fatalf("quantity = %d, want 1 (unchanged)", it.Quantity)
+	}
+}
+
+// failPlanOnce errors the first read of one plan id.
+type failPlanOnce struct {
+	*plansMock
+	id     string
+	failed bool
+}
+
+func (f *failPlanOnce) GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error) {
+	if id == f.id && !f.failed {
+		f.failed = true
+		return domain.Plan{}, errors.New("connection reset")
+	}
+	return f.plansMock.GetPlan(ctx, tenantID, id)
+}
+
+// Update-item plan swap: a read error on the outgoing plan used to read as
+// "not a cross-interval swap" and route the change down the non-atomic path
+// (ADR-056) with the wrong proration.
+func TestUpdateItem_OldPlanReadErrorFailsWithNothingChanged(t *testing.T) {
+	h, store, subID, itemID := prorationHandler(t)
+	plans := h.plans.(*plansMock)
+	h.plans = &failPlanOnce{plansMock: plans, id: "plan_existing"}
+	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
+	req := withTenantRoute(httptest.NewRequestWithContext(proCtx(), http.MethodPatch, "/subscriptions/"+subID+"/items/"+itemID, bytes.NewReader(body)), "t1", map[string]string{"id": subID, "itemID": itemID})
+	rr := httptest.NewRecorder()
+	h.updateItem(rr, req)
+	if rr.Code < 500 {
+		t.Fatalf("status = %d, want 5xx. body=%s", rr.Code, rr.Body.String())
+	}
+	if it, _ := store.memStore.GetItem(context.Background(), "t1", itemID); it.PlanID != "plan_existing" {
+		t.Fatalf("plan = %s, want plan_existing (unchanged)", it.PlanID)
+	}
+}
+
+// Remove-item: a subscription read error used to hard-delete the item with no
+// credit for the unused portion.
+func TestRemoveItem_SubReadErrorFailsWithNothingRemoved(t *testing.T) {
+	h, store, subID, itemID := prorationHandler(t)
+	if _, err := h.svc.AddItem(context.Background(), "t1", subID, AddItemInput{PlanID: "plan_new", Quantity: 1}); err != nil {
+		t.Fatalf("seed second item: %v", err)
+	}
+	store.failGet = true
+	req := withTenantRoute(httptest.NewRequestWithContext(proCtx(), http.MethodDelete, "/subscriptions/"+subID+"/items/"+itemID, nil), "t1", map[string]string{"id": subID, "itemID": itemID})
+	rr := httptest.NewRecorder()
+	h.removeItem(rr, req)
+	if rr.Code < 500 {
+		t.Fatalf("status = %d, want 5xx. body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := store.memStore.GetItem(context.Background(), "t1", itemID); err != nil {
+		t.Fatalf("item gone after a failed remove: %v", err)
+	}
+}

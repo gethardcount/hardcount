@@ -979,7 +979,15 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// "escalated" beside an invoice/sub that never got closed — escalated
 	// runs are permanently excluded from both due-run pickers, so they'd
 	// never be re-attempted.
-	actionFailed := invReadFailed // unknown invoice state: neither half fires
+	// Unknown invoice state: neither half fires. A policy with no terminal
+	// actions has nothing to protect, but the read error still means the run
+	// may already be paid, so the tick fails and the run is re-checked on the
+	// next one — rather than escalating, or being labelled action_failed for
+	// an action that does not exist.
+	if invReadFailed && policy.FinalSubscriptionAction == domain.SubActionNone && policy.FinalInvoiceAction == domain.InvActionNone {
+		return fmt.Errorf("dunning exhaust: read invoice %s for the paid re-check", run.InvoiceID)
+	}
+	actionFailed := invReadFailed
 
 	// applied is what the escalation email renders. It records whether each
 	// REQUESTED END STATE HOLDS — not whether this call performed the
@@ -1270,40 +1278,53 @@ func (s *Service) applyInvoiceAction(ctx context.Context, tenantID, invoiceID st
 // feedback_audit_overlapping_flows: same operator intent ("we're not
 // collecting"), same end state required.
 //
-// The invoice-side write is best-effort and logged on failure rather
-// than rolled back — the run's resolved state is itself useful for the
-// dunning history view, and a wrapper transaction across two domains
-// is heavier than the rarity warrants. If MarkUncollectible 4xxs
-// (e.g. invoice was already paid via webhook between dialog open and
-// submit), we surface the error to the caller and the operator can
-// reconcile.
+// The invoice write-off runs first; if it fails (e.g. the invoice was paid
+// via webhook between dialog open and submit) the error is returned and the
+// run stays open. If the run update then fails, a retry finds the invoice
+// already written off and only resolves the run.
 func (s *Service) ResolveRun(ctx context.Context, tenantID, runID string, resolution domain.DunningResolution) (domain.InvoiceDunningRun, error) {
 	run, err := s.store.GetRun(ctx, tenantID, runID)
 	if err != nil {
 		return domain.InvoiceDunningRun{}, err
 	}
 
-	// Resolve via the shared CAS path so an operator resolve racing an automated
-	// resolver (a card settle or the scheduler) fires dunning.resolved exactly once —
-	// the CAS winner owns the timeline row + the outbound webhook.
-	updated, err := s.resolveRunNow(ctx, tenantID, run, resolution, string(resolution))
-	if err != nil {
-		return domain.InvoiceDunningRun{}, err
-	}
-
-	if resolution == domain.ResolutionInvoiceNotCollectible && s.invoiceUncollect != nil {
-		if err := s.invoiceUncollect.MarkUncollectible(ctx, tenantID, run.InvoiceID); err != nil {
-			// Already-uncollectible is benign (race with automated
-			// terminal invoice action). Surface other errors so the operator
-			// knows the dunning run was resolved but the invoice
-			// didn't transition.
-			if !errors.Is(err, errs.ErrInvalidState) {
-				return updated, fmt.Errorf("mark invoice uncollectible: %w", err)
+	// The write-off runs BEFORE the run is resolved, like the operator's
+	// recovered/voided actions: resolving first and then failing the write-off
+	// left a resolved run beside an invoice still open, which nothing revisits.
+	// An invoice already written off (a race with the automated terminal
+	// action) is the requested end state, so it proceeds to resolve.
+	if resolution == domain.ResolutionInvoiceNotCollectible && s.invoiceUncollect != nil && run.InvoiceID != "" {
+		done, err := s.invoiceIn(ctx, tenantID, run.InvoiceID, domain.InvoiceUncollectible)
+		if err != nil {
+			return domain.InvoiceDunningRun{}, err
+		}
+		if !done {
+			if err := s.invoiceUncollect.MarkUncollectible(ctx, tenantID, run.InvoiceID); err != nil {
+				return domain.InvoiceDunningRun{}, fmt.Errorf("mark invoice uncollectible: %w", err)
 			}
 		}
 	}
 
-	return updated, nil
+	// Resolve via the shared CAS path so an operator resolve racing an automated
+	// resolver (a card settle or the scheduler) fires dunning.resolved exactly once —
+	// the CAS winner owns the timeline row + the outbound webhook.
+	return s.resolveRunNow(ctx, tenantID, run, resolution, string(resolution))
+}
+
+// invoiceIn reports whether the invoice is already in status want — an
+// operator resolution whose invoice side already happened (a retry after the
+// run update failed, or a race with a webhook or the automated action) is
+// done, not an error. Without an invoice reader wired it reports false and
+// the writer's own state check decides.
+func (s *Service) invoiceIn(ctx context.Context, tenantID, invoiceID string, want domain.InvoiceStatus) (bool, error) {
+	if s.invoiceGet == nil {
+		return false, nil
+	}
+	inv, err := s.invoiceGet.Get(ctx, tenantID, invoiceID)
+	if err != nil {
+		return false, fmt.Errorf("read invoice %s: %w", invoiceID, err)
+	}
+	return inv.Status == want, nil
 }
 
 // resolveRunNow transitions an already-loaded run to resolved with the given

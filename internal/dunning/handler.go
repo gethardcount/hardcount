@@ -380,9 +380,10 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 	// and then failing the invoice action (logged, 200) left a resolved run
 	// beside an unpaid / un-voided invoice: dunning had stopped, so nothing
 	// would ever collect or void it. This way a failed action leaves the run
-	// active and the operator sees the error; if the resolve itself fails
-	// after a successful action, the next dunning tick's paid/voided
-	// pre-check resolves the run.
+	// open and the operator sees the error. If the resolve itself fails after
+	// a successful action, the operator's retry finds the invoice already in
+	// the requested state, skips the action and resolves the run (an
+	// escalated run has no tick to do it for them).
 	pending, err := h.svc.store.GetRun(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "dunning_run")
@@ -432,6 +433,19 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error {
 	if invoiceID == "" {
 		return nil
+	}
+	target := map[domain.DunningResolution]domain.InvoiceStatus{
+		domain.ResolutionPaymentRecovered: domain.InvoicePaid,
+		domain.ResolutionInvoiceVoided:    domain.InvoiceVoided,
+	}[resolution]
+	if target != "" {
+		done, err := h.svc.invoiceIn(ctx, tenantID, invoiceID, target)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil // already paid / voided: the requested end state
+		}
 	}
 	switch resolution {
 	case domain.ResolutionPaymentRecovered:

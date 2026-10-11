@@ -110,11 +110,14 @@ function SortableHead({
 
 // refundUnconfirmed: an issued credit note with a refund amount whose refund
 // result was never recorded (a failed write after Stripe answered, or a crash
-// in that window). Mirrors the backend needs-attention rule, including its one
-// hour grace so a refund still being issued is not flagged. Retry refund
-// recovers it: the backend looks for the Stripe refund before creating one.
+// in that window). Same rule as the backend's needs-attention filter
+// (domain.CreditNoteRefundNeedsAttentionSQL): real credit notes only, after a
+// one-hour grace so a refund still being issued is not flagged. The backend
+// times the hour from updated_at, which for this state is the issue time, so
+// issued_at is the same instant. Retry refund recovers it: the backend looks
+// for the Stripe refund before creating one.
 function refundUnconfirmed(note: CreditNote): boolean {
-  if (note.status !== 'issued' || note.refund_status !== 'none' || note.refund_amount_cents <= 0) return false
+  if (note.is_simulated || note.status !== 'issued' || note.refund_status !== 'none' || note.refund_amount_cents <= 0) return false
   const issued = Date.parse(note.issued_at || note.created_at)
   return Number.isFinite(issued) && wallClockNow() - issued > 60 * 60 * 1000
 }
