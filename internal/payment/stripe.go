@@ -424,6 +424,9 @@ func IsUnknownPaymentFailure(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, ErrPaymentTransient) {
+		return false // nothing reached Stripe: not an incident signal
+	}
 	var pe *PaymentError
 	if errors.As(err, &pe) {
 		return pe.Unknown
@@ -621,6 +624,13 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		}
 	} else {
 		result, err = s.client.CreatePaymentIntent(ctx, params)
+	}
+	if errors.Is(err, ErrPaymentTransient) {
+		// Nothing reached Stripe (the credentials could not be read): same as
+		// the breaker short-circuit above — no state write, the next tick
+		// retries. Classified below it would be an UNKNOWN outcome, parking
+		// the invoice for a reconciler that has no PaymentIntent to find.
+		return domain.Invoice{}, ErrPaymentTransient
 	}
 	if err != nil {
 		// Categorise the error so ambiguous (5xx/timeout/network) outcomes are

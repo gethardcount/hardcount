@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/auth"
@@ -69,5 +70,28 @@ func TestRecordCheckoutCard_LookupErrorFailsNoCardSkips(t *testing.T) {
 	s.SetCardFetcher(cardFetcherStub{err: ErrNoSavedCard})
 	if err := s.RecordCheckoutCard(context.Background(), "t1", "cus_1", "cus_stripe", PurposeHostedInvoicePay); err != nil {
 		t.Fatalf("no saved card: err = %v, want nil", err)
+	}
+}
+
+// A credentials read error reaches the charge as ErrPaymentTransient: nothing
+// was sent to Stripe, so the invoice is left as it was and the caller retries.
+// Classified as an unknown outcome it parked the invoice for a reconciler that
+// had no PaymentIntent to find.
+func TestChargeInvoice_CredentialReadErrorLeavesInvoiceUntouched(t *testing.T) {
+	invoices := newMockInvoiceUpdater()
+	snapshot := pendingSnapshot()
+	invoices.invoices["inv_1"] = snapshot
+	transient := fmt.Errorf("%w: stripe credential lookup: %v", ErrPaymentTransient, errBlip)
+	s := NewStripe(&mockStripeClient{shouldFail: true, failErr: transient}, invoices, newMockWebhookStore(), nil, nil)
+
+	_, err := s.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	if !errors.Is(err, ErrPaymentTransient) {
+		t.Fatalf("err = %v, want ErrPaymentTransient", err)
+	}
+	if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentPending {
+		t.Fatalf("payment_status = %s, want pending (untouched)", got.PaymentStatus)
+	}
+	if IsUnknownPaymentFailure(err) {
+		t.Error("a credentials read error counted as an unknown payment outcome")
 	}
 }

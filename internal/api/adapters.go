@@ -1192,8 +1192,9 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 			audit.MarkSkip(ctx)
 			return a.mintForClaim(ctx, sc, claim, stripeCustomerID, inv, successURL, cancelURL)
 		}
-		if drifted && !expired && claim.StripeSessionID != "" {
-			// Amount drift with a live session: the customer may be PAYING it
+		if (drifted || expired) && claim.StripeSessionID != "" {
+			// Amount drift, or a claim at the end of its life, with a session
+			// that may still be live: the customer may be PAYING it
 			// right now. Branch on the Stripe-side truth before minting a
 			// second charge vehicle (panel: expiring a COMPLETED session
 			// fails — minting anyway double-charges).
