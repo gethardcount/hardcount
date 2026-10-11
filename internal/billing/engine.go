@@ -320,7 +320,7 @@ type NoPaymentMethodNotifier interface {
 // card-less invoices out of dunning forever. Wire in router.go via
 // SetDunningStarter.
 type DunningStarter interface {
-	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, failureAt time.Time, cause domain.DunningStartCause) error
+	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, issuedAt time.Time, cause domain.DunningStartCause) error
 }
 
 // DunningResolver resolves an active dunning run when an invoice settles via a
@@ -5364,7 +5364,7 @@ const failedDunningBackfillCoolOff = 10 * time.Minute
 // invoice still reaches a terminal instead of sitting failed forever. CRON /
 // livemode path; clock-pinned invoices are excluded by the store query and dunned
 // inline during Advance. Shares enrollStalledForDunning's body, so it inherits the
-// adapter's "dunning disabled" swallow and dunningFailureAt simulated-time anchoring.
+// adapter's "dunning disabled" swallow.
 func (e *Engine) EnrollFailedWithoutDunning(ctx context.Context, limit int) (int, []error) {
 	// dunningStarter is REQUIRED (boot fails closed, #442) — the old nil
 	// early-returns in the three enroll sweeps silently left card-less
@@ -5381,39 +5381,21 @@ func (e *Engine) EnrollFailedWithoutDunning(ctx context.Context, limit int) (int
 }
 
 // enrollStalledForDunning is the shared body: enroll each candidate via
-// the idempotent StartDunning. failureAt anchors on the invoice's issue/
-// period instant (simulation-relative for clock-pinned invoices), NOT
-// wall-clock now, so the first retry lands grace-days after the real
-// (simulated) collection failure — matching the inline decline path's
-// timing. A "dunning disabled" outcome is swallowed by the adapter as a
-// deliberate skip; other errors are collected per-invoice so one bad row
-// doesn't abort the sweep.
+// the idempotent StartDunning (which anchors the first retry: now for a
+// wall-clock invoice, the issue instant for a clock-pinned one). A "dunning
+// disabled" outcome is swallowed by the adapter as a deliberate skip; other
+// errors are collected per-invoice so one bad row doesn't abort the sweep.
 func (e *Engine) enrollStalledForDunning(ctx context.Context, pending []domain.Invoice, cause domain.DunningStartCause) (int, []error) {
 	swept := 0
 	var errs []error
 	for _, inv := range pending {
-		if err := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, dunningFailureAt(inv), cause); err != nil {
+		if err := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), cause); err != nil {
 			errs = append(errs, fmt.Errorf("enroll invoice %s for dunning: %w", inv.ID, err))
 			continue
 		}
 		swept++
 	}
 	return swept, errs
-}
-
-// dunningFailureAt resolves the simulated instant a no-card invoice's
-// collection "failed" — its issue time, else its period end. Returns the
-// zero Time when neither is set; StartDunning then falls back to its own
-// clock. Anchoring on the invoice (not wall-clock now) keeps clock-pinned
-// dunning on simulated time.
-func dunningFailureAt(inv domain.Invoice) time.Time {
-	if inv.IssuedAt != nil && !inv.IssuedAt.IsZero() {
-		return *inv.IssuedAt
-	}
-	if !inv.BillingPeriodEnd.IsZero() {
-		return inv.BillingPeriodEnd
-	}
-	return time.Time{}
 }
 
 // processAutoCharge is the one collector for finalized invoices. The two
@@ -5558,7 +5540,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			// A resolve ERROR is not "no card", so it starts nothing.
 			// StartDunning is idempotent: one run per invoice, ever.
 			if err == nil {
-				if derr := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, dunningFailureAt(inv), domain.DunningCauseNoPaymentMethod); derr != nil {
+				if derr := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCauseNoPaymentMethod); derr != nil {
 					// Left queued: the next sweep retries the start.
 					errs = append(errs, fmt.Errorf("start no-payment dunning for %s: %w", inv.ID, derr))
 				}

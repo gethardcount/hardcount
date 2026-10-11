@@ -244,6 +244,42 @@ the natural "queue of due work" shape.
   retryable invoice in the same Advance — that second one waits.
   Low real-world impact; not fixed in this pass.
 
+## Amendment 2026-10-11: the first retry counts from the failure
+
+Section 2's `simulatedFailureAt` anchored every first retry on the latest
+billing-period boundary at or before `IssuedAt`, and it ran for wall-clock
+invoices too. Any invoice issued partway through its period was anchored
+before it existed. Found walking FLOW I10: an invoice issued Oct 11 for an
+Oct 1 period got its first retry at Oct 4, already past, so it was retried
+at once with no grace. The no-card path used a second helper,
+`dunningFailureAt` (`IssuedAt`), so the two paths disagreed. Both were also
+wrong when a charge fails days after issue (a card attached late, the
+backfill sweep).
+
+`StartDunning` now owns the anchor, and callers pass the invoice's
+`issued_at`:
+
+- **Wall-clock invoice:** now, the moment the failure is recorded.
+- **Clock-pinned invoice:** `issued_at`, when it is earlier than the
+  clock's now. A cycle invoice is issued at its cycle close
+  (`billOnePeriod` sets it from `sub.NextBillingAt`), so cycle invoices
+  anchor where they did before, and section 2's single-click walk is
+  unchanged.
+
+"Clock-pinned" is read from the ctx after `StartDunning` binds the
+invoice's time domain (`clock.SimOf`). Inside an Advance the catchup
+binding says so; outside one, the engine resolver does.
+
+**Accepted residual:** a simulated invoice first charged on a later
+Advance (a card attached after issue) still counts from its issue instant,
+so its first retry runs on that Advance. It is test-clock only.
+
+**Test locks:** `TestStartDunning_FirstRetryAnchor`,
+`TestCollector_FirstRetryCountsFromTheFailure_RealStore` and
+`TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore`. Each is
+mutation-verified against the old anchor and against dropping the
+clock-pinned branch.
+
 ## References
 
 - ADR-028: billing-engine period loop and disjoint flows

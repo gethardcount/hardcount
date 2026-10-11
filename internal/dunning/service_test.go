@@ -367,6 +367,56 @@ func TestStartDunning(t *testing.T) {
 	})
 }
 
+// TestStartDunning_FirstRetryAnchor: the first retry is grace_period_days
+// after the moment collection failed, in the invoice's own time domain.
+// Found walking FLOW I10 (2026-10-11): an invoice issued Oct 11 inside an
+// Oct-1 period was anchored on Oct 1, so its first retry (Oct 4) was already
+// past and ran at once — no grace at all.
+func TestStartDunning_FirstRetryAnchor(t *testing.T) {
+	grace := 3 * 24 * time.Hour // newMemStore's default policy
+
+	t.Run("wall-clock invoice counts from now, not its issue date", func(t *testing.T) {
+		now := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
+		svc := NewService(newMemStore(), &noopRetrier{}, clock.NewFake(now))
+		issued := now.Add(-10 * 24 * time.Hour) // declined 10 days after issue
+		run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", issued, domain.DunningCausePaymentFailed)
+		if err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		if want := now.Add(grace); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
+			t.Errorf("next_action_at: got %v, want %v (decline + grace)", run.NextActionAt, want)
+		}
+		if !run.CreatedAt.Equal(now) {
+			t.Errorf("created_at: got %v, want %v", run.CreatedAt, now)
+		}
+	})
+
+	t.Run("clock-pinned invoice counts from its issue instant", func(t *testing.T) {
+		frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
+		issued := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
+		svc := NewService(newMemStore(), &noopRetrier{}, nil)
+		run, err := svc.StartDunning(inAdvance(context.Background(), frozen), "t1", "inv_1", "cus_1", issued, domain.DunningCausePaymentFailed)
+		if err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		if want := issued.Add(grace); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
+			t.Errorf("next_action_at: got %v, want %v (issue + grace)", run.NextActionAt, want)
+		}
+	})
+
+	t.Run("clock-pinned invoice with no issue instant counts from the clock's now", func(t *testing.T) {
+		frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
+		svc := NewService(newMemStore(), &noopRetrier{}, nil)
+		run, err := svc.StartDunning(inAdvance(context.Background(), frozen), "t1", "inv_1", "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
+		if err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		if want := frozen.Add(grace); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
+			t.Errorf("next_action_at: got %v, want %v", run.NextActionAt, want)
+		}
+	})
+}
+
 func TestStartDunning_DisabledPolicy(t *testing.T) {
 	store := newMemStore()
 	p := store.policies[store.defaultID]
@@ -487,6 +537,14 @@ func TestProcessDueRuns_MaxRetriesExhausted(t *testing.T) {
 	}
 }
 
+// inAdvance binds ctx the way a test-clock Advance does (catchup's
+// clock.WithSim at advance-end frozen_time), so StartDunning reads the
+// invoice as clock-pinned and anchors its first retry on the issue instant
+// passed in — the cycle close — not on frozen.
+func inAdvance(ctx context.Context, frozen time.Time) context.Context {
+	return clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: "clock_1"})
+}
+
 // TestProcessDueRunsForClock_LoopsUntilExhausted locks in the Gap B
 // fix: a single Advance click must walk dunning state forward to
 // completion when multiple retries fit inside the advance window.
@@ -508,7 +566,7 @@ func TestProcessDueRunsForClock_LoopsUntilExhausted(t *testing.T) {
 
 	// Start dunning at simulated cycle-close time. With grace=3d this
 	// schedules retry #1 for May 4 (well inside the May 20 window).
-	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
 
@@ -592,7 +650,7 @@ func TestProcessDueRunsForClock_StopsWhenAllAdvancePastFrozen(t *testing.T) {
 	// Advance only to May 5 — past May 4 retry #1 but before May 7 retry #2.
 	frozen := time.Date(2024, 5, 5, 0, 0, 0, 0, time.UTC)
 
-	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
 
@@ -680,7 +738,7 @@ func TestProcessDueRunsForClock_EnqueuesEscalationEmailOnExhaust(t *testing.T) {
 
 	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
 	frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
@@ -1109,7 +1167,7 @@ func TestProcessDueRunsForClock_RecoveryStampsContractedInstant(t *testing.T) {
 	frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
 	retry2At := cycleClose.Add(72*time.Hour + 72*time.Hour) // grace 3d + schedule[0] 3d = May 7
 
-	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
 	if _, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", frozen, 20); len(errs) > 0 {
@@ -1181,7 +1239,7 @@ func TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant(t *testing.T) {
 
 	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
 	frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
 	if _, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", frozen, 20); len(errs) > 0 {
@@ -1224,7 +1282,7 @@ func TestProcessRun_FailedRetryStampsPIAttribution(t *testing.T) {
 	ctx := context.Background()
 
 	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(inAdvance(ctx, cycleClose.Add(96*time.Hour)), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
 	if _, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", cycleClose.Add(96*time.Hour), 20); len(errs) > 0 {

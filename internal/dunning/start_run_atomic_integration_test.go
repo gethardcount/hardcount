@@ -11,6 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/webhook"
@@ -97,10 +98,13 @@ func TestStartRun_RunEventAndWebhookAreAllOrNone(t *testing.T) {
 		inv := newInvoice(t, "INV-SRA-OK")
 		store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 		svc := dunning.NewService(store, nil, nil)
-		failureAt := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC) // the failure instant, not now
+		// A clock-pinned invoice under an Advance: the run and its timeline row
+		// sit at the invoice's issue instant, not at advance-end frozen_time.
+		failureAt := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+		advCtx := clock.WithSim(ctx, clock.Sim{At: failureAt.Add(19 * 24 * time.Hour), TestClockID: "tclk_sra"})
 		var run domain.InvoiceDunningRun
 		for i := 0; i < 2; i++ {
-			got, err := svc.StartDunning(ctx, tenantID, inv.ID, cust.ID, failureAt, domain.DunningCauseNoPaymentMethod)
+			got, err := svc.StartDunning(advCtx, tenantID, inv.ID, cust.ID, failureAt, domain.DunningCauseNoPaymentMethod)
 			if err != nil {
 				t.Fatalf("StartDunning #%d: %v", i+1, err)
 			}

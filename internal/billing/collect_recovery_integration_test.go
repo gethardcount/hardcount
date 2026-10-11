@@ -18,6 +18,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/tax"
 	"github.com/sagarsuperuser/velox/internal/tenant"
+	"github.com/sagarsuperuser/velox/internal/testclock"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
@@ -218,5 +219,107 @@ func TestCollector_StartsNoPaymentDunning_RealStore(t *testing.T) {
 	h.newEng(testPaymentSetupsReady{}, &countingCharger{store: h.invoices}, starter).RetryPendingCharges(h.ctx, 50, nil)
 	if _, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, withCard.ID); err == nil {
 		t.Error("a customer with a card must not be dunned as no_payment_method")
+	}
+}
+
+// The first retry counts from when collection failed, not from the invoice's
+// issue date or billing period (found walking FLOW I10, 2026-10-11: an
+// invoice issued 10 days into its period was anchored on the period start,
+// so its first retry was already past and ran at once). Real store, real
+// engine as the clock resolver — the production wiring — so an unpinned
+// invoice resolves to wall-clock through the same path it does live.
+func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
+	h := newCollectHarness(t)
+	dstore := dunning.NewPostgresStore(h.db)
+	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
+		Name: "default", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+	}); err != nil {
+		t.Fatalf("upsert policy: %v", err)
+	}
+	before := time.Now().UTC() // the engine's clock is fixed when it is built
+	svc := dunning.NewService(dstore, nil, nil)
+	e := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, dunningServiceStarter{svc: svc})
+	svc.SetResolver(e)
+
+	cust, err := customer.NewPostgresStore(h.db).Create(h.ctx, h.tenantID, domain.Customer{ExternalID: "cus_anchor", DisplayName: "Anchor"})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	periodStart := time.Now().UTC().Add(-10 * 24 * time.Hour)
+	issued := periodStart.Add(time.Hour)
+	inv, err := h.invoices.Create(h.ctx, h.tenantID, domain.Invoice{
+		CustomerID: cust.ID, InvoiceNumber: "INV-ANCHOR-1",
+		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
+		BillingPeriodStart: periodStart, BillingPeriodEnd: periodStart.Add(30 * 24 * time.Hour),
+		IssuedAt: &issued,
+	})
+	if err != nil {
+		t.Fatalf("create invoice: %v", err)
+	}
+
+	e.RetryPendingCharges(h.ctx, 50, nil)
+	after := time.Now().UTC()
+
+	run, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, inv.ID)
+	if err != nil {
+		t.Fatalf("card-less invoice must have a dunning run: %v", err)
+	}
+	grace := 3 * 24 * time.Hour
+	if run.NextActionAt == nil || run.NextActionAt.Before(before.Add(grace)) || run.NextActionAt.After(after.Add(grace)) {
+		t.Errorf("first retry = %v, want failure + 3d, in [%v, %v] (issued %v would give %v)",
+			run.NextActionAt, before.Add(grace), after.Add(grace), issued, issued.Add(grace))
+	}
+}
+
+// The clock-pinned twin, outside any Advance (a decline webhook or the
+// reconciler reports it): the real resolver finds the customer's clock, so
+// the first retry counts from the invoice's simulated issue instant — inside
+// the window the operator advances through — not from wall-clock now.
+func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) {
+	h := newCollectHarness(t)
+	dstore := dunning.NewPostgresStore(h.db)
+	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
+		Name: "default", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+	}); err != nil {
+		t.Fatalf("upsert policy: %v", err)
+	}
+	svc := dunning.NewService(dstore, nil, nil)
+	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
+	resolver.SetCustomerReader(customer.NewPostgresStore(h.db)) // as api/router.go wires it
+	resolver.SetTestClockReader(testclock.NewPostgresStore(h.db))
+	svc.SetResolver(resolver)
+
+	frozen := time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC)
+	clockID := postgres.NewID("vlx_tclk")
+	execTx(t, h.db, h.ctx, h.tenantID,
+		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
+		 VALUES ($1, $2, false, 'Anchor Clock', $3, 'ready')`, clockID, h.tenantID, frozen)
+	cust, err := customer.NewPostgresStore(h.db).Create(h.ctx, h.tenantID, domain.Customer{ExternalID: "cus_anchor_sim", DisplayName: "Anchor Sim", TestClockID: clockID})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	if cust.TestClockID != clockID {
+		t.Fatalf("customer test_clock_id = %q, want %q", cust.TestClockID, clockID)
+	}
+	issued := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	inv, err := h.invoices.Create(h.ctx, h.tenantID, domain.Invoice{
+		CustomerID: cust.ID, InvoiceNumber: "INV-ANCHOR-SIM",
+		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
+		IssuedAt: &issued,
+	})
+	if err != nil {
+		t.Fatalf("create invoice: %v", err)
+	}
+
+	run, err := svc.StartDunning(h.ctx, h.tenantID, inv.ID, cust.ID, issued, domain.DunningCausePaymentFailed)
+	if err != nil {
+		t.Fatalf("start dunning: %v", err)
+	}
+	if want := issued.Add(3 * 24 * time.Hour); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
+		t.Errorf("first retry = %v, want %v (simulated issue + 3d)", run.NextActionAt, want)
 	}
 }

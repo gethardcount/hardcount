@@ -292,15 +292,25 @@ func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, pay
 // race somehow gets past this check, the INSERT in CreateRun fails
 // with a constraint violation.
 //
-// failureAt is the simulated moment the charge failed — typically the
-// invoice's cycle-close instant, NOT wall-clock-or-frozen "now." For
-// clock-pinned invoices under catchup, frozen_time is advance-end
-// (e.g. May 20) while the charge "actually" failed at the May 1 cycle
-// close; anchoring next_action_at on frozen_time would push the first
-// retry past advance-end and leave it stranded. The caller is
-// responsible for resolving failureAt from invoice period boundaries.
-// Pass time.Now() (or s.clock.Now(ctx)) when no period anchor is
-// available — that's the wall-clock / manual-invoice case.
+// The first retry lands grace_period_days after the moment collection
+// failed, in the invoice's own time domain:
+//
+//   - A wall-clock invoice: now, the moment the failure is recorded. Not the
+//     invoice's issue date or billing period — an invoice charged (or
+//     re-charged, or backfilled) days after it was issued would otherwise get
+//     a first retry already in the past and be retried with no grace at all
+//     (found walking FLOW I10, 2026-10-11: an Oct-11 decline anchored on its
+//     Oct-1 period start was retried at once instead of on Oct 14).
+//   - A clock-pinned invoice: its issuedAt, when that is earlier than the
+//     clock's now. A test-clock Advance runs the charge at advance-end
+//     frozen_time, but the charge belongs at the invoice's issue instant
+//     (a cycle invoice is issued at its cycle close), so the retries fall
+//     inside the window the operator advanced through, as Stripe test clocks
+//     do. Known limit: a simulated invoice first charged on a LATER Advance
+//     still counts from its issue instant.
+//
+// issuedAt is the invoice's issued_at (zero when unknown); it is read only
+// for a clock-pinned invoice.
 //
 // cause is WHY collection needs a run — declared by the caller at write
 // time (decline paths pass payment_failed; the card-less enrollment
@@ -309,7 +319,7 @@ func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, pay
 // so card-less invoices carried a payment-failure they never had; the
 // timeline hid the lie by rendering a generic row. An unknown cause is
 // refused loudly.
-func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, failureAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
+func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, issuedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
 	if !cause.Valid() {
 		return domain.InvoiceDunningRun{}, errs.Invalid("cause", fmt.Sprintf("unknown dunning start cause %q", cause))
 	}
@@ -359,13 +369,9 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 	}
 
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
-	if failureAt.IsZero() {
-		// Defensive fallback — callers should always supply, but a missing
-		// timestamp should not blow up dunning. Use the clock's "now",
-		// which under catchup is advance-end frozen_time (the same
-		// degenerate case we're trying to avoid, but at least the run
-		// gets created so the operator can see it).
-		failureAt = s.clock.Now(ctx)
+	failureAt := s.clock.Now(ctx)
+	if _, simulated := clock.SimOf(ctx); simulated && !issuedAt.IsZero() && issuedAt.Before(failureAt) {
+		failureAt = issuedAt
 	}
 	t := failureAt.Add(firstRetryDelay)
 	nextActionAt := &t
@@ -383,8 +389,8 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		Reason:       string(cause),
 		AttemptCount: 0,
 		NextActionAt: nextActionAt,
-		// CreatedAt = failureAt so the dunning run lives on simulated
-		// cycle-close time, not orchestrator frozen_time.
+		// CreatedAt = failureAt so a simulated run lives on its invoice's
+		// issue instant, not orchestrator frozen_time.
 		CreatedAt: failureAt,
 	})
 	if err != nil {

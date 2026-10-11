@@ -122,6 +122,16 @@ func (i Invoice) CardRefundableCents(priorRefundCents int64) int64 {
 	return max(0, i.AmountPaidCents-priorRefundCents)
 }
 
+// IssuedAtOrZero is the issue instant, or the zero Time on an invoice that was
+// never issued. Dunning start reads it to anchor a clock-pinned invoice's first
+// retry (see dunning.Service.StartDunning).
+func (i Invoice) IssuedAtOrZero() time.Time {
+	if i.IssuedAt == nil {
+		return time.Time{}
+	}
+	return *i.IssuedAt
+}
+
 // Provider PaymentIntent statuses, verbatim from Stripe. These name the values
 // that can land in Invoice.ProviderPaymentStatus (migration 0167) so stored
 // data and tests read against symbols rather than loose string literals. No

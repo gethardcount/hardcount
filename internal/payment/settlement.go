@@ -410,10 +410,9 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 			"invoice_id", fresh.ID, "status", fresh.Status)
 		return fresh, res, nil
 	}
-	// failureAt is the simulated cycle-close instant — the moment in the
-	// invoice's own time domain when this charge "should" have happened — so
-	// dunning's next_action_at lands inside the operator's Advance window for
-	// clock-pinned invoices. See simulatedFailureAt.
+	// StartDunning anchors the first retry on now for a wall-clock invoice and
+	// on the issue instant for a clock-pinned one; it reads issued_at only for
+	// the latter.
 	//
 	// Post-commit and best-effort, NOT folded into the fail-tx: that would hold
 	// the invoice FOR UPDATE across StartDunning's ~600ms retry sleep plus a
@@ -422,8 +421,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// with no run; the next report of this PaymentIntent re-drives it (see
 	// above), and for wall-clock invoices the dunning_backfill reconciler
 	// (billing.Engine.EnrollFailedWithoutDunning) does too.
-	failureAt := simulatedFailureAt(fresh)
-	if started, err := startDunningWithRetry(ctx, s.dunning, tenantID, fresh.ID, fresh.CustomerID, failureAt, domain.DunningCausePaymentFailed); err != nil {
+	if started, err := startDunningWithRetry(ctx, s.dunning, tenantID, fresh.ID, fresh.CustomerID, fresh.IssuedAtOrZero(), domain.DunningCausePaymentFailed); err != nil {
 		slog.Error("payment failure StartDunning failed after retries — the next report of this payment intent retries it, and for a wall-clock invoice the dunning backfill sweep does on a later scheduler tick",
 			"invoice_id", fresh.ID, "customer_id", fresh.CustomerID, "error", err)
 	} else if started {

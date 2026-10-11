@@ -28,7 +28,7 @@ import (
 // If we ever support another provider, we'll refactor — not speculate now.
 // DunningStarter starts dunning for failed payments.
 type DunningStarter interface {
-	StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, failureAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
+	StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, issuedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
 }
 
 // DunningResolver closes an active dunning run when a card payment settles —
@@ -875,18 +875,6 @@ const PurposeHostedInvoicePay = "hosted_invoice_pay"
 // attach flows leave the purpose empty or "portal_add_payment_method".
 const purposePaymentUpdateToken = "payment_update_token"
 
-// simulatedFailureAt derives the cycle-close instant for a failed
-// charge on the given invoice. Used by both the inline charge-failure
-// path and the async webhook handler so dunning anchors next_action_at
-// on simulated time even when running under test-clock catchup.
-//
-// Returns the latest invoice period boundary at or before IssuedAt:
-// - in_arrears: BillingPeriodEnd (= elapsed period close = cycle fire)
-// - in_advance: BillingPeriodStart (= upcoming period start = cycle fire)
-// Both directions converge on "the cycle close instant in simulated
-// time." Manual invoices with no period fields fall back to IssuedAt,
-// and ultimately to time.Now() — both wall-clock-equivalent in
-// production.
 // startDunningWithRetry calls StartDunning with bounded inline retry to
 // absorb transient blips (DB connection hiccup, brief contention) without
 // silently losing the dunning start. StartDunning is idempotent by
@@ -907,7 +895,7 @@ const purposePaymentUpdateToken = "payment_update_token"
 //
 // 2026-05-30 design-debt audit (Tier 1 #5) replaced two log-and-swallow
 // sites here and at the inline charge-failure path with this retry.
-func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID, invoiceID, customerID string, failureAt time.Time, cause domain.DunningStartCause) (started bool, err error) {
+func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID, invoiceID, customerID string, issuedAt time.Time, cause domain.DunningStartCause) (started bool, err error) {
 	delays := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond}
 	var lastErr error
 	for i, d := range delays {
@@ -918,7 +906,7 @@ func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID
 				return false, fmt.Errorf("ctx canceled during StartDunning retry (attempt %d): %w", i+1, ctx.Err())
 			}
 		}
-		if _, err := dunning.StartDunning(ctx, tenantID, invoiceID, customerID, failureAt, cause); err != nil {
+		if _, err := dunning.StartDunning(ctx, tenantID, invoiceID, customerID, issuedAt, cause); err != nil {
 			if errors.Is(err, errs.ErrInvalidState) {
 				// Dunning disabled or not-configured (no policy) is a DELIBERATE
 				// skip, not a transient failure — return success immediately rather
@@ -1008,8 +996,7 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 			"invoice_id", inv.ID, "status", current.Status)
 		return
 	}
-	failureAt := simulatedFailureAt(inv)
-	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, failureAt, domain.DunningCausePaymentFailed); derr != nil {
+	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCausePaymentFailed); derr != nil {
 		slog.Error("inline StartDunning after a failed charge failed — for a wall-clock invoice the dunning backfill sweep starts the run on a later scheduler tick",
 			"invoice_id", inv.ID, "customer_id", inv.CustomerID, "error", derr)
 	}
@@ -1122,24 +1109,6 @@ func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID 
 		slog.Warn("record charge attempt failed — timeline falls back to the webhook row",
 			"invoice_id", inv.ID, "payment_intent_id", piID, "error", err)
 	}
-}
-
-func simulatedFailureAt(inv domain.Invoice) time.Time {
-	failureAt := time.Now()
-	if inv.IssuedAt != nil {
-		failureAt = *inv.IssuedAt
-	}
-	var candidate time.Time
-	if !inv.BillingPeriodStart.IsZero() && !inv.BillingPeriodStart.After(failureAt) && inv.BillingPeriodStart.After(candidate) {
-		candidate = inv.BillingPeriodStart
-	}
-	if !inv.BillingPeriodEnd.IsZero() && !inv.BillingPeriodEnd.After(failureAt) && inv.BillingPeriodEnd.After(candidate) {
-		candidate = inv.BillingPeriodEnd
-	}
-	if !candidate.IsZero() {
-		failureAt = candidate
-	}
-	return failureAt
 }
 
 // HandleWebhook processes a Stripe webhook event and updates the
