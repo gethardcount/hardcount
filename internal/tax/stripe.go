@@ -2,6 +2,8 @@ package tax
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -127,6 +129,17 @@ func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result
 	// faithful audit snapshot even on error. Stripe's SDK types marshal
 	// cleanly enough for the tax_calculations.request JSONB column.
 	reqRaw, _ := json.Marshal(params)
+
+	// A scoped request (one billing step of one subscription) is idempotent at
+	// Stripe: the key hashes the scope AND the exact request, so a retry of a
+	// failed step that sends the same lines reuses the first calculation
+	// instead of paying for another, while any change — new usage, a new
+	// address — is a different key and a fresh calculation. Stripe replays a
+	// key for 24h; the calculation itself expires after 24h too.
+	if scope := calculationScope(ctx); scope != "" {
+		sum := sha256.Sum256(append([]byte(scope+"\x00"), reqRaw...))
+		params.IdempotencyKey = stripe.String("velox_tax_calc_" + hex.EncodeToString(sum[:20]))
+	}
 
 	calc, err := client.V1TaxCalculations.Create(ctx, params)
 	if err != nil {

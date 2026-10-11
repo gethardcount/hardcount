@@ -143,8 +143,12 @@ func (s *PostgresStore) LinkInvoice(ctx context.Context, tenantID, invoiceID, pr
 	return nil
 }
 
-// LookupCalculationCreatedAt returns the created_at of the
-// tax_calculations row that matches (tenant, invoice, provider_ref).
+// LookupCalculationCreatedAt returns the created_at of the OLDEST
+// tax_calculations row that matches (tenant, invoice, provider_ref). One
+// upstream calculation can be recorded more than once — a retried billing
+// step reuses it through its idempotency key (WithCalculationScope) — and its
+// real age runs from the first record: reading the newest would make an
+// expired calculation look fresh to the finalize expiry guard.
 // When the same invoice has been retried (RetryTaxForInvoice writes a
 // new row with a fresh provider_ref), the lookup still uniquely
 // resolves because each retry uses a different upstream calc id —
@@ -167,7 +171,7 @@ func (s *PostgresStore) LookupCalculationCreatedAt(ctx context.Context, tenantID
 	err = tx.QueryRowContext(ctx, `
 		SELECT created_at FROM tax_calculations
 		WHERE tenant_id = $1 AND invoice_id = $2 AND provider_ref = $3
-		ORDER BY created_at DESC
+		ORDER BY created_at ASC
 		LIMIT 1
 	`, tenantID, invoiceID, providerRef).Scan(&createdAt)
 	if errors.Is(err, sql.ErrNoRows) {

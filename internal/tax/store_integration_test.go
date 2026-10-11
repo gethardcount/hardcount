@@ -223,3 +223,66 @@ func TestPostgresStore_Record_TenantIsolation(t *testing.T) {
 		t.Errorf("tenant B sees tenant A's calculation row — RLS not enforced")
 	}
 }
+
+// A calculation reused by a retried billing step (its idempotency key) is
+// recorded twice. Its age — what the finalize expiry guard checks — runs from
+// the FIRST record; reading the newest made an expired calculation look fresh.
+func TestPostgresStore_LookupCalculationCreatedAt_OldestRecord(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	tenantID := testutil.CreateTestTenant(t, db, "Tax Store Oldest")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 10*time.Second)
+	defer cancel()
+
+	var invoiceID string
+	func() {
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin setup tx: %v", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		var custID string
+		if err := tx.QueryRowContext(ctx, `INSERT INTO customers (tenant_id, external_id, display_name) VALUES ($1, 'ext_oldest', 'Oldest Co') RETURNING id`, tenantID).Scan(&custID); err != nil {
+			t.Fatalf("insert customer: %v", err)
+		}
+		if err := tx.QueryRowContext(ctx, `INSERT INTO invoices (tenant_id, customer_id, invoice_number, billing_period_start, billing_period_end) VALUES ($1, $2, 'INV-OLDEST-1', now(), now()) RETURNING id`, tenantID, custID).Scan(&invoiceID); err != nil {
+			t.Fatalf("insert invoice: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit setup: %v", err)
+		}
+	}()
+
+	store := tax.NewPostgresStore(db)
+	req := tax.Request{LineItems: []tax.RequestLine{{Ref: "line_0", AmountCents: 10000}}}
+	res := &tax.Result{Provider: "stripe_tax", CalculationID: "calc_reused"}
+	for i := 0; i < 2; i++ { // the failed close, then its retry reusing the calculation
+		if _, err := store.Record(ctx, tenantID, "", req, res); err != nil {
+			t.Fatalf("Record %d: %v", i, err)
+		}
+	}
+	first := time.Now().UTC().Add(-20 * time.Hour).Truncate(time.Second)
+	func() {
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		// Age the first record by 20h.
+		if _, err := tx.ExecContext(ctx, `UPDATE tax_calculations SET created_at = $1 WHERE id = (SELECT id FROM tax_calculations WHERE provider_ref = 'calc_reused' ORDER BY created_at ASC LIMIT 1)`, first); err != nil {
+			t.Fatalf("age first record: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}()
+	if err := store.LinkInvoice(ctx, tenantID, invoiceID, "calc_reused"); err != nil {
+		t.Fatalf("LinkInvoice: %v", err)
+	}
+	got, err := store.LookupCalculationCreatedAt(ctx, tenantID, invoiceID, "calc_reused")
+	if err != nil {
+		t.Fatalf("LookupCalculationCreatedAt: %v", err)
+	}
+	if !got.Equal(first) {
+		t.Errorf("created_at = %v, want the first record's %v (the calculation's real age)", got, first)
+	}
+}

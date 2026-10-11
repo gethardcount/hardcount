@@ -3290,7 +3290,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// Coupons removed 2026-05-29 (Phase A1). Discount stays at zero;
 	// AI-native discount intent flows through the credit ledger.
 	var discountCents int64
-	taxApp, err := e.ApplyTaxToLineItems(ctx, sub.TenantID, sub.CustomerID, invoiceCurrency, subtotal, discountCents, lineItems)
+	taxApp, err := e.ApplyTaxToLineItems(tax.WithCalculationScope(ctx, "cycle:"+sub.ID+":"+periodStart.Format(time.RFC3339)+":"+periodEnd.Format(time.RFC3339)), sub.TenantID, sub.CustomerID, invoiceCurrency, subtotal, discountCents, lineItems)
 	if err != nil {
 		// A tax failure must abort before invoice create/finalize and
 		// before the cycle advances — otherwise a transient DB blip would
@@ -3721,7 +3721,7 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 	}
 
 	// Apply tax.
-	taxApp, err := e.ApplyTaxToLineItems(ctx, sub.TenantID, sub.CustomerID, invoiceCurrency, subtotal, 0, lineItems)
+	taxApp, err := e.ApplyTaxToLineItems(tax.WithCalculationScope(ctx, "create:"+sub.ID+":"+periodStart.Format(time.RFC3339)+":"+periodEnd.Format(time.RFC3339)), sub.TenantID, sub.CustomerID, invoiceCurrency, subtotal, 0, lineItems)
 	if err != nil {
 		return domain.Invoice{}, nil, false, fmt.Errorf("apply tax: %w", err)
 	}
@@ -4409,7 +4409,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	}
 
 	// Apply tax.
-	taxApp, err := e.ApplyTaxToLineItems(ctx, sub.TenantID, sub.CustomerID, invoiceCurrency, subtotal, 0, lineItems)
+	taxApp, err := e.ApplyTaxToLineItems(tax.WithCalculationScope(ctx, "cancel:"+sub.ID+":"+canceledAt.Format(time.RFC3339Nano)), sub.TenantID, sub.CustomerID, invoiceCurrency, subtotal, 0, lineItems)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("apply tax on cancel: %w", err)
 	}
