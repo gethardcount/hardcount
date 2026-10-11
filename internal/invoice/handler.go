@@ -1082,7 +1082,12 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	charged, err := h.charger.ChargeInvoice(r.Context(), tenantID, inv, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	// Bound to the invoice's clock, as finalize binds its collect: on a
+	// clock-pinned invoice the charge records its simulated instant (the PI's
+	// velox_anchor_at), which dates paid_at and a decline's first dunning
+	// retry. Unbound, a Collect on a later Advance dated the retry from the
+	// issue instant, in the past. A wall-clock invoice binds nothing.
+	charged, err := h.charger.ChargeInvoice(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a
 		// *payment.PaymentError which respond.FromError detects and

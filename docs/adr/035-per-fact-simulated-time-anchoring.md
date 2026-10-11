@@ -289,16 +289,23 @@ subscription's cycle invoice is a draft issued at the cycle close and
 charged when finalized later; a tax-pending draft is charged after its
 retry succeeds. Counting from the issue put the first retry in the past.
 Each later retry chains off the last in simulated time, so one dunning
-phase ran the whole campaign to its end. A card-less invoice is not
-affected: it gets a `no_payment_method` run at issue, and a later decline
-reuses that run.
+phase ran the whole campaign to its end. The same happens to a card-less
+draft: it enters collection only when finalized, so its `no_payment_method`
+run starts then.
 
 Every simulated charge already records its instant in the PI's
 `velox_anchor_at` metadata (section 1's paid_at anchor).
 `payment.dunningSimFailedAt` hands that to `StartDunning`, falling back to
-`issued_at` when no charge carried one (the card-less path, an old PI). All
-three decline reports now carry it: the charge response, the webhook and
-the reconciler.
+`issued_at` when no charge carried one (an old PI). All three decline
+reports now carry it: the charge response, the webhook and the reconciler.
+Two more paths needed fixing, found by review:
+
+- **Operator Collect** charged without binding the invoice's clock, so its
+  PI carried no anchor. It now binds, as finalize's collect does.
+- **The card-less start** (`processAutoCharge`) passes `settleAt`, the
+  instant this collection runs in the invoice's time domain. That is the
+  cycle close for an invoice collected at finalize, and the clock's now for
+  a draft finalized on a later Advance.
 
 The webhook had never carried it, for payments either. The handler keeps
 the event body as a string under `Payload["raw"]`, and
@@ -315,8 +322,10 @@ on the real handler.
 production-shaped resolver) and
 `TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore`, the
 `TestDecline_*` set (one per decline report, two through a signed webhook),
-`TestSucceeded_SignedWebhook_PaidAtIsThePIAnchor` and
-`TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore`.
+`TestSucceeded_SignedWebhook_PaidAtIsThePIAnchor`,
+`TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore`,
+`TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore`
+and `TestCollectPayment_ChargesInTheInvoicesClock`.
 Each is mutation-verified against the code it replaced. The last one, run
 with the issue instant, shows the old failure: retry 1 at May 4 and the run
 escalated within one Advance.
