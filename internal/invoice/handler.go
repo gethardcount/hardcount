@@ -1032,7 +1032,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !claimed {
-		respond.Validation(w, r, "a charge for this invoice is already in progress or it is no longer chargeable — refresh and retry in a few minutes")
+		respond.Validation(w, r, "a payment for this invoice is already in progress (a charge, or the customer paying on the payment page) or it is no longer chargeable — refresh and retry later")
 		return
 	}
 

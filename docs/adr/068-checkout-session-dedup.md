@@ -85,10 +85,9 @@ deferred, the operator is the refund mechanism):
 expire fails; pre-deploy sessions are outside the ledger (expire ≤24h —
 upgrade note in CHANGELOG); Stripe-account rotation mid-session (expire
 404s on the old account) — bounded by the same 1h; no auto-refund — the
-attention banner + per-cause events are the operator's refund trigger; a
-full session-sweeping reconciler stays deferred (the
-`checkout.session.completed` truth-sync covers the common dropped-webhook
-shape).
+attention banner + per-cause events are the operator's refund trigger. (A
+session-sweeping reconciler was deferred here; it shipped with the
+2026-10-11 amendment.)
 
 ## Test locks (mutation/fault-verified)
 
@@ -101,3 +100,56 @@ Stripe-interaction legs (idempotency-key convergence, ExpiresAt params,
 drift branching) are covered by the MANUAL_TEST flow — no HTTP-level
 Stripe stub harness exists in-repo yet; building one is named follow-up
 work, not silently skipped.
+
+## Amendment 2026-10-11: one payer at a time
+
+**What changed.** The ledger stopped two hosted sessions paying one
+invoice, but nothing stopped a hosted session and a Velox charge (the
+automatic charge, a dunning retry, or Collect) from both taking money. Now
+they exclude each other:
+
+- **Velox charges skip an invoice the customer may be paying.** The three
+  charge claims refuse while `domain.HostedCheckoutLiveSQL` holds: an
+  unfilled claim for 65 minutes, a recorded `open`/`superseded` session
+  until the hosted sweep records how it ended, and a `completed` session
+  until its payment settles. Recorded sessions stop blocking 24 hours after
+  expiry regardless, so one the sweep cannot resolve delays collection
+  instead of stopping it. Each claim locks the invoice row before its
+  UPDATE: the hosted claim holds `FOR SHARE` but never changes the row, so
+  a single-statement claim would proceed on a snapshot taken before the
+  session existed (reproduced by
+  `TestChargeClaim_SeesHostedClaimCommittedWhileItWaited`). The dunning
+  due-run scans apply the same fragment, so a blocked run does not hold
+  the head of the queue.
+- **No hosted session while Velox charges, or after an unrecorded hosted
+  payment.** The hosted claim also refuses while the charge lease is held
+  (a charge on its way to Stripe is still `pending`), and while a
+  `completed` session's payment is unrecorded.
+- **The hosted sweep** (`payment/reconciler_hosted.go`, part of the
+  payment reconciler) replaces the deferred session reconciler above. It
+  asks Stripe how each expired, unresolved session ended, and settles any
+  `completed` session whose invoice is still unpaid. It calls
+  `SettleSucceeded` directly, so a hosted payment on an invoice Velox
+  already charged raises `payment.duplicate_charge` even when no webhook
+  ever arrived.
+- **Fixes on the session path:** the Stripe expiry is fixed at claim
+  creation + 1h (a clock-relative expiry changed the params under a fixed
+  idempotency key, so every re-drive failed); a session Velox failed to
+  record is never handed out; a pending claim too old to re-drive (Stripe
+  requires an expiry at least 30 minutes ahead) is superseded; and a
+  session a credit apply superseded is expired at Stripe before a new one
+  is minted.
+
+**Peers.** Stripe Billing confirms one PaymentIntent per invoice from both
+the hosted page and auto-collection; Kill Bill's hosted page only saves the
+card and Kill Bill charges under a per-account lock; Recurly offers hosted
+pay only on manual-collection invoices. Lago delays the first automatic
+charge 10 minutes, which narrows the race without closing it. A hold column
+with its own release reconciler and operator action was designed and
+rejected as heavier than the risk: the session table already carries the
+state, and session expiry bounds every wait.
+
+**Residual.** An operator records an offline payment while the customer
+completes a hosted session and that payment's webhook is lost: the
+`completed` row's invoice is paid, so the sweep does not look at it and no
+duplicate alert fires.

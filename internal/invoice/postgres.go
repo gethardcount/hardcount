@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -2058,6 +2059,28 @@ func collectionQueuedAtFinalize(status domain.InvoiceStatus, paymentStatus domai
 	return status == domain.InvoiceFinalized && paymentStatus == domain.PaymentPending
 }
 
+// noLiveHostedPageSQL keeps every Velox charge off an invoice the customer
+// may be paying on the hosted page: one payer at a time
+// (domain.HostedCheckoutLiveSQL says when a page counts as live).
+var noLiveHostedPageSQL = "NOT " + domain.HostedCheckoutLiveSQL("invoices.id")
+
+// lockInvoiceForChargeClaim takes the invoice row lock before a charge
+// claim's UPDATE. Without it the UPDATE could miss a hosted session created
+// concurrently: the hosted claim (payment.CheckoutSessionStore.ClaimOpen)
+// holds FOR SHARE on this row while it inserts the session, but never changes
+// the row, so an UPDATE whose snapshot predates that commit waits for the
+// lock and then proceeds on its old snapshot, blind to the new session.
+// Taking the lock in its own statement means the UPDATE that follows reads a
+// snapshot taken after any such commit. false = the row is not visible.
+func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR UPDATE`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // ClaimAutoCharge takes the per-invoice charge lease (HA hazard #1,
 // migration 0141): a 5-minute CAS claim that admits exactly one sweep
 // leader into the charge leg per invoice per window. The full
@@ -2096,6 +2119,9 @@ func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string
 	}
 	defer postgres.Rollback(tx)
 
+	if ok, err := lockInvoiceForChargeClaim(ctx, tx, id); err != nil || !ok {
+		return false, err
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invoices
 		SET auto_charge_claimed_until = now() + interval '5 minutes'
@@ -2104,6 +2130,7 @@ func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string
 		  AND payment_status = 'pending'
 		  AND status = 'finalized'
 		  AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now())
+		  AND `+noLiveHostedPageSQL+`
 	`, id)
 	if err != nil {
 		return false, err
@@ -2193,6 +2220,9 @@ func (s *PostgresStore) ClaimChargeForManualCollect(ctx context.Context, tenantI
 	// those hazards. A written-off invoice is settleable by RECORDING writers
 	// only (offline payment, ADR-108 adoption) — nothing initiates money
 	// against it.
+	if ok, err := lockInvoiceForChargeClaim(ctx, tx, id); err != nil || !ok {
+		return false, err
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invoices
 		SET auto_charge_claimed_until = now() + interval '5 minutes'
@@ -2201,6 +2231,7 @@ func (s *PostgresStore) ClaimChargeForManualCollect(ctx context.Context, tenantI
 		  AND status = 'finalized'
 		  AND amount_due_cents > 0
 		  AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now())
+		  AND `+noLiveHostedPageSQL+`
 	`, id)
 	if err != nil {
 		return false, err
@@ -2230,6 +2261,9 @@ func (s *PostgresStore) claimChargeLease(ctx context.Context, tenantID, id strin
 	}
 	defer postgres.Rollback(tx)
 
+	if ok, err := lockInvoiceForChargeClaim(ctx, tx, id); err != nil || !ok {
+		return false, err
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invoices
 		SET auto_charge_claimed_until = now() + interval '5 minutes'
@@ -2238,6 +2272,7 @@ func (s *PostgresStore) claimChargeLease(ctx context.Context, tenantID, id strin
 		  AND status = 'finalized'
 		  AND amount_due_cents > 0
 		  AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now())
+		  AND `+noLiveHostedPageSQL+`
 	`, id)
 	if err != nil {
 		return false, err

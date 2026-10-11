@@ -137,6 +137,10 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 	processing := mkDueRun("INV-PROCESSING", domain.PaymentProcessing, "pi_live_2", domain.InvoiceFinalized)
 	parkedWrittenOff := mkDueRun("INV-PARKED-WROFF", domain.PaymentUnknown, "", domain.InvoiceUncollectible)
 	ordinaryFailed := mkDueRun("INV-FAILED", domain.PaymentFailed, "", domain.InvoiceFinalized)
+	hostedLive := mkDueRun("INV-HOSTED-LIVE", domain.PaymentFailed, "", domain.InvoiceFinalized)
+	hostedLiveWrittenOff := mkDueRun("INV-HOSTED-WROFF", domain.PaymentFailed, "", domain.InvoiceUncollectible)
+	seedLiveHostedPage(t, db, ctx, tenantID, hostedLive)
+	seedLiveHostedPage(t, db, ctx, tenantID, hostedLiveWrittenOff)
 
 	due, err := dstore.ListDueRuns(ctx, tenantID, now.Add(time.Minute), 200)
 	if err != nil {
@@ -161,6 +165,33 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 	}
 	if !got[ordinaryFailed] {
 		t.Error("an ordinary failed invoice must remain due — this is the normal dunning path and the control for the assertions above")
+	}
+	if got[hostedLive] {
+		t.Error("a run whose customer is paying on the hosted page must be excluded — the charge claim refuses it (one payer at a time), so selecting it spins at the head of the queue for the page's whole life")
+	}
+	if !got[hostedLiveWrittenOff] {
+		t.Error("a written-off source with a hosted page must still be selected — the terminal branch resolves the run")
+	}
+}
+
+// seedLiveHostedPage gives the run's invoice an open hosted Checkout session
+// that is still payable at Stripe.
+func seedLiveHostedPage(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, runID string) {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, stripe_session_id, amount_cents, currency, status, expires_at)
+		SELECT $1, $2, r.invoice_id, false, 'cs_' || $1, 5000, 'USD', 'open', now() + interval '50 minutes'
+		FROM invoice_dunning_runs r WHERE r.id = $3
+	`, postgres.NewID("vlx_cks"), tenantID, runID); err != nil {
+		t.Fatalf("seed hosted page: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }
 
@@ -220,6 +251,9 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 	seedInvRun("inv_clk_proc", "run_clk_proc", "processing", "pi_sim_2", "finalized")
 	seedInvRun("inv_clk_wroff", "run_clk_wroff", "unknown", "", "uncollectible")
 	seedInvRun("inv_clk_failed", "run_clk_failed", "failed", "", "finalized")
+	seedInvRun("inv_clk_hosted", "run_clk_hosted", "failed", "", "finalized")
+	mustExec(`INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, stripe_session_id, amount_cents, currency, status, expires_at)
+		VALUES ('cks_clk_hosted', $1, 'inv_clk_hosted', false, 'cs_clk_hosted', 2500, 'USD', 'open', now() + interval '50 minutes')`, tenantID)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -247,5 +281,8 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 	}
 	if !got["run_clk_failed"] {
 		t.Error("an ordinary failed simulated invoice must remain due — the control")
+	}
+	if got["run_clk_hosted"] {
+		t.Error("a simulated invoice with a live hosted page must be excluded — its charge claim refuses, so a clock advance would spin it")
 	}
 }

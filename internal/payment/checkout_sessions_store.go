@@ -82,9 +82,12 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	// trigger.
 	var status, paymentStatus string
 	var amountDue int64
+	var charging bool
 	err = tx.QueryRowContext(ctx, `
-		SELECT status, payment_status, amount_due_cents FROM invoices WHERE id = $1 FOR SHARE
-	`, invoiceID).Scan(&status, &paymentStatus, &amountDue)
+		SELECT status, payment_status, amount_due_cents,
+		       COALESCE(auto_charge_claimed_until > now(), false)
+		FROM invoices WHERE id = $1 FOR SHARE
+	`, invoiceID).Scan(&status, &paymentStatus, &amountDue, &charging)
 	if err != nil {
 		return CheckoutClaim{}, false, fmt.Errorf("payable re-check: %w", err)
 	}
@@ -96,6 +99,29 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	// letting the customer pay through the hosted page is the same double charge
 	// by a customer-facing route.
 	if paymentStatus == "processing" || paymentStatus == "unknown" {
+		return CheckoutClaim{}, false, ErrChargeInFlight
+	}
+	// A held charge lease is a Velox charge on its way to Stripe: its
+	// payment_status is still pending/failed until the call returns. The
+	// charge claims lock this row FOR UPDATE before taking the lease, so this
+	// FOR SHARE read either waits for that claim and sees its lease, or wins
+	// and the claim sees the session this transaction inserts.
+	if charging {
+		return CheckoutClaim{}, false, ErrChargeInFlight
+	}
+	// The customer already paid a session whose payment is not recorded yet:
+	// a new page would let them pay twice. Settling the invoice ends this.
+	var paidUnrecorded bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM checkout_sessions
+			WHERE invoice_id = $1 AND status = 'completed'
+			  AND COALESCE(expires_at, created_at + interval '1 hour') + interval '24 hours' > now()
+		)
+	`, invoiceID).Scan(&paidUnrecorded); err != nil {
+		return CheckoutClaim{}, false, fmt.Errorf("completed session check: %w", err)
+	}
+	if paidUnrecorded {
 		return CheckoutClaim{}, false, ErrChargeInFlight
 	}
 	if amountCents != amountDue {
@@ -114,10 +140,13 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 		Currency:    currency,
 		Status:      "open",
 	}
-	_, err = tx.ExecContext(ctx, `
+	// created_at comes back because it anchors the Stripe-side expiry: every
+	// re-drive of this claim must send identical params (see mintForClaim).
+	err = tx.QueryRowContext(ctx, `
 		INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, amount_cents, currency, status)
 		VALUES ($1, $2, $3, $4, $5, $6, 'open')
-	`, claim.ID, tenantID, invoiceID, livemode, amountCents, currency)
+		RETURNING created_at
+	`, claim.ID, tenantID, invoiceID, livemode, amountCents, currency).Scan(&claim.CreatedAt)
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
 			// Loser protocol. The violation ABORTED this tx (25P02 — no
@@ -315,3 +344,99 @@ func (s *CheckoutSessionStore) MarkExpired(ctx context.Context, tenantID, claimI
 // second payable vehicle = the double charge); the webhook settle is in
 // flight and the amount-mismatch escalation owns any drift consequence.
 var ErrSessionCompleted = errors.New("checkout session already completed")
+
+// ListHostedToReconcile is the hosted sweep's input (reconciler_hosted.go):
+//   - recorded sessions whose outcome Velox has not seen ('open',
+//     'superseded', and 'invoice_settled', where the customer may have paid in
+//     the same moment the invoice was settled another way), once expired at
+//     Stripe; and
+//   - 'completed' sessions whose invoice is still unpaid: the
+//     checkout.session.completed webhook arrived but the payment's own did
+//     not. They leave this list when the payment settles.
+//
+// Cross-tenant (TxBypass) for the ctx's mode, least recently looked at first
+// so a session that keeps erroring cannot hold the head of the queue
+// (TouchReconcile rotates it).
+func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, expiredBefore time.Time, limit int) ([]CheckoutClaim, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT cs.id, cs.tenant_id, cs.invoice_id, cs.livemode, cs.stripe_session_id, cs.url, cs.amount_cents,
+		       cs.currency, cs.status, cs.expires_at, cs.created_at
+		FROM checkout_sessions cs
+		WHERE cs.stripe_session_id IS NOT NULL
+		  AND cs.livemode = $2
+		  AND (
+		    (cs.status IN ('open', 'superseded', 'invoice_settled') AND cs.expires_at < $1)
+		    OR (cs.status = 'completed' AND cs.updated_at < $1
+		      AND EXISTS (
+		        SELECT 1 FROM invoices i
+		        WHERE i.id = cs.invoice_id
+		          AND i.status = 'finalized'
+		          AND i.payment_status <> 'succeeded'
+		      ))
+		  )
+		ORDER BY cs.updated_at ASC
+		LIMIT $3
+	`, expiredBefore, postgres.Livemode(ctx), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []CheckoutClaim
+	for rows.Next() {
+		var c CheckoutClaim
+		var sessID, url sql.NullString
+		var expiresAt sql.NullTime
+		if err := rows.Scan(&c.ID, &c.TenantID, &c.InvoiceID, &c.Livemode, &sessID, &url,
+			&c.AmountCents, &c.Currency, &c.Status, &expiresAt, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		c.StripeSessionID = sessID.String
+		c.URL = url.String
+		if expiresAt.Valid {
+			t := expiresAt.Time
+			c.ExpiresAt = &t
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// TouchReconcile moves a session the sweep could not resolve to the back of
+// its queue.
+func (s *CheckoutSessionStore) TouchReconcile(ctx context.Context, tenantID, claimID string) error {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE checkout_sessions SET updated_at = now() WHERE id = $1`, claimID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// MarkSessionCompleted records the hosted sweep's finding that a session was
+// paid. Keyed on the claim id and unconditional on the prior status, unlike
+// the webhook's MarkCompleted: the sweep also resolves 'invoice_settled' rows,
+// and a row it leaves unchanged would be swept again every tick.
+func (s *CheckoutSessionStore) MarkSessionCompleted(ctx context.Context, tenantID, claimID string) error {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE checkout_sessions SET status = 'completed', updated_at = now() WHERE id = $1`, claimID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

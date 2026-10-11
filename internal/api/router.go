@@ -492,6 +492,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// webhook within ~one extra tick.
 	paymentReconciler.SetSettler(stripeAdapter)
 	paymentReconciler.SetProcessingReconcileAfter(30 * time.Minute)
+	if stripeClient != nil {
+		// Finished hosted sessions no webhook reported (reconciler_hosted.go).
+		paymentReconciler.SetHostedSessions(checkoutSessionStore, stripeClient)
+	}
 	// Engine isn't constructed yet at this point — paymentReconciler's
 	// resolver is wired below at line ~640 alongside dunningSvc and
 	// stripeAdapter. Keep this declaration near the constructor; the

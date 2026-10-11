@@ -108,6 +108,10 @@ type Reconciler struct {
 	// provider enabling search for an account is a deploy-scale event, not a
 	// tick-scale one.
 	searchDisabled map[string]bool
+	// hostedLedger + hostedReader drive the hosted-page sweep
+	// (reconciler_hosted.go). Nil-tolerant: unwired, that sweep is skipped.
+	hostedLedger HostedSessionLedger
+	hostedReader CheckoutSessionReader
 }
 
 // NewReconciler constructs a Reconciler. If olderThan <= 0, defaults to 60s
@@ -157,13 +161,15 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 // payment.Stripe.SetResolver + dunning.Handler.SetResolver.
 func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 
-// Run reconciles unresolved in-flight invoices against Stripe in two sweeps:
-//   - 'unknown' (ambiguous charge outcomes) past the short cool-off, and
+// Run reconciles unresolved payments against Stripe:
+//   - 'unknown' (ambiguous charge outcomes) past the short cool-off,
 //   - stale 'processing' (the dropped-webhook backstop, ADR-049 Phase 2) past
-//     the longer processing cool-off.
+//     the longer processing cool-off,
+//   - parked invoices (ADR-108 search-and-adopt), and
+//   - finished hosted Checkout sessions (reconciler_hosted.go).
 //
-// Both route recovered terminals through the same path (reconcileOne →
-// settler), so a backstop-recovered settlement fires the full side-effects.
+// All route recovered terminals through the settler, so a backstop-recovered
+// settlement fires the full side-effects.
 // Returns the number resolved (succeeded or failed) and any per-invoice errors.
 func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 	// The parked-invoice count (ADR-107's alerting surface) is exported by
@@ -174,8 +180,10 @@ func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 	n1, e1 := r.sweep(ctx, "unknown", r.invoices.ListUnknownPayments, r.olderThan, limit)
 	n2, e2 := r.sweep(ctx, "processing", r.invoices.ListProcessingPayments, r.olderThanProcessing, limit)
 	n3, e3 := r.sweepParked(ctx, limit)
+	n4, e4 := r.sweepHostedSessions(ctx, limit)
 	errs := append(e1, e2...)
-	return n1 + n2 + n3, append(errs, e3...)
+	errs = append(errs, e3...)
+	return n1 + n2 + n3 + n4, append(errs, e4...)
 }
 
 // parkedSearchAge is how long an invoice must have been parked before the

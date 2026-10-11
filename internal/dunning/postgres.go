@@ -778,10 +778,15 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 			-- next tick anyway". Excluding terminal rows here would delete that
 			-- backstop and strand the run active forever — the exact bug this
 			-- predicate's twin in creditnote/postgres.go was fixed for.
+			--
+			-- A live hosted Checkout page blocks the claim the same way (one
+			-- payer at a time, domain.HostedCheckoutLiveSQL), so it is part of
+			-- the same exclusion.
 			AND NOT EXISTS (
 			  SELECT 1 FROM invoices i
 			  WHERE i.id = r.invoice_id
-			    AND i.payment_status IN ('processing', 'unknown')
+			    AND (i.payment_status IN ('processing', 'unknown')
+			      OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
 			    AND i.status NOT IN ('voided', 'uncollectible')
 			)
 		  AND leader_fence($3, $4)
@@ -850,7 +855,8 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 			-- in-flight sim invoice can consume the whole catchup budget and stall
 			-- every other run on the clock.
 			AND NOT (
-			  i.payment_status IN ('processing', 'unknown')
+			  (i.payment_status IN ('processing', 'unknown')
+			    OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
 			  AND i.status NOT IN ('voided', 'uncollectible')
 			)
 		ORDER BY r.next_action_at ASC LIMIT $4

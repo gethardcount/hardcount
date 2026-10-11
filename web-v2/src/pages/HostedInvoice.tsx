@@ -117,8 +117,11 @@ export default function HostedInvoicePage() {
 
   // The redirect from Stripe Checkout beats the webhook that flips the
   // invoice to paid, so with ?paid=1 the page POLLS (3s) until the
-  // payload's payment_status — the authoritative backend signal, no
-  // client-side inference — turns terminal (succeeded or failed).
+  // invoice leaves 'finalized'. Stripe redirects to ?paid=1 only after
+  // the customer's payment went through, and a hosted-page attempt never
+  // moves payment_status (ADR-049 amendment 2026-10-11), so a 'failed'
+  // seen here is the EARLIER automatic charge's decline, not this
+  // payment: it settles like any other non-terminal state.
   // Capped at 3 minutes: async payment methods can legitimately take
   // longer, at which point the copy turns honest instead of spinning
   // forever. Pre-fix the page promised to "update automatically", never
@@ -137,8 +140,7 @@ export default function HostedInvoicePage() {
     !!d &&
     paidSignal &&
     d.invoice.status === 'finalized' &&
-    d.invoice.payment_status !== 'succeeded' &&
-    d.invoice.payment_status !== 'failed'
+    d.invoice.payment_status !== 'succeeded'
 
   // Invoice fetch keyed by (token, paidSignal). retry=false so a
   // genuinely invalid token doesn't pound the public endpoint; the
@@ -303,24 +305,6 @@ export default function HostedInvoicePage() {
             <p className="text-muted-foreground">
               Online payment is no longer available for this invoice. Please
               contact support to settle it or restore service.
-            </p>
-          </div>
-        </div>
-      )
-    }
-    if (paidSignal && invoice.status === 'finalized' && invoice.payment_status === 'failed') {
-      // Authoritative failure from the backend: the charge did not go
-      // through. Re-enabling Pay is safe — no successful charge exists.
-      return (
-        <div
-          role="alert"
-          className="rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-4 py-3 flex items-start gap-3"
-        >
-          <XCircle size={18} className="text-red-600 dark:text-red-400 mt-0.5 shrink-0" aria-hidden="true" />
-          <div className="text-sm">
-            <p className="font-medium text-red-800 dark:text-red-300">Payment didn't complete</p>
-            <p className="text-red-700/80 dark:text-red-400/80">
-              Your card was not charged. You can try again below.
             </p>
           </div>
         </div>
@@ -618,9 +602,7 @@ export default function HostedInvoicePage() {
             {/* Actions. Pay is suppressed the whole time a redirect-back
                 payment is settling (including past the poll cap) — a live
                 Pay button during settle is how cards get charged twice.
-                It reappears only on an authoritative payment_status of
-                'failed' (no charge exists) or naturally when the invoice
-                flips paid (pay_enabled goes false). */}
+                Once the invoice flips paid, pay_enabled goes false. */}
             {/* A customer whose invoice has an unresolved payment previously
                 arrived here, saw "Amount due", found no Pay button, and was
                 told nothing at all — the worst possible version of a page whose

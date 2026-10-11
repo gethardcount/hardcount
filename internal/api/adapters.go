@@ -1161,6 +1161,10 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 	switch {
 	case err == nil:
 		expired := claim.ExpiresAt != nil && time.Now().After(claim.ExpiresAt.Add(-time.Minute))
+		if claim.URL == "" && time.Since(claim.CreatedAt) > checkoutPendingRedriveLimit {
+			// A pending claim too old to re-drive: supersede and claim fresh.
+			expired = true
+		}
 		drifted := claim.AmountCents != inv.AmountDueCents
 		if !expired && !drifted && claim.URL != "" {
 			// Straight reuse: both devices get the SAME session. NOTHING is
@@ -1205,7 +1209,13 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 			_ = won
 		}
 	case errors.Is(err, errs.ErrNotFound):
-		// No open claim — claim fresh below.
+		// No open claim — claim fresh below, after closing any session a
+		// credit apply superseded: that path flips the row in its own
+		// transaction and never reaches Stripe, so the old session is still
+		// payable and minting beside it leaves the customer two live pages.
+		if cerr := a.expireSupersededSessions(ctx, sc, tenantID, inv.ID); cerr != nil {
+			return "", cerr
+		}
 	default:
 		return "", fmt.Errorf("read open checkout claim: %w", err)
 	}
@@ -1296,8 +1306,11 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 			SetupFutureUsage: stripe.String("off_session"),
 		},
 		// 1h Stripe-side expiry (min 30m, default 24h): the DB TTL alone
-		// would leave a ~23h invisible payable session (ADR-068).
-		ExpiresAt: stripe.Int64(time.Now().Add(time.Hour).Unix()),
+		// would leave a ~23h invisible payable session (ADR-068). Anchored on
+		// the claim's creation, not the call: every re-drive reuses the claim
+		// id as the idempotency key, and Stripe rejects a replayed key whose
+		// params changed, so a clock-relative expiry broke every retry.
+		ExpiresAt: stripe.Int64(checkoutSessionExpiry(claim).Unix()),
 		Params: stripe.Params{
 			Metadata: meta,
 			// The claim id: every re-drive for this claim converges on the
@@ -1312,13 +1325,62 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 	// CAS to a concurrent re-drive is fine — same session, same values.
 	expiresAt := time.Unix(sess.ExpiresAt, 0).UTC()
 	if fErr := a.sessions.FillSession(ctx, claim.TenantID, claim.ID, sess.ID, sess.URL, expiresAt); fErr != nil {
-		// The session exists at Stripe and the claim row will be re-driven to
-		// the same session on the next POST (idempotency key) — log, don't
-		// fail the customer.
-		slog.WarnContext(ctx, "checkout: fill claim row failed (recoverable via idempotent re-drive)",
-			"claim_id", claim.ID, "error", fErr)
+		// Never hand out a session Velox has not recorded: the reconciler and
+		// the expire sweeps find sessions by their recorded id, so an
+		// unrecorded one could be paid with nothing ever looking at it. The
+		// customer retries; the re-drive replays the same session and fills.
+		return "", fmt.Errorf("record checkout session: %w", fErr)
 	}
 	return sess.URL, nil
+}
+
+// checkoutSessionTTL is how long a hosted Checkout session stays payable at
+// Stripe. The charge claims (invoice/postgres.go, hostedPageLiveSQL) block
+// Velox charges for the same window, so the two must move together.
+const checkoutSessionTTL = time.Hour
+
+// checkoutPendingRedriveLimit bounds how long a claim whose Stripe create
+// never landed may be re-driven. Stripe requires expires_at at least 30
+// minutes ahead, and the expiry is fixed at claim creation, so past this age
+// a create that never reached Stripe can no longer succeed. Such a claim's
+// URL was never handed out (mintForClaim returns a URL only once recorded),
+// so superseding it strands nothing payable.
+const checkoutPendingRedriveLimit = 25 * time.Minute
+
+func checkoutSessionExpiry(claim payment.CheckoutClaim) time.Time {
+	return claim.CreatedAt.Add(checkoutSessionTTL)
+}
+
+// expireSupersededSessions expires, at Stripe, every superseded session of
+// the invoice that may still be live. A COMPLETED one means the customer
+// already paid it: return ErrChargeInFlight so nothing new is minted (the
+// webhook or the reconciler settles it). A network failure is the same
+// accepted residual as the drift path: the session's own expiry bounds it,
+// and the charge claims keep Velox off the invoice until then.
+func (a *hostedInvoiceStripeAdapter) expireSupersededSessions(ctx context.Context, sc *stripe.Client, tenantID, invoiceID string) error {
+	live, err := a.sessions.ListUnresolvedForInvoice(ctx, tenantID, invoiceID)
+	if err != nil {
+		return fmt.Errorf("list superseded checkout sessions: %w", err)
+	}
+	for _, c := range live {
+		if c.Status != "superseded" {
+			continue
+		}
+		perr := a.expireStripeSession(ctx, sc, c.StripeSessionID)
+		switch {
+		case perr == nil:
+			if mErr := a.sessions.MarkExpired(ctx, tenantID, c.ID); mErr != nil {
+				slog.WarnContext(ctx, "checkout: record superseded session expiry failed",
+					"invoice_id", invoiceID, "claim_id", c.ID, "error", mErr)
+			}
+		case errors.Is(perr, payment.ErrSessionCompleted):
+			return payment.ErrChargeInFlight
+		default:
+			slog.WarnContext(ctx, "checkout: best-effort expire of superseded session failed",
+				"invoice_id", invoiceID, "claim_id", c.ID, "error", perr)
+		}
+	}
+	return nil
 }
 
 // expireStripeSession best-effort expires a live session, classifying the
