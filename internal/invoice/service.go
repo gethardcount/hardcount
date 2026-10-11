@@ -166,6 +166,7 @@ type Service struct {
 	dunningReader  DunningRunReader
 	subPauseReader SubscriptionPauseReader
 	commitGrants   CommitGrantReader
+	paymentPages   PaymentPageReader
 	creditApplier  CreditApplier
 	settings       TenantSettingsReader
 	audit          AuditLogger
@@ -383,6 +384,20 @@ type CommitGrantReader interface {
 // exposure is claimed — the same safe default as an unwired dunning reader.
 func (s *Service) SetCommitGrantReader(r CommitGrantReader) {
 	s.commitGrants = r
+}
+
+// PaymentPageReader reports whether an invoice has a hosted payment page that
+// may still take the customer's money (domain.HostedCheckoutLiveSQL, the rule
+// the charge claims refuse on). Satisfied by *PostgresStore.
+type PaymentPageReader interface {
+	PaymentPageLive(ctx context.Context, tenantID, invoiceID string) (bool, error)
+}
+
+// SetPaymentPageReader wires the payment-page lookup for the attention banner.
+// Optional: when nil no page is reported open, and the banner keeps offering
+// Retry, which a live page would refuse with a clear 422.
+func (s *Service) SetPaymentPageReader(r PaymentPageReader) {
+	s.paymentPages = r
 }
 
 // collectionPaused reports whether the invoice's subscription has
@@ -791,6 +806,29 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 	if inv.AutoChargePending && inv.Status == domain.InvoiceFinalized &&
 		inv.PaymentStatus == domain.PaymentPending {
 		atc.CollectionPaused = s.collectionPaused(ctx, inv.TenantID, inv.SubscriptionID)
+	}
+	// A live hosted payment page holds every Velox charge (ADR-068). Only a
+	// finalized, unpaid invoice can have one that matters; one indexed EXISTS
+	// per such row. A read error leaves it false: the banner then offers Retry,
+	// which a live page refuses with a clear message.
+	if s.paymentPages != nil && inv.ID != "" && inv.Status == domain.InvoiceFinalized &&
+		(inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed) {
+		if live, err := s.paymentPages.PaymentPageLive(ctx, inv.TenantID, inv.ID); err == nil {
+			atc.PaymentPageOpen = live
+		}
+	}
+	// A clock-pinned invoice's failure banner dates "since" from its latest
+	// failed charge's simulated instant. Simulated failed invoices only, so a
+	// live list page never pays this read.
+	if inv.IsSimulated && inv.PaymentStatus == domain.PaymentFailed && inv.ID != "" {
+		if attempts, err := s.store.ListChargeAttemptsByInvoice(ctx, inv.TenantID, inv.ID); err == nil {
+			for i := len(attempts) - 1; i >= 0; i-- {
+				if attempts[i].Outcome == domain.ChargeAttemptFailed && attempts[i].SimEffectiveAt != nil {
+					atc.LastFailedChargeAt = attempts[i].SimEffectiveAt
+					break
+				}
+			}
+		}
 	}
 	// Prepaid-commit exposure: credit this invoice already handed the customer
 	// while the cash never arrived (ADR-078 D3 fast-follow). Same lazy shape as

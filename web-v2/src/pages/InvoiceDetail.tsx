@@ -1835,6 +1835,9 @@ function OperatorContextCard({
                       {cardless && (
                         <span className="block text-xs text-muted-foreground">Won't charge until a card is attached.</span>
                       )}
+                      {invoice.attention?.code === 'payment.page_open' && (
+                        <span className="block text-xs text-muted-foreground">Held while the customer's payment page is open.</span>
+                      )}
                     </dd>
                   </>
                 )}

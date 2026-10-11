@@ -1150,3 +1150,57 @@ func TestClassifyInvoiceAttention_PendingSeverityTracksAutomaticMover(t *testing
 		})
 	}
 }
+
+// While the customer's payment page is open no Velox charge can start
+// (ADR-068), so the banner must not offer Retry / Charge now — the buttons
+// would be refused — and it says why the retry date is not acted on.
+func TestClassifyInvoiceAttention_PaymentPageOpen(t *testing.T) {
+	for _, ps := range []InvoicePaymentStatus{PaymentFailed, PaymentPending} {
+		inv := draft()
+		inv.Status = InvoiceFinalized
+		inv.PaymentStatus = ps
+		inv.AutoChargePending = true
+		att := ClassifyInvoiceAttention(inv, AttentionContext{HasPaymentMethod: true, PaymentPageOpen: true})
+		if att == nil || att.Code != "payment.page_open" || att.Reason != AttentionReasonPaymentProcessing || att.Severity != AttentionSeverityInfo {
+			t.Fatalf("payment_status=%s: got %+v, want info payment.page_open", ps, att)
+		}
+		if len(att.Actions) != 0 {
+			t.Errorf("payment_status=%s: page-open banner offers %v; every charge is refused while the page is open", ps, att.Actions)
+		}
+	}
+	// Negative control: the same failed invoice without a live page keeps the
+	// decline banner and its Retry.
+	inv := draft()
+	inv.Status = InvoiceFinalized
+	inv.PaymentStatus = PaymentFailed
+	if att := ClassifyInvoiceAttention(inv, AttentionContext{HasPaymentMethod: true}); att == nil || att.Code != "payment.declined" {
+		t.Fatalf("no page: got %+v, want payment.declined", att)
+	}
+	// A paid invoice stays silent even if a stale row says a page is open.
+	inv.Status = InvoicePaid
+	if att := ClassifyInvoiceAttention(inv, AttentionContext{PaymentPageOpen: true}); att != nil {
+		t.Errorf("paid: got %+v, want nil", att)
+	}
+}
+
+// A clock-pinned invoice's failure banner dates "since" from its latest failed
+// charge, not its issue instant: a draft issued Feb 1 and declined Feb 10 read
+// "since 13d ago" on Feb 14 (FLOW TC5 walk, 2026-10-11).
+func TestClassifyInvoiceAttention_SimulatedFailureSinceIsTheCharge(t *testing.T) {
+	issued := time.Date(2028, 2, 1, 0, 0, 0, 0, time.UTC)
+	charged := time.Date(2028, 2, 10, 9, 0, 0, 0, time.UTC)
+	inv := draft()
+	inv.Status = InvoiceFinalized
+	inv.PaymentStatus = PaymentFailed
+	inv.IsSimulated = true
+	inv.IssuedAt = &issued
+
+	att := ClassifyInvoiceAttention(inv, AttentionContext{LastFailedChargeAt: &charged})
+	if att == nil || att.Since == nil || !att.Since.Equal(charged) {
+		t.Fatalf("since = %v, want the failed charge %v", att.Since, charged)
+	}
+	// Without a recorded attempt it keeps the issue instant.
+	if att := ClassifyInvoiceAttention(inv, AttentionContext{}); att == nil || att.Since == nil || !att.Since.Equal(issued) {
+		t.Fatalf("no attempt: since = %v, want the issue instant %v", att.Since, issued)
+	}
+}

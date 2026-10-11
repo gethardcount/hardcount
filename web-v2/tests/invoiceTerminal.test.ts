@@ -19,8 +19,16 @@ test('uncollectible is terminal — the miss this module exists for', () => {
 test('all three collection-ending states are terminal', () => {
   for (const s of ['paid', 'voided', 'uncollectible']) {
     assert.equal(isTerminalInvoiceStatus(s), true, `${s} must be terminal`)
+  }
+  // void / write-off keep amount_due — it is the invoice's amount.
+  for (const s of ['voided', 'uncollectible']) {
     assert.equal(invoiceAmountLabel(s), 'Invoice amount', `${s} must relabel the figure`)
   }
+})
+
+test('paid zeroes amount_due, so its figure is what is still due, not the invoice amount', () => {
+  // "Invoice amount $0.00" on a paid invoice (FLOW I10 walk, 2026-10-11).
+  assert.equal(invoiceAmountLabel('paid'), 'Amount due')
 })
 
 test('collectible states are NOT terminal — the negative control', () => {

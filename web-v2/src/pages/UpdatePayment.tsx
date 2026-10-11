@@ -237,11 +237,9 @@ export default function UpdatePaymentPage() {
                       <span className="text-sm text-muted-foreground">Invoice</span>
                       <span className="text-sm font-mono text-foreground">{data.invoice_number}</span>
                     </div>
-                    {/* amount_due_cents survives a void/settle by design
-                        (the transition reverses collection, it doesn't
-                        rewrite the figure) — so label it for what it is
-                        once nothing is owed, rather than dunning a
-                        customer for a settled invoice. */}
+                    {/* amount_due_cents survives a void / write-off and is
+                        zeroed by a settle; invoiceAmountLabel names each so
+                        a closed invoice never reads as owed. */}
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">
                         {invoiceAmountLabel(data.invoice_status)}

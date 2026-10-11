@@ -41,11 +41,18 @@ export function isTerminalInvoiceStatus(status: string | undefined | null): bool
 }
 
 /**
- * `amount_due_cents` survives a void/settle/write-off by design — the
- * transition ends collection, it does not rewrite the figure. So the number
- * stays true and only its LABEL changes: calling it "Amount Due" on an invoice
- * nobody is collecting is the actual lie.
+ * The label for `amount_due_cents`, which means different things by status:
+ *
+ * - void / write-off: it SURVIVES — the transition ends collection, it does not
+ *   rewrite the figure — so it is the invoice's amount, and calling it "Amount
+ *   Due" on an invoice nobody is collecting is the lie.
+ * - paid: it is ZEROED — the settle moves it into `amount_paid_cents`
+ *   (MarkPaid). Labelled "Invoice amount" it read "Invoice amount $0.00" on a
+ *   paid invoice (found walking FLOW I10, 2026-10-11); "Amount due $0.00" is
+ *   the true statement. Pages that headline a paid invoice show
+ *   `amount_paid_cents` instead.
  */
 export function invoiceAmountLabel(status: string | undefined | null): string {
+  if (status === 'paid') return 'Amount due'
   return isTerminalInvoiceStatus(status) ? 'Invoice amount' : 'Amount Due'
 }

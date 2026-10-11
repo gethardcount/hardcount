@@ -430,11 +430,14 @@ export default function HostedInvoicePage() {
                     but left this header saying "Amount Due", so a voided
                     invoice still led with money owed in the largest type on
                     the page. Same rule, both places. */}
+                {/* A paid invoice headlines what was paid: the settle zeroes
+                    amount_due (it moves into amount_paid), so the shared
+                    label/figure pair below would lead with $0.00. */}
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">
-                  {invoiceAmountLabel(invoice.status)}
+                  {invoice.status === 'paid' ? 'Amount paid' : invoiceAmountLabel(invoice.status)}
                 </p>
                 <p className="text-2xl font-semibold text-foreground tabular-nums">
-                  {formatCents(invoice.amount_due_cents, invoice.currency)}
+                  {formatCents(invoice.status === 'paid' ? invoice.amount_paid_cents : invoice.amount_due_cents, invoice.currency)}
                 </p>
                 {invoice.due_at && invoice.status === 'finalized' && (
                   <p className="text-xs text-muted-foreground mt-1">
@@ -575,12 +578,10 @@ export default function HostedInvoicePage() {
                     </dd>
                   </div>
                 )}
-                {/* amount_due_cents survives a void / write-off by design —
-                    those transitions reverse COLLECTION, they don't rewrite
-                    the figure. Labelling it "Amount due" on a closed invoice
-                    tells the customer they owe money we've stopped
-                    collecting; name it for what it is instead (same fix as
-                    the payment-update page, 2026-07-28). */}
+                {/* amount_due_cents survives a void / write-off (named
+                    "Invoice amount" there) and is zeroed by a settle (named
+                    "Amount due", truly $0.00, under the Paid row). See
+                    invoiceAmountLabel. */}
                 <div className="flex justify-between pt-2 border-t font-semibold">
                   <dt className="text-foreground">
                     {invoiceAmountLabel(invoice.status)}

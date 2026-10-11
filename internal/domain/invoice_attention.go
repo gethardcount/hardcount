@@ -428,6 +428,22 @@ type AttentionContext struct {
 	// the age escalation (the banner stays Info) — safe for callers that don't
 	// set it.
 	Now time.Time
+
+	// PaymentPageOpen: the customer has a hosted payment page that may still
+	// take their money, or a hosted payment Velox has not recorded yet
+	// (HostedCheckoutLiveSQL). While it holds, every Velox charge refuses to
+	// start (ADR-068 "one payer at a time"), so a banner offering Retry would
+	// offer a button that is refused. The invoice service reads it for
+	// finalized, unpaid invoices only.
+	PaymentPageOpen bool
+
+	// LastFailedChargeAt is the simulated instant of the invoice's latest
+	// failed charge, for a clock-pinned invoice only (nil otherwise). The
+	// payment-failure banner dates "since" from it: attentionSince's issue
+	// instant is wrong for an invoice charged on a later Advance (a paused
+	// subscription's draft finalized later read "since 13d ago" four days
+	// after its decline, found walking FLOW TC5, 2026-10-11).
+	LastFailedChargeAt *time.Time
 }
 
 // processingStaleAfter is how long a payment may sit `processing` before the
@@ -518,8 +534,14 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	switch {
 	case inv.TaxStatus == InvoiceTaxFailed:
 		return classifyTaxAttention(inv, atc, AttentionSeverityCritical)
+	// Before the failure and pending states: while the customer's payment page
+	// is open no Velox charge can start, so their banners' Retry / Charge now
+	// would be refused, and a dunning retry date reads as overdue when it is
+	// held.
+	case inv.Status == InvoiceFinalized && atc.PaymentPageOpen:
+		return classifyPaymentPageOpen()
 	case inv.PaymentStatus == PaymentFailed:
-		return classifyPaymentFailure(inv)
+		return classifyPaymentFailure(inv, atc)
 	case inv.TaxStatus == InvoiceTaxPending:
 		return classifyTaxAttention(inv, atc, AttentionSeverityWarning)
 	case inv.PaymentStatus == PaymentUnknown:
@@ -884,7 +906,7 @@ func attentionSince(inv Invoice) time.Time {
 	return inv.UpdatedAt
 }
 
-func classifyPaymentFailure(inv Invoice) *Attention {
+func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	// Operator voice, not provider voice: LastPaymentError is Stripe's
 	// CARDHOLDER-facing sentence ("Your card was declined") — promoted
 	// verbatim to the banner it read as Velox addressing the operator,
@@ -897,6 +919,9 @@ func classifyPaymentFailure(inv Invoice) *Attention {
 		headline = "The customer's payment attempt failed."
 	}
 	since := attentionSince(inv)
+	if atc.LastFailedChargeAt != nil {
+		since = *atc.LastFailedChargeAt
+	}
 	// Update Payment Method is the primary action: the card on file
 	// is broken, retrying with the same card will decline again.
 	// Retry Payment is offered as secondary for transient declines
@@ -1022,6 +1047,23 @@ func classifyPaymentProcessing(inv Invoice, atc AttentionContext) *Attention {
 		Message:  "Payment is in flight at the provider — Velox confirms it automatically when the provider responds.",
 		DocURL:   docBaseURL + "payment-processing",
 		Since:    &since,
+	}
+}
+
+// classifyPaymentPageOpen: the customer is paying on the hosted payment page,
+// or has just paid there and Velox is recording it. Nothing is wrong and the
+// operator has nothing to do: Velox holds its own charges and dunning retries
+// until the page closes (ADR-068), so no actions are offered — Collect and
+// Retry would be refused. Reuses payment_processing (the closed reason enum is
+// a public contract): a payment may be in progress, and the Code carries the
+// granularity.
+func classifyPaymentPageOpen() *Attention {
+	return &Attention{
+		Severity: AttentionSeverityInfo,
+		Reason:   AttentionReasonPaymentProcessing,
+		Code:     "payment.page_open",
+		Message:  "The customer has the payment page open, or has just paid on it. Velox won't charge the card or retry until that's done, usually within an hour.",
+		DocURL:   docBaseURL + "payment-processing",
 	}
 }
 

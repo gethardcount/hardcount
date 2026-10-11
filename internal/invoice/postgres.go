@@ -3904,6 +3904,23 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 	return tx.Commit()
 }
 
+// PaymentPageLive reports whether the invoice has a hosted payment page that
+// may still take the customer's money, or a hosted payment not yet recorded:
+// the same domain.HostedCheckoutLiveSQL rule the charge claims refuse on, so
+// the banner and the refusal cannot disagree.
+func (s *PostgresStore) PaymentPageLive(ctx context.Context, tenantID, invoiceID string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return false, err
+	}
+	defer postgres.Rollback(tx)
+	var live bool
+	if err := tx.QueryRowContext(ctx, `SELECT `+domain.HostedCheckoutLiveSQL("$1"), invoiceID).Scan(&live); err != nil {
+		return false, fmt.Errorf("payment page live: %w", err)
+	}
+	return live, nil
+}
+
 // ListChargeAttemptsByInvoice returns the invoice's charge attempts,
 // oldest first — the timeline's billing-axis payment facts (ADR-102).
 func (s *PostgresStore) ListChargeAttemptsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceChargeAttempt, error) {

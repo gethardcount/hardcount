@@ -59,6 +59,12 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **A paid invoice's page no longer shows "Invoice amount $0.00" (2026-10-11).** The hosted invoice page now leads with **Amount paid**, and its totals end **Amount due $0.00**. The payment-update page uses the same label.
+
+- **The dashboard says when the customer's payment page is holding collection (2026-10-11).** While a customer has the Pay page open, Velox won't charge or retry (ADR-068). The invoice banner now says so and drops its Retry button, which would be refused, and the next dunning retry reads as held.
+
+- **A test-clock invoice's failure banner dates from its last failed charge, not its issue date (2026-10-11).** An invoice declined days after it was issued read "since 13d ago" four days after the decline.
+
 - **Test clocks: an invoice charged on a later advance gets its full dunning grace, and a webhook-paid invoice keeps the right paid date (2026-10-11).** An invoice charged on a later advance (a paused subscription's draft, a Collect, a card-less draft) counted its retries from its issue date, so one advance ran every retry and escalated. Retries now count from the charge. Webhooks also never read the charge's simulated time, so a test-clock invoice paid by webhook was dated at the end of the advance. [ADR-035](docs/adr/035-per-fact-simulated-time-anchoring.md#amendment-2026-10-11-the-first-retry-counts-from-the-failure)
 
 - **Dunning retries keep their spacing: the first waits the full grace period, and a late retry no longer drags the rest into the past (2026-10-11).** The first retry counted from the invoice's billing-period start, so an invoice charged partway through its period was retried at once. After any late retry, every later retry was then also dated in the past and ran on the next tick. Retries now count from the decline and from the previous retry. [ADR-035](docs/adr/035-per-fact-simulated-time-anchoring.md#amendment-2026-10-11-the-first-retry-counts-from-the-failure)
