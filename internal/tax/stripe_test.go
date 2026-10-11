@@ -272,3 +272,39 @@ func TestMapResult_NotCollecting_DocLevelReasonReachesZeroTaxLine(t *testing.T) 
 			res.Lines[0].TaxRate, res.Lines[0].TaxAmountCents)
 	}
 }
+
+// Every requested line must come back mapped: a line Stripe returned under an
+// unknown reference, or one missing from the list, used to keep zero tax while
+// the invoice total included it.
+func TestMapResult_UnmappedLineFails(t *testing.T) {
+	req := Request{LineItems: []RequestLine{
+		{Ref: "line_0", AmountCents: 10000, Quantity: 1},
+		{Ref: "line_1", AmountCents: 5000, Quantity: 1},
+	}}
+	line := func(ref string, tax int64) *stripe.TaxCalculationLineItem {
+		return &stripe.TaxCalculationLineItem{Reference: ref, Amount: 10000, AmountTax: tax}
+	}
+	p := &StripeTaxProvider{}
+
+	unknownRef := &stripe.TaxCalculation{ID: "taxcalc_x", TaxAmountExclusive: 1500,
+		LineItems: &stripe.TaxCalculationLineItemList{Data: []*stripe.TaxCalculationLineItem{line("line_0", 1000), line("mystery", 500)}}}
+	if _, err := p.mapResult(unknownRef, req); err == nil {
+		t.Error("unknown line reference: want an error, got a result")
+	}
+
+	missing := &stripe.TaxCalculation{ID: "taxcalc_y", TaxAmountExclusive: 1500,
+		LineItems: &stripe.TaxCalculationLineItemList{Data: []*stripe.TaxCalculationLineItem{line("line_0", 1000)}}}
+	if _, err := p.mapResult(missing, req); err == nil {
+		t.Error("missing line: want an error, got a result")
+	}
+
+	full := &stripe.TaxCalculation{ID: "taxcalc_z", TaxAmountExclusive: 1500,
+		LineItems: &stripe.TaxCalculationLineItemList{Data: []*stripe.TaxCalculationLineItem{line("line_1", 500), line("line_0", 1000)}}}
+	res, err := p.mapResult(full, req)
+	if err != nil {
+		t.Fatalf("every line mapped (any order): %v", err)
+	}
+	if res.Lines[0].TaxAmountCents != 1000 || res.Lines[1].TaxAmountCents != 500 {
+		t.Errorf("lines = %d/%d, want 1000/500", res.Lines[0].TaxAmountCents, res.Lines[1].TaxAmountCents)
+	}
+}

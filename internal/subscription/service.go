@@ -477,10 +477,14 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 	}
 	target, describe := "", ""
 	if outgoingPlanID != "" {
-		if op, err := s.plans.GetPlan(ctx, tenantID, outgoingPlanID); err == nil {
-			target = strings.ToUpper(strings.TrimSpace(op.Currency))
-			describe = fmt.Sprintf("the item's current plan %q (%s)", op.Code, target)
+		// A read error must not drop the outgoing currency from the pin:
+		// proration subtracts old cents from new cents raw.
+		op, err := s.plans.GetPlan(ctx, tenantID, outgoingPlanID)
+		if err != nil {
+			return fmt.Errorf("currency pin: outgoing plan %q: %w", outgoingPlanID, err)
 		}
+		target = strings.ToUpper(strings.TrimSpace(op.Currency))
+		describe = fmt.Sprintf("the item's current plan %q (%s)", op.Code, target)
 	}
 	for _, pid := range planIDs {
 		plan, err := s.plans.GetPlan(ctx, tenantID, pid)
@@ -505,7 +509,13 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 		return nil
 	}
 	if s.profiles != nil {
-		if bp, err := s.profiles.GetBillingProfile(ctx, tenantID, customerID); err == nil {
+		bp, err := s.profiles.GetBillingProfile(ctx, tenantID, customerID)
+		switch {
+		case errors.Is(err, errs.ErrNotFound):
+			// No billing profile: no profile currency to agree with.
+		case err != nil:
+			return fmt.Errorf("currency pin: billing profile: %w", err)
+		default:
 			pc := strings.ToUpper(strings.TrimSpace(bp.Currency))
 			if pc != "" && pc != target {
 				return errs.InvalidState(fmt.Sprintf(
@@ -688,7 +698,13 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// directly on the domain.Subscription it constructs.
 	var inheritedClockID string
 	if s.customers != nil {
-		if cust, err := s.customers.Get(ctx, tenantID, input.CustomerID); err == nil {
+		cust, err := s.customers.Get(ctx, tenantID, input.CustomerID)
+		if err != nil && !errors.Is(err, errs.ErrNotFound) {
+			// A read error must not skip the archived guard or the clock
+			// inheritance (a clock customer's sub would bill on wall time).
+			return domain.Subscription{}, fmt.Errorf("get customer: %w", err)
+		}
+		if err == nil {
 			// Archived customer = no NEW subscriptions (ADR-067). Archive's
 			// contract is "hide + stop new business"; without this guard a
 			// direct API call quietly starts billing a customer the operator
@@ -698,8 +714,8 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 			}
 			inheritedClockID = cust.TestClockID
 		}
-		// If err != nil here, fall through — the downstream FK check
-		// on customer_id will fail with a clean 400.
+		// Not found: fall through — the downstream FK check on
+		// customer_id fails with a clean 400.
 	}
 
 	// Archived plans accept no new subscriptions (ADR-067; same enforcement

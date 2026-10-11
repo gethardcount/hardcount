@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { api, downloadCreditNotePDF, formatCents, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
 import type { CreditNote, Invoice, Customer } from '@/lib/api'
+import { wallClockNow } from '@/lib/effectiveNow'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { downloadCSV } from '@/lib/csv'
@@ -105,6 +106,17 @@ function SortableHead({
       </button>
     </TableHead>
   )
+}
+
+// refundUnconfirmed: an issued credit note with a refund amount whose refund
+// result was never recorded (a failed write after Stripe answered, or a crash
+// in that window). Mirrors the backend needs-attention rule, including its one
+// hour grace so a refund still being issued is not flagged. Retry refund
+// recovers it: the backend looks for the Stripe refund before creating one.
+function refundUnconfirmed(note: CreditNote): boolean {
+  if (note.status !== 'issued' || note.refund_status !== 'none' || note.refund_amount_cents <= 0) return false
+  const issued = Date.parse(note.issued_at || note.created_at)
+  return Number.isFinite(issued) && wallClockNow() - issued > 60 * 60 * 1000
 }
 
 export default function CreditNotesPage() {
@@ -361,7 +373,7 @@ export default function CreditNotesPage() {
       {refundStatusFilter === 'needs_attention' && (
         <div className="mt-3 flex items-center gap-2 text-xs">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 font-medium text-destructive">
-            Showing refunds needing attention (failed, or pending &gt; 72h)
+            Showing refunds needing attention (failed, unconfirmed, or pending &gt; 72h)
             <button
               onClick={() => setUrlState({ refund_status: '', page: '1' })}
               className="hover:text-foreground"
@@ -466,6 +478,11 @@ export default function CreditNotesPage() {
                         <TableCell>
                           <div className="flex items-center gap-1.5">
                             <Badge variant={statusBadgeVariant(note.status)}>{note.status}</Badge>
+                            {isRefund && refundUnconfirmed(note) && (
+                              <Badge variant="danger" title="The refund's result was never recorded. Retry checks Stripe before creating a new refund.">
+                                refund not confirmed
+                              </Badge>
+                            )}
                             {isRefund && note.status === 'issued' && note.refund_status && note.refund_status !== 'none' && (
                               <Badge variant={note.refund_status === 'succeeded' ? 'success' : note.refund_status === 'failed' ? 'danger' : 'warning'}>
                                 {note.refund_status === 'succeeded' ? 'refunded' : note.refund_status === 'failed' ? 'refund failed' : 'refund pending'}
@@ -493,7 +510,7 @@ export default function CreditNotesPage() {
                             )}
                             {note.status === 'issued' && (
                               <div className="flex items-center gap-1 ml-3">
-                                {(note.refund_status === 'failed' || note.refund_status === 'pending') && (
+                                {(note.refund_status === 'failed' || note.refund_status === 'pending' || refundUnconfirmed(note)) && (
                                   <Button
                                     variant="outline"
                                     size="sm"

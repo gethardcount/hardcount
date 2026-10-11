@@ -3,6 +3,7 @@ package invoice
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -401,20 +402,22 @@ func (s *Service) SetPaymentPageReader(r PaymentPageReader) {
 }
 
 // collectionPaused reports whether the invoice's subscription has
-// pause_collection set. A read error or unwired reader answers false: the gate
-// it feeds only WITHHOLDS auto-finalize, so guessing "paused" on a failed read
-// would strand a healthy invoice as a draft indefinitely.
-func (s *Service) collectionPaused(ctx context.Context, tenantID, subscriptionID string) bool {
+// pause_collection set. An unwired reader, no subscription id or a subscription
+// that no longer exists answers false (nothing to pause). Any other read error
+// is returned: the auto-finalize gate must not issue and charge an invoice on a
+// guess that collection is not paused.
+func (s *Service) collectionPaused(ctx context.Context, tenantID, subscriptionID string) (bool, error) {
 	if s.subPauseReader == nil || subscriptionID == "" {
-		return false
+		return false, nil
 	}
 	sub, err := s.subPauseReader.Get(ctx, tenantID, subscriptionID)
-	if err != nil {
-		slog.Warn("invoice: could not read subscription pause state; treating as not paused",
-			"error", err, "tenant_id", tenantID, "subscription_id", subscriptionID)
-		return false
+	if errors.Is(err, errs.ErrNotFound) {
+		return false, nil
 	}
-	return sub.PauseCollection != nil
+	if err != nil {
+		return false, fmt.Errorf("read subscription pause state: %w", err)
+	}
+	return sub.PauseCollection != nil, nil
 }
 
 // SetCustomerReader wires the customer lookup used to (a) stamp is_simulated
@@ -430,17 +433,18 @@ func (s *Service) SetCustomerReader(r CustomerReader) {
 // customerOnTestClock reports whether the customer is pinned to a test clock —
 // the authoritative write-time signal for invoice.is_simulated on manual
 // invoices (mirrors the engine's sub.TestClockID check for cycle invoices).
-// Lookup failure / unwired reader → false (safe: an unbadged simulated invoice
-// is better than a badged real one, and the reader is always wired in prod).
-func (s *Service) customerOnTestClock(ctx context.Context, tenantID, customerID string) bool {
+// Unwired reader → false (narrow unit tests; prod always wires it). A lookup
+// error is returned: is_simulated is durable, and a simulated invoice stored
+// as real would count as revenue and go through the real reconcilers.
+func (s *Service) customerOnTestClock(ctx context.Context, tenantID, customerID string) (bool, error) {
 	if s.customerReader == nil || customerID == "" {
-		return false
+		return false, nil
 	}
 	cust, err := s.customerReader.Get(ctx, tenantID, customerID)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("read customer test-clock pin: %w", err)
 	}
-	return cust.TestClockID != ""
+	return cust.TestClockID != "", nil
 }
 
 // SetStripeChecker wires the per-tenant Stripe-connected probe used
@@ -547,6 +551,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	issuedAt := now
 	dueAt := now.AddDate(0, 0, netDays)
 
+	onClock, err := s.customerOnTestClock(ctx, tenantID, input.CustomerID)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
 	inv := domain.Invoice{
 		CustomerID:         input.CustomerID,
 		SubscriptionID:     input.SubscriptionID,
@@ -573,7 +581,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		// clock.IsSimulated(ctx): bindForCreate binds ctx to the resolver's
 		// effective-now even for UNPINNED customers (it returns wall-clock), so
 		// "ctx is bound" would mis-flag every manual invoice as simulated.
-		IsSimulated: s.customerOnTestClock(ctx, tenantID, input.CustomerID),
+		IsSimulated: onClock,
 	}
 
 	// Bare-header create — caller adds line items incrementally afterwards.
@@ -805,7 +813,14 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 	// dunning-run lookup above.
 	if inv.AutoChargePending && inv.Status == domain.InvoiceFinalized &&
 		inv.PaymentStatus == domain.PaymentPending {
-		atc.CollectionPaused = s.collectionPaused(ctx, inv.TenantID, inv.SubscriptionID)
+		// Display-only: a read error shows the not-paused banner (logged);
+		// the collector itself refuses to charge a paused subscription.
+		paused, perr := s.collectionPaused(ctx, inv.TenantID, inv.SubscriptionID)
+		if perr != nil {
+			slog.Warn("invoice: attention could not read pause state", "error", perr,
+				"tenant_id", inv.TenantID, "invoice_id", inv.ID)
+		}
+		atc.CollectionPaused = paused
 	}
 	// A live hosted payment page holds every Velox charge (ADR-068). Only a
 	// finalized, unpaid invoice can have one that matters; one indexed EXISTS
@@ -1161,19 +1176,16 @@ func (s *Service) reverseInvoiceTax(ctx context.Context, tenantID string, inv do
 	if inv.TotalAmountCents > 0 {
 		remainingGross := inv.AmountPaidCents + inv.AmountDueCents
 		if s.creditNotes != nil {
-			if creditNoted, cerr := s.creditNotes.CreditedCents(ctx, tenantID, inv.ID); cerr == nil {
-				remainingGross = inv.TotalAmountCents - creditNoted
-			} else {
-				// ERROR (not WARN): the amount-due proxy UNDER-reverses when
-				// customer-balance credit was applied (credit cuts amount_due
-				// without reversing tax), so the reversal may be short — the tenant
-				// over-remits (the conservative direction, but still wrong). Loud +
-				// alarmable so it's reconciled; we keep the proxy rather than skip
-				// because skipping reverses nothing (a larger over-remit) and the
-				// no-credit common case is exact (product-audit G6).
-				slog.ErrorContext(ctx, "credit-note total lookup failed; tax reversal uses the amount-due proxy and may under-reverse — reconcile",
-					"invoice_id", inv.ID, "error", cerr)
+			creditNoted, cerr := s.creditNotes.CreditedCents(ctx, tenantID, inv.ID)
+			if cerr != nil {
+				// Fail, never guess: the amount-due proxy UNDER-reverses when
+				// customer credit was applied, and the short reversal would be
+				// filed for good under the one inv_taxrev_<id> reference. Failing
+				// leaves tax_reversed_at NULL, so RetryPendingTaxReversal re-drives
+				// it with the real credited total.
+				return fmt.Errorf("read credit-noted total for tax reversal: %w", cerr)
 			}
+			remainingGross = inv.TotalAmountCents - creditNoted
 		}
 		if remainingGross < 0 {
 			remainingGross = 0
@@ -1801,10 +1813,20 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 	// the operator an invoice they asked us not to send, and its banner would
 	// promise an automatic charge that collection (correctly) refuses to make.
 	// The draft simply waits for the resume or an explicit Finalize.
-	if shouldAutoFinalizeAfterRetry(inv) && s.collectionPaused(ctx, tenantID, inv.SubscriptionID) {
-		slog.Info("invoice: tax resolved but collection is paused on the subscription; leaving the invoice as a draft",
-			"tenant_id", tenantID, "invoice_id", invoiceID, "subscription_id", inv.SubscriptionID)
-		return s.attachAttention(ctx, inv), nil
+	if shouldAutoFinalizeAfterRetry(inv) {
+		paused, perr := s.collectionPaused(ctx, tenantID, inv.SubscriptionID)
+		if perr != nil {
+			// Unknown is not "not paused": leave the draft (tax is already
+			// persisted), exactly like a failed auto-finalize below.
+			slog.Warn("invoice: tax resolved but the pause state could not be read; leaving the invoice as a draft",
+				"error", perr, "tenant_id", tenantID, "invoice_id", invoiceID, "subscription_id", inv.SubscriptionID)
+			return s.attachAttention(ctx, inv), nil
+		}
+		if paused {
+			slog.Info("invoice: tax resolved but collection is paused on the subscription; leaving the invoice as a draft",
+				"tenant_id", tenantID, "invoice_id", invoiceID, "subscription_id", inv.SubscriptionID)
+			return s.attachAttention(ctx, inv), nil
+		}
 	}
 	if shouldAutoFinalizeAfterRetry(inv) {
 		final, ferr := s.finalize(ctx, tenantID, invoiceID, false) // the calc is seconds old

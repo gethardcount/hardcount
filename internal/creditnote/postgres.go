@@ -459,7 +459,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 		// the dashboard once true-pending is recorded). is_simulated excluded —
 		// test-clock CNs aren't an operator obligation. Literal, no arg → no
 		// injection surface.
-		clauses = append(clauses, "status = 'issued' AND (refund_status = 'failed' OR (refund_status = 'pending' AND updated_at < now() - interval '72 hours')) AND is_simulated = false")
+		clauses = append(clauses, domain.CreditNoteRefundNeedsAttentionSQL)
 	} else if filter.RefundStatus != "" {
 		clauses = append(clauses, fmt.Sprintf("refund_status = $%d", idx))
 		args = append(args, filter.RefundStatus)

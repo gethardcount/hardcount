@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -250,13 +251,18 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// bypassing this 409 gate — they cannot bounce a cancel/downgrade back to a
 	// human. Instead they DEFER: Issue() leaves the draft unissued while the
 	// source is in-flight and the reconciler issues it once the source settles
-	// (ADR-059). A Get error here falls through to create(), which raises the
-	// canonical not-found/validation error.
+	// (ADR-059). Not-found falls through to create(), which raises the
+	// canonical not-found/validation error; any other read error fails — the
+	// gate cannot be skipped on a read it could not make.
 	if input.InvoiceID != "" {
-		if inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID); err == nil {
+		inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
+		switch {
+		case err == nil:
 			if b := domain.PaymentBlocksAction(inv, domain.ActionIssueCreditNote); b.Blocked {
 				return domain.CreditNote{}, errs.InvalidState(b.Message).WithCode(b.Code)
 			}
+		case !errors.Is(err, errs.ErrNotFound):
+			return domain.CreditNote{}, fmt.Errorf("read invoice for the in-flight payment check: %w", err)
 		}
 	}
 	return s.create(ctx, tenantID, input, nil)
@@ -1638,7 +1644,12 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 				}
 			}
 			if err := s.store.UpdateRefundStatusAudited(ctx, tenantID, id, RefundStatusWrite{Status: cn.RefundStatus, StripeRefundID: cn.StripeRefundID, ExpectedPriorRefundID: ""}, emit); err != nil {
-				slog.Warn("failed to persist refund status",
+				// The note is issued (committed) and the refund leg already ran, so
+				// failing Issue now would only confuse its callers. The row stays
+				// refund_status='none' with a refund amount, which the needs-attention
+				// list surfaces after an hour; RetryRefund then adopts the refund
+				// Stripe minted (metadata search) instead of creating a second one.
+				slog.ErrorContext(ctx, "failed to persist refund status after the refund leg ran; the credit note will show in refunds needing attention — retry the refund",
 					"credit_note_id", cn.ID, "refund_status", cn.RefundStatus,
 					"stripe_refund_id", cn.StripeRefundID, "error", err)
 			}

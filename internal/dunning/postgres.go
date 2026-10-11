@@ -52,7 +52,12 @@ func scanPolicy(row interface {
 		&p.GracePeriodDays, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return domain.DunningPolicy{}, err
 	}
-	_ = json.Unmarshal(scheduleJSON, &p.RetrySchedule)
+	// A retry_schedule that does not decode is a broken row, not "no
+	// retries": read as empty, a run charges and then fails its bounds check
+	// without advancing, so it charges again every tick.
+	if err := json.Unmarshal(scheduleJSON, &p.RetrySchedule); err != nil {
+		return domain.DunningPolicy{}, fmt.Errorf("decode retry_schedule for dunning policy %s: %w", p.ID, err)
+	}
 	return p, nil
 }
 

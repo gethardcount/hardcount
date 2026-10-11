@@ -795,13 +795,20 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 	// currency. A threshold expressed in cents only makes sense against a
 	// single-currency line set.
 	if h.plans != nil {
+		// A read error fails the request: skipping it would let a cents
+		// threshold onto a mixed-currency sub.
 		sub, gerr := h.svc.Get(r.Context(), tenantID, id)
-		if gerr == nil && len(sub.Items) > 0 {
+		if gerr != nil {
+			respond.FromError(w, r, gerr, "subscription")
+			return
+		}
+		if len(sub.Items) > 0 {
 			seen := make(map[string]struct{}, 2)
 			for _, it := range sub.Items {
 				p, perr := h.plans.GetPlan(r.Context(), tenantID, it.PlanID)
 				if perr != nil {
-					continue
+					respond.FromError(w, r, fmt.Errorf("get plan %s: %w", it.PlanID, perr), "plan")
+					return
 				}
 				if p.Currency != "" {
 					seen[p.Currency] = struct{}{}
@@ -912,8 +919,14 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 	var subBefore domain.Subscription
 	var prorationRemainingDays, prorationTotalDays int64
 	if h.plans != nil && h.invoices != nil {
+		// A read error fails the add: carrying on would add the item with
+		// proration silently off (no in-advance charge for the period).
 		sub, serr := h.svc.Get(ctx, tenantID, id)
-		if serr == nil {
+		if serr != nil {
+			respond.FromError(w, r, serr, "subscription")
+			return
+		}
+		{
 			subBefore = sub
 			if sub.Status == domain.SubscriptionActive {
 				prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
@@ -1091,16 +1104,24 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 	isQuantityChange := input.Quantity != nil
 	prorationEligible := (isImmediatePlanChange || isQuantityChange) && h.plans != nil
 	if prorationEligible {
+		// Read errors fail the change: carrying on would apply it with
+		// proration silently off (no charge or credit for the period).
 		item, gerr := h.svc.store.GetItem(ctx, tenantID, itemID)
-		if gerr == nil && item.SubscriptionID == subID {
+		if gerr != nil {
+			respond.FromError(w, r, gerr, "subscription item")
+			return
+		}
+		if item.SubscriptionID == subID {
 			oldPlanID = item.PlanID
 			oldQuantity = item.Quantity
 		}
 		sub, serr := h.svc.Get(ctx, tenantID, subID)
-		if serr == nil {
-			subBefore = sub
-			prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
+		if serr != nil {
+			respond.FromError(w, r, serr, "subscription")
+			return
 		}
+		subBefore = sub
+		prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
 	}
 
 	// Atomic UpdateItem-with-proration path (ADR-030 atomic-proration
@@ -1126,8 +1147,19 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 	crossIntervalSwap := false
 	if isImmediatePlanChange && h.plans != nil && oldPlanID != "" {
 		oldP, e1 := h.plans.GetPlan(ctx, tenantID, oldPlanID)
+		if e1 != nil {
+			respond.FromError(w, r, fmt.Errorf("get current plan %s: %w", oldPlanID, e1), "plan")
+			return
+		}
+		// A missing new plan is the service's validation error to report;
+		// any other read error must not misroute a cross-interval swap onto
+		// the non-atomic path (ADR-056).
 		newP, e2 := h.plans.GetPlan(ctx, tenantID, input.NewPlanID)
-		if e1 == nil && e2 == nil {
+		if e2 != nil && !errors.Is(e2, errs.ErrNotFound) {
+			respond.FromError(w, r, fmt.Errorf("get new plan %s: %w", input.NewPlanID, e2), "plan")
+			return
+		}
+		if e2 == nil {
 			oi := oldP.BillingInterval
 			if oi == "" {
 				oi = domain.BillingMonthly
@@ -1368,17 +1400,25 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	var subBefore domain.Subscription
 	var prorationRemainingDays, prorationTotalDays int64
 	if h.plans != nil && h.credits != nil {
+		// Read errors fail the remove: it is a hard delete, so carrying on
+		// would lose the unused-portion credit and the data to compute it.
 		item, gerr := h.svc.store.GetItem(ctx, tenantID, itemID)
-		if gerr == nil && item.SubscriptionID == subID {
+		if gerr != nil {
+			respond.FromError(w, r, gerr, "subscription item")
+			return
+		}
+		if item.SubscriptionID == subID {
 			removedPlanID = item.PlanID
 			removedQuantity = item.Quantity
 		}
 		sub, serr := h.svc.Get(ctx, tenantID, subID)
-		if serr == nil {
-			subBefore = sub
-			if sub.Status == domain.SubscriptionActive {
-				prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
-			}
+		if serr != nil {
+			respond.FromError(w, r, serr, "subscription")
+			return
+		}
+		subBefore = sub
+		if sub.Status == domain.SubscriptionActive {
+			prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
 		}
 	}
 

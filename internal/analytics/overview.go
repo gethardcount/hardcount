@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"database/sql"
+	"github.com/sagarsuperuser/velox/internal/domain"
 	"log/slog"
 	"net/http"
 
@@ -166,11 +167,10 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		// is operator-retried (no auto-sweep), so surfacing the count is what
 		// turns "an operator will notice" into "an operator is told". Real
 		// refunds only (test-clock sims aren't an operator obligation).
-		// failed (terminal — customer un-refunded) OR a 'pending' STUCK >72h
-		// (~3 business days). Fresh pending is normal async settlement, NOT an
-		// alert — else every healthy in-flight refund would light the banner.
+		// The predicate is domain.CreditNoteRefundNeedsAttentionSQL, shared with the list
+		// filter so the count and the list never disagree.
 		{"refunds_needing_attention", &resp.RefundsAttention,
-			`SELECT COUNT(*) FROM credit_notes WHERE status = 'issued' AND (refund_status = 'failed' OR (refund_status = 'pending' AND updated_at < now() - interval '72 hours')) AND is_simulated = false`, nil},
+			`SELECT COUNT(*) FROM credit_notes WHERE ` + domain.CreditNoteRefundNeedsAttentionSQL, nil},
 	}
 	for _, q := range queries {
 		if err := tx.QueryRowContext(ctx, q.sql, q.args...).Scan(q.dst); err != nil {

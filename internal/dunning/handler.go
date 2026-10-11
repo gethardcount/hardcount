@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -375,6 +376,23 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The invoice action runs BEFORE the run is resolved. Resolving first
+	// and then failing the invoice action (logged, 200) left a resolved run
+	// beside an unpaid / un-voided invoice: dunning had stopped, so nothing
+	// would ever collect or void it. This way a failed action leaves the run
+	// active and the operator sees the error; if the resolve itself fails
+	// after a successful action, the next dunning tick's paid/voided
+	// pre-check resolves the run.
+	pending, err := h.svc.store.GetRun(r.Context(), tenantID, id)
+	if err != nil {
+		respond.FromError(w, r, err, "dunning_run")
+		return
+	}
+	if err := h.applyResolutionToInvoice(r.Context(), tenantID, pending.InvoiceID, domain.DunningResolution(input.Resolution)); err != nil {
+		respond.FromError(w, r, err, "invoice")
+		return
+	}
+
 	run, err := h.svc.ResolveRun(r.Context(), tenantID, id, domain.DunningResolution(input.Resolution))
 	if err != nil {
 		respond.FromError(w, r, err, "dunning_run")
@@ -403,50 +421,57 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Propagate resolution to invoice
-	if run.InvoiceID != "" {
-		switch domain.DunningResolution(input.Resolution) {
-		case domain.ResolutionPaymentRecovered:
-			// Route through the invoice service's offline-payment writer —
-			// the same path the invoice page's Record-offline-payment dialog
-			// uses — so the recovery gets the out_of_band: PaymentIntent
-			// marker, the in-flight-charge guard, the payment_recorded audit
-			// row, and the invoice.payment_recorded webhook. A raw MarkPaid
-			// here was a second offline-payment writer with a thinner
-			// evidence trail for the same operator action. The service binds
-			// the invoice's clock itself (ADR-030), so sim-pinned invoices
-			// land paid_at on the sim axis without a bind here.
-			if h.invoiceVoider == nil {
-				slog.WarnContext(r.Context(), "invoice service unwired; skipping dunning payment-recovered mark-paid", "invoice_id", run.InvoiceID)
-				break
-			}
-			if _, err := h.invoiceVoider.RecordOfflinePayment(r.Context(), tenantID, run.InvoiceID, "Recovered via dunning resolution"); err != nil {
-				slog.WarnContext(r.Context(), "failed to record recovered payment after dunning resolution", "invoice_id", run.InvoiceID, "error", err)
-			}
-		case domain.ResolutionInvoiceVoided:
-			// Void through the invoice SERVICE (single void writer): status flip
-			// + atomic consumed-credit reversal + tax reversal + in-flight guard
-			// + single-writer invoice.voided event. The PI-cancel below is gated
-			// on the void SUCCEEDING — otherwise an in-flight invoice (which the
-			// service's guard refuses to void) would still get its live PI
-			// canceled, defeating the guard. It runs only after a confirmed void.
-			if h.invoiceVoider == nil {
-				slog.WarnContext(r.Context(), "invoice voider unwired; skipping dunning manual-resolve void", "invoice_id", run.InvoiceID)
-				break
-			}
-			voided, err := h.invoiceVoider.Void(r.Context(), tenantID, run.InvoiceID)
-			if err != nil {
-				slog.WarnContext(r.Context(), "failed to void invoice after dunning resolution; skipping PI cancel", "invoice_id", run.InvoiceID, "error", err)
-				break
-			}
-			// Stop collection at Stripe (only after a confirmed void):
-			// expire live Checkout sessions, then cancel the PI where
-			// cancelable. Credit reversal already happened inside Void.
-			if h.paymentCancel != nil {
-				h.paymentCancel.StopCollection(r.Context(), tenantID, voided)
-			}
+	respond.JSON(w, r, http.StatusOK, run)
+}
+
+// applyResolutionToInvoice carries an operator's dunning resolution to the
+// invoice: payment_recovered records an offline payment, invoice_voided
+// voids it (and then stops collection at Stripe). invoice_not_collectible
+// is written by ResolveRun itself. An unwired writer is a known-degraded
+// construction and skips with a warning; a writer ERROR is returned.
+func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error {
+	if invoiceID == "" {
+		return nil
+	}
+	switch resolution {
+	case domain.ResolutionPaymentRecovered:
+		// Route through the invoice service's offline-payment writer —
+		// the same path the invoice page's Record-offline-payment dialog
+		// uses — so the recovery gets the out_of_band: PaymentIntent
+		// marker, the in-flight-charge guard, the payment_recorded audit
+		// row, and the invoice.payment_recorded webhook. A raw MarkPaid
+		// here was a second offline-payment writer with a thinner
+		// evidence trail for the same operator action. The service binds
+		// the invoice's clock itself (ADR-030), so sim-pinned invoices
+		// land paid_at on the sim axis without a bind here.
+		if h.invoiceVoider == nil {
+			slog.WarnContext(ctx, "invoice service unwired; skipping dunning payment-recovered mark-paid", "invoice_id", invoiceID)
+			return nil
+		}
+		if _, err := h.invoiceVoider.RecordOfflinePayment(ctx, tenantID, invoiceID, "Recovered via dunning resolution"); err != nil {
+			return fmt.Errorf("record the recovered payment: %w", err)
+		}
+	case domain.ResolutionInvoiceVoided:
+		// Void through the invoice SERVICE (single void writer): status flip
+		// + atomic consumed-credit reversal + tax reversal + in-flight guard
+		// + single-writer invoice.voided event. The PI-cancel below is gated
+		// on the void SUCCEEDING — otherwise an in-flight invoice (which the
+		// service's guard refuses to void) would still get its live PI
+		// canceled, defeating the guard. It runs only after a confirmed void.
+		if h.invoiceVoider == nil {
+			slog.WarnContext(ctx, "invoice voider unwired; skipping dunning manual-resolve void", "invoice_id", invoiceID)
+			return nil
+		}
+		voided, err := h.invoiceVoider.Void(ctx, tenantID, invoiceID)
+		if err != nil {
+			return fmt.Errorf("void the invoice: %w", err)
+		}
+		// Stop collection at Stripe (only after a confirmed void):
+		// expire live Checkout sessions, then cancel the PI where
+		// cancelable. Credit reversal already happened inside Void.
+		if h.paymentCancel != nil {
+			h.paymentCancel.StopCollection(ctx, tenantID, voided)
 		}
 	}
-
-	respond.JSON(w, r, http.StatusOK, run)
+	return nil
 }

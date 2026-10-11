@@ -104,7 +104,7 @@ type ListFilter struct {
 	CustomerID string
 	Status     string
 	// RefundStatus filters by the Stripe refund leg. Exact match, except the
-	// sentinel "needs_attention" → refund_status IN ('failed','pending') (the
+	// sentinel "needs_attention" → domain.CreditNoteRefundNeedsAttentionSQL (the
 	// dashboard "refunds need attention" alert links here).
 	RefundStatus string
 	Limit        int

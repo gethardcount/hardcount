@@ -427,7 +427,11 @@ func (s *PostgresStore) createPlanTx(ctx context.Context, tx *sql.Tx, tenantID s
 		}
 		return domain.Plan{}, err
 	}
-	_ = json.Unmarshal(meterIDsJSON, &p.MeterIDs)
+	// A meter_ids value that does not decode is a broken row, not "no
+	// meters": read as empty, the plan would bill all its usage at $0.
+	if err := json.Unmarshal(meterIDsJSON, &p.MeterIDs); err != nil {
+		return domain.Plan{}, fmt.Errorf("decode meter_ids for plan %s: %w", p.ID, err)
+	}
 	return p, nil
 }
 
@@ -505,7 +509,11 @@ func (s *PostgresStore) UpdatePlan(ctx context.Context, tenantID string, p domai
 	if err != nil {
 		return domain.Plan{}, err
 	}
-	_ = json.Unmarshal(meterIDsJSON, &p.MeterIDs)
+	// A meter_ids value that does not decode is a broken row, not "no
+	// meters": read as empty, the plan would bill all its usage at $0.
+	if err := json.Unmarshal(meterIDsJSON, &p.MeterIDs); err != nil {
+		return domain.Plan{}, fmt.Errorf("decode meter_ids for plan %s: %w", p.ID, err)
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Plan{}, err
 	}
@@ -560,7 +568,11 @@ func scanPlan(row rowScanner) (domain.Plan, error) {
 	if err != nil {
 		return domain.Plan{}, err
 	}
-	_ = json.Unmarshal(meterIDsJSON, &p.MeterIDs)
+	// A meter_ids value that does not decode is a broken row, not "no
+	// meters": read as empty, the plan would bill all its usage at $0.
+	if err := json.Unmarshal(meterIDsJSON, &p.MeterIDs); err != nil {
+		return domain.Plan{}, fmt.Errorf("decode meter_ids for plan %s: %w", p.ID, err)
+	}
 	return p, nil
 }
 

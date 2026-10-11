@@ -132,6 +132,19 @@ func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result
 	if err != nil {
 		return p.handleFailure(ctx, req, "api_error", fmt.Errorf("stripe tax: %w", err))
 	}
+	// The expanded line_items is a paged list: an invoice with more lines
+	// than its first page comes back has_more=true. Page the rest from the
+	// calculation's line-items endpoint so every line gets its tax.
+	if calc.LineItems != nil && calc.LineItems.HasMore {
+		all := make([]*stripe.TaxCalculationLineItem, 0, len(req.LineItems))
+		for li, lerr := range client.V1TaxCalculations.ListLineItems(ctx, &stripe.TaxCalculationListLineItemsParams{Calculation: stripe.String(calc.ID)}) {
+			if lerr != nil {
+				return p.handleFailure(ctx, req, "api_error", fmt.Errorf("stripe tax: list calculation line items: %w", lerr))
+			}
+			all = append(all, li)
+		}
+		calc.LineItems.Data, calc.LineItems.HasMore = all, false
+	}
 
 	result, err := p.mapResult(calc, req)
 	if err != nil {
@@ -417,6 +430,11 @@ func (p *StripeTaxProvider) mapResult(calc *stripe.TaxCalculation, req Request) 
 	for i, li := range req.LineItems {
 		indexByRef[li.Ref] = i
 	}
+	// Every requested line must come back mapped. A line left unmapped (an
+	// unrecognised reference, or a truncated list) would keep zero tax while the
+	// invoice total includes it, so per-line tax would not sum to the total and
+	// a credit note's per-line reversal would under-reverse. Fail instead.
+	mapped := make([]bool, len(lines))
 	if calc.LineItems != nil {
 		for _, sli := range calc.LineItems.Data {
 			if sli == nil {
@@ -427,8 +445,9 @@ func (p *StripeTaxProvider) mapResult(calc *stripe.TaxCalculation, req Request) 
 				idx = parseLineRef(sli.Reference)
 			}
 			if idx < 0 || idx >= len(lines) {
-				continue
+				continue // unrecognised reference: its requested line stays unmapped and fails below
 			}
+			mapped[idx] = true
 			lines[idx].TaxAmountCents = sli.AmountTax
 			if req.TaxInclusive {
 				// In inclusive mode Stripe returns the gross sent in as Amount
@@ -487,6 +506,11 @@ func (p *StripeTaxProvider) mapResult(calc *stripe.TaxCalculation, req Request) 
 			} else if req.DefaultTaxCode != "" {
 				lines[idx].TaxCode = req.DefaultTaxCode
 			}
+		}
+	}
+	for i, ok := range mapped {
+		if !ok {
+			return nil, fmt.Errorf("stripe tax: calculation %s returned no line for requested line %q (%d of %d mapped)", calc.ID, lines[i].Ref, countTrue(mapped), len(mapped))
 		}
 	}
 
@@ -581,6 +605,16 @@ func parseLineRef(ref string) int {
 	n, err := strconv.Atoi(ref[5:])
 	if err != nil {
 		return -1
+	}
+	return n
+}
+
+func countTrue(bs []bool) int {
+	n := 0
+	for _, b := range bs {
+		if b {
+			n++
+		}
 	}
 	return n
 }

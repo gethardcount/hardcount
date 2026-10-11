@@ -1862,7 +1862,7 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 		}
 	})
 
-	t.Run("read error → finalizes (never strand a healthy draft)", func(t *testing.T) {
+	t.Run("subscription gone → finalizes (nothing to pause)", func(t *testing.T) {
 		store := newMemStore()
 		newStuckInvoice(store)
 		svc := NewService(store, nil, nil)
@@ -1874,7 +1874,26 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 			t.Fatalf("RetryTax: %v", err)
 		}
 		if out.Status != domain.InvoiceFinalized {
-			t.Errorf("status = %s, want finalized — an unreadable pause state must not strand the draft", out.Status)
+			t.Errorf("status = %s, want finalized — a missing subscription has no pause", out.Status)
+		}
+	})
+
+	t.Run("read error → stays draft (never charge on a guess)", func(t *testing.T) {
+		store := newMemStore()
+		newStuckInvoice(store)
+		svc := NewService(store, nil, nil)
+		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
+		svc.SetSubscriptionPauseReader(&stubPauseReader{err: errors.New("connection reset")})
+
+		out, err := svc.RetryTax(context.Background(), "t1", "inv_paused")
+		if err != nil {
+			t.Fatalf("RetryTax: %v (the tax result is persisted; the draft just waits)", err)
+		}
+		if out.Status != domain.InvoiceDraft {
+			t.Errorf("status = %s, want draft — an unreadable pause state must not issue and queue a charge", out.Status)
+		}
+		if store.invoices["inv_paused"].AutoChargePending {
+			t.Error("auto_charge_pending set on an unread pause state")
 		}
 	})
 }
