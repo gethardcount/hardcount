@@ -1884,7 +1884,11 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 		return emitAudit(r.CreditedCents, inv.Currency)
 	})
 	if err != nil {
-		if errors.Is(err, errs.ErrInvalidState) {
+		// Only the fire's own race outcomes are benign. A relief or billing
+		// refusal is also an InvalidState, and skipping it silently left the
+		// subscription active past its cancel_at; it is returned, so the scan
+		// reports it and retries next tick.
+		if errs.Code(err) == ScheduledCancelSuperseded {
 			slog.InfoContext(ctx, "due scheduled cancel: benign race, skipping",
 				"subscription_id", id, "tenant_id", tenantID, "reason", err.Error())
 			return nil

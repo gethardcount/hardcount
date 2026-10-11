@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
 // canceledInAdvanceSub builds a mid-period-canceled in_advance sub funded by the
@@ -219,5 +220,106 @@ func TestBillOnCancelDraftsTx_MultiPaidSource_RespectsHeadroom(t *testing.T) {
 	// well under it, and no single draft may exceed its own source's total.
 	if sum > 20000 {
 		t.Errorf("cumulative draft gross %d exceeds combined funding headroom 20000", sum)
+	}
+}
+
+// An unpaid funding invoice that the change leaves wholly unused is voided
+// outright, and leaves the allocation. Its applied customer credits come back
+// through the void; they must not also spill onto a paid invoice as balance
+// credit (a double relief, when the allocator capped the unpaid share at its
+// amount due and water-filled the credits-applied part elsewhere).
+func TestReliefTx_FullyUnusedUnpaidWithAppliedCredits_NoDoubleRelief(t *testing.T) {
+	baseInv, baseLine := paidBaseInvoice() // paid 15000, window Jun1→Jul1
+	upgradeAt := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	upInv := domain.Invoice{ // unpaid upgrade proration, 2000 of customer credit applied
+		ID: "inv_up", TenantID: "t1", SubscriptionID: "sub_1",
+		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
+		SubtotalCents: 5067, TotalAmountCents: 5067, AmountDueCents: 3067,
+		BillingReason: domain.BillingReasonSubscriptionUpdate, SourcePlanChangedAt: &upgradeAt,
+		BillingPeriodStart: upgradeAt, BillingPeriodEnd: periodEnd,
+	}
+	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv, upInv}, []domain.InvoiceLineItem{baseLine})
+	pricing.plans["pln_base"] = domain.Plan{ID: "pln_base", Currency: "USD", BillingInterval: domain.BillingMonthly,
+		BaseAmountCents: 23000, BaseBillTiming: domain.BillInAdvance} // post-upgrade base
+	sub.CanceledAt = &upgradeAt // canceled the day of the upgrade: the upgrade's window is unused
+	adjuster := &fakeCreditNoteAdjuster{}
+	e := wireCancelEngine(inv, pricing, adjuster)
+	voider := &fakeInvoiceVoider{}
+	e.SetInvoiceVoider(voider)
+
+	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	if err != nil {
+		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+	}
+	if len(voider.voided) != 1 || voider.voided[0] != "inv_up" {
+		t.Fatalf("voided = %v, want [inv_up]", voider.voided)
+	}
+	// totalUnused = 23000×19/30 = 14567; the voided upgrade relieves its 5067,
+	// so the paid base is credited its own 9500 — not 9500 + the 2000 of
+	// credits the void already hands back.
+	if len(adjuster.draftCall) != 1 || adjuster.draftCall[0].invoiceID != "inv_base" || adjuster.draftCall[0].gross != 9500 {
+		t.Fatalf("drafts = %+v, want one on inv_base of 9500", adjuster.draftCall)
+	}
+	if r.CreditedCents != 9500 {
+		t.Errorf("credited = %d, want 9500", r.CreditedCents)
+	}
+}
+
+// A partly-used funding invoice still in DRAFT (pause_collection keeps cycle
+// invoices as drafts) gets its relief note too — Issue holds it until the
+// invoice is finalized. Before, the note was refused for a draft source and the
+// cancel failed on every retry. A draft whose tax is not settled cannot be
+// sized yet: the change is refused with a retryable code.
+func TestReliefTx_DraftFundingInvoice(t *testing.T) {
+	draft := func(tax domain.InvoiceTaxStatus) domain.Invoice {
+		inv, _ := paidBaseInvoice()
+		inv.Status, inv.PaymentStatus, inv.AmountDueCents = domain.InvoiceDraft, domain.PaymentPending, inv.TotalAmountCents
+		inv.TaxStatus = tax
+		return inv
+	}
+	_, baseLine := paidBaseInvoice()
+
+	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{draft(domain.InvoiceTaxOK)}, []domain.InvoiceLineItem{baseLine})
+	adjuster := &fakeCreditNoteAdjuster{}
+	e := wireCancelEngine(inv, pricing, adjuster)
+	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	if err != nil {
+		t.Fatalf("draft with settled tax: %v", err)
+	}
+	if len(adjuster.draftCall) != 1 || adjuster.draftCall[0].gross != 5000 || r.CreditedCents != 0 {
+		t.Fatalf("drafts = %+v credited = %d, want one note of 5000 and no balance credit (nothing was paid)", adjuster.draftCall, r.CreditedCents)
+	}
+
+	sub, inv, pricing = canceledInAdvanceSub([]domain.Invoice{draft(domain.InvoiceTaxPending)}, []domain.InvoiceLineItem{baseLine})
+	e = wireCancelEngine(inv, pricing, &fakeCreditNoteAdjuster{})
+	if _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); errs.Code(err) != "funding_invoice_tax_pending" {
+		t.Fatalf("draft with pending tax: err = %v, want funding_invoice_tax_pending", err)
+	}
+}
+
+// erroringHeadroom fails the credited-total read.
+type erroringHeadroom struct{}
+
+func (erroringHeadroom) CreditedCents(context.Context, string, string) (int64, error) {
+	return 0, errors.New("connection reset")
+}
+
+// Only "the funding set is already fully credited" lets the change proceed
+// without relief; any other allocation failure (here a headroom read error)
+// rolls it back.
+func TestReliefTx_AllocationErrors(t *testing.T) {
+	baseInv, baseLine := paidBaseInvoice()
+	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
+	adjuster := &fakeCreditNoteAdjuster{}
+	e := wireCancelEngine(inv, pricing, adjuster)
+	e.SetCreditHeadroomReader(&fakeCreditHeadroom{credited: map[string]int64{"inv_base": 15000}})
+	if r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err != nil || len(r.DraftIDs) != 0 {
+		t.Fatalf("already fully credited: relief %+v err %v, want no relief and no error", r, err)
+	}
+
+	e.SetCreditHeadroomReader(erroringHeadroom{})
+	if _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err == nil {
+		t.Fatal("a headroom read error must fail the relief, not read as already credited")
 	}
 }

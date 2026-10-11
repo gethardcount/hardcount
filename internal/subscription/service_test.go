@@ -268,10 +268,10 @@ func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenant
 	}
 	// Mirror the real CAS: status AND cancel_at equality (ADR-097).
 	if s.Status != domain.SubscriptionActive {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("scheduled cancel cannot fire on %s subscription", s.Status))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("scheduled cancel cannot fire on %s subscription", s.Status)).WithCode(ScheduledCancelSuperseded)
 	}
 	if s.CancelAt == nil || !s.CancelAt.Equal(at) {
-		return domain.Subscription{}, errs.InvalidState("scheduled cancel no longer current (unscheduled or re-scheduled concurrently)")
+		return domain.Subscription{}, errs.InvalidState("scheduled cancel no longer current (unscheduled or re-scheduled concurrently)").WithCode(ScheduledCancelSuperseded)
 	}
 	s.Status = domain.SubscriptionCanceled
 	s.CanceledAt = &at

@@ -567,10 +567,8 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The cancel audit row rides the cancel transaction itself (ADR-090,
-	// Service.Cancel emission) — same row content, plus dunning-driven cancels
-	// record identically instead of being invisible. The fallback-path proration
-	// credit lands post-commit as its own audited grant row rather than a field
-	// here.
+	// Service.Cancel emission), with the proration credit in its metadata —
+	// dunning-driven cancels record identically instead of being invisible.
 	_ = prorationCreditCents
 
 	// subscription.canceled is enqueued IN the cancel tx (store-level

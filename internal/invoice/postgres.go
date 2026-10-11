@@ -1432,13 +1432,29 @@ func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenan
 		UPDATE invoices SET
 			amount_due_cents = GREATEST(amount_due_cents - $1, 0),
 			updated_at = $2
-		WHERE id = $3
+		WHERE id = $3 AND status = 'finalized' AND payment_status <> 'succeeded'
 		RETURNING `+invCols,
 		amountCents, now, id,
 	).Scan(s.scanInvDest(&inv)...)
 
 	if err == sql.ErrNoRows {
-		return domain.Invoice{}, errs.ErrNotFound
+		// Either no such invoice, or it is no longer an open receivable: the
+		// caller (credit-note Issue) chose the "reduce amount due" branch from
+		// a read taken before its tx, and a payment (or a finalize/void) landed
+		// since. Refuse, so its tx rolls back and the reconciler re-drives the
+		// note against the invoice's current state (a paid one is credited to
+		// the balance instead of losing the relief).
+		var status, payment string
+		rerr := tx.QueryRowContext(ctx, `SELECT status, payment_status FROM invoices WHERE id = $1`, id).Scan(&status, &payment)
+		if rerr == sql.ErrNoRows {
+			return domain.Invoice{}, errs.ErrNotFound
+		}
+		if rerr != nil {
+			return domain.Invoice{}, rerr
+		}
+		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
+			"invoice %s is %s/%s, not an open receivable; the credit note will be re-applied against its current state", id, status, payment)).
+			WithCode("invoice_not_open_receivable")
 	}
 	if err != nil {
 		return domain.Invoice{}, err

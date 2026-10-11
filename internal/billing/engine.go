@@ -4739,39 +4739,69 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 		return domain.Relief{}, fmt.Errorf("%s: look up funding invoices: %w", what, err)
 	}
 
-	shares, err := e.allocateUnusedAcrossFunding(ctx, sub, sources, in.PeriodEnd, in.CancelAt, in.TotalUnused)
-	if errors.Is(err, errHeadroomExhausted) {
-		// Already fully credited — nothing more is owed. Loud, because it can
-		// also mean drift, but not a reason to refuse the cancel or swap.
-		slog.ErrorContext(ctx, what+": funding invoices already fully credited; no further relief",
-			"subscription_id", sub.ID, "customer_id", sub.CustomerID, "error", err)
-		return domain.Relief{}, nil
-	}
-	if err != nil {
-		return domain.Relief{}, fmt.Errorf("%s: allocate across funding invoices: %w", what, err)
-	}
-
 	var r domain.Relief
-	for _, sh := range shares {
-		src := sh.Source
-		gross, void := sh.GrossCents, false
-		if src.PaymentStatus != domain.PaymentSucceeded {
-			gross, void = unpaidRelief(src, sh.NetCents)
-		}
-		if gross <= 0 {
-			continue
-		}
-		if void {
+	// An unpaid source whose whole window is unused (zero used days at the
+	// relief math's day granularity — the change lands on its period start's
+	// day), with nothing paid and no charge in flight, is
+	// voided outright: the void relieves its full total — its amount due AND
+	// the customer credits applied to it, which it hands back. It leaves the
+	// allocation, so its share cannot also spill onto a paid source as balance
+	// credit (that was a double relief whenever credits had been applied).
+	var allocate []domain.Invoice
+	totalUnused := in.TotalUnused
+	for _, src := range sources {
+		if src.PaymentStatus != domain.PaymentSucceeded && src.AmountPaidCents == 0 &&
+			roundDays(in.CancelAt.Sub(src.BillingPeriodStart)) <= 0 &&
+			!domain.PaymentBlocksAction(src, domain.ActionVoid).Blocked {
 			voided, verr := e.invoiceVoider.VoidUnchangedTx(ctx, tx, sub.TenantID, src)
 			if verr != nil {
 				return domain.Relief{}, fmt.Errorf("%s: void fully-unused %s: %w", what, src.ID, verr)
 			}
 			r.Voided = append(r.Voided, voided)
+			totalUnused = max(0, totalUnused-src.SubtotalCents)
+			continue
+		}
+		// A partly-used draft whose tax is not settled has no final total to
+		// size its credit note against: refuse, so the change is retried once
+		// the tax retry resolves it (normally minutes) rather than relieving a
+		// wrong amount.
+		if src.Status == domain.InvoiceDraft && src.TaxStatus != domain.InvoiceTaxOK && src.TaxStatus != "" {
+			return domain.Relief{}, errs.InvalidState(fmt.Sprintf(
+				"%s: funding invoice %s is a draft whose tax is still %s; retry once it is calculated", what, src.ID, src.TaxStatus)).
+				WithCode("funding_invoice_tax_pending")
+		}
+		allocate = append(allocate, src)
+	}
+	if len(allocate) == 0 || totalUnused <= 0 {
+		return r, nil
+	}
+
+	shares, err := e.allocateUnusedAcrossFunding(ctx, sub, allocate, in.PeriodEnd, in.CancelAt, totalUnused)
+	if errors.Is(err, errHeadroomExhausted) {
+		// Already fully credited — nothing more is owed. Loud, because it can
+		// also mean drift, but not a reason to refuse the cancel or swap.
+		slog.ErrorContext(ctx, what+": funding invoices already fully credited; no further relief",
+			"subscription_id", sub.ID, "customer_id", sub.CustomerID, "error", err)
+		return r, nil
+	}
+	if err != nil {
+		return domain.Relief{}, fmt.Errorf("%s: allocate across funding invoices: %w", what, err)
+	}
+
+	for _, sh := range shares {
+		src := sh.Source
+		gross := sh.GrossCents
+		if src.PaymentStatus != domain.PaymentSucceeded {
+			gross = unpaidRelief(src, sh.NetCents)
+		}
+		if gross <= 0 {
 			continue
 		}
 		// A credit-note cap rejection here (a concurrent operator credit note
 		// shrank the source's headroom after the off-tx CreditedCents read)
 		// rolls the change back too; the retry re-reads the smaller headroom.
+		// A draft source gets its note too: Issue holds it until the invoice
+		// is finalized (and voids it if the draft is voided instead).
 		cn, cerr := e.creditNoteAdjuster.CreateAdjustmentDraftTx(ctx, tx, sub.TenantID, src.ID, gross, reason, in.Desc)
 		if cerr != nil {
 			return domain.Relief{}, fmt.Errorf("%s: credit-note draft on %s: %w", what, src.ID, cerr)
@@ -4784,27 +4814,19 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 	return r, nil
 }
 
-// unpaidRelief sizes the relief for an UNPAID funding invoice's share (net,
-// tax-exclusive): grossed up by the invoice's own Total/Subtotal ratio so the
-// unused portion's tax is relieved too (Velox invoices carry one tax rate and
-// no discount, so the ratio is 1 + rate), clamped to its amount_due. void=true
-// when the whole remaining receivable is unused, nothing has been paid, and no
-// charge is in flight: the invoice is voided — status voided, applied credits
-// handed back, full tax reversal. Otherwise an adjustment credit note reduces
-// amount_due to the used portion; on an in-flight source Issue() defers that
-// note until the charge settles (ADR-059).
-func unpaidRelief(src domain.Invoice, net int64) (gross int64, void bool) {
-	gross = net
+// unpaidRelief sizes the relief for an UNPAID, partly-used funding invoice's
+// share (net, tax-exclusive): grossed up by the invoice's own Total/Subtotal
+// ratio so the unused portion's tax is relieved too (Velox invoices carry one
+// tax rate and no discount, so the ratio is 1 + rate), clamped to its
+// amount_due. An adjustment credit note reduces amount_due by it; on an
+// in-flight source Issue() defers the note until the charge settles
+// (ADR-059). (A fully-unused unpaid source is voided before allocation.)
+func unpaidRelief(src domain.Invoice, net int64) int64 {
+	gross := net
 	if src.SubtotalCents > 0 {
 		gross = money.RoundHalfToEven(net*src.TotalAmountCents, src.SubtotalCents)
 	}
-	gross = min(gross, src.AmountDueCents)
-	if gross <= 0 {
-		return 0, false
-	}
-	void = gross >= src.AmountDueCents && src.AmountPaidCents == 0 &&
-		!domain.PaymentBlocksAction(src, domain.ActionVoid).Blocked
-	return gross, void
+	return min(gross, src.AmountDueCents)
 }
 
 // FinishRelief runs a committed Relief's post-commit legs: issue the

@@ -84,6 +84,32 @@ Deleted:
   immediate cross-interval swap with `swap_requires_atomic_path`; the handler
   runs it through `UpdateItemTx`.
 
+### Edge cases settled in review
+
+- **Draft funding invoice.** With `pause_collection` set to keep_as_draft, a
+  cycle invoice stays a draft. A partly used draft still gets its relief
+  credit note, and Issue holds that note until the invoice is finalized, as it
+  does for an in-flight charge. If the draft is voided instead, the note is
+  voided too. Only this automated note may target a draft; an operator credit
+  note still needs an issued invoice.
+  - A draft whose tax is not yet calculated has no final total to size the
+    relief against. The change is refused with `funding_invoice_tax_pending`,
+    and the tax retry clears that state.
+- **Fully unused is a time fact.** An unpaid invoice is voided when the change
+  lands on its period start's day (zero used days) and nothing was paid. It is
+  taken out of the allocation before the rest is shared out. The old amount
+  test (`relief >= amount_due`) let the credits applied to that invoice spill
+  onto a paid invoice as balance credit, while the void also handed them back,
+  so the customer got them twice.
+- **Scheduled cancels** treat only the fire's own race outcomes as benign
+  (`scheduled_cancel_superseded`). A relief refusal is surfaced, so the scan
+  retries it; before, it was skipped as a race at INFO level.
+- **Credit-note Issue** picks its branch from a read taken before its
+  transaction. The amount-due reduction now applies only to a finalized,
+  unpaid invoice, and otherwise refuses with `invoice_not_open_receivable`.
+  So a payment landing in between sends the note back to the reconciler,
+  which re-applies it against the paid invoice as a balance credit.
+
 ## Why this design
 
 The principle: a money effect that must happen because of a state change is

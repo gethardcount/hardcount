@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
 // ADR-097 regressions for FireDueScheduledCancel — the executor the billing
@@ -147,4 +148,25 @@ func TestFireDueScheduledCancel_BenignRaces(t *testing.T) {
 			t.Error("the CAS guarantees exactly one biller — the loser must not bill")
 		}
 	})
+}
+
+// A relief refusal is an InvalidState too, but not a race: it must surface
+// (the scan reports it and retries) and the flip must roll back. It used to be
+// swallowed as a "benign race" — the subscription stayed active past its
+// cancel_at with nothing but an INFO line.
+func TestFireDueScheduledCancel_ReliefRefusalSurfaces(t *testing.T) {
+	store := newMemStore()
+	cancelAt := time.Date(2027, 8, 16, 0, 0, 0, 0, time.UTC)
+	dueCancelSub(t, store, cancelAt)
+
+	biller := &fakeBiller{draftTxErr: errs.InvalidState("invoice changed while it was being voided; retry").WithCode("invoice_changed")}
+	svc := NewService(store, nil)
+	svc.SetBiller(biller)
+
+	if err := svc.FireDueScheduledCancel(context.Background(), "t1", "sub_due", cancelAt); err == nil {
+		t.Fatal("a relief refusal must surface, not be skipped as a benign race")
+	}
+	if got := store.subs["sub_due"]; got.Status != domain.SubscriptionActive || got.CancelAt == nil {
+		t.Errorf("flip must roll back on a relief refusal: status %q cancel_at %v", got.Status, got.CancelAt)
+	}
 }
