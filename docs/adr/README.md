@@ -156,6 +156,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [114](114-leader-leases-tick-scoped-fencing.md) | 2026-08-30 | Accepted | Platform & ops | Leader election is a database row per role, with a fencing token checked by every claim |
 | [115](115-one-closer-for-the-billing-period.md) | 2026-08-30 | Accepted | Billing | Every period write locks the subscription and rechecks its period snapshot first |
 | [116](116-collection-intent-at-finalize-one-collector.md) | 2026-10-08 | Accepted | Payments | Finalize queues the invoice in its own write; one collector charges it, and a nudge runs it right away |
+| [117](117-one-payment-intent-per-invoice-deferred.md) | 2026-10-11 | Proposed | Payments | One PaymentIntent per invoice (Stripe Billing's model) considered and deferred: per-attempt PaymentIntents stay, with triggers to reopen |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.
