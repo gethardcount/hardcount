@@ -158,3 +158,54 @@ clean retry), `TestScanThresholds_ResetAdvanceFailure_IsLoud`,
 `TestBillOnePeriod_ZeroTotal_AutoPaid`, both heal tests. The multi-fire
 base-identity test (N prorated fires + close == exactly one base) needs
 simulated time across re-anchors — lands with P1c's clock-driven suite.
+
+## Amendment 2026-10-11: tiers continue across the fire (P21)
+
+Under `reset=false` the fire bills `[periodStart, T)` and the close bills
+`[T, periodEnd)`. Each side rated its slice from tier 0, so a graduated or
+package rule restarted its ladder at the fire and the period overbilled. For
+example, a ladder of 1,000 units at 10¢ then 2¢, with 700 units before the
+fire and 600 after, billed $70 + $60. Pricing the whole period gives $70 +
+$36. Stripe, OpenMeter (#4298 fixed the same bug), Lago and Kill Bill all keep
+one ladder across a mid-period threshold invoice. Cycle resets
+(`reset=true`) still restart tiers, as they restart the cycle.
+
+**Decision: marginal pricing per additive bucket, seeded from the fire.**
+The closers (cycle close and immediate cancel, multi-dim and single-rule)
+keep one ladder per bucket. The seed is the fire's usage line for the same
+(meter, resolved rating rule version): its quantity and its billed amount.
+Each later slice bills `max(0, F(quantity so far + q) − amount billed so
+far)`.
+
+- **Exact for flat and graduated.** The fire and the close sum to F(total).
+- **Package pricing can be non-monotone.** Nothing checks
+  `overage × size ≤ package price`, so a larger quantity can cost less. A
+  slice is then clamped at 0, and the period bills max(F(fire), F(total)).
+  Tracking the billed amount, not just quantity, lets a later slice in the
+  same close recover the difference.
+- **The key is the resolved version.** The close resolves the rule
+  (`resolveRatedRule` at period start, as the fire does) and looks the seed
+  up by the resolved id. A version published before the period opens leaves
+  the binding on the old id while both invoices carry the new one, so a key
+  on the binding would silently restart tiers.
+- **Ambiguous configs fail loudly.** Lines carry no pricing-rule id. So the
+  seed lookup is ambiguous when two buckets of one meter resolve to the same
+  version. That happens with the meter's default binding plus a pricing rule
+  pinned to it, or with two pricing rules pinned to versions of one rule
+  key. When that happens
+  and the fire billed that version, the close returns an error naming the
+  meter and version, and retries each tick. The check reads the
+  configuration, not which buckets happen to have usage, because a bucket
+  with no post-fire usage would otherwise hand its seed to another.
+- **Non-additive buckets are unchanged.** Under `reset=false` the fire drops
+  them (§4). Under `reset=true` the fire is outside the closer's window.
+- **No fire, no change.** Disjoint windows of one meter in a cycle (an item
+  removed and re-added) still rate each window from tier 0. Velox models the
+  re-add as a separate item, and Stripe gives each item its own ladder.
+  Changing that is a separate decision.
+
+**Out of scope (registered):**
+- Usage caps with thresholds: the fire is uncapped while the close is
+  cap-scaled over the whole period.
+- An authoring guard against the ambiguous configs.
+- Package monotonicity validation.

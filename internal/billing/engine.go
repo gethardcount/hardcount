@@ -2858,6 +2858,9 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 		iv              usageInterval
 		nonAdditiveOnly bool
 	}
+	// One tier ladder per usage bucket for the whole close, continuing from
+	// what a threshold fire already billed (P21, ADR-066 amendment).
+	ladder := newUsageLadder(wm)
 	for meterID := range meterIDSet {
 		meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 		if err != nil {
@@ -2880,6 +2883,9 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 		rulesByID := make(map[string]domain.MeterPricingRule, len(pricingRules))
 		for _, r := range pricingRules {
 			rulesByID[r.ID] = r
+		}
+		if err := e.checkLadderSeeds(ctx, sub, meterID, pricingRules, periodStart, wm); err != nil {
+			return nil, 0, nil, err
 		}
 
 		windows := make([]meterWindow, 0, 4)
@@ -2951,7 +2957,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 					if err != nil {
 						return nil, 0, nil, fmt.Errorf("resolve pricing for meter %s rule %s: %w", meterID, ratingRuleID, err)
 					}
-					amount, err := domain.ComputeAmountCents(rule, qty)
+					amount, err := ladder.price(rule, meterID, meterID+"|"+agg.RuleID, agg.AggregationMode, qty)
 					if err != nil {
 						return nil, 0, nil, fmt.Errorf("compute amount for meter %s rule %s: %w", meterID, ratingRuleID, err)
 					}
@@ -3025,7 +3031,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 			if err != nil {
 				return nil, 0, nil, fmt.Errorf("resolve pricing for meter %s: %w", meterID, err)
 			}
-			amount, err := domain.ComputeAmountCents(rule, quantity)
+			amount, err := ladder.price(rule, meterID, meterID+"|", mapMeterAggregation(meter.Aggregation), quantity)
 			if err != nil {
 				return nil, 0, nil, fmt.Errorf("compute amount for meter %s: %w", meterID, err)
 			}
@@ -4078,6 +4084,8 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		iv              usageInterval
 		nonAdditiveOnly bool
 	}
+	// Same per-bucket tier ladder as the cycle close (P21, ADR-066 amendment).
+	ladder := newUsageLadder(wm)
 	for meterID := range cancelMeterIDSet {
 		// Does this meter price via dimension-match pricing rules (the
 		// multi-dim shape: e.g. the AI `tokens` meter, one rule per
@@ -4091,6 +4099,9 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		pricingRules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, sub.TenantID, meterID)
 		if err != nil {
 			return nil, 0, fmt.Errorf("list pricing rules for meter %s on cancel: %w", meterID, err)
+		}
+		if err := e.checkLadderSeeds(ctx, sub, meterID, pricingRules, periodStart, wm); err != nil {
+			return nil, 0, err
 		}
 
 		windows := make([]meterWindow, 0, 4)
@@ -4154,7 +4165,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 					if err != nil {
 						return nil, 0, fmt.Errorf("resolve pricing for meter %s rule %s on cancel: %w", meterID, ratingRuleID, err)
 					}
-					amount, err := domain.ComputeAmountCents(rule, qty)
+					amount, err := ladder.price(rule, meterID, meterID+"|"+agg.RuleID, agg.AggregationMode, qty)
 					if err != nil {
 						return nil, 0, fmt.Errorf("compute amount for meter %s rule %s on cancel: %w", meterID, ratingRuleID, err)
 					}
@@ -4231,7 +4242,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 			if err != nil {
 				return nil, 0, fmt.Errorf("resolve pricing for meter %s on cancel: %w", meterID, err)
 			}
-			amount, err := domain.ComputeAmountCents(rule, quantity)
+			amount, err := ladder.price(rule, meterID, meterID+"|", mapMeterAggregation(meter.Aggregation), quantity)
 			if err != nil {
 				return nil, 0, fmt.Errorf("compute amount for meter %s on cancel: %w", meterID, err)
 			}

@@ -59,6 +59,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **A usage threshold no longer restarts graduated or package tiers for the rest of the period (2026-10-11).** After a mid-period threshold invoice (`reset_billing_cycle: false`), the period-end or cancel invoice priced the remaining usage from the first tier again, so tiered usage was overbilled. It now continues the tiers from what the threshold invoice billed. A pricing setup the close cannot split unambiguously now fails that close with a clear error rather than guessing. [ADR-066](docs/adr/066-threshold-money-semantics.md#amendment-2026-10-11-tiers-continue-across-the-fire-p21)
+
 - **A paid invoice's page no longer shows "Invoice amount $0.00" (2026-10-11).** The hosted invoice page now leads with **Amount paid**, and its totals end **Amount due $0.00**. The payment-update page uses the same label.
 
 - **The dashboard says when the customer's payment page is holding collection (2026-10-11).** While a customer has the Pay page open, Velox won't charge or retry (ADR-068). The invoice banner now says so and drops its Retry button, which would be refused, and the next dunning retry reads as held.
