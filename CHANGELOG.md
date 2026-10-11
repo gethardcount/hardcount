@@ -70,7 +70,7 @@ Older entries keep their original text.
   - **Pricing:** a plan whose meter list can't be decoded is an error. Before, it read as a plan with no meters, so its usage billed at $0.
   - **Credit notes:**
     - The in-flight-payment check fails on a read error.
-    - A refund whose result was never recorded now appears under "refunds needing attention", with a "refund not confirmed" badge and **Retry refund**.
+    - A refund whose result was never recorded now appears under "refunds needing attention", with a "not confirmed" badge and **Retry refund**.
   - **Invoices:** the tax reversal fails, and retries later, if the credited total can't be read. A manual invoice is not created on a failed customer read. A tax retry does not auto-finalize when the pause state can't be read.
   - **Stripe Tax:** invoices with more lines than Stripe's first page get every line's tax (the remaining pages are fetched). A calculation where any line comes back unmapped is an error.
 

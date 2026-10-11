@@ -480,7 +480,7 @@ export default function CreditNotesPage() {
                             <Badge variant={statusBadgeVariant(note.status)}>{note.status}</Badge>
                             {isRefund && refundUnconfirmed(note) && (
                               <Badge variant="danger" title="The refund's result was never recorded. Retry checks Stripe before creating a new refund.">
-                                refund not confirmed
+                                not confirmed
                               </Badge>
                             )}
                             {isRefund && note.status === 'issued' && note.refund_status && note.refund_status !== 'none' && (
