@@ -465,8 +465,14 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 
 	case "canceled", "requires_payment_method":
 		// The PI purpose travels with the report, as on the webhook: it
-		// decides the customer email (failureEmailSuppressed).
-		return r.settle(ctx, inv, res.ID, 0, res.Purpose, "reconciled: "+res.Status, terminalFailed, res.Status)
+		// decides the customer email (failureEmailSuppressed). The anchor does
+		// too, as on the succeeded branch: a decline starts dunning, whose
+		// first retry counts from the instant the charge fired.
+		settleCtx := ctx
+		if !res.AnchorAt.IsZero() {
+			settleCtx = withSettleAnchor(ctx, res.AnchorAt)
+		}
+		return r.settle(settleCtx, inv, res.ID, 0, res.Purpose, "reconciled: "+res.Status, terminalFailed, res.Status)
 
 	case "processing", "requires_action", "requires_confirmation", "requires_capture":
 		// Not terminal, so nothing settles here — but RECORD WHAT WE OBSERVED

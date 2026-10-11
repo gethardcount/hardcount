@@ -301,16 +301,18 @@ func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, pay
 //     a first retry already in the past and be retried with no grace at all
 //     (found walking FLOW I10, 2026-10-11: an Oct-11 decline anchored on its
 //     Oct-1 period start was retried at once instead of on Oct 14).
-//   - A clock-pinned invoice: its issuedAt, when that is earlier than the
-//     clock's now. A test-clock Advance runs the charge at advance-end
-//     frozen_time, but the charge belongs at the invoice's issue instant
-//     (a cycle invoice is issued at its cycle close), so the retries fall
+//   - A clock-pinned invoice: simFailedAt, when that is earlier than the
+//     clock's now. A test-clock Advance does its work at advance-end
+//     frozen_time, but a charge belongs at the simulated instant it fired —
+//     a cycle invoice's charge at its cycle close, a charge after a card
+//     attached on a later Advance at that Advance — so the retries fall
 //     inside the window the operator advanced through, as Stripe test clocks
-//     do. Known limit: a simulated invoice first charged on a LATER Advance
-//     still counts from its issue instant.
+//     do.
 //
-// issuedAt is the invoice's issued_at (zero when unknown); it is read only
-// for a clock-pinned invoice.
+// simFailedAt is that simulated instant, chosen by the caller: the failed
+// charge's contracted anchor (payment.dunningSimFailedAt), or the issue
+// instant when no charge carried one (the card-less path). Zero when unknown;
+// read only for a clock-pinned invoice.
 //
 // cause is WHY collection needs a run — declared by the caller at write
 // time (decline paths pass payment_failed; the card-less enrollment
@@ -319,7 +321,7 @@ func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, pay
 // so card-less invoices carried a payment-failure they never had; the
 // timeline hid the lie by rendering a generic row. An unknown cause is
 // refused loudly.
-func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, issuedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
+func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
 	if !cause.Valid() {
 		return domain.InvoiceDunningRun{}, errs.Invalid("cause", fmt.Sprintf("unknown dunning start cause %q", cause))
 	}
@@ -370,8 +372,8 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
 	failureAt := s.clock.Now(ctx)
-	if _, simulated := clock.SimOf(ctx); simulated && !issuedAt.IsZero() && issuedAt.Before(failureAt) {
-		failureAt = issuedAt
+	if _, simulated := clock.SimOf(ctx); simulated && !simFailedAt.IsZero() && simFailedAt.Before(failureAt) {
+		failureAt = simFailedAt
 	}
 	t := failureAt.Add(firstRetryDelay)
 	nextActionAt := &t

@@ -410,9 +410,9 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 			"invoice_id", fresh.ID, "status", fresh.Status)
 		return fresh, res, nil
 	}
-	// StartDunning anchors the first retry on now for a wall-clock invoice and
-	// on the issue instant for a clock-pinned one; it reads issued_at only for
-	// the latter.
+	// StartDunning anchors the first retry on now for a wall-clock invoice and,
+	// for a clock-pinned one, on the simulated instant this charge fired
+	// (dunningSimFailedAt).
 	//
 	// Post-commit and best-effort, NOT folded into the fail-tx: that would hold
 	// the invoice FOR UPDATE across StartDunning's ~600ms retry sleep plus a
@@ -421,7 +421,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// with no run; the next report of this PaymentIntent re-drives it (see
 	// above), and for wall-clock invoices the dunning_backfill reconciler
 	// (billing.Engine.EnrollFailedWithoutDunning) does too.
-	if started, err := startDunningWithRetry(ctx, s.dunning, tenantID, fresh.ID, fresh.CustomerID, fresh.IssuedAtOrZero(), domain.DunningCausePaymentFailed); err != nil {
+	if started, err := startDunningWithRetry(ctx, s.dunning, tenantID, fresh.ID, fresh.CustomerID, dunningSimFailedAt(ctx, fresh), domain.DunningCausePaymentFailed); err != nil {
 		slog.Error("payment failure StartDunning failed after retries — the next report of this payment intent retries it, and for a wall-clock invoice the dunning backfill sweep does on a later scheduler tick",
 			"invoice_id", fresh.ID, "customer_id", fresh.CustomerID, "error", err)
 	} else if started {
@@ -553,10 +553,12 @@ func (s *Stripe) expireCheckoutSessionsBestEffort(ctx context.Context, tenantID 
 }
 
 // settleAnchorKey carries the charge's contracted instant from the charge
-// site (inline) or the webhook's PI metadata into SettleSucceeded, which
-// rebinds ctx internally (bindForInvoice resolves the clock's CURRENT
-// frozen_time and would otherwise win). Package-private: the anchor is a
-// payment-internal contract between the charge and its settle.
+// site (inline) or the PI metadata (webhook, reconciler) into SettleSucceeded
+// (paid_at) and SettleFailed (dunning's first retry, dunningSimFailedAt). Both
+// rebind ctx to the invoice's clock, which resolves its CURRENT frozen_time —
+// the advance target, not the instant the charge fired — so the anchor has to
+// travel separately. Package-private: the anchor is a payment-internal
+// contract between the charge and its settle.
 type settleAnchorKeyType struct{}
 
 var settleAnchorKey = settleAnchorKeyType{}
@@ -570,15 +572,32 @@ func settleAnchorFrom(ctx context.Context) (time.Time, bool) {
 	return t, ok && !t.IsZero()
 }
 
+// dunningSimFailedAt is the simulated instant a failed charge fired at, which
+// StartDunning reads for a clock-pinned invoice's first retry: the charge's
+// contracted anchor when the report carries it (the inline decline, the
+// webhook's and the reconciler's PI metadata), else the issue instant. The
+// anchor matters when a charge fires on a later Advance than the issue — a
+// card attached after the invoice — where counting from the issue instant
+// would put the first retry in the past and run it at once.
+func dunningSimFailedAt(ctx context.Context, inv domain.Invoice) time.Time {
+	if a, ok := settleAnchorFrom(ctx); ok {
+		return a
+	}
+	return inv.IssuedAtOrZero()
+}
+
 // anchorFromEventPayload extracts data.object.metadata.velox_anchor_at from
-// a parsed Stripe webhook event. Returns false on absence or parse failure —
-// the settle then falls back to the invoice-pin binding (the pre-anchor
-// behavior), never errors: a malformed anchor must not block a settlement.
+// a Stripe webhook event. Returns false on absence or parse failure — the
+// settle then falls back to the invoice-pin binding (paid_at) or the issue
+// instant (dunning), never errors: a malformed anchor must not block a
+// settlement.
+//
+// It reads the event body from Payload["raw"], the only shape the webhook
+// handler builds (handler.go). It used to read a parsed Payload["data"] that
+// no production event carries, so the webhook never recovered the anchor;
+// its test built that shape by hand (found 2026-10-11).
 func anchorFromEventPayload(event domain.StripeWebhookEvent) (time.Time, bool) {
-	data, _ := event.Payload["data"].(map[string]any)
-	obj, _ := data["object"].(map[string]any)
-	meta, _ := obj["metadata"].(map[string]any)
-	raw, _ := meta["velox_anchor_at"].(string)
+	raw := piMetadataFromPayload(event.Payload)["velox_anchor_at"]
 	if raw == "" {
 		return time.Time{}, false
 	}

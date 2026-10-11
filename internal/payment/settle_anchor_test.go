@@ -2,6 +2,7 @@ package payment
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -64,20 +65,28 @@ func TestChargeInvoice_WallCtx_NoAnchor(t *testing.T) {
 	}
 }
 
+// rawPIEventPayload is a webhook event's Payload in the one shape the handler
+// builds (handler.go): the Stripe body as a JSON string under "raw".
+func rawPIEventPayload(meta map[string]string) map[string]any {
+	body, _ := json.Marshal(map[string]any{
+		"id": "evt_test", "type": "payment_intent.payment_failed",
+		"data": map[string]any{"object": map[string]any{"id": "pi_test", "object": "payment_intent", "metadata": meta}},
+	})
+	return map[string]any{"raw": string(body)}
+}
+
 func TestAnchorFromEventPayload(t *testing.T) {
 	contracted := time.Date(2027, 3, 7, 18, 30, 0, 0, time.UTC)
-	mk := func(meta map[string]any) domain.StripeWebhookEvent {
-		return domain.StripeWebhookEvent{Payload: map[string]any{
-			"data": map[string]any{"object": map[string]any{"metadata": meta}},
-		}}
+	mk := func(meta map[string]string) domain.StripeWebhookEvent {
+		return domain.StripeWebhookEvent{Payload: rawPIEventPayload(meta)}
 	}
-	if got, ok := anchorFromEventPayload(mk(map[string]any{"velox_anchor_at": contracted.Format(time.RFC3339Nano)})); !ok || !got.Equal(contracted) {
+	if got, ok := anchorFromEventPayload(mk(map[string]string{"velox_anchor_at": contracted.Format(time.RFC3339Nano)})); !ok || !got.Equal(contracted) {
 		t.Errorf("present anchor: got %v ok=%v", got, ok)
 	}
-	if _, ok := anchorFromEventPayload(mk(map[string]any{})); ok {
+	if _, ok := anchorFromEventPayload(mk(map[string]string{})); ok {
 		t.Error("absent anchor must report false")
 	}
-	if _, ok := anchorFromEventPayload(mk(map[string]any{"velox_anchor_at": "not-a-time"})); ok {
+	if _, ok := anchorFromEventPayload(mk(map[string]string{"velox_anchor_at": "not-a-time"})); ok {
 		t.Error("malformed anchor must report false (fallback, never block a settlement)")
 	}
 	if _, ok := anchorFromEventPayload(domain.StripeWebhookEvent{Payload: map[string]any{}}); ok {
@@ -110,6 +119,10 @@ type anchorCapturingSettler struct {
 	anchor    time.Time
 	hadAnchor bool
 	calls     int
+
+	failAnchor    time.Time
+	failHadAnchor bool
+	failCalls     int
 }
 
 func (a *anchorCapturingSettler) SettleSucceeded(ctx context.Context, _ string, _ domain.Invoice, _ string, _ int64, _ SettlementSource) error {
@@ -118,7 +131,9 @@ func (a *anchorCapturingSettler) SettleSucceeded(ctx context.Context, _ string, 
 	return nil
 }
 
-func (a *anchorCapturingSettler) SettleFailed(context.Context, string, domain.Invoice, PaymentFailure, SettlementSource) error {
+func (a *anchorCapturingSettler) SettleFailed(ctx context.Context, _ string, _ domain.Invoice, _ PaymentFailure, _ SettlementSource) error {
+	a.failCalls++
+	a.failAnchor, a.failHadAnchor = settleAnchorFrom(ctx)
 	return nil
 }
 

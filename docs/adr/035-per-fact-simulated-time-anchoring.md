@@ -260,11 +260,10 @@ backfill sweep).
 `issued_at`:
 
 - **Wall-clock invoice:** now, the moment the failure is recorded.
-- **Clock-pinned invoice:** `issued_at`, when it is earlier than the
-  clock's now. A cycle invoice is issued at its cycle close
-  (`billOnePeriod` sets it from `sub.NextBillingAt`), so cycle invoices
-  anchor where they did before, and section 2's single-click walk is
-  unchanged.
+- **Clock-pinned invoice:** the simulated instant the failed charge
+  fired, when it is earlier than the clock's now. See the follow-up below.
+  A cycle invoice charged at its cycle close anchors where it did before,
+  so section 2's single-click walk is unchanged.
 
 "Clock-pinned" is read from the ctx after `StartDunning` binds the
 invoice's time domain (`clock.SimOf`). Inside an Advance the catchup
@@ -283,17 +282,44 @@ every run read as simulated and the clamp never ran. VLX-000081 retried
 on `clock.SimOf` (a test clock is bound), the same test `StartDunning` uses.
 The unit test for the clamp wired no resolver, so it could not see this.
 
-**Accepted residual:** a simulated invoice first charged on a later
-Advance (a card attached after issue) still counts from its issue instant,
-so its first retry runs on that Advance. It is test-clock only.
+**Follow-up the same day: count from the charge, not the issue.** This
+amendment first anchored a clock-pinned invoice on `issued_at`. That is
+wrong when the charge fires on a later Advance than the issue. A paused
+subscription's cycle invoice is a draft issued at the cycle close and
+charged when finalized later; a tax-pending draft is charged after its
+retry succeeds. Counting from the issue put the first retry in the past.
+Each later retry chains off the last in simulated time, so one dunning
+phase ran the whole campaign to its end. A card-less invoice is not
+affected: it gets a `no_payment_method` run at issue, and a later decline
+reuses that run.
+
+Every simulated charge already records its instant in the PI's
+`velox_anchor_at` metadata (section 1's paid_at anchor).
+`payment.dunningSimFailedAt` hands that to `StartDunning`, falling back to
+`issued_at` when no charge carried one (the card-less path, an old PI). All
+three decline reports now carry it: the charge response, the webhook and
+the reconciler.
+
+The webhook had never carried it, for payments either. The handler keeps
+the event body as a string under `Payload["raw"]`, and
+`anchorFromEventPayload` read a parsed `Payload["data"]` that no production
+event has. A test-clock invoice paid by webhook was dated at the clock's
+current frozen_time, not the charge instant. Its test built the parsed
+shape by hand. It now parses `raw`, and the tests go through a signed body
+on the real handler.
 
 **Test locks:** `TestStartDunning_FirstRetryAnchor`,
 `TestCollector_FirstRetryCountsFromTheFailure_RealStore` and
 `TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore`,
 `TestProcessDueRuns_WallClockCadenceAfterDowntime` (now also with a
 production-shaped resolver) and
-`TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore`. Each is
-mutation-verified against the code it replaced.
+`TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore`, the
+`TestDecline_*` set (one per decline report, two through a signed webhook),
+`TestSucceeded_SignedWebhook_PaidAtIsThePIAnchor` and
+`TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore`.
+Each is mutation-verified against the code it replaced. The last one, run
+with the issue instant, shows the old failure: retry 1 at May 4 and the run
+escalated within one Advance.
 
 ## References
 

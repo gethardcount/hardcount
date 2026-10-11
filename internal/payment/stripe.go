@@ -28,7 +28,7 @@ import (
 // If we ever support another provider, we'll refactor — not speculate now.
 // DunningStarter starts dunning for failed payments.
 type DunningStarter interface {
-	StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, issuedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
+	StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
 }
 
 // DunningResolver closes an active dunning run when a card payment settles —
@@ -707,7 +707,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 			// and never on an invoice voided, written off or paid during the
 			// call.
 			seq := inv.ChargeAttemptSeq
-			current, res, serr := s.settleDeclineWithRetry(ctx, tenantID, inv, PaymentFailure{
+			current, res, serr := s.settleDeclineWithRetry(withChargeAnchor(ctx), tenantID, inv, PaymentFailure{
 				PaymentIntentID: pe.PaymentIntentID,
 				Message:         pe.Message,
 				Purpose:         purpose,
@@ -728,7 +728,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				logRefusedChargeOutcome(ctx, current, domain.PaymentFailed, pe.PaymentIntentID, idempotencyKey)
 			}
 		} else {
-			s.stampUnreportableOutcome(ctx, tenantID, inv, pe, status, idempotencyKey)
+			s.stampUnreportableOutcome(withChargeAnchor(ctx), tenantID, inv, pe, status, idempotencyKey)
 		}
 		// Count unknown outcomes as failed for the success-rate alert — a
 		// Stripe outage genuinely impairs customer charging and should page,
@@ -785,13 +785,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// authentication_required DECLINE (a card error → definite failure), it
 	// does not park a PI here — the phrase was retracted 2026-07-31.
 	if result.Status == "succeeded" {
-		settleCtx := ctx
-		if sim, ok := clock.SimOf(ctx); ok {
-			// Same anchor the PI metadata carries — the inline path can
-			// hand it over directly instead of round-tripping via Stripe.
-			settleCtx = withSettleAnchor(ctx, sim.At)
-		}
-		if serr := s.SettleSucceeded(settleCtx, tenantID, inv, result.ID, inv.AmountDueCents, SourceChargeResponse); serr != nil {
+		if serr := s.SettleSucceeded(withChargeAnchor(ctx), tenantID, inv, result.ID, inv.AmountDueCents, SourceChargeResponse); serr != nil {
 			return domain.Invoice{}, fmt.Errorf("settle succeeded inline: %w", serr)
 		}
 		// Definitive outcome — the settle's status flips already make the
@@ -895,7 +889,7 @@ const purposePaymentUpdateToken = "payment_update_token"
 //
 // 2026-05-30 design-debt audit (Tier 1 #5) replaced two log-and-swallow
 // sites here and at the inline charge-failure path with this retry.
-func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID, invoiceID, customerID string, issuedAt time.Time, cause domain.DunningStartCause) (started bool, err error) {
+func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (started bool, err error) {
 	delays := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond}
 	var lastErr error
 	for i, d := range delays {
@@ -906,7 +900,7 @@ func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID
 				return false, fmt.Errorf("ctx canceled during StartDunning retry (attempt %d): %w", i+1, ctx.Err())
 			}
 		}
-		if _, err := dunning.StartDunning(ctx, tenantID, invoiceID, customerID, issuedAt, cause); err != nil {
+		if _, err := dunning.StartDunning(ctx, tenantID, invoiceID, customerID, simFailedAt, cause); err != nil {
 			if errors.Is(err, errs.ErrInvalidState) {
 				// Dunning disabled or not-configured (no policy) is a DELIBERATE
 				// skip, not a transient failure — return success immediately rather
@@ -996,10 +990,21 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 			"invoice_id", inv.ID, "status", current.Status)
 		return
 	}
-	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCausePaymentFailed); derr != nil {
+	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, dunningSimFailedAt(ctx, inv), domain.DunningCausePaymentFailed); derr != nil {
 		slog.Error("inline StartDunning after a failed charge failed — for a wall-clock invoice the dunning backfill sweep starts the run on a later scheduler tick",
 			"invoice_id", inv.ID, "customer_id", inv.CustomerID, "error", derr)
 	}
+}
+
+// withChargeAnchor hands a simulated charge's contracted instant to its inline
+// settle — the same value the PI's velox_anchor_at metadata carries for the
+// webhook and the reconciler, passed directly instead of round-tripping via
+// Stripe. A wall-clock charge carries none.
+func withChargeAnchor(ctx context.Context) context.Context {
+	if sim, ok := clock.SimOf(ctx); ok {
+		return withSettleAnchor(ctx, sim.At)
+	}
+	return ctx
 }
 
 // settleDeclineWithRetry reports the charge call's own decline through
@@ -1450,7 +1455,11 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	// invoice is waiting on) and fires payment.failed, the customer email and
 	// dunning once per PaymentIntent. The purpose decides the email (a dunning
 	// retry sent its own) and marks a hosted Checkout attempt, which never
-	// moves the invoice.
+	// moves the invoice. The charge's anchor rides along for dunning's first
+	// retry, as it does into SettleSucceeded for paid_at.
+	if a, ok := anchorFromEventPayload(event); ok {
+		ctx = withSettleAnchor(ctx, a)
+	}
 	return s.SettleFailed(ctx, tenantID, inv, PaymentFailure{
 		PaymentIntentID: event.PaymentIntentID,
 		Message:         event.FailureMessage,
@@ -1464,13 +1473,15 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 // the parse narrow to just the field we need so unrelated schema
 // drift doesn't break extraction.
 func piPurposeFromPayload(payload map[string]any) string {
-	raw, ok := payload["raw"]
+	return piMetadataFromPayload(payload)["velox_purpose"]
+}
+
+// piMetadataFromPayload parses data.object.metadata out of the event body in
+// payload["raw"]; nil when absent or unparseable.
+func piMetadataFromPayload(payload map[string]any) map[string]string {
+	rawStr, ok := payload["raw"].(string)
 	if !ok {
-		return ""
-	}
-	rawStr, ok := raw.(string)
-	if !ok {
-		return ""
+		return nil
 	}
 	var parsed struct {
 		Data struct {
@@ -1480,9 +1491,9 @@ func piPurposeFromPayload(payload map[string]any) string {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(rawStr), &parsed); err != nil {
-		return ""
+		return nil
 	}
-	return parsed.Data.Object.Metadata["velox_purpose"]
+	return parsed.Data.Object.Metadata
 }
 
 func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, event domain.StripeWebhookEvent) error {

@@ -320,7 +320,7 @@ type NoPaymentMethodNotifier interface {
 // card-less invoices out of dunning forever. Wire in router.go via
 // SetDunningStarter.
 type DunningStarter interface {
-	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, issuedAt time.Time, cause domain.DunningStartCause) error
+	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) error
 }
 
 // DunningResolver resolves an active dunning run when an invoice settles via a
