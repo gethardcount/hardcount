@@ -1230,7 +1230,7 @@ type fakeCreditNoteTotaler struct {
 	unrelieved int64
 }
 
-func (f *fakeCreditNoteTotaler) CreditedCents(_ context.Context, _, _ string) (int64, error) {
+func (f *fakeCreditNoteTotaler) IssuedCreditedCents(_ context.Context, _, _ string) (int64, error) {
 	return f.credited, nil
 }
 

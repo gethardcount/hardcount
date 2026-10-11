@@ -271,3 +271,38 @@ func TestExhaust_NoActionPolicyReadErrorRetries(t *testing.T) {
 		t.Errorf("run = %s/%s, want active with no action_failed label", got.State, got.Resolution)
 	}
 }
+
+// The dunning cancel can void the dunned invoice in its own transaction (an
+// invoice whose period was wholly unused, ADR-118). The write-off then has
+// nothing to act on: the run resolves as invoice_voided right away instead of
+// failing MarkUncollectible on a voided invoice and resolving only on the
+// 24h re-attempt.
+func TestExhaust_CancelVoidedTheInvoice_ResolvesWithoutWriteOff(t *testing.T) {
+	store := newMemStore()
+	twoAxisPolicy(store, domain.SubActionCancel, domain.InvActionMarkUncollectible)
+	svc := NewService(store, &noopRetrier{}, nil)
+	voided := unpaidInv()
+	voided.Status = domain.InvoiceVoided
+	svc.SetSubscriptionPauser(&recordingPauser{}, &seqInvGet{steps: []stubInvGet{
+		{inv: unpaidInv()}, // tick-start pre-check
+		{inv: unpaidInv()}, // the late re-check
+		{inv: voided},      // after the cancel
+	}})
+	canceler := &recordingSubCanceler{}
+	svc.SetSubscriptionCanceler(canceler)
+	uncollect := &capturingUncollect{}
+	svc.SetInvoiceUncollectibleMarker(uncollect)
+
+	run := exhaustedRun(t, store, svc)
+	svc.ProcessDueRuns(context.Background(), "t1", 20)
+
+	if canceler.calls != 1 {
+		t.Fatalf("cancel calls = %d, want 1", canceler.calls)
+	}
+	if len(uncollect.calls) != 0 {
+		t.Errorf("write-off attempted on a voided invoice: %v", uncollect.calls)
+	}
+	if got := store.runs[run.ID]; got.State != domain.DunningResolved || got.Resolution != domain.ResolutionInvoiceVoided {
+		t.Errorf("run = %s/%s, want resolved/invoice_voided", got.State, got.Resolution)
+	}
+}

@@ -57,15 +57,17 @@ type TaxReverser interface {
 	ReverseTax(ctx context.Context, tenantID string, req tax.ReversalRequest) (*tax.ReversalResult, error)
 }
 
-// CreditNoteTotaler reports the sum of non-voided credit-note totals already
-// issued against an invoice. OPTIONAL — when wired, reverseInvoiceTax reverses
-// exactly the un-credit-noted gross (total − credited) on void/uncollectible,
+// CreditNoteTotaler reports the sum of ISSUED credit-note totals against an
+// invoice — the credit notes that reversed (or will reverse, under their own
+// reference) their slice of its tax. OPTIONAL — when wired, reverseInvoiceTax
+// reverses exactly the gross no credit note covers (total − issued) on a void,
 // which is correct even when customer credit was applied to the invoice
-// (applied credit reduces amount_due without reversing tax). Unwired (narrow
-// tests) → falls back to the amount_paid+amount_due proxy. Satisfied by
-// *creditnote.Service.CreditedCents.
+// (applied credit reduces amount_due without reversing tax). A DRAFT credit
+// note is not counted: it has reversed nothing, and once its invoice is voided
+// it is voided too without ever issuing. Unwired (narrow tests) → falls back to
+// the amount_paid+amount_due proxy. Satisfied by *creditnote.Service.
 type CreditNoteTotaler interface {
-	CreditedCents(ctx context.Context, tenantID, invoiceID string) (int64, error)
+	IssuedCreditedCents(ctx context.Context, tenantID, invoiceID string) (int64, error)
 	// UnreliefedClawbackCents sums clawback relief this invoice was owed but
 	// never received (issue_pending drafts that were voided before issuing).
 	// Non-zero means amount_due is stale-HIGH — bad-debt recovery refuses,
@@ -1176,7 +1178,7 @@ func (s *Service) reverseInvoiceTax(ctx context.Context, tenantID string, inv do
 	if inv.TotalAmountCents > 0 {
 		remainingGross := inv.AmountPaidCents + inv.AmountDueCents
 		if s.creditNotes != nil {
-			creditNoted, cerr := s.creditNotes.CreditedCents(ctx, tenantID, inv.ID)
+			creditNoted, cerr := s.creditNotes.IssuedCreditedCents(ctx, tenantID, inv.ID)
 			if cerr != nil {
 				// Fail, never guess: the amount-due proxy UNDER-reverses when
 				// customer credit was applied, and the short reversal would be

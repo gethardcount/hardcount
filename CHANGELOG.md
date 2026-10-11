@@ -59,6 +59,9 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Voiding an invoice now reverses all of its tax that credit notes have not already reversed (2026-10-12).** A credit note still in draft was counted as if it had reversed its share, so a void that landed while a cancel's credit note was still pending reversed too little tax. Only issued credit notes count now.
+- **Dunning resolves a run straight away when its cancel voids the invoice (2026-10-12).** If the cancel voided the dunned invoice, the following write-off used to fail once, and the run resolved only on the retry 24 hours later. The run now resolves as voided in the same step.
+
 - **A cancel or plan change can no longer go through while the customer's refund for the unused period is lost (2026-10-12, ADR-118).** When an invoice for that period was unpaid, the relief ran after the cancel or immediate plan swap had been saved, and a failure there was only logged. Examples: an unused unpaid invoice stayed due; a paid share was never credited. Now the relief is saved in the same step as the cancel or swap: credit notes, or a void of an unpaid invoice that was not used at all. If it fails, the cancel or swap fails too, and dunning and scheduled cancels retry on their own. An operator or API caller may now see an error on a temporary problem and should retry.
 
 - **An invoice's currency is no longer guessed when the customer's billing profile cannot be read (2026-10-11).** The period close, the first invoice of a new subscription, the final invoice on cancel and the threshold invoice now stop and retry. They used to fall back to the plan's currency. A customer with no billing profile still gets the plan's currency.

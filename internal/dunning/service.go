@@ -1044,6 +1044,23 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// `inv` is the zero value when unread, whose Status is not
 	// `uncollectible`, so the skip-if-done check simply does not fire and the
 	// write-off is attempted — the pre-ADR-112 behaviour.
+	// The cancel can change the invoice: its relief is written in the cancel's
+	// transaction (ADR-118), and an invoice whose period was wholly unused is
+	// voided there. Re-read it before the write-off, so a voided invoice
+	// resolves the run now (the same end state the 24h re-attempt reached,
+	// after a failed write-off tick) instead of failing MarkUncollectible.
+	if !actionFailed && outcome.SubscriptionCanceled && invRead && policy.FinalInvoiceAction != domain.InvActionNone {
+		fresh, err := s.invoiceGet.Get(ctx, tenantID, run.InvoiceID)
+		if err != nil {
+			slog.Warn("failed to re-read invoice after the dunning cancel", "invoice_id", run.InvoiceID, "error", err)
+			actionFailed = true
+		} else if fresh.Status == domain.InvoiceVoided {
+			_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceVoided, "invoice_voided", nil)
+			return rerr
+		} else {
+			inv = fresh
+		}
+	}
 	if !actionFailed {
 		invApplied, invFailed := s.applyInvoiceAction(
 			ctx, tenantID, run.InvoiceID, policy.FinalInvoiceAction, inv)

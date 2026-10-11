@@ -1387,6 +1387,25 @@ func (s *Service) CreditedCents(ctx context.Context, tenantID, invoiceID string)
 	return total, nil
 }
 
+// IssuedCreditedCents sums the ISSUED credit notes against an invoice — the
+// ones whose tax reversal is filed under their own reference. A void reverses
+// the rest of the invoice's tax, so a still-pending draft must not be counted:
+// it reverses nothing and is voided with the invoice (the orphan guard in
+// Issue). Counting it under-reversed the tenant's output tax by its share.
+func (s *Service) IssuedCreditedCents(ctx context.Context, tenantID, invoiceID string) (int64, error) {
+	cns, err := s.store.List(ctx, ListFilter{TenantID: tenantID, InvoiceID: invoiceID})
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, cn := range cns {
+		if cn.Status == domain.CreditNoteIssued {
+			total += cn.TotalCents
+		}
+	}
+	return total, nil
+}
+
 func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {
 	cn, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {

@@ -12,7 +12,7 @@ var errBlip = errors.New("connection reset")
 
 type failingCreditNoteTotaler struct{}
 
-func (failingCreditNoteTotaler) CreditedCents(context.Context, string, string) (int64, error) {
+func (failingCreditNoteTotaler) IssuedCreditedCents(context.Context, string, string) (int64, error) {
 	return 0, errBlip
 }
 
