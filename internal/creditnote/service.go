@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"strings"
 	"time"
 
@@ -330,9 +331,19 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	// caps below use as the ceiling. The tax portion is back-solved from
 	// the invoice's tax ratio (see proportional tax block below) so a CN
 	// that refunds half the invoice also reverses half the tax.
+	// Overflow-checked: an absurd quantity × price wrapped to a negative total
+	// that slipped under the over-credit cap below.
 	var subtotal int64
-	for _, line := range input.Lines {
-		subtotal += line.Quantity * line.UnitAmountCents
+	lineAmounts := make([]int64, len(input.Lines))
+	for i, line := range input.Lines {
+		amount, err := domain.MulCents(line.Quantity, line.UnitAmountCents)
+		if err == nil {
+			subtotal, err = domain.AddCents(subtotal, amount)
+		}
+		if err != nil {
+			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("line %d: amount is too large", i+1))
+		}
+		lineAmounts[i] = amount
 	}
 
 	// Line rows are built up front and committed in the SAME transaction as
@@ -340,13 +351,13 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	// one after the header committed, so a partial failure left an orphan
 	// credit note with a non-zero total and zero lines.
 	lineRows := make([]domain.CreditNoteLineItem, 0, len(input.Lines))
-	for _, line := range input.Lines {
+	for i, line := range input.Lines {
 		lineRows = append(lineRows, domain.CreditNoteLineItem{
 			InvoiceLineItemID: line.InvoiceLineItemID,
 			Description:       line.Description,
 			Quantity:          line.Quantity,
 			UnitAmountCents:   line.UnitAmountCents,
-			AmountCents:       line.Quantity * line.UnitAmountCents,
+			AmountCents:       lineAmounts[i],
 		})
 	}
 
@@ -366,7 +377,7 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 				existingTaxReversed += cn.TaxAmountCents
 			}
 		}
-		if existingTotal+subtotal > inv.TotalAmountCents {
+		if subtotal > inv.TotalAmountCents-existingTotal { // never existingTotal+subtotal: that sum can wrap
 			remaining := inv.TotalAmountCents - existingTotal
 			if remaining <= 0 {
 				return domain.CreditNote{}, errs.InvalidState("invoice has already been fully credited")
@@ -706,11 +717,16 @@ func (s *Service) buildCreditNote(ctx context.Context, tenantID string, input Cr
 	var taxAmount, netSubtotal int64
 	netSubtotal = subtotal
 	if inv.TotalAmountCents > 0 && inv.TaxAmountCents > 0 {
-		if existingTotal+subtotal == inv.TotalAmountCents {
+		if subtotal == inv.TotalAmountCents-existingTotal {
 			// This CN exhausts the invoice — absorb the residual.
 			taxAmount = inv.TaxAmountCents - existingTaxReversed
 		} else {
-			taxAmount = inv.TaxAmountCents * subtotal / inv.TotalAmountCents
+			// tax × subtotal can exceed int64 on a large invoice; big.Int
+			// division truncates exactly as int64 "/" did, without the wrap.
+			taxAmount = new(big.Int).Quo(
+				new(big.Int).Mul(big.NewInt(inv.TaxAmountCents), big.NewInt(subtotal)),
+				big.NewInt(inv.TotalAmountCents),
+			).Int64()
 		}
 		netSubtotal = subtotal - taxAmount
 	}

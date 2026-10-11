@@ -154,6 +154,16 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 	); err != nil {
 		return domain.CreditLedgerEntry{}, fmt.Errorf("acquire credit ledger lock: %w", err)
 	}
+	// A second entry for the same source (credit note, invoice reversal,
+	// commit funding, proration) is refused by the dedup indexes, and callers
+	// treat that refusal as "already done". That is only true when the amount
+	// matches: a different amount for the same source means some code path
+	// computed it differently, and swallowing it hides the bug (P06). Checked
+	// here, under the customer lock and before the INSERT — a unique violation
+	// would abort the tx, so it cannot be compared afterwards.
+	if err := checkSameSourceAmount(ctx, tx, tenantID, entry); err != nil {
+		return domain.CreditLedgerEntry{}, err
+	}
 	var currentBalance int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2`,
@@ -1534,4 +1544,46 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+// checkSameSourceAmount looks for an existing entry with the same dedup key as
+// entry — the keys of the four partial unique indexes on the ledger — and
+// refuses with a mismatch error when its amount differs. A matching amount, or
+// no existing entry, returns nil: the INSERT then either succeeds or hits the
+// index and reports the usual "already exists".
+func checkSameSourceAmount(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) error {
+	var (
+		where string
+		args  []any
+	)
+	switch {
+	case entry.SourceCreditNoteID != "":
+		where, args = "source_credit_note_id = $2", []any{tenantID, entry.SourceCreditNoteID}
+	case entry.SourceInvoiceReversalID != "":
+		where, args = "source_invoice_reversal_id = $2", []any{tenantID, entry.SourceInvoiceReversalID}
+	case entry.SourceInvoiceID != "" && entry.GrantKind == domain.GrantKindCommit:
+		where, args = "source_invoice_id = $2 AND grant_kind = 'commit'", []any{tenantID, entry.SourceInvoiceID}
+	case entry.SourceSubscriptionID != "" && entry.SourcePlanChangedAt != nil:
+		where = "source_subscription_id = $2 AND source_subscription_item_id = $3 AND source_change_type = $4 AND source_plan_changed_at = $5"
+		args = []any{tenantID, entry.SourceSubscriptionID, entry.SourceSubscriptionItemID, string(entry.SourceChangeType), *entry.SourcePlanChangedAt}
+	default:
+		return nil
+	}
+	var existing int64
+	err := tx.QueryRowContext(ctx, `SELECT amount_cents FROM customer_credit_ledger WHERE tenant_id = $1 AND `+where+` LIMIT 1`, args...).Scan(&existing)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check existing credit entry for this source: %w", err)
+	}
+	if existing == entry.AmountCents {
+		return nil
+	}
+	slog.ErrorContext(ctx, "credit ledger: a second entry for the same source with a DIFFERENT amount — refusing; one of the two computations is wrong",
+		"tenant_id", tenantID, "customer_id", entry.CustomerID, "existing_amount_cents", existing, "new_amount_cents", entry.AmountCents,
+		"source_credit_note_id", entry.SourceCreditNoteID, "source_invoice_reversal_id", entry.SourceInvoiceReversalID,
+		"source_invoice_id", entry.SourceInvoiceID, "source_subscription_id", entry.SourceSubscriptionID)
+	return errs.InvalidState(fmt.Sprintf("a credit entry for this source already exists with a different amount (%d, now %d)", existing, entry.AmountCents)).
+		WithCode("credit_source_amount_mismatch")
 }

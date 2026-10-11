@@ -1,9 +1,33 @@
 package domain
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
+
+// MulCents and AddCents are overflow-checked arithmetic for non-negative
+// minor-unit amounts. int64 multiplication and addition wrap silently: a
+// credit-note line of 3e9 × 4e9 cents wrapped to a NEGATIVE total, which then
+// passed the "not more than the invoice" cap. They return ErrAmountOverflow
+// instead, for the caller to refuse the request.
+func MulCents(a, b int64) (int64, error) {
+	if a < 0 || b < 0 {
+		return 0, ErrAmountOverflow
+	}
+	if a != 0 && b > math.MaxInt64/a {
+		return 0, ErrAmountOverflow
+	}
+	return a * b, nil
+}
+
+// AddCents adds two non-negative minor-unit amounts; see MulCents.
+func AddCents(a, b int64) (int64, error) {
+	if a < 0 || b < 0 || a > math.MaxInt64-b {
+		return 0, ErrAmountOverflow
+	}
+	return a + b, nil
+}
 
 // FormatMoneyMinor renders a minor-unit amount for operator-facing prose:
 // FormatMoneyMinor(10000000, "usd") == "100,000.00 USD".

@@ -59,6 +59,12 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Money errors now fail instead of guessing a default (2026-10-11).** Four places turned an error into a silent default; each now refuses the request:
+  - A credit note with an absurdly large line no longer wraps to a negative total that passed the "not more than the invoice" check. It is refused as too large.
+  - Creating an invoice without a currency during a database blip used to fall back to the tenant default or USD. It now answers 503; only a customer with no billing currency set gets the tenant default.
+  - A request with an `Idempotency-Key` whose key cannot be recorded now gets **503 with `Retry-After`** and does not run. Before, it ran unprotected, so a retry could repeat the action (a second credit, refund or charge).
+  - A second credit-ledger entry for the same source (credit note, reversal, proration, commit funding) with a **different** amount is refused and logged, instead of being reported as "already done".
+
 - **A card used to pay on the hosted invoice page is saved to the customer again (2026-10-11).** Since the move to `payment_methods`, the card was saved at Stripe but never recorded in Velox, so a customer with no card stayed card-less and went to dunning for the next invoice. The card is now recorded, and becomes the default when the customer had none. A payment whose webhooks were lost records it too. [ADR-021](docs/adr/021-hosted-invoice-pay-flow-saves-pm.md#amendment-2026-10-11-the-saved-card-was-never-recorded-after-migration-0097)
 
 - **A usage threshold no longer restarts graduated or package tiers for the rest of the period (2026-10-11).** After a mid-period threshold invoice (`reset_billing_cycle: false`), the period-end or cancel invoice priced the remaining usage from the first tier again, so tiered usage was overbilled. It now continues the tiers from what the threshold invoice billed. A pricing setup the close cannot split unambiguously now fails that close with a clear error rather than guessing. [ADR-066](docs/adr/066-threshold-money-semantics.md#amendment-2026-10-11-tiers-continue-across-the-fire-p21)

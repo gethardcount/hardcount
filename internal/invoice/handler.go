@@ -338,6 +338,15 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
+// currencyUnavailable answers a create whose currency could not be read: a
+// retryable 503, never a guessed currency.
+func currencyUnavailable(w http.ResponseWriter, r *http.Request, tenantID, customerID string, err error) {
+	slog.ErrorContext(r.Context(), "invoice create: could not read the currency to use; refusing rather than guessing",
+		"tenant_id", tenantID, "customer_id", customerID, "error", err)
+	respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "currency_unavailable",
+		"could not load the customer's billing currency — please retry")
+}
+
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
@@ -356,16 +365,33 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// Only this endpoint can see an empty currency: every internal
 	// caller (cycle engine, prorations, threshold, BillOnCreate) stamps
 	// the plan currency explicitly.
+	//
+	// A read that ERRORS stops the request: treating it as "no currency set"
+	// minted, during a database blip, a USD invoice for a EUR customer — a
+	// wrong invoice nobody notices, where a failed request is retried. Only a
+	// profile that does not exist (or has no currency) falls through to the
+	// tenant default, which the settings read itself supplies when the tenant
+	// has no settings row.
 	if strings.TrimSpace(input.Currency) == "" && input.CustomerID != "" {
 		if h.customers != nil {
-			if bp, err := h.customers.GetBillingProfile(r.Context(), tenantID, input.CustomerID); err == nil && bp.Currency != "" {
+			bp, err := h.customers.GetBillingProfile(r.Context(), tenantID, input.CustomerID)
+			switch {
+			case err == nil:
 				input.Currency = bp.Currency
+			case errors.Is(err, errs.ErrNotFound):
+				// No billing profile: the currency is not set.
+			default:
+				currencyUnavailable(w, r, tenantID, input.CustomerID, err)
+				return
 			}
 		}
 		if input.Currency == "" && h.settings != nil {
-			if ts, err := h.settings.Get(r.Context(), tenantID); err == nil && ts.DefaultCurrency != "" {
-				input.Currency = ts.DefaultCurrency
+			ts, err := h.settings.Get(r.Context(), tenantID)
+			if err != nil {
+				currencyUnavailable(w, r, tenantID, input.CustomerID, err)
+				return
 			}
+			input.Currency = ts.DefaultCurrency
 		}
 	}
 

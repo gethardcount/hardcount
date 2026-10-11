@@ -47,3 +47,21 @@ func TestFormatMoneyMinor(t *testing.T) {
 		})
 	}
 }
+
+func TestMulAddCents_RefuseOverflow(t *testing.T) {
+	if v, err := MulCents(3_000_000_000, 3); err != nil || v != 9_000_000_000 {
+		t.Fatalf("MulCents ok case = %d, %v", v, err)
+	}
+	if _, err := MulCents(3_000_000_000, 4_000_000_000); err != ErrAmountOverflow {
+		t.Fatalf("MulCents overflow = %v, want ErrAmountOverflow", err)
+	}
+	if _, err := MulCents(-1, 5); err != ErrAmountOverflow {
+		t.Fatalf("MulCents negative = %v, want ErrAmountOverflow", err)
+	}
+	if v, err := AddCents(math.MaxInt64-1, 1); err != nil || v != math.MaxInt64 {
+		t.Fatalf("AddCents edge = %d, %v", v, err)
+	}
+	if _, err := AddCents(math.MaxInt64, 1); err != ErrAmountOverflow {
+		t.Fatalf("AddCents overflow = %v, want ErrAmountOverflow", err)
+	}
+}

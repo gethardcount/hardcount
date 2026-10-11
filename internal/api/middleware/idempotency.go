@@ -132,16 +132,19 @@ func Idempotency(db *postgres.DB, releaseServerErrors func(*http.Request) bool) 
 			claimed, err := reserveKey(r.Context(), db, tenantID, key,
 				r.Method, r.URL.Path, fingerprint)
 			if err != nil {
-				// DB error on the reserve — fail open (don't block the write).
-				// An idempotency-infra failure shouldn't prevent the actual
-				// operation; this matches the prior read-path fail-open. But it
-				// IS an idempotency lapse: a concurrent/retried request can now
-				// re-run the side effect, so make it observable rather than
-				// silent — operators need to see it during a DB blip.
+				// DB error on the reserve — fail CLOSED: refuse with a retryable
+				// 503 and run nothing. Running the handler unreserved (the old
+				// fail-open) broke the one promise the key makes exactly when
+				// retries happen: the action committed, the client saw an
+				// error and retried, the retry found no reservation and ran
+				// the action again (a second credit grant, refund, charge).
+				// A refused request is retried safely; Stripe answers a
+				// failed idempotency check the same way.
 				idempotencyCacheErrors.WithLabelValues("reserve").Inc()
-				slog.ErrorContext(r.Context(), "idempotency reserve failed; failing open (side effect may re-execute on retry)",
+				slog.ErrorContext(r.Context(), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
 					"tenant_id", tenantID, "path", r.URL.Path, "error", err)
-				next.ServeHTTP(w, r)
+				w.Header().Set("Retry-After", "1")
+				ErrorJSON(w, http.StatusServiceUnavailable, "api_error", "could not record the idempotency key — retry the request with the same key")
 				return
 			}
 			if !claimed {
