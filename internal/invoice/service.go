@@ -934,6 +934,15 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice
 }
 
 func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
+	return s.finalize(ctx, tenantID, id, true)
+}
+
+// finalize is Finalize; checkTaxExpiry=false skips the tax-calculation expiry
+// guard, for the one caller whose calculation was created moments earlier in
+// the same call (the auto-finalize after a successful tax retry): it cannot
+// be 24h old, and since the guard fails closed on a read error, running it
+// there would only add ways to leave a freshly-taxed invoice a draft.
+func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExpiry bool) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, id)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
@@ -1011,7 +1020,7 @@ func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Inv
 	// double-reported tax. Only the shape where the build-time commit
 	// FAILED (calc present, transaction absent) both needs the commit and
 	// can never get it once expired.
-	if s.taxCommitter != nil && inv.TaxCalculationID != "" && inv.TaxTransactionID == "" {
+	if checkTaxExpiry && s.taxCommitter != nil && inv.TaxCalculationID != "" && inv.TaxTransactionID == "" {
 		if err := s.taxCommitter.CheckTaxCalculationUsable(ctx, tenantID, id, inv.TaxCalculationID); err != nil {
 			return domain.Invoice{}, err
 		}
@@ -1798,7 +1807,7 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 		return s.attachAttention(ctx, inv), nil
 	}
 	if shouldAutoFinalizeAfterRetry(inv) {
-		final, ferr := s.Finalize(ctx, tenantID, invoiceID)
+		final, ferr := s.finalize(ctx, tenantID, invoiceID, false) // the calc is seconds old
 		if ferr != nil {
 			// Tax already updated and persisted; finalize-side
 			// failure shouldn't unwind the recompute. Return the

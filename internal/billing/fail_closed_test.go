@@ -169,3 +169,83 @@ func TestEvaluateThresholds_MissingRuleFails(t *testing.T) {
 		t.Fatal("evaluateThresholds with a missing pinned rule must fail, not drop the line")
 	}
 }
+
+// The tax-calculation row is required when there is a provider calculation to
+// commit (the expiry guard reads it); a manual/none result has no calculation
+// id and nothing reads its row, so a failed write stays a warning there.
+func TestApplyTax_RecordRequiredOnlyForProviderCalculations(t *testing.T) {
+	lines := func() []domain.InvoiceLineItem { return []domain.InvoiceLineItem{{AmountCents: 10000, Quantity: 1}} }
+	withCalc := &Engine{
+		settings:     &taxSettings{provider: "stripe_tax"},
+		taxProviders: stubResolver(&stubProvider{result: &tax.Result{Provider: "stripe_tax", CalculationID: "taxcalc_1", TotalTaxCents: 0}}),
+		taxCalcStore: &guardCalcStore{recordErr: errBlip},
+	}
+	if _, err := withCalc.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 10000, 0, lines()); !errors.Is(err, errBlip) {
+		t.Fatalf("provider calculation, record fails: err = %v, want the record error", err)
+	}
+	manual := newManualEngine(1850, "VAT", nil)
+	manual.taxCalcStore = &guardCalcStore{recordErr: errBlip}
+	if _, err := manual.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 10000, 0, lines()); err != nil {
+		t.Fatalf("manual tax, record fails: err = %v, want nil (audit-only)", err)
+	}
+}
+
+// A provider that cannot be resolved fails the expiry guard too.
+func TestCheckTaxCalculationUsable_ResolveErrorFails(t *testing.T) {
+	e := &Engine{
+		settings: &taxSettings{provider: "stripe_tax"},
+		taxProviders: resolverFunc(func(context.Context, domain.TenantSettings) (tax.Provider, error) {
+			return nil, errBlip
+		}),
+		taxCalcStore: &guardCalcStore{createdAt: time.Now().UTC()},
+	}
+	if err := e.CheckTaxCalculationUsable(context.Background(), "t1", "inv_1", "taxcalc_1"); !errors.Is(err, errBlip) {
+		t.Fatalf("err = %v, want the resolve error", err)
+	}
+}
+
+// Ingest accepts negative corrections, so a meter's running total can be
+// negative mid-period. That must not abort the threshold evaluation (which
+// would stop every threshold on the subscription from firing): it counts as 0.
+func TestEvaluateThresholds_NegativeRunningUsageCountsAsZero(t *testing.T) {
+	thresholds := &domain.BillingThresholds{AmountGTE: 100, ResetBillingCycle: false}
+	engine, _, _ := setupThresholdEngine(thresholds, -500)
+	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
+	periodStart := *sub.CurrentBillingPeriodStart
+	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err != nil {
+		t.Fatalf("a net-negative running total must not fail the evaluation: %v", err)
+	}
+}
+
+// countingProvider counts Calculate calls (each one is a paid provider call).
+type countingProvider struct {
+	stubProvider
+	calls int
+}
+
+func (c *countingProvider) Calculate(ctx context.Context, r tax.Request) (*tax.Result, error) {
+	c.calls++
+	return c.stubProvider.Calculate(ctx, r)
+}
+
+// Retry tax refreshes an OK draft's calculation only when the guard PROVES it
+// expired. A guard that cannot read its inputs is not proof: refreshing on it
+// mints a second calculation beside one that may still be committable.
+func TestRetryTax_RefreshesOnlyAProvenExpiredCalculation(t *testing.T) {
+	prov := &countingProvider{stubProvider: stubProvider{result: &tax.Result{Provider: "stripe_tax", CalculationID: "taxcalc_new"}}}
+	e := &Engine{
+		settings:     &taxSettings{provider: "stripe_tax"},
+		taxProviders: stubResolver(prov),
+		taxCalcStore: &guardCalcStore{lookupErr: errBlip},
+		invoices: &mockInvoices{invoices: []domain.Invoice{{
+			ID: "inv_1", TenantID: "t1", Status: domain.InvoiceDraft,
+			TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxCalculationID: "taxcalc_old"},
+		}}},
+	}
+	if _, err := e.RetryTaxForInvoice(context.Background(), "t1", "inv_1"); !errors.Is(err, errBlip) {
+		t.Fatalf("err = %v, want the guard's read error", err)
+	}
+	if prov.calls != 0 {
+		t.Fatalf("%d provider calculation(s) on an unproven expiry, want 0", prov.calls)
+	}
+}

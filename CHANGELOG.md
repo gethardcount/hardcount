@@ -63,8 +63,9 @@ Older entries keep their original text.
   - **Meter settings** at period close or cancel: a max/last meter used to be billed as the sum of its usage.
   - **The usage cap's recalculation**: a block-capped customer used to be billed every unit.
   - **The customer's tax profile**: tax used to be calculated without their exemption, reverse charge, address and tax ID.
-  - **The tax-calculation expiry check at finalize**: it used to let the finalize through. Saving the calculation's record is now required, because the check reads it.
+  - **The tax-calculation expiry check at finalize**: it used to let the finalize through. Saving the calculation's record is now required when there is a provider calculation to check (Stripe Tax). The automatic finalize right after a successful tax retry skips the check: its calculation is seconds old.
   - **The threshold invoice**: a line with a missing or failing price was dropped, and a meter or plan that could not be read was left out of an item threshold's count.
+  - A meter whose running total is negative after usage corrections counts as 0 in the preview and the threshold check, with a warning. It is a valid state, not an error.
 
 - **Money errors now fail instead of guessing a default (2026-10-11).** Four places turned an error into a silent default; each now refuses the request:
   - A credit note with an absurdly large line no longer wraps to a negative total that passed the "not more than the invoice" check. It is refused as too large.

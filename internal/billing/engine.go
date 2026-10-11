@@ -1694,10 +1694,16 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 
 	if e.taxCalcStore != nil {
 		if _, err := e.taxCalcStore.Record(ctx, tenantID, "", req, res); err != nil {
-			// Required, not audit-only: the finalize expiry guard reads this
-			// row's age. Without it the guard finds "no row" forever and an
-			// aged calculation finalizes uncommittable.
-			return TaxApplication{}, fmt.Errorf("persist tax calculation %s: %w", res.CalculationID, err)
+			// Required when there is a provider calculation to commit: the
+			// finalize expiry guard reads this row's age, and without it the
+			// guard finds "no row" forever and an aged calculation finalizes
+			// uncommittable. Manual/none results carry no calculation id and
+			// nothing reads their row, so for them it stays audit-only.
+			if res.CalculationID != "" {
+				return TaxApplication{}, fmt.Errorf("persist tax calculation %s: %w", res.CalculationID, err)
+			}
+			slog.Warn("tax: failed to persist tax_calculations row",
+				"error", err, "tenant_id", tenantID, "provider", provider.Name())
 		}
 	}
 

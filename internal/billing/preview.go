@@ -195,10 +195,10 @@ func (e *Engine) previewWithWindow(ctx context.Context, sub domain.Subscription,
 	// matches what its actual invoice will be.
 	//
 	// A previewMeter ERROR aborts the whole preview (ADR-070,
-	// no-silent-fallbacks). Config-shaped soft cases (no rule binding,
-	// rule not found, rating failure) already surface as warnings from
-	// INSIDE previewMeter; what reaches this err is infrastructure
-	// failure (store errors, transient resolution failures), and a
+	// no-silent-fallbacks). Only a meter with no rule binding at all and a
+	// net-negative bucket (usage corrections) are soft cases, surfaced as
+	// warnings from INSIDE previewMeter. A missing pinned rule, a rating
+	// failure and store or resolution errors all reach this err, and a
 	// partial preview built from those is a lie — worse, the threshold
 	// scan PERSISTS these lines as a fire invoice, and a silently
 	// dropped meter's pre-fire usage would then be billed by nobody:
@@ -302,6 +302,16 @@ func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID
 
 	for _, agg := range aggs {
 		if agg.Quantity.IsZero() {
+			continue
+		}
+		// Ingest accepts negative corrections, so a bucket's period-to-date
+		// total can be negative until new usage overtakes it. That is a
+		// legitimate state, not a pricing error: it contributes nothing to
+		// a preview or a threshold, with a warning. (Pricing it would fail —
+		// ComputeAmountCents refuses negative quantities — and abort the
+		// whole threshold evaluation for the subscription.)
+		if agg.Quantity.IsNegative() {
+			warnings = append(warnings, fmt.Sprintf("meter %q: net-negative usage so far (%s) after corrections — counted as 0", meter.Key, agg.Quantity.String()))
 			continue
 		}
 
