@@ -109,3 +109,38 @@ Stripe's own Billing product uses `off_session` for the same reason.
   (offline invoicing, manual reconciliation, etc.). Lazy mint on first
   Stripe-bound action keeps dormant tenants from polluting the
   operator's Stripe dashboard.
+
+## Amendment 2026-10-11: the saved card was never recorded after migration 0097
+
+This ADR's promise held at Stripe but not in Velox. Migration 0097 moved
+cards from `customer_payment_setups` to `payment_methods`, and made the setup
+upsert in `checkout.session.completed` write only the customer↔Stripe
+mapping. Cards are written by the attach path, which only
+`setup_intent.succeeded` called. A hosted payment confirms a PaymentIntent
+with `setup_future_usage`, so no SetupIntent event comes and the card was
+never recorded.
+
+`FetchCardDetails` still made the new card Stripe's default, so Stripe and
+Velox disagreed, and Velox charges the card in `payment_methods`. Found
+walking FLOW I10: Stripe held two saved 4242 cards for a customer whose
+Velox record had only the declining 0341. A customer with no card on file
+stayed card-less, and the next invoice went to card-less dunning, asking for
+a card they had just given.
+
+**Fix.** `Stripe.RecordCheckoutCard` (shared by the webhook and the hosted
+sweep) attaches the card through the payment-methods attach path. A card
+already recorded as the default is skipped, so the two callers write one
+audit row.
+
+The attach follows the store's existing default rule:
+
+- **No card on file:** the paid card becomes the default. This restores
+  this ADR's "future invoices auto-charge".
+- **A default card on file:** the paid card is added beside it, as Add card
+  does. This matches Stripe's own default for invoice payments
+  (`save_default_payment_method` off). Making the paid card the new default
+  is a product choice, left for a decision.
+
+**Lost webhooks.** The reconciler's hosted sweep (ADR-068 amendment) now
+records the card too, for a paid session whose webhooks were lost. Before,
+it recorded the payment only.

@@ -30,6 +30,14 @@ type CheckoutSessionResult struct {
 	Status          string // open | complete | expired
 	PaymentStatus   string // paid | unpaid | no_payment_required
 	PaymentIntentID string
+	CustomerID      string // the Stripe customer the session saved the card to
+}
+
+// CheckoutCardRecorder records the card a finished Checkout session saved as
+// the customer's payment method. *Stripe implements it (RecordCheckoutCard),
+// shared with the checkout.session.completed webhook.
+type CheckoutCardRecorder interface {
+	RecordCheckoutCard(ctx context.Context, tenantID, customerID, stripeCustomerID, purpose string) error
 }
 
 // hostedSweepGrace is how long a session must sit unchecked (since it was
@@ -39,9 +47,10 @@ const hostedSweepGrace = 5 * time.Minute
 
 // SetHostedSessions wires the hosted-page sweep. Unwired (tests, Stripe not
 // configured), the sweep does nothing.
-func (r *Reconciler) SetHostedSessions(ledger HostedSessionLedger, reader CheckoutSessionReader) {
+func (r *Reconciler) SetHostedSessions(ledger HostedSessionLedger, reader CheckoutSessionReader, cards CheckoutCardRecorder) {
 	r.hostedLedger = ledger
 	r.hostedReader = reader
+	r.hostedCards = cards
 }
 
 // sweepHostedSessions asks Stripe how each unresolved hosted Checkout
@@ -53,7 +62,9 @@ func (r *Reconciler) SetHostedSessions(ledger HostedSessionLedger, reader Checko
 //   - complete and paid -> settle through the shared primitive. That records
 //     the payment, or, when the invoice was paid by another PaymentIntent in
 //     the meantime, raises payment.duplicate_charge (or
-//     payment.received_on_voided_invoice) for the operator to refund.
+//     payment.received_on_voided_invoice) for the operator to refund. Then
+//     record the card the session saved (ADR-021), which otherwise only the
+//     lost checkout.session.completed webhook would have done.
 //   - expired -> record it; nothing was paid.
 //   - anything else, or an error -> touch the row so the queue rotates, and
 //     look again next tick.
@@ -124,6 +135,14 @@ func (r *Reconciler) reconcileHostedSession(ctx context.Context, c CheckoutClaim
 		if inv.PaymentAnomalyPaymentIntentID != pi.ID {
 			if err := r.settler.SettleSucceeded(ctx, c.TenantID, inv, pi.ID, pi.AmountReceivedCents, SourceReconciler); err != nil {
 				return false, fmt.Errorf("settle hosted payment: %w", err)
+			}
+		}
+		// Before marking the row completed: a failed card record keeps the row
+		// unresolved, so the next tick tries again (the settle above is then a
+		// no-op on the paid invoice).
+		if r.hostedCards != nil && sess.CustomerID != "" {
+			if err := r.hostedCards.RecordCheckoutCard(ctx, c.TenantID, inv.CustomerID, sess.CustomerID, PurposeHostedInvoicePay); err != nil {
+				return false, fmt.Errorf("record the session's card: %w", err)
 			}
 		}
 		if err := r.hostedLedger.MarkSessionCompleted(ctx, c.TenantID, c.ID); err != nil {

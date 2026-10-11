@@ -77,7 +77,7 @@ func TestHostedSweep_SettlesPaidSessionsEvenOnAPaidInvoice(t *testing.T) {
 	settler := &recordingSettler{}
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(settler)
-	r.SetHostedSessions(ledger, reader)
+	r.SetHostedSessions(ledger, reader, nil)
 
 	resolved, errs := r.sweepHostedSessions(context.Background(), 50)
 
@@ -123,7 +123,7 @@ func TestHostedSweep_OneAlertPerCharge(t *testing.T) {
 	settler := &recordingSettler{}
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(settler)
-	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}})
+	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}}, nil)
 
 	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 1 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
@@ -139,7 +139,7 @@ func TestHostedSweep_OneAlertPerCharge(t *testing.T) {
 func TestHostedSweep_UnwiredDoesNothing(t *testing.T) {
 	ledger := &fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", StripeSessionID: "cs_1"}}}
 	r := NewReconciler(&mockStripeClient{}, newMockReconcileStore(), time.Second)
-	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "expired"}})
+	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "expired"}}, nil)
 	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 0 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
 	}
@@ -164,4 +164,53 @@ func assertIDs(t *testing.T, what string, got []string, want ...string) {
 			return
 		}
 	}
+}
+
+type cardCall struct{ tenantID, customerID, stripeCustomerID, purpose string }
+
+type recordingCardRecorder struct {
+	calls []cardCall
+	err   error
+}
+
+func (r *recordingCardRecorder) RecordCheckoutCard(_ context.Context, tenantID, customerID, stripeCustomerID, purpose string) error {
+	r.calls = append(r.calls, cardCall{tenantID, customerID, stripeCustomerID, purpose})
+	return r.err
+}
+
+// A paid hosted session whose webhooks were all lost: the sweep records the
+// payment AND the card the session saved (ADR-021), for the invoice's
+// customer and the session's Stripe customer. Without the card, the next
+// invoice went to card-less dunning asking for a card the customer had just
+// given. A failed card record keeps the session unresolved for the next tick.
+func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
+	newSweep := func(rec *recordingCardRecorder) (*Reconciler, *fakeHostedLedger) {
+		store := newMockReconcileStore(domain.Invoice{ID: "inv_1", TenantID: "t1", CustomerID: "cus_velox", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed})
+		client := &mockStripeClient{piStates: map[string]PaymentIntentResult{"pi_hosted": {ID: "pi_hosted", Status: "succeeded", AmountReceivedCents: 5000}}}
+		ledger := &fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", InvoiceID: "inv_1", StripeSessionID: "cs_1", Status: "open"}}}
+		r := NewReconciler(client, store, time.Second)
+		r.SetSettler(&recordingSettler{})
+		r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted", CustomerID: "cus_stripe"}}, rec)
+		return r, ledger
+	}
+
+	rec := &recordingCardRecorder{}
+	r, ledger := newSweep(rec)
+	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 1 || len(errs) != 0 {
+		t.Fatalf("n=%d errs=%v", n, errs)
+	}
+	if len(rec.calls) != 1 || rec.calls[0] != (cardCall{"t1", "cus_velox", "cus_stripe", PurposeHostedInvoicePay}) {
+		t.Fatalf("card calls = %+v, want one for (t1, cus_velox, cus_stripe, hosted pay)", rec.calls)
+	}
+	assertIDs(t, "completed", ledger.completed, "cks_1")
+
+	failing := &recordingCardRecorder{err: errors.New("db down")}
+	r, ledger = newSweep(failing)
+	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 0 || len(errs) != 1 {
+		t.Fatalf("card failure: n=%d errs=%v, want unresolved with one error", n, errs)
+	}
+	if len(ledger.completed) != 0 {
+		t.Errorf("a session whose card was not recorded must not be marked completed: %v", ledger.completed)
+	}
+	assertIDs(t, "touched", ledger.touched, "cks_1")
 }

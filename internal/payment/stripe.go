@@ -1535,6 +1535,19 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 		return nil
 	}
 
+	return s.RecordCheckoutCard(ctx, tenantID, customerID, event.CustomerExternalID, veloxPurpose)
+}
+
+// RecordCheckoutCard records the card a finished Checkout session saved to the
+// customer's Stripe customer (setup_future_usage, ADR-021) as the customer's
+// payment method. Two callers: the checkout.session.completed webhook, and
+// the reconciler's hosted sweep for a paid session whose webhooks were lost —
+// without the sweep's call, Velox recorded the payment but showed "no payment
+// method" and sent the next invoice to card-less dunning, asking for a card
+// the customer had just given. A card already on file with the same Stripe
+// payment method is left alone, so a webhook and the sweep both reporting one
+// session write one audit row and one payment_method.updated event.
+func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, stripeCustomerID, purpose string) error {
 	if s.paymentSetups == nil {
 		slog.Warn("payment setup store not configured, cannot update payment status")
 		return nil
@@ -1553,12 +1566,12 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 	// inconsistency: dashboard showed "Payment method active" with
 	// no card on file. Now no-save flows leave the setup row at
 	// its prior state.
-	if s.cardFetcher == nil || event.CustomerExternalID == "" {
+	if s.cardFetcher == nil || stripeCustomerID == "" {
 		slog.Info("checkout.session.completed: no cardFetcher or stripe customer — skipping setup update",
 			"customer_id", customerID)
 		return nil
 	}
-	card, err := s.cardFetcher.FetchCardDetails(ctx, event.CustomerExternalID)
+	card, err := s.cardFetcher.FetchCardDetails(ctx, stripeCustomerID)
 	if err != nil {
 		// No PM attached to the Stripe customer — operator chose
 		// not to save. The PI on this checkout session still
@@ -1566,9 +1579,31 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 		// state); we just don't update the customer's PM record.
 		slog.Info("checkout.session.completed: no saved PM (one-off payment) — leaving customer setup unchanged",
 			"customer_id", customerID,
-			"stripe_customer_id", event.CustomerExternalID,
+			"stripe_customer_id", stripeCustomerID,
 			"reason", err.Error())
 		return nil
+	}
+
+	if cur, err := s.paymentSetups.GetPaymentSetup(ctx, tenantID, customerID); err == nil &&
+		cur.SetupStatus == domain.PaymentSetupReady && cur.StripePaymentMethodID == card.PaymentMethodID {
+		return nil // already recorded (the webhook and the hosted sweep can both report a session)
+	}
+
+	// Record the card itself as a payment method. Since migration 0097 the
+	// setup upsert below writes only the customer↔Stripe mapping, and cards
+	// live in payment_methods, written by the attach path — which only
+	// setup_intent.succeeded called. A hosted payment confirms a
+	// PaymentIntent (setup_future_usage, ADR-021), so no SetupIntent event
+	// ever came, and the card the customer paid with was never recorded:
+	// Velox kept charging its old card, or none (found 2026-10-11: Stripe
+	// held two saved 4242 cards for a customer whose Velox record had only
+	// the declining 0341). The attach follows the store's default rule: the
+	// customer's first card becomes the default; another card is added
+	// without replacing it, as Add card does.
+	if s.pmAttacher != nil && card.PaymentMethodID != "" {
+		if err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, card.PaymentMethodID); err != nil {
+			return fmt.Errorf("record the checkout's card: %w", err)
+		}
 	}
 
 	now := time.Now().UTC()
@@ -1578,7 +1613,7 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 		SetupStatus:                 domain.PaymentSetupReady,
 		DefaultPaymentMethodPresent: true,
 		PaymentMethodType:           "card",
-		StripeCustomerID:            event.CustomerExternalID,
+		StripeCustomerID:            stripeCustomerID,
 		LastVerifiedAt:              &now,
 		UpdatedAt:                   now,
 		CardBrand:                   card.Brand,
@@ -1592,7 +1627,7 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 	// same velox_purpose gate as the setup_intent attach path (#461); an
 	// operator-driven or purposeless session stays system-attributed.
 	auditCtx := ctx
-	if veloxPurpose == PurposeHostedInvoicePay || veloxPurpose == purposePaymentUpdateToken {
+	if purpose == PurposeHostedInvoicePay || purpose == purposePaymentUpdateToken {
 		auditCtx = veloxauth.WithCustomerActor(ctx, customerID)
 	}
 	var emit func(tx *sql.Tx) error
@@ -1606,8 +1641,8 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 					"action":             "payment_setup_completed",
 					"card_brand":         setup.CardBrand,
 					"card_last4":         setup.CardLast4,
-					"stripe_customer_id": event.CustomerExternalID,
-					"velox_purpose":      veloxPurpose,
+					"stripe_customer_id": stripeCustomerID,
+					"velox_purpose":      purpose,
 				},
 			})
 		}
@@ -1620,7 +1655,7 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 		// against a customer that no longer exists.
 		if errors.Is(err, errs.ErrNotFound) {
 			slog.WarnContext(ctx, "checkout.session.completed: customer not found for payment-setup mapping — acking event",
-				"customer_id", customerID, "stripe_customer_id", event.CustomerExternalID)
+				"customer_id", customerID, "stripe_customer_id", stripeCustomerID)
 			return nil
 		}
 		return fmt.Errorf("update payment setup: %w", err)
@@ -1628,14 +1663,14 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 
 	slog.Info("payment method setup completed",
 		"customer_id", customerID,
-		"stripe_customer_id", event.CustomerExternalID,
+		"stripe_customer_id", stripeCustomerID,
 		"card_brand", setup.CardBrand,
 		"card_last4", setup.CardLast4,
 	)
 
 	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodUpdated, map[string]any{
 		"customer_id":        customerID,
-		"stripe_customer_id": event.CustomerExternalID,
+		"stripe_customer_id": stripeCustomerID,
 		"card_brand":         setup.CardBrand,
 		"card_last4":         setup.CardLast4,
 	})

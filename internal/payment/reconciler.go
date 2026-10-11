@@ -112,6 +112,7 @@ type Reconciler struct {
 	// (reconciler_hosted.go). Nil-tolerant: unwired, that sweep is skipped.
 	hostedLedger HostedSessionLedger
 	hostedReader CheckoutSessionReader
+	hostedCards  CheckoutCardRecorder
 }
 
 // NewReconciler constructs a Reconciler. If olderThan <= 0, defaults to 60s

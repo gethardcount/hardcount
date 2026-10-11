@@ -59,6 +59,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **A card used to pay on the hosted invoice page is saved to the customer again (2026-10-11).** Since the move to `payment_methods`, the card was saved at Stripe but never recorded in Velox, so a customer with no card stayed card-less and went to dunning for the next invoice. The card is now recorded, and becomes the default when the customer had none. A payment whose webhooks were lost records it too. [ADR-021](docs/adr/021-hosted-invoice-pay-flow-saves-pm.md#amendment-2026-10-11-the-saved-card-was-never-recorded-after-migration-0097)
+
 - **A usage threshold no longer restarts graduated or package tiers for the rest of the period (2026-10-11).** After a mid-period threshold invoice (`reset_billing_cycle: false`), the period-end or cancel invoice priced the remaining usage from the first tier again, so tiered usage was overbilled. It now continues the tiers from what the threshold invoice billed. A pricing setup the close cannot split unambiguously now fails that close with a clear error rather than guessing. [ADR-066](docs/adr/066-threshold-money-semantics.md#amendment-2026-10-11-tiers-continue-across-the-fire-p21)
 
 - **A paid invoice's page no longer shows "Invoice amount $0.00" (2026-10-11).** The hosted invoice page now leads with **Amount paid**, and its totals end **Amount due $0.00**. The payment-update page uses the same label.

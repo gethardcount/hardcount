@@ -447,5 +447,8 @@ func (c *LiveStripeClient) GetCheckoutSession(ctx context.Context, sessionID str
 	if sess.PaymentIntent != nil {
 		out.PaymentIntentID = sess.PaymentIntent.ID
 	}
+	if sess.Customer != nil {
+		out.CustomerID = sess.Customer.ID
+	}
 	return out, nil
 }
