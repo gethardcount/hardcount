@@ -335,8 +335,8 @@ func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (
 // billing failure rolls the cancel back rather than leaving a canceled sub with
 // an uninvoiced partial period (a revenue leak: there is no final-on-cancel
 // reconciler). ADR-056 coordinator pattern. The external finalize (tax commit +
-// auto-charge) and the in_advance proration credit run post-commit via the
-// caller (FinalizeOnCreateInvoice / BillOnCancel). billFn may be nil.
+// auto-charge) and the proration relief's legs run post-commit via the caller
+// (FinalizeOnCreateInvoice / FinishRelief). billFn may be nil.
 func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

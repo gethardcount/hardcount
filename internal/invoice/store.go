@@ -42,6 +42,9 @@ type Store interface {
 	// prior status read under the row lock (ADR-090: audit rows must not
 	// stamp status_before from a racy pre-tx snapshot).
 	UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx, prior domain.InvoiceStatus) error) (domain.Invoice, error)
+	// UpdateStatusWithReversalPriorTx is the same flip on the caller's tx; the
+	// closure receives the invoice as read under the row lock.
+	UpdateStatusWithReversalPriorTx(ctx context.Context, tx *sql.Tx, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, prior domain.Invoice) error) (domain.Invoice, error)
 	// FinalizeWithDates flips status to finalized AND re-stamps issued_at +
 	// due_at to the finalize moment. Used for operator-composed (manual)
 	// invoices so the issue/due dates anchor to issuance, not draft-create
@@ -215,7 +218,7 @@ type Store interface {
 	// FindBaseInvoiceForPeriod returns the most-recent NON-VOIDED invoice
 	// carrying a base-fee line item with billing_period_start = the given
 	// periodStart for the given subscription. Used by proration-credit
-	// paths (BillOnCancel + handleItemProration on downgrade) to verify
+	// paths (handleItemProration on downgrade) to verify
 	// the customer actually paid for the current period before granting
 	// a "refund" — industry standard (Chargebee distinguishes Refundable
 	// vs Adjustment credit notes based on this; Stripe warns operators

@@ -79,7 +79,7 @@ func TestExtendTrial_TimezoneUnreadableLeavesTrialUntouched(t *testing.T) {
 
 func TestCrossIntervalSwap_TimezoneUnreadableLeavesPlanUntouched(t *testing.T) {
 	ctx := context.Background()
-	fb := &fakeBiller{createTxOK: true, swapDraftHandled: true}
+	fb := &fakeBiller{createTxOK: true}
 	svc, sub := newSwapWiringSvc(t, fb)
 	svc.SetSettingsReader(downSettings{})
 

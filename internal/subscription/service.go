@@ -54,28 +54,17 @@ type Biller interface {
 	// external finalize runs post-commit via FinalizeOnCreateInvoice. Empty
 	// invoice (nil error) for the no-op cases.
 	BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Invoice, error)
-	BillOnCancel(ctx context.Context, sub domain.Subscription) (int64, error)
-	// BillOnCancelDraftsTx is the ATOMIC half of the cancel-proration credit
-	// (ADR-057 extension): when every funding source is PAID, it creates the
-	// credit-note drafts (issue_pending) on the caller's cancel tx and returns
-	// their ids + the gross owed. handled=false means the in-tx path declined
-	// (any unpaid source, or no funding) and the caller must fall back to the
-	// post-commit BillOnCancel. A draft-create error rolls the cancel back.
-	BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (ids []string, creditedCents int64, handled bool, err error)
-	// IssueCancelDrafts issues the cancel-credit drafts post-commit (external
-	// Stripe tax reversal + balance grant); best-effort, recovered by the
-	// clawback reconciler. Mirrors FinalizeOnCreateInvoice.
-	IssueCancelDrafts(ctx context.Context, sub domain.Subscription, ids []string)
-	// BillOnPlanSwapImmediate issues a refund credit for the unused
-	// portion of an in_advance billed period when an immediate
-	// plan-swap restructures the cycle (cross-interval). No-op for
-	// in_arrears subs (nothing prebilled) and when at >= period_end.
-	// Caller invokes BEFORE applying the swap so plan lookups still
-	// resolve the outgoing plan rate. POST-COMMIT FALLBACK ONLY on the
-	// atomic path: BillOnPlanSwapDraftsTx below is the primary (deferred
-	// Bug B, closed 2026-07-05) — this runs only when the in-tx half
-	// declined (unpaid funding source / lookup blip).
-	BillOnPlanSwapImmediate(ctx context.Context, sub domain.Subscription, at time.Time) (int64, error)
+	// BillOnCancelDraftsTx writes the cancel-proration relief on the caller's
+	// cancel tx (ADR-057, ADR-118): credit-note drafts (issue_pending) for
+	// paid and partly-used unpaid funding invoices, and an in-place void of a
+	// fully-unused unpaid one. Any error rolls the cancel back — never a
+	// canceled subscription whose relief was lost. The caller runs
+	// FinishRelief after commit.
+	BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Relief, error)
+	// FinishRelief runs a committed relief's post-commit legs (issue the
+	// drafts; the voids' tax reversal and webhook). Best-effort: each leg is
+	// durable and recovered by its own sweep.
+	FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief)
 	// ThresholdBilledThroughTx reads, on the caller's tx, the instant a
 	// mid-cycle threshold invoice already billed sub's CURRENT period
 	// through (nil = no threshold fire this period). The atomic plan swap
@@ -85,19 +74,11 @@ type Biller interface {
 	// period below that window would re-bill it at the next close, so the
 	// swap refuses instead.
 	ThresholdBilledThroughTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (*time.Time, error)
-	// BillOnPlanSwapDraftsTx is the ATOMIC half of the cross-interval swap
-	// refund — the BillOnCancelDraftsTx shape: when every funding source
-	// for the OLD period is PAID, the refund credit-note drafts commit ON
-	// the swap tx (issue_pending), so a crash between the swap commit and
-	// the refund can no longer lose the customer's unused prepayment (a
-	// swap retry 400s on the same-plan guard; no reconciler re-derives a
-	// missed swap refund). handled=false = declined → caller falls back to
-	// the post-commit BillOnPlanSwapImmediate. A draft-create error rolls
-	// the whole swap back. sub is the PRE-swap snapshot.
-	BillOnPlanSwapDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, at time.Time) (ids []string, creditedCents int64, handled bool, err error)
-	// IssueSwapDrafts issues the swap-refund drafts post-commit; best-effort,
-	// recovered by the clawback reconciler. Twin of IssueCancelDrafts.
-	IssueSwapDrafts(ctx context.Context, sub domain.Subscription, ids []string)
+	// BillOnPlanSwapDraftsTx is the plan-swap twin of BillOnCancelDraftsTx:
+	// the refund for the OLD period's unused prepayment, written on the swap
+	// tx; any error rolls the swap back. sub is the PRE-swap snapshot. The
+	// caller runs FinishRelief after commit.
+	BillOnPlanSwapDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, at time.Time) (domain.Relief, error)
 	// BillOnCreateTx is the in-tx variant of BillOnCreate: it inserts the day-1
 	// in_advance invoice on the caller's tx (no finalize). ok=false means there
 	// was nothing to bill (no in_advance items / zero subtotal) or an idempotent
@@ -1009,16 +990,13 @@ type ItemChangeResult struct {
 	// crossAxisNewInvoice carries the new-period in_advance invoice created
 	// in-tx by the atomic cross-interval swap (applyCrossIntervalPlanSwapTx),
 	// so the handler can run FinalizeOnCreateInvoice (tax commit + auto-charge)
-	// POST-commit. nil when the swap was in_arrears (no day-1 invoice) or when
-	// the swap ran via the non-atomic fallback. Internal — not serialized.
+	// POST-commit. nil when the swap was in_arrears (no day-1 invoice).
+	// Internal — not serialized.
 	crossAxisNewInvoice *domain.Invoice
-	// swapRefundDraftIDs are the issue_pending refund drafts committed ON the
-	// swap tx by BillOnPlanSwapDraftsTx; FinalizeCrossIntervalSwap issues them
-	// post-commit. swapRefundHandled=true means the in-tx half owned the
-	// refund (possibly a no-op) and the post-commit BillOnPlanSwapImmediate
-	// fallback MUST NOT run — it would double-credit.
-	swapRefundDraftIDs []string
-	swapRefundHandled  bool
+	// swapRelief is the OLD period's refund written ON the swap tx by
+	// BillOnPlanSwapDraftsTx; FinalizeCrossIntervalSwap runs its post-commit
+	// legs.
+	swapRelief domain.Relief
 }
 
 type ProrationDetail struct {
@@ -1210,11 +1188,9 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 
 // UpdateItemTx is the in-transaction variant of UpdateItem for the
 // simple paths (quantity change, same-interval immediate plan change).
-// Returns an error if the call would route to the cross-interval-swap
-// path (which involves engine.BillOnPlanSwapImmediate and multiple
-// store writes that don't yet have Tx variants) or the scheduled-
-// change path (no proration emission — atomicity isn't needed).
-// Caller falls back to the non-Tx UpdateItem in those cases.
+// The immediate cross-interval swap runs here too, atomically
+// (applyCrossIntervalPlanSwapTx); the non-Tx UpdateItem refuses it. The
+// scheduled-change path needs no tx (no proration emission).
 //
 // ADR-030 atomic-proration follow-through (2026-05-29). Cross-interval
 // swap atomicity is a documented follow-up — the engine-level write
@@ -1520,7 +1496,7 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 		// by cadence:
 		//
 		//   in_advance: refund the unused portion of the OLD prepaid
-		//   period via BillOnPlanSwapImmediate, jump current_period
+		//   period (BillOnPlanSwapDraftsTx), jump current_period
 		//   to (now, NextBillingPeriodEnd for NEW interval), and
 		//   synchronously bill the NEW in_advance period (with stub
 		//   proration if calendar snap shortens it).
@@ -1539,7 +1515,12 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 		// rejected upstream — no industry peer documents it as an
 		// in-place plan-swap operation.
 		if input.Immediate && crossInterval {
-			return s.applyCrossIntervalPlanSwap(ctx, tenantID, subscriptionID, itemID, input.NewPlanID, sub, newInterval, newTiming, now)
+			// Only the atomic path (applyCrossIntervalPlanSwapTx, through the
+			// handler's tx) may restructure the cycle: its refund, plan write,
+			// period CAS and new-period invoice commit together. The old
+			// non-atomic variant refunded first and swapped after, and lost the
+			// refund on any failure in between (ADR-118).
+			return ItemChangeResult{}, errs.InvalidState("an immediate cross-interval plan swap must run on the atomic path").WithCode("swap_requires_atomic_path")
 		}
 	}
 
@@ -1564,97 +1545,6 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 	return ItemChangeResult{Item: updated, EffectiveAt: now}, nil
 }
 
-// applyCrossIntervalPlanSwap handles the immediate same-cadence
-// cross-interval plan-swap path (the only restructure-the-cycle plan
-// change Velox supports today). Caller has already validated:
-//   - sub is active
-//   - new plan exists, differs from current
-//   - bill_timing matches on both sides (cross-cadence rejected upstream)
-//   - newInterval differs from currentInterval
-//
-// See UpdateItem's inline comment for the by-cadence semantics.
-func (s *Service) applyCrossIntervalPlanSwap(
-	ctx context.Context,
-	tenantID, subscriptionID, itemID, newPlanID string,
-	sub domain.Subscription,
-	newInterval domain.BillingInterval,
-	newTiming domain.BillTiming,
-	now time.Time,
-) (ItemChangeResult, error) {
-	// Resolved before the refund and the plan write below, so a settings read
-	// failure refuses the swap with nothing written.
-	loc, err := s.tenantLocation(ctx, sub.TenantID)
-	if err != nil {
-		return ItemChangeResult{}, err
-	}
-
-	// Step 1: refund unused OLD in_advance portion BEFORE the swap so
-	// plan lookups still resolve the outgoing rate. We don't block the
-	// terminal swap on a credit failure (a DB blip shouldn't strand the
-	// operator's intent), but the failure is logged at ERROR — it means the
-	// customer was NOT credited their unused prepayment and a manual credit is
-	// required, which must be alarmable, not a silent warning.
-	// No-op for in_arrears (nothing prebilled).
-	if s.biller != nil {
-		if _, err := s.biller.BillOnPlanSwapImmediate(ctx, sub, now); err != nil {
-			slog.ErrorContext(ctx, "plan-swap refund credit FAILED — customer not credited for unused prepayment; manual credit required",
-				"subscription_id", subscriptionID,
-				"tenant_id", tenantID,
-				"error", err)
-		}
-	}
-
-	// Step 2: apply the plan swap. After this, item.plan_id = newPlanID
-	// and subscription_item_changes records the transition at `now`.
-	updated, err := s.store.ApplyItemPlanImmediately(ctx, tenantID, itemID, newPlanID, now)
-	if err != nil {
-		return ItemChangeResult{}, err
-	}
-
-	// Step 3a (in_advance): jump period to (now, NextBillingPeriodEnd)
-	// and synchronously bill the new in_advance period.
-	// Step 3b (in_arrears): truncate to (oldPS, now); scheduler closes
-	// the partial period under the OLD plan via segment-aware billing.
-	// The swap re-anchors the cycle to `now`, so the billing anchor day is
-	// recomputed for the new cadence (ADR-055) — it must NOT keep the old
-	// interval's anchor day.
-	swapAnchorDay := domain.AnchorDayFor(now, sub.BillingTime, newInterval, loc)
-	// ADR-115: the period write proves the snapshot this request was planned
-	// from; a closer that moved the period since the read makes it a 409.
-	expected := SnapshotOf(sub)
-	if newTiming == domain.BillInAdvance {
-		newPE := domain.NextBillingPeriodEnd(now, sub.BillingTime, newInterval, loc, swapAnchorDay)
-		if err := s.store.ClosePeriod(ctx, tenantID, subscriptionID, expected, now, newPE, newPE, swapAnchorDay); err != nil {
-			return ItemChangeResult{}, mapPeriodMoved(err)
-		}
-		if s.biller != nil {
-			refreshed, err := s.store.Get(ctx, tenantID, subscriptionID)
-			if err != nil {
-				return ItemChangeResult{}, err
-			}
-			if _, err := s.biller.BillOnCreate(ctx, refreshed); err != nil {
-				// Non-atomic fallback (h.db unwired — tests only). The watermark
-				// already advanced above, so this failure CANNOT be "retried by
-				// the scheduler" — the just-opened period is past next_billing_at
-				// and cycle close skips in_advance base segments, so the new
-				// period's base would be silently dropped. Fail LOUD instead.
-				// Production uses applyCrossIntervalPlanSwapTx, which commits the
-				// new-period invoice atomically with the watermark advance.
-				return ItemChangeResult{}, fmt.Errorf("plan-swap new in_advance bill failed: %w", err)
-			}
-		}
-	} else {
-		// in_arrears: truncate. Period start preserved; period end +
-		// next_billing pulled in to `now`.
-		if sub.CurrentBillingPeriodStart != nil {
-			if err := s.store.ClosePeriod(ctx, tenantID, subscriptionID, expected, *sub.CurrentBillingPeriodStart, now, now, swapAnchorDay); err != nil {
-				return ItemChangeResult{}, mapPeriodMoved(err)
-			}
-		}
-	}
-	return ItemChangeResult{Item: updated, EffectiveAt: now, OrchestratedCrossAxis: true}, nil
-}
-
 // mapPeriodMoved turns the store's stale-snapshot sentinel into the 409 an
 // item change returns when the subscription's billing period changed between
 // the request's read and its write (ADR-115). Everything else passes through.
@@ -1665,8 +1555,9 @@ func mapPeriodMoved(err error) error {
 	return err
 }
 
-// applyCrossIntervalPlanSwapTx is the atomic, in-tx variant of
-// applyCrossIntervalPlanSwap used by the handler's tx-owning path. It runs the
+// applyCrossIntervalPlanSwapTx is the immediate same-cadence cross-interval
+// plan swap — the only restructure-the-cycle plan change Velox supports —
+// run on the handler's tx. It runs the
 // cycle-restructuring DB writes — the period CAS (first statement, ADR-115),
 // the refund drafts, the plan swap, and (for in_advance) the new-period invoice
 // insert via BillOnCreateTx — on the caller's single tx, so any failure rolls
@@ -1676,9 +1567,8 @@ func mapPeriodMoved(err error) error {
 // invoice's external steps (tax commit, auto-charge) are deliberately NOT done
 // here — the handler runs them POST-commit, because Stripe calls must never ride
 // a DB tx. A created new invoice is carried back on the result for that
-// post-commit FinalizeOnCreateInvoice. Caller has validated the swap exactly as
-// applyCrossIntervalPlanSwap documents (active sub, plan exists + differs,
-// same-cadence, different interval).
+// post-commit FinalizeOnCreateInvoice. Caller has validated the swap (active
+// sub, plan exists + differs, same-cadence, different interval).
 func (s *Service) applyCrossIntervalPlanSwapTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -1741,21 +1631,17 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 		}
 	}
 
-	// OLD-period refund drafts, on this same tx (deferred Bug B, closed
-	// 2026-07-05): computed from the pre-swap `sub` snapshot so the math
-	// resolves the OUTGOING plan rate and the old period's funding invoices. A
-	// draft-create error fails the whole swap (never a swapped sub with a
-	// silently-lost refund); handled=false defers the refund to the
-	// post-commit fallback in FinalizeCrossIntervalSwap (unpaid funding
-	// source / lookup blip — the cancel path's exact decline contract).
-	var swapDraftIDs []string
-	swapRefundHandled := false
+	// OLD-period refund, on this same tx (deferred Bug B; ADR-118): computed
+	// from the pre-swap `sub` snapshot so the math resolves the OUTGOING plan
+	// rate and the old period's funding invoices, paid or unpaid. Any error
+	// fails the whole swap — never a swapped sub with a silently-lost refund.
+	var swapRelief domain.Relief
 	if s.biller != nil {
-		ids, _, handled, derr := s.biller.BillOnPlanSwapDraftsTx(ctx, tx, sub, now)
-		if derr != nil {
-			return ItemChangeResult{}, fmt.Errorf("plan-swap refund drafts: %w", derr)
+		r, rerr := s.biller.BillOnPlanSwapDraftsTx(ctx, tx, sub, now)
+		if rerr != nil {
+			return ItemChangeResult{}, fmt.Errorf("plan-swap refund: %w", rerr)
 		}
-		swapDraftIDs, swapRefundHandled = ids, handled
+		swapRelief = r
 	}
 
 	// Apply the plan swap on the tx (stamps item.plan_id + plan_changed_at=now).
@@ -1766,7 +1652,7 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 
 	res := ItemChangeResult{
 		Item: updated, EffectiveAt: now, OrchestratedCrossAxis: true,
-		swapRefundDraftIDs: swapDraftIDs, swapRefundHandled: swapRefundHandled,
+		swapRelief: swapRelief,
 	}
 
 	if newTiming == domain.BillInAdvance && s.biller != nil {
@@ -1804,29 +1690,17 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 // cross-interval swap, called by the handler AFTER the swap tx is durable
 // (Stripe calls must never ride a DB tx):
 //
-//   - OLD-period refund. The refund credit-note DRAFTS were committed ON the
-//     swap tx by BillOnPlanSwapDraftsTx (deferred Bug B, closed 2026-07-05) —
-//     here they only get their post-commit Issue relay (Stripe tax reversal +
-//     balance grant), and a never-issued draft self-heals via
-//     RetryPendingClawbackIssue. Only when the in-tx half DECLINED (unpaid
-//     funding source / lookup blip) does the legacy post-commit
-//     BillOnPlanSwapImmediate run — same decline contract as the cancel path;
-//     its failure still needs the loud ERROR because the unpaid-leg relief has
-//     no reconciler behind it.
+//   - OLD-period refund. It was written ON the swap tx by
+//     BillOnPlanSwapDraftsTx (ADR-118); here only its post-commit legs run
+//     (draft Issue; a void's tax reversal and webhook), each recovered by its
+//     own sweep if this fails.
 //   - FinalizeOnCreateInvoice (tax commit + auto-charge) for the new in_advance
 //     day-1 invoice committed inside the swap tx, if one was created.
 func (s *Service) FinalizeCrossIntervalSwap(ctx context.Context, tenantID string, subBefore domain.Subscription, result ItemChangeResult) {
 	if s.biller == nil {
 		return
 	}
-	if result.swapRefundHandled {
-		s.biller.IssueSwapDrafts(ctx, subBefore, result.swapRefundDraftIDs)
-	} else if _, err := s.biller.BillOnPlanSwapImmediate(ctx, subBefore, result.EffectiveAt); err != nil {
-		slog.ErrorContext(ctx, "plan-swap refund credit FAILED — customer not credited for unused prepayment; manual credit required",
-			"subscription_id", subBefore.ID,
-			"tenant_id", tenantID,
-			"error", err)
-	}
+	s.biller.FinishRelief(ctx, subBefore, result.swapRelief)
 	if result.crossAxisNewInvoice != nil {
 		s.biller.FinalizeOnCreateInvoice(ctx, subBefore, *result.crossAxisNewInvoice)
 	}
@@ -1966,11 +1840,9 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 	ctx = s.bindForSub(ctx, tenantID, id)
 
 	var finalInv domain.Invoice
-	var cancelDraftIDs []string
-	var cancelDraftCredit int64
-	var cancelDraftsHandled bool
+	var relief domain.Relief
 	canceled, err := s.store.FireScheduledCancellationWithBill(ctx, tenantID, id, at, func(tx *sql.Tx, c domain.Subscription) error {
-		emitAudit := func(credited int64, handled bool, currency string) error {
+		emitAudit := func(credited int64, currency string) error {
 			if s.audit == nil {
 				return nil
 			}
@@ -1979,7 +1851,7 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 				"plan_ids":    planIDsFromItems(c.Items),
 				"canceled_by": "schedule",
 			}
-			if handled && credited > 0 {
+			if credited > 0 {
 				meta["prorated_credit_cents"] = credited
 				if currency != "" {
 					meta["currency"] = currency
@@ -1997,19 +1869,19 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 			return nil
 		}
 		if s.biller == nil {
-			return emitAudit(0, false, "")
+			return emitAudit(0, "")
 		}
 		inv, billErr := s.biller.BillFinalOnImmediateCancelTx(ctx, tx, c)
 		if billErr != nil {
 			return fmt.Errorf("final-on-scheduled-cancel invoice: %w", billErr)
 		}
 		finalInv = inv
-		ids, credited, handled, draftErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
-		if draftErr != nil {
-			return fmt.Errorf("scheduled-cancel proration drafts: %w", draftErr)
+		r, reliefErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
+		if reliefErr != nil {
+			return fmt.Errorf("scheduled-cancel proration relief: %w", reliefErr)
 		}
-		cancelDraftIDs, cancelDraftCredit, cancelDraftsHandled = ids, credited, handled
-		return emitAudit(credited, handled, inv.Currency)
+		relief = r
+		return emitAudit(r.CreditedCents, inv.Currency)
 	})
 	if err != nil {
 		if errors.Is(err, errs.ErrInvalidState) {
@@ -2021,24 +1893,13 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 	}
 
 	// Post-commit external legs — identical to Cancel: finalize (tax commit +
-	// auto-charge) for the final invoice, then issue the durable relief
-	// drafts (clawback reconciler recovers a failed issue) or the loud
-	// unpaid-source fallback.
+	// auto-charge) for the final invoice, then the relief's legs (each
+	// recovered by its own sweep if this fails).
 	if s.biller != nil && finalInv.ID != "" {
 		s.biller.FinalizeOnCreateInvoice(ctx, canceled, finalInv)
 	}
 	if s.biller != nil {
-		if cancelDraftsHandled {
-			s.biller.IssueCancelDrafts(ctx, canceled, cancelDraftIDs)
-			_ = cancelDraftCredit
-		} else {
-			if _, err := s.biller.BillOnCancel(ctx, canceled); err != nil {
-				slog.ErrorContext(ctx, "scheduled-cancel proration credit FAILED — customer not credited for unused prepayment; manual credit required",
-					"subscription_id", canceled.ID,
-					"tenant_id", tenantID,
-					"error", err)
-			}
-		}
+		s.biller.FinishRelief(ctx, canceled, relief)
 	}
 	return nil
 }
@@ -2053,18 +1914,16 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	// revenue leak (there is no final-on-cancel reconciler; the prior "G3
 	// deferred reconciler" referenced here never existed). No-op for a clean
 	// cancel (canceled_at at/after current_period_end). The build runs BEFORE
-	// BillOnCancel so the credit grant doesn't pre-apply against this invoice.
+	// relief so the credit grant doesn't pre-apply against this invoice.
 	var finalInv domain.Invoice
-	var cancelDraftIDs []string
-	var cancelDraftCredit int64
-	var cancelDraftsHandled bool
+	var relief domain.Relief
 	canceled, err := s.store.CancelAtomicWithBill(ctx, tenantID, id, func(tx *sql.Tx, c domain.Subscription) error {
 		// ADR-090 in-tx emission runs at the END of this closure (emitCancelAudit)
 		// so the atomic-path credit amount can ride the row — but it fires
 		// UNCONDITIONALLY: audit coverage must not be conditioned on the
 		// unrelated biller dependency (a biller-less construction still
 		// flips the sub to canceled).
-		emitCancelAudit := func(credited int64, handled bool, currency string) error {
+		emitCancelAudit := func(credited int64, currency string) error {
 			if s.audit == nil {
 				return nil
 			}
@@ -2073,12 +1932,11 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 				"plan_ids":    planIDsFromItems(c.Items),
 				"canceled_by": cancelActorLabel(ctx),
 			}
-			if handled && credited > 0 {
+			if credited > 0 {
 				meta["prorated_credit_cents"] = credited
 				// Currency from the final invoice built in this same tx;
 				// credit-only cancels (no final invoice) omit it and the
-				// timeline falls back to its default rendering — the
-				// fallback-path credit carries its own audited grant row.
+				// timeline falls back to its default rendering.
 				if currency != "" {
 					meta["currency"] = currency
 				}
@@ -2101,26 +1959,24 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 			return nil
 		}
 		if s.biller == nil {
-			return emitCancelAudit(0, false, "")
+			return emitCancelAudit(0, "")
 		}
 		inv, billErr := s.biller.BillFinalOnImmediateCancelTx(ctx, tx, c)
 		if billErr != nil {
 			return fmt.Errorf("final-on-cancel invoice: %w", billErr)
 		}
 		finalInv = inv
-		// Cancel-proration credit drafts (ADR-057 extension): created IN this tx
-		// AFTER the final invoice (so the credit isn't sized against it — the
-		// documented ordering at service.go's original BillOnCancel-runs-after
-		// comment, now structurally guaranteed). All-paid funding only; any unpaid
-		// source declines (handled=false) and is relieved post-commit by
-		// BillOnCancel. A draft-create failure rolls the whole cancel back.
-		ids, credited, handled, draftErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
-		if draftErr != nil {
-			return fmt.Errorf("cancel proration drafts: %w", draftErr)
+		// Cancel-proration relief (ADR-057, ADR-118): written IN this tx AFTER
+		// the final invoice (so the credit isn't sized against it), for every
+		// funding invoice, paid or unpaid. Any failure rolls the whole cancel
+		// back.
+		r, reliefErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
+		if reliefErr != nil {
+			return fmt.Errorf("cancel proration relief: %w", reliefErr)
 		}
-		cancelDraftIDs, cancelDraftCredit, cancelDraftsHandled = ids, credited, handled
+		relief = r
 
-		return emitCancelAudit(credited, handled, inv.Currency)
+		return emitCancelAudit(r.CreditedCents, inv.Currency)
 	})
 	if err != nil {
 		return domain.Subscription{}, 0, err
@@ -2134,36 +1990,14 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 		s.biller.FinalizeOnCreateInvoice(ctx, canceled, finalInv)
 	}
 
-	// ADR-031 / ADR-057 ext: the in_advance cancel-proration credit for the
-	// unused portion of an already-billed period. No-op for in_arrears.
-	// Returns the cents granted so the handler can stamp the cancel audit row
-	// (the timeline "Prorated credit $X.XX" line).
-	//
-	// Two paths: (1) the ATOMIC path — when every funding source was paid, the
-	// credit drafts were created in the cancel tx above; here we just ISSUE them
-	// post-commit (external Stripe tax reversal + balance grant). The drafts are
-	// already durable, so a crash/transient failure here is recovered by the
-	// clawback reconciler — the customer can no longer be silently un-credited.
-	// (2) the FALLBACK path — any unpaid funding source (or the in-tx path
-	// declined): today's post-commit BillOnCancel, loud-on-failure (manual credit
-	// required; a silent warning here is exactly how the 2026-06-15 upgrade→cancel
-	// overcharge went unnoticed). PR1 scope: unpaid relief stays on this path.
+	// ADR-031 / ADR-057 / ADR-118: the relief for the unused part of an
+	// already-billed in_advance period is durable (written in the cancel tx
+	// above); here its external legs run. The credited amount stamps the
+	// timeline's "Prorated credit $X.XX" line.
 	var prorationCreditCents int64
 	if s.biller != nil {
-		if cancelDraftsHandled {
-			s.biller.IssueCancelDrafts(ctx, canceled, cancelDraftIDs)
-			prorationCreditCents = cancelDraftCredit
-		} else {
-			amt, err := s.biller.BillOnCancel(ctx, canceled)
-			if err != nil {
-				slog.ErrorContext(ctx, "cancel proration credit FAILED — customer not credited for unused prepayment; manual credit required",
-					"subscription_id", canceled.ID,
-					"tenant_id", tenantID,
-					"error", err)
-			} else {
-				prorationCreditCents = amt
-			}
-		}
+		s.biller.FinishRelief(ctx, canceled, relief)
+		prorationCreditCents = relief.CreditedCents
 	}
 
 	return canceled, prorationCreditCents, nil

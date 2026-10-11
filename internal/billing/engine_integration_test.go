@@ -661,9 +661,21 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 	subRefreshed.Status = domain.SubscriptionCanceled
 	subRefreshed.CanceledAt = &cancelAt
 
-	if _, err := engine.BillOnCancel(ctx, subRefreshed); err != nil {
-		t.Fatalf("BillOnCancel: %v", err)
+	// The cancel relief as Cancel runs it: written on a real tx, committed,
+	// then its post-commit legs.
+	reliefTx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin relief tx: %v", err)
 	}
+	relief, err := engine.BillOnCancelDraftsTx(ctx, reliefTx, subRefreshed)
+	if err != nil {
+		_ = reliefTx.Rollback()
+		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+	}
+	if err := reliefTx.Commit(); err != nil {
+		t.Fatalf("commit relief: %v", err)
+	}
+	engine.FinishRelief(ctx, subRefreshed, relief)
 
 	// Read the customer's credit ledger; should have a grant entry for
 	// the unused portion. July has 31 days; unused = 15 days =
@@ -806,9 +818,7 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 		sub.Status = domain.SubscriptionCanceled
 		sub.CanceledAt = &cancelAt
 
-		if _, err := newEngine().BillOnCancel(ctx, sub); err != nil {
-			t.Fatalf("BillOnCancel: %v", err)
-		}
+		cancelRelief(t, ctx, db, tenantID, newEngine(), sub)
 
 		got, err := invoiceStore.Get(ctx, tenantID, invID)
 		if err != nil {
@@ -832,9 +842,7 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 		sub.Status = domain.SubscriptionCanceled
 		sub.CanceledAt = &cancelAt
 
-		if _, err := newEngine().BillOnCancel(ctx, sub); err != nil {
-			t.Fatalf("BillOnCancel: %v", err)
-		}
+		cancelRelief(t, ctx, db, tenantID, newEngine(), sub)
 
 		got, err := invoiceStore.Get(ctx, tenantID, invID)
 		if err != nil {
@@ -847,6 +855,93 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 			t.Errorf("credit grants = %d, want 0", n)
 		}
 	})
+
+	// ADR-118: the relief is written in the cancel tx, so a crash after the
+	// commit and before its post-commit legs loses nothing — the clawback
+	// reconciler issues the committed draft on its own.
+	t.Run("crash before FinishRelief: the reconciler issues the relief", func(t *testing.T) {
+		sub, invID := freshUnpaidSub("cus_crash")
+		cancelAt := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)
+		sub.Status = domain.SubscriptionCanceled
+		sub.CanceledAt = &cancelAt
+
+		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		r, err := newEngine().BillOnCancelDraftsTx(ctx, tx, sub)
+		if err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		if len(r.DraftIDs) != 1 {
+			t.Fatalf("relief drafts = %v, want 1 (the unpaid reduce)", r.DraftIDs)
+		}
+		// The crash: FinishRelief never runs.
+		if got, _ := invoiceStore.Get(ctx, tenantID, invID); got.AmountDueCents != 4900 {
+			t.Fatalf("amount_due = %d before the draft is issued, want 4900", got.AmountDueCents)
+		}
+		if _, errs := creditNoteSvc.RetryPendingClawbackIssue(ctx, 50); len(errs) != 0 {
+			t.Fatalf("RetryPendingClawbackIssue: %v", errs)
+		}
+		got, err := invoiceStore.Get(ctx, tenantID, invID)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if got.AmountDueCents != 2450 {
+			t.Errorf("amount_due after the reconciler = %d, want 2450 (relief recovered)", got.AmountDueCents)
+		}
+	})
+
+	// The engine decides to void from a snapshot read before the cancel tx; if
+	// the invoice changed since (a payment started, an amount moved), the
+	// void refuses under the row lock and the cancel rolls back — the retry
+	// decides again from fresh data.
+	t.Run("a void refuses when the invoice changed since it was read", func(t *testing.T) {
+		_, invID := freshUnpaidSub("cus_stale")
+		snap, err := invoiceStore.Get(ctx, tenantID, invID)
+		if err != nil {
+			t.Fatalf("snapshot: %v", err)
+		}
+		// A partial payment lands after the snapshot. Void's own state checks
+		// allow it (finalized, nothing in flight) — only the snapshot
+		// comparison stops a void that would annul collected money.
+		btx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin bypass: %v", err)
+		}
+		res, err := btx.ExecContext(ctx, `UPDATE invoices SET amount_paid_cents = 100, amount_due_cents = amount_due_cents - 100 WHERE id = $1`, invID)
+		if err != nil {
+			_ = btx.Rollback()
+			t.Fatalf("partial payment: %v", err)
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			_ = btx.Rollback()
+			t.Fatalf("partial payment updated %d rows, want 1", n)
+		}
+		if err := btx.Commit(); err != nil {
+			t.Fatalf("commit partial payment: %v", err)
+		}
+		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		_, verr := invoiceSvc.VoidUnchangedTx(ctx, tx, tenantID, snap)
+		_ = tx.Rollback()
+		if verr == nil {
+			t.Fatal("VoidUnchangedTx voided an invoice that was partly paid after the snapshot")
+		}
+		got, err := invoiceStore.Get(ctx, tenantID, invID)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if got.Status == domain.InvoiceVoided {
+			t.Error("invoice voided despite the refusal")
+		}
+	})
 }
 
 func (a *subStoreAdapter) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
@@ -855,4 +950,24 @@ func (a *subStoreAdapter) ActivateAfterTrialWithBill(ctx context.Context, tenant
 
 func (a *subStoreAdapter) CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error) {
 	return a.store.CancelAtTrialEnd(ctx, tenantID, id, observedTrialEnd)
+}
+
+// cancelRelief runs the cancel relief the way Cancel does: written on a real
+// tenant tx, committed, then its post-commit legs.
+func cancelRelief(t *testing.T, ctx context.Context, db *postgres.DB, tenantID string, e *billing.Engine, sub domain.Subscription) domain.Relief {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin relief tx: %v", err)
+	}
+	r, err := e.BillOnCancelDraftsTx(ctx, tx, sub)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit relief: %v", err)
+	}
+	e.FinishRelief(ctx, sub, r)
+	return r
 }

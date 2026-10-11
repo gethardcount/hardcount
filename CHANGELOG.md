@@ -59,6 +59,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **A cancel or plan change can no longer go through while the customer's refund for the unused period is lost (2026-10-12, ADR-118).** When an invoice for that period was unpaid, the relief ran after the cancel or immediate plan swap had been saved, and a failure there was only logged. Examples: an unused unpaid invoice stayed due; a paid share was never credited. Now the relief is saved in the same step as the cancel or swap: credit notes, or a void of an unpaid invoice that was not used at all. If it fails, the cancel or swap fails too, and dunning and scheduled cancels retry on their own. An operator or API caller may now see an error on a temporary problem and should retry.
+
 - **An invoice's currency is no longer guessed when the customer's billing profile cannot be read (2026-10-11).** The period close, the first invoice of a new subscription, the final invoice on cancel and the threshold invoice now stop and retry. They used to fall back to the plan's currency. A customer with no billing profile still gets the plan's currency.
 
 - **Payments stop on a read error instead of guessing (2026-10-11).**

@@ -231,17 +231,15 @@ func (e *Engine) dispatchInvoiceFinalized(ctx context.Context, sub domain.Subscr
 	}
 }
 
-// SetCreditGranter wires the credit-grant issuer used by BillOnCancel
-// for cancel proration on in_advance plans (ADR-031). Optional —
-// without it, in_advance subs cancel without a proration credit.
+// SetCreditGranter wires the credit-grant issuer (ADR-031). Required by the
+// boot wiring check.
 func (e *Engine) SetCreditGranter(g CreditGranter) {
 	e.creditGranter = g
 }
 
-// SetInvoiceVoider / SetCreditNoteAdjuster wire the two issuers BillOnCancel
-// uses to settle an UNPAID in_advance invoice at mid-period cancel (#22):
-// void it when nothing was consumed, or reduce its amount_due to the consumed
-// portion via an adjustment credit note. Both REQUIRED — boot fails closed if
+// SetInvoiceVoider / SetCreditNoteAdjuster wire the two issuers the cancel and
+// plan-swap relief writes through (#22, ADR-118): a void when an unpaid
+// invoice's period was not used at all, an adjustment credit note otherwise. Both REQUIRED — boot fails closed if
 // unwired (#442); the old "unwired → leave for dunning" fallback arms are
 // deleted, so a missing issuer can never silently dun a customer for a
 // canceled period again.
@@ -374,30 +372,31 @@ type CreditApplier interface {
 	ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, invoiceID string, amountCents int64, at time.Time, invoiceNumber ...string) (int64, error)
 }
 
-// CreditGranter issues a new credit grant. Used by BillOnCancel
-// (ADR-031 slice 3) to refund the unused portion of an already-
-// billed in_advance period to the customer's credit balance.
+// CreditGranter issues a new credit grant. Wired by boot
+// (ADR-031 slice 3); the cancel relief credits the balance through
+// credit notes (CreditNoteAdjuster), not through this.
 // Implemented by *credit.Service.
 type CreditGranter interface {
 	Grant(ctx context.Context, tenantID string, input credit.GrantInput) (domain.CreditLedgerEntry, error)
 }
 
-// InvoiceVoider annuls a finalized, unpaid invoice. Used by BillOnCancel (#22)
-// to void an in_advance prebill that the customer never consumed any of when
-// they cancel mid-period. Implemented by *invoice.Service (refuses paid and
-// already-voided invoices, reverses upstream tax). Narrow on purpose so billing
+// InvoiceVoider annuls a finalized, unpaid invoice inside a cancel or plan-swap
+// transaction: the relief for an in_advance prebill the customer never used any
+// of (#22). VoidUnchangedTx voids on the caller's tx and refuses if the invoice
+// changed since the engine read it; AfterVoid runs the post-commit tax reversal
+// and webhook. Implemented by *invoice.Service. Narrow on purpose so billing
 // keeps coordinating through a domain-typed interface, not an invoice import.
 type InvoiceVoider interface {
-	Void(ctx context.Context, tenantID, id string) (domain.Invoice, error)
+	VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID string, snapshot domain.Invoice) (domain.Invoice, error)
+	AfterVoid(ctx context.Context, tenantID string, voided domain.Invoice)
 }
 
-// CreditNoteAdjuster reduces an unpaid finalized invoice's amount_due by issuing
-// an adjustment credit note. Used by BillOnCancel (#22) to settle a partially-
-// consumed unpaid in_advance prebill down to the consumed portion (the unused
-// fraction is removed from the receivable, proportional tax reversed). The
-// amount is gross (tax-inclusive). Implemented by *creditnote.Service.
+// CreditNoteAdjuster writes the cancel / plan-swap relief as adjustment credit
+// notes: on a PAID source the note credits the customer's balance, on an UNPAID
+// one it reduces amount_due to the used portion (proportional tax reversed in
+// both). The amount is gross (tax-inclusive). Implemented by
+// *creditnote.Service.
 type CreditNoteAdjuster interface {
-	CreateAndIssueAdjustment(ctx context.Context, tenantID, invoiceID string, grossCents int64, reason, description string) (domain.CreditNote, error)
 	// CreateAdjustmentDraftTx creates the adjustment credit note as an
 	// issue_pending DRAFT on the caller's coordinator tx (ADR-057), to be issued
 	// post-commit. Used by the atomic cancel-proration-credit path.
@@ -3805,8 +3804,7 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 //   - Lines:
 //   - in_arrears base items: prorated by `elapsed / full_cycle`.
 //   - in_advance base items: skipped (already paid up-front; the
-//     refund of the unused portion is BillOnCancel's job — credit
-//     grant to balance).
+//     relief for the unused portion is BillOnCancelDraftsTx's job).
 //   - Usage: aggregated for [periodStart, canceled_at] across every
 //     meter referenced by every item. Same shape as a normal cycle
 //     invoice's usage section, just with a truncated period_end.
@@ -3901,8 +3899,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	// partial period [periodStart, canceledAt]. in_advance items are
 	// explicitly skipped — their base for the just-canceled period
 	// was already paid at period start (BillOnCreate or prior cycle),
-	// and the unused portion will be refunded by BillOnCancel as a
-	// credit grant.
+	// and the unused portion is relieved by BillOnCancelDraftsTx.
 	//
 	// Segment-aware: if the customer changed plan or quantity (or
 	// added/removed an item) between periodStart and canceledAt, each
@@ -4509,97 +4506,10 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	return inv, nil
 }
 
-// BillOnCancel emits the cancel proration credit for an in_advance
-// subscription that was canceled before its current period closed
-// (ADR-031). The base for the current period was already billed —
-// either on day 1 via BillOnCreate or at the prior cycle close — so
-// the unused portion (canceled_at → period_end) needs to flow back
-// to the customer.
-//
-// Refund mode: credit grant to the customer's balance. Operator can
-// separately issue a credit note against the original invoice for a
-// PM refund if desired (matches Stripe's out_of_band vs payment
-// refund choice). Granting to balance is the safer default — no
-// Stripe round-trip, applies automatically to future invoices.
-//
-// No-op when:
-//   - sub.Status != canceled (defensive — caller should have flipped it)
-//   - no current period set
-//   - cancel_at at/after period_end (clean cancel, no proration owed)
-//   - no item's plan is in_advance (every base was arrears, nothing prebilled)
-//   - computed unused amount rounds to zero
-//
-// Idempotency: not provided. Cancel is called once; if BillOnCancel
-// fails after the cancel succeeds, the operator can manually issue
-// a credit grant from the dashboard. Re-calling Cancel against an
-// already-canceled sub returns the existing canceled state before
-// reaching the biller (so BillOnCancel doesn't run twice in normal
-// retry).
-// Returns (credit_cents, error). credit_cents is the cents-amount of
-// the cancel-proration credit granted (0 when no credit applied —
-// in_arrears sub, clean cancel, unpaid source invoice, etc.). The
-// caller surfaces this to the activity timeline so operators see the
-// "Cancel proration credit: $X.XX" line linked to the cancel event.
-func (e *Engine) BillOnCancel(ctx context.Context, sub domain.Subscription) (int64, error) {
-	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillOnCancel",
-		trace.WithAttributes(
-			attribute.String("subscription_id", sub.ID),
-			attribute.String("tenant_id", sub.TenantID),
-		),
-	)
-	defer span.End()
-
-	in, ok, err := e.prepareCancelCredit(ctx, sub)
-	if err != nil {
-		return 0, err
-	}
-	if !ok {
-		return 0, nil
-	}
-
-	// Resolve EVERY invoice that funded this period — the day-1 base invoice
-	// AND any mid-period upgrade/qty proration invoice. The credit is sized off
-	// the post-change base, which can exceed the single base invoice;
-	// settleUnusedAcrossFunding fans it across the full set so each piece stays
-	// within its own invoice's credit-note cap, paid sources credited to
-	// balance / unpaid sources relieved on amount_due. A per-invoice cap failure
-	// is surfaced loudly here, never swallowed to a silent $0 (ADR-031/ADR-048).
-	sources, lookupErr := e.invoices.FindFundingInvoicesForPeriod(ctx, sub.TenantID, sub.ID, in.PeriodStart, in.PeriodEnd)
-	if errors.Is(lookupErr, errs.ErrNotFound) {
-		slog.InfoContext(ctx, "cancel proration: no in_advance invoice for period; no relief to apply",
-			"subscription_id", sub.ID,
-			"customer_id", sub.CustomerID,
-			"period_start", in.PeriodStart,
-		)
-		return 0, nil
-	}
-	if lookupErr != nil {
-		// Real lookup error (DB blip, etc.) — fail loud rather than
-		// silently shortchange the customer (2026-05-30 design-debt
-		// audit Tier 1 #6).
-		return 0, fmt.Errorf("cancel proration: lookup funding invoices: %w", lookupErr)
-	}
-	credited, err := e.settleUnusedAcrossFunding(ctx, sub, sources, in.PeriodEnd, in.CancelAt, in.TotalUnused, "subscription_cancellation", in.Desc)
-	if err != nil {
-		return 0, fmt.Errorf("cancel proration credit: %w", err)
-	}
-	slog.Info("cancel proration credit issued",
-		"subscription_id", sub.ID,
-		"customer_id", sub.CustomerID,
-		"amount_cents", credited,
-		"funding_invoices", len(sources),
-		"period_start", in.PeriodStart,
-		"period_end", in.PeriodEnd,
-		"canceled_at", in.CancelAt,
-	)
-	return credited, nil
-}
-
 // cancelCreditInputs is the shared setup for the in_advance cancel-proration
 // credit: the funding-period bounds, the net unused base, and the human
-// description. Computed once by prepareCancelCredit and consumed by BOTH the
-// post-commit BillOnCancel and the in-tx BillOnCancelDraftsTx (so the unused-base
-// math has a single source of truth).
+// description. Computed by prepareCancelCredit (prepareSwapCredit for a plan
+// swap) and consumed by the in-tx relief trunk.
 type cancelCreditInputs struct {
 	PeriodStart, PeriodEnd, CancelAt time.Time
 	TotalUnused                      int64
@@ -4607,8 +4517,7 @@ type cancelCreditInputs struct {
 }
 
 // unusedBaseForPeriod is the single source of the mid-period unused-base
-// arithmetic shared by the cancel and plan-swap refund paths (both the
-// in-tx draft halves and the post-commit fallbacks). Day-based math to
+// arithmetic shared by the cancel and plan-swap relief. Day-based math to
 // avoid int64 overflow — nanosecond math overflows for ~$36+ base fees on
 // a full-month proration. Denominator is the FULL plan-interval cycle (not
 // the current period's length), since the customer paid
@@ -4717,39 +4626,29 @@ func (e *Engine) prepareCancelCredit(ctx context.Context, sub domain.Subscriptio
 	}, true, nil
 }
 
-// BillOnCancelDraftsTx is the ATOMIC half of the cancel-proration credit
-// (ADR-057 extension). When EVERY funding invoice for the period is PAID (the
-// dominant in_advance cancel), it creates the credit notes as issue_pending
-// DRAFTS on the caller's cancel *sql.Tx — so the customer's owed credit is
-// durable atomically with the cancel flip. The external Issue (Stripe tax
-// reversal + customer-balance grant) runs POST-COMMIT via IssueCancelDrafts, and
-// a never-issued draft is recovered by RetryPendingClawbackIssue.
-//
-// handled=false (no error, no rollback) means the in-tx path DECLINED — any
-// UNPAID funding source (PR1 leaves the whole unpaid leg on the post-commit
-// BillOnCancel path), a transient funding-lookup blip (BillOnCancel re-handles it
-// loudly), or an allocation fault (kept non-blocking, as today). A DRAFT-CREATE
-// failure returns an error → the caller rolls the cancel back (never a canceled
-// sub with a silently-lost credit). creditedCents is the gross owed (durable once
-// the drafts commit, even if the post-commit Issue is later retried).
+// BillOnCancelDraftsTx writes the cancel-proration relief on the caller's
+// cancel *sql.Tx (ADR-057, completed by ADR-118): every funding share, paid or
+// unpaid, so the relief commits — or rolls back — with the cancel. Any error
+// rolls the cancel back: never a canceled subscription whose relief was lost.
+// The caller runs FinishRelief after commit.
 //
 // Engine-writes-on-the-subscription-store's-tx is the BillFinalOnImmediateCancelTx
 // precedent (the final invoice already inserts on this same tx).
-func (e *Engine) BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (ids []string, creditedCents int64, handled bool, err error) {
-	in, ok, perr := e.prepareCancelCredit(ctx, sub)
-	if perr != nil {
-		return nil, 0, false, perr // malformed sub → roll the cancel back
+func (e *Engine) BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Relief, error) {
+	in, ok, err := e.prepareCancelCredit(ctx, sub)
+	if err != nil {
+		return domain.Relief{}, err // malformed sub or plan lookup failure → roll the cancel back
 	}
 	if !ok {
-		return nil, 0, true, nil // nothing to credit — handled no-op
+		return domain.Relief{}, nil // nothing to credit
 	}
-	return e.createUnusedDraftsTx(ctx, tx, sub, in, "subscription_cancellation", "cancel proration")
+	return e.reliefTx(ctx, tx, sub, in, "subscription_cancellation", "cancel proration")
 }
 
 // BillOnPlanSwapDraftsTx is the ATOMIC half of the cross-interval plan-swap
 // refund — the same folded-write shape as BillOnCancelDraftsTx (deferred
 // Bug B, closed 2026-07-05). Pre-fix the ENTIRE swap refund ran post-commit
-// via BillOnPlanSwapImmediate on the request ctx: a crash or disconnect
+// on the request ctx: a crash or disconnect
 // between the swap commit and the refund permanently lost the customer's
 // unused prepayment — the retry 400s on the same-plan guard, and no
 // reconciler re-derives a missed swap refund. Now, when every funding
@@ -4759,22 +4658,19 @@ func (e *Engine) BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domai
 // RetryPendingClawbackIssue — reason-agnostic, so swap drafts ride the same
 // sweep as cancel drafts.
 //
-// handled=false declines to the post-commit BillOnPlanSwapImmediate exactly
-// as the cancel path declines to BillOnCancel: any UNPAID funding source
-// (relief routes through relieveUnpaidPrebill there), a transient lookup
-// blip, or an allocation fault. A draft-create failure returns an error →
-// the caller rolls the whole swap back (never a swapped sub with a
-// silently-lost refund). sub is the PRE-swap snapshot; at is the swap
+// Since ADR-118 every funding share — unpaid ones included — is written on
+// the swap tx, and any error rolls the whole swap back (never a swapped sub
+// with a silently-lost refund). sub is the PRE-swap snapshot; at is the swap
 // instant.
-func (e *Engine) BillOnPlanSwapDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, at time.Time) (ids []string, creditedCents int64, handled bool, err error) {
-	in, ok, perr := e.prepareSwapCredit(ctx, sub, at)
-	if perr != nil {
-		return nil, 0, false, perr // plan lookup failure → roll the swap back
+func (e *Engine) BillOnPlanSwapDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, at time.Time) (domain.Relief, error) {
+	in, ok, err := e.prepareSwapCredit(ctx, sub, at)
+	if err != nil {
+		return domain.Relief{}, err // plan lookup failure → roll the swap back
 	}
 	if !ok {
-		return nil, 0, true, nil // nothing to credit (in_arrears, boundary swap) — handled no-op
+		return domain.Relief{}, nil // nothing to credit (in_arrears, boundary swap)
 	}
-	return e.createUnusedDraftsTx(ctx, tx, sub, in, "subscription_plan_change", "plan-swap refund")
+	return e.reliefTx(ctx, tx, sub, in, "subscription_plan_change", "plan-swap refund")
 }
 
 // prepareSwapCredit mirrors prepareCancelCredit for the mid-period plan
@@ -4815,209 +4711,131 @@ func (e *Engine) prepareSwapCredit(ctx context.Context, sub domain.Subscription,
 	}, true, nil
 }
 
-// createUnusedDraftsTx is the shared in-tx trunk of BillOnCancelDraftsTx and
-// BillOnPlanSwapDraftsTx: funding lookup → all-paid gate → allocation →
-// issue_pending drafts on the caller's tx. what labels log lines ("cancel
-// proration" / "plan-swap refund").
-func (e *Engine) createUnusedDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, in cancelCreditInputs, reason, what string) (ids []string, creditedCents int64, handled bool, err error) {
-	// invoices + creditNoteAdjuster are REQUIRED (boot fails closed, #442) —
-	// the old "unwired → decline to post-commit fallback" arm is deleted;
-	// handled=false remains ONLY for its legitimate runtime reason (an
-	// UNPAID funding source routes to the post-commit path below).
-	sources, lookupErr := e.invoices.FindFundingInvoicesForPeriod(ctx, sub.TenantID, sub.ID, in.PeriodStart, in.PeriodEnd)
-	if errors.Is(lookupErr, errs.ErrNotFound) {
-		// No in_advance invoice funded this period (e.g. trial cancel) — nothing
-		// to credit. Mirror the post-commit paths' trace so the case stays observable.
+// errHeadroomExhausted is the allocator's "an ALL-PAID funding set cannot
+// absorb the owed credit": the period was already fully credited (an earlier
+// credit note took its headroom), so nothing more is owed. It is the only
+// allocation error the relief trunk lets the change proceed past.
+var errHeadroomExhausted = errors.New("unused-prebill credit exceeds the funding invoices' remaining headroom")
+
+// reliefTx is the shared in-tx trunk of BillOnCancelDraftsTx and
+// BillOnPlanSwapDraftsTx: funding lookup → allocation → one write per share on
+// the caller's tx. what labels log lines ("cancel proration" / "plan-swap
+// refund").
+//
+// Every share is written here, paid or unpaid (ADR-118). Until then an UNPAID
+// funding source sent the whole relief to a post-commit path whose failure was
+// only logged — the cancel or swap stood and the customer's relief was lost,
+// with no retry. Any error now rolls the change back; callers retry (dunning
+// and the scheduled-cancel scan do it on their own).
+func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, in cancelCreditInputs, reason, what string) (domain.Relief, error) {
+	sources, err := e.invoices.FindFundingInvoicesForPeriod(ctx, sub.TenantID, sub.ID, in.PeriodStart, in.PeriodEnd)
+	if errors.Is(err, errs.ErrNotFound) {
+		// No in_advance invoice funded this period (e.g. trial cancel) — nothing to relieve.
 		slog.InfoContext(ctx, what+": no in_advance invoice for period; no relief to apply",
 			"subscription_id", sub.ID, "customer_id", sub.CustomerID, "period_start", in.PeriodStart)
-		return nil, 0, true, nil
+		return domain.Relief{}, nil
 	}
-	if lookupErr != nil {
-		return nil, 0, false, nil // transient lookup blip → the post-commit path re-handles loudly
-	}
-
-	// All-paid gate. CreditedCents counts non-voided notes INCLUDING drafts, so
-	// the coupled allocator can't be safely re-run post-commit; the atomic path
-	// therefore runs only when the whole funding set is paid (the dominant
-	// case) and declines the rest to the post-commit fallback.
-	for _, src := range sources {
-		if src.PaymentStatus != domain.PaymentSucceeded {
-			return nil, 0, false, nil
-		}
+	if err != nil {
+		return domain.Relief{}, fmt.Errorf("%s: look up funding invoices: %w", what, err)
 	}
 
-	shares, aerr := e.allocateUnusedAcrossFunding(ctx, sub, sources, in.PeriodEnd, in.CancelAt, in.TotalUnused)
-	if aerr != nil {
-		// Allocation fault (e.g. all-paid headroom can't absorb): decline to the
-		// post-commit path, which surfaces the same loud ERROR without blocking
-		// the terminal write — preserving the non-fatal behavior for this fault class.
-		return nil, 0, false, nil
+	shares, err := e.allocateUnusedAcrossFunding(ctx, sub, sources, in.PeriodEnd, in.CancelAt, in.TotalUnused)
+	if errors.Is(err, errHeadroomExhausted) {
+		// Already fully credited — nothing more is owed. Loud, because it can
+		// also mean drift, but not a reason to refuse the cancel or swap.
+		slog.ErrorContext(ctx, what+": funding invoices already fully credited; no further relief",
+			"subscription_id", sub.ID, "customer_id", sub.CustomerID, "error", err)
+		return domain.Relief{}, nil
+	}
+	if err != nil {
+		return domain.Relief{}, fmt.Errorf("%s: allocate across funding invoices: %w", what, err)
 	}
 
+	var r domain.Relief
 	for _, sh := range shares {
-		if sh.GrossCents <= 0 {
+		src := sh.Source
+		gross, void := sh.GrossCents, false
+		if src.PaymentStatus != domain.PaymentSucceeded {
+			gross, void = unpaidRelief(src, sh.NetCents)
+		}
+		if gross <= 0 {
 			continue
 		}
-		cn, cerr := e.creditNoteAdjuster.CreateAdjustmentDraftTx(ctx, tx, sub.TenantID, sh.Source.ID, sh.GrossCents, reason, in.Desc)
-		if cerr != nil {
-			// Draft create failed → roll the WHOLE terminal write back (the atomic
-			// guarantee: never a canceled/swapped sub with a silently-lost credit).
-			// Deliberately atomic-refuse for ANY draft-create failure, including a
-			// credit-note cap rejection from a concurrent operator CN shrinking the
-			// source's headroom AFTER the off-tx CreditedCents read — the operator's
-			// retry self-heals (allocate re-reads the smaller headroom and sizes a
-			// fitting share). This is stricter than the pre-fix post-commit path
-			// (which logged + let the write proceed with the credit stranded);
-			// refusing-and-retrying is the more correct money behavior. Distinct
-			// from an UNPAID source (handled=false above → post-commit fallback).
-			return nil, 0, false, fmt.Errorf("%s draft on %s: %w", what, sh.Source.ID, cerr)
+		if void {
+			voided, verr := e.invoiceVoider.VoidUnchangedTx(ctx, tx, sub.TenantID, src)
+			if verr != nil {
+				return domain.Relief{}, fmt.Errorf("%s: void fully-unused %s: %w", what, src.ID, verr)
+			}
+			r.Voided = append(r.Voided, voided)
+			continue
 		}
-		ids = append(ids, cn.ID)
-		creditedCents += sh.GrossCents
+		// A credit-note cap rejection here (a concurrent operator credit note
+		// shrank the source's headroom after the off-tx CreditedCents read)
+		// rolls the change back too; the retry re-reads the smaller headroom.
+		cn, cerr := e.creditNoteAdjuster.CreateAdjustmentDraftTx(ctx, tx, sub.TenantID, src.ID, gross, reason, in.Desc)
+		if cerr != nil {
+			return domain.Relief{}, fmt.Errorf("%s: credit-note draft on %s: %w", what, src.ID, cerr)
+		}
+		r.DraftIDs = append(r.DraftIDs, cn.ID)
+		if src.PaymentStatus == domain.PaymentSucceeded {
+			r.CreditedCents += gross
+		}
 	}
-	return ids, creditedCents, true, nil
+	return r, nil
 }
 
-// IssueCancelDrafts issues the cancel-proration credit-note drafts created in-tx
-// by BillOnCancelDraftsTx — the POST-COMMIT external relay (Stripe tax reversal +
-// customer-balance grant). Best-effort: a failure is logged and the drafts stay
-// status='draft' + issue_pending for RetryPendingClawbackIssue to re-issue (the
-// credit is already durable). Mirrors FinalizeOnCreateInvoice.
-func (e *Engine) IssueCancelDrafts(ctx context.Context, sub domain.Subscription, ids []string) {
-	e.issueDrafts(ctx, sub, ids, "cancel proration")
+// unpaidRelief sizes the relief for an UNPAID funding invoice's share (net,
+// tax-exclusive): grossed up by the invoice's own Total/Subtotal ratio so the
+// unused portion's tax is relieved too (Velox invoices carry one tax rate and
+// no discount, so the ratio is 1 + rate), clamped to its amount_due. void=true
+// when the whole remaining receivable is unused, nothing has been paid, and no
+// charge is in flight: the invoice is voided — status voided, applied credits
+// handed back, full tax reversal. Otherwise an adjustment credit note reduces
+// amount_due to the used portion; on an in-flight source Issue() defers that
+// note until the charge settles (ADR-059).
+func unpaidRelief(src domain.Invoice, net int64) (gross int64, void bool) {
+	gross = net
+	if src.SubtotalCents > 0 {
+		gross = money.RoundHalfToEven(net*src.TotalAmountCents, src.SubtotalCents)
+	}
+	gross = min(gross, src.AmountDueCents)
+	if gross <= 0 {
+		return 0, false
+	}
+	void = gross >= src.AmountDueCents && src.AmountPaidCents == 0 &&
+		!domain.PaymentBlocksAction(src, domain.ActionVoid).Blocked
+	return gross, void
 }
 
-// IssueSwapDrafts is the plan-swap twin — issues the drafts created in-tx by
-// BillOnPlanSwapDraftsTx after the swap tx commits.
-func (e *Engine) IssueSwapDrafts(ctx context.Context, sub domain.Subscription, ids []string) {
-	e.issueDrafts(ctx, sub, ids, "plan-swap refund")
-}
-
-func (e *Engine) issueDrafts(ctx context.Context, sub domain.Subscription, ids []string, what string) {
-	for _, id := range ids {
+// FinishRelief runs a committed Relief's post-commit legs: issue the
+// credit-note drafts (Stripe tax reversal + customer-balance grant, or the
+// amount_due reduction) and the voids' tax reversal and webhook. Best-effort:
+// every leg is already durable and recovered by its own sweep, so a failure
+// here is logged, never returned.
+func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) {
+	for _, id := range r.DraftIDs {
 		if _, err := e.creditNoteAdjuster.Issue(ctx, sub.TenantID, id); err != nil {
-			// Issue() is atomic + recoverable (ADR-061): the draft→issued CAS and
-			// the internal money effect (amount_due reduction / credit grant) commit
-			// together, and the external legs recover on their own. So an error here
-			// is self-healing — either the CAS never committed (still 'draft' +
-			// issue_pending → RetryPendingClawbackIssue re-drives) or a post-commit
-			// external leg failed (refund → RetryRefund; tax reversal →
-			// RetryPendingCreditNoteTaxReversal). The credit is durable; no manual
-			// reconcile, and no post-flip orphan window (closed by ADR-061).
-			slog.ErrorContext(ctx, what+" draft issue failed post-commit; self-heals via reconciler (no manual reconcile needed)",
+			// Issue() is atomic + recoverable (ADR-061): either the draft→issued
+			// CAS never committed (still draft + issue_pending →
+			// RetryPendingClawbackIssue re-drives) or a post-commit external leg
+			// failed (refund → RetryRefund; tax reversal →
+			// RetryPendingCreditNoteTaxReversal).
+			slog.ErrorContext(ctx, "relief credit-note issue failed post-commit; self-heals via reconciler",
 				"subscription_id", sub.ID, "credit_note_id", id, "error", err)
 		}
 	}
+	for _, inv := range r.Voided {
+		e.invoiceVoider.AfterVoid(ctx, sub.TenantID, inv)
+	}
 }
 
-// relieveUnpaidPrebill settles an UNPAID in_advance prebill when the customer
-// abandons the period it covers — a mid-period cancel (#22) or a same-cadence
-// cross-interval plan swap (ADR-050). totalUnused is the net (tax-exclusive)
-// unused base already computed by the caller; src is the unpaid finalized
-// invoice for the period; reason/desc are the credit-note categorical reason
-// and human description for the issuing path. No customer-balance credit is
-// granted (no cash was funded), so it always returns 0 cents; the error is
-// non-nil only on a hard failure.
-//
-// Rule:
-//   - Gross up totalUnused to the invoice's gross via its own Total/Subtotal
-//     ratio so the relief also covers the unused portion's proportional tax.
-//     Velox invoices carry a single uniform tax rate and (post-coupon-cut) no
-//     discount, so Total/Subtotal == 1 + rate; a zero-tax invoice grosses up by
-//     1× (no change).
-//   - Clamp to the invoice's current amount_due.
-//   - Whole remaining receivable unused AND nothing paid → Void (clean terminal
-//     status, full tax reversal).
-//   - Otherwise → adjustment credit note reducing amount_due to the consumed
-//     portion (reverses the unused fraction's tax).
-//
-// When the relevant issuer isn't wired (narrow unit tests), it logs and leaves
-// the invoice untouched — the legacy "ride the dunning path" behavior — so
-// existing engine tests that don't wire the issuers keep passing.
-//
-// Idempotency: each caller runs once per terminal event (BillOnCancel once per
-// cancel; the swap path once per immediate swap), so this is not re-entered for
-// the same invoice in normal operation; the amount_due cap is the backstop.
-func (e *Engine) relieveUnpaidPrebill(ctx context.Context, sub domain.Subscription, src domain.Invoice, totalUnused int64, reason, desc string) (int64, error) {
-	grossUnused := totalUnused
-	if src.SubtotalCents > 0 {
-		grossUnused = money.RoundHalfToEven(totalUnused*src.TotalAmountCents, src.SubtotalCents)
-	}
-	reduceBy := min(grossUnused, src.AmountDueCents)
-	if reduceBy <= 0 {
-		return 0, nil
-	}
-
-	// Whole remaining receivable is unused and nothing has been paid → void it.
-	// A partial payment (amount_paid > 0) would make a void annul collected
-	// money, so fall through to the reduce path in that case.
-	//
-	// EXCEPT when the charge is in flight (processing/unknown): voiding an
-	// invoice whose payment may still succeed strands captured money on a voided
-	// invoice (and invoice.Service.Void now refuses it, ADR-059). Fall through to
-	// the reduce path, which creates a FULL-amount clawback draft that Issue()
-	// defers until the source settles — paid → full credit to balance, failed →
-	// amount_due reduced to 0 (the same end-state the void would have produced),
-	// chosen by the source's settled payment_status at issue time.
-	if reduceBy >= src.AmountDueCents && src.AmountPaidCents == 0 && !src.PaymentStatus.IsInFlight() {
-		// invoiceVoider is required (boot fails closed, #442) — the old
-		// "unwired → leave for dunning" arm silently dunned a customer for
-		// a fully-unused prebill instead of voiding it.
-		if _, err := e.invoiceVoider.Void(ctx, sub.TenantID, src.ID); err != nil {
-			return 0, fmt.Errorf("relieve unpaid prebill: void fully-unused %s: %w", src.ID, err)
-		}
-		slog.InfoContext(ctx, "unpaid prebill relief: voided fully-unused invoice",
-			"subscription_id", sub.ID, "customer_id", sub.CustomerID,
-			"source_invoice_id", src.ID, "amount_cents", reduceBy, "reason", reason)
-		return 0, nil
-	}
-
-	// Partially consumed → reduce amount_due down to the consumed portion.
-	// (creditNoteAdjuster is required — boot fails closed, #442; the old
-	// "unwired → leave for dunning" arm silently under-relieved.)
-	if _, err := e.creditNoteAdjuster.CreateAndIssueAdjustment(
-		ctx, sub.TenantID, src.ID, reduceBy, reason, desc); err != nil {
-		return 0, fmt.Errorf("relieve unpaid prebill: reduce %s to consumed portion: %w", src.ID, err)
-	}
-	// For an in-flight source the CreateAndIssueAdjustment above created the
-	// clawback as a DRAFT and Issue() DEFERRED it (ADR-059) — amount_due is NOT
-	// reduced yet; the reconciler issues it once the charge settles. Log the
-	// honest state so this doesn't read as a completed reduction.
-	if src.PaymentStatus.IsInFlight() {
-		slog.InfoContext(ctx, "unpaid prebill relief: source charge in flight — clawback drafted, deferred until settle",
-			"subscription_id", sub.ID, "customer_id", sub.CustomerID,
-			"source_invoice_id", src.ID, "drafted_cents", reduceBy,
-			"payment_status", string(src.PaymentStatus), "reason", reason)
-		return 0, nil
-	}
-	slog.InfoContext(ctx, "unpaid prebill relief: reduced amount_due to consumed portion",
-		"subscription_id", sub.ID, "customer_id", sub.CustomerID,
-		"source_invoice_id", src.ID, "reduced_by_cents", reduceBy, "reason", reason)
-	return 0, nil
-}
-
-// settleUnusedAcrossFunding relieves the unused in_advance prepayment of a
-// canceled / swapped period across EVERY invoice that funded it. `totalUnused`
-// (net, sized off the post-change base across all items) is the authoritative
-// figure; it is PARTITIONED across the funding invoices in proportion to each
-// invoice's own unused contribution (its subtotal × the unused fraction of the
-// window it covers), then settled per invoice:
-//   - PAID source   → gross up by its own Total/Subtotal ratio and credit the
-//     customer balance via a per-invoice credit note (reversing that invoice's
-//     own proportional tax against its own tax_transaction_id). Adds its gross
-//     to the returned credited total.
-//   - UNPAID source → relieve its amount_due (void / reduce) for its share.
-//
-// Because the partition sums to totalUnused exactly, the customer is neither
-// over- nor under-credited even after a prior reversing change (downgrade /
-// qty-decrease) inflated the raw per-invoice shares. A per-invoice credit-note
-// cap failure (e.g. a prior credit note already consumed a source's headroom)
-// is returned as a HARD error — the caller must surface it loudly, never
-// swallow it to a silent $0 credit.
 // fundingShare is one funding invoice's allocated slice of the unused-prebill
-// credit, from allocateUnusedAcrossFunding. GrossCents is the clamped credit-note
-// gross for a PAID source (the customer-balance credit); an UNPAID source carries
-// only NetCents (relieveUnpaidPrebill computes its own gross).
+// credit, from allocateUnusedAcrossFunding. totalUnused (net, sized off the
+// post-change base across all items) is PARTITIONED across the funding invoices
+// in proportion to each invoice's own unused contribution, so the customer is
+// neither over- nor under-credited after a prior reversing change. GrossCents is
+// the clamped credit-note gross for a PAID source (the customer-balance credit);
+// an UNPAID source carries only NetCents (unpaidRelief computes its gross).
 type fundingShare struct {
 	Source     domain.Invoice
 	NetCents   int64
@@ -5030,9 +4848,8 @@ type fundingShare struct {
 // via AllocateByWeightCapped, and surface an unplaceable remainder LOUDLY (all-paid
 // fault) or as a WARN (mixed set). READS + MATH only — no Create/Issue — so it is
 // safe inside a coordinator tx. CRITICAL: the per-PAID-source net→gross clamp AND
-// the remainder loud-fail live HERE, not in the consumer, so the #276/#277/#278
-// over-credit invariant (cumulative credit ≤ funding headroom) holds for BOTH the
-// post-commit issue/relieve consumer AND the in-tx draft path. The CreditedCents
+// the remainder loud-fail live HERE, so the #276/#277/#278 over-credit invariant
+// (cumulative credit ≤ funding headroom) holds for every relief write. The CreditedCents
 // headroom read MUST stay off any coordinator tx — it counts non-voided notes
 // INCLUDING drafts, so an on-tx read would let an in-flight draft shrink its own
 // headroom.
@@ -5064,7 +4881,7 @@ func (e *Engine) allocateUnusedAcrossFunding(ctx context.Context, sub domain.Sub
 		//     non-voided credit notes via the optional reader; full total
 		//     unwired). A prior credit note that shrank it pushes the share
 		//     elsewhere.
-		//   - UNPAID + real total → amount_due. relieveUnpaidPrebill can only
+		//   - UNPAID + real total → amount_due. unpaidRelief can only
 		//     reduce a receivable down to zero, so capping here makes the
 		//     allocator route the un-relievable overflow to PAID sources (which
 		//     credit the customer) instead of silently dropping it inside the
@@ -5116,7 +4933,7 @@ func (e *Engine) allocateUnusedAcrossFunding(ctx context.Context, sub domain.Sub
 			// All-paid funding set can't absorb the owed credit — a genuine fault
 			// (period already fully credited, or drift). Fail LOUD; never silently
 			// drop the customer's money.
-			return nil, fmt.Errorf("cannot place unused-prebill credit: %d of %d exceeds funding headroom across %d invoice(s)", remainder, totalUnused, len(sources))
+			return nil, fmt.Errorf("%w: %d of %d across %d invoice(s)", errHeadroomExhausted, remainder, totalUnused, len(sources))
 		}
 		// Mixed/unpaid set: paid sources already absorbed all they could (the
 		// allocator water-fills overflow onto them first); the residual is value
@@ -5149,134 +4966,6 @@ func (e *Engine) allocateUnusedAcrossFunding(ctx context.Context, sub domain.Sub
 		shares = append(shares, sh)
 	}
 	return shares, nil
-}
-
-// settleUnusedAcrossFunding is the POST-COMMIT consumer of the allocation: PAID
-// sources → a credit note that credits the customer's balance
-// (CreateAndIssueAdjustment); UNPAID sources → relieveUnpaidPrebill. Behavior is
-// unchanged from the pre-split single-pass version; the allocation math now lives
-// in allocateUnusedAcrossFunding so the in-tx draft path (BillOnCancelDraftsTx)
-// shares the exact same #277-guarded caps/clamp/remainder logic.
-func (e *Engine) settleUnusedAcrossFunding(ctx context.Context, sub domain.Subscription, sources []domain.Invoice, periodEnd, effectiveAt time.Time, totalUnused int64, reason, desc string) (int64, error) {
-	shares, err := e.allocateUnusedAcrossFunding(ctx, sub, sources, periodEnd, effectiveAt, totalUnused)
-	if err != nil {
-		return 0, err
-	}
-	var credited int64
-	for _, sh := range shares {
-		src := sh.Source
-		if src.PaymentStatus == domain.PaymentSucceeded {
-			if sh.GrossCents <= 0 {
-				continue
-			}
-			if _, err := e.creditNoteAdjuster.CreateAndIssueAdjustment(ctx, sub.TenantID, src.ID, sh.GrossCents, reason, desc); err != nil {
-				// Loud-fail: a source's credit-note cap rejecting its share means
-				// money would be stranded. Surface it; do NOT drop to $0.
-				return credited, fmt.Errorf("credit unused prebill on %s (share %d of total %d): %w", src.ID, sh.GrossCents, totalUnused, err)
-			}
-			credited += sh.GrossCents
-			continue
-		}
-		// Unpaid funding invoice → relieve its receivable for its share.
-		if _, err := e.relieveUnpaidPrebill(ctx, sub, src, sh.NetCents, reason, desc); err != nil {
-			return credited, err
-		}
-	}
-	return credited, nil
-}
-
-// BillOnPlanSwapImmediate issues the refund credit for the unused
-// portion of an in_advance billed period when a sub's plan is swapped
-// to a different cadence/interval mid-period. Returns the cents amount
-// granted (0 when none).
-//
-// Mirrors BillOnCancel's refund math but takes `at` as a parameter and
-// does not gate on canceled status — the caller (Service.UpdateItem)
-// invokes this BEFORE applying the plan swap, while the OLD plan is
-// still on the items so plan lookups resolve the outgoing rate.
-//
-// No-op when:
-//   - no current period set
-//   - at at/after period_end OR at/before period_start (clean swap)
-//   - no item's plan is in_advance (nothing prebilled to refund)
-//   - source in_advance invoice not paid (mirrors BillOnCancel paid-check)
-//   - computed unused amount rounds to zero
-//
-// Caller is responsible for applying the plan swap and updating the
-// billing period AFTER this call — this method only handles the
-// refund for the OLD in_advance portion.
-func (e *Engine) BillOnPlanSwapImmediate(ctx context.Context, sub domain.Subscription, at time.Time) (int64, error) {
-	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillOnPlanSwapImmediate",
-		trace.WithAttributes(
-			attribute.String("subscription_id", sub.ID),
-			attribute.String("tenant_id", sub.TenantID),
-		),
-	)
-	defer span.End()
-
-	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-		return 0, nil
-	}
-
-	periodStart := *sub.CurrentBillingPeriodStart
-	periodEnd := *sub.CurrentBillingPeriodEnd
-
-	if !at.Before(periodEnd) || !at.After(periodStart) {
-		return 0, nil
-	}
-
-	// One zone for the refund amount and its description.
-	loc, err := e.tenantLocation(ctx, sub.TenantID)
-	if err != nil {
-		return 0, err
-	}
-	totalUnused, err := e.unusedBaseForPeriod(ctx, sub, periodStart, periodEnd, at, loc)
-	if err != nil {
-		return 0, err
-	}
-	if totalUnused <= 0 {
-		return 0, nil
-	}
-
-	// Civil-day dates on the customer-facing credit-note / ledger description
-	// render in the tenant billing timezone (ADR-077), not UTC.
-	desc := prorationRefundDesc("Plan-swap refund", sub.Code, "swapped", periodStart, periodEnd, at, loc)
-
-	// Fan the refund across EVERY invoice that funded the period (base +
-	// mid-period upgrade) — same multi-source settlement as cancel — so a swap
-	// after a prior upgrade doesn't overrun the single base invoice's
-	// credit-note cap and silently strand the customer's unused prepayment.
-	// Paid sources credit the balance (own tax reversal), unpaid sources relieve
-	// amount_due (ADR-050); a per-invoice cap failure surfaces loudly here.
-	sources, lookupErr := e.invoices.FindFundingInvoicesForPeriod(ctx, sub.TenantID, sub.ID, periodStart, periodEnd)
-	if errors.Is(lookupErr, errs.ErrNotFound) {
-		slog.InfoContext(ctx, "plan-swap refund: no in_advance invoice for period; no credit to grant",
-			"subscription_id", sub.ID,
-			"customer_id", sub.CustomerID,
-			"period_start", periodStart,
-		)
-		return 0, nil
-	}
-	if lookupErr != nil {
-		// Real lookup error (DB blip, etc.) — fail loud rather than
-		// silently shortchange the customer (2026-05-30 design-debt
-		// audit Tier 1 #6).
-		return 0, fmt.Errorf("plan-swap refund: lookup funding invoices: %w", lookupErr)
-	}
-	credited, err := e.settleUnusedAcrossFunding(ctx, sub, sources, periodEnd, at, totalUnused, "subscription_plan_change", desc)
-	if err != nil {
-		return 0, fmt.Errorf("plan-swap refund credit: %w", err)
-	}
-	slog.Info("plan-swap refund credit issued",
-		"subscription_id", sub.ID,
-		"customer_id", sub.CustomerID,
-		"amount_cents", credited,
-		"funding_invoices", len(sources),
-		"period_start", periodStart,
-		"period_end", periodEnd,
-		"swapped_at", at,
-	)
-	return credited, nil
 }
 
 // invoicePage returns one page of a background invoice queue after the

@@ -1305,19 +1305,47 @@ func (g *fakeCreditGranter) Grant(_ context.Context, _ string, in credit.GrantIn
 }
 
 // fakeInvoiceVoider / fakeCreditNoteAdjuster back the #22 unpaid-prebill-relief
-// tests: they record which settlement path BillOnCancel took (void the whole
-// invoice vs reduce amount_due to the consumed portion via an adjustment CN).
+// tests: they record which relief the trunk wrote (void the whole invoice vs
+// reduce amount_due to the consumed portion via an adjustment CN).
 type fakeInvoiceVoider struct {
-	voided []string // invoice IDs
-	err    error
+	voided     []string // invoice IDs voided in-tx
+	afterVoids []string // invoice IDs whose post-commit legs ran
+	err        error
 }
 
-func (v *fakeInvoiceVoider) Void(_ context.Context, _, id string) (domain.Invoice, error) {
+func (v *fakeInvoiceVoider) VoidUnchangedTx(_ context.Context, _ *sql.Tx, _ string, snap domain.Invoice) (domain.Invoice, error) {
 	if v.err != nil {
 		return domain.Invoice{}, v.err
 	}
-	v.voided = append(v.voided, id)
-	return domain.Invoice{ID: id, Status: domain.InvoiceVoided}, nil
+	v.voided = append(v.voided, snap.ID)
+	snap.Status = domain.InvoiceVoided
+	return snap, nil
+}
+
+func (v *fakeInvoiceVoider) AfterVoid(_ context.Context, _ string, inv domain.Invoice) {
+	v.afterVoids = append(v.afterVoids, inv.ID)
+}
+
+// billOnCancel runs the cancel relief the way Cancel does — written on the
+// (here absent) tx, then its post-commit legs — and returns the customer-
+// balance credit, the shape the pre-ADR-118 BillOnCancel returned.
+func billOnCancel(e *Engine, ctx context.Context, sub domain.Subscription) (int64, error) {
+	r, err := e.BillOnCancelDraftsTx(ctx, nil, sub)
+	if err != nil {
+		return 0, err
+	}
+	e.FinishRelief(ctx, sub, r)
+	return r.CreditedCents, nil
+}
+
+// billOnPlanSwap is billOnCancel's plan-swap twin.
+func billOnPlanSwap(e *Engine, ctx context.Context, sub domain.Subscription, at time.Time) (int64, error) {
+	r, err := e.BillOnPlanSwapDraftsTx(ctx, nil, sub, at)
+	if err != nil {
+		return 0, err
+	}
+	e.FinishRelief(ctx, sub, r)
+	return r.CreditedCents, nil
 }
 
 type cnAdjustCall struct {
@@ -1345,6 +1373,12 @@ func (a *fakeCreditNoteAdjuster) CreateAdjustmentDraftTx(_ context.Context, _ *s
 	if a.draftErr != nil {
 		return domain.CreditNote{}, a.draftErr
 	}
+	if a.err != nil {
+		return domain.CreditNote{}, a.err
+	}
+	// Every relief credit note is a draft now (ADR-118): record it in calls
+	// too, the list the per-invoice relief assertions read.
+	a.calls = append(a.calls, cnAdjustCall{invoiceID: invoiceID, gross: grossCents})
 	a.draftCall = append(a.draftCall, cnAdjustCall{invoiceID: invoiceID, gross: grossCents})
 	return domain.CreditNote{ID: fmt.Sprintf("vlx_cn_draft_%d", len(a.draftCall)), TotalCents: grossCents}, nil
 }
@@ -3430,7 +3464,7 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
-		cents, err := engine.BillOnCancel(context.Background(), makeSub())
+		cents, err := billOnCancel(engine, context.Background(), makeSub())
 		if err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
@@ -3471,7 +3505,7 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
-		cents, err := engine.BillOnCancel(context.Background(), makeSub())
+		cents, err := billOnCancel(engine, context.Background(), makeSub())
 		if err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
@@ -3498,7 +3532,7 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
 		engine.SetCreditGranter(granter)
 
-		if _, err := engine.BillOnCancel(context.Background(), makeSub()); err != nil {
+		if _, err := billOnCancel(engine, context.Background(), makeSub()); err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
 		if len(granter.grants) != 0 {
@@ -3570,7 +3604,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		e, g, v, a := newEngine(inv)
 		cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC) // 17 unused / 31 days
 
-		cents, err := e.BillOnCancel(context.Background(), makeSub(cancelAt))
+		cents, err := billOnCancel(e, context.Background(), makeSub(cancelAt))
 		if err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
@@ -3598,7 +3632,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		e, _, v, a := newEngine(inv)
 		cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
 
-		if _, err := e.BillOnCancel(context.Background(), makeSub(cancelAt)); err != nil {
+		if _, err := billOnCancel(e, context.Background(), makeSub(cancelAt)); err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
 		if len(v.voided) != 0 {
@@ -3618,7 +3652,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		e, g, v, a := newEngine(inv)
 		cancelAt := periodStart.Add(time.Hour) // ~whole period unused → unusedDays rounds to full cycle
 
-		cents, err := e.BillOnCancel(context.Background(), makeSub(cancelAt))
+		cents, err := billOnCancel(e, context.Background(), makeSub(cancelAt))
 		if err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
@@ -3643,7 +3677,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		e, _, v, a := newEngine(inv)
 		cancelAt := periodStart.Add(time.Hour)
 
-		if _, err := e.BillOnCancel(context.Background(), makeSub(cancelAt)); err != nil {
+		if _, err := billOnCancel(e, context.Background(), makeSub(cancelAt)); err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
 		if len(v.voided) != 0 {
@@ -3724,7 +3758,7 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
-		cents, err := engine.BillOnPlanSwapImmediate(context.Background(), makeAdvanceSub(), swapAt)
+		cents, err := billOnPlanSwap(engine, context.Background(), makeAdvanceSub(), swapAt)
 		if err != nil {
 			t.Fatalf("BillOnPlanSwapImmediate: %v", err)
 		}
@@ -3748,7 +3782,7 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), paidInvoices(), nil, &mockSettings{}, nil, nil, billingTestClock()))
 		engine.SetCreditGranter(granter)
 
-		cents, err := engine.BillOnPlanSwapImmediate(context.Background(), makeArrearsSub(), swapAt)
+		cents, err := billOnPlanSwap(engine, context.Background(), makeArrearsSub(), swapAt)
 		if err != nil {
 			t.Fatalf("BillOnPlanSwapImmediate: %v", err)
 		}
@@ -3784,7 +3818,7 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
-		cents, err := engine.BillOnPlanSwapImmediate(context.Background(), makeAdvanceSub(), swapAt)
+		cents, err := billOnPlanSwap(engine, context.Background(), makeAdvanceSub(), swapAt)
 		if err != nil {
 			t.Fatalf("BillOnPlanSwapImmediate: %v", err)
 		}
@@ -3839,7 +3873,7 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		// at = a moment just after stubStart so the strict-after gate
 		// fires (`!at.After(periodStart)` would short-circuit if at==
 		// periodStart). roundDays absorbs the 1h difference.
-		cents, err := engine.BillOnPlanSwapImmediate(context.Background(), stubSub, stubStart.Add(time.Hour))
+		cents, err := billOnPlanSwap(engine, context.Background(), stubSub, stubStart.Add(time.Hour))
 		if err != nil {
 			t.Fatalf("BillOnPlanSwapImmediate: %v", err)
 		}
@@ -3857,7 +3891,7 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), paidInvoices(), nil, &mockSettings{}, nil, nil, billingTestClock()))
 		engine.SetCreditGranter(granter)
 
-		cents, err := engine.BillOnPlanSwapImmediate(context.Background(), makeAdvanceSub(), periodEnd)
+		cents, err := billOnPlanSwap(engine, context.Background(), makeAdvanceSub(), periodEnd)
 		if err != nil {
 			t.Fatalf("BillOnPlanSwapImmediate: %v", err)
 		}

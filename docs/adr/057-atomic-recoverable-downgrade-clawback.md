@@ -79,3 +79,10 @@ ADR-061 shipped (PR2), making `creditnote.Issue()` atomic + recoverable. The two
 - **the post-flip partial-issue re-entrancy window** — closed. The CAS and the internal effect (grant / reduce) now commit **together**: a crash mid-tx rolls back to `draft` (so `RetryPendingClawbackIssue` re-drives cleanly), and a crash post-commit leaves the effect already applied alongside the flip. There is no `status='issued'` row with an un-applied internal effect. The external legs (refund, tax reversal) recover independently (`RetryRefund`, `RetryPendingCreditNoteTaxReversal`).
 
 Consequently the `IssueCancelDrafts` post-commit relay (the cancel path's phase 3) is now safe to re-drive on any failure — `engine.IssueCancelDrafts`'s log no longer claims a manual-reconcile gap (updated in PR2). The unpaid-source **completeness** item — moving the unpaid relief into a single cancel-and-credit tx (relaxing the all-paid gate, and the `Void` sub-path's own dedup'd-reversal representation) — remains deferred per this ADR's "Deferred to PR2" note; PR2 closed the *correctness* hole (`Issue()` re-entrancy), not that completeness gap.
+
+## Amendment 2026-10-12
+
+The cancel and plan-swap extension of this ADR covered only an all-paid
+funding set; any unpaid funding invoice sent the relief to a post-commit path
+that could lose it. ADR-118 completes it: every funding share is written in
+the change's transaction, and the post-commit fallbacks are deleted.

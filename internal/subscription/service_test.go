@@ -1025,10 +1025,10 @@ func TestCreate(t *testing.T) {
 		if fb.finalCalls != 1 {
 			t.Errorf("BillFinalOnImmediateCancel called %d times, want 1", fb.finalCalls)
 		}
-		// BillOnCancel (credit grant for in_advance) also still fires
-		// — the two are independent operations (invoice vs credit).
-		if fb.cancelCalls != 1 {
-			t.Errorf("BillOnCancel called %d times, want 1 (independent of BillFinalOnImmediateCancel)", fb.cancelCalls)
+		// The proration relief also still runs — the two are independent
+		// operations (invoice vs credit).
+		if fb.finishCalls != 1 {
+			t.Errorf("FinishRelief called %d times, want 1 (independent of BillFinalOnImmediateCancel)", fb.finishCalls)
 		}
 	})
 
@@ -1063,13 +1063,13 @@ func TestCreate(t *testing.T) {
 		if after.Status != domain.SubscriptionActive {
 			t.Errorf("cancel must roll back on a final-invoice failure; status=%q, want active", after.Status)
 		}
-		// BillOnCancel (the proration credit) must NOT run when the cancel didn't commit.
-		if fb.cancelCalls != 0 {
-			t.Errorf("BillOnCancel must not run when the cancel rolled back; got %d", fb.cancelCalls)
+		// The relief's post-commit legs must NOT run when the cancel didn't commit.
+		if fb.finishCalls != 0 {
+			t.Errorf("FinishRelief must not run when the cancel rolled back; got %d", fb.finishCalls)
 		}
 	})
 
-	t.Run("ADR-031 BillOnCancel called on Cancel", func(t *testing.T) {
+	t.Run("ADR-031 cancel relief runs on Cancel", func(t *testing.T) {
 		svcWithBiller := NewService(newMemStore(), nil)
 		fb := &fakeBiller{}
 		svcWithBiller.SetBiller(fb)
@@ -1085,14 +1085,18 @@ func TestCreate(t *testing.T) {
 		if _, _, err := svcWithBiller.Cancel(ctx, "t1", sub.ID); err != nil {
 			t.Fatalf("cancel: %v", err)
 		}
-		if fb.cancelCalls != 1 {
-			t.Errorf("BillOnCancel called %d times, want 1", fb.cancelCalls)
+		if fb.finishCalls != 1 {
+			t.Errorf("FinishRelief called %d times, want 1", fb.finishCalls)
 		}
 	})
 
-	t.Run("ADR-031 BillOnCancel error does NOT fail cancel", func(t *testing.T) {
-		svcWithBiller := NewService(newMemStore(), nil)
-		fb := &fakeBiller{cancelErr: fmt.Errorf("credit grant failed")}
+	t.Run("ADR-118 a relief error fails the cancel and rolls it back", func(t *testing.T) {
+		// It used to be logged while the cancel stood — the customer's relief
+		// lost with no retry. Now the relief is written in the cancel tx, so its
+		// failure is the cancel's failure; the caller retries.
+		store := newMemStore()
+		svcWithBiller := NewService(store, nil)
+		fb := &fakeBiller{}
 		svcWithBiller.SetBiller(fb)
 		sub, err := svcWithBiller.Create(ctx, "t1", CreateInput{
 			Code: "sub-cancel-errpath", DisplayName: "Error on cancel",
@@ -1103,15 +1107,19 @@ func TestCreate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		canceled, _, err := svcWithBiller.Cancel(ctx, "t1", sub.ID)
-		if err != nil {
-			t.Fatalf("biller error should not fail cancel: %v", err)
+		fb.draftTxErr = fmt.Errorf("credit-note draft insert failed")
+		if _, _, err := svcWithBiller.Cancel(ctx, "t1", sub.ID); err == nil {
+			t.Fatal("a relief error must fail the cancel")
 		}
-		if canceled.Status != domain.SubscriptionCanceled {
-			t.Errorf("status %q, want canceled", canceled.Status)
+		after, gerr := store.Get(ctx, "t1", sub.ID)
+		if gerr != nil {
+			t.Fatalf("get after rollback: %v", gerr)
 		}
-		if fb.cancelCalls != 1 {
-			t.Errorf("BillOnCancel called %d times, want 1", fb.cancelCalls)
+		if after.Status != domain.SubscriptionActive {
+			t.Errorf("status %q after a failed relief, want active (rolled back)", after.Status)
+		}
+		if fb.finishCalls != 0 {
+			t.Errorf("FinishRelief ran %d time(s) on a rolled-back cancel", fb.finishCalls)
 		}
 	})
 
@@ -1147,8 +1155,8 @@ func TestCreate(t *testing.T) {
 	})
 }
 
-// fakeBiller captures BillOnCreate / BillOnCancel invocations for
-// ADR-031 tests.
+// fakeBiller captures the billing calls a subscription change makes, for the
+// ADR-031 / ADR-118 tests.
 type fakeBiller struct {
 	// thresholdBilledThrough feeds ThresholdBilledThroughTx — the swap's
 	// fire-vs-swap guard (ADR-115). nil = no threshold fire this period.
@@ -1156,39 +1164,29 @@ type fakeBiller struct {
 	thresholdBilledThroughErr error
 	calls                     int
 	finalCalls                int
-	cancelCalls               int
-	planSwapCalls             int
-	planSwapAt                time.Time
 	err                       error
 	finalCancelErr            error
 	finalCancelInv            domain.Invoice
-	cancelErr                 error
-	planSwapErr               error
-	cancelCreditCents         int64
-	planSwapCreditCents       int64
 	createTxCalls             int
 	createTxOK                bool
 	createTxInv               domain.Invoice
 	createTxErr               error
 	finalizeCalls             int
-	// cancel-credit draft path (ADR-057 ext). draftHandled defaults FALSE, so
-	// existing cancel tests fall through to BillOnCancel (today's path) unchanged.
-	draftTxCalls    int
-	draftIDs        []string
-	draftCredit     int64
-	draftHandled    bool
-	draftTxErr      error
-	issueDraftCalls int
-	issuedDraftIDs  []string
-	// plan-swap draft path (Bug B transplant). swapDraftHandled defaults
-	// FALSE, so existing swap tests fall through to BillOnPlanSwapImmediate
-	// (the pre-fix path) unchanged.
-	swapDraftTxCalls    int
-	swapDraftIDs        []string
-	swapDraftHandled    bool
-	swapDraftTxErr      error
-	issueSwapDraftCalls int
-	issuedSwapDraftIDs  []string
+	// Cancel relief (BillOnCancelDraftsTx): what it returns, and how often it
+	// ran in the cancel tx.
+	draftTxCalls int
+	draftIDs     []string
+	draftCredit  int64
+	draftTxErr   error
+	// Plan-swap relief (BillOnPlanSwapDraftsTx).
+	swapDraftTxCalls int
+	swapDraftIDs     []string
+	swapDraftTxErr   error
+	planSwapAt       time.Time
+	// FinishRelief: post-commit runs and the draft ids they issued (cancel
+	// and swap share it).
+	finishCalls    int
+	finishedDrafts []string
 }
 
 func (f *fakeBiller) BillOnCreate(_ context.Context, _ domain.Subscription) (domain.Invoice, error) {
@@ -1206,35 +1204,26 @@ func (f *fakeBiller) BillFinalOnImmediateCancelTx(_ context.Context, _ *sql.Tx, 
 	return f.finalCancelInv, f.finalCancelErr
 }
 
-func (f *fakeBiller) BillOnCancel(_ context.Context, _ domain.Subscription) (int64, error) {
-	f.cancelCalls++
-	return f.cancelCreditCents, f.cancelErr
-}
-
-func (f *fakeBiller) BillOnCancelDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) ([]string, int64, bool, error) {
+func (f *fakeBiller) BillOnCancelDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Relief, error) {
 	f.draftTxCalls++
-	return f.draftIDs, f.draftCredit, f.draftHandled, f.draftTxErr
+	if f.draftTxErr != nil {
+		return domain.Relief{}, f.draftTxErr
+	}
+	return domain.Relief{DraftIDs: f.draftIDs, CreditedCents: f.draftCredit}, nil
 }
 
-func (f *fakeBiller) IssueCancelDrafts(_ context.Context, _ domain.Subscription, ids []string) {
-	f.issueDraftCalls++
-	f.issuedDraftIDs = append(f.issuedDraftIDs, ids...)
-}
-
-func (f *fakeBiller) BillOnPlanSwapImmediate(_ context.Context, _ domain.Subscription, at time.Time) (int64, error) {
-	f.planSwapCalls++
-	f.planSwapAt = at
-	return f.planSwapCreditCents, f.planSwapErr
-}
-
-func (f *fakeBiller) BillOnPlanSwapDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, _ time.Time) ([]string, int64, bool, error) {
+func (f *fakeBiller) BillOnPlanSwapDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, at time.Time) (domain.Relief, error) {
 	f.swapDraftTxCalls++
-	return f.swapDraftIDs, 0, f.swapDraftHandled, f.swapDraftTxErr
+	f.planSwapAt = at
+	if f.swapDraftTxErr != nil {
+		return domain.Relief{}, f.swapDraftTxErr
+	}
+	return domain.Relief{DraftIDs: f.swapDraftIDs}, nil
 }
 
-func (f *fakeBiller) IssueSwapDrafts(_ context.Context, _ domain.Subscription, ids []string) {
-	f.issueSwapDraftCalls++
-	f.issuedSwapDraftIDs = append(f.issuedSwapDraftIDs, ids...)
+func (f *fakeBiller) FinishRelief(_ context.Context, _ domain.Subscription, r domain.Relief) {
+	f.finishCalls++
+	f.finishedDrafts = append(f.finishedDrafts, r.DraftIDs...)
 }
 
 func (f *fakeBiller) BillOnCreateTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Invoice, bool, error) {
@@ -2883,9 +2872,16 @@ func TestPeriodAnchoring(t *testing.T) {
 		// the biller even for in_arrears (the engine no-ops internally),
 		// so fb.calls increments here. The assertion below is about the
 		// swap path, not Create's call.
-		fb.calls = 0
+		fb.calls, fb.createTxCalls = 0, 0
 		oldPS := *sub.CurrentBillingPeriodStart
-		res, err := svc.UpdateItem(ctx, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
+		// The non-atomic UpdateItem refuses a cycle-restructuring swap
+		// (ADR-118); the handler runs it through UpdateItemTx.
+		if _, err := svc.UpdateItem(ctx, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
+			NewPlanID: "p_yearly", Immediate: true,
+		}); errs.Code(err) != "swap_requires_atomic_path" {
+			t.Fatalf("non-atomic cross-interval swap: err = %v, want swap_requires_atomic_path", err)
+		}
+		res, err := svc.UpdateItemTx(ctx, nil, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
 			NewPlanID: "p_yearly",
 			Immediate: true,
 		})
@@ -2895,15 +2891,14 @@ func TestPeriodAnchoring(t *testing.T) {
 		if res.Item.PlanID != "p_yearly" {
 			t.Errorf("item plan after swap: got %q want p_yearly", res.Item.PlanID)
 		}
-		// in_arrears path: refund orchestrator is called but is a no-op.
-		// For in_arrears subs nothing was prebilled, so the engine
-		// returns 0/nil. Service still invokes it (uniform shape).
-		if fb.planSwapCalls != 1 {
-			t.Errorf("expected 1 BillOnPlanSwapImmediate call, got %d", fb.planSwapCalls)
+		// in_arrears path: the refund is still written in the swap tx (the
+		// engine finds nothing prebilled and writes nothing) — uniform shape.
+		if fb.swapDraftTxCalls != 1 {
+			t.Errorf("expected 1 BillOnPlanSwapDraftsTx call, got %d", fb.swapDraftTxCalls)
 		}
-		// in_arrears NEW plan: no synchronous BillOnCreate.
-		if fb.calls != 0 {
-			t.Errorf("expected 0 BillOnCreate calls (in_arrears NEW), got %d", fb.calls)
+		// in_arrears NEW plan: no new-period bill.
+		if fb.calls != 0 || fb.createTxCalls != 0 {
+			t.Errorf("expected no new-period bill (in_arrears NEW), got BillOnCreate=%d BillOnCreateTx=%d", fb.calls, fb.createTxCalls)
 		}
 		updated, err := svc.store.Get(ctx, "t1", sub.ID)
 		if err != nil {
@@ -2941,9 +2936,10 @@ func TestPeriodAnchoring(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		// Reset BillOnCreate counter — Create's day-1 invoice fires it once.
-		fb.calls = 0
-		res, err := svc.UpdateItem(ctx, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
+		// Reset the bill counters — Create's day-1 invoice fires them once.
+		fb.calls, fb.createTxCalls = 0, 0
+		fb.createTxOK = true
+		res, err := svc.UpdateItemTx(ctx, nil, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
 			NewPlanID: "p_monthly_adv",
 			Immediate: true,
 		})
@@ -2953,14 +2949,14 @@ func TestPeriodAnchoring(t *testing.T) {
 		if res.Item.PlanID != "p_monthly_adv" {
 			t.Errorf("item plan after swap: got %q want p_monthly_adv", res.Item.PlanID)
 		}
-		if fb.planSwapCalls != 1 {
-			t.Errorf("expected 1 BillOnPlanSwapImmediate call, got %d", fb.planSwapCalls)
+		if fb.swapDraftTxCalls != 1 {
+			t.Errorf("expected 1 BillOnPlanSwapDraftsTx call, got %d", fb.swapDraftTxCalls)
 		}
 		if !fb.planSwapAt.Equal(now) {
-			t.Errorf("BillOnPlanSwapImmediate at: got %v want %v", fb.planSwapAt, now)
+			t.Errorf("refund at: got %v want %v", fb.planSwapAt, now)
 		}
-		if fb.calls != 1 {
-			t.Errorf("expected 1 synchronous BillOnCreate call for new in_advance period, got %d", fb.calls)
+		if fb.createTxCalls != 1 {
+			t.Errorf("expected 1 in-tx BillOnCreateTx call for the new in_advance period, got %d", fb.createTxCalls)
 		}
 		updated, err := svc.store.Get(ctx, "t1", sub.ID)
 		if err != nil {
@@ -3080,7 +3076,7 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 			t.Fatalf("Create: %v", err)
 		}
 		fb.createTxErr, fb.createTxOK = savedErr, savedOK
-		fb.calls, fb.createTxCalls, fb.finalizeCalls, fb.planSwapCalls = 0, 0, 0, 0
+		fb.calls, fb.createTxCalls, fb.finalizeCalls, fb.swapDraftTxCalls, fb.finishCalls = 0, 0, 0, 0, 0
 		return svc, sub
 	}
 
@@ -3106,9 +3102,13 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		if res.crossAxisNewInvoice == nil || res.crossAxisNewInvoice.ID != "vlx_inv_swap" {
 			t.Errorf("crossAxisNewInvoice should carry the new invoice for post-commit finalize; got %+v", res.crossAxisNewInvoice)
 		}
-		// Refund + finalize are POST-commit — they must NOT run inside the tx.
-		if fb.planSwapCalls != 0 {
-			t.Errorf("refund must be deferred to post-commit; BillOnPlanSwapImmediate ran %d times in-tx", fb.planSwapCalls)
+		// The refund is WRITTEN in the tx; its legs and the finalize run
+		// post-commit.
+		if fb.swapDraftTxCalls != 1 {
+			t.Errorf("refund must be written in the swap tx; BillOnPlanSwapDraftsTx ran %d times", fb.swapDraftTxCalls)
+		}
+		if fb.finishCalls != 0 {
+			t.Errorf("relief legs must be deferred to post-commit; FinishRelief ran %d times in-tx", fb.finishCalls)
 		}
 		if fb.finalizeCalls != 0 {
 			t.Errorf("finalize must be deferred to post-commit; FinalizeOnCreateInvoice ran %d times in-tx", fb.finalizeCalls)
@@ -3134,8 +3134,8 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		if fb.createTxCalls != 1 {
 			t.Errorf("BillOnCreateTx calls: got %d want 1", fb.createTxCalls)
 		}
-		if fb.planSwapCalls != 0 || fb.finalizeCalls != 0 {
-			t.Errorf("post-commit steps must not run on in-tx failure; planSwap=%d finalize=%d", fb.planSwapCalls, fb.finalizeCalls)
+		if fb.finishCalls != 0 || fb.finalizeCalls != 0 {
+			t.Errorf("post-commit steps must not run on in-tx failure; finish=%d finalize=%d", fb.finishCalls, fb.finalizeCalls)
 		}
 	})
 
@@ -3197,12 +3197,10 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		svc.FinalizeCrossIntervalSwap(ctx, "t1", subBefore, ItemChangeResult{
 			EffectiveAt:         now,
 			crossAxisNewInvoice: &domain.Invoice{ID: "vlx_inv_swap"},
+			swapRelief:          domain.Relief{DraftIDs: []string{"cn_swap"}},
 		})
-		if fb.planSwapCalls != 1 {
-			t.Errorf("refund: BillOnPlanSwapImmediate calls got %d want 1", fb.planSwapCalls)
-		}
-		if !fb.planSwapAt.Equal(now) {
-			t.Errorf("refund at: got %v want %v", fb.planSwapAt, now)
+		if fb.finishCalls != 1 || len(fb.finishedDrafts) != 1 || fb.finishedDrafts[0] != "cn_swap" {
+			t.Errorf("refund legs: FinishRelief calls %d drafts %v, want 1 with cn_swap", fb.finishCalls, fb.finishedDrafts)
 		}
 		if fb.finalizeCalls != 1 {
 			t.Errorf("FinalizeOnCreateInvoice calls got %d want 1", fb.finalizeCalls)

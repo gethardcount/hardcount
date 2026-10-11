@@ -181,7 +181,7 @@ func TestCancelCredit_DraftFailure_RealTxRollsBackCancel(t *testing.T) {
 // headline real-Postgres proof of the ADR-057 cancel-credit extension: on an
 // all-PAID in_advance cancel, BillOnCancelDraftsTx creates the proration credit
 // as an issue_pending DRAFT on the caller's tx. We then SIMULATE the post-commit
-// crash (never call IssueCancelDrafts) and prove RetryPendingClawbackIssue
+// crash (never call FinishRelief) and prove RetryPendingClawbackIssue
 // recovers it — the customer's owed credit lands EXACTLY ONCE, deduped on a
 // second sweep. This is the crash-window the work closes: the credit can no
 // longer be silently lost between the cancel commit and the post-commit issue.
@@ -270,15 +270,12 @@ func TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers(t *testing.
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	ids, credited, handled, err := e.BillOnCancelDraftsTx(ctx, tx, sub)
+	r, err := e.BillOnCancelDraftsTx(ctx, tx, sub)
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
-	if !handled {
-		_ = tx.Rollback()
-		t.Fatal("an all-paid in_advance cancel must be handled by the in-tx draft path")
-	}
+	ids, credited := r.DraftIDs, r.CreditedCents
 	if credited != wantCredit || len(ids) != 1 {
 		_ = tx.Rollback()
 		t.Fatalf("credited=%d ids=%v, want %d / 1 id", credited, ids, wantCredit)
@@ -288,7 +285,7 @@ func TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers(t *testing.
 	}
 
 	// The draft is durable + pending (NOT yet issued) — the crash window: we
-	// deliberately do NOT call IssueCancelDrafts.
+	// deliberately do NOT call FinishRelief.
 	pending, err := creditNoteStore.ListPendingClawbackDrafts(ctx, 100, false)
 	if err != nil {
 		t.Fatalf("list pending: %v", err)

@@ -840,14 +840,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// (default) — best-effort path that logs but doesn't fail Create
 	// on billing errors (the cycle scheduler picks up later periods).
 	subSvc.SetBiller(engine)
-	// ADR-031 slice 3: the engine's BillOnCancel uses creditSvc to
-	// issue a credit grant for the unused portion of an in_advance
-	// period when a sub is canceled mid-cycle. No-op for in_arrears.
 	engine.SetCreditGranter(creditSvc)
-	// #22: when the in_advance prebill for the canceled period is UNPAID,
-	// BillOnCancel settles it down to the consumed portion instead of leaving
-	// the full amount in dunning — voiding it (nothing consumed) or reducing
-	// amount_due via an adjustment credit note (partially consumed).
+	// ADR-031 / #22 / ADR-118: the cancel and plan-swap relief for the unused
+	// part of an in_advance period, written in the change's transaction —
+	// a credit note crediting the balance (paid invoice), a credit note
+	// reducing amount_due (unpaid, partly used), or a void (unpaid, unused).
 	engine.SetInvoiceVoider(invoiceSvc)
 	engine.SetCreditNoteAdjuster(creditNoteSvc)
 	engine.SetCreditHeadroomReader(creditNoteSvc)

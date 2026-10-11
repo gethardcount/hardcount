@@ -16,7 +16,7 @@ import (
 // current period is shorter than a cycle, so dividing by it over-charges
 // upgrades / over-credits downgrades. Derived from the shared
 // domain.AddBillingInterval so this matches the engine's day-1 stub base-fee
-// proration (segDays/fullCycleDays) and BillOnPlanSwapImmediate exactly.
+// proration (segDays/fullCycleDays) and the cross-interval swap refund exactly.
 //
 // loc is the tenant's billing timezone: the cycle advance is computed in loc
 // (ADR-058) so the denominator is host-TZ-independent and agrees with the

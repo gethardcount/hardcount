@@ -10,13 +10,13 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 )
 
-// Bug B transplant wiring (2026-07-05): the cross-interval swap refund is
-// created as issue_pending DRAFTS on the swap tx (BillOnPlanSwapDraftsTx),
-// issued post-commit by FinalizeCrossIntervalSwap, with the legacy
-// post-commit BillOnPlanSwapImmediate demoted to the declined-path fallback.
-// Pre-fix the whole refund ran post-commit: a crash between the swap commit
-// and the refund lost the customer's unused prepayment for good (retry 400s
-// on the same-plan guard; no reconciler re-derives a missed swap refund).
+// Bug B transplant wiring (2026-07-05), completed by ADR-118: the
+// cross-interval swap refund is written on the swap tx (BillOnPlanSwapDraftsTx)
+// for every funding invoice, paid or unpaid, and its legs run post-commit in
+// FinalizeCrossIntervalSwap. There is no post-commit fallback: a crash between
+// the swap commit and a post-commit refund lost the customer's unused
+// prepayment for good (retry 400s on the same-plan guard; no reconciler
+// re-derives a missed swap refund).
 
 func newSwapWiringSvc(t *testing.T, fb *fakeBiller) (*Service, domain.Subscription) {
 	t.Helper()
@@ -39,13 +39,13 @@ func newSwapWiringSvc(t *testing.T, fb *fakeBiller) (*Service, domain.Subscripti
 		t.Fatalf("seed create: %v", err)
 	}
 	fb.createTxErr, fb.createTxOK = savedErr, savedOK
-	fb.createTxCalls, fb.planSwapCalls, fb.swapDraftTxCalls = 0, 0, 0
+	fb.createTxCalls, fb.swapDraftTxCalls, fb.finishCalls = 0, 0, 0
 	return svc, sub
 }
 
-func TestCrossIntervalSwap_DraftPath_IssuesDraftsAndSkipsImmediate(t *testing.T) {
+func TestCrossIntervalSwap_ReliefWrittenInTxThenFinished(t *testing.T) {
 	ctx := context.Background()
-	fb := &fakeBiller{createTxOK: true, swapDraftHandled: true, swapDraftIDs: []string{"cn_swap_1"}}
+	fb := &fakeBiller{createTxOK: true, swapDraftIDs: []string{"cn_swap_1"}}
 	svc, sub := newSwapWiringSvc(t, fb)
 
 	res, err := svc.UpdateItemTx(ctx, nil, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
@@ -55,38 +55,15 @@ func TestCrossIntervalSwap_DraftPath_IssuesDraftsAndSkipsImmediate(t *testing.T)
 		t.Fatalf("UpdateItemTx: %v", err)
 	}
 	if fb.swapDraftTxCalls != 1 {
-		t.Errorf("BillOnPlanSwapDraftsTx calls = %d, want 1 (refund drafts must ride the swap tx)", fb.swapDraftTxCalls)
+		t.Errorf("BillOnPlanSwapDraftsTx calls = %d, want 1 (the refund must ride the swap tx)", fb.swapDraftTxCalls)
 	}
-	if !res.swapRefundHandled || len(res.swapRefundDraftIDs) != 1 {
-		t.Fatalf("result must carry the in-tx drafts: handled=%v ids=%v", res.swapRefundHandled, res.swapRefundDraftIDs)
+	if len(res.swapRelief.DraftIDs) != 1 {
+		t.Fatalf("result must carry the in-tx relief: %+v", res.swapRelief)
 	}
 
 	svc.FinalizeCrossIntervalSwap(ctx, "t1", sub, res)
-	if fb.issueSwapDraftCalls != 1 || len(fb.issuedSwapDraftIDs) != 1 || fb.issuedSwapDraftIDs[0] != "cn_swap_1" {
-		t.Errorf("IssueSwapDrafts not invoked with the drafts; calls=%d ids=%v", fb.issueSwapDraftCalls, fb.issuedSwapDraftIDs)
-	}
-	if fb.planSwapCalls != 0 {
-		t.Errorf("BillOnPlanSwapImmediate (fallback) must NOT run when the in-tx half handled the refund; calls=%d — running both double-credits", fb.planSwapCalls)
-	}
-}
-
-func TestCrossIntervalSwap_DeclinedDraftPath_FallsBackToImmediate(t *testing.T) {
-	ctx := context.Background()
-	fb := &fakeBiller{createTxOK: true, swapDraftHandled: false} // declined (e.g. unpaid funding)
-	svc, sub := newSwapWiringSvc(t, fb)
-
-	res, err := svc.UpdateItemTx(ctx, nil, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
-		NewPlanID: "p_monthly_adv", Immediate: true,
-	})
-	if err != nil {
-		t.Fatalf("UpdateItemTx: %v", err)
-	}
-	svc.FinalizeCrossIntervalSwap(ctx, "t1", sub, res)
-	if fb.planSwapCalls != 1 {
-		t.Errorf("BillOnPlanSwapImmediate fallback must run when the in-tx half declined; calls=%d", fb.planSwapCalls)
-	}
-	if fb.issueSwapDraftCalls != 0 {
-		t.Errorf("IssueSwapDrafts must NOT run on the declined path; calls=%d", fb.issueSwapDraftCalls)
+	if fb.finishCalls != 1 || len(fb.finishedDrafts) != 1 || fb.finishedDrafts[0] != "cn_swap_1" {
+		t.Errorf("FinishRelief not run with the relief; calls=%d ids=%v", fb.finishCalls, fb.finishedDrafts)
 	}
 }
 

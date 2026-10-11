@@ -263,6 +263,26 @@ func (m *memStore) UpdateStatusWithReversalPrior(ctx context.Context, tenantID, 
 	return m.UpdateStatusWithReversal(ctx, tenantID, id, status, fn)
 }
 
+// Tx variant: the fake ignores tx; the closure sees the current in-memory
+// invoice as the locked prior, and an error restores it (the rollback).
+func (m *memStore) UpdateStatusWithReversalPriorTx(ctx context.Context, _ *sql.Tx, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, prior domain.Invoice) error) (domain.Invoice, error) {
+	prev, ok := m.invoices[id]
+	if !ok || prev.TenantID != tenantID {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	inv, err := m.UpdateStatus(ctx, tenantID, id, status)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if fn != nil {
+		if err := fn(nil, prev); err != nil {
+			m.invoices[id] = prev
+			return domain.Invoice{}, err
+		}
+	}
+	return inv, nil
+}
+
 func (m *memStore) UpdateStatusWithReversal(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx) error) (domain.Invoice, error) {
 	prev, ok := m.invoices[id]
 	if !ok || prev.TenantID != tenantID {

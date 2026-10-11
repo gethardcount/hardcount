@@ -56,7 +56,7 @@ func TestSettleUnusedAcrossFunding_MixedPaidUnpaid_NoSilentDrop(t *testing.T) {
 	e.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 	e.SetInvoiceVoider(&fakeInvoiceVoider{})
 
-	credited, err := e.BillOnCancel(context.Background(), sub)
+	credited, err := billOnCancel(e, context.Background(), sub)
 	if err != nil {
 		t.Fatalf("BillOnCancel: %v", err)
 	}

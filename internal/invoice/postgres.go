@@ -600,26 +600,47 @@ func (s *PostgresStore) UpdateStatusWithReversalPrior(ctx context.Context, tenan
 	}
 	defer postgres.Rollback(tx)
 
-	// Row lock + true prior status; same row the CAS below updates, so no
+	var fn func(tx *sql.Tx, prior domain.Invoice) error
+	if reverseFn != nil {
+		fn = func(tx *sql.Tx, prior domain.Invoice) error { return reverseFn(tx, prior.Status) }
+	}
+	inv, err := s.UpdateStatusWithReversalPriorTx(ctx, tx, tenantID, id, status, fn)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Invoice{}, err
+	}
+	return inv, nil
+}
+
+// UpdateStatusWithReversalPriorTx is the flip on the CALLER's tx: it locks the
+// row, hands the closure the invoice as it is UNDER THE LOCK (so a caller can
+// re-check what its earlier snapshot assumed), then flips the status and runs
+// the closure's writes on the same tx. The billing engine voids a fully-unused
+// unpaid prebill this way inside the cancel / plan-swap transaction, so the
+// relief commits — or rolls back — with the change that caused it.
+func (s *PostgresStore) UpdateStatusWithReversalPriorTx(ctx context.Context, tx *sql.Tx, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, prior domain.Invoice) error) (domain.Invoice, error) {
+	// Row lock + the true prior state; same row the CAS below updates, so no
 	// new lock ordering edge.
-	var prior string
+	var prior domain.Invoice
 	if err := tx.QueryRowContext(ctx,
-		`SELECT status FROM invoices WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
-		id, tenantID).Scan(&prior); err != nil {
+		`SELECT `+invCols+` FROM invoices WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+		id, tenantID).Scan(s.scanInvDest(&prior)...); err != nil {
+		if err == sql.ErrNoRows {
+			return domain.Invoice{}, errs.ErrNotFound
+		}
 		return domain.Invoice{}, fmt.Errorf("lock invoice for status flip: %w", err)
 	}
-
 	inv, err := s.updateStatusInTx(ctx, tx, id, status)
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	if reverseFn != nil {
-		if err := reverseFn(tx, domain.InvoiceStatus(prior)); err != nil {
+	// The closure's error aborts the caller's tx, flip included.
+	if fn != nil {
+		if err := fn(tx, prior); err != nil {
 			return domain.Invoice{}, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Invoice{}, err
 	}
 	return inv, nil
 }

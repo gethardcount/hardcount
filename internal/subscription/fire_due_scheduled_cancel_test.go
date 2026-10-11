@@ -38,7 +38,6 @@ func TestFireDueScheduledCancel_FlipsAndBillsAtomically(t *testing.T) {
 		finalCancelInv: domain.Invoice{ID: "inv_final", Currency: "USD"},
 		draftIDs:       []string{"cn_relief"},
 		draftCredit:    27500,
-		draftHandled:   true,
 	}
 	svc := NewService(store, nil)
 	svc.SetBiller(biller)
@@ -66,11 +65,8 @@ func TestFireDueScheduledCancel_FlipsAndBillsAtomically(t *testing.T) {
 	if biller.finalizeCalls != 1 {
 		t.Errorf("post-commit finalize calls: got %d, want 1", biller.finalizeCalls)
 	}
-	if biller.issueDraftCalls != 1 {
-		t.Errorf("post-commit draft-issue calls: got %d, want 1 (handled path)", biller.issueDraftCalls)
-	}
-	if biller.cancelCalls != 0 {
-		t.Errorf("BillOnCancel fallback must not run when drafts were handled; got %d calls", biller.cancelCalls)
+	if biller.finishCalls != 1 || len(biller.finishedDrafts) != 1 {
+		t.Errorf("post-commit FinishRelief: calls %d drafts %v, want 1 call with the relief draft", biller.finishCalls, biller.finishedDrafts)
 	}
 }
 
@@ -96,7 +92,7 @@ func TestFireDueScheduledCancel_BillFailureRollsBackFlip(t *testing.T) {
 	if got.CancelAt == nil || !got.CancelAt.Equal(cancelAt) {
 		t.Errorf("cancel_at must survive the rollback: %v", got.CancelAt)
 	}
-	if biller.finalizeCalls != 0 || biller.issueDraftCalls != 0 {
+	if biller.finalizeCalls != 0 || biller.finishCalls != 0 {
 		t.Error("no post-commit legs may run when the tx failed")
 	}
 }

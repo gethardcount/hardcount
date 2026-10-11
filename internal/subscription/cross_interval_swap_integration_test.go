@@ -41,22 +41,13 @@ func (b *billOnCreateTxErrBiller) BillFinalOnImmediateCancel(context.Context, do
 func (b *billOnCreateTxErrBiller) BillFinalOnImmediateCancelTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, error) {
 	return domain.Invoice{}, nil
 }
-func (b *billOnCreateTxErrBiller) BillOnCancel(context.Context, domain.Subscription) (int64, error) {
-	return 0, nil
+func (b *billOnCreateTxErrBiller) BillOnCancelDraftsTx(context.Context, *sql.Tx, domain.Subscription) (domain.Relief, error) {
+	return domain.Relief{}, nil
 }
-func (b *billOnCreateTxErrBiller) BillOnCancelDraftsTx(context.Context, *sql.Tx, domain.Subscription) ([]string, int64, bool, error) {
-	return nil, 0, false, nil
+func (b *billOnCreateTxErrBiller) BillOnPlanSwapDraftsTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Relief, error) {
+	return domain.Relief{}, nil
 }
-func (b *billOnCreateTxErrBiller) IssueCancelDrafts(context.Context, domain.Subscription, []string) {
-}
-func (b *billOnCreateTxErrBiller) BillOnPlanSwapImmediate(context.Context, domain.Subscription, time.Time) (int64, error) {
-	return 0, nil
-}
-func (b *billOnCreateTxErrBiller) BillOnPlanSwapDraftsTx(context.Context, *sql.Tx, domain.Subscription, time.Time) ([]string, int64, bool, error) {
-	return nil, 0, false, nil
-}
-func (b *billOnCreateTxErrBiller) IssueSwapDrafts(context.Context, domain.Subscription, []string) {
-}
+func (b *billOnCreateTxErrBiller) FinishRelief(context.Context, domain.Subscription, domain.Relief) {}
 func (b *billOnCreateTxErrBiller) BillOnCreateTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, bool, error) {
 	return domain.Invoice{}, false, b.err
 }

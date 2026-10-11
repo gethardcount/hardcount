@@ -53,7 +53,7 @@ func TestBillOnCancel_PaidPrebillReversesTax(t *testing.T) {
 	netUnused := money.RoundHalfToEven(6000*16, 31)            // pre-fix bare grant
 	grossUnused := money.RoundHalfToEven(netUnused*6600, 6000) // grossed up by the invoice's tax
 
-	cents, err := e.BillOnCancel(context.Background(), sub)
+	cents, err := billOnCancel(e, context.Background(), sub)
 	if err != nil {
 		t.Fatalf("BillOnCancel: %v", err)
 	}

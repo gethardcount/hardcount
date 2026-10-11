@@ -125,7 +125,7 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	// Compare against clock.Now(ctx) so clock-pinned customers
 	// (bindForCustomer above seeded ctx with the sim clock) evaluate
 	// against simulated time, not wall-clock. Internal engine callers
-	// (BillOnCancel / BillOnPlanSwapImmediate / CN Issue) don't set
+	// (cancel / plan-swap relief, CN Issue) don't set
 	// ExpiresAt on their grants, so this gate doesn't affect refund
 	// flows — only operator-driven and SDK-driven Grant calls.
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(clock.Now(ctx)) {

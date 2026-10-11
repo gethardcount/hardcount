@@ -456,9 +456,9 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 // card refund is produced — Issue's unpaid branch simply lowers amount_due and
 // reverses the proportional output tax. The note is a single gross-amount
 // line; Create caps grossCents at the invoice's current amount_due. Returns the
-// issued credit note. Idempotency is the caller's responsibility (BillOnCancel
-// runs once per cancel — see its contract); a second call would create a second
-// adjustment and is rejected by Create's amount_due cap once the first lands.
+// issued credit note. Idempotency is the caller's responsibility; a second call
+// would create a second adjustment and is rejected by Create's amount_due cap
+// once the first lands.
 func (s *Service) CreateAndIssueAdjustment(ctx context.Context, tenantID, invoiceID string, grossCents int64, reason, description string) (domain.CreditNote, error) {
 	// Calls the create() CORE directly (not the public Create) so the automated
 	// ADR-050 unpaid-source clawback BYPASSES the operator in-flight 409 gate in

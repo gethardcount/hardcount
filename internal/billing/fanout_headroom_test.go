@@ -64,7 +64,7 @@ func TestSettleUnusedAcrossFunding_HeadroomSpill(t *testing.T) {
 	e.SetCreditNoteAdjuster(adjuster)
 	e.SetCreditHeadroomReader(headroom)
 
-	credited, err := e.BillOnCancel(context.Background(), sub)
+	credited, err := billOnCancel(e, context.Background(), sub)
 	if err != nil {
 		t.Fatalf("BillOnCancel: %v (must spill, not loud-fail)", err)
 	}

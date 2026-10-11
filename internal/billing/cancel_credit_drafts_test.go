@@ -52,47 +52,40 @@ func wireCancelEngine(inv *mockInvoices, pricing *mockPricing, adjuster *fakeCre
 	return e
 }
 
-// TestBillOnCancelDraftsTx_AllPaid_CreatesDraftsNotIssue: when the funding set is
-// all-paid, the atomic path creates issue_pending DRAFTS (CreateAdjustmentDraftTx),
-// NOT an immediate CreateAndIssueAdjustment, and reports handled + the gross owed.
-func TestBillOnCancelDraftsTx_AllPaid_CreatesDraftsNotIssue(t *testing.T) {
+// TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts: an all-paid funding set gets
+// issue_pending DRAFTS on the cancel tx, reports the gross owed, and
+// FinishRelief issues them post-commit.
+func TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireCancelEngine(inv, pricing, adjuster)
 
-	ids, credited, handled, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
-	if !handled {
-		t.Fatal("all-paid funding must be handled by the in-tx draft path")
-	}
 	const want = 5000 // 15000 * 10/30
-	if credited != want {
-		t.Errorf("credited=%d, want %d", credited, want)
+	if r.CreditedCents != want {
+		t.Errorf("credited=%d, want %d", r.CreditedCents, want)
 	}
-	if len(ids) != 1 {
-		t.Fatalf("got %d draft ids, want 1: %v", len(ids), ids)
+	if len(r.DraftIDs) != 1 || len(adjuster.draftCall) != 1 || adjuster.draftCall[0].gross != want {
+		t.Fatalf("drafts=%v calls=%+v, want one of gross %d", r.DraftIDs, adjuster.draftCall, want)
 	}
-	if len(adjuster.draftCall) != 1 || adjuster.draftCall[0].gross != want {
-		t.Errorf("draft calls=%+v, want one of gross %d", adjuster.draftCall, want)
+	if len(adjuster.issued) != 0 {
+		t.Errorf("nothing may be issued before the cancel commits; issued=%v", adjuster.issued)
 	}
-	if len(adjuster.calls) != 0 {
-		t.Errorf("must NOT CreateAndIssueAdjustment on the draft path; got %+v", adjuster.calls)
-	}
-
-	// Post-commit issue relays the drafts.
-	e.IssueCancelDrafts(context.Background(), sub, ids)
-	if len(adjuster.issued) != 1 || adjuster.issued[0] != ids[0] {
-		t.Errorf("IssueCancelDrafts issued=%v, want %v", adjuster.issued, ids)
+	e.FinishRelief(context.Background(), sub, r)
+	if len(adjuster.issued) != 1 || adjuster.issued[0] != r.DraftIDs[0] {
+		t.Errorf("FinishRelief issued=%v, want %v", adjuster.issued, r.DraftIDs)
 	}
 }
 
-// TestBillOnCancelDraftsTx_AnyUnpaid_Declines: a mixed paid+unpaid funding set
-// declines the in-tx path (handled=false, no drafts) so the caller falls back to
-// the post-commit BillOnCancel (PR1: unpaid relief stays post-commit).
-func TestBillOnCancelDraftsTx_AnyUnpaid_Declines(t *testing.T) {
+// TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx: a paid base plus an unpaid,
+// partly-used upgrade invoice. Before ADR-118 any unpaid source sent the whole
+// relief to a post-commit path whose failure was only logged; now both shares
+// are drafts on the cancel tx. Only the paid share is customer-balance credit.
+func TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	changeAt := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
@@ -107,15 +100,71 @@ func TestBillOnCancelDraftsTx_AnyUnpaid_Declines(t *testing.T) {
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireCancelEngine(inv, pricing, adjuster)
 
-	ids, credited, handled, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
-	if handled {
-		t.Error("a funding set with any unpaid source must decline the in-tx path")
+	drafted := map[string]int64{}
+	for _, c := range adjuster.draftCall {
+		drafted[c.invoiceID] += c.gross
 	}
-	if len(ids) != 0 || credited != 0 || len(adjuster.draftCall) != 0 {
-		t.Errorf("declined path must create no drafts; ids=%v credited=%d drafts=%+v", ids, credited, adjuster.draftCall)
+	if drafted["inv_base"] <= 0 || drafted["inv_up"] <= 0 {
+		t.Fatalf("drafts=%+v, want a draft on BOTH the paid base and the unpaid upgrade", adjuster.draftCall)
+	}
+	if drafted["inv_up"] >= 8000 {
+		t.Errorf("unpaid upgrade draft %d, want less than its 8000 amount due (partly used → reduce, not void)", drafted["inv_up"])
+	}
+	if r.CreditedCents != drafted["inv_base"] {
+		t.Errorf("credited=%d, want only the paid share %d (unpaid relief reduces amount due, it is not credit)", r.CreditedCents, drafted["inv_base"])
+	}
+}
+
+// TestBillOnCancelDraftsTx_UnpaidFullyUnused_VoidsInTx: a single unpaid prebill
+// that the customer used none of is voided on the cancel tx, and its
+// post-commit legs (tax reversal, webhook) run in FinishRelief.
+func TestBillOnCancelDraftsTx_UnpaidFullyUnused_VoidsInTx(t *testing.T) {
+	baseInv, baseLine := paidBaseInvoice()
+	baseInv.PaymentStatus, baseInv.AmountDueCents = domain.PaymentFailed, baseInv.TotalAmountCents
+	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
+	start := *sub.CurrentBillingPeriodStart
+	sub.CanceledAt = &start // nothing used
+	adjuster := &fakeCreditNoteAdjuster{}
+	e := wireCancelEngine(inv, pricing, adjuster)
+	voider := &fakeInvoiceVoider{}
+	e.SetInvoiceVoider(voider)
+
+	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	if err != nil {
+		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+	}
+	if len(voider.voided) != 1 || voider.voided[0] != "inv_base" || len(adjuster.draftCall) != 0 {
+		t.Fatalf("voided=%v drafts=%+v, want inv_base voided in-tx and no draft", voider.voided, adjuster.draftCall)
+	}
+	if r.CreditedCents != 0 {
+		t.Errorf("credited=%d, want 0 (nothing was paid)", r.CreditedCents)
+	}
+	e.FinishRelief(context.Background(), sub, r)
+	if len(voider.afterVoids) != 1 {
+		t.Errorf("AfterVoid ran %d time(s), want 1", len(voider.afterVoids))
+	}
+}
+
+// failingFundingLookup errors the funding-invoice lookup.
+type failingFundingLookup struct{ *mockInvoices }
+
+func (f failingFundingLookup) FindFundingInvoicesForPeriod(context.Context, string, string, time.Time, time.Time) ([]domain.Invoice, error) {
+	return nil, errors.New("connection reset")
+}
+
+// A funding lookup error fails the relief, so the cancel rolls back. It used
+// to decline to a post-commit path that, failing again, only logged.
+func TestBillOnCancelDraftsTx_LookupError_Fails(t *testing.T) {
+	baseInv, baseLine := paidBaseInvoice()
+	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
+	e := wireCancelEngine(inv, pricing, &fakeCreditNoteAdjuster{})
+	e.invoices = failingFundingLookup{inv}
+	if _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err == nil {
+		t.Fatal("a funding lookup error must fail the relief (and roll the cancel back)")
 	}
 }
 
@@ -128,7 +177,7 @@ func TestBillOnCancelDraftsTx_DraftError_PropagatesForRollback(t *testing.T) {
 	adjuster := &fakeCreditNoteAdjuster{draftErr: errors.New("draft insert failed")}
 	e := wireCancelEngine(inv, pricing, adjuster)
 
-	if _, _, _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err == nil {
+	if _, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub); err == nil {
 		t.Fatal("a draft-create failure must return an error (so the cancel rolls back)")
 	}
 }
@@ -154,13 +203,11 @@ func TestBillOnCancelDraftsTx_MultiPaidSource_RespectsHeadroom(t *testing.T) {
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireCancelEngine(inv, pricing, adjuster)
 
-	_, credited, handled, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
 	if err != nil {
 		t.Fatalf("BillOnCancelDraftsTx: %v", err)
 	}
-	if !handled {
-		t.Fatal("all-paid multi-source must be handled")
-	}
+	credited := r.CreditedCents
 	var sum int64
 	for _, c := range adjuster.draftCall {
 		sum += c.gross

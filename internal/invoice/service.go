@@ -1248,20 +1248,8 @@ func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.Invoice
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	if inv.Status == domain.InvoicePaid {
-		return domain.Invoice{}, errs.InvalidState("cannot void a paid invoice — issue a credit note instead")
-	}
-	if inv.Status == domain.InvoiceVoided {
-		return domain.Invoice{}, errs.InvalidState("invoice is already voided")
-	}
-	// A charge in flight (processing/unknown) may still succeed: voiding now
-	// would strand captured money on a voided invoice and reverse tax on a
-	// sale that completes. Block until the charge reaches a terminal state —
-	// the reconciler resolves it, then the void can proceed. Stripe enforces
-	// the same rule ("you can't void an invoice with open payments"). Guard
-	// sits BEFORE reverseInvoiceTax so the reversal never fires in-flight.
-	if b := domain.PaymentBlocksAction(inv, domain.ActionVoid); b.Blocked {
-		return domain.Invoice{}, errs.InvalidState(b.Message).WithCode(b.Code)
+	if err := voidRefusal(inv); err != nil {
+		return domain.Invoice{}, err
 	}
 
 	// Atomic: flip status to voided AND reverse the consumed customer credits
@@ -1274,64 +1262,121 @@ func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.Invoice
 	// transient failure (no reconciler re-drove it). The 0106 dedup index keeps
 	// the in-tx reversal exactly-once across redelivery.
 	voided, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceVoided, func(tx *sql.Tx, prior domain.InvoiceStatus) error {
-		var creditsReversed, commitRetired int64
-		if s.creditReverser != nil && inv.CustomerID != "" {
-			reversed, rerr := s.creditReverser.ReverseForInvoiceTx(ctx, tx, tenantID, inv.CustomerID, inv.ID, inv.InvoiceNumber)
-			if rerr != nil {
-				return rerr
-			}
-			creditsReversed = reversed
-			// ADR-078 D3: voiding a commit FUNDING invoice retires the funded
-			// grant's remaining balance in this same tx (no-op for non-commit
-			// invoices). Void is the ONLY retire trigger — uncollectible and
-			// the dunning pause/cancel terminals leave the block live as a
-			// collections stance, and voided→paid is rejected so a retired
-			// grant can never be paid for afterwards. The consumed_cents CAS
-			// inside makes the legal uncollectible→void sequence and retries
-			// converge on one retirement.
-			retired, rerr := s.creditReverser.RetireCommitGrantForInvoiceTx(ctx, tx, tenantID, inv.ID)
-			if rerr != nil {
-				return rerr
-			}
-			commitRetired = retired
-		}
-		// ADR-090 in-tx emission — one canonical void row for BOTH the
-		// operator endpoint and engine-triggered voids (unpaid-prebill
-		// relief), which previously left no audit trail at all. The
-		// reversal/retirement amounts ride the row so the ledger effects
-		// of the void are readable without cross-referencing the ledger.
-		if s.audit != nil {
-			meta := map[string]any{
-				"invoice_number":     inv.InvoiceNumber,
-				"customer_id":        inv.CustomerID,
-				"total_amount_cents": inv.TotalAmountCents,
-				"currency":           inv.Currency,
-				"status_before":      string(prior),
-			}
-			if creditsReversed > 0 {
-				meta["credits_reversed_cents"] = creditsReversed
-			}
-			if commitRetired > 0 {
-				meta["commit_retired_cents"] = commitRetired
-			}
-			if auditErr := s.audit.LogInTx(ctx, tx, audit.Entry{
-				Action:        domain.AuditActionVoid,
-				ResourceType:  "invoice",
-				ResourceID:    inv.ID,
-				ResourceLabel: inv.InvoiceNumber,
-				Metadata:      meta,
-			}); auditErr != nil {
-				return fmt.Errorf("audit emission: %w", auditErr)
-			}
-		}
-		return nil
+		return s.voidEffectsTx(ctx, tx, tenantID, inv, prior)
 	})
 	if err != nil {
 		return domain.Invoice{}, err
 	}
+	s.AfterVoid(ctx, tenantID, voided)
+	return voided, nil
+}
 
-	// Reverse the upstream tax transaction AFTER the void durably commits —
-	// external Stripe call, best-effort (WARN on failure; see reverseInvoiceTax).
+// voidRefusal is Void's state machine: paid and voided invoices cannot be
+// voided, and neither can one whose charge is in flight.
+func voidRefusal(inv domain.Invoice) error {
+	if inv.Status == domain.InvoicePaid {
+		return errs.InvalidState("cannot void a paid invoice — issue a credit note instead")
+	}
+	if inv.Status == domain.InvoiceVoided {
+		return errs.InvalidState("invoice is already voided")
+	}
+	// A charge in flight (processing/unknown) may still succeed: voiding now
+	// would strand captured money on a voided invoice and reverse tax on a
+	// sale that completes. Block until the charge reaches a terminal state —
+	// the reconciler resolves it, then the void can proceed. Stripe enforces
+	// the same rule ("you can't void an invoice with open payments"). Checked
+	// before any tax reversal can fire.
+	if b := domain.PaymentBlocksAction(inv, domain.ActionVoid); b.Blocked {
+		return errs.InvalidState(b.Message).WithCode(b.Code)
+	}
+	return nil
+}
+
+// VoidUnchangedTx voids snapshot's invoice on the CALLER's transaction — the
+// billing engine relieving a fully-unused unpaid prebill inside the cancel /
+// plan-swap transaction, so the relief commits or rolls back with the change.
+// The engine decided to void from snapshot; under the row lock the invoice
+// must still be exactly that (status, payment state, amounts), else it returns
+// an error and the caller's transaction rolls back — the retry re-reads and
+// decides again (a payment that landed meanwhile turns the void into a credit
+// note). After the caller commits it must call AfterVoid.
+func (s *Service) VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID string, snapshot domain.Invoice) (domain.Invoice, error) {
+	return s.store.UpdateStatusWithReversalPriorTx(ctx, tx, tenantID, snapshot.ID, domain.InvoiceVoided, func(tx *sql.Tx, locked domain.Invoice) error {
+		if err := voidRefusal(locked); err != nil {
+			return err
+		}
+		if locked.Status != snapshot.Status || locked.PaymentStatus != snapshot.PaymentStatus ||
+			locked.AmountDueCents != snapshot.AmountDueCents || locked.AmountPaidCents != snapshot.AmountPaidCents ||
+			locked.TotalAmountCents != snapshot.TotalAmountCents {
+			return errs.InvalidState(fmt.Sprintf("invoice %s changed while it was being voided; retry", snapshot.ID)).WithCode("invoice_changed")
+		}
+		return s.voidEffectsTx(ctx, tx, tenantID, locked, locked.Status)
+	})
+}
+
+// voidEffectsTx is the in-tx half of a void, shared by Void and
+// VoidUnchangedTx: hand back the consumed customer credits, retire a funded
+// commit grant, and write the audit row — all on the void's transaction.
+func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, prior domain.InvoiceStatus) error {
+	var creditsReversed, commitRetired int64
+	if s.creditReverser != nil && inv.CustomerID != "" {
+		reversed, rerr := s.creditReverser.ReverseForInvoiceTx(ctx, tx, tenantID, inv.CustomerID, inv.ID, inv.InvoiceNumber)
+		if rerr != nil {
+			return rerr
+		}
+		creditsReversed = reversed
+		// ADR-078 D3: voiding a commit FUNDING invoice retires the funded
+		// grant's remaining balance in this same tx (no-op for non-commit
+		// invoices). Void is the ONLY retire trigger — uncollectible and
+		// the dunning pause/cancel terminals leave the block live as a
+		// collections stance, and voided→paid is rejected so a retired
+		// grant can never be paid for afterwards. The consumed_cents CAS
+		// inside makes the legal uncollectible→void sequence and retries
+		// converge on one retirement.
+		retired, rerr := s.creditReverser.RetireCommitGrantForInvoiceTx(ctx, tx, tenantID, inv.ID)
+		if rerr != nil {
+			return rerr
+		}
+		commitRetired = retired
+	}
+	// ADR-090 in-tx emission — one canonical void row for BOTH the
+	// operator endpoint and engine-triggered voids (unpaid-prebill
+	// relief). The reversal/retirement amounts ride the row so the ledger
+	// effects of the void are readable without cross-referencing the ledger.
+	if s.audit != nil {
+		meta := map[string]any{
+			"invoice_number":     inv.InvoiceNumber,
+			"customer_id":        inv.CustomerID,
+			"total_amount_cents": inv.TotalAmountCents,
+			"currency":           inv.Currency,
+			"status_before":      string(prior),
+		}
+		if creditsReversed > 0 {
+			meta["credits_reversed_cents"] = creditsReversed
+		}
+		if commitRetired > 0 {
+			meta["commit_retired_cents"] = commitRetired
+		}
+		if auditErr := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action:        domain.AuditActionVoid,
+			ResourceType:  "invoice",
+			ResourceID:    inv.ID,
+			ResourceLabel: inv.InvoiceNumber,
+			Metadata:      meta,
+		}); auditErr != nil {
+			return fmt.Errorf("audit emission: %w", auditErr)
+		}
+	}
+	return nil
+}
+
+// AfterVoid runs a committed void's post-commit legs: the upstream tax
+// reversal and the invoice.voided webhook. Void calls it itself; a caller of
+// VoidUnchangedTx calls it once its transaction commits. A crash before it
+// runs loses nothing durable: RetryPendingTaxReversal re-drives the reversal
+// (the voided row keeps tax_reversed_at NULL); the webhook is best-effort, as
+// on every void.
+func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.Invoice) {
 	// Invoice-stable reversal reference (inv_taxrev_<id>). Void permits an
 	// `uncollectible` source (annulling a bad debt is a legitimate operator
 	// action), and MarkUncollectible already reversed the tax under THIS same
@@ -1340,13 +1385,11 @@ func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.Invoice
 	// a distinct reference that did NOT dedup → uncollectible-then-void reversed
 	// the tax twice → tenant under-remitted (ADR-056 follow-up / product audit G1).
 	// Best-effort post-commit: a failure here is logged ERROR and recovered by
-	// RetryPendingTaxReversal, so the caller deliberately ignores the return.
-	_ = s.reverseInvoiceTax(ctx, tenantID, inv, "inv_taxrev_"+inv.ID)
+	// RetryPendingTaxReversal, so the return is deliberately ignored.
+	_ = s.reverseInvoiceTax(ctx, tenantID, voided, "inv_taxrev_"+voided.ID)
 	// invoice.voided webhook — single-writer at the service layer (same
-	// pattern as finalized/marked_uncollectible/payment_recorded). Pre-fix
-	// it fired from the HTTP handler only, so engine-triggered voids (the
-	// unpaid-prebill relief on immediate cancel routes through this method
-	// via the InvoiceVoider interface) silently skipped it.
+	// pattern as finalized/marked_uncollectible/payment_recorded), so
+	// engine-triggered voids notify integrators too.
 	if s.events != nil {
 		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceVoided, map[string]any{
 			"invoice_id":         voided.ID,
@@ -1359,7 +1402,6 @@ func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.Invoice
 			"currency":           voided.Currency,
 		})
 	}
-	return voided, nil
 }
 
 // MarkUncollectible flips a finalized-but-unpaid invoice to

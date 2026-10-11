@@ -48,7 +48,7 @@ type ProrationInvoiceCreator interface {
 	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
 	// FindBaseInvoiceForPeriod gates immediate in_advance proration on
 	// whether the source invoice was actually paid. Mirrors the engine's
-	// BillOnCancel paid-check; same industry rationale (Chargebee
+	// cancel-relief paid/unpaid split; same industry rationale (Chargebee
 	// Refundable vs Adjustment / Stripe proration_behavior=none).
 	FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error)
 	// FindFundingInvoicesForPeriod returns EVERY invoice that funded the
@@ -2164,7 +2164,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	// over-credits downgrades — the customer paid old × stub/fullCycle for the
 	// period, so the delta for the remaining portion is (new−old) ×
 	// remaining/fullCycle. This matches the engine's day-1 stub base fee and
-	// BillOnPlanSwapImmediate (both divide by fullCycleDays).
+	// cross-interval swap refund (both divide by fullCycleDays).
 	oldAmount := oldPlan.BaseAmountCents * spec.oldQuantity
 	newAmount := newPlan.BaseAmountCents * spec.newQuantity
 	billingLoc, err := h.tenantLoc(ctx, sub.TenantID)
@@ -2700,8 +2700,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 //   - NET CREDIT (downgrade / removal / qty-decrease, proratedCents < 0) →
 //     reduce the open invoice's amount_due via a tax-reversing ADJUSTMENT
 //     credit note, capped at amount_due. No refundable balance credit is
-//     granted (no cash was funded). This is the same CreateAndIssueAdjustment
-//     primitive the engine's relieveUnpaidPrebill uses on an unpaid cancel —
+//     granted (no cash was funded). This is the same adjustment credit note
+//     the engine's cancel relief writes for an unpaid invoice —
 //     Chargebee's "Adjustment Credit", Lago's credit-note, Orb's adjustment.
 //
 // The adjustment is carried on the detail's Clawback* fields and issued by the
