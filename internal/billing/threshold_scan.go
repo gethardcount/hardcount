@@ -619,30 +619,24 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		// The sum aggregates every meter on the item's plan.
 		itemRunning := make(map[string]decimal.Decimal, len(sub.Items))
 		for _, it := range sub.Items {
+			// Read errors fail this subscription's evaluation (it retries
+			// next tick; other subscriptions are unaffected). Skipping the
+			// item, a meter, or a meter's usage under-counted the running
+			// total, so a crossed item threshold silently did not fire.
 			plan, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
 			if err != nil {
-				// Plan resolution errors are surfaced but don't kill the whole
-				// scan — fall through, the per-item check just won't fire on
-				// this row. The cycle scan will surface the same error later
-				// if the misconfig persists.
-				slog.Warn("threshold scan: get plan failed",
-					"subscription_id", sub.ID,
-					"item_id", it.ID,
-					"plan_id", it.PlanID,
-					"error", err,
-				)
-				continue
+				return thresholdEval{}, fmt.Errorf("item threshold: get plan %s for item %s: %w", it.PlanID, it.ID, err)
 			}
 			total := decimal.Zero
 			for _, meterID := range plan.MeterIDs {
 				meter, mErr := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 				if mErr != nil {
-					continue
+					return thresholdEval{}, fmt.Errorf("item threshold: get meter %s: %w", meterID, mErr)
 				}
 				defaultMode := mapMeterAggregation(meter.Aggregation)
 				aggs, aErr := e.usage.AggregateByPricingRules(ctx, sub.TenantID, sub.CustomerID, meterID, defaultMode, periodStart, now)
 				if aErr != nil {
-					continue
+					return thresholdEval{}, fmt.Errorf("item threshold: aggregate meter %s: %w", meterID, aErr)
 				}
 				for _, agg := range aggs {
 					total = total.Add(agg.Quantity)

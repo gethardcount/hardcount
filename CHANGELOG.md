@@ -59,6 +59,13 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Billing and tax now stop on a read error instead of billing with a guessed value (2026-10-11).** A failed read in these places now fails the step, which retries on the next run:
+  - **Meter settings** at period close or cancel: a max/last meter used to be billed as the sum of its usage.
+  - **The usage cap's recalculation**: a block-capped customer used to be billed every unit.
+  - **The customer's tax profile**: tax used to be calculated without their exemption, reverse charge, address and tax ID.
+  - **The tax-calculation expiry check at finalize**: it used to let the finalize through. Saving the calculation's record is now required, because the check reads it.
+  - **The threshold invoice**: a line with a missing or failing price was dropped, and a meter or plan that could not be read was left out of an item threshold's count.
+
 - **Money errors now fail instead of guessing a default (2026-10-11).** Four places turned an error into a silent default; each now refuses the request:
   - A credit note with an absurdly large line no longer wraps to a negative total that passed the "not more than the invoice" check. It is refused as too large.
   - Creating an invoice without a currency during a database blip used to fall back to the tenant default or USD. It now answers 503; only a customer with no billing currency set gets the tenant default.

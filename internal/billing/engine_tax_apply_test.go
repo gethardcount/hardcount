@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/tax"
 	"github.com/shopspring/decimal"
@@ -44,16 +44,22 @@ func (s *taxSettings) NextInvoiceNumberTx(_ context.Context, _ *sql.Tx, _ string
 	return "", errors.New("NextInvoiceNumberTx must not be called in tax-apply tests")
 }
 
-// taxProfiles returns a billing profile for configured customers; missing
-// customer → error (matches real store behaviour).
+// taxProfiles returns a billing profile for configured customers; a missing
+// customer → errs.ErrNotFound, exactly what customer.PostgresStore returns on
+// no rows (a plain error here would read as a database failure, which now
+// fails the tax calculation). err, when set, is returned for every customer.
 type taxProfiles struct {
 	profiles map[string]domain.CustomerBillingProfile
+	err      error
 }
 
 func (p *taxProfiles) GetBillingProfile(_ context.Context, _, customerID string) (domain.CustomerBillingProfile, error) {
+	if p.err != nil {
+		return domain.CustomerBillingProfile{}, p.err
+	}
 	bp, ok := p.profiles[customerID]
 	if !ok {
-		return domain.CustomerBillingProfile{}, fmt.Errorf("not found")
+		return domain.CustomerBillingProfile{}, errs.ErrNotFound
 	}
 	return bp, nil
 }

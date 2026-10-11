@@ -2,7 +2,6 @@ package billing
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
 // PreviewLine is one line of an invoice preview. Mirrors the line shape the
@@ -323,22 +321,19 @@ func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID
 		// scan, which persists these lines as a real invoice). This is
 		// what makes preview == invoice hold across a mid-period
 		// publish, and a threshold fire agree with the later close.
+		// Both failures abort, as the cycle close does for the same rule: a
+		// threshold fire persists these lines as a real invoice, and a
+		// skipped line under-billed the fire (the bucket was then not on
+		// the watermark either). A missing PINNED version is not "not set" —
+		// usage is bound to it — so it fails like any other error.
 		ratingRule, err := e.resolveRatedRule(ctx, tenantID, customerID, ratingRuleID, from)
 		if err != nil {
-			if errors.Is(err, errs.ErrNotFound) {
-				warnings = append(warnings, fmt.Sprintf("meter %q rule %q: rating rule not found", meter.Key, ratingRuleID))
-				continue
-			}
-			// Transient failure: abort rather than degrade — a
-			// threshold fire built from this preview would silently
-			// misprice (e.g. list price for a negotiated customer).
 			return nil, nil, fmt.Errorf("resolve pricing for meter %q rule %q: %w", meter.Key, ratingRuleID, err)
 		}
 
 		amount, err := domain.ComputeAmountCents(ratingRule, agg.Quantity)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("meter %q rule %q: rating failed: %s", meter.Key, ratingRule.RuleKey, err.Error()))
-			continue
+			return nil, nil, fmt.Errorf("compute amount for meter %q rule %q: %w", meter.Key, ratingRule.RuleKey, err)
 		}
 
 		// Unit amount is amount / quantity, rounded to nearest cent. The

@@ -830,10 +830,14 @@ func (e *Engine) CommitTax(ctx context.Context, tenantID, invoiceID, calculation
 // available. That is also what this guard's message has promised the
 // operator all along.
 //
-// Returns nil on every internal uncertainty — store unwired, row not
-// found, lookup error, provider unresolvable — mirroring CommitTax's own
-// fall-through: "can't prove it expired" must attempt the commit, never
-// block an invoice on a DB blip.
+// Returns nil when there is nothing to guard: store unwired, no
+// calculation, a tenant with no committing provider (none/manual), or no
+// audit row for the calculation. A read ERROR fails closed (2026-10-11): it
+// used to return nil — "never block an invoice on a DB blip" — but a
+// finalize let through on an unreadable guard could finalize an expired
+// calculation, which is the one failure nothing heals. A refused finalize
+// is retried; callers that only need "proven expired" check the
+// tax_calculation_expired code.
 func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoiceID, calculationID string) error {
 	if e.taxCalcStore == nil || calculationID == "" || e.taxProviders == nil || e.settings == nil {
 		return nil
@@ -844,19 +848,21 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 	// entirely, so an aged calc must not block THEIR finalize either.
 	ts, err := e.settings.Get(ctx, tenantID)
 	if err != nil {
-		return nil
+		return fmt.Errorf("tax expiry guard: read settings: %w", err)
 	}
-	if provider, perr := e.taxProviders.Resolve(ctx, ts); perr != nil || provider == nil {
+	provider, perr := e.taxProviders.Resolve(ctx, ts)
+	if perr != nil {
+		return fmt.Errorf("tax expiry guard: resolve provider: %w", perr)
+	}
+	if provider == nil {
 		return nil
 	}
 	// Backfill invoice_id on the audit row now that the invoice is
 	// persisted — Record wrote it during tax application before the
-	// invoice existed. Best-effort: a failure here only degrades the
-	// expiry lookup below to "not found → skip", never blocks finalize.
+	// invoice existed. The lookup below filters on it, so a failed link
+	// would read as "no row" and skip the guard: fail instead.
 	if linkErr := e.taxCalcStore.LinkInvoice(ctx, tenantID, invoiceID, calculationID); linkErr != nil {
-		slog.Warn("tax: failed to link invoice to tax_calculations row",
-			"error", linkErr, "tenant_id", tenantID, "invoice_id", invoiceID,
-			"calculation_id", calculationID)
+		return fmt.Errorf("tax expiry guard: link calculation %s to invoice: %w", calculationID, linkErr)
 	}
 	createdAt, lookupErr := e.taxCalcStore.LookupCalculationCreatedAt(ctx, tenantID, invoiceID, calculationID)
 	if lookupErr == nil {
@@ -882,12 +888,7 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 			return de.WithCode("tax_calculation_expired")
 		}
 	} else if !errors.Is(lookupErr, errs.ErrNotFound) {
-		// Lookup failure on a real DB error: log and fall through.
-		// Better to attempt commit and let Stripe reject than to
-		// block finalize on a transient DB blip.
-		slog.Warn("tax: expiry-guard lookup failed; attempting commit anyway",
-			"error", lookupErr, "tenant_id", tenantID, "invoice_id", invoiceID,
-			"calculation_id", calculationID)
+		return fmt.Errorf("tax expiry guard: look up calculation age: %w", lookupErr)
 	}
 	return nil
 }
@@ -1526,10 +1527,19 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 
 	var profile domain.CustomerBillingProfile
 	if e.profiles != nil && customerID != "" {
-		if bp, err := e.profiles.GetBillingProfile(ctx, tenantID, customerID); err == nil {
+		bp, err := e.profiles.GetBillingProfile(ctx, tenantID, customerID)
+		switch {
+		case err == nil:
 			profile = bp
 			app.TaxCountry = bp.Country
 			app.TaxID = bp.TaxID
+		case errors.Is(err, errs.ErrNotFound):
+			// No billing profile: nothing to apply (not set).
+		default:
+			// A read error used to leave an empty profile, and tax was then
+			// computed without the customer's exemption, reverse-charge
+			// status, address and tax ID — and committed that way.
+			return TaxApplication{}, fmt.Errorf("get billing profile for tax: %w", err)
 		}
 	}
 
@@ -1684,10 +1694,10 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 
 	if e.taxCalcStore != nil {
 		if _, err := e.taxCalcStore.Record(ctx, tenantID, "", req, res); err != nil {
-			// Persistence failure doesn't block the invoice — log it. The
-			// billing engine's correctness does not depend on the audit row.
-			slog.Warn("tax: failed to persist tax_calculations row",
-				"error", err, "tenant_id", tenantID, "provider", provider.Name())
+			// Required, not audit-only: the finalize expiry guard reads this
+			// row's age. Without it the guard finds "no row" forever and an
+			// aged calculation finalizes uncommittable.
+			return TaxApplication{}, fmt.Errorf("persist tax calculation %s: %w", res.CalculationID, err)
 		}
 	}
 
@@ -2262,12 +2272,13 @@ func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscripti
 			if _, ok := meterAggs[meterID]; ok {
 				continue
 			}
+			// An unreadable meter fails the close (it retries next tick):
+			// defaulting to "sum" billed a max/last meter as its total.
 			m, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err == nil {
-				meterAggs[meterID] = m.Aggregation
-			} else {
-				meterAggs[meterID] = "sum"
+			if err != nil {
+				return nil, "", nil, nil, fmt.Errorf("get meter %s aggregation: %w", meterID, err)
 			}
+			meterAggs[meterID] = m.Aggregation
 		}
 	}
 
@@ -2542,11 +2553,10 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 				continue
 			}
 			m, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err == nil {
-				meterAggs[meterID] = m.Aggregation
-			} else {
-				meterAggs[meterID] = "sum"
+			if err != nil { // never default to "sum": a max/last meter would bill its total
+				return nil, 0, nil, fmt.Errorf("get meter %s aggregation: %w", meterID, err)
 			}
+			meterAggs[meterID] = m.Aggregation
 		}
 	}
 
@@ -2746,14 +2756,17 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 			// Cap actually fired (post-cap total == cap). Compute the
 			// pre-cap total by re-aggregating, then derive scale.
 			preCapTotals, err := e.usage.AggregateForBillingPeriodByAgg(ctx, sub.TenantID, sub.CustomerID, meterAggs, periodStart, periodEnd)
-			if err == nil {
-				preCapTotal := decimal.Zero
-				for _, qty := range preCapTotals {
-					preCapTotal = preCapTotal.Add(qty)
-				}
-				if preCapTotal.GreaterThan(capDec) && !preCapTotal.IsZero() {
-					capScale = capDec.Div(preCapTotal)
-				}
+			if err != nil {
+				// Never bill uncapped: leaving capScale at 1 on an error
+				// billed a block-capped customer for every unit.
+				return nil, 0, nil, fmt.Errorf("re-aggregate usage for the cap scale: %w", err)
+			}
+			preCapTotal := decimal.Zero
+			for _, qty := range preCapTotals {
+				preCapTotal = preCapTotal.Add(qty)
+			}
+			if preCapTotal.GreaterThan(capDec) && !preCapTotal.IsZero() {
+				capScale = capDec.Div(preCapTotal)
 			}
 		}
 	}
@@ -3972,11 +3985,10 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 				continue
 			}
 			m, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err == nil {
-				meterAggs[meterID] = m.Aggregation
-			} else {
-				meterAggs[meterID] = "sum"
+			if err != nil { // never default to "sum": a max/last meter would bill its total
+				return nil, 0, fmt.Errorf("get meter %s aggregation on cancel: %w", meterID, err)
 			}
+			meterAggs[meterID] = m.Aggregation
 		}
 	}
 	usageTotals := make(map[string]decimal.Decimal)
@@ -5689,9 +5701,17 @@ func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID str
 	//    refreshable would let an operator race the orphan reconciler's
 	//    heal of a persist-failed commit — replacing the exact calc whose
 	//    idempotent re-commit would have recovered the transaction id.
-	okWithExpiredCalc := inv.TaxStatus == domain.InvoiceTaxOK && inv.TaxCalculationID != "" &&
-		inv.TaxTransactionID == "" &&
-		e.CheckTaxCalculationUsable(ctx, tenantID, invoiceID, inv.TaxCalculationID) != nil
+	okWithExpiredCalc := false
+	if inv.TaxStatus == domain.InvoiceTaxOK && inv.TaxCalculationID != "" && inv.TaxTransactionID == "" {
+		// PROVEN expired only — a guard that could not read its inputs is not
+		// proof, and treating it as such would mint a second calculation.
+		if err := e.CheckTaxCalculationUsable(ctx, tenantID, invoiceID, inv.TaxCalculationID); err != nil {
+			if errs.Code(err) != "tax_calculation_expired" {
+				return domain.Invoice{}, fmt.Errorf("check the draft's tax calculation: %w", err)
+			}
+			okWithExpiredCalc = true
+		}
+	}
 	if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed && !okWithExpiredCalc {
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
 			"tax retry only valid when tax_status is pending or failed, or to refresh a draft's EXPIRED uncommitted calculation (current: %s)", inv.TaxStatus))
