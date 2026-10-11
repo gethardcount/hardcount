@@ -402,27 +402,6 @@ func classifySearchError(err error) error {
 // caller additionally treats the invalid_request class as "search not offered
 // on this account" (the documented India case and its kin) and disables its
 // sweep for the account rather than retrying a request-shape error forever.
-// GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted
-// sweep, reconciler_hosted.go).
-func (c *LiveStripeClient) GetCheckoutSession(ctx context.Context, sessionID string) (CheckoutSessionResult, error) {
-	sc := c.clients.ForCtx(ctx)
-	if sc == nil {
-		return CheckoutSessionResult{}, ErrStripeNotConfigured
-	}
-	sess, err := sc.V1CheckoutSessions.Retrieve(ctx, sessionID, nil)
-	if err != nil {
-		return CheckoutSessionResult{}, classifyStripeError(err)
-	}
-	out := CheckoutSessionResult{
-		Status:        string(sess.Status),
-		PaymentStatus: string(sess.PaymentStatus),
-	}
-	if sess.PaymentIntent != nil {
-		out.PaymentIntentID = sess.PaymentIntent.ID
-	}
-	return out, nil
-}
-
 func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, invoiceID string) ([]PaymentIntentResult, error) {
 	sc := c.clients.ForCtx(ctx)
 	if sc == nil {
@@ -446,6 +425,27 @@ func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, 
 			Purpose:             pi.Metadata["velox_purpose"],
 			AmountReceivedCents: pi.AmountReceived,
 		})
+	}
+	return out, nil
+}
+
+// GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted
+// sweep, reconciler_hosted.go).
+func (c *LiveStripeClient) GetCheckoutSession(ctx context.Context, sessionID string) (CheckoutSessionResult, error) {
+	sc := c.clients.ForCtx(ctx)
+	if sc == nil {
+		return CheckoutSessionResult{}, ErrStripeNotConfigured
+	}
+	sess, err := sc.V1CheckoutSessions.Retrieve(ctx, sessionID, nil)
+	if err != nil {
+		return CheckoutSessionResult{}, classifyStripeError(err)
+	}
+	out := CheckoutSessionResult{
+		Status:        string(sess.Status),
+		PaymentStatus: string(sess.PaymentStatus),
+	}
+	if sess.PaymentIntent != nil {
+		out.PaymentIntentID = sess.PaymentIntent.ID
 	}
 	return out, nil
 }

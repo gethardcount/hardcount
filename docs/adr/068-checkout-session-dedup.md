@@ -131,12 +131,16 @@ they exclude each other:
   `completed` session whose invoice is still unpaid. It calls
   `SettleSucceeded` directly, so a hosted payment on an invoice Velox
   already charged raises `payment.duplicate_charge` even when no webhook
-  ever arrived.
+  ever arrived, and skips a payment the webhook already escalated (the
+  invoice's anomaly marker names its PaymentIntent) so one charge raises
+  one alert.
 - **Fixes on the session path:** the Stripe expiry is fixed at claim
   creation + 1h (a clock-relative expiry changed the params under a fixed
   idempotency key, so every re-drive failed); a session Velox failed to
-  record is never handed out; a pending claim too old to re-drive (Stripe
-  requires an expiry at least 30 minutes ahead) is superseded; and a
+  record is never handed out, nor is one whose claim was replaced while
+  its create was in flight (it is expired instead); a pending claim too old
+  to re-drive (Stripe requires an expiry at least 30 minutes ahead) is
+  superseded; and a
   session a credit apply superseded is expired at Stripe before a new one
   is minted.
 
@@ -147,7 +151,9 @@ pay only on manual-collection invoices. Lago delays the first automatic
 charge 10 minutes, which narrows the race without closing it. A hold column
 with its own release reconciler and operator action was designed and
 rejected as heavier than the risk: the session table already carries the
-state, and session expiry bounds every wait.
+state. A wait lasts until the session's expiry plus the sweep's 5-minute
+grace plus one scheduler tick (hourly in production), with the 24-hour cap
+as the backstop.
 
 **Residual.** An operator records an offline payment while the customer
 completes a hosted session and that payment's webhook is lost: the

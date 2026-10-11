@@ -334,3 +334,50 @@ func TestListHostedToReconcile_Selection(t *testing.T) {
 		}
 	}
 }
+
+// TestFillSession_ReportsAReplacedClaim: a create that finishes after its
+// claim was superseded still records the session (so the sweeps can find
+// and expire it), but reports the claim's status so the caller does not hand
+// the URL out beside the newer claim's page.
+func TestFillSession_ReportsAReplacedClaim(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: skipped in -short mode")
+	}
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Fill Replaced Claim")
+	sessions := NewCheckoutSessionStore(db)
+	exp := time.Now().Add(time.Hour)
+
+	live := seedClaimInvoice(t, db, ctx, tenantID, "finalized", "pending", 5000)
+	c, _, err := sessions.ClaimOpen(ctx, tenantID, live, 5000, "USD", false)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if st, err := sessions.FillSession(ctx, tenantID, c.ID, "cs_live", "https://pay/live", exp); err != nil || st != "open" {
+		t.Fatalf("fill open claim: status=%q err=%v", st, err)
+	}
+
+	replaced := seedClaimInvoice(t, db, ctx, tenantID, "finalized", "pending", 5000)
+	c2, _, err := sessions.ClaimOpen(ctx, tenantID, replaced, 5000, "USD", false)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if won, err := sessions.Supersede(ctx, tenantID, c2.ID); err != nil || !won {
+		t.Fatalf("supersede: won=%v err=%v", won, err)
+	}
+	st, err := sessions.FillSession(ctx, tenantID, c2.ID, "cs_late", "https://pay/late", exp)
+	if err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+	if st != "superseded" {
+		t.Fatalf("status = %q, want superseded (the caller must not hand this URL out)", st)
+	}
+	unresolved, err := sessions.ListUnresolvedForInvoice(ctx, tenantID, replaced)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(unresolved) != 1 || unresolved[0].StripeSessionID != "cs_late" {
+		t.Fatalf("late session not recorded for the sweeps: %+v", unresolved)
+	}
+}

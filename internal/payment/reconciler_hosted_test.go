@@ -104,6 +104,36 @@ func TestHostedSweep_SettlesPaidSessionsEvenOnAPaidInvoice(t *testing.T) {
 	assertIDs(t, "touched", ledger.touched, "cks_live", "cks_err", "cks_unpaid")
 }
 
+// TestHostedSweep_OneAlertPerCharge: when the webhook already settled this
+// hosted payment as an anomaly (the invoice's marker names its
+// PaymentIntent), the sweep records the session and does not settle again,
+// which would send a second payment.duplicate_charge for one charge.
+func TestHostedSweep_OneAlertPerCharge(t *testing.T) {
+	store := newMockReconcileStore(domain.Invoice{
+		ID: "inv_paid", TenantID: "t1", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
+		StripePaymentIntentID: "pi_velox", PaymentAnomalyKind: domain.EventPaymentDuplicateCharge,
+		PaymentAnomalyPaymentIntentID: "pi_hosted",
+	})
+	client := &mockStripeClient{piStates: map[string]PaymentIntentResult{
+		"pi_hosted": {ID: "pi_hosted", Status: "succeeded", AmountReceivedCents: 5000},
+	}}
+	ledger := &fakeHostedLedger{rows: []CheckoutClaim{
+		{ID: "cks_1", TenantID: "t1", InvoiceID: "inv_paid", StripeSessionID: "cs_1", Status: "invoice_settled"},
+	}}
+	settler := &recordingSettler{}
+	r := NewReconciler(client, store, time.Second)
+	r.SetSettler(settler)
+	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}})
+
+	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 1 || len(errs) != 0 {
+		t.Fatalf("n=%d errs=%v", n, errs)
+	}
+	if len(settler.succeeded) != 0 {
+		t.Fatalf("settled again: %+v — a second alert for a payment already escalated", settler.succeeded)
+	}
+	assertIDs(t, "completed", ledger.completed, "cks_1")
+}
+
 // TestHostedSweep_UnwiredDoesNothing: without a settler the sweep cannot
 // record a payment correctly, so it must not touch anything.
 func TestHostedSweep_UnwiredDoesNothing(t *testing.T) {

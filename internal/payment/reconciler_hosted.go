@@ -119,8 +119,13 @@ func (r *Reconciler) reconcileHostedSession(ctx context.Context, c CheckoutClaim
 		if err != nil {
 			return false, fmt.Errorf("get invoice %s: %w", c.InvoiceID, err)
 		}
-		if err := r.settler.SettleSucceeded(ctx, c.TenantID, inv, pi.ID, pi.AmountReceivedCents, SourceReconciler); err != nil {
-			return false, fmt.Errorf("settle hosted payment: %w", err)
+		// The webhook already reported this payment as an anomaly (a duplicate,
+		// or money on a voided invoice): settling again would send the
+		// operator's systems a second payment.duplicate_charge for one charge.
+		if inv.PaymentAnomalyPaymentIntentID != pi.ID {
+			if err := r.settler.SettleSucceeded(ctx, c.TenantID, inv, pi.ID, pi.AmountReceivedCents, SourceReconciler); err != nil {
+				return false, fmt.Errorf("settle hosted payment: %w", err)
+			}
 		}
 		if err := r.hostedLedger.MarkSessionCompleted(ctx, c.TenantID, c.ID); err != nil {
 			// Settled; the row comes back next tick and settles as a no-op.

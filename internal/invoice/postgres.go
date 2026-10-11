@@ -2148,11 +2148,13 @@ func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string
 // ReleaseAutoChargeClaim clears the lease on skip paths where the
 // charge call was PROVABLY never made (credit-apply failure, no payment
 // method on file) so the next tick — or the next test-clock Advance —
-// retries immediately instead of waiting out the lease. Never called
-// after ChargeInvoice was attempted: terminal outcomes exit the list
-// predicate on their own, and an ambiguous transient (breaker/timeout)
-// must wait out the lease precisely because the call may have reached
-// Stripe. No updated_at write (see ClaimAutoCharge).
+// retries immediately instead of waiting out the lease. The charge path
+// (payment/stripe.go) also calls it after a DEFINITE outcome, a decline or
+// a settled success, so the customer's hosted page and the next initiator
+// are not held off by a charge that already finished. An ambiguous
+// transient (breaker/timeout) must wait out the lease precisely because
+// the call may have reached Stripe. No updated_at write (see
+// ClaimAutoCharge).
 func (s *PostgresStore) ReleaseAutoChargeClaim(ctx context.Context, tenantID, id string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

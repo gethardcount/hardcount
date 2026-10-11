@@ -1324,19 +1324,33 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 	// Persist Stripe's ACTUAL expiry (it clamps requests) via CAS; losing the
 	// CAS to a concurrent re-drive is fine — same session, same values.
 	expiresAt := time.Unix(sess.ExpiresAt, 0).UTC()
-	if fErr := a.sessions.FillSession(ctx, claim.TenantID, claim.ID, sess.ID, sess.URL, expiresAt); fErr != nil {
+	status, fErr := a.sessions.FillSession(ctx, claim.TenantID, claim.ID, sess.ID, sess.URL, expiresAt)
+	if fErr != nil {
 		// Never hand out a session Velox has not recorded: the reconciler and
 		// the expire sweeps find sessions by their recorded id, so an
 		// unrecorded one could be paid with nothing ever looking at it. The
 		// customer retries; the re-drive replays the same session and fills.
 		return "", fmt.Errorf("record checkout session: %w", fErr)
 	}
+	if status != "open" {
+		// The claim was replaced while this create was in flight (a credit
+		// apply, a settle, or the pending-claim supersede): a newer claim owns
+		// the invoice, so handing this URL out would leave two live pages.
+		// Close it; the recorded id lets the sweeps finish the job if this
+		// expire fails.
+		if perr := a.expireStripeSession(ctx, sc, sess.ID); perr != nil {
+			slog.WarnContext(ctx, "checkout: expire of a replaced claim's session failed",
+				"claim_id", claim.ID, "error", perr)
+		}
+		return "", payment.ErrChargeInFlight
+	}
 	return sess.URL, nil
 }
 
 // checkoutSessionTTL is how long a hosted Checkout session stays payable at
-// Stripe. The charge claims (invoice/postgres.go, hostedPageLiveSQL) block
-// Velox charges for the same window, so the two must move together.
+// Stripe. domain.HostedCheckoutLiveSQL writes this window as SQL literals
+// (an unfilled claim blocks charges for 1h + 5m), so a change here must
+// change those too.
 const checkoutSessionTTL = time.Hour
 
 // checkoutPendingRedriveLimit bounds how long a claim whose Stripe create

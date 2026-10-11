@@ -222,11 +222,13 @@ func scanOpenClaim(ctx context.Context, tx *sql.Tx, invoiceID string) (CheckoutC
 // FillSession records the Stripe session onto the claim via CAS
 // (stripe_session_id IS NULL). Losing the CAS is fine — the idempotency key
 // guarantees both racers hold the SAME session, so the row already carries
-// these values.
-func (s *CheckoutSessionStore) FillSession(ctx context.Context, tenantID, claimID, stripeSessionID, url string, expiresAt time.Time) error {
+// these values. It returns the claim's status after the write: a claim
+// superseded while its create was in flight still records the session (so
+// the sweeps can find it), but the caller must not hand its URL out.
+func (s *CheckoutSessionStore) FillSession(ctx context.Context, tenantID, claimID, stripeSessionID, url string, expiresAt time.Time) (string, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer postgres.Rollback(tx)
 	if _, err := tx.ExecContext(ctx, `
@@ -234,9 +236,13 @@ func (s *CheckoutSessionStore) FillSession(ctx context.Context, tenantID, claimI
 		SET stripe_session_id = $1, url = $2, expires_at = $3, updated_at = now()
 		WHERE id = $4 AND stripe_session_id IS NULL
 	`, stripeSessionID, url, expiresAt, claimID); err != nil {
-		return err
+		return "", err
 	}
-	return tx.Commit()
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM checkout_sessions WHERE id = $1`, claimID).Scan(&status); err != nil {
+		return "", err
+	}
+	return status, tx.Commit()
 }
 
 // Supersede CAS-flips an open claim to superseded (amount drift or
