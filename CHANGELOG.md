@@ -59,6 +59,12 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Payments stop on a read error instead of guessing (2026-10-11).**
+  - **Stripe credentials:** a credentials read error is now "try again" and does not use up a dunning attempt. It used to read as "Stripe not configured". A Stripe Tax commit with no Stripe client is now an error; it used to count as committed.
+  - **Saved cards:** a failed card lookup at Stripe, including a failed page of the card list, is now retried. It used to read as "no card saved", so the card a customer saved on the hosted page could go unrecorded.
+  - **Stripe customer link:** a failed customer read no longer creates a second Stripe customer. If saving a new Stripe customer link fails, the error is returned.
+  - **Webhook payloads:** an undecodable payload on a declined-payment or checkout-completed webhook is redelivered, not acknowledged.
+  - **Hosted payment page:** if an older payment page can be neither closed nor confirmed closed at Stripe, no second page is created. The customer sees "try again" instead of a page that could take a second payment.
 - **Plan changes, credit notes, dunning and pricing stop on a read error instead of carrying on with a guess (2026-10-11).**
   - **Plan changes:** add, update and remove item, and billing-threshold changes, fail before changing anything if a read they depend on fails. Before, the change went through with no proration, or skipped the currency check.
   - **Subscription create and currency checks:** an error is no longer treated as "no customer", "no profile" or "no outgoing plan".

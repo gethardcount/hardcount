@@ -70,21 +70,41 @@ func (c *StripeClients) ForCtx(ctx context.Context) *stripe.Client {
 // (reconciler) that derive tenantID + livemode from a database row instead
 // of request ctx.
 func (c *StripeClients) For(ctx context.Context, tenantID string, livemode bool) *stripe.Client {
-	if c == nil || tenantID == "" {
+	sc, err := c.Resolve(ctx, tenantID, livemode)
+	if err != nil {
+		slog.ErrorContext(ctx, "stripe credential lookup failed",
+			"tenant_id", tenantID, "livemode", livemode, "error", err)
 		return nil
+	}
+	return sc
+}
+
+// Resolve is For that tells "not configured" (nil, nil) apart from "the
+// credentials could not be read" (nil, err). Money paths use it so a lookup
+// blip is a retryable failure, not a definite "Stripe not configured".
+func (c *StripeClients) Resolve(ctx context.Context, tenantID string, livemode bool) (*stripe.Client, error) {
+	if c == nil || tenantID == "" {
+		return nil, nil
 	}
 	creds, err := c.fetcher.GetPlaintext(ctx, tenantID, livemode)
 	if err != nil {
-		if !errors.Is(err, errs.ErrNotFound) {
-			slog.ErrorContext(ctx, "stripe credential lookup failed",
-				"tenant_id", tenantID, "livemode", livemode, "error", err)
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, nil
 		}
-		return nil
+		return nil, err
 	}
 	if creds.SecretKey == "" {
-		return nil
+		return nil, nil
 	}
-	return stripe.NewClient(creds.SecretKey, stripe.WithBackends(stripe.NewBackends(stripeHTTPClient)))
+	return stripe.NewClient(creds.SecretKey, stripe.WithBackends(stripe.NewBackends(stripeHTTPClient))), nil
+}
+
+// ResolveCtx is Resolve for the tenant and mode on ctx.
+func (c *StripeClients) ResolveCtx(ctx context.Context) (*stripe.Client, error) {
+	if c == nil {
+		return nil, nil
+	}
+	return c.Resolve(ctx, auth.TenantID(ctx), postgres.Livemode(ctx))
 }
 
 // Has returns true iff a credential fetcher is wired. Used at server

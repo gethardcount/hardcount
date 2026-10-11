@@ -64,7 +64,13 @@ func (a *StripeAdapter) client(ctx context.Context) (*stripe.Client, error) {
 // public_token row, livemode pinned by hostedinvoice.resolveInvoice).
 func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, customerID string) (string, error) {
 	cust, err := a.customerLink.Get(ctx, tenantID, customerID)
-	if err == nil && cust.StripeCustomerID != "" {
+	if err != nil {
+		// A read error is not "no Stripe customer yet": creating one here
+		// re-mapped the customer to a new, empty Stripe customer, stranding
+		// the saved card on the old one.
+		return "", fmt.Errorf("read customer %s: %w", customerID, err)
+	}
+	if cust.StripeCustomerID != "" {
 		return cust.StripeCustomerID, nil
 	}
 
@@ -148,12 +154,17 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 		return "", fmt.Errorf("stripe create customer: %w", err)
 	}
 
-	// Persist on the customer row so future calls short-circuit.
-	// Best-effort — if the write races (concurrent first-PM action),
-	// the partial unique index on (tenant_id, livemode, stripe_customer_id)
-	// rejects the duplicate write and the caller re-reads the winning
-	// value on next call.
-	_ = a.customerLink.SetStripeCustomerID(ctx, tenantID, customerID, stripeCust.ID)
+	// Persist on the customer row so future calls short-circuit. The
+	// returned id must be the RECORDED one: a card saved on a Stripe
+	// customer Velox has not recorded can never be charged. If the write
+	// fails, re-read — a concurrent first-PM action may have recorded its
+	// own customer, and that winner is the one to use; otherwise fail.
+	if err := a.customerLink.SetStripeCustomerID(ctx, tenantID, customerID, stripeCust.ID); err != nil {
+		if now, rerr := a.customerLink.Get(ctx, tenantID, customerID); rerr == nil && now.StripeCustomerID != "" {
+			return now.StripeCustomerID, nil
+		}
+		return "", fmt.Errorf("record stripe customer %s for %s: %w", stripeCust.ID, customerID, err)
+	}
 	return stripeCust.ID, nil
 }
 

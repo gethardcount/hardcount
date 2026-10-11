@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
 // PaymentSetupStore persists Stripe customer/payment method data.
@@ -110,8 +112,15 @@ func (h *CheckoutHandler) createSetupSession(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Check if customer already has a Stripe customer ID
+	// A read error is not "no Stripe customer": creating one would re-map the
+	// customer and strand their saved card on the old Stripe customer.
 	var stripeCustomerID string
-	if existing, err := h.store.GetPaymentSetup(r.Context(), tenantID, req.CustomerID); err == nil && existing.StripeCustomerID != "" {
+	existing, err := h.store.GetPaymentSetup(r.Context(), tenantID, req.CustomerID)
+	if err != nil && !errors.Is(err, errs.ErrNotFound) {
+		respond.FromError(w, r, err, "payment_setup")
+		return
+	}
+	if err == nil {
 		stripeCustomerID = existing.StripeCustomerID
 	}
 

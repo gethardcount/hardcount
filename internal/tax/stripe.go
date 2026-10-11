@@ -197,9 +197,13 @@ func (p *StripeTaxProvider) Commit(ctx context.Context, calcRef, invoiceID strin
 	}
 	client := p.clientForCtx(ctx)
 	if client == nil {
-		// No client for the current mode (mode/credential mismatch at commit
-		// time); nothing to commit upstream. No-op, consistent with manual.
-		return "", nil
+		// A calculation exists, so Stripe WAS configured when it was made:
+		// no client now means the credentials are gone or could not be read.
+		// Either way nothing was committed — returning ("", nil) read as
+		// success and the commit-retry sweep counted it as recovered while
+		// the tax was never reported to Stripe.
+		return "", fmt.Errorf("stripe tax: commit calculation %s for invoice %s: no Stripe client for livemode=%t (credentials missing or unreadable)",
+			calcRef, invoiceID, postgres.Livemode(ctx))
 	}
 	params := &stripe.TaxTransactionCreateFromCalculationParams{
 		Calculation: stripe.String(calcRef),

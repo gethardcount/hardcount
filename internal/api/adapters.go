@@ -410,6 +410,15 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 	}
 
 	ps, err := a.paymentSetups.GetPaymentSetup(ctx, tenantID, customerID)
+	if err != nil && !errors.Is(err, errs.ErrNotFound) {
+		// A read error is not "no card": reporting ErrNoPaymentMethodOnRetry
+		// spent a counted dunning attempt (and could drive the invoice to its
+		// terminal action) on a database blip. Skip this tick, uncounted.
+		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		slog.WarnContext(ctx, "dunning retry: payment setup read failed; skipping this attempt",
+			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
+		return dunning.ErrTransientSkip
+	}
 	if err != nil || ps.StripeCustomerID == "" || ps.StripePaymentMethodID == "" {
 		// Provably pre-Stripe: release the lease before reporting.
 		// Typed sentinel so the dunning warning email renders clean
@@ -1194,10 +1203,11 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 					// will settle + escalate the amount mismatch. Never mint.
 					return "", payment.ErrChargeInFlight
 				}
-				// Network failure: accepted ≤1h residual (Stripe-side
-				// ExpiresAt bounds the orphan); proceed to supersede + remint.
-				slog.WarnContext(ctx, "checkout: best-effort expire of drifted session failed",
-					"invoice_id", inv.ID, "claim_id", claim.ID, "error", perr)
+				// Neither expired nor confirmed closed: the old page may still
+				// be payable, so minting a second one could take two payments.
+				// Fail; the customer retries (the old page also expires on its
+				// own within the hour).
+				return "", fmt.Errorf("expire the previous payment page: %w", perr)
 			}
 		}
 		// Supersede via CAS — exactly one concurrent caller wins the remint.
@@ -1368,9 +1378,9 @@ func checkoutSessionExpiry(claim payment.CheckoutClaim) time.Time {
 // expireSupersededSessions expires, at Stripe, every superseded session of
 // the invoice that may still be live. A COMPLETED one means the customer
 // already paid it: return ErrChargeInFlight so nothing new is minted (the
-// webhook or the reconciler settles it). A network failure is the same
-// accepted residual as the drift path: the session's own expiry bounds it,
-// and the charge claims keep Velox off the invoice until then.
+// webhook or the reconciler settles it). A session that could be neither
+// expired nor confirmed closed fails the mint: two payable pages for one
+// invoice could take two payments.
 func (a *hostedInvoiceStripeAdapter) expireSupersededSessions(ctx context.Context, sc *stripe.Client, tenantID, invoiceID string) error {
 	live, err := a.sessions.ListUnresolvedForInvoice(ctx, tenantID, invoiceID)
 	if err != nil {
@@ -1390,8 +1400,9 @@ func (a *hostedInvoiceStripeAdapter) expireSupersededSessions(ctx context.Contex
 		case errors.Is(perr, payment.ErrSessionCompleted):
 			return payment.ErrChargeInFlight
 		default:
-			slog.WarnContext(ctx, "checkout: best-effort expire of superseded session failed",
-				"invoice_id", invoiceID, "claim_id", c.ID, "error", perr)
+			// Unknown state: the superseded page may still be payable, so do
+			// not mint another one beside it. Fail; the customer retries.
+			return fmt.Errorf("expire superseded payment page %s: %w", c.StripeSessionID, perr)
 		}
 	}
 	return nil
@@ -1409,7 +1420,7 @@ func (a *hostedInvoiceStripeAdapter) expireStripeSession(ctx context.Context, sc
 	// not a contract.
 	sess, rErr := sc.V1CheckoutSessions.Retrieve(ctx, sessionID, &stripe.CheckoutSessionRetrieveParams{})
 	if rErr != nil {
-		return err // original failure; caller treats as network residual
+		return err // original failure: state unknown, callers do not mint
 	}
 	switch sess.Status {
 	case stripe.CheckoutSessionStatusComplete:

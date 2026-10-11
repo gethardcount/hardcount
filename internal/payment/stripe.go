@@ -1460,28 +1460,29 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	if a, ok := anchorFromEventPayload(event); ok {
 		ctx = withSettleAnchor(ctx, a)
 	}
+	// The purpose routes the decline (a hosted attempt never moves the
+	// invoice; a dunning retry already sent its own email). An undecodable
+	// body is not "no purpose": guessing would fail a hosted attempt into
+	// dunning. Fail so Stripe redelivers.
+	md, err := piMetadata(event.Payload)
+	if err != nil {
+		return fmt.Errorf("decode payment_intent.payment_failed metadata: %w", err)
+	}
 	return s.SettleFailed(ctx, tenantID, inv, PaymentFailure{
 		PaymentIntentID: event.PaymentIntentID,
 		Message:         event.FailureMessage,
-		Purpose:         piPurposeFromPayload(event.Payload),
+		Purpose:         md["velox_purpose"],
 	}, SourceWebhook)
 }
 
-// piPurposeFromPayload extracts data.object.metadata.velox_purpose from
-// a Stripe webhook event payload. Returns "" if not present. The
-// payload["raw"] field is the JSON body of the Stripe event; we keep
-// the parse narrow to just the field we need so unrelated schema
-// drift doesn't break extraction.
-func piPurposeFromPayload(payload map[string]any) string {
-	return piMetadataFromPayload(payload)["velox_purpose"]
-}
-
-// piMetadataFromPayload parses data.object.metadata out of the event body in
-// payload["raw"]; nil when absent or unparseable.
-func piMetadataFromPayload(payload map[string]any) map[string]string {
+// piMetadata parses data.object.metadata out of the event body in
+// payload["raw"] (the JSON body of the Stripe event; the parse stays narrow
+// so unrelated schema drift doesn't break it). No body or no metadata is
+// (nil, nil); a body that does not decode is an error.
+func piMetadata(payload map[string]any) (map[string]string, error) {
 	rawStr, ok := payload["raw"].(string)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	var parsed struct {
 		Data struct {
@@ -1491,9 +1492,17 @@ func piMetadataFromPayload(payload map[string]any) map[string]string {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(rawStr), &parsed); err != nil {
-		return nil
+		return nil, err
 	}
-	return parsed.Data.Object.Metadata
+	return parsed.Data.Object.Metadata, nil
+}
+
+// piMetadataFromPayload is piMetadata for the charge anchor only, where an
+// unreadable body deliberately falls back (anchorFromEventPayload: a
+// malformed anchor must not block a settlement).
+func piMetadataFromPayload(payload map[string]any) map[string]string {
+	md, _ := piMetadata(payload)
+	return md
 }
 
 func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, event domain.StripeWebhookEvent) error {
@@ -1511,13 +1520,17 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 				} `json:"object"`
 			} `json:"data"`
 		}
-		if err := json.Unmarshal([]byte(payload.(string)), &raw); err == nil {
-			customerID = raw.Data.Object.Metadata["velox_customer_id"]
-			sessionID = raw.Data.Object.ID
-			veloxPurpose = raw.Data.Object.Metadata["velox_purpose"]
-			if event.CustomerExternalID == "" {
-				event.CustomerExternalID = raw.Data.Object.Customer
-			}
+		if err := json.Unmarshal([]byte(payload.(string)), &raw); err != nil {
+			// A verified Stripe payload that does not decode is not "no
+			// customer": acking it would drop the card and the claim's
+			// completion for good. Fail so Stripe redelivers.
+			return fmt.Errorf("decode checkout.session.completed: %w", err)
+		}
+		customerID = raw.Data.Object.Metadata["velox_customer_id"]
+		sessionID = raw.Data.Object.ID
+		veloxPurpose = raw.Data.Object.Metadata["velox_purpose"]
+		if event.CustomerExternalID == "" {
+			event.CustomerExternalID = raw.Data.Object.Customer
 		}
 	}
 	// Truth-sync the claim ledger (ADR-068): the session finished at Stripe.
@@ -1572,8 +1585,16 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 		return nil
 	}
 	card, err := s.cardFetcher.FetchCardDetails(ctx, stripeCustomerID)
+	if err != nil && !errors.Is(err, ErrNoSavedCard) {
+		// A failed lookup (Stripe 5xx, rate limit, unreadable credentials)
+		// is not "no card saved": returning nil acked the webhook and let the
+		// hosted sweep mark the session done, so the card the customer just
+		// saved was never recorded. Fail; the webhook redelivers and the
+		// sweep retries.
+		return fmt.Errorf("look up the card saved by checkout: %w", err)
+	}
 	if err != nil {
-		// No PM attached to the Stripe customer — operator chose
+		// No PM attached to the Stripe customer — the customer chose
 		// not to save. The PI on this checkout session still
 		// succeeded (payment_intent.succeeded handles invoice
 		// state); we just don't update the customer's PM record.

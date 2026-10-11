@@ -156,6 +156,12 @@ func classifyStripeError(err error) *PaymentError {
 // actionable signal ("connect Stripe under Settings → Payments").
 var ErrStripeNotConfigured = &PaymentError{Message: "stripe not configured for this mode"}
 
+// ErrNoSavedCard is FetchCardDetails' "the Stripe customer has no card" — a
+// one-off payment where the customer did not save the card. It is the only
+// FetchCardDetails error that means "nothing to record"; any other is a
+// failed lookup and must be retried.
+var ErrNoSavedCard = errors.New("no saved card on the Stripe customer")
+
 // LiveStripeClient wraps the Stripe SDK for PaymentIntent operations. Despite
 // the "Live" in the name, it handles both live and test modes — it selects
 // the underlying per-mode client from clients.ForCtx(ctx) on each call.
@@ -173,10 +179,26 @@ func NewLiveStripeClient(clients *StripeClients) *LiveStripeClient {
 	return &LiveStripeClient{clients: clients}
 }
 
-func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params PaymentIntentParams) (PaymentIntentResult, error) {
-	sc := c.clients.ForCtx(ctx)
+// client resolves the Stripe client for ctx: ErrStripeNotConfigured when the
+// tenant has no credentials for this mode, ErrPaymentTransient (nothing was
+// sent to Stripe; retry) when the credentials could not be read. A lookup
+// blip used to read as "not configured" — a definite failure that spent a
+// dunning attempt.
+func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
+	sc, err := c.clients.ResolveCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: stripe credential lookup: %v", ErrPaymentTransient, err)
+	}
 	if sc == nil {
-		return PaymentIntentResult{}, ErrStripeNotConfigured
+		return nil, ErrStripeNotConfigured
+	}
+	return sc, nil
+}
+
+func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params PaymentIntentParams) (PaymentIntentResult, error) {
+	sc, err := c.client(ctx)
+	if err != nil {
+		return PaymentIntentResult{}, err
 	}
 
 	metadata := make(map[string]string)
@@ -221,9 +243,9 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 }
 
 func (c *LiveStripeClient) FetchCardDetails(ctx context.Context, stripeCustomerID string) (CardDetails, error) {
-	sc := c.clients.ForCtx(ctx)
-	if sc == nil {
-		return CardDetails{}, ErrStripeNotConfigured
+	sc, err := c.client(ctx)
+	if err != nil {
+		return CardDetails{}, err
 	}
 
 	// Get the most recently created card
@@ -233,14 +255,16 @@ func (c *LiveStripeClient) FetchCardDetails(ctx context.Context, stripeCustomerI
 		Type:     stripe.String("card"),
 	}) {
 		if err != nil {
-			break
+			// A failed page is not "no card" (and a partial list could pick
+			// an older card as the newest): fail, the caller retries.
+			return CardDetails{}, fmt.Errorf("list cards for customer %s: %w", stripeCustomerID, classifyStripeError(err))
 		}
 		if latest == nil || pm.Created > latest.Created {
 			latest = pm
 		}
 	}
 	if latest == nil || latest.Card == nil {
-		return CardDetails{}, fmt.Errorf("no card found for customer %s", stripeCustomerID)
+		return CardDetails{}, fmt.Errorf("customer %s: %w", stripeCustomerID, ErrNoSavedCard)
 	}
 
 	// Set this card as the customer's default payment method
@@ -266,9 +290,9 @@ func (c *LiveStripeClient) FetchCardDetails(ctx context.Context, stripeCustomerI
 // creates an ephemeral PaymentMethod object for the charge that
 // stays accessible through the PI's `payment_method` field. ADR-020.
 func (c *LiveStripeClient) FetchCardForPaymentIntent(ctx context.Context, paymentIntentID string) (CardDetails, error) {
-	sc := c.clients.ForCtx(ctx)
-	if sc == nil {
-		return CardDetails{}, ErrStripeNotConfigured
+	sc, err := c.client(ctx)
+	if err != nil {
+		return CardDetails{}, err
 	}
 	pi, err := sc.V1PaymentIntents.Retrieve(ctx, paymentIntentID, &stripe.PaymentIntentRetrieveParams{
 		Expand: []*string{stripe.String("payment_method")},
@@ -301,11 +325,11 @@ func (c *LiveStripeClient) FetchCardForPaymentIntent(ctx context.Context, paymen
 }
 
 func (c *LiveStripeClient) CancelPaymentIntent(ctx context.Context, paymentIntentID string) error {
-	sc := c.clients.ForCtx(ctx)
-	if sc == nil {
-		return ErrStripeNotConfigured
+	sc, err := c.client(ctx)
+	if err != nil {
+		return err
 	}
-	_, err := sc.V1PaymentIntents.Cancel(ctx, paymentIntentID, nil)
+	_, err = sc.V1PaymentIntents.Cancel(ctx, paymentIntentID, nil)
 	if err != nil {
 		return fmt.Errorf("stripe cancel: %s", stripeErrorMessage(err))
 	}
@@ -316,9 +340,9 @@ func (c *LiveStripeClient) CancelPaymentIntent(ctx context.Context, paymentInten
 // reconciler to resolve PaymentUnknown invoices — Stripe is the source of
 // truth for whether a charge actually succeeded.
 func (c *LiveStripeClient) GetPaymentIntent(ctx context.Context, paymentIntentID string) (PaymentIntentResult, error) {
-	sc := c.clients.ForCtx(ctx)
-	if sc == nil {
-		return PaymentIntentResult{}, ErrStripeNotConfigured
+	sc, err := c.client(ctx)
+	if err != nil {
+		return PaymentIntentResult{}, err
 	}
 	pi, err := sc.V1PaymentIntents.Retrieve(ctx, paymentIntentID, nil)
 	if err != nil {
@@ -403,9 +427,9 @@ func classifySearchError(err error) error {
 // on this account" (the documented India case and its kin) and disables its
 // sweep for the account rather than retrying a request-shape error forever.
 func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, invoiceID string) ([]PaymentIntentResult, error) {
-	sc := c.clients.ForCtx(ctx)
-	if sc == nil {
-		return nil, ErrStripeNotConfigured
+	sc, err := c.client(ctx)
+	if err != nil {
+		return nil, err
 	}
 	params := &stripe.PaymentIntentSearchParams{
 		SearchParams: stripe.SearchParams{
@@ -432,9 +456,9 @@ func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, 
 // GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted
 // sweep, reconciler_hosted.go).
 func (c *LiveStripeClient) GetCheckoutSession(ctx context.Context, sessionID string) (CheckoutSessionResult, error) {
-	sc := c.clients.ForCtx(ctx)
-	if sc == nil {
-		return CheckoutSessionResult{}, ErrStripeNotConfigured
+	sc, err := c.client(ctx)
+	if err != nil {
+		return CheckoutSessionResult{}, err
 	}
 	sess, err := sc.V1CheckoutSessions.Retrieve(ctx, sessionID, nil)
 	if err != nil {
