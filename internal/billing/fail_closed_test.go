@@ -249,3 +249,39 @@ func TestRetryTax_RefreshesOnlyAProvenExpiredCalculation(t *testing.T) {
 		t.Fatalf("%d provider calculation(s) on an unproven expiry, want 0", prov.calls)
 	}
 }
+
+// A billing-profile read ERROR stops the close instead of labelling the
+// invoice with the next source's currency; no profile at all still bills in
+// the plan's currency.
+func TestRunCycle_CurrencyProfileReadErrorFails(t *testing.T) {
+	engine, _, _, _, invoices := setupEngine()
+	// Only the first profile read fails — the currency lookup, which runs
+	// before tax — so a later read (tax) succeeds and only the currency
+	// fix can stop the invoice.
+	engine.profiles = &blipFirstProfile{taxProfiles: &taxProfiles{profiles: map[string]domain.CustomerBillingProfile{}}}
+	if count, errs := engine.RunCycle(context.Background(), 50, nil); count != 0 || len(errs) == 0 || len(invoices.invoices) != 0 {
+		t.Fatalf("RunCycle = %d invoice(s), stored=%d, errs %v; want none and an error", count, len(invoices.invoices), errs)
+	}
+
+	engine, _, _, _, invoices = setupEngine()
+	engine.profiles = &taxProfiles{profiles: map[string]domain.CustomerBillingProfile{}}
+	if count, errs := engine.RunCycle(context.Background(), 50, nil); count != 1 || len(errs) != 0 {
+		t.Fatalf("no profile: RunCycle = %d, %v; want 1 invoice", count, errs)
+	}
+	if got := invoices.invoices[0].Currency; got != "USD" {
+		t.Errorf("currency = %q, want the plan's USD", got)
+	}
+}
+
+type blipFirstProfile struct {
+	*taxProfiles
+	n int
+}
+
+func (b *blipFirstProfile) GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error) {
+	b.n++
+	if b.n == 1 {
+		return domain.CustomerBillingProfile{}, errBlip
+	}
+	return b.taxProfiles.GetBillingProfile(ctx, tenantID, customerID)
+}

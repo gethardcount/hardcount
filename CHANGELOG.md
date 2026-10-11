@@ -59,6 +59,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **An invoice's currency is no longer guessed when the customer's billing profile cannot be read (2026-10-11).** The period close, the first invoice of a new subscription, the final invoice on cancel and the threshold invoice now stop and retry. They used to fall back to the plan's currency. A customer with no billing profile still gets the plan's currency.
+
 - **Payments stop on a read error instead of guessing (2026-10-11).**
   - **Stripe credentials:** a credentials read error is now "try again" and does not use up a dunning attempt. It used to read as "Stripe not configured". A Stripe Tax commit with no Stripe client is now an error; it used to count as committed.
   - **Saved cards:** a failed card lookup at Stripe, including a failed page of the card list, is now retried. It used to read as "no card saved", so the card a customer saved on the hosted page could go unrecorded.

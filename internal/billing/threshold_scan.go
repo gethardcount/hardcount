@@ -706,10 +706,9 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		// reached the fire path — defensive bail.
 		return false, fmt.Errorf("no invoice currency resolved for threshold fire")
 	}
-	if e.profiles != nil {
-		if bp, err := e.profiles.GetBillingProfile(ctx, sub.TenantID, sub.CustomerID); err == nil && bp.Currency != "" {
-			invoiceCurrency = bp.Currency
-		}
+	invoiceCurrency, err = e.invoiceCurrency(ctx, sub, invoiceCurrency)
+	if err != nil {
+		return false, err
 	}
 
 	// Coupons removed 2026-05-29 (Phase A1). Discount stays at zero;

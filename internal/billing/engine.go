@@ -2220,6 +2220,36 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 	return sub, nil
 }
 
+// invoiceCurrency resolves an invoice's currency in the ADR-100 order:
+// the customer's billing profile, else planCurrency, else the tenant default
+// (a dead branch since ADR-100), else "USD". A source that is NOT SET (no
+// profile, an empty field) falls through to the next; a READ ERROR fails —
+// guessing the next source could label the invoice in the wrong currency.
+func (e *Engine) invoiceCurrency(ctx context.Context, sub domain.Subscription, planCurrency string) (string, error) {
+	if e.profiles != nil {
+		bp, err := e.profiles.GetBillingProfile(ctx, sub.TenantID, sub.CustomerID)
+		switch {
+		case err == nil && bp.Currency != "":
+			return bp.Currency, nil
+		case err != nil && !errors.Is(err, errs.ErrNotFound):
+			return "", fmt.Errorf("read billing profile for invoice currency: %w", err)
+		}
+	}
+	if planCurrency != "" {
+		return planCurrency, nil
+	}
+	if e.settings != nil {
+		ts, err := e.settings.Get(ctx, sub.TenantID)
+		if err != nil {
+			return "", fmt.Errorf("read tenant settings for invoice currency: %w", err)
+		}
+		if ts.DefaultCurrency != "" {
+			return ts.DefaultCurrency, nil
+		}
+	}
+	return "USD", nil
+}
+
 // resolveBillingInputs gathers everything needed to price this period:
 // each item's plan, the invoice currency, and the per-meter usage totals
 // (usage-cap-scaled when a subscription cap fires). Extracted from
@@ -2252,18 +2282,9 @@ func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscripti
 	// a reconciliation policy.
 	firstPlanCurrency := plans[sub.Items[0].PlanID].Currency
 	invoiceCurrency := firstPlanCurrency
-	if e.profiles != nil {
-		if bp, err := e.profiles.GetBillingProfile(ctx, sub.TenantID, sub.CustomerID); err == nil && bp.Currency != "" {
-			invoiceCurrency = bp.Currency
-		}
-	}
-	if invoiceCurrency == "" && e.settings != nil {
-		if ts, err := e.settings.Get(ctx, sub.TenantID); err == nil && ts.DefaultCurrency != "" {
-			invoiceCurrency = ts.DefaultCurrency
-		}
-	}
-	if invoiceCurrency == "" {
-		invoiceCurrency = "USD"
+	invoiceCurrency, err := e.invoiceCurrency(ctx, sub, invoiceCurrency)
+	if err != nil {
+		return nil, "", nil, nil, err
 	}
 
 	// Collect the union of meter_ids across every item's plan. Usage is
@@ -3637,18 +3658,9 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 	// branch) > "USD". Same order
 	// as the cycle path.
 	invoiceCurrency := plans[advanceItems[0].PlanID].Currency
-	if e.profiles != nil {
-		if bp, err := e.profiles.GetBillingProfile(ctx, sub.TenantID, sub.CustomerID); err == nil && bp.Currency != "" {
-			invoiceCurrency = bp.Currency
-		}
-	}
-	if invoiceCurrency == "" && e.settings != nil {
-		if ts, err := e.settings.Get(ctx, sub.TenantID); err == nil && ts.DefaultCurrency != "" {
-			invoiceCurrency = ts.DefaultCurrency
-		}
-	}
-	if invoiceCurrency == "" {
-		invoiceCurrency = "USD"
+	invoiceCurrency, err := e.invoiceCurrency(ctx, sub, invoiceCurrency)
+	if err != nil {
+		return domain.Invoice{}, nil, false, err
 	}
 
 	// Build base-fee line items for in_advance items, with mid-period
@@ -4369,18 +4381,9 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// ADR-100): profile > first item's plan > settings (dead branch) >
 	// "USD". Same order as billOnePeriod and BillOnCreate.
 	invoiceCurrency := plans[sub.Items[0].PlanID].Currency
-	if e.profiles != nil {
-		if bp, err := e.profiles.GetBillingProfile(ctx, sub.TenantID, sub.CustomerID); err == nil && bp.Currency != "" {
-			invoiceCurrency = bp.Currency
-		}
-	}
-	if invoiceCurrency == "" && e.settings != nil {
-		if ts, err := e.settings.Get(ctx, sub.TenantID); err == nil && ts.DefaultCurrency != "" {
-			invoiceCurrency = ts.DefaultCurrency
-		}
-	}
-	if invoiceCurrency == "" {
-		invoiceCurrency = "USD"
+	invoiceCurrency, err = e.invoiceCurrency(ctx, sub, invoiceCurrency)
+	if err != nil {
+		return domain.Invoice{}, err
 	}
 
 	// Compute the final invoice's line items over the partial cancel
