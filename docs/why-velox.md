@@ -21,7 +21,7 @@ Velox is built around three needs that Stripe covers only through a hosted produ
 - Examples: data-residency policies, healthcare-adjacent SaaS, government procurement.
 - Stripe Billing is a hosted service, so usage and invoice data are stored on Stripe's infrastructure.
 - Velox runs in your VPC, and usage and invoice records stay in your Postgres. If you connect Stripe for card payments, the customer's name, email, address and the charge amount still go to Stripe.
-- One deployment serves many internal tenants behind Postgres Row-Level Security.
+- Postgres Row-Level Security keeps test data apart from live data, and one tenant's rows apart from another's.
 - The binary makes no outbound calls of its own: no licence check, no usage telemetry, no vendor endpoint. You can confirm this by searching the source.
 
 **4. Every bill gets disputed, and the only answer is the raw events.**

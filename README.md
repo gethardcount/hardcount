@@ -82,7 +82,7 @@ Velox is the wrong choice if you need:
 
 - **Simple per-seat pricing paid by card.** Stripe Billing already does that well.
 - **A payment processor other than Stripe.** Stripe is the only one today.
-- **A marketplace that splits payouts** between sellers (Stripe Connect). Velox bills your own customers. It does serve many separate businesses from one install, each collecting for itself.
+- **A marketplace that splits payouts** between sellers (Stripe Connect). Velox bills your own customers.
 - **Revenue recognition or accounting reports.** Export the data to your own warehouse.
 - **Quotes or multi-phase contracts** for sales-led deals.
 - **Many payment methods.** Today it is cards through Stripe, or an invoice the customer pays outside Velox.

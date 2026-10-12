@@ -104,8 +104,7 @@ rolling: Kubernetes `Recreate`, or `maxSurge: 0, maxUnavailable: 100%`.
 
   "Safe" is not "fully supported". A few surfaces still assume one process:
   - the dashboard's live webhook-event tail only shows events dispatched
-    by the replica serving the stream;
-  - the password-reset send cap becomes per-replica.
+    by the replica serving the stream.
 
   The complete verified list is
   [docs/dev/ha-readiness-2026-07-06.md](../docs/dev/ha-readiness-2026-07-06.md).
