@@ -75,3 +75,7 @@ require (
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+// v0.1.0 and v0.2.0 ship two commands that were later deleted (velox-bench,
+// velox-cli) and predate the billing fixes in v0.4.0. Use v0.4.0 or later.
+retract [v0.1.0, v0.2.0]
