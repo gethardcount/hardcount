@@ -120,6 +120,9 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
           TEST_DATABASE_URL: postgres://velox_test_app:velox_test_app@localhost:5432/velox_test?sslmode=disable
+          # A database call that forgot to say live or test mode panics
+          # instead of logging a warning.
+          VELOX_LIVEMODE_STRICT: "true"
 
       # Money-invariant sweep over whatever the integration suite left behind
       # (docs/dev/product-stability-plan.md B1). The doctor's own test already
@@ -195,6 +198,8 @@ jobs:
 
       - name: Integration Tests through PgBouncer (transaction mode)
         run: PGB_MODE=ci scripts/pgbouncer-test.sh
+        env:
+          VELOX_LIVEMODE_STRICT: "true"
 
   # Golden path: the README quickstart + scripts/demo.sh, executed for real.
   # This is the whole wedge chain in one run — recipe → test-clock customer →
