@@ -11,6 +11,19 @@ import type { Subscription } from './subscription';
 
 export type PostV1SubscriptionsIdRetryBilling200 = {
   subscription: Subscription;
-  /** Invoices this call created. */
+  /**
+     * Period-close invoices this call created. The final
+     * invoice of a scheduled cancel and the first invoice
+     * at a trial end are not counted, so 0 does not mean
+     * the retry failed. Read success from
+     * `subscription.billing_failure` and `still_due`.
+     */
   invoices_generated: number;
+  /**
+     * True when, after the attempt, the subscription has
+     * no `billing_failure` and is still due for billing.
+     * The attempt did not complete and nothing was saved;
+     * the next billing run attempts the subscription.
+     */
+  still_due?: boolean;
 };

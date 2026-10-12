@@ -2137,15 +2137,27 @@ export const getPostV1SubscriptionsIdRetryBillingUrl = (id: string,) => {
  * cause of a failure, to skip the wait, or to restart a parked
  * subscription. An audit log entry records the retry.
  *
- * A retry that fails again is **not** an HTTP error. The response is
- * 200 and the returned subscription carries a new `billing_failure`
- * with `attempts: 1`; the billing run then retries on its own
- * schedule. A subscription that was overdue for several periods is
- * billed for each of them, one invoice per period.
+ * Once the failure is cleared, the outcome of the attempt is never
+ * an HTTP error. A 200 has three outcomes:
+ *
+ * - **Billed.** No `billing_failure`, and `still_due` is false. A
+ *   subscription that was overdue for several periods is billed for
+ *   each of them, one invoice per period.
+ * - **Failed again.** The subscription carries a new
+ *   `billing_failure` with `attempts: 1`, and the billing run then
+ *   retries on its own schedule. This includes an attempt that
+ *   finished without an error but left the subscription due.
+ * - **Not completed.** No `billing_failure`, and `still_due` is
+ *   true. The attempt was cut short by a lost database connection
+ *   or a deadlock, and nothing was saved. The subscription is still
+ *   unbilled, and the next billing run attempts it. Calling this
+ *   endpoint again answers 409, because the failure is already
+ *   cleared.
  *
  * The call bills inline. If it times out part-way through a long
- * catch-up, the invoices already created stay, and the next billing
- * run finishes the rest.
+ * catch-up, the response is an error, the invoices already created
+ * stay, and the next billing run finishes the rest. The failure may
+ * already be cleared at that point, so a repeat call can answer 409.
  * @summary Retry billing on a subscription whose billing is failing
  */
 export const postV1SubscriptionsIdRetryBilling = async (id: string, options?: RequestInit): Promise<PostV1SubscriptionsIdRetryBilling200> => {

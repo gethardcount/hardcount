@@ -5,12 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
@@ -29,6 +32,7 @@ const retryKeyID = "vlx_key_retry_billing"
 type retryRig struct {
 	*billFailureEnv
 	audit  *audit.Logger
+	svc    *subscription.Service
 	router http.Handler
 }
 
@@ -39,16 +43,17 @@ func newRetryRig(t *testing.T, name string, auditLogger subscription.AuditLogger
 	if auditLogger == nil {
 		auditLogger = r.audit
 	}
-	svc := subscription.NewService(env.subs, env.clock)
-	svc.SetAuditLogger(auditLogger)
-	svc.SetDueBiller(env.engine)
-	r.router = subscription.NewHandler(svc).Routes()
+	r.svc = subscription.NewService(env.subs, env.clock)
+	r.svc.SetAuditLogger(auditLogger)
+	r.svc.SetDueBiller(env.engine)
+	r.router = subscription.NewHandler(r.svc).Routes()
 	return r
 }
 
 type retryResponse struct {
 	Subscription      domain.Subscription `json:"subscription"`
 	InvoicesGenerated int                 `json:"invoices_generated"`
+	StillDue          bool                `json:"still_due"`
 }
 
 // retry calls POST /{id}/retry-billing as an API-key operator of the tenant.
@@ -103,8 +108,8 @@ func TestRetryBilling_RepairedParkedSubscriptionBills(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("retry: %d %s", code, body)
 	}
-	if out.InvoicesGenerated != 1 || out.Subscription.BillingFailure != nil || out.Subscription.ID != a.ID {
-		t.Fatalf("response: invoices_generated=%d billing_failure=%+v", out.InvoicesGenerated, out.Subscription.BillingFailure)
+	if out.InvoicesGenerated != 1 || out.Subscription.BillingFailure != nil || out.Subscription.ID != a.ID || out.StillDue {
+		t.Fatalf("response: invoices_generated=%d billing_failure=%+v still_due=%v", out.InvoicesGenerated, out.Subscription.BillingFailure, out.StillDue)
 	}
 	if strings.Contains(body, `"billing_failure"`) {
 		t.Fatalf("a billed subscription still carries billing_failure on the wire: %s", body)
@@ -282,5 +287,77 @@ func TestRetryBilling_RacingTheScheduler_ExactlyOneInvoice(t *testing.T) {
 	}
 	if bf := r.get(t, a.ID).BillingFailure; bf != nil {
 		t.Fatalf("billed subscription still reads as failing: %+v", bf)
+	}
+}
+
+// TestRetryBilling_NoProgressIsSavedInTheSameCall: a retry whose attempt
+// returns cleanly but leaves the subscription due has not billed it. The
+// billing run only notices that when the subscription comes back on a later
+// page; the retry has no later page, so it checks after its one attempt. The
+// response must show the failure, not read as a success.
+func TestRetryBilling_NoProgressIsSavedInTheSameCall(t *testing.T) {
+	r := newRetryRig(t, "Retry Billing No Progress", nil)
+	a := r.dueSub(t, "sub-a", r.planBad, r.periodEnd)
+	r.park(t, a.ID)
+	// The plan read is fixed, but every close now loses the period CAS, which
+	// billSubscription absorbs and returns cleanly from.
+	r.pricing.failing.Store(false)
+	stuck := &failableSubAdapter{subStoreAdapter: &subStoreAdapter{r.subs}, closePeriodTxErr: subscription.ErrWatermarkMoved}
+	r.svc.SetDueBiller(r.newEngine(stuck, r.pricing))
+	now := r.clock.Now(r.ctx)
+
+	code, out, body := r.retry(t, a.ID)
+	if code != http.StatusOK {
+		t.Fatalf("retry: %d %s", code, body)
+	}
+	bf := out.Subscription.BillingFailure
+	if bf == nil || bf.Attempts != 1 || !strings.HasPrefix(bf.LastError, "Billing made no progress") ||
+		bf.NextAttemptAt == nil || !bf.NextAttemptAt.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("billing_failure = %+v, want attempts 1 with the no-progress text and the first wait", bf)
+	}
+	if out.InvoicesGenerated != 0 || out.StillDue {
+		t.Fatalf("invoices_generated=%d still_due=%v, want 0 and false (the failure is saved, so the record carries the outcome)", out.InvoicesGenerated, out.StillDue)
+	}
+	if rows := r.auditRows(t, a.ID); len(rows) != 1 {
+		t.Fatalf("%d audit rows, want the retry's 1", len(rows))
+	}
+}
+
+// TestRetryBilling_UncountedFailureAnswersStillDue: the retry's attempt fails
+// with an error that is never saved (here a deadlock abort). The clear and its
+// audit row are committed, so the answer is still 200, but it must not read as
+// billed: there is no billing_failure, and still_due says the subscription is
+// unbilled and waiting for the next billing run.
+//
+// Mutation seam: stop computing still_due in Service.RetryBilling → this fails.
+func TestRetryBilling_UncountedFailureAnswersStillDue(t *testing.T) {
+	r := newRetryRig(t, "Retry Billing Uncounted", nil)
+	a := r.dueSub(t, "sub-a", r.planBad, r.periodEnd)
+	r.park(t, a.ID)
+	r.pricing.fail = func() error {
+		return fmt.Errorf("get plan: %w", &pgconn.PgError{Code: "40P01", Message: "deadlock detected"})
+	}
+
+	code, out, body := r.retry(t, a.ID)
+	if code != http.StatusOK {
+		t.Fatalf("retry: %d %s", code, body)
+	}
+	if out.Subscription.BillingFailure != nil || out.InvoicesGenerated != 0 || !out.StillDue {
+		t.Fatalf("billing_failure=%+v invoices_generated=%d still_due=%v, want none, 0 and true", out.Subscription.BillingFailure, out.InvoicesGenerated, out.StillDue)
+	}
+	if !strings.Contains(body, `"still_due":true`) {
+		t.Fatalf("still_due is not on the wire: %s", body)
+	}
+	if rows := r.auditRows(t, a.ID); len(rows) != 1 {
+		t.Fatalf("%d audit rows, want the retry's 1", len(rows))
+	}
+	// A billed retry says still_due false.
+	r.pricing.fail = nil
+	r.pricing.failing.Store(false)
+	if _, errs := r.engine.RunCycle(r.ctx, 50, nil); len(errs) != 0 {
+		t.Fatalf("the next billing run: %v", errs)
+	}
+	if n := r.invoiceCount(t, a.ID); n != 1 {
+		t.Fatalf("%d invoices after the next run, want 1: an uncounted failure must leave the subscription due with no wait", n)
 	}
 }

@@ -2023,6 +2023,22 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	return canceled, prorationCreditCents, nil
 }
 
+// RetryBillingResult is what one retry-billing call did.
+type RetryBillingResult struct {
+	// Subscription is the row re-read after the attempt. Its BillingFailure
+	// is set when the attempt failed and the failure was saved.
+	Subscription domain.Subscription
+	// InvoicesGenerated counts the period-close invoices the attempt created.
+	// A scheduled cancel's final invoice and a trial-end first invoice are
+	// not counted, so 0 does not mean failure.
+	InvoicesGenerated int
+	// StillDue is true when, after the attempt, the subscription has no saved
+	// failure and is still due: the attempt did not complete and nothing was
+	// saved (a lost connection, a deadlock abort, a failed failure-write).
+	// The subscription is unbilled; the next billing run attempts it.
+	StillDue bool
+}
+
 // RetryBilling is the operator's exit from a failing or parked subscription
 // (ADR-119): POST /v1/subscriptions/{id}/retry-billing.
 //
@@ -2034,19 +2050,31 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 // attempt needs no special path past the gate.
 //
 // A subscription with no live record answers InvalidState (409, code
-// billing_not_failing) and writes nothing. A retry that fails again is not an
-// error: the returned subscription carries the new record (attempt 1, next
-// attempt in 15 minutes) and the billing run resumes on its own.
+// billing_not_failing) and writes nothing. Once the clear has committed, the
+// attempt's outcome is never an error. It is one of three results:
+//
+//   - Billed, or nothing was left to bill: no BillingFailure, StillDue false.
+//   - Failed again, and the failure was saved: BillingFailure is set (attempt
+//     1, next attempt in 15 minutes) and the billing run resumes on its own.
+//     This includes an attempt that returned cleanly but left the
+//     subscription due.
+//   - The attempt did not complete and nothing was saved (a lost connection,
+//     a deadlock abort, a failure-write that failed): no BillingFailure,
+//     StillDue true. The next billing run attempts the subscription.
+//
+// The third is deliberately not an error. The clear and its audit row are
+// committed, so a caller that retried after a 5xx would get 409
+// billing_not_failing for a subscription that is still unbilled.
 //
 // If the process dies after the clear commits and before the bill, the
 // subscription is simply due and healthy, and the next billing run bills it.
-func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (domain.Subscription, int, error) {
+func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (RetryBillingResult, error) {
 	sub, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
-		return domain.Subscription{}, 0, err
+		return RetryBillingResult{}, err
 	}
 	if sub.TestClockID != "" {
-		return domain.Subscription{}, 0, errs.InvalidState("this subscription is on a test clock; use Retry advance on the clock")
+		return RetryBillingResult{}, errs.InvalidState("this subscription is on a test clock; use Retry advance on the clock")
 	}
 
 	if _, err := s.store.ClearBillingFailure(ctx, tenantID, id, func(tx *sql.Tx, cleared domain.BillingFailure) error {
@@ -2074,22 +2102,29 @@ func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (domain
 		}
 		return nil
 	}); err != nil {
-		return domain.Subscription{}, 0, err
+		return RetryBillingResult{}, err
 	}
 
-	// After commit, on the request ctx. A failure here is the engine's to
-	// save and log (attemptSub); the caller reads the outcome off the
-	// subscription, exactly as after a scheduled attempt.
-	generated := 0
+	// After commit, on the request ctx. The engine saves a counted failure and
+	// logs every failure, including its own reads. The error is not returned
+	// to the operator (see above); the outcome is read off the re-read row.
+	var res RetryBillingResult
+	var billErr error
 	if s.dueBiller != nil {
-		generated, _ = s.dueBiller.BillDueNow(ctx, tenantID, id)
+		res.InvoicesGenerated, billErr = s.dueBiller.BillDueNow(ctx, tenantID, id)
 	}
 
-	fresh, err := s.store.Get(ctx, tenantID, id)
+	res.Subscription, err = s.store.Get(ctx, tenantID, id)
 	if err != nil {
-		return domain.Subscription{}, generated, err
+		return RetryBillingResult{}, err
 	}
-	return fresh, generated, nil
+	res.StillDue = res.Subscription.BillingFailure == nil && domain.BillingDueAt(res.Subscription, s.clock.Now(ctx))
+	if billErr != nil && res.Subscription.BillingFailure == nil {
+		// The one outcome with no saved record to show for it.
+		slog.Warn("retry-billing: the attempt failed and no failure was saved; the next billing run attempts the subscription",
+			"subscription_id", id, "tenant_id", tenantID, "still_due", res.StillDue, "error", billErr)
+	}
+	return res, nil
 }
 
 // ScheduleCancelInput carries the soft-cancel intent. Exactly one of

@@ -55,6 +55,17 @@ func DueInstant(sub Subscription) *time.Time {
 	return due
 }
 
+// BillingDueAt reports whether sub owes work to the billing run at now: it can
+// still bill (active or trialing) and its due instant has been reached. It is
+// the Go form of what the due scans admit, before the billing-failure gate.
+func BillingDueAt(sub Subscription, now time.Time) bool {
+	if sub.Status != SubscriptionActive && sub.Status != SubscriptionTrialing {
+		return false
+	}
+	due := DueInstant(sub)
+	return due != nil && !due.After(now)
+}
+
 // SubscriptionDueInstantSQL is the SQL form of DueInstant for the
 // subscriptions row aliased as alias.
 func SubscriptionDueInstantSQL(alias string) string {

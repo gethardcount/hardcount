@@ -18,7 +18,7 @@ Older entries keep their original text.
 ### Added
 
 - **A subscription whose billing keeps failing is now saved, visible and bounded (2026-10-12, #960).** It was retried on every billing run and left only a log line. Now the subscription carries `billing_failure`, waits before each new attempt (15 minutes up to 24 hours), and parks after eight failures. List them with `GET /v1/subscriptions?billing=failing`. See [ADR-119](docs/adr/119-billing-failure-record-keyed-to-the-due-instant.md).
-- **`POST /v1/subscriptions/{id}/retry-billing` (2026-10-12, #960).** Clears a subscription's billing failure and bills it at once, with an audit log entry. Use it after fixing the cause, or to restart a parked subscription. A retry that fails again returns 200 with a new `billing_failure`.
+- **`POST /v1/subscriptions/{id}/retry-billing` (2026-10-12, #960).** Clears a subscription's billing failure and bills it at once, with an audit log entry. Use it after fixing the cause, or to restart a parked subscription. The response is 200 once the failure is cleared: a retry that fails again carries a new `billing_failure`, and one cut short by a database error carries `still_due: true`.
 - **New gauge `velox_billing_failing_subscriptions{mode,state}` (2026-10-12, #960).** Alert on `state="parked"` above zero: an invoice is not being issued until someone retries. Runbook: [Subscriptions whose billing is failing](docs/ops/runbook.md#14-subscriptions-whose-billing-is-failing).
 
 ### Changed

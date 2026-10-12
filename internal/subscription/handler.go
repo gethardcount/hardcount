@@ -709,24 +709,29 @@ func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 
 // retryBilling is the operator's retry for a subscription whose billing is
 // failing or parked (ADR-119). It clears the saved failure (with its audit row,
-// in one transaction) and bills the subscription now. 200 carries the
-// subscription and the invoices generated; a retry that fails again is still
-// 200, with the new billing_failure on the subscription. 409
-// billing_not_failing when there is nothing to retry. The audit row is the
+// in one transaction) and bills the subscription now.
+//
+// 200 carries the subscription, invoices_generated and still_due, and has
+// three outcomes: billed (no billing_failure, still_due false); failed again
+// and saved (billing_failure set); or the attempt did not complete and nothing
+// was saved (no billing_failure, still_due true: unbilled, the next billing
+// run attempts it). 409 billing_not_failing when there is nothing to retry,
+// 409 invalid_state for a subscription on a test clock. The audit row is the
 // service's; the handler emits none.
 func (h *Handler) retryBilling(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	sub, generated, err := h.svc.RetryBilling(r.Context(), tenantID, id)
+	res, err := h.svc.RetryBilling(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription")
 		return
 	}
-	h.stampPeriodDisplay(r.Context(), &sub)
+	h.stampPeriodDisplay(r.Context(), &res.Subscription)
 	respond.JSON(w, r, http.StatusOK, map[string]any{
-		"subscription":       sub,
-		"invoices_generated": generated,
+		"subscription":       res.Subscription,
+		"invoices_generated": res.InvoicesGenerated,
+		"still_due":          res.StillDue,
 	})
 }
 

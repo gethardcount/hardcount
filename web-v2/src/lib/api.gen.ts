@@ -1085,15 +1085,27 @@ export interface paths {
          *     cause of a failure, to skip the wait, or to restart a parked
          *     subscription. An audit log entry records the retry.
          *
-         *     A retry that fails again is **not** an HTTP error. The response is
-         *     200 and the returned subscription carries a new `billing_failure`
-         *     with `attempts: 1`; the billing run then retries on its own
-         *     schedule. A subscription that was overdue for several periods is
-         *     billed for each of them, one invoice per period.
+         *     Once the failure is cleared, the outcome of the attempt is never
+         *     an HTTP error. A 200 has three outcomes:
+         *
+         *     - **Billed.** No `billing_failure`, and `still_due` is false. A
+         *       subscription that was overdue for several periods is billed for
+         *       each of them, one invoice per period.
+         *     - **Failed again.** The subscription carries a new
+         *       `billing_failure` with `attempts: 1`, and the billing run then
+         *       retries on its own schedule. This includes an attempt that
+         *       finished without an error but left the subscription due.
+         *     - **Not completed.** No `billing_failure`, and `still_due` is
+         *       true. The attempt was cut short by a lost database connection
+         *       or a deadlock, and nothing was saved. The subscription is still
+         *       unbilled, and the next billing run attempts it. Calling this
+         *       endpoint again answers 409, because the failure is already
+         *       cleared.
          *
          *     The call bills inline. If it times out part-way through a long
-         *     catch-up, the invoices already created stay, and the next billing
-         *     run finishes the rest.
+         *     catch-up, the response is an error, the invoices already created
+         *     stay, and the next billing run finishes the rest. The failure may
+         *     already be cleared at that point, so a repeat call can answer 409.
          */
         post: {
             parameters: {
@@ -1107,9 +1119,12 @@ export interface paths {
             requestBody?: never;
             responses: {
                 /**
-                 * @description The retry ran. `subscription.billing_failure` is absent when
-                 *     the subscription billed (or had nothing left to bill), and
-                 *     present when the attempt failed again.
+                 * @description The retry ran. Read the outcome from two fields.
+                 *     `subscription.billing_failure` is present when the attempt
+                 *     failed again. When it is absent, `still_due` false means the
+                 *     subscription billed or had nothing left to bill, and
+                 *     `still_due` true means the attempt did not complete and the
+                 *     subscription is still unbilled.
                  */
                 200: {
                     headers: {
@@ -1118,8 +1133,21 @@ export interface paths {
                     content: {
                         "application/json": {
                             subscription: components["schemas"]["Subscription"];
-                            /** @description Invoices this call created. */
+                            /**
+                             * @description Period-close invoices this call created. The final
+                             *     invoice of a scheduled cancel and the first invoice
+                             *     at a trial end are not counted, so 0 does not mean
+                             *     the retry failed. Read success from
+                             *     `subscription.billing_failure` and `still_due`.
+                             */
                             invoices_generated: number;
+                            /**
+                             * @description True when, after the attempt, the subscription has
+                             *     no `billing_failure` and is still due for billing.
+                             *     The attempt did not complete and nothing was saved;
+                             *     the next billing run attempts the subscription.
+                             */
+                            still_due?: boolean;
                         };
                     };
                 };
@@ -1131,10 +1159,10 @@ export interface paths {
                     content?: never;
                 };
                 /**
-                 * @description Nothing to retry. Error code `billing_not_failing` when the
-                 *     subscription has no `billing_failure`. Also returned for a
-                 *     subscription attached to a test clock; use the clock's retry
-                 *     advance there.
+                 * @description The retry was refused. Code `billing_not_failing`: the
+                 *     subscription has no `billing_failure`, so there is nothing to
+                 *     retry. Code `invalid_state`: the subscription is attached to
+                 *     a test clock; use the clock's retry advance instead.
                  */
                 409: {
                     headers: {

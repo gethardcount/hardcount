@@ -1016,7 +1016,7 @@ Velox accepts `immediate=true` plan-swaps that change the billing interval as lo
 
 A subscription whose billing fails is saved as failing, waits before each new attempt, parks after eight, and is retried with `POST /v1/subscriptions/{id}/retry-billing`. Wall-clock subscriptions only; a subscription on a test clock stops its clock instead (FLOW TC2).
 
-> **Automated coverage: 17 / 22.** `[x]` items are locked by the named test (run `go test -p 1 -short=false ./internal/billing/ ./internal/subscription/ ./internal/api/middleware/`). The `[ ]` items are the API walk; they are pending.
+> **Automated coverage: 19 / 24.** `[x]` items are locked by the named test (run `go test -p 1 -short=false ./internal/billing/ ./internal/subscription/ ./internal/api/middleware/`). The `[ ]` items are the API walk; they are pending.
 
 **Setup for the walk:** a wall-clock subscription whose period has ended (backdate `current_billing_period_end` and `next_billing_at`, as in FLOW B1), and a fault that fails its billing: `psql -c "REVOKE INSERT ON invoices FROM velox_app"` (the runtime role). Undo the fault with `GRANT INSERT ON invoices TO velox_app`.
 
@@ -1025,10 +1025,12 @@ A subscription whose billing fails is saved as failing, waits before each new at
 - [ ] **A waiting subscription is skipped** — `POST /v1/billing/run` again right away → `{"errors": [], "invoices_generated": 0}`, and `billing_failure.attempts` is still 1.
 - [ ] **The failing list shows it** — `GET /v1/subscriptions?billing=failing` returns the subscription, and `GET /v1/subscriptions?billing=other` is a 400.
 - [ ] **The gauge counts it** — `/metrics` shows `velox_billing_failing_subscriptions{mode="test",state="retrying"}` at 1, and `velox_billing_due_subscriptions{mode="test"}` does not count it.
-- [x] **Retry bills at once and records who retried** — undo the fault, `POST /v1/subscriptions/{id}/retry-billing` → 200 with `invoices_generated: 1` and no `billing_failure` on the returned subscription. *(auto: `TestRetryBilling_RepairedParkedSubscriptionBills`)*
+- [x] **Retry bills at once and records who retried** — undo the fault, `POST /v1/subscriptions/{id}/retry-billing` → 200 with `invoices_generated: 1`, `still_due: false` and no `billing_failure` on the returned subscription. *(auto: `TestRetryBilling_RepairedParkedSubscriptionBills`)*
 - [x] **The retry leaves one audit row** — the audit log has one `update` row on the subscription with metadata `action: billing_retried`, `attempts_before` and `was_parked`. *(auto: `TestRetryBilling_RepairedParkedSubscriptionBills`)*
 - [x] **A second retry has nothing to do** — the same call again → 409 with code `billing_not_failing`, and no second audit row. *(auto: `TestRetryBilling_RepairedParkedSubscriptionBills`, `TestRetryBilling_Refusals`)*
 - [x] **A retry that fails again is a 200** — with the fault still in place, retry → 200, `billing_failure.attempts` is 1 and `next_attempt_at` is 15 minutes out; three retries in a row never park the subscription. *(auto: `TestRetryBilling_StillFailingRestartsTheLadder`)*
+- [x] **A retry that makes no progress is a failure in the same response** — the attempt ends without an error but the subscription is still due → 200 with `billing_failure.attempts: 1` and `last_error` starting "Billing made no progress". *(auto: `TestRetryBilling_NoProgressIsSavedInTheSameCall`)*
+- [x] **A retry cut short by the database says so** — the attempt hits a deadlock (SQLSTATE 40P01) → 200 with no `billing_failure` and `still_due: true`, and the next billing run bills the subscription. *(auto: `TestRetryBilling_UncountedFailureAnswersStillDue`)*
 - [x] **The waits follow the ladder** — the wait after failures 1 to 7 is 15m, 1h, 4h, 12h, 24h, 24h, 24h, and a run one nanosecond before a wait ends does not attempt the subscription. *(auto: `TestBillingFailure_ParksAtTheEighthFailure`, `TestBillRetryWait_Rungs`)*
 - [x] **The eighth failure parks** — `billing_failure.parked` is true, `next_attempt_at` is absent, and neither the scheduler's run nor `POST /v1/billing/run` attempts the subscription again. *(auto: `TestBillingFailure_ParksAtTheEighthFailure`)*
 - [x] **A healthy subscription behind a failing one is billed** — the failing subscription is the oldest due; the same run invoices the healthy one. *(auto: `TestBillingFailure_FailingSubIsSavedWaitsAndIsSkipped`)*

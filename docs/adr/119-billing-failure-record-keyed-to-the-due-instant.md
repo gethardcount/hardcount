@@ -16,7 +16,8 @@ instant changes and the record stops counting. Nothing has to clear it.
 
 An interrupted run or a lost database connection is not counted and saves
 nothing. `POST /v1/subscriptions/{id}/retry-billing` clears the record, writes
-an audit row, and bills at once.
+an audit row, and bills at once. Its 200 response says which of three things
+happened: billed, failed again, or not completed and still due.
 
 ## Context
 
@@ -96,6 +97,23 @@ database error. It never matches message text.
 | Interrupted | The run's own context is done: shutdown, a lost lease, a request timeout. | No |
 | Transient | The connection was lost, or the server aborted the transaction for a serialization conflict or a deadlock. | No |
 | Counted | Everything else, including every timeout while the run is alive, a panic, and an attempt that returns cleanly but leaves the subscription due. | Yes |
+
+**The operator retry.** `POST /v1/subscriptions/{id}/retry-billing` clears the
+record and writes the audit row in one transaction, then bills inline through
+the same attempt as the billing run. After the clear has committed, the
+attempt's outcome is never an HTTP error, because a caller that repeated the
+call after a 5xx would get 409 for a subscription that is still unbilled. The
+200 response has three outcomes:
+
+| Outcome | `billing_failure` | `still_due` |
+|---|---|---|
+| Billed, or nothing was left to bill | absent | false |
+| Failed again and saved, at attempt 1 | present | false |
+| Not completed, nothing saved (lost connection, deadlock, failed failure-write) | absent | true |
+
+An attempt that returns cleanly but leaves the subscription due is the second
+outcome: the retry re-reads after its attempt and saves "no progress", as the
+billing run does when the subscription comes back on a later page.
 
 **The ladder.** After counted failure 1 the wait is 15 minutes, then 1 hour,
 4 hours, 12 hours, and 24 hours three times. The eighth failure parks. The

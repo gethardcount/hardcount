@@ -41,11 +41,16 @@ type dueBillerSpy struct {
 	// when the bill ran: it must not, the clear comes first.
 	sawRecord bool
 	store     *memStore
+	// err, if set, is what the attempt returns (with zero invoices).
+	err error
 }
 
 func (b *dueBillerSpy) BillDueNow(_ context.Context, _, id string) (int, error) {
 	b.calls++
 	b.sawRecord = b.store.subs[id].BillingFailure != nil
+	if b.err != nil {
+		return 0, b.err
+	}
 	return 2, nil
 }
 
@@ -70,12 +75,12 @@ func TestRetryBilling_ClearsWithAuditThenBills(t *testing.T) {
 	svc.SetAuditLogger(spy)
 	svc.SetDueBiller(biller)
 
-	sub, generated, err := svc.RetryBilling(context.Background(), tenantID, subID)
+	res, err := svc.RetryBilling(context.Background(), tenantID, subID)
 	if err != nil {
 		t.Fatalf("RetryBilling: %v", err)
 	}
-	if generated != 2 || sub.BillingFailure != nil {
-		t.Fatalf("generated=%d failure=%+v", generated, sub.BillingFailure)
+	if res.InvoicesGenerated != 2 || res.Subscription.BillingFailure != nil {
+		t.Fatalf("generated=%d failure=%+v", res.InvoicesGenerated, res.Subscription.BillingFailure)
 	}
 	if biller.calls != 1 || biller.sawRecord {
 		t.Fatalf("biller calls=%d sawRecord=%v: the record must be cleared before the one bill", biller.calls, biller.sawRecord)
@@ -90,6 +95,51 @@ func TestRetryBilling_ClearsWithAuditThenBills(t *testing.T) {
 	}
 }
 
+// TestRetryBilling_AttemptErrorIsNotTheOperatorsError pins the contract after
+// the clear has committed: an attempt that failed without saving a failure is
+// answered as a result, never as an error (a 5xx would invite a second call,
+// which gets 409 for a subscription that is still unbilled). StillDue carries
+// the truth: true while the subscription is due with no record, false once it
+// is not due.
+func TestRetryBilling_AttemptErrorIsNotTheOperatorsError(t *testing.T) {
+	const tenantID = "t1"
+	store := newMemStore()
+	subID := seedFailingSub(t, store, tenantID)
+	past := time.Now().Add(-time.Hour)
+	sub := store.subs[subID]
+	sub.Status, sub.NextBillingAt = domain.SubscriptionActive, &past
+	store.subs[subID] = sub
+	spy, biller := &retryAuditSpy{}, &dueBillerSpy{store: store, err: errors.New("deadlock detected")}
+	svc := NewService(store, nil)
+	svc.SetAuditLogger(spy)
+	svc.SetDueBiller(biller)
+
+	res, err := svc.RetryBilling(context.Background(), tenantID, subID)
+	if err != nil {
+		t.Fatalf("RetryBilling returned the attempt's error: %v", err)
+	}
+	if res.InvoicesGenerated != 0 || res.Subscription.BillingFailure != nil || !res.StillDue {
+		t.Fatalf("generated=%d failure=%+v still_due=%v, want 0, none and true", res.InvoicesGenerated, res.Subscription.BillingFailure, res.StillDue)
+	}
+	if len(spy.entries) != 1 || biller.calls != 1 {
+		t.Fatalf("audit entries=%d bills=%d, want 1 and 1", len(spy.entries), biller.calls)
+	}
+
+	// Not due any more (another run billed it): the same attempt error is
+	// not "still due".
+	store.subs[subID] = func() domain.Subscription {
+		s := store.subs[subID]
+		future := time.Now().Add(24 * time.Hour)
+		s.NextBillingAt = &future
+		s.BillingFailure = &domain.BillingFailure{Attempts: 1, MaxAttempts: domain.MaxBillingAttempts}
+		return s
+	}()
+	res, err = svc.RetryBilling(context.Background(), tenantID, subID)
+	if err != nil || res.StillDue {
+		t.Fatalf("err=%v still_due=%v, want nil and false for a subscription that is no longer due", err, res.StillDue)
+	}
+}
+
 func TestRetryBilling_NotFailingWritesNothing(t *testing.T) {
 	const tenantID = "t1"
 	store := newMemStore()
@@ -99,7 +149,7 @@ func TestRetryBilling_NotFailingWritesNothing(t *testing.T) {
 	svc.SetAuditLogger(spy)
 	svc.SetDueBiller(biller)
 
-	_, _, err := svc.RetryBilling(context.Background(), tenantID, subID)
+	_, err := svc.RetryBilling(context.Background(), tenantID, subID)
 	if !errors.Is(err, errs.ErrInvalidState) || errs.Code(err) != "billing_not_failing" {
 		t.Fatalf("err = %v (code %q), want InvalidState billing_not_failing", err, errs.Code(err))
 	}
@@ -117,7 +167,7 @@ func TestRetryBilling_AuditFailureKeepsTheRecordAndDoesNotBill(t *testing.T) {
 	svc.SetAuditLogger(&retryAuditSpy{err: errors.New("audit down")})
 	svc.SetDueBiller(biller)
 
-	if _, _, err := svc.RetryBilling(context.Background(), tenantID, subID); err == nil {
+	if _, err := svc.RetryBilling(context.Background(), tenantID, subID); err == nil {
 		t.Fatal("RetryBilling succeeded although its audit row failed")
 	}
 	if store.subs[subID].BillingFailure == nil || biller.calls != 0 {
@@ -134,9 +184,9 @@ func TestRetryBilling_ClockPinnedIsRefused(t *testing.T) {
 	store.subs[subID] = sub
 	svc := NewService(store, nil)
 
-	_, _, err := svc.RetryBilling(context.Background(), tenantID, subID)
-	if !errors.Is(err, errs.ErrInvalidState) {
-		t.Fatalf("err = %v, want InvalidState", err)
+	_, err := svc.RetryBilling(context.Background(), tenantID, subID)
+	if !errors.Is(err, errs.ErrInvalidState) || errs.Code(err) != "" {
+		t.Fatalf("err = %v (code %q), want InvalidState with the default code: billing_not_failing means something else", err, errs.Code(err))
 	}
 	if store.subs[subID].BillingFailure == nil {
 		t.Fatal("a refused retry cleared the record")

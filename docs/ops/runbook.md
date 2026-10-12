@@ -568,7 +568,7 @@ the tax provider setting and the last deploy first.
 
    ```bash
    curl -sS -X POST "$API/v1/subscriptions/<subscription id>/retry-billing" \
-     -H "Authorization: Bearer $KEY" | jq '{invoices_generated, failure: .subscription.billing_failure}'
+     -H "Authorization: Bearer $KEY" | jq '{invoices_generated, still_due, failure: .subscription.billing_failure}'
    ```
 
 3. After a shared cause is fixed, retry every failing subscription of the
@@ -579,11 +579,14 @@ the tax provider setting and the last deploy first.
      | jq -r '.data[].id' \
      | while read -r id; do
          curl -sS -X POST "$API/v1/subscriptions/$id/retry-billing" -H "Authorization: Bearer $KEY" \
-           | jq -c '{id: .subscription.id, invoices_generated, still_failing: (.subscription.billing_failure != null)}'
+           | jq -c '{id: .subscription.id, invoices_generated, still_due, still_failing: (.subscription.billing_failure != null)}'
        done
    ```
 
-   Repeat until the list is empty; each page holds at most 100.
+   Repeat until the list is empty; each page holds at most 100. An empty
+   list is not proof that everything billed: a row printed with
+   `still_due: true` left the list without being billed. The next billing
+   run attempts it.
 
 Do not cancel a subscription to clear a park. An immediate cancel after the
 period has ended writes no final invoice, so the ended period is never billed.
@@ -591,9 +594,23 @@ period has ended writes no final invoice, so the ended period is never billed.
 `POST /v1/billing/run` is not a retry. It skips subscriptions that are
 waiting or parked.
 
-**Verify**: the retry response has `invoices_generated` above zero and no
-`billing_failure`. If it still has a `billing_failure`, the attempt failed
-again: `attempts` is back to 1 and the billing run retries on its own.
+**Verify**: read two fields of the retry response.
+
+| Response | Meaning |
+|---|---|
+| no `billing_failure`, `still_due: false` | Billed, or nothing was left to bill. |
+| `billing_failure` present | The attempt failed again. `attempts` is back to 1 and the billing run retries on its own. This includes an attempt that ended without an error but left the subscription due ("Billing made no progress"). |
+| no `billing_failure`, `still_due: true` | The attempt did not complete: a database connection was lost, or a deadlock. Nothing was saved and the subscription is unbilled. The next billing run attempts it, and the server log has the reason (`retry-billing: the attempt failed`). A second call answers 409, because the failure is already cleared. |
+
+`invoices_generated` is not the success test. It counts period-close invoices
+only. It is 0 when the retry fired a scheduled cancel (the subscription comes
+back `canceled`, with its final invoice), ended a trial, or closed a period
+with nothing to bill.
+
+A call that times out returns an error, but may already have cleared the
+failure. A repeat call can then answer 409 `billing_not_failing` while the
+next billing run bills the subscription.
+
 `velox_billing_failing_subscriptions` falls on the next scrape.
 
 **Not covered here**: a subscription on a test clock never appears in this

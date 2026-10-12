@@ -279,10 +279,42 @@ func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, logArg
 //
 // The caller has already cleared the failure record. If a billing run saved a
 // new failure in between, the attempt-time gate stops this attempt.
+//
+// A clean attempt that leaves the subscription due is a failure here too. The
+// billing run notices that case when the subscription comes back on a later
+// page of the same run (drainDue); a retry has no later page, so it re-reads
+// after its one attempt and saves errStillDue the same way. Without this a
+// retry of a subscription that makes no progress would read as a success and
+// the next run would only then find it failing again. A subscription that
+// already carries a record is left alone: another run saved it, and counting
+// here as well would count one attempt twice.
+//
+// Every error is logged before it is returned, so the caller may answer the
+// operator without it: a failed attempt by attemptSub, the two reads here.
 func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string) (int, error) {
+	logArgs := []any{"run", "operator_retry"}
 	sub, err := e.subs.Get(ctx, tenantID, subscriptionID)
 	if err != nil {
+		// No row was read, so there is nothing to record a failure against.
+		slog.Error("bill subscription failed", append([]any{
+			"subscription_id", subscriptionID, "tenant_id", tenantID, "error", err, "recorded", false,
+		}, logArgs...)...)
 		return 0, fmt.Errorf("read subscription %s: %w", subscriptionID, err)
 	}
-	return e.attemptSub(ctx, sub, "run", "operator_retry")
+	n, err := e.attemptSub(ctx, sub, logArgs...)
+	if err != nil {
+		return n, err
+	}
+	fresh, err := e.subs.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
+		slog.Error("bill subscription: re-read after a clean attempt failed", append([]any{
+			"subscription_id", subscriptionID, "tenant_id", tenantID, "error", err,
+		}, logArgs...)...)
+		return n, fmt.Errorf("re-read subscription %s: %w", subscriptionID, err)
+	}
+	if fresh.TestClockID == "" && fresh.BillingFailure == nil && domain.BillingDueAt(fresh, e.clock.Now(ctx)) {
+		e.reportBillFailure(ctx, fresh, n, errStillDue, logArgs...)
+		return n, errStillDue
+	}
+	return n, nil
 }
