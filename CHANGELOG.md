@@ -15,6 +15,17 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-13
+
+One day after 0.4.0. It fixes the LiteLLM integration, which recorded nothing from a real proxy, ships two requests from a user, and carries the first audit fix.
+
+**Before upgrading:**
+
+- If you use the LiteLLM integration: usage sent before this release was not stored and cannot be recovered from Velox. See the entry under Fixed.
+- `POST /v1/billing/run` now skips a subscription whose billing is failing until its wait has passed. Use `POST /v1/subscriptions/{id}/retry-billing` to try one now.
+- `velox_billing_due_subscriptions` and `velox_billing_oldest_due_age_seconds` no longer count failing subscriptions. Update alerts that relied on that.
+- Run migrations first, as for any upgrade. This release adds five columns to `subscriptions`.
+
 ### Added
 
 - **The public cost page data now includes the customer's credit balance (2026-10-12, #86).** `GET /v1/public/cost-dashboard/{token}` returns a `credits` object: the balance, what is left of the prepaid commit and of promotional credit, and an estimate of what remains after this period's usage so far. You can show a customer their balance without a secret key.
@@ -4738,7 +4749,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/getvelox/velox/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/getvelox/velox/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/getvelox/velox/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/getvelox/velox/compare/v0.3.0...v0.3.1
