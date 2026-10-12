@@ -2,6 +2,7 @@ package creditnote_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -53,7 +54,7 @@ func TestCreateUnderInvoiceLockTx_RollsBackWithCallerTx(t *testing.T) {
 	}
 
 	store := creditnote.NewPostgresStore(db)
-	build := func(existing []domain.CreditNote) (domain.CreditNote, error) {
+	build := func(_ *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error) {
 		return domain.CreditNote{
 			InvoiceID:        inv.ID,
 			CustomerID:       cust.ID,

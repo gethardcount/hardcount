@@ -2,6 +2,7 @@ package creditnote_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func TestList_CustomerIDFilter(t *testing.T) {
 			t.Fatalf("create invoice %s: %v", invNum, err)
 		}
 		_, err = cnStore.CreateUnderInvoiceLock(ctx, tenantID, inv.ID, nil,
-			func([]domain.CreditNote) (domain.CreditNote, error) {
+			func(*sql.Tx, []domain.CreditNote) (domain.CreditNote, error) {
 				return domain.CreditNote{
 					InvoiceID:         inv.ID,
 					CustomerID:        cust.ID,

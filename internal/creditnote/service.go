@@ -102,9 +102,10 @@ type TaxReverser interface {
 	ReverseTax(ctx context.Context, tenantID string, req tax.ReversalRequest) (*tax.ReversalResult, error)
 }
 
-// NumberGenerator generates sequential credit note numbers.
+// NumberGenerator generates sequential credit note numbers on the
+// transaction that inserts the note, so a rolled-back create leaves no gap.
 type NumberGenerator interface {
-	NextCreditNoteNumber(ctx context.Context, tenantID string) (string, error)
+	NextCreditNoteNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error)
 }
 
 type CreditGrantInput struct {
@@ -380,7 +381,7 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	// invoice serialize on the lock: the second sees the first's note in
 	// `existingCNs` and is capped correctly, closing the TOCTOU where both
 	// read the same pre-state and both inserted past the invoice total.
-	buildFn := func(existingCNs []domain.CreditNote) (domain.CreditNote, error) {
+	buildFn := func(lockTx *sql.Tx, existingCNs []domain.CreditNote) (domain.CreditNote, error) {
 		// Validate: total credit notes cannot exceed invoice total.
 		// For unpaid invoices, also cap at current amount_due.
 		var existingTotal, existingTaxReversed int64
@@ -402,7 +403,7 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("credit note amount (%.2f) exceeds amount due (%.2f)", float64(subtotal)/100, float64(inv.AmountDueCents)/100))
 		}
 
-		return s.buildCreditNote(ctx, tenantID, input, inv, subtotal, existingTotal, existingTaxReversed, existingCNs)
+		return s.buildCreditNote(ctx, lockTx, tenantID, input, inv, subtotal, existingTotal, existingTaxReversed, existingCNs)
 	}
 
 	// ADR-090 in-tx emission. The `create` row rides the SAME transaction as the
@@ -705,8 +706,9 @@ func (s *Service) promoteOrphan(ctx context.Context, cn domain.CreditNote, errsO
 
 // buildCreditNote runs the tax-breakout, three-channel allocation, refund cap,
 // and number generation, returning the credit note to insert. Called inside
-// CreateUnderInvoiceLock with the lock-stable `existingCNs` snapshot.
-func (s *Service) buildCreditNote(ctx context.Context, tenantID string, input CreateInput, inv domain.Invoice, subtotal, existingTotal, existingTaxReversed int64, existingCNs []domain.CreditNote) (domain.CreditNote, error) {
+// CreateUnderInvoiceLock with the lock-stable `existingCNs` snapshot; tx is
+// that lock's transaction, which the number is allocated on.
+func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID string, input CreateInput, inv domain.Invoice, subtotal, existingTotal, existingTaxReversed int64, existingCNs []domain.CreditNote) (domain.CreditNote, error) {
 	// Break out proportional tax from the gross subtotal. The invoice's
 	// tax_amount / total_amount ratio tells us what fraction of the gross
 	// was tax; apply the same ratio to the CN's gross subtotal so a
@@ -835,7 +837,7 @@ func (s *Service) buildCreditNote(ctx context.Context, tenantID string, input Cr
 	if s.numbers == nil {
 		return domain.CreditNote{}, fmt.Errorf("credit-note number generator not wired (call SetNumberGenerator)")
 	}
-	cnNumber, err := s.numbers.NextCreditNoteNumber(ctx, tenantID)
+	cnNumber, err := s.numbers.NextCreditNoteNumberTx(ctx, tx, tenantID)
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("allocate credit note number: %w", err)
 	}
@@ -1110,7 +1112,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 				float64(refundAmount)/100, float64(pmRefundable)/100))
 		}
 
-		cnNumber, nerr := s.numbers.NextCreditNoteNumber(ctx, tenantID)
+		cnNumber, nerr := s.numbers.NextCreditNoteNumberTx(ctx, tx, tenantID)
 		if nerr != nil {
 			return domain.CreditNote{}, nil, fmt.Errorf("allocate credit note number: %w", nerr)
 		}

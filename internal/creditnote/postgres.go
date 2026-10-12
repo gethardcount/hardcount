@@ -79,7 +79,7 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, cn domain.C
 // here and each line was inserted afterwards in its own transaction — a crash
 // or failure between them left an orphan credit note with a non-zero total
 // and zero lines, which Issue() would still act on.
-func (s *PostgresStore) CreateUnderInvoiceLock(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+func (s *PostgresStore) CreateUnderInvoiceLock(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
 	return s.CreateUnderInvoiceLockAudited(ctx, tenantID, invoiceID, lines, build, nil)
 }
 
@@ -90,7 +90,7 @@ func (s *PostgresStore) CreateUnderInvoiceLock(ctx context.Context, tenantID, in
 // without its evidence, and evidence never commits without the note. It fires
 // exactly once, and only on the path that actually inserted a row (a build
 // rejection returns before it).
-func (s *PostgresStore) CreateUnderInvoiceLockAudited(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
+func (s *PostgresStore) CreateUnderInvoiceLockAudited(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.CreditNote{}, err
@@ -120,7 +120,7 @@ func (s *PostgresStore) CreateUnderInvoiceLockAudited(ctx context.Context, tenan
 // fire-and-forget gap where a removed item could leave the customer
 // un-credited. The per-invoice advisory lock is taken on the caller's tx and
 // releases when it commits. The caller owns Begin/Commit/Rollback.
-func (s *PostgresStore) CreateUnderInvoiceLockTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+func (s *PostgresStore) CreateUnderInvoiceLockTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
 	return s.CreateUnderInvoiceLockTxAudited(ctx, tx, tenantID, invoiceID, lines, build, nil)
 }
 
@@ -129,7 +129,7 @@ func (s *PostgresStore) CreateUnderInvoiceLockTx(ctx context.Context, tx *sql.Tx
 // the credit note itself does — so the own-tx and caller-tx create paths carry
 // the same evidence (the own-tx/caller-tx divergence ADR-090 §3 closed for
 // grants), and an emission failure rolls the caller's whole change back.
-func (s *PostgresStore) CreateUnderInvoiceLockTxAudited(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
+func (s *PostgresStore) CreateUnderInvoiceLockTxAudited(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
 	created, err := s.createUnderInvoiceLockInTx(ctx, tx, tenantID, invoiceID, lines, build)
 	if err != nil {
 		return domain.CreditNote{}, err
@@ -142,7 +142,7 @@ func (s *PostgresStore) CreateUnderInvoiceLockTxAudited(ctx context.Context, tx 
 	return created, nil
 }
 
-func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+":"+invoiceID,
 	); err != nil {
@@ -153,7 +153,7 @@ func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
-	cn, err := build(existing)
+	cn, err := build(tx, existing)
 	if err != nil {
 		return domain.CreditNote{}, err
 	}

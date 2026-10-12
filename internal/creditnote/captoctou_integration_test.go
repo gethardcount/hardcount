@@ -2,6 +2,7 @@ package creditnote_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sync"
 	"testing"
@@ -59,8 +60,8 @@ func TestCreateUnderInvoiceLock_SerializesCap(t *testing.T) {
 	store := creditnote.NewPostgresStore(db)
 
 	const amount = 6000
-	build := func(i int) func(existing []domain.CreditNote) (domain.CreditNote, error) {
-		return func(existing []domain.CreditNote) (domain.CreditNote, error) {
+	build := func(i int) func(_ *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error) {
+		return func(_ *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error) {
 			var existingTotal int64
 			for _, cn := range existing {
 				if cn.Status != domain.CreditNoteVoided {

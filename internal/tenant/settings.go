@@ -280,16 +280,13 @@ func (s *SettingsStore) nextInvoiceNumberInTx(ctx context.Context, tx *sql.Tx, t
 	return strings.ToUpper(prefix) + "-" + padSeq(seq), nil
 }
 
-// NextCreditNoteNumber atomically allocates the next credit note number in
-// the mode carried on ctx. Same per-mode-column rationale as
+// NextCreditNoteNumberTx allocates the next credit note number in the mode
+// carried on ctx, on the CALLER's transaction — the one that inserts the
+// credit note. A rolled-back create (a failed cancel, a refused swap) rolls
+// the number back with it, so the sequence stays gap-free, the same contract
+// NextInvoiceNumberTx keeps for invoices. Same per-mode-column rationale as
 // NextInvoiceNumber above.
-func (s *SettingsStore) NextCreditNoteNumber(ctx context.Context, tenantID string) (string, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return "", err
-	}
-	defer postgres.Rollback(tx)
-
+func (s *SettingsStore) NextCreditNoteNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
 	col := "credit_note_next_seq_test"
 	if postgres.Livemode(ctx) {
 		col = "credit_note_next_seq_live"
@@ -305,9 +302,6 @@ func (s *SettingsStore) NextCreditNoteNumber(ctx context.Context, tenantID strin
 	var prefix string
 	var seq int
 	if err := tx.QueryRowContext(ctx, q, tenantID).Scan(&prefix, &seq); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
 		return "", err
 	}
 	return strings.ToUpper(prefix) + "-" + padSeq(seq), nil

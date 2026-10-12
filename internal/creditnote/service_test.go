@@ -52,7 +52,7 @@ func (m *memStore) Create(ctx context.Context, tenantID string, cn domain.Credit
 	return cn, nil
 }
 
-func (m *memStore) CreateUnderInvoiceLock(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+func (m *memStore) CreateUnderInvoiceLock(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
 	return m.CreateUnderInvoiceLockAudited(ctx, tenantID, invoiceID, lines, build, nil)
 }
 
@@ -60,7 +60,7 @@ func (m *memStore) CreateUnderInvoiceLock(ctx context.Context, tenantID, invoice
 // the CREATED row, only after a successful insert; an emit error fails the
 // create (the double can't roll back — real shared fate is pinned by the
 // real-Postgres integration test).
-func (m *memStore) CreateUnderInvoiceLockAudited(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
+func (m *memStore) CreateUnderInvoiceLockAudited(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
 	created, err := m.createUnderInvoiceLock(ctx, tenantID, invoiceID, lines, build)
 	if err != nil {
 		return domain.CreditNote{}, err
@@ -77,11 +77,11 @@ func (m *memStore) CreateUnderInvoiceLockAudited(ctx context.Context, tenantID, 
 
 // CreateUnderInvoiceLockTxAudited runs the same emission on the caller's tx —
 // the double has no real tx, so it delegates.
-func (m *memStore) CreateUnderInvoiceLockTxAudited(ctx context.Context, _ *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
+func (m *memStore) CreateUnderInvoiceLockTxAudited(ctx context.Context, _ *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error) {
 	return m.CreateUnderInvoiceLockAudited(ctx, tenantID, invoiceID, lines, build, emit)
 }
 
-func (m *memStore) createUnderInvoiceLock(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+func (m *memStore) createUnderInvoiceLock(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
 	m.lastLockLines = lines
 	var existing []domain.CreditNote
 	for _, cn := range m.notes {
@@ -89,7 +89,7 @@ func (m *memStore) createUnderInvoiceLock(ctx context.Context, tenantID, invoice
 			existing = append(existing, cn)
 		}
 	}
-	cn, err := build(existing)
+	cn, err := build(nil, existing)
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
@@ -111,7 +111,7 @@ func (m *memStore) createUnderInvoiceLock(ctx context.Context, tenantID, invoice
 // double has no real transaction, so it can't model rollback. The atomicity
 // (a clawback-create failure rolling back the caller's item delete) is
 // exercised by the real-Postgres integration test, not this double.
-func (m *memStore) CreateUnderInvoiceLockTx(ctx context.Context, _ *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+func (m *memStore) CreateUnderInvoiceLockTx(ctx context.Context, _ *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
 	return m.CreateUnderInvoiceLock(ctx, tenantID, invoiceID, lines, build)
 }
 
@@ -120,7 +120,7 @@ func (m *memStore) CreateUnderInvoiceLockTx(ctx context.Context, _ *sql.Tx, tena
 // discipline is proven against real Postgres).
 func (m *memStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, _ *sql.Tx, tenantID, invoiceID string, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
 	var lines []domain.CreditNoteLineItem
-	created, err := m.CreateUnderInvoiceLock(ctx, tenantID, invoiceID, nil, func(existing []domain.CreditNote) (domain.CreditNote, error) {
+	created, err := m.CreateUnderInvoiceLock(ctx, tenantID, invoiceID, nil, func(_ *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error) {
 		cn, ls, err := build(existing)
 		lines = ls
 		return cn, err
@@ -404,7 +404,7 @@ type fakeCNNumbers struct {
 	err error
 }
 
-func (f *fakeCNNumbers) NextCreditNoteNumber(_ context.Context, _ string) (string, error) {
+func (f *fakeCNNumbers) NextCreditNoteNumberTx(_ context.Context, _ *sql.Tx, _ string) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}

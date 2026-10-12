@@ -16,20 +16,20 @@ type Store interface {
 	// AND its line items in that one transaction — closing the over-credit
 	// TOCTOU on concurrent Create, and guaranteeing a header can never commit
 	// without its lines (no orphan credit notes on partial failure).
-	CreateUnderInvoiceLock(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error)
+	CreateUnderInvoiceLock(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error)
 	// CreateUnderInvoiceLockAudited is CreateUnderInvoiceLock with the ADR-090
 	// in-tx emission: emit runs on the insert's own tx with the CREATED row, so
 	// the credit note and its `create` evidence commit or roll back together.
-	CreateUnderInvoiceLockAudited(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error)
+	CreateUnderInvoiceLockAudited(ctx context.Context, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error)
 	// CreateUnderInvoiceLockTx is CreateUnderInvoiceLock on the CALLER's tx
 	// (coordinator-owned, ADR-056) so the credit note commits atomically with
 	// the caller's other writes (e.g. a subscription item delete) — the caller
 	// owns Begin/Commit/Rollback.
-	CreateUnderInvoiceLockTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error)
+	CreateUnderInvoiceLockTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error)
 	// CreateUnderInvoiceLockTxAudited is the caller-tx create with the same
 	// in-tx emission — the create row rides the caller's coordinator tx, so
 	// both create paths carry identical evidence (ADR-090 §3).
-	CreateUnderInvoiceLockTxAudited(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error)
+	CreateUnderInvoiceLockTxAudited(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error)
 	// CreateUnderInvoiceLockDynamicTx: build returns the header AND lines —
 	// for callers whose line amounts derive from state read under locks
 	// taken inside build (ADR-080 commit relief).

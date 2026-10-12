@@ -34,7 +34,7 @@ type seqNumbers struct {
 	n      int
 }
 
-func (s *seqNumbers) NextCreditNoteNumber(context.Context, string) (string, error) {
+func (s *seqNumbers) NextCreditNoteNumberTx(context.Context, *sql.Tx, string) (string, error) {
 	s.n++
 	return fmt.Sprintf("CN-%s-%d", s.prefix, s.n), nil
 }

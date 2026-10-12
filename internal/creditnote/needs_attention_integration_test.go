@@ -2,6 +2,7 @@ package creditnote_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -39,7 +40,7 @@ func TestNeedsAttention_UnrecordedRefundOutcome(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}
-		cn, err := cnStore.CreateUnderInvoiceLock(ctx, tenantID, inv.ID, nil, func([]domain.CreditNote) (domain.CreditNote, error) {
+		cn, err := cnStore.CreateUnderInvoiceLock(ctx, tenantID, inv.ID, nil, func(*sql.Tx, []domain.CreditNote) (domain.CreditNote, error) {
 			return domain.CreditNote{
 				InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-" + num,
 				Status: domain.CreditNoteIssued, Reason: "fixture",
