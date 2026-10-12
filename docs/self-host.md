@@ -23,7 +23,7 @@ In short:
 2. Run `docker compose up -d`.
 3. Make one `POST /v1/bootstrap` call. It returns your dashboard login and your API keys.
 
-That gives you a working [tenant](glossary.md): one business account with its own data, dashboard users and API keys. One install can hold several tenants.
+That gives you a working [tenant](glossary.md): one business account with its own data, dashboard users and API keys.
 
 **Signing in before you add TLS.** The stack serves plain HTTP on port 80. Until you put TLS in front, sign in to the dashboard at `http://localhost/` on the server, or through an SSH tunnel. Sign-in does not work at `http://<server-ip>/`. The [compose guide](../deploy/compose/README.md#tls) covers both.
 
@@ -44,7 +44,7 @@ This is the supported production setup:
 Things to know:
 
 - **Background jobs run once, not once per copy.** Billing runs, payment retries and webhook delivery are background jobs. The copies agree, through a row in Postgres, on which one runs each job. The others stand by, and one takes over within about 15 seconds if the first dies.
-- **Connection poolers work.** PgBouncer in transaction mode and RDS Proxy both work for the server. Run database upgrades (migrations) over a direct connection.
+- **Connection poolers.** PgBouncer in transaction mode works for the server, and CI runs the test suite through it. RDS Proxy is expected to behave the same way but has not been tested ([details](ops/postgres-requirements.md)). Run database upgrades (migrations) over a direct connection.
 - **Give each copy 120 seconds to shut down.** On a stop signal, a copy first tells the load balancer it is leaving, then finishes its work. The worst case is 90 seconds.
 - **A few features still assume one copy.** The live event stream in the dashboard is one. None of them touch money. The full list is in the [readiness review](dev/ha-readiness-2026-07-06.md).
 

@@ -27,8 +27,8 @@ Everything below ships in the one MIT edition. For the cases Velox does not cove
   - Check this against whatever else you are evaluating. Open-core billing engines commonly put dunning, SSO and RBAC behind a key. Velox has no SSO or RBAC to gate (see [What Velox is not](../README.md#what-velox-is-not)).
 - **Nothing phones home**: no licence check, no telemetry, no analytics SDK. OpenTelemetry tracing exists and exports to *your* collector when you configure one.
 - **Data sovereignty**: customer billing data never leaves your infrastructure. This transfers the compliance obligations to you; it does not remove them. "Self-hosted so it's compliant by default" is not a claim we'll make.
-- **Append-only audit log**: tamper-evidence enforced by database triggers, not convention.
-- **Row-Level Security**: one deployment cleanly serves N internal tenants.
+- **Append-only audit log**: database triggers refuse any update or delete of an audit row.
+- **Row-Level Security**: the database keeps test data apart from live data, and one tenant's rows apart from another's.
 
 ## Stripe-grade primitives (already shipped)
 

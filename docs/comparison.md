@@ -12,7 +12,7 @@ Velox is pre-1.0 and has no production users yet. The other four are in producti
 
 - One MIT licence, and every feature is in it.
 - A test clock for each test customer, on your normal deployment.
-- Tenant isolation enforced by the database.
+- Tenant isolation uses Postgres row-level security: a query that forgets its tenant filter returns no other tenant's rows.
 - Failed-payment retries are included. Kill Bill includes them too.
 - Webhooks are signed, with a timestamp, without running another service.
 - The throughput figure comes with its hardware and method.

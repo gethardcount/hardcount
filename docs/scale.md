@@ -31,7 +31,7 @@ Lago is the closest comparable, and it *does* ship a Kafka + ClickHouse tier. It
 
 Their 10,000/sec reference point is one self-hosted deployment they describe but don't name. To their credit, they publish the whole story rather than only the flattering half: *"A major global payments company runs Lago self-hosted, processing thousands of transactions per second. They started on Postgres (validated at 10K events/sec) and later migrated to ClickHouse + Kafka for higher throughput …"* ([source](https://docs.getlago.com/guide/events/ingesting-usage), verified 2026-08-17).
 
-So 10k/sec is where a Postgres-first billing stack stops being obviously sufficient, not where it stops working. Ten thousand a second is roughly 26 billion events a month. An AI product metering LLM calls at one to three events each reaches billions of API calls a month before the architecture is the constraint.
+So 10k/sec is where a Postgres-first billing stack stops being obviously sufficient, not where it stops working. Ten thousand a second is roughly 26 billion events a month. That figure is theirs, not ours. What Velox itself has measured is below.
 
 **What we have actually measured, and what we haven't.**
 
@@ -54,13 +54,13 @@ Conditions: AWS, one AZ, the live-mode path, 200 customers, and every event reco
 **The ladder, which stays boring for a long time.** Before Velox needs a new dependency, these steps come first:
 
 1. Use the batch endpoint. One database commit spreads the write cost across up to 1,000 events.
-2. Add replicas (multi-replica leader leases already ship).
+2. Add API replicas. Ingest is stateless, so this should help, but it has not been measured.
 3. Partition `usage_events` by month.
 4. Set a retention window on raw events.
 5. Move analytics to a read replica.
 
 Each rung is ordinary Postgres operations. A columnar store only earns its place in two cases: you want arbitrary slicing over years of raw events, or sustained ingest well past the figure above. At that point it belongs beside Velox as a read-side sidecar, not underneath it. Money never leaves Postgres.
 
-**And if you already run Kafka, keep it.** Velox does not want to own your transport. Point a consumer at the batch ingest endpoint, and your existing pipeline feeds it directly. Teams already use this shape to avoid duplicating a metering stack they consider core. Velox is deliberately the last mile: rating, invoicing, credits, dunning, collection.
+**And if you already run Kafka, keep it.** Velox does not want to own your transport. Point a consumer at the batch ingest endpoint, and your existing pipeline feeds it directly. Velox is deliberately the last mile: rating, invoicing, credits, dunning, collection.
 
 One structural note makes all of the above easier than it looks. Velox scales as many separate deployments, not one shared cluster. Every company running Velox runs its own deployment, carrying only its own volume. So the aggregate pressure that forces a shared SaaS platform onto Kafka never accumulates in any single instance.
