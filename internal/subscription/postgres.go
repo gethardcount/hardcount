@@ -1583,6 +1583,8 @@ func (s *PostgresStore) ClearBillingFailure(ctx context.Context, tenantID, id st
 	var cleared domain.BillingFailure
 	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		var failedAt, nextAttemptAt sql.NullTime
+		var count int
+		var lastError string
 		// The CTE locks the row and reads the record before the UPDATE nulls
 		// it; a second retry blocked on the lock re-evaluates the predicate
 		// and finds nothing.
@@ -1600,7 +1602,7 @@ func (s *PostgresStore) ClearBillingFailure(ctx context.Context, tenantID, id st
 			  FROM prev
 			 WHERE s.id = prev.id
 			RETURNING prev.billing_failure_count, prev.billing_last_error, prev.billing_failed_at, prev.billing_next_attempt_at
-		`, id).Scan(&cleared.Attempts, &cleared.LastError, &failedAt, &nextAttemptAt)
+		`, id).Scan(&count, &lastError, &failedAt, &nextAttemptAt)
 		if err == sql.ErrNoRows {
 			var exists bool
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE id = $1)`, id).Scan(&exists); err != nil {
@@ -1614,13 +1616,7 @@ func (s *PostgresStore) ClearBillingFailure(ctx context.Context, tenantID, id st
 		if err != nil {
 			return err
 		}
-		cleared.MaxAttempts = domain.MaxBillingAttempts
-		cleared.FailedAt = failedAt.Time
-		cleared.Parked = !nextAttemptAt.Valid
-		if nextAttemptAt.Valid {
-			t := nextAttemptAt.Time
-			cleared.NextAttemptAt = &t
-		}
+		cleared = newBillingFailure(count, lastError, failedAt, nextAttemptAt)
 		if inTx == nil {
 			return nil
 		}
@@ -2631,9 +2627,10 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 // BillingFailure only on a wall-clock subscription that can still bill and
 // whose record was saved for the due instant the row has now. Anything else is
 // a stale leftover (the columns are never cleared when the due instant moves)
-// and reads as nil. This is the only place the columns are read into Go, so
-// every read path agrees; a real-Postgres test asserts it matches the SQL
-// predicate row for row.
+// and reads as nil. This is the only place Go decides whether a record is
+// live, so every read path agrees; a real-Postgres test asserts it matches the
+// SQL predicate row for row. (ClearBillingFailure decides it in SQL, with that
+// same predicate.)
 func composeBillingFailure(sub domain.Subscription, failedFor sql.NullTime, count int, failedAt, nextAttemptAt sql.NullTime, lastError string) *domain.BillingFailure {
 	if !failedFor.Valid || sub.TestClockID != "" {
 		return nil
@@ -2645,7 +2642,16 @@ func composeBillingFailure(sub domain.Subscription, failedFor sql.NullTime, coun
 	if due == nil || !due.Equal(failedFor.Time) {
 		return nil
 	}
-	bf := &domain.BillingFailure{
+	bf := newBillingFailure(count, lastError, failedAt, nextAttemptAt)
+	return &bf
+}
+
+// newBillingFailure maps the saved columns of a record onto the domain type.
+// It is the one mapping: the row scan uses it for a live record, and
+// ClearBillingFailure for the record it just cleared, so the audit row and the
+// API can never describe the same record differently.
+func newBillingFailure(count int, lastError string, failedAt, nextAttemptAt sql.NullTime) domain.BillingFailure {
+	bf := domain.BillingFailure{
 		Attempts:    count,
 		MaxAttempts: domain.MaxBillingAttempts,
 		LastError:   lastError,

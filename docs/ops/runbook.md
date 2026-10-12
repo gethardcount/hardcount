@@ -55,13 +55,13 @@ alerting tier: what should page someone, and what is only informational.
 | Metric | Threshold | What it means |
 |---|---|---|
 | `velox_http_request_duration_seconds` p99 | > 5s for 5m | Server is unhealthy |
-| `velox_billing_cycle_errors_total` | rate > 0.1/s for 5m | Billing cycles failing systematically. The rate falls after the first tick of a fault, because a subscription that failed is not attempted again until its wait has passed. A low rate is therefore not an all-clear: use the next row |
+| `velox_billing_cycle_errors_total` | rate > 0.1/s for 5m | Billing cycles failing systematically. The rate falls once a fault has lasted a few ticks, because a subscription that failed is not attempted again until its wait has passed. On the hourly production tick the first three ticks each retry everything (the waits are 15 minutes, then 1 hour); from the fourth tick the waits are longer than the tick. A low rate is therefore not an all-clear: use the next row |
 | `sum(velox_billing_failing_subscriptions{mode="live"})` | above a threshold you choose (suggested 20), or rising for 30m | One cause is failing many subscriptions: a bad deploy, or a tax provider that is set but not configured. Nothing parks before 3 days 17 hours after its first failure, so there is time to fix the cause. See [14](#14-subscriptions-whose-billing-is-failing) |
 | `up{job="velox"}` | == 0 | Process down |
 | Postgres connection errors (count) | > 10/min | DB connectivity broken |
 | `time() - velox_scheduler_last_run_timestamp_seconds` | > 2× tick interval | Scheduler stalled (also flips `/health/ready` to 503) |
 | `velox_leader_last_tick_age_seconds{role}` | > 3× the role's interval | The role has not finished a tick on any replica. This is the cluster-wide stall signal that a per-replica liveness gauge cannot give. `SELECT * FROM leader_status;` shows the holder and whether an operator paused the role ([runbook-leader-leases.md](runbook-leader-leases.md)). **For billing, a busy billing day also trips this:** a tick bills every due subscription before it ends. If `velox_billing_due_subscriptions` is falling, the tick is draining; do not restart it |
-| `increase(velox_leader_lease_lost_total[1h])` | > 0 | Split by `reason`. `panicked`: the role's tick panicked and ran nothing past the panic; it repeats every `min(interval, 60 s)` until the bad input or code is fixed, so restarting does not help. The stack is in the `scheduler panic recovered` ERROR log. A panic while billing one subscription is the exception: it is saved as a billing failure on that subscription, and the next tick skips it. So that page fires once per such subscription, not every 60 s, and the subscription shows up in `velox_billing_failing_subscriptions`. Any other reason: a leader could not keep its lease mid-tick (frozen process, DB stall, pooler hiccup); correctness held (fence + row CAS), but find out why. `paused` is an operator action, so exclude it |
+| `increase(velox_leader_lease_lost_total[1h])` | > 0 | Split by `reason`. `panicked`: the role's tick panicked and ran nothing past the panic; it repeats every `min(interval, 60 s)` until the bad input or code is fixed, so restarting does not help. The stack is in the `scheduler panic recovered` ERROR log. A panic while billing one subscription is the exception. It is saved as a billing failure on that subscription, and later ticks skip the subscription until its wait ends. Each attempt that panics again ends that one tick early; the tick that follows about 60 s later skips the subscription and does the rest of the work. So the page fires once per attempt, not every 60 s. That is at most eight times over 3 days 17 hours, spaced on the wait ladder (15m, 1h, 4h, 12h, 24h three times). Then the subscription parks and the panic stops. On the hourly production tick the first three attempts land on three ticks in a row. The subscription shows up in `velox_billing_failing_subscriptions`, and its id and stack are in the `bill subscription panicked` ERROR log; see [14](#14-subscriptions-whose-billing-is-failing). Any other reason: a leader could not keep its lease mid-tick (frozen process, DB stall, pooler hiccup); correctness held (fence + row CAS), but find out why. `paused` is an operator action, so exclude it |
 
 ### Warn (slack/email, not page)
 
@@ -136,7 +136,7 @@ curl -s http://localhost:8080/health/ready
 ```
 
 **Fix**:
-1. Check application logs for `scheduler panic recovered`. A panic in the tick repeats on whichever replica leads next, so a restart does not fix it: find the input in the stack and fix or remove it.
+1. Check application logs for `scheduler panic recovered`. A panic in the tick repeats on whichever replica leads next, so a restart does not fix it: find the input in the stack and fix or remove it. A panic while billing one subscription is also logged as `bill subscription panicked` with the subscription id, and repeats only when that subscription's wait ends ([14](#14-subscriptions-whose-billing-is-failing)).
 2. Cancel long queries with `SELECT pg_cancel_backend(<pid>)` if
    appropriate.
 3. Batch size is hard-coded as a fixed literal (50 subs per tick,
@@ -537,8 +537,19 @@ failure on the subscription and now waits before each new attempt (ADR-119).
 - `state="parked"`: eight attempts failed. Nothing retries the subscription
   until someone calls retry-billing. The earliest a subscription can park is
   3 days 17 hours after its first failure.
-- A parked subscription loses nothing by waiting. When it is retried, it is
-  billed for every period it missed, one invoice per period.
+- A parked subscription skips no period. When it is retried, it is billed for
+  every period it missed, one invoice per period. Waiting still has a cost:
+  - prepaid credits that expire in the meantime do not apply to the late
+    invoice;
+  - an in-advance item changed while the period is overdue is billed from the
+    period boundary;
+  - usage thresholds do not fire for a period that has already ended;
+  - a cancel after the period end writes no final invoice (ADR-119).
+
+  Retry promptly once the cause is fixed.
+- A cancel scheduled for the end of a trial still fires on a failing or parked
+  trialing subscription. Any other change that leaves the same work due does
+  not restart billing; retry after it.
 
 **Check**:
 
@@ -558,6 +569,14 @@ grep "bill subscription failed" log | jq 'select(.subscription_id == "<subscript
 
 Many subscriptions failing with the same error means one shared cause. Check
 the tax provider setting and the last deploy first.
+
+A database outage does not normally use up attempts: a lost connection, a
+server shutdown, a deadlock and a serialization abort are not counted. Two
+shapes of outage are counted, because the error type cannot tell them from a
+real failure. One is a statement or lock timeout. The other is a server that
+answers but refuses writes: a standby reached during a failover (SQLSTATE
+25006). After such an outage, retry the affected subscriptions; do not wait
+out the ladder.
 
 **Fix**:
 
@@ -773,7 +792,8 @@ The tick interval and batch size are compiled-in, not env-configurable:
 
 A tenant with a backlog is drained on demand via `POST /v1/billing/run`
 (loops until that tenant has nothing left that it will attempt), not by
-tuning these knobs. It skips subscriptions whose billing is failing; see
+tuning these knobs. It skips subscriptions whose billing is failing while
+they wait for their next attempt or are parked; see
 [14](#14-subscriptions-whose-billing-is-failing). A drain
 running under the leader's tick may report 0 for a subscription the
 leader is committing at that instant (its due fetch skips locked rows).
@@ -863,8 +883,11 @@ logger). Useful greps:
 # Billing cycle errors
 grep "billing cycle complete" log | jq 'select(.errors > 0)'
 
-# One subscription's failed billing attempts (class: counted, transient, interrupted)
-grep "bill subscription failed" log | jq '{subscription_id, class, attempt, next_attempt_at, error}'
+# One subscription's failed billing attempts (class: counted, transient, interrupted).
+# recorded=false with class=counted carries not_recorded_reason: test_clock (a
+# test-clock subscription never saves a failure), moved_on (another run finished
+# the work or counted the attempt), write_error, or no_due_instant.
+grep "bill subscription failed" log | jq '{subscription_id, class, recorded, not_recorded_reason, attempt, next_attempt_at, error}'
 
 # Subscriptions that parked
 grep "subscription billing parked" log

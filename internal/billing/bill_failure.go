@@ -42,9 +42,10 @@ const (
 	billClassCounted = "counted"
 )
 
-// classifyBillFailure decides whether a failed billing attempt counts against
-// the subscription. It reads the run's ctx and typed driver errors only; it
-// never matches message text.
+// classifyBillFailure classifies the error of a failed billing attempt. It
+// reads the run's ctx and typed driver errors only; it never matches message
+// text. It knows nothing about the subscription: recordBillFailure additionally
+// never saves a failure for a clock-pinned subscription, whatever the class.
 //
 // The ctx is tested, not the error chain: a cancel can surface as a driver
 // error with no context.Canceled in it, and an inner deadline (the tenant
@@ -163,8 +164,23 @@ func billFailureText(subID string, cause error) string {
 type billFailureOutcome struct {
 	class    string
 	recorded bool
-	attempt  int
-	next     *time.Time
+	// notRecorded says why a counted failure was not saved: "test_clock",
+	// "no_due_instant", "moved_on" (the write matched no row: another writer
+	// finished the work or counted this attempt) or "write_error". Empty when
+	// recorded, and for an uncounted class, which is its own reason.
+	notRecorded string
+	attempt     int
+	next        *time.Time
+}
+
+// billProgress is what billSubscription publishes to attemptSub while it
+// runs, so both survive an error return and a panic.
+type billProgress struct {
+	// seen is the row of the latest loop-top read: the row the step that
+	// failed planned from. Until the first read it is the page's row.
+	seen domain.Subscription
+	// invoiced is how many invoices the call has generated so far.
+	invoiced int
 }
 
 // recordBillFailure saves one failed billing attempt on the subscription the
@@ -183,11 +199,16 @@ type billFailureOutcome struct {
 // records then. The count ends one low, which can never over-park.
 func (e *Engine) recordBillFailure(ctx context.Context, seen domain.Subscription, cause error) billFailureOutcome {
 	out := billFailureOutcome{class: classifyBillFailure(ctx, cause)}
-	if out.class != billClassCounted || seen.TestClockID != "" {
+	if out.class != billClassCounted {
+		return out
+	}
+	if seen.TestClockID != "" {
+		out.notRecorded = "test_clock"
 		return out
 	}
 	due := domain.DueInstant(seen)
 	if due == nil {
+		out.notRecorded = "no_due_instant"
 		return out
 	}
 	observed := 0
@@ -212,10 +233,12 @@ func (e *Engine) recordBillFailure(ctx context.Context, seen domain.Subscription
 	})
 	switch {
 	case err != nil:
+		out.notRecorded = "write_error"
 		slog.Error("billing failure not recorded",
 			"subscription_id", seen.ID, "tenant_id", seen.TenantID, "error", err, "billing_error", cause)
 	case !recorded:
 		// Another writer finished this work or already counted this attempt.
+		out.notRecorded = "moved_on"
 		slog.Debug("billing failure not recorded: the subscription moved on",
 			"subscription_id", seen.ID, "tenant_id", seen.TenantID, "attempt", out.attempt)
 	default:
@@ -228,8 +251,13 @@ func (e *Engine) recordBillFailure(ctx context.Context, seen domain.Subscription
 	return out
 }
 
-// reportBillFailure records a failed attempt and writes the one ERROR line
-// for it. The message text is what the runbook greps for.
+// reportBillFailure records a failed attempt and writes its "bill subscription
+// failed" ERROR line, the message the runbook greps for. Other lines may
+// accompany it (a panic's stack, a failed failure-write, a park).
+//
+// The line carries class, and recorded. When a counted failure was not saved,
+// not_recorded_reason says why, so class=counted recorded=false is never
+// ambiguous: every failure on a test clock logs it with reason test_clock.
 func (e *Engine) reportBillFailure(ctx context.Context, seen domain.Subscription, invoicesBefore int, cause error, logArgs ...any) {
 	out := e.recordBillFailure(ctx, seen, cause)
 	args := []any{
@@ -242,19 +270,24 @@ func (e *Engine) reportBillFailure(ctx context.Context, seen domain.Subscription
 		if out.next != nil {
 			args = append(args, "next_attempt_at", *out.next)
 		}
+	} else if out.notRecorded != "" {
+		args = append(args, "not_recorded_reason", out.notRecorded)
 	}
 	slog.Error("bill subscription failed", append(args, logArgs...)...)
 }
 
-// attemptSub is the one place a subscription is billed: the scheduler run, the
-// operator's billing run, test-clock Advance and the operator retry all come
-// through it. It bills sub and, when the attempt fails, saves the failure
-// against the row the failing step planned from.
+// attemptSub is the one caller of billSubscription, the bill of a
+// subscription's due work: the scheduler run, the operator's billing run,
+// test-clock Advance and the operator retry all come through it. (Invoices
+// written by other paths, such as the day-1 bill on create, a cancel's final
+// invoice or a threshold fire, do not, and save no failure.) It bills sub and,
+// when the attempt fails, saves the failure against the row the failing step
+// planned from.
 //
-// That row is kept in `seen`, which billSubscription overwrites at each
-// loop-top read. So a failure in the second of three overdue periods is
-// recorded against the second period's due instant, and the row survives both
-// an error return and a panic. Until the first read it is the page's row.
+// That row is kept in billProgress, which billSubscription keeps current. So
+// a failure in the second of three overdue periods is recorded against the
+// second period's due instant, and the row and the invoice count survive both
+// an error return and a panic. Until the first read the row is the page's.
 //
 // A panic is recorded as a counted failure and then re-raised. The tick still
 // dies and the scheduler still reports it; the next tick skips this
@@ -263,18 +296,20 @@ func (e *Engine) reportBillFailure(ctx context.Context, seen domain.Subscription
 // (its test clock), not of the caller: for a clock-pinned subscription
 // nothing is written and the panic reaches the catch-up's own recover.
 func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, logArgs ...any) (n int, err error) {
-	seen := sub
+	progress := billProgress{seen: sub}
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("bill subscription panicked",
 				append([]any{"subscription_id", sub.ID, "tenant_id", sub.TenantID, "panic", fmt.Sprint(r), "stack", string(debug.Stack())}, logArgs...)...)
-			e.reportBillFailure(ctx, seen, n, errBillPanic, logArgs...)
+			// n is not assigned when billSubscription panics; the count of
+			// invoices already committed in this call is in progress.
+			e.reportBillFailure(ctx, progress.seen, progress.invoiced, errBillPanic, logArgs...)
 			panic(r)
 		}
 	}()
-	n, err = e.billSubscription(ctx, sub, &seen)
+	n, err = e.billSubscription(ctx, sub, &progress)
 	if err != nil && !errors.Is(err, errBillingGated) {
-		e.reportBillFailure(ctx, seen, n, err, logArgs...)
+		e.reportBillFailure(ctx, progress.seen, n, err, logArgs...)
 	}
 	return n, err
 }

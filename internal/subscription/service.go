@@ -1902,8 +1902,8 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 	if err != nil {
 		// Only the fire's own race outcomes are benign. A relief or billing
 		// refusal is also an InvalidState, and skipping it silently left the
-		// subscription active past its cancel_at; it is returned, so the scan
-		// reports it and retries next tick.
+		// subscription active past its cancel_at; it is returned, so the
+		// billing run reports it and saves it as a billing failure (ADR-119).
 		if errs.Code(err) == ScheduledCancelSuperseded {
 			slog.InfoContext(ctx, "due scheduled cancel: benign race, skipping",
 				"subscription_id", id, "tenant_id", tenantID, "reason", err.Error())
@@ -2639,7 +2639,8 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		}
 		// ADR-056: build the day-1 in_advance invoice IN THE SAME tx as the
 		// trialing→active flip, so a billing failure rolls the activation back
-		// (the sub stays trialing and is retried next tick) rather than leaving
+		// (the sub stays trialing; this scan retries it next tick unless the
+		// billing run has saved a failure for it, ADR-119) rather than leaving
 		// an active sub with no first-period invoice — a revenue leak (the cycle
 		// scheduler skips the just-elapsed in_advance segment).
 		var firstInv domain.Invoice

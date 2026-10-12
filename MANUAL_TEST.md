@@ -1016,7 +1016,7 @@ Velox accepts `immediate=true` plan-swaps that change the billing interval as lo
 
 A subscription whose billing fails is saved as failing, waits before each new attempt, parks after eight, and is retried with `POST /v1/subscriptions/{id}/retry-billing`. Wall-clock subscriptions only; a subscription on a test clock stops its clock instead (FLOW TC2).
 
-> **Automated coverage: 19 / 24.** `[x]` items are locked by the named test (run `go test -p 1 -short=false ./internal/billing/ ./internal/subscription/ ./internal/api/middleware/`). The `[ ]` items are the API walk; they are pending.
+> **Automated coverage: 20 / 25.** `[x]` items are locked by the named test (run `go test -p 1 -short=false ./internal/billing/ ./internal/subscription/ ./internal/api/middleware/ ./internal/platform/postgres/`). The `[ ]` items are the API walk; they are pending.
 
 **Setup for the walk:** a wall-clock subscription whose period has ended (backdate `current_billing_period_end` and `next_billing_at`, as in FLOW B1), and a fault that fails its billing: `psql -c "REVOKE INSERT ON invoices FROM velox_app"` (the runtime role). Undo the fault with `GRANT INSERT ON invoices TO velox_app`.
 
@@ -1042,7 +1042,8 @@ A subscription whose billing fails is saved as failing, waits before each new at
 - [x] **Two runs failing the same attempt count once** — `attempts` is 1, not 2. *(auto: `TestBillingFailure_TwoRunsFailTogether_CountOnce`)*
 - [x] **A retry racing the billing run bills once** — two retries, two scheduler runs and two manual runs at the same instant → exactly one invoice. *(auto: `TestRetryBilling_RacingTheScheduler_ExactlyOneInvoice`)*
 - [x] **Un-scheduling a failing mid-period cancel removes the failure** — a scheduled cancel that keeps failing parks; `DELETE /v1/subscriptions/{id}/scheduled-cancel` → no `billing_failure`, and the next period close bills. *(auto: `TestBillingFailure_MidPeriodCancelFails_ClearingTheCancelVoids`)*
-- [x] **A subscription on a test clock is refused** — `POST /v1/subscriptions/{id}/retry-billing` → 409 naming the clock's retry advance. *(auto: `TestRetryBilling_Refusals`)*
+- [x] **A subscription on a test clock is refused** — `POST /v1/subscriptions/{id}/retry-billing` → 409 with code `invalid_state`, naming the clock's retry advance. *(auto: `TestRetryBilling_Refusals`)*
+- [x] **A cancel scheduled for the trial end still fires on a parked trialing subscription** — the trial-expiry scan returns it although its billing is parked. *(auto: `TestDueScans_WaitingAndParkedAreSkippedBeforeLimit`)*
 - [x] **A panic while billing one subscription does not block the next run** — the run that panics fails loudly; the next run skips that subscription and bills the others. *(auto: `TestBillingFailure_PanicIsRecordedThenRepanics`)*
 
 ---

@@ -1971,12 +1971,13 @@ const maxPeriodsPerSubPerCall = 10000
 // keeps working — kill -9 mid-loop is still observable from the
 // outside.
 //
-// seen, when non-nil, is overwritten with each loop-top read, so the caller
-// (attemptSub) knows which row a failing step planned from even when this
-// returns an error or panics.
+// progress, when non-nil, is kept current as the loop runs: the row of each
+// loop-top read and the invoices generated so far. The caller (attemptSub)
+// then knows which row a failing step planned from, and how much was already
+// billed, even when this returns an error or panics.
 //
 // ADR-028.
-func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, seen *domain.Subscription) (int, error) {
+func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, progress *billProgress) (int, error) {
 	count := 0
 	movedRetry := false
 	for i := 0; i < maxPeriodsPerSubPerCall; i++ {
@@ -1995,8 +1996,8 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 			return count, fmt.Errorf("refresh subscription %s: %w", sub.ID, err)
 		}
 		sub = fresh
-		if seen != nil {
-			*seen = fresh
+		if progress != nil {
+			progress.seen = fresh
 		}
 
 		// Billing-failure gate, re-checked at attempt time (ADR-119). The due
@@ -2068,6 +2069,9 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 		}
 		if invoiced {
 			count++
+			if progress != nil {
+				progress.invoiced = count
+			}
 		}
 
 		// No-progress guard: if billOnePeriod returned cleanly but
@@ -2352,7 +2356,7 @@ func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscripti
 			if _, ok := meterAggs[meterID]; ok {
 				continue
 			}
-			// An unreadable meter fails the close (it retries next tick):
+			// An unreadable meter fails the close (retried per ADR-119):
 			// defaulting to "sum" billed a max/last meter as its total.
 			m, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 			if err != nil {
@@ -3327,8 +3331,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// number is allocated INSIDE the closer tx, after the row CAS, as a
 	// strictly monotonic per-tenant sequence (NextInvoiceNumberTx): a lost
 	// race burns no number, and a rolled-back invoice leaves no gap. No
-	// fallback: a collision-prone number is worse than a failed billing tick
-	// since the tick will retry, while a duplicate invoice number corrupts
+	// fallback: a collision-prone number is worse than a failed billing
+	// attempt, since the attempt is retried, while a duplicate invoice number corrupts
 	// accounting. `now` was resolved at the top of billSubscription via
 	// effectiveNow — reuse it so invoice timestamps sit on the same timeline
 	// as the rest of this call (matters for test-clock subs where wall-clock
@@ -3349,7 +3353,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		// A tax failure must abort before invoice create/finalize and
 		// before the cycle advances — otherwise a transient DB blip would
 		// finalize a $0 invoice and burn the period. Returning the error
-		// leaves the sub untouched so the next tick retries.
+		// writes no invoice and does not advance the period; the attempt is
+		// retried (ADR-119: after the saved wait when the failure is counted).
 		return false, fmt.Errorf("apply tax: %w", err)
 	}
 	// In tax-inclusive mode the engine back-calculates net subtotal/discount
@@ -3920,7 +3925,8 @@ func (e *Engine) BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, s
 //
 // Error contract (no-silent-fallbacks): a missing override
 // (errs.ErrNotFound) means list price; ANY other failure — including
-// version resolution — aborts the rating path and retries next tick.
+// version resolution — aborts the rating path; the caller's failure handling
+// decides the retry (cycle billing: attemptSub, ADR-119).
 // The pre-ADR-070 code treated every override error as absence and fell
 // back to the pinned version on resolution errors: a transient DB blip
 // silently billed a negotiated customer at list price.
@@ -5688,8 +5694,8 @@ func (e *Engine) NetPaymentTermDays(ctx context.Context, tenantID string) (int, 
 // writes. 0 is a real setting ("Due on receipt": due_at == issued_at), not
 // "unset" — the column is NOT NULL DEFAULT 30, so unset never reads as 0. A
 // settings read failure is an error, not a Net 30 guess: a wrong due date
-// moves reminders and dunning by up to a year, and the caller's close retries
-// on the next tick (P24).
+// moves reminders and dunning by up to a year, so the caller fails its close
+// instead (P24; a cycle close is then retried per ADR-119).
 func (e *Engine) netPaymentTermDays(ctx context.Context, tenantID string) (int, error) {
 	if e.settings == nil {
 		return 30, nil // test seam; production always wires settings

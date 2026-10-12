@@ -65,7 +65,11 @@ AND billing_failed_for IS NOT DISTINCT FROM
 
 This predicate lives in one place, `domain.SubscriptionBillingFailingSQL`. Its
 Go form is in the subscription store's row scan, which sets
-`Subscription.BillingFailure`. Every reader uses one of the two.
+`Subscription.BillingFailure`. Every reader uses one of the two, with one
+exception: the gauges in `internal/api/middleware/metrics.go` carry a hand copy
+of the SQL, because that package imports no domain package.
+`TestBillingGauges_DueAndFailingPartition` pins the copy to the predicate on
+real rows; change both together.
 
 **States.** They are derived, not stored:
 
@@ -88,6 +92,9 @@ Go form is in the subscription store's row scan, which sets
 scan behind `POST /v1/billing/run`, and the trial-expiry scan. Each skips a
 subscription whose live record is parked, or whose next attempt is after the
 run's instant. `billSubscription` checks again after its own read of the row.
+The trial-expiry scan gates only the activation of a trial. A trialing
+subscription with a cancel due at trial end is always returned, so a cancel
+scheduled on a parked trialing subscription still fires.
 
 **What counts.** `classifyBillFailure` reads the run's context and the typed
 database error. It never matches message text.
@@ -95,7 +102,7 @@ database error. It never matches message text.
 | Class | When | Saved? |
 |---|---|---|
 | Interrupted | The run's own context is done: shutdown, a lost lease, a request timeout. | No |
-| Transient | The connection was lost, or the server aborted the transaction for a serialization conflict or a deadlock. | No |
+| Transient | The connection was lost (including a network timeout with no deadline behind it), the server is shutting down, or the server aborted the transaction for a serialization conflict or a deadlock. | No |
 | Counted | Everything else, including every timeout while the run is alive, a panic, and an attempt that returns cleanly but leaves the subscription due. | Yes |
 
 **The operator retry.** `POST /v1/subscriptions/{id}/retry-billing` clears the
@@ -115,6 +122,17 @@ An attempt that returns cleanly but leaves the subscription due is the second
 outcome: the retry re-reads after its attempt and saves "no progress", as the
 billing run does when the subscription comes back on a later page.
 
+The classes are decided by error type only. Two database faults therefore
+count although the subscription did not cause them: a statement or lock
+timeout during an overload, and a server that refuses writes during a failover
+(SQLSTATE 25006, a read-only standby). The first cannot be separated from a
+query that is too slow for its own data. The second is left counted until a
+mixed pool is seen in practice.
+
+A failure on a test-clock subscription is classified the same way and is never
+saved. Its log line reads `class=counted recorded=false
+not_recorded_reason=test_clock`.
+
 **The ladder.** After counted failure 1 the wait is 15 minutes, then 1 hour,
 4 hours, 12 hours, and 24 hours three times. The eighth failure parks. The
 earliest park is 3 days 17 hours 15 minutes after the first failure. The
@@ -126,7 +144,9 @@ written. Any other error is saved as "An internal error occurred. Reference:
 <subscription id>", and the full error stays in the log under that id.
 
 **A panic** while billing one subscription is saved as a counted failure and
-then raised again, so the tick still fails loudly.
+then raised again, so the tick still fails loudly. It panics again on each
+later attempt, so one such subscription ends at most eight ticks early before
+it parks.
 
 **Test clocks** are unchanged. A subscription on a test clock never gets a
 record, and the test-clock scans carry no gate.
