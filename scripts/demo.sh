@@ -154,7 +154,7 @@ PDF_BYTES=$(curl -sf "$BASE/v1/invoices/$INV_ID/pdf" -H "Authorization: Bearer $
 [ "$PDF_BYTES" -gt 5000 ] || { echo "✗ PDF looks empty ($PDF_BYTES bytes)"; exit 1; }
 green "✓ Invoice with per-(model, token_type) lines — PDF renders ($PDF_BYTES bytes)"
 
-step "9. Margin — what no other billing engine shows in-app"
+step "9. Margin: what you billed against what the provider cost you"
 MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW&to=$ADV_TO")
 echo "$MARGIN" | jq -r '"  billed  $\(.revenue_cents / 100)\n  cost    $\(.cost_micros / 1000000)\n  margin  \((.margin_bps // 0) / 100)%"'
 echo "$MARGIN" | jq -r '.by_model[] | "    \(.model): cost $\(.cost_micros / 1000000)" + (if .attributed then "  billed $\((.revenue_cents // 0) / 100)" else "" end)'

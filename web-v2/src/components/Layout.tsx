@@ -444,21 +444,20 @@ export function Layout({ children }: { children: ReactNode }) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => {
-                  // Build the mailto body at click-time so the request_id we
-                  // send is the freshest one — not whatever was current when
-                  // the menu rendered. tenant_id helps us scope the search on
-                  // our end without asking the user to reproduce.
+                  // Opens a prefilled GitHub issue. Built at click-time so the
+                  // request_id is the freshest one. The issue is public, so the
+                  // body carries no tenant id and no dashboard URL.
                   const requestId = getLastRequestId()
                   const body =
                     `What happened:\n\n\n` +
                     `--- context ---\n` +
-                    `tenant_id: ${user.tenant_id}\n` +
-                    `url: ${window.location.href}\n` +
                     `user_agent: ${navigator.userAgent}\n` +
                     (requestId ? `request_id: ${requestId}\n` : '')
-                  window.location.href = `mailto:support@velox.dev?subject=${encodeURIComponent(
-                    'Velox issue report',
-                  )}&body=${encodeURIComponent(body)}`
+                  window.open(
+                    `https://github.com/getvelox/velox/issues/new?body=${encodeURIComponent(body)}`,
+                    '_blank',
+                    'noopener,noreferrer',
+                  )
                 }}
               >
                 <MessageSquareWarning />

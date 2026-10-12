@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { authApi, type SessionInfo } from '@/lib/auth'
 import { ApiError } from '@/lib/api'
+import { confirmSessionKept } from '@/lib/sessionKept'
 
 // AuthContext exposes the resolved session context to the rest of the
 // dashboard. Per ADR-011, the dashboard signs in via email + password;
@@ -93,6 +94,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await authApi.login(email, password)
+    // Throws SessionNotKeptError when the browser dropped the cookie the
+    // login just set (a Secure cookie over plain HTTP); the sign-in page
+    // explains it instead of bouncing back to itself.
+    await confirmSessionKept(authApi.whoami, err => err instanceof ApiError && err.status === 401)
     setUser({
       user_id: res.user_id,
       tenant_id: res.tenant_id,

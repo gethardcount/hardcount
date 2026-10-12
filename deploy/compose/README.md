@@ -103,6 +103,14 @@ curl -X POST http://localhost/v1/bootstrap \
 `admin@velox.local` with a generated password returned once. Passwords
 must be at least 12 characters.)
 
+**Sign in at `http://localhost/`, not at `http://<server-ip>/`.** Until
+TLS is in front (see [TLS](#tls)), dashboard sign-in works only at
+localhost: on the VM itself, or from your laptop through an SSH tunnel
+(`ssh -L 8080:localhost:80 you@server`, then open `http://localhost:8080/`).
+At any other plain-HTTP address the sign-in page tells you so. The session
+cookie is marked secure, and a browser keeps a secure cookie only on HTTPS
+or localhost.
+
 The response carries, exactly once (Velox stores only hashes — none of
 it is recoverable later):
 

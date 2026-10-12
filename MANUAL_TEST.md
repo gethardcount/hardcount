@@ -307,6 +307,8 @@ Single tenant-wide timezone used for date input and timestamp display
 
 ## FLOW A1: Sign-in
 
+- [~] On a production-mode install opened at `http://<server-ip>:<port>/login` (plain HTTP, not localhost), a correct password shows "Sign-in does not work at this address because it is plain HTTP…" and no session starts. *(walked 2026-10-12 on the compose stack built from the release commit, Chromium: the message rendered and the cookie jar stayed empty; before the fix the page showed "cross-site request blocked".)*
+- [~] The same install at `http://localhost:<port>/login` signs in and lands on the dashboard. *(walked 2026-10-12: redirect to `/`, `velox_session` set.)*
 - [~] Empty form → inline error, no request. *(walked 2026-08-04: with both fields genuinely empty, submit produced **0 `/auth/login` requests** (counted by wrapping `window.fetch`) and the inline message "Email and password are required". A first attempt at this box was invalid — the browser had retained values, so it hit the server and returned the 401 copy; the fields were cleared and it was re-run.)*
 - [~] Wrong password → 401 "Invalid email or password". *(walked — API returns `401 unauthorized / invalid email or password`; the dashboard renders it as "Invalid email or password".)*
 - [~] Repeated wrong passwords keep returning the same generic 401 — no lockout, no distinct 429/`account_locked` (v1 has no automatic account lockout or login throttle; deferred — ADR-094). *(walked: five consecutive wrong-password attempts returned **identical** `401 / code=unauthorized / invalid email or password` — no escalation to 429, no `account_locked`, and the correct password still worked immediately afterwards, so nothing was locked.)*

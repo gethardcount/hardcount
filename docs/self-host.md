@@ -36,6 +36,11 @@ The steps:
 3. Make one `POST /v1/bootstrap` call. It returns your dashboard owner login
    and API keys (test + live).
 
+The stack serves plain HTTP on port 80. Until you put TLS in front, sign in to
+the dashboard at `http://localhost/` on the server, or through an SSH tunnel.
+Sign-in does not work at `http://<server-ip>/`. The
+[compose guide](../deploy/compose/README.md#tls) covers both.
+
 Everything below on this page is reference material that applies to both
 the compose stack and a hand-rolled install. It covers Postgres
 requirements, env vars, scaling and observability.

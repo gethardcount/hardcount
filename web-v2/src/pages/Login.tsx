@@ -3,6 +3,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { ApiError } from '@/lib/api'
+import { SessionNotKeptError, sessionNotKeptMessage, signInRefusedMessage } from '@/lib/sessionKept'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -39,7 +40,9 @@ export default function LoginPage() {
       await login(email.trim(), password)
       navigate('/', { replace: true })
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof SessionNotKeptError) {
+        setError(sessionNotKeptMessage(window.isSecureContext))
+      } else if (err instanceof ApiError) {
         if (err.status === 401) {
           setError('Invalid email or password')
         } else if (err.status === 429) {
@@ -48,6 +51,8 @@ export default function LoginPage() {
           // anti-enumeration (user/handler.go). So this copy must NOT promise a
           // 15-minute lockout wait; it describes the rate limit, with no number.
           setError('Too many attempts. Please wait a moment and try again.')
+        } else if (err.status === 403) {
+          setError(signInRefusedMessage(window.isSecureContext, err.message))
         } else {
           setError(err.message)
         }
@@ -137,8 +142,13 @@ export default function LoginPage() {
       </Card>
       <p className="text-xs text-muted-foreground mt-6">
         Need help?{' '}
-        <a href="mailto:support@velox.dev" className="text-foreground hover:underline">
-          Contact support
+        <a
+          href="https://github.com/getvelox/velox/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-foreground hover:underline"
+        >
+          Open an issue on GitHub
         </a>
       </p>
     </div>

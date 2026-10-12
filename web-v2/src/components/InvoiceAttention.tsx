@@ -129,12 +129,9 @@ export function InvoiceAttention({
                 sending={sending}
               />
             ))}
-            {att.doc_url && (
-              <Button render={<a href={att.doc_url} target="_blank" rel="noopener noreferrer" />} variant="ghost" size="sm" className="text-xs">
-                Learn more
-                <ExternalLink size={12} className="ml-1" />
-              </Button>
-            )}
+            {/* att.doc_url is not rendered: the pages it points at are not
+                published yet, so a "Learn more" button would open a dead
+                link. Restore the button when they exist. */}
           </div>
         )}
 
