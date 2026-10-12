@@ -1,6 +1,6 @@
 # How Velox compares
 
-This page compares Velox with four open-source billing engines: Lago, OpenMeter, Flexprice and Kill Bill. Every cell is a fact read from that project's own source or docs, and the sources are listed under the table.
+This page compares Velox with four open-source billing engines: Lago, OpenMeter, Flexprice and Kill Bill. Every cell is a fact read from that project's own source or docs, and each was checked line by line against the source listed under the table.
 
 **Checked on 2026-10-12.** Projects change. Re-check any cell you plan to rely on.
 
@@ -23,22 +23,23 @@ Velox is pre-1.0 and has no production users yet. The other four are in producti
 - SDKs: Velox has none.
 - Invoice preview: Velox's leaves out tax and credits.
 - Fewest services to run: Kill Bill's Compose file has three.
+- Previewing a plan change: Flexprice and Kill Bill both do it.
 
 ## The comparison
 
 | | Velox | Lago | OpenMeter | Flexprice | Kill Bill |
 |---|---|---|---|---|---|
-| **Licence** | MIT, one edition | AGPL-3.0. A licence key unlocks premium features. | Apache-2.0. No operator UI in the open-source distribution. | AGPL-3.0 at the root. `internal/ee`, which holds the billing, invoice and subscription services, is under an enterprise licence. | Apache-2.0. A paid plugin, Aviate, adds metering, wallets and coupons. |
+| **Licence** | MIT, one edition | AGPL-3.0. A licence key unlocks premium features. | Apache-2.0. No operator UI in the open-source distribution. | AGPL-3.0 at the root. `internal/ee`, which holds the billing, invoice and subscription services, is under an enterprise licence. | Apache-2.0. A commercial plugin, Aviate, adds metering, wallets and coupons. |
 | **Services in the Compose file** | 5 | 8 | 11, described as "not a production topology" | 9 by default, plus a separate dashboard | 3 |
-| **Price by model × token type on one meter** | Yes: pricing rules match on event dimensions | Yes: charge filters on a billable metric | One filtered feature per combination¹ | A price references one meter; no per-dimension rate found | No dimensions on usage; one unit per combination¹ |
-| **Prepaid credits** | Yes. Credit from a prepaid commit is usable before its invoice is paid. | Wallets are free. Recurring top-ups and real-time balance need a premium licence. | Credit grants sit behind a config flag that defaults to off | Wallets, top-ups, auto top-up, expiry | Account credits. Wallets are in Aviate. |
+| **Price by model × token type on one meter** | Yes: pricing rules match on event dimensions | Yes: charge filters on a billable metric | One filtered feature per combination¹ | A meter filters events by property, and a price references one meter. No per-dimension rate found. | No dimensions on usage; one unit per combination¹ |
+| **Prepaid credits** | Yes. Credit from a prepaid commit is usable before its invoice is paid. | Wallets are free. Recurring top-ups and real-time balance need a premium licence. | Credit grants sit behind a config flag that defaults to off | Wallets with prepaid and promotional credits | Account credits. Wallets are in Aviate. |
 | **Test clock** | Per customer, in test mode on the normal deployment | None found | None in the public API. A sandbox app and an invoice-simulate endpoint exist. | None found | One clock for the whole server; needs test mode at start-up |
 | **Failed-payment retries** | Included | Automatic dunning is a premium add-on. Free: manual retry per invoice. | None. Collection goes through Stripe Invoicing. | No retry schedule documented. Subscriptions can auto-cancel after a grace period. | Included: a retry schedule and overdue states |
-| **Outbound webhooks** | HMAC over timestamp and body; 6 attempts over about 26.5 hours | JWT (default) or HMAC, no timestamp signed; 3 attempts | Delivered through Svix, a separate service | Self-hosted default: unsigned, 3 retries. With Svix: signed, 8 attempts. | Unsigned; retries at 15m, 30m, 2h, 12h, 1d |
+| **Outbound webhooks** | HMAC over timestamp and body; 6 attempts over about 26.5 hours | JWT (default) or HMAC, no timestamp signed; 3 attempts | Delivered through Svix, a separate service | Self-hosted default: unsigned, 3 retries. With Svix enabled: signed. | Unsigned; retries at 15m, 30m, 2h, 12h, 1d |
 | **Tenant isolation** | Postgres row-level security | Application code | Application code; one static namespace in the open-source server | Application code | Application code |
 | **Payment providers** | Stripe, cards only | Stripe, GoCardless, Cashfree, Adyen, Flutterwave, Moneyhash | Stripe, through Stripe Invoicing; or your own invoicing integration | Stripe, Razorpay, Nomod, Moyasar, Paddle, Whop, Chargebee | Plugins for Adyen, Braintree, Qualpay, Stripe, Hyperswitch |
 | **SDKs** | None | 8 listed; the Java and C# repos are archived | JavaScript, Python, Go, all pre-release | Go, Python, TypeScript | Java, PHP, Python, Ruby, Node, Go |
-| **Published throughput** | 1,000 to 15,000 events/s, with hardware and method | 10K events/s on Postgres, 1 to 3M with ClickHouse; no hardware or method | "Millions of events per second"; no hardware or method | "40k+ events processed per second"; no hardware or method | None found |
+| **Published throughput** | An ingest benchmark, published with its hardware and method | 10K events/s on one Postgres, 1 to 3M with ClickHouse and Kafka; configuration named, no hardware sizing or method | "Millions of events per second"; no hardware or method | "40k+ events processed per second"; no hardware or method | None found |
 | **Invoice preview** | Free. Subtotal only: no tax or credits. | Needs a premium licence | An invoice-simulate endpoint | Preview routes, including subscription changes | Dry run, including subscription changes |
 
 ¹ Our reading of the project's schema or API spec. No sentence in its docs states it.
@@ -84,7 +85,7 @@ Links to other projects are pinned to the commit that was read.
 - Licences: [`LICENSE`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/LICENSE#L1-L4), [`internal/ee/LICENSE`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/internal/ee/LICENSE#L6-L20), [`internal/ee/service`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/internal/ee/service), [`README.md`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/README.md#L191).
 - Services: [`docker-compose.yml`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/docker-compose.yml#L1-L241).
 - Meter and price: [`meter/model.go`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/internal/domain/meter/model.go#L19-L31), [`price/model.go`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/internal/domain/price/model.go#L107-L108).
-- Wallets: [docs](https://docs.flexprice.io/docs/wallet/prepaid-and-promotional).
+- Wallets: [docs](https://docs.flexprice.io/docs/wallet/prepaid-and-promotional). Preview of subscription changes: [`router.go`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/internal/api/router.go#L373-L380).
 - Unpaid invoices: [docs](https://docs.flexprice.io/docs/settings/settings).
 - Webhooks: [signing](https://docs.flexprice.io/developers/webhooks/signature-verification), [retries](https://docs.flexprice.io/developers/webhooks/retries-and-ordering).
 - Tenant scoping: [`invoice.go`](https://github.com/flexprice/flexprice/blob/15d780cc425989a045086f668cc8051f2d107e5a/internal/repository/ent/invoice.go#L345).
@@ -93,7 +94,7 @@ Links to other projects are pinned to the commit that was read.
 
 **Kill Bill**
 
-- Licence and Aviate: [`LICENSE`](https://github.com/killbill/killbill/blob/3868a5b2339c3b86531904d6738a36e1e82933bf/LICENSE#L1-L3), [premium features](https://github.com/killbill/killbill-docs/blob/d8dade1b7c8eaba715a94a909fd1232361fbb738/userguide/getting-started/premium_features.adoc#L15).
+- Licence and Aviate: [`LICENSE`](https://github.com/killbill/killbill/blob/3868a5b2339c3b86531904d6738a36e1e82933bf/LICENSE#L1-L3), [`README.md`](https://github.com/killbill/killbill/blob/3868a5b2339c3b86531904d6738a36e1e82933bf/README.md#L38-L40), [premium features](https://github.com/killbill/killbill-docs/blob/d8dade1b7c8eaba715a94a909fd1232361fbb738/userguide/getting-started/premium_features.adoc#L15).
 - Services: [`docker-compose.kb.yml`](https://github.com/killbill/killbill-cloud/blob/e05d07c0ec6a0555abbb1e6ab848eb7818831890/docker/compose/docker-compose.kb.yml#L5-L39).
 - Usage records: [`UsageRecord.java`](https://github.com/killbill/killbill-api/blob/13d8d448ccc1228202f13ac53aebc44c7b22d898/src/main/java/org/killbill/billing/usage/api/UsageRecord.java#L25-L29), [metering](https://github.com/killbill/killbill-docs/blob/d8dade1b7c8eaba715a94a909fd1232361fbb738/userguide/aviate/aviate-metering.adoc#L13).
 - Credits and wallets: [credits](https://github.com/killbill/slate/blob/4ad3bbf6c2fd4a02bc8f052bd26ae5b1c2174843/source/includes/_credit.md#L5-L7), [wallets](https://github.com/killbill/killbill-docs/blob/d8dade1b7c8eaba715a94a909fd1232361fbb738/userguide/aviate/aviate-wallet.adoc#L11).
@@ -102,7 +103,7 @@ Links to other projects are pinned to the commit that was read.
 - Notifications: [`PushNotificationListener.java`](https://github.com/killbill/killbill/blob/3868a5b2339c3b86531904d6738a36e1e82933bf/profiles/killbill/src/main/java/org/killbill/billing/server/notifications/PushNotificationListener.java#L132-L154), [`NotificationConfig.java`](https://github.com/killbill/killbill/blob/3868a5b2339c3b86531904d6738a36e1e82933bf/util/src/main/java/org/killbill/billing/util/config/definition/NotificationConfig.java#L31-L34).
 - Tenant scoping: [`EntitySqlDao.sql.stg`](https://github.com/killbill/killbill/blob/3868a5b2339c3b86531904d6738a36e1e82933bf/util/src/main/resources/org/killbill/billing/util/entity/dao/EntitySqlDao.sql.stg#L133-L135).
 - Plugins: [docs](https://github.com/killbill/killbill-docs/blob/d8dade1b7c8eaba715a94a909fd1232361fbb738/userguide/tutorials/plugin_introduction.adoc#L152-L161). Clients: [API docs](https://github.com/killbill/slate/blob/4ad3bbf6c2fd4a02bc8f052bd26ae5b1c2174843/source/includes/_index.md#L10-L12).
-- Dry run: [`InvoiceResource.java`](https://github.com/killbill/killbill/blob/3868a5b2339c3b86531904d6738a36e1e82933bf/jaxrs/src/main/java/org/killbill/billing/jaxrs/resources/InvoiceResource.java#L442-L452).
+- Dry run: [modes](https://github.com/killbill/killbill-docs/blob/d8dade1b7c8eaba715a94a909fd1232361fbb738/userguide/subscription/includes/invoicing-dry-run.adoc#L3-L9), [`InvoiceResource.java`](https://github.com/killbill/killbill/blob/3868a5b2339c3b86531904d6738a36e1e82933bf/jaxrs/src/main/java/org/killbill/billing/jaxrs/resources/InvoiceResource.java#L442-L452).
 
 ## Not compared here
 
