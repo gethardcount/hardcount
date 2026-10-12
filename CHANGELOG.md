@@ -15,6 +15,16 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-12
+
+The first release since August. It carries the September and October money-path fixes and makes two or more replicas the supported production setup.
+
+**Before upgrading from 0.3.2 or earlier:**
+
+- Do this one rollout as stop-all-then-start, not rolling. Steps: [Upgrading](deploy/README.md#upgrading).
+- Production refuses to start without `REDIS_URL` and `TRUST_PROXY`. Set both first.
+- Dashboards keyed on the HTTP metrics' `path` label now see route patterns, not raw paths.
+
 ### Added
 
 - **Production refuses to boot without `TRUST_PROXY` (2026-08-30, sweep S3).** Behind a balancer with it unset, every request's client address is the balancer's, so the per-IP limits on the public pay pages (60/min) and `/v1/auth` (100/min) were one bucket for every customer and operator of the install — ~6-10 concurrent payers before 429s, and one client could lock every operator out. Same shape as the Redis guard: a boot error naming the fix; `TRUST_PROXY=none` declares there is no proxy.
@@ -4701,7 +4711,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/getvelox/velox/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/getvelox/velox/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/getvelox/velox/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/getvelox/velox/compare/v0.2.0...v0.3.0
