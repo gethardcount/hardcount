@@ -8,8 +8,9 @@
 #   PGB_PACKAGES="./internal/platform/leader/" scripts/pgbouncer-test.sh
 #
 # Any statement that assumes a session — SET without LOCAL, a session
-# advisory lock, a prepared statement across transactions — fails here and
-# passes on a direct connection. That difference is the whole point.
+# advisory lock, a prepared statement across transactions — passes on a
+# direct connection and can misbehave here. PgBouncer does not reject such a
+# statement; the proof is that the whole suite still passes through it.
 set -euo pipefail
 
 MODE="${PGB_MODE:-local}"

@@ -83,7 +83,7 @@ locally before you push, so a failing CI build holds no surprises:
 
 | Gate | Local command | Notes |
 |---|---|---|
-| Unit tests + race detector | `go test ./... -race -short -count=1` | |
+| Unit tests + race detector | `go test ./... -race -short -count=1` | the `unit` job, with `go vet ./...` |
 | Integration tests | `go test -p 1 ./... -count=1 -short=false` | needs `docker compose up -d postgres`; test DBs are auto-provisioned |
 | The same suite through a connection pooler | `scripts/pgbouncer-test.sh` | needs Docker; starts PgBouncer in transaction mode in front of the same Postgres |
 | Money-invariant sweep | `DATABASE_URL=postgres://velox:velox@localhost:5432/velox_test?sslmode=disable go run ./cmd/velox-doctor` | runs in CI after the integration suite, over the rows the tests left behind |

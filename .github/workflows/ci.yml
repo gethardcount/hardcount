@@ -33,6 +33,31 @@ permissions:
   contents: read
 
 jobs:
+  # Everything that needs no database. It used to sit in front of the
+  # integration suite in the test job, adding about two and a half minutes
+  # to the longest job in the run.
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Unit Tests (with race detector)
+        run: go test ./... -race -short -count=1 -coverprofile=coverage.out
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        with:
+          files: coverage.out
+        continue-on-error: true
+
   test:
     # Pinned, not ubuntu-latest: the jobs rely on tools preinstalled on the
     # image (psql, jq, docker). Move every job to the next image in its own PR.
@@ -76,15 +101,6 @@ jobs:
       - name: Verify modules
         run: go mod verify
 
-      - name: Unit Tests (with race detector)
-        run: go test ./... -race -short -count=1 -coverprofile=coverage.out
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Vulnerability check
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
-
       - name: Create test database and app user
         run: |
           # docker/init.sql is the one definition of the roles, the test
@@ -121,11 +137,6 @@ jobs:
         env:
           DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
 
-      - name: Upload Coverage
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
-        with:
-          files: coverage.out
-        continue-on-error: true
 
   # The same integration suite with the APP pool behind PgBouncer in
   # TRANSACTION mode (ADR-114 PR-E). Since the leader-lease cutover every
@@ -133,7 +144,9 @@ jobs:
   # makes that a checked property instead of a claim. Anything that assumes
   # a session — SET without LOCAL, a session advisory lock, a prepared
   # statement reused across transactions — passes on the direct-connection
-  # job above and fails here. Admin/migration traffic stays direct, as
+  # job above and can misbehave here. The pooler does not reject such a
+  # statement; what this job proves is that the whole suite still passes
+  # through it. Admin/migration traffic stays direct, as
   # production migrations do (docs/ops/postgres-requirements.md).
   test-pgbouncer:
     runs-on: ubuntu-24.04
@@ -330,6 +343,15 @@ jobs:
       - name: lint-tz (ADR-076)
         run: make lint-tz
 
+      # Last, so a newly published advisory (the usual reason this fails, with
+      # no change in this repo) does not hide the results of the steps above.
+      # The matcher is removed so govulncheck's call traces stay plain text
+      # instead of becoming annotations.
+      - name: Vulnerability check
+        run: |
+          echo "::remove-matcher owner=go::"
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
+
   # codegen-drift fails the build when api/openapi.yaml has been edited
   # without regenerating the Go and TS artifacts that derive from it
   # (or vice versa — when a generated file was hand-edited). The check
@@ -443,7 +465,9 @@ jobs:
 
   docker:
     timeout-minutes: 30
-    needs: [test, frontend, lint]
+    # Keep this list the same as the required status checks on main: an
+    # image must not be published past a check that would block a merge.
+    needs: [test, unit, test-pgbouncer, golden-path, codegen-drift, frontend, lint]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
