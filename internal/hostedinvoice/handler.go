@@ -95,7 +95,7 @@ type Handler struct {
 	settings    SettingsGetter
 	creditNotes CreditNoteLister
 	stripe      CheckoutSessionCreator
-	// baseURL is the customer-facing SPA origin, e.g. https://app.velox.dev.
+	// baseURL is the customer-facing SPA origin, e.g. https://app.example.com.
 	// Used to build Stripe Checkout return URLs. If empty, the handler
 	// falls back to localhost for dev. Kept as a config value rather than
 	// hardcoded so single-tenant self-hosted deployments can point it at

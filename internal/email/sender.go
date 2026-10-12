@@ -136,7 +136,7 @@ func NewSender() *Sender {
 		port:                 envOr("SMTP_PORT", "587"),
 		username:             strings.TrimSpace(os.Getenv("SMTP_USERNAME")),
 		password:             strings.TrimSpace(os.Getenv("SMTP_PASSWORD")),
-		from:                 envOr("SMTP_FROM", "billing@velox.dev"),
+		from:                 envOr("SMTP_FROM", "billing@velox.local"),
 		tlsMode:              tlsMode,
 		prodEnv:              prodEnv,
 		hostedInvoiceBaseURL: strings.TrimSpace(os.Getenv("HOSTED_INVOICE_BASE_URL")),
@@ -148,7 +148,7 @@ func NewSender() *Sender {
 // env resolution) used to exercise deliver()'s strict-STARTTLS and
 // prod-none refusals against local fake servers.
 func NewTestSender(host, port, tlsMode string, prodEnv bool) *Sender {
-	return &Sender{host: host, port: port, from: "test@velox.dev", tlsMode: tlsMode, prodEnv: prodEnv}
+	return &Sender{host: host, port: port, from: "test@example.com", tlsMode: tlsMode, prodEnv: prodEnv}
 }
 
 // DeliverForTest exposes deliver() to tests in this module.

@@ -164,7 +164,7 @@ export interface paths {
                         "application/json": {
                             /** @example vlx_pcd_a3f9c4... */
                             token: string;
-                            /** @example https://api.velox.dev/v1/public/cost-dashboard/vlx_pcd_a3f9c4... */
+                            /** @example https://api.example.com/v1/public/cost-dashboard/vlx_pcd_a3f9c4... */
                             public_url: string;
                         };
                     };

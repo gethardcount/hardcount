@@ -454,9 +454,14 @@ type AttentionContext struct {
 // method is enabled (ADR-049 deferred tail).
 const processingStaleAfter = 6 * time.Hour
 
-// docBaseURL is the doc site root for operator-facing error pages. Kept
-// as a const so the SDK and the dashboard agree without env coupling.
-const docBaseURL = "https://docs.velox.dev/errors/"
+// docURL returns the operator-facing documentation link for an attention
+// reason. No such pages are published yet, so it returns "" and doc_url is
+// omitted from the response; a link nobody can open is worse than none.
+// Call sites keep their slug so the pages can be wired in one place later.
+func docURL(slug string) string {
+	_ = slug
+	return ""
+}
 
 // ClassifyInvoiceAttention returns the most-pressing reason this
 // invoice needs operator attention, or nil if everything is healthy.
@@ -592,7 +597,7 @@ func classifyRecoveryInFlight(inv Invoice) *Attention {
 		Code:     "payment.recovery_processing",
 		Message: "This invoice was written off, and a payment is still in flight at the payment provider. " +
 			"It stays written off until that payment reports an outcome.",
-		DocURL: docBaseURL + "payment-processing",
+		DocURL: docURL("payment-processing"),
 		Since:  &since,
 	}
 }
@@ -694,7 +699,7 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 			Reason:   AttentionReasonCommitExposure,
 			Code:     "credit.commit_exposure",
 			Message:  sentence,
-			DocURL:   docBaseURL + "commit-exposure",
+			DocURL:   docURL("commit-exposure"),
 			Actions:  voidAction,
 			Since:    &since,
 			DueBy:    inv.DueAt,
@@ -810,7 +815,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 		att.Reason = AttentionReasonTaxLocationRequired
 		att.Message = "The customer's billing profile has missing or invalid data the tax provider requires (postal code, country, or tax ID)."
 		att.Param = "customer.address.postal_code"
-		att.DocURL = docBaseURL + "tax-location-required"
+		att.DocURL = docURL("tax-location-required")
 		att.Actions = []AttentionActionItem{
 			{Code: AttentionActionEditBillingProfile, Label: "Edit billing profile"},
 			{Code: AttentionActionRetryTax, Label: "Retry tax"},
@@ -818,7 +823,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 	case "jurisdiction_unsupported":
 		att.Reason = AttentionReasonTaxCalculationFailed
 		att.Message = "The provider can't compute tax for this customer's region. Register with the provider in that jurisdiction or override tax manually."
-		att.DocURL = docBaseURL + "tax-jurisdiction-unsupported"
+		att.DocURL = docURL("tax-jurisdiction-unsupported")
 		att.Actions = []AttentionActionItem{
 			{Code: AttentionActionReviewRegistration, Label: "Review tax registration"},
 			{Code: AttentionActionRetryTax, Label: "Retry tax"},
@@ -830,7 +835,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 		} else {
 			att.Message = fmt.Sprintf("The tax provider is temporarily unreachable. The engine retries automatically (%d of %d attempts used).", inv.TaxRetryCount, MaxTaxRetryAttempts)
 		}
-		att.DocURL = docBaseURL + "tax-provider-outage"
+		att.DocURL = docURL("tax-provider-outage")
 		att.Actions = []AttentionActionItem{
 			{Code: AttentionActionWaitProvider, Label: "Check provider status"},
 			{Code: AttentionActionRetryTax, Label: "Retry now"},
@@ -838,14 +843,14 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 	case "provider_auth":
 		att.Reason = AttentionReasonTaxCalculationFailed
 		att.Message = "The configured tax-provider API key is invalid or revoked. Rotate the key in Settings."
-		att.DocURL = docBaseURL + "tax-provider-auth"
+		att.DocURL = docURL("tax-provider-auth")
 		att.Actions = []AttentionActionItem{
 			{Code: AttentionActionRotateAPIKey, Label: "Rotate API key"},
 			{Code: AttentionActionRetryTax, Label: "Retry tax"},
 		}
 	case "provider_not_configured":
 		att.Reason = AttentionReasonTaxCalculationFailed
-		att.DocURL = docBaseURL + "tax-provider-not-configured"
+		att.DocURL = docURL("tax-provider-not-configured")
 		// Banner copy + actions split on whether the tenant has Stripe
 		// connected NOW. The invoice's tax_error_code was stamped at
 		// the time of the failed calculation; if the operator has
@@ -881,7 +886,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 		} else {
 			att.Message = "Tax calculation failed for an unrecognised reason. See the raw provider response below."
 		}
-		att.DocURL = docBaseURL + "tax-calculation-failed"
+		att.DocURL = docURL("tax-calculation-failed")
 		att.Actions = []AttentionActionItem{
 			{Code: AttentionActionRetryTax, Label: "Retry tax"},
 		}
@@ -938,7 +943,7 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 		Reason:   AttentionReasonPaymentFailed,
 		Code:     "payment.declined",
 		Message:  headline,
-		DocURL:   docBaseURL + "payment-failed",
+		DocURL:   docURL("payment-failed"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionUpdatePaymentMethod, Label: "Update payment method"},
 			{Code: AttentionActionRetryPayment, Label: "Retry payment"},
@@ -979,7 +984,7 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 			Message: "This invoice's charge attempt could not be identified with the payment provider, so Velox cannot confirm whether the customer was charged. " +
 				"Velox keeps searching the provider for the attempt and adopts it automatically if it can be found; if it cannot be found, this will not resolve on its own — and no further charge will be attempted, deliberately, to rule out charging twice. " +
 				"Find the attempt in Stripe (search by customer and amount). If money was taken, it will settle here once the provider reports it; if nothing was taken, mark this invoice uncollectible to close it out.",
-			DocURL: docBaseURL + "payment-unconfirmed",
+			DocURL: docURL("payment-unconfirmed"),
 			Since:  &since,
 			// No Actions entry: the invoice page already carries a
 			// Mark-uncollectible control, which the service refused for this
@@ -1008,7 +1013,7 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 		// the hosted checkout, where the customer is present and mid-3DS, and
 		// that one expires with its session inside the hour.
 		Message: "Payment outcome unconfirmed by the provider — Velox re-checks automatically and resolves once Stripe reports a final outcome. If it sits here for hours the charge may be waiting on customer action (e.g. 3-D Secure): check the payment in Stripe, then cancel or retry it.",
-		DocURL:  docBaseURL + "payment-unconfirmed",
+		DocURL:  docURL("payment-unconfirmed"),
 		Since:   &since,
 	}
 }
@@ -1035,7 +1040,7 @@ func classifyPaymentProcessing(inv Invoice, atc AttentionContext) *Attention {
 			Reason:   AttentionReasonPaymentProcessing,
 			Code:     "payment.processing",
 			Message:  "Payment has been awaiting confirmation at the provider for an unusually long time — check this payment in Stripe.",
-			DocURL:   docBaseURL + "payment-processing",
+			DocURL:   docURL("payment-processing"),
 			Since:    &since,
 		}
 	}
@@ -1045,7 +1050,7 @@ func classifyPaymentProcessing(inv Invoice, atc AttentionContext) *Attention {
 		Reason:   AttentionReasonPaymentProcessing,
 		Code:     "payment.processing",
 		Message:  "Payment is in flight at the provider — Velox confirms it automatically when the provider responds.",
-		DocURL:   docBaseURL + "payment-processing",
+		DocURL:   docURL("payment-processing"),
 		Since:    &since,
 	}
 }
@@ -1063,7 +1068,7 @@ func classifyPaymentPageOpen() *Attention {
 		Reason:   AttentionReasonPaymentProcessing,
 		Code:     "payment.page_open",
 		Message:  "The customer has the payment page open, or has just paid on it. Velox won't charge the card or retry until that's done, usually within an hour.",
-		DocURL:   docBaseURL + "payment-processing",
+		DocURL:   docURL("payment-processing"),
 	}
 }
 
@@ -1094,7 +1099,7 @@ func classifyPaymentScheduled(inv Invoice) *Attention {
 		Reason:   AttentionReasonPaymentScheduled,
 		Code:     "payment.scheduled",
 		Message:  message,
-		DocURL:   docBaseURL + "payment-scheduled",
+		DocURL:   docURL("payment-scheduled"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionChargeNow, Label: "Charge now"},
 		},
@@ -1119,7 +1124,7 @@ func classifyCollectionPaused(inv Invoice) *Attention {
 		Reason:   AttentionReasonCollectionPaused,
 		Code:     "payment.collection_paused",
 		Message:  "Collection is paused on this subscription, so this invoice will not be charged automatically. Resume collection on the subscription, or use Charge now to collect this one invoice.",
-		DocURL:   docBaseURL + "collection-paused",
+		DocURL:   docURL("collection-paused"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionChargeNow, Label: "Charge now"},
 		},
@@ -1145,7 +1150,7 @@ func classifyAwaitingPayment(inv Invoice) *Attention {
 		Reason:   AttentionReasonAwaitingPayment,
 		Code:     "payment.awaiting",
 		Message:  "Invoice is finalized and awaiting first charge attempt.",
-		DocURL:   docBaseURL + "awaiting-payment",
+		DocURL:   docURL("awaiting-payment"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionChargeNow, Label: "Charge now"},
 			{Code: AttentionActionSendReminder, Label: "Email payment link"},
@@ -1210,7 +1215,7 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 			Reason:   AttentionReasonDunningExhausted,
 			Code:     "payment.dunning_exhausted",
 			Message:  msg,
-			DocURL:   docBaseURL + "dunning-exhausted",
+			DocURL:   docURL("dunning-exhausted"),
 			Actions:  actions,
 			Since:    &since,
 			DueBy:    inv.DueAt,
@@ -1253,7 +1258,7 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 			Reason:   AttentionReasonNoPaymentMethod,
 			Code:     "payment.no_payment_method",
 			Message:  "No payment method on file. We email a setup link only when the customer has an email address on file — open the customer page to copy a secure setup link and share it with the customer directly, or add an email so it can be sent. " + autoCharge,
-			DocURL:   docBaseURL + "no-payment-method",
+			DocURL:   docURL("no-payment-method"),
 			Actions: []AttentionActionItem{
 				{Code: AttentionActionAddPaymentMethod, Label: "Open customer page"},
 			},
@@ -1266,7 +1271,7 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 		Reason:   AttentionReasonNoPaymentMethod,
 		Code:     "payment.no_payment_method",
 		Message:  "No payment method on file. Velox emails the customer a setup link when an invoice finalizes — the invoice timeline and Sent emails show whether it was delivered. Resend the link if they haven't acted, or open the customer page to copy it and share it directly. " + autoCharge,
-		DocURL:   docBaseURL + "no-payment-method",
+		DocURL:   docURL("no-payment-method"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionSendReminder, Label: "Resend setup link"},
 			{Code: AttentionActionAddPaymentMethod, Label: "Open customer page"},

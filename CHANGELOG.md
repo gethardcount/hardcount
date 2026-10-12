@@ -39,6 +39,7 @@ The first release since August. It carries the September and October money-path 
 
 ### Changed
 
+- **Velox no longer points at `velox.dev`, a domain the project does not own (2026-10-12).** The default sender address when `SMTP_FROM` is unset is now `billing@velox.local`; set `SMTP_FROM` to an address on your own domain before sending real email. Invoice warnings no longer return a `doc_url`, because the pages it pointed at were never published. The code of conduct names a working contact address, and example URLs use `example.com`.
 - **The README is one screen, and the engineering page is a list of principles (2026-10-12).** The README went from about 4,700 words to under 800: what Velox is, a quickstart, six reasons to use it, and what it is not. Everything else moved to its own page under `docs/` and nothing was deleted. Links into the old README sections now point at the new pages.
 
 - **Go 1.26.9 and golang.org/x/net 0.60.0 (2026-10-10).** Clears 11 standard-library and 4 x/net advisories that `govulncheck` reaches from Velox code; CI failed on every branch until this lands. No application code change.

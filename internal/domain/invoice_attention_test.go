@@ -82,8 +82,9 @@ func TestClassifyInvoiceAttention_TaxFailedSubcodes(t *testing.T) {
 			if att.Actions[0].Code != tc.wantPrimAct {
 				t.Errorf("primary action = %s, want %s", att.Actions[0].Code, tc.wantPrimAct)
 			}
-			if att.DocURL == "" {
-				t.Errorf("expected DocURL to be set")
+			// No doc pages are published yet; a set DocURL would be a dead link.
+			if att.DocURL != "" {
+				t.Errorf("DocURL = %q, want empty until the doc pages exist", att.DocURL)
 			}
 			// ADR-025: upstream provider responses go in ProviderResponse,
 			// not Detail. Every code in this test fixture except
