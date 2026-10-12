@@ -15,7 +15,17 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Added
+
+- **A subscription whose billing keeps failing is now saved, visible and bounded (2026-10-12, #960).** It was retried on every billing run and left only a log line. Now the subscription carries `billing_failure`, waits before each new attempt (15 minutes up to 24 hours), and parks after eight failures. List them with `GET /v1/subscriptions?billing=failing`. See [ADR-119](docs/adr/119-billing-failure-record-keyed-to-the-due-instant.md).
+- **`POST /v1/subscriptions/{id}/retry-billing` (2026-10-12, #960).** Clears a subscription's billing failure and bills it at once, with an audit log entry. Use it after fixing the cause, or to restart a parked subscription. A retry that fails again returns 200 with a new `billing_failure`.
+- **New gauge `velox_billing_failing_subscriptions{mode,state}` (2026-10-12, #960).** Alert on `state="parked"` above zero: an invoice is not being issued until someone retries. Runbook: [Subscriptions whose billing is failing](docs/ops/runbook.md#14-subscriptions-whose-billing-is-failing).
+
 ### Changed
+
+- **`POST /v1/billing/run` skips subscriptions whose billing is failing (2026-10-12, #960).** A subscription that is waiting for its next attempt, or is parked, is no longer attempted by a manual run, and is not listed under `errors`. If you script this endpoint to retry failures, call `POST /v1/subscriptions/{id}/retry-billing` instead.
+- **`velox_billing_due_subscriptions` and `velox_billing_oldest_due_age_seconds` no longer count failing subscriptions (2026-10-12, #960).** Those are in the new `velox_billing_failing_subscriptions`. Add the alerts from the runbook, or a subscription that fails to bill no longer raises the oldest-due-age alert.
+- **A panic while billing one subscription no longer stops every later billing run (2026-10-12, #960).** The failure is saved on that subscription and the next run skips it. The run that panicked still fails and is still reported.
 
 - **Release images are built for ARM as well as Intel/AMD (2026-10-12, #959).** `docker pull ghcr.io/getvelox/velox` failed on Apple Silicon Macs and ARM servers with "no matching manifest for linux/arm64". Both images are now published for `linux/amd64` and `linux/arm64`, starting with the next release.
 - **Dashboard build tooling updated; 28 of 35 dependency advisories cleared (2026-10-12).** The API client generator (orval) moves to 8.22.0, the first version with fixes for two critical advisories that apply while generating code, and other build-time packages move to patched versions. Seven advisories remain, all one denial-of-service issue in `braces` reached through build tools, with no fixed version published yet.

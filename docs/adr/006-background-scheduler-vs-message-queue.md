@@ -66,3 +66,33 @@ Two claims above were false.
 **No circuit breaker.** A drain does not stop after N consecutive failures. A breaker would bring back the head-of-line block this change removes: a run of failing subscriptions at the front would end the tick before the healthy ones. The broad failures that could make a whole-set drain expensive are already handled. A tax provider outage defers the invoice's tax (`tax_status=pending`) instead of failing the subscription. A database outage fails the page fetch, which ends the drain.
 
 **Deferred: billing subscriptions in parallel.** The drain is serial, and each subscription's close includes its inline charge (a Stripe round trip). Drain time therefore grows with the number of subscriptions due at once. Trigger to revisit: `velox_billing_cycle_duration_seconds` p95 approaching the billing interval.
+
+## Amendment 2026-10-12 (ADR-119): a failing subscription waits, then parks
+
+The 2026-10-10 amendment says a subscription still due after its attempt is
+left out of later pages of the same run, and is attempted again on the next
+run. The first half still holds. The second half changed.
+
+**Change.** A failed attempt on a wall-clock subscription is now saved on the
+subscription row ([ADR-119](119-billing-failure-record-keyed-to-the-due-instant.md)).
+The due scans skip that subscription until its next attempt is due: 15 minutes
+after the first failure, then 1 hour, 4 hours, 12 hours, and 24 hours three
+times. The eighth failure parks it, and no run attempts it again until an
+operator calls `POST /v1/subscriptions/{id}/retry-billing`.
+
+**What this changes in the text above.**
+
+- "Each subscription is attempted at most once per run" still holds. A failing
+  subscription is now also not attempted on every run.
+- The in-run exclude list stays. It covers the failures that are not saved: an
+  interrupted run, a lost database connection, a serialization or deadlock
+  abort, and every subscription on a test clock.
+- `POST /v1/billing/run` follows the same rule. It skips waiting and parked
+  subscriptions, so it no longer "bills everything due" for a tenant that has
+  a failing subscription.
+- `velox_billing_due_subscriptions` and
+  `velox_billing_oldest_due_age_seconds` leave out subscriptions with a saved
+  failure. Those are counted by `velox_billing_failing_subscriptions`.
+- **"No circuit breaker" still holds for the run.** A run does not stop after
+  N consecutive failures. The bound is per subscription: eight failed attempts
+  on one piece of due work. A broad fault parks nothing before 3 days 17 hours.

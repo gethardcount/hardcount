@@ -158,6 +158,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [116](116-collection-intent-at-finalize-one-collector.md) | 2026-10-08 | Accepted | Payments | Finalize queues the invoice in its own write; one collector charges it, and a nudge runs it right away |
 | [117](117-one-payment-intent-per-invoice-deferred.md) | 2026-10-11 | Proposed | Payments | One PaymentIntent per invoice (Stripe Billing's model) considered and deferred: per-attempt PaymentIntents stay, with triggers to reopen |
 | [118](118-cancel-and-swap-relief-in-the-change-transaction.md) | 2026-10-12 | Accepted | Credits | Cancel and plan-swap relief (credit notes, or a void of an unused unpaid invoice) is written in the change's transaction; the post-commit fallbacks are deleted |
+| [119](119-billing-failure-record-keyed-to-the-due-instant.md) | 2026-10-12 | Accepted | Billing | A failed billing attempt is saved on the subscription, keyed to the due instant it failed on; attempts wait on a ladder and park after eight; an operator retry clears it |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.

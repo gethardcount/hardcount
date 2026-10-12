@@ -48,8 +48,10 @@ POST   /v1/subscriptions                — create subscription
 PATCH  /v1/subscriptions/{id}/items/{itemID}     — plan/quantity change (proration on immediate)
 PUT    /v1/subscriptions/{id}/pause-collection   — keep cycle, invoice as draft
 POST   /v1/subscriptions/{id}/extend-trial       — push trial_end_at later
+POST   /v1/subscriptions/{id}/retry-billing      — clear a billing failure and bill now
+GET    /v1/subscriptions?billing=failing         — subscriptions whose billing is failing
 
-POST   /v1/billing/run                  — finalize all due cycles
+POST   /v1/billing/run                  — bill the tenant's due subscriptions (skips ones waiting after a failed attempt, or parked)
 GET    /v1/billing/preview/{sub_id}     — invoice preview (dry run)
 
 POST   /v1/credit-notes                 — issue credit note (credit or refund)
