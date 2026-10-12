@@ -122,6 +122,16 @@ func (i Invoice) CardRefundableCents(priorRefundCents int64) int64 {
 	return max(0, i.AmountPaidCents-priorRefundCents)
 }
 
+// UnpaidRelievableCents is the most a credit note can relieve on an invoice
+// that has not been paid: what is still due, plus the customer credits applied
+// to it. A note first reduces the amount due; the rest of it displaces applied
+// credits, which go back to the customer's balance when the note is issued
+// (creditnote.Issue, ADR-061 amendment 2026-10-12). Sizing a note against the
+// amount due alone dropped those credits.
+func (i Invoice) UnpaidRelievableCents() int64 {
+	return max(0, i.AmountDueCents) + max(0, i.CreditsAppliedCents)
+}
+
 // IssuedAtOrZero is the issue instant, or the zero Time on an invoice that was
 // never issued. Dunning start reads it to anchor a clock-pinned invoice's first
 // retry (see dunning.Service.StartDunning).

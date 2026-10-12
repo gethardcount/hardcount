@@ -4838,16 +4838,18 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 // unpaidRelief sizes the relief for an UNPAID, partly-used funding invoice's
 // share (net, tax-exclusive): grossed up by the invoice's own Total/Subtotal
 // ratio so the unused portion's tax is relieved too (Velox invoices carry one
-// tax rate and no discount, so the ratio is 1 + rate), clamped to its
-// amount_due. An adjustment credit note reduces amount_due by it; on an
-// in-flight source Issue() defers the note until the charge settles
-// (ADR-059). (A fully-unused unpaid source is voided before allocation.)
+// tax rate and no discount, so the ratio is 1 + rate), clamped to what the
+// invoice can still be relieved of: its amount_due plus the customer credits
+// applied to it. An adjustment credit note reduces amount_due first and returns
+// the credits the rest displaces to the balance (ADR-061); on an in-flight
+// source Issue() defers the note until the charge settles (ADR-059). (A
+// fully-unused unpaid source is voided before allocation.)
 func unpaidRelief(src domain.Invoice, net int64) int64 {
 	gross := net
 	if src.SubtotalCents > 0 {
 		gross = money.RoundHalfToEven(net*src.TotalAmountCents, src.SubtotalCents)
 	}
-	return min(gross, src.AmountDueCents)
+	return min(gross, src.UnpaidRelievableCents())
 }
 
 // FinishRelief runs a committed Relief's post-commit legs: issue the
@@ -4924,11 +4926,12 @@ func (e *Engine) allocateUnusedAcrossFunding(ctx context.Context, sub domain.Sub
 		//     non-voided credit notes via the optional reader; full total
 		//     unwired). A prior credit note that shrank it pushes the share
 		//     elsewhere.
-		//   - UNPAID + real total → amount_due. unpaidRelief can only
-		//     reduce a receivable down to zero, so capping here makes the
-		//     allocator route the un-relievable overflow to PAID sources (which
-		//     credit the customer) instead of silently dropping it inside the
-		//     relieve clamp (2026-06-15 mixed paid/unpaid fix).
+		//   - UNPAID + real total → amount_due plus the customer credits applied
+		//     to it. unpaidRelief can relieve a receivable down to zero and
+		//     hand its applied credits back, no further, so capping here makes
+		//     the allocator route the un-relievable overflow to PAID sources
+		//     (which credit the customer) instead of silently dropping it inside
+		//     the relieve clamp (2026-06-15 mixed paid/unpaid fix).
 		//   - zero-total source (drift state; a $0 invoice funds nothing) →
 		//     no meaningful cap; gross clamps to 0 downstream, so the share
 		//     is skipped rather than credited beyond real money in.
@@ -4954,10 +4957,7 @@ func (e *Engine) allocateUnusedAcrossFunding(ctx context.Context, sub domain.Sub
 			netCaps[i] = netCap
 		case src.TotalAmountCents > 0:
 			hasUnpaid = true
-			grossCap := src.AmountDueCents
-			if grossCap < 0 {
-				grossCap = 0
-			}
+			grossCap := src.UnpaidRelievableCents()
 			grossCaps[i] = grossCap
 			netCap := grossCap
 			if src.SubtotalCents > 0 {
@@ -4980,8 +4980,9 @@ func (e *Engine) allocateUnusedAcrossFunding(ctx context.Context, sub domain.Sub
 		}
 		// Mixed/unpaid set: paid sources already absorbed all they could (the
 		// allocator water-fills overflow onto them first); the residual is value
-		// an UNPAID invoice can't relieve beyond its amount_due — nothing was
-		// paid for it, so there's no cash to return. Not a fault, but log it.
+		// an UNPAID invoice can't relieve beyond its amount_due and applied
+		// credits — nothing else was paid for it, so there's nothing more to
+		// return. Not a fault, but log it.
 		slog.WarnContext(ctx, "unused-prebill credit: residual unplaceable on unpaid funding invoice(s)",
 			"subscription_id", sub.ID,
 			"residual_cents", remainder,

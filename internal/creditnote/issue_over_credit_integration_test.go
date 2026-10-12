@@ -375,3 +375,48 @@ func TestIssue_RacingCreditApplication_ConservesInvoiceAndCredits(t *testing.T) 
 		r.conserved(t)
 	}
 }
+
+// A note may be as large as what the invoice can still be relieved of: the
+// amount due plus the credits applied to it. Credits applied BEFORE the note is
+// written come back the same way as credits applied after. Before 2026-10-12
+// create refused anything above the amount due, so those credits could not be
+// returned by a credit note at all.
+func TestCreate_NoteMayCoverAppliedCredits_AndIssueReturnsThem(t *testing.T) {
+	r := newOverCreditRig(t, "CN Sizing")
+	r.applyCredits(t, 6000) // due 4000, credits applied 6000
+
+	draft := r.draft(t, 10000) // the whole invoice
+	if _, err := r.notes.Issue(r.ctx, r.tenantID, draft.ID); err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	inv := r.invoiceNow(t)
+	if inv.AmountDueCents != 0 || inv.CreditsAppliedCents != 0 {
+		t.Fatalf("invoice due %d / credits applied %d, want 0 / 0", inv.AmountDueCents, inv.CreditsAppliedCents)
+	}
+	if got := r.balance(t); got != 6000 {
+		t.Fatalf("customer balance = %d, want 6000", got)
+	}
+	r.conserved(t)
+}
+
+// The ceiling is the invoice: one cent more than due plus applied credits is refused.
+func TestCreate_NoteAboveDuePlusAppliedCredits_Refused(t *testing.T) {
+	r := newOverCreditRig(t, "CN Sizing Cap")
+	r.applyCredits(t, 6000)
+	// Take 1000 of the amount due away so due + applied credits (9000) is below the total.
+	first := r.draft(t, 1000)
+	if _, err := r.notes.Issue(r.ctx, r.tenantID, first.ID); err != nil {
+		t.Fatalf("Issue first: %v", err)
+	}
+	_, err := r.notes.Create(r.ctx, r.tenantID, creditnote.CreateInput{
+		InvoiceID: r.inv.ID,
+		Reason:    "order_change",
+		Lines:     []creditnote.CreditLineInput{{Description: "credit", Quantity: 1, UnitAmountCents: 9001}},
+	})
+	if err == nil {
+		t.Fatal("a 9001 note on an invoice with 3000 due and 6000 of applied credits was accepted")
+	}
+	if ok := r.draft(t, 9000); ok.TotalCents != 9000 {
+		t.Fatalf("a 9000 note was not created at 9000: %d", ok.TotalCents)
+	}
+}

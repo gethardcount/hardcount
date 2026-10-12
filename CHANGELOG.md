@@ -59,6 +59,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **A cancel, downgrade or credit note on an unpaid invoice now returns the customer credits it displaces (2026-10-12, ADR-061, ADR-050 amended).** Relief was capped at the amount still due, so credits already applied to the invoice stayed spent on unused time. Example: $49 prebill, $30 of credits applied, cancelled halfway — relief is now $24.50 ($19 off the invoice, $5.50 back to the balance), not $19.
+
 - **A credit note issued after customer credits were applied no longer relieves an invoice twice (2026-10-12, ADR-061).** A $100 draft on a $100 invoice, issued after $60 of credits had been applied, left the invoice relieved by $160 and the credits spent on nothing. The note now reduces what is still due and returns the displaced credits to the balance. `velox-doctor` lists any invoice already affected.
 
 - **An immediate switch between monthly and yearly billing on a paid in-advance plan works again (2026-10-12).** Since the gap-free credit-note numbering change the same day, the swap waited on its own lock until the request timed out, then rolled back. The new period's invoice number is now taken on the swap's transaction. No amounts were affected.

@@ -1927,7 +1927,9 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 			}
 			grossCap = f.TotalAmountCents - credited
 		} else {
-			grossCap = f.AmountDueCents
+			// Unpaid: what is still due plus the customer credits applied to
+			// it — the note returns the credits it displaces (ADR-061).
+			grossCap = f.UnpaidRelievableCents()
 		}
 		if grossCap <= 0 {
 			continue // no room left on this invoice
@@ -2709,8 +2711,9 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 //
 //   - NET CREDIT (downgrade / removal / qty-decrease, proratedCents < 0) →
 //     reduce the open invoice's amount_due via a tax-reversing ADJUSTMENT
-//     credit note, capped at amount_due. No refundable balance credit is
-//     granted (no cash was funded). This is the same adjustment credit note
+//     credit note, capped at amount_due plus the customer credits applied to
+//     the invoice. No cash was funded, so nothing is refunded; applied credits
+//     the note displaces go back to the balance (ADR-061). This is the same adjustment credit note
 //     the engine's cancel relief writes for an unpaid invoice —
 //     Chargebee's "Adjustment Credit", Lago's credit-note, Orb's adjustment.
 //
@@ -2734,11 +2737,13 @@ func (h *Handler) settleUnpaidSourceProration(ctx context.Context, tenantID stri
 	}
 
 	// Net credit: settle the unused slice against the open invoice as an
-	// adjustment, capped at what's still owed (CreateAndIssueAdjustment errors
-	// above amount_due — same clamp the engine's unpaid-cancel relief applies).
+	// adjustment, capped at what the invoice can still be relieved of — what
+	// is owed plus the customer credits applied to it, which the note hands
+	// back when issued (ADR-061; the same clamp the engine's unpaid-cancel
+	// relief applies).
 	creditAmount := -proratedCents
 	grossCredit := grossUpByInvoiceRatio(creditAmount, src.SubtotalCents, src.TotalAmountCents)
-	reduceBy := min(grossCredit, src.AmountDueCents)
+	reduceBy := min(grossCredit, src.UnpaidRelievableCents())
 	if reduceBy <= 0 {
 		// Nothing left to reduce on the source, so this branch cannot place the
 		// credit. Reaching here with a credit owed used to `return nil, nil` —
@@ -2747,7 +2752,7 @@ func (h *Handler) settleUnpaidSourceProration(ctx context.Context, tenantID stri
 		// routes to the draft path upstream; anything ELSE landing here is a
 		// state we have not modelled, so say so LOUDLY rather than silently
 		// under-crediting (no-silent-fallbacks).
-		slog.ErrorContext(ctx, "downgrade credit could not be placed: unpaid source has no remaining amount_due to reduce — customer may be under-credited, reconcile manually",
+		slog.ErrorContext(ctx, "downgrade credit could not be placed: unpaid source has no amount_due or applied credits left to relieve — customer may be under-credited, reconcile manually",
 			"subscription_id", sub.ID,
 			"item_id", spec.itemID,
 			"source_invoice_id", src.ID,

@@ -405,12 +405,16 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 			}
 			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("credit note amount exceeds remaining creditable amount (%.2f)", float64(remaining)/100))
 		}
-		// For unpaid invoices, credit note cannot exceed current amount_due.
+		// For unpaid invoices, a credit note cannot exceed what the invoice
+		// can still be relieved of: the amount due plus the customer credits
+		// applied to it (Issue returns the credits a note displaces).
 		// This is an early refusal, not a guarantee: a draft reserves nothing,
-		// and the amount due can fall before the draft is issued. Issue() is
-		// where the note is fitted to what is actually still due.
-		if inv.Status == domain.InvoiceFinalized && subtotal > inv.AmountDueCents {
-			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("credit note amount (%.2f) exceeds amount due (%.2f)", float64(subtotal)/100, float64(inv.AmountDueCents)/100))
+		// and both figures can move before the draft is issued. Issue() is
+		// where the note is fitted to the invoice as it then stands.
+		if inv.Status == domain.InvoiceFinalized && subtotal > inv.UnpaidRelievableCents() {
+			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf(
+				"credit note amount (%.2f) exceeds what this invoice can still be credited (%.2f due plus %.2f of applied credits)",
+				float64(subtotal)/100, float64(inv.AmountDueCents)/100, float64(inv.CreditsAppliedCents)/100))
 		}
 
 		return s.buildCreditNote(ctx, lockTx, tenantID, input, inv, subtotal, existingTotal, existingTaxReversed, existingCNs)

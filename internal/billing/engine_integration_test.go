@@ -715,6 +715,33 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 //   - partial consumption → adjustment credit note reduces amount_due to the
 //     consumed portion
 //   - no consumption (cancel at period start) → invoice voided
+//
+// reliefLedgerGranter bridges credit-note Issue() to the real credit ledger, as
+// api.creditGrantAdapter does in production (that adapter is unexported).
+type reliefLedgerGranter struct{ svc *credit.Service }
+
+func (g reliefLedgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
+	return credit.GrantInput{CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
+}
+func (g reliefLedgerGranter) Grant(ctx context.Context, tenantID string, i creditnote.CreditGrantInput) error {
+	_, err := g.svc.Grant(ctx, tenantID, g.in(i))
+	return err
+}
+func (g reliefLedgerGranter) GrantForCreditNote(ctx context.Context, tenantID, cnID string, i creditnote.CreditGrantInput) error {
+	_, err := g.svc.GrantForCreditNote(ctx, tenantID, cnID, g.in(i))
+	return err
+}
+func (g reliefLedgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
+	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
+	return err
+}
+func (g reliefLedgerGranter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, int64, int64, bool, error) {
+	return g.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID)
+}
+func (g reliefLedgerGranter) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, int64, int64, int64) (int64, error) {
+	panic("commit relief is not exercised by this test")
+}
+
 func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -853,6 +880,48 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 		}
 		if n := countGrants(sub.CustomerID); n != 0 {
 			t.Errorf("credit grants = %d, want 0", n)
+		}
+	})
+
+	// Customer credits were applied to the unpaid invoice BEFORE the cancel.
+	// The relief is still the unused half: it clears what is due and the rest
+	// of it hands applied credits back. Sized against the amount due alone
+	// (before 2026-10-12) the relief stopped at 1900 and 550 of the customer's
+	// credits stayed spent on time they never used.
+	t.Run("credits applied before the cancel: the unused share of them comes back", func(t *testing.T) {
+		sub, invID := freshUnpaidSub("cus_credits_first")
+		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{CustomerID: sub.CustomerID, AmountCents: 3000, Description: "goodwill"}); err != nil {
+			t.Fatalf("grant: %v", err)
+		}
+		if applied, err := creditSvc.ApplyToInvoice(ctx, tenantID, sub.CustomerID, invID, 4900); err != nil || applied != 3000 {
+			t.Fatalf("apply credits = %d, %v; want 3000", applied, err)
+		}
+		cancelAt := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC) // 15 unused / 30 days
+		sub.Status = domain.SubscriptionCanceled
+		sub.CanceledAt = &cancelAt
+
+		withLedger := creditnote.NewService(creditNoteStore, invoiceStore, nil, reliefLedgerGranter{creditSvc})
+		withLedger.SetNumberGenerator(settingsStore)
+		e := newEngine()
+		e.SetCreditNoteAdjuster(withLedger)
+		e.SetCreditHeadroomReader(withLedger)
+		cancelRelief(t, ctx, db, tenantID, e, sub)
+
+		got, err := invoiceStore.Get(ctx, tenantID, invID)
+		if err != nil {
+			t.Fatalf("reload invoice: %v", err)
+		}
+		// Used half = 2450, all of it covered by credits. Unused half = 2450:
+		// 1900 was still due, 550 was covered by credits and goes back.
+		if got.AmountDueCents != 0 || got.CreditsAppliedCents != 2450 {
+			t.Errorf("invoice due %d / credits applied %d, want 0 / 2450", got.AmountDueCents, got.CreditsAppliedCents)
+		}
+		bal, err := creditSvc.GetBalance(ctx, tenantID, sub.CustomerID)
+		if err != nil {
+			t.Fatalf("balance: %v", err)
+		}
+		if bal.BalanceCents != 550 {
+			t.Errorf("customer balance = %d, want 550 (the credits spent on unused time)", bal.BalanceCents)
 		}
 	})
 

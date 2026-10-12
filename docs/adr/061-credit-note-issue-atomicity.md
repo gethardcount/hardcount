@@ -289,9 +289,24 @@ The alternative was to store the returned amount as the note's `credit_amount_ce
 - `create()` takes no invoice row lock. Its amount-due cap is an early refusal only: a draft reserves nothing, so two drafts that each fit can together exceed what is due. `Issue()` is where a note is fitted to the invoice. A row lock in `create()` would also invert the lock order of transactions that draft several notes (they take the per-invoice advisory locks first).
 - No backfill. The widened doctor check lists any invoice the old clamp over-relieved; the remedy is a manual credit grant for the excess.
 
+### Sizing: a note may cover applied credits (same day, second change)
+
+The change above returned credits applied *after* a note was sized. Credits applied *before* were still dropped, because every place that sizes a note against an unpaid invoice capped it at amount due. The owner's decision (2026-10-12) is that a credit note returns applied credits in both orders.
+
+The cap is now `Invoice.UnpaidRelievableCents()`: amount due plus the customer credits applied to the invoice. It replaces amount due at five sites:
+
+- `creditnote` create, for a finalized unpaid invoice;
+- `unpaidRelief` and the allocator's unpaid cap in the billing engine (cancel and swap relief);
+- the two downgrade paths in the subscription handler (one source invoice, and the split across several).
+
+Example: a 49.00 prebill with 30.00 of credits applied (19.00 due), cancelled halfway. The unused half is 24.50. Before, relief stopped at the 19.00 due and 5.50 of the customer's credits stayed spent on unused time. Now the note is 24.50: it clears the 19.00 and returns 5.50.
+
+A fully unused unpaid invoice is still voided, which hands back all its credits. The cap on the sum of an invoice's credit notes (the invoice total) is unchanged.
+
+Not changed: the dashboard's credit-note dialog still offers amount due as the maximum for an unpaid invoice. It is stricter than the API, not wrong; widening it is a UI change to review separately.
+
 ### Not decided here, with triggers
 
-- **Sizing still caps at amount due.** Credits applied before a note is sized are not returned, while credits applied after are. ADR-050 states the first as policy. The owner's decision (2026-10-12) is to return applied credits in general; that moves the four amount-due caps to a cap on the invoice total, in a follow-up change.
 - **A charge already sent to the card network.** It is marked only by the charge lease, which `Issue()` does not read. Trigger: the first payment recorded with an amount that differs from what the card was charged.
 - **What kind of credit comes back.** It is a plain grant with no expiry and no promotional kind, as a void's hand-back already is. Trigger: the first tenant with expiring or promotional credits applied to an invoice that is then credited or voided.
 
