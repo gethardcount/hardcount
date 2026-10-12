@@ -229,6 +229,7 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) {
 	const subCount = 40
 
 	seed := seedDueSubscriptions(t, db, subCount)
+	failingID := seedFailingHeadSubscription(t, db, seed)
 
 	leader := exec.Command(os.Args[0], "-test.run=TestBillingLeaderHelperProcess")
 	leader.Env = append(os.Environ(),
@@ -305,7 +306,53 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) {
 		t.Fatalf("billed %d cents, expected %d", totalCents, want)
 	}
 
+	// The failing subscription at the head of the queue (ADR-119). The dead
+	// leader attempted it first and saved the failure. The wait is in the row,
+	// so the successor skipped it: no failure above, and still one attempt.
+	// Before the record existed every new leader re-attempted it at once.
+	failing, err := subscription.NewPostgresStore(db).Get(ctx, seed.tenantID, failingID)
+	if err != nil {
+		t.Fatalf("read failing subscription: %v", err)
+	}
+	if bf := failing.BillingFailure; bf == nil || bf.Attempts != 1 || bf.Parked {
+		t.Fatalf("failing subscription after the failover: %+v, want one saved attempt that is waiting", bf)
+	}
+
 	assertDoctorClean(t)
+}
+
+// seedFailingHeadSubscription adds one subscription that can never bill (its
+// only item is removed, so the close refuses with "no items to bill") and is
+// due a month before the others, which puts it first in the oldest-first
+// queue. Its rows are well-formed; nothing is corrupted to make it fail.
+func seedFailingHeadSubscription(t *testing.T, db *postgres.DB, seed exactlyOnceSeed) string {
+	t.Helper()
+	ctx := postgres.WithLivemode(context.Background(), false)
+	subStore := subscription.NewPostgresStore(db)
+	healthy, err := subStore.Get(ctx, seed.tenantID, seed.subIDs[0])
+	if err != nil {
+		t.Fatalf("read a seeded subscription: %v", err)
+	}
+	start, end := seed.periodStart.AddDate(0, -1, 0), seed.periodStart
+	sub, err := subStore.Create(ctx, seed.tenantID, domain.Subscription{
+		Code: "sub-failover-failing", DisplayName: "Failover failing",
+		CustomerID:  healthy.CustomerID,
+		Items:       []domain.SubscriptionItem{{PlanID: healthy.Items[0].PlanID, Quantity: 1}},
+		Status:      domain.SubscriptionActive,
+		BillingTime: domain.BillingTimeCalendar,
+		StartedAt:   &start, ActivatedAt: &start,
+		CurrentBillingPeriodStart: &start, CurrentBillingPeriodEnd: &end,
+	})
+	if err != nil {
+		t.Fatalf("create failing sub: %v", err)
+	}
+	subscriptiontest.SetBillingCycle(t, ctx, db, seed.tenantID, sub.ID, start, end, end, 1)
+	// The removal is stamped inside the fixture's own (future) timeline: at
+	// wall-clock now it would close the item's interval before it opened.
+	if err := subStore.RemoveItem(clock.WithEffectiveNow(ctx, end), seed.tenantID, sub.Items[0].ID); err != nil {
+		t.Fatalf("remove the failing sub's item: %v", err)
+	}
+	return sub.ID
 }
 
 // assertDoctorClean runs every money-invariant check after a failover.

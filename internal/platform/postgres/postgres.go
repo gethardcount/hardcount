@@ -3,9 +3,12 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -285,6 +288,44 @@ func IsCheckViolation(err error) bool {
 		return pgErr.Code == "23514"
 	}
 	return false
+}
+
+// IsTransient reports whether err means the statement never reached a verdict
+// because the connection or the transaction was taken away: the connection
+// was lost, the server is shutting down, or the server aborted the transaction
+// to resolve a serialization conflict or a deadlock. The row a statement was
+// working on cannot cause any of these, so a caller that counts failures
+// against a row (the billing run, ADR-119) does not count one.
+//
+// A timeout is deliberately NOT transient: not a statement timeout (57014),
+// not a lock timeout (55P03), and not a Go deadline. A timeout is the only way
+// a query that is too slow for its own data ever shows up, and it recurs.
+// Resource exhaustion (class 53) is not transient either.
+func IsTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	// A cancelled or expired ctx surfaces through the driver in many shapes,
+	// some of them net errors. Whether that is an interruption is the
+	// caller's question about its own ctx, not a property of the connection.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "57P01", "57P02", "57P03", // admin shutdown, crash shutdown, cannot connect now
+			"40001", "40P01": // serialization failure, deadlock detected
+			return true
+		}
+		return strings.HasPrefix(pgErr.Code, "08") // connection exception
+	}
+	if errors.Is(err, driver.ErrBadConn) || errors.Is(err, sql.ErrConnDone) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && !netErr.Timeout()
 }
 
 func NullableString(v string) any {

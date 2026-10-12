@@ -362,6 +362,8 @@ func (m *mockSettings) Get(_ context.Context, _ string) (domain.TenantSettings, 
 type mockSubs struct {
 	subs         map[string]domain.Subscription
 	cycleUpdated map[string]bool
+	// billingFailures records every RecordBillingFailure call, by sub id.
+	billingFailures map[string][]subscription.BillingFailureWrite
 	// itemChanges feeds ListItemChangesInPeriod. Tests that exercise
 	// segment-aware billing seed this with the change rows the DB
 	// trigger would have produced (migration 0029).
@@ -526,6 +528,17 @@ func (m *mockSubs) Get(_ context.Context, _, id string) (domain.Subscription, er
 		return domain.Subscription{}, fmt.Errorf("not found")
 	}
 	return s, nil
+}
+
+// RecordBillingFailure keeps what the engine asked to save. The mock scans do
+// not gate on it and Get does not read it back: the guards and the gate are
+// proven on real Postgres (billing_failure_integration_test.go).
+func (m *mockSubs) RecordBillingFailure(_ context.Context, _, id string, f subscription.BillingFailureWrite) (bool, error) {
+	if m.billingFailures == nil {
+		m.billingFailures = make(map[string][]subscription.BillingFailureWrite)
+	}
+	m.billingFailures[id] = append(m.billingFailures[id], f)
+	return true, nil
 }
 
 // FireScheduledCancellationTx mirrors the store's terminal close: CAS on
@@ -4294,7 +4307,7 @@ func TestBillSubscription_PeriodMoved_RetriesOnce(t *testing.T) {
 			s.NextBillingAt = &truncated
 			m.subs["sub_1"] = s
 		}
-		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"])
+		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"], nil)
 		if err != nil {
 			t.Fatalf("billSubscription: %v", err)
 		}
@@ -4318,7 +4331,7 @@ func TestBillSubscription_PeriodMoved_RetriesOnce(t *testing.T) {
 			s.CurrentBillingPeriodEnd = &moved
 			m.subs["sub_1"] = s
 		}
-		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"])
+		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"], nil)
 		if err != nil || n != 0 {
 			t.Fatalf("billSubscription = (%d, %v), want (0, nil): a lost race is not an error", n, err)
 		}

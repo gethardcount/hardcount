@@ -469,6 +469,11 @@ type SubscriptionReader interface {
 	// pinned subs for the caller's tenant only — never cross-tenant.
 	GetDueBillingForTenant(ctx context.Context, tenantID string, before time.Time, exclude []string, limit int) ([]domain.Subscription, error)
 	Get(ctx context.Context, tenantID, id string) (domain.Subscription, error)
+	// RecordBillingFailure saves one counted billing failure on a wall-clock
+	// subscription (ADR-119) and reports whether a row was written. Zero rows
+	// is normal: the due instant moved, or another run counted this attempt.
+	// It writes only the five billing_* columns.
+	RecordBillingFailure(ctx context.Context, tenantID, id string, f subscription.BillingFailureWrite) (bool, error)
 	// WithTenantTx opens a period closer's transaction (ADR-115). The store
 	// that owns the period state machine owns the coordinator tx: the engine
 	// runs ClosePeriodTx / FireScheduledCancellationTx as the FIRST statement,
@@ -1524,7 +1529,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	// emitting a wrong-tax invoice.
 	provider, err := e.taxProviders.Resolve(ctx, ts)
 	if err != nil {
-		return TaxApplication{}, fmt.Errorf("resolve tax provider: %w", err)
+		return TaxApplication{}, refuse(refusalTaxProvider, fmt.Errorf("resolve tax provider: %w", err))
 	}
 	app.TaxProvider = provider.Name()
 
@@ -1719,7 +1724,11 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 // its period twice in a row (errPeriodMoved), or a cancel or trial change was
 // rescheduled while it fired. The drain does not bill a sub twice in one run,
 // so it reports the sub, and the next run retries it.
-var errStillDue = errors.New("still due after a clean billing attempt: the subscription changed concurrently; the next run retries it")
+//
+// It is saved as a counted failure (ADR-119). A real race costs one 15 minute
+// wait, which the next clean bill voids. A sub that makes no progress on every
+// run parks, where it used to loop with only this log line.
+var errStillDue = refuse(refusalNoProgress, errors.New("still due after a clean billing attempt: the subscription changed concurrently; the next run retries it"))
 
 // dueFetch returns up to limit due subscriptions, oldest first, leaving out
 // the ids in exclude.
@@ -1734,6 +1743,12 @@ type dueFetch func(ctx context.Context, exclude []string, limit int) ([]domain.S
 // skips it. Without that, a persistently failing sub stays first in the
 // oldest-first order and comes back on every page. A page made only of such
 // subs used to end the run while healthy subs waited behind them.
+//
+// A failed attempt on a wall-clock sub is also saved on the subscription
+// (attemptSub, ADR-119), and the wall-clock scans then skip it until its next
+// attempt is due, or for good once it is parked. The exclude list stays: it
+// covers the failures that are not saved (an interrupted run, a transient
+// database error, a failed save) and every clock-pinned sub.
 //
 // Termination: every sub on a non-empty page is either attempted for the first
 // time or added to exclude, so each page shrinks what the next page can return.
@@ -1770,18 +1785,17 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 			}
 			if attempted[sub.ID] {
 				exclude = append(exclude, sub.ID)
-				slog.Error("bill subscription failed",
-					append([]any{"subscription_id", sub.ID, "tenant_id", sub.TenantID, "error", errStillDue}, logArgs...)...)
+				// The page's row is the freshest read of a sub that was
+				// attempted cleanly and is still due.
+				e.reportBillFailure(ctx, sub, 0, errStillDue, logArgs...)
 				failures = append(failures, SubBillError{SubscriptionID: sub.ID, Err: errStillDue})
 				continue
 			}
 			attempted[sub.ID] = true
-			n, err := e.billSubscription(ctx, sub)
+			n, err := e.attemptSub(ctx, sub, logArgs...)
 			generated += n
 			if err != nil {
 				exclude = append(exclude, sub.ID)
-				slog.Error("bill subscription failed",
-					append([]any{"subscription_id", sub.ID, "tenant_id", sub.TenantID, "invoices_before_error", n, "error", err}, logArgs...)...)
 				failures = append(failures, SubBillError{SubscriptionID: sub.ID, Err: err})
 			}
 		}
@@ -1858,6 +1872,12 @@ func (e SubBillError) Unwrap() error { return e.Err }
 // scheduler.go), it bills only the caller's own due subscriptions via
 // GetDueBillingForTenant (RLS-fenced) — the manual trigger can never sweep or
 // observe another tenant.
+//
+// It follows the same rule as the scheduler's run for a failing sub (ADR-119):
+// a sub that is waiting for its next attempt or is parked is skipped, and a
+// failed attempt is saved and counted. So a scripted run cannot burn a sub's
+// attempts, and it is not the way to retry one sub: that is
+// POST /v1/subscriptions/{id}/retry-billing.
 func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSize int) (int, []SubBillError) {
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.RunCycleForTenant",
 		trace.WithAttributes(
@@ -1883,6 +1903,10 @@ func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSi
 // is due, across all tenants in ctx's livemode, before returning. Before P27 it
 // billed one page of batchSize subs per tick, which at 50 subs per hourly tick
 // meant 20,000 subs due on the 1st took about 17 days to invoice.
+//
+// "Due" leaves out a sub whose billing is failing and is either waiting for
+// its next attempt or parked (ADR-119). Those are counted by
+// velox_billing_failing_subscriptions, not attempted here.
 //
 // onPage runs after each page; the scheduler passes its liveness stamp.
 // Returns the invoices generated and the per-sub errors.
@@ -1939,8 +1963,12 @@ const maxPeriodsPerSubPerCall = 10000
 // keeps working — kill -9 mid-loop is still observable from the
 // outside.
 //
+// seen, when non-nil, is overwritten with each loop-top read, so the caller
+// (attemptSub) knows which row a failing step planned from even when this
+// returns an error or panics.
+//
 // ADR-028.
-func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription) (int, error) {
+func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, seen *domain.Subscription) (int, error) {
 	count := 0
 	movedRetry := false
 	for i := 0; i < maxPeriodsPerSubPerCall; i++ {
@@ -1959,6 +1987,19 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription) 
 			return count, fmt.Errorf("refresh subscription %s: %w", sub.ID, err)
 		}
 		sub = fresh
+		if seen != nil {
+			*seen = fresh
+		}
+
+		// Billing-failure gate, re-checked at attempt time (ADR-119). The due
+		// scans already skip a waiting or parked sub, but this row may come
+		// from a page fetched before another run recorded a failure. Without
+		// the re-check that stale page would attempt past the wait. The scan
+		// hides the sub from here on, so it does not come back as still due.
+		// Never set on a clock-pinned sub.
+		if bf := sub.BillingFailure; bf != nil && (bf.NextAttemptAt == nil || bf.NextAttemptAt.After(e.clock.Now(ctx))) {
+			return count, nil
+		}
 
 		// Caught-up check. The clock the sub lives on (test or wall)
 		// determines "now"; sub.NextBillingAt strictly after that
@@ -3124,7 +3165,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	}
 
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-		return false, fmt.Errorf("subscription has no billing period set")
+		return false, refuse(refusalNoPeriod, fmt.Errorf("subscription has no billing period set"))
 	}
 
 	// Resolve "now" as this cycle's own close instant — sub.NextBillingAt
@@ -3188,7 +3229,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	}
 
 	if len(sub.Items) == 0 {
-		return false, fmt.Errorf("subscription has no items to bill")
+		return false, refuse(refusalNoItems, fmt.Errorf("subscription has no items to bill"))
 	}
 
 	periodStart := *sub.CurrentBillingPeriodStart
@@ -5649,7 +5690,7 @@ func (e *Engine) netPaymentTermDays(ctx context.Context, tenantID string) (int, 
 		return 0, fmt.Errorf("read tenant net payment terms: %w", err)
 	}
 	if ts.NetPaymentTerms < 0 {
-		return 0, fmt.Errorf("tenant net payment terms is negative (%d)", ts.NetPaymentTerms)
+		return 0, refuse(refusalNetTerms, fmt.Errorf("tenant net payment terms is negative (%d)", ts.NetPaymentTerms))
 	}
 	return ts.NetPaymentTerms, nil
 }
@@ -5675,7 +5716,7 @@ func (e *Engine) tenantLocation(ctx context.Context, tenantID string) (*time.Loc
 	}
 	loc, err := time.LoadLocation(ts.Timezone)
 	if err != nil {
-		return nil, fmt.Errorf("load tenant timezone %q: %w", ts.Timezone, err)
+		return nil, refuse(refusalTimezone, fmt.Errorf("load tenant timezone %q: %w", ts.Timezone, err))
 	}
 	return loc, nil
 }

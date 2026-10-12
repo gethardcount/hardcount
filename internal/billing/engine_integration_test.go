@@ -48,6 +48,10 @@ func (a *subStoreAdapter) Get(ctx context.Context, tenantID, id string) (domain.
 	return a.store.Get(ctx, tenantID, id)
 }
 
+func (a *subStoreAdapter) RecordBillingFailure(ctx context.Context, tenantID, id string, f subscription.BillingFailureWrite) (bool, error) {
+	return a.store.RecordBillingFailure(ctx, tenantID, id, f)
+}
+
 func (a *subStoreAdapter) WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error {
 	return a.store.WithTenantTx(ctx, tenantID, fn)
 }

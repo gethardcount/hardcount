@@ -863,9 +863,16 @@ func TestCycleClose_InvoiceAndAdvance_ShareFate(t *testing.T) {
 		t.Fatalf("invoice sequence moved %d → %d on a rolled-back close (a number was burned)", seqBefore, got)
 	}
 
+	// The failed close was saved as a billing failure (ADR-119), so a run at
+	// the same instant skips the sub; the retry comes once the first rung of
+	// the ladder (15 minutes) has passed.
 	r.closer.invs.createTxErr = nil
-	if gen := r.runClose(t); gen != 1 {
-		t.Fatalf("retry generated %d, want 1", gen)
+	if gen := r.runClose(t); gen != 0 {
+		t.Fatalf("a run inside the wait generated %d, want 0", gen)
+	}
+	gen, failures = r.closer.engine.RunCycleForTenant(r.at(r.close.Add(15*time.Minute)), r.f.tenantID, 50)
+	if gen != 1 || len(failures) != 0 {
+		t.Fatalf("retry after the wait: generated %d failures %v, want 1 and none", gen, failures)
 	}
 	cycle, _, _ := r.liveInvoices(t)
 	if len(cycle) != 1 || cycle[0].SubtotalCents != 1000 {
