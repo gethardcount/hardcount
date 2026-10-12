@@ -119,8 +119,8 @@ call after a 5xx would get 409 for a subscription that is still unbilled. The
 | Not completed, nothing saved (lost connection, deadlock, failed failure-write) | absent | true |
 
 An attempt that returns cleanly but leaves the subscription due is the second
-outcome: the retry re-reads after its attempt and saves "no progress", as the
-billing run does when the subscription comes back on a later page.
+outcome. The retry re-reads after its attempt and saves "no progress". The
+billing run does the same when the subscription comes back on a later page.
 
 The classes are decided by error type only. Two database faults therefore
 count although the subscription did not cause them: a statement or lock
