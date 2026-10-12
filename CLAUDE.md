@@ -91,7 +91,7 @@ Two or more Claude Code sessions may work this repo at the same time. Rules:
 - **Email:** single delivery path.
   - `Sender` returns `ErrSMTPNotConfigured` when `SMTP_HOST` is unset. There is no stdout fallback.
   - Boot logs WARN once per missing email-link env (`HOSTED_INVOICE_BASE_URL`, `PAYMENT_UPDATE_URL`, `DASHBOARD_BASE_URL`). The producer always wires the real adapter.
-- **Stripe:** PaymentIntent-only pattern (no Stripe Billing/Invoices to avoid 0.5% fee)
+- **Stripe:** PaymentIntent-only pattern (no Stripe Billing/Invoices to avoid its percentage fee)
 - **Background work:** no Temporal dependency in v1.
   - Background work runs as simple goroutine loops. Each loop is a leader-leased singleton role (`internal/platform/leader`, ADR-114).
   - A [leader lease](docs/README.md#glossary) is a per-tick lease row on the database clock. Its fence token is re-checked inside every claim statement. The lease is safe behind transaction-mode poolers.

@@ -17,7 +17,7 @@ handles that. This doc names what they need to know.
 
 ## Required extensions
 
-Both are standard `contrib` extensions — part of Postgres's own
+All three are standard `contrib` extensions — part of Postgres's own
 extension collection, present in every managed Postgres (RDS, Cloud
 SQL, Aurora, CloudNativePG, postgres-operator, self-managed
 Debian/Ubuntu Postgres). Velox creates them via its database
@@ -28,14 +28,16 @@ needs `CREATE EXTENSION` permission on first install.
 |---|---|---|
 | `pgcrypto` | `gen_random_bytes()` for ID generation, `digest()` for hashing | `0001_schema.up.sql` |
 | `citext` | Case-insensitive `email` column on `users` | `0069_user_password_auth.up.sql` |
+| `btree_gist` | The exclusion constraint on billing intervals | `0159_billing_intervals.up.sql` |
 
 If your environment forbids `CREATE EXTENSION` at runtime (some
-managed Postgres setups), pre-create both extensions before running
+managed Postgres setups), pre-create all three extensions before running
 migrations:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 ```
 
 ## Required session settings (RLS)

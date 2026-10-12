@@ -130,7 +130,7 @@ Compose ships Postgres 16 with default settings — sufficient for eval.
 For your own VM:
 
 - Version: 16.x
-- Extensions: `pgcrypto` (provides `gen_random_bytes`) and `citext`.
+- Extensions: `pgcrypto` (provides `gen_random_bytes`), `citext` and `btree_gist`.
   Migrations run `CREATE EXTENSION IF NOT EXISTS`, so the migrating role
   needs the `CREATE EXTENSION` permission. On locked-down managed
   Postgres, pre-create them as
@@ -186,6 +186,9 @@ Required:
 |---|---|
 | `DATABASE_URL` | Postgres DSN — admin/migration role |
 | `APP_DATABASE_URL` | Postgres DSN — least-privilege `velox_app` runtime role (RLS enforced). Required in `staging`/`production`; local dev derives `velox_app:velox_app` from `DATABASE_URL` when unset |
+| `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data. Required in `production`; the server refuses to start without it |
+| `REDIS_URL` | Redis for rate limiting. Required in `production` |
+| `TRUST_PROXY` | Which proxy headers to trust for the client address. Required in `production` |
 
 Bootstrap-time (read by `make bootstrap` / `cmd/velox-bootstrap`, not the server):
 

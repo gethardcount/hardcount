@@ -21,9 +21,9 @@ docs in the order listed. Words you may not know are in the
 1. [Quick start](../README.md#quick-start): Postgres, the API and the
    dashboard on localhost.
 2. [`scripts/demo.sh`](../scripts/demo.sh): the full flow from usage events
-   to a paid invoice.
-3. [AI pricing in code](ai-pricing.md): the same thing by hand, in five
-   API calls.
+   to a finalized invoice, its PDF and a margin report.
+3. [AI pricing in code](ai-pricing.md): one meter, a prepaid commit and a
+   margin read, in five steps.
 
 ## Connect your product
 

@@ -106,7 +106,7 @@ result.
 - **PaymentIntent-only Stripe** ([ADR-001](adr/001-paymentintent-only-stripe.md)).
   Velox owns invoices, dunning and the payment lifecycle end-to-end. Stripe
   executes the card charge as a plain PaymentIntent; Velox creates no Stripe
-  Billing objects. Why: Stripe Billing adds a 0.5% fee, and using it would mean
+  Billing objects. Why: Stripe Billing adds a percentage fee, and using it would mean
   two systems tracking the same invoices.
 - **Coupons cut after shipping** ([ADR-039](adr/039-cut-coupons-pre-launch.md)).
   A full coupon surface shipped in a Stripe-parity sprint. It was deleted once
