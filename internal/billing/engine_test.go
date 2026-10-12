@@ -1357,8 +1357,11 @@ type fakeCreditNoteAdjuster struct {
 	calls     []cnAdjustCall // create (issue+draft) calls
 	draftCall []cnAdjustCall // CreateAdjustmentDraftTx calls specifically
 	issued    []string       // Issue() ids
-	err       error
-	draftErr  error
+	// lockedBeforeDrafts holds the invoice ids of every LockInvoicesForDraftsTx
+	// call made before the first draft; a call after a draft is left out.
+	lockedBeforeDrafts []string
+	err                error
+	draftErr           error
 }
 
 func (a *fakeCreditNoteAdjuster) CreateAndIssueAdjustment(_ context.Context, _, invoiceID string, grossCents int64, _, _ string) (domain.CreditNote, error) {
@@ -1367,6 +1370,13 @@ func (a *fakeCreditNoteAdjuster) CreateAndIssueAdjustment(_ context.Context, _, 
 	}
 	a.calls = append(a.calls, cnAdjustCall{invoiceID: invoiceID, gross: grossCents})
 	return domain.CreditNote{ID: fmt.Sprintf("vlx_cn_%d", len(a.calls)), TotalCents: grossCents}, nil
+}
+
+func (a *fakeCreditNoteAdjuster) LockInvoicesForDraftsTx(_ context.Context, _ *sql.Tx, _ string, invoiceIDs []string) error {
+	if len(a.draftCall) == 0 {
+		a.lockedBeforeDrafts = append(a.lockedBeforeDrafts, invoiceIDs...)
+	}
+	return nil
 }
 
 func (a *fakeCreditNoteAdjuster) CreateAdjustmentDraftTx(_ context.Context, _ *sql.Tx, _, invoiceID string, grossCents int64, _, _ string) (domain.CreditNote, error) {

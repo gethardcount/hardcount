@@ -44,6 +44,10 @@ func (f *fakeCNIssuer) CreateAndIssueAdjustment(_ context.Context, _, invoiceID 
 	return domain.CreditNote{ID: "vlx_cn_test", InvoiceID: invoiceID}, nil
 }
 
+func (f *fakeCNIssuer) LockInvoicesForDraftsTx(context.Context, *sql.Tx, string, []string) error {
+	return nil
+}
+
 // CreateAdjustmentDraftTx records like CreateAndIssueAdjustment so f.calls
 // assertions hold on both the atomic (draft-in-tx) and non-atomic paths.
 func (f *fakeCNIssuer) CreateAdjustmentDraftTx(_ context.Context, _ *sql.Tx, _, invoiceID string, gross int64, reason, desc string) (domain.CreditNote, error) {

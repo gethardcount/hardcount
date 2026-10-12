@@ -59,6 +59,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **A cancel, swap or downgrade that credits several invoices no longer deadlocks with a credit note on one of them (2026-10-12).** Since the gap-free numbering change below, one of the two requests failed with a database deadlock error. The change now takes every funding invoice's lock before it writes its first credit note. No amounts were affected.
+
 - **A failed change no longer leaves a gap in credit-note numbers (2026-10-12).** The number was reserved in its own transaction, so a cancel or swap that rolled back still used one up (CN-000003 was skipped in the ADR-118 walk). It is now reserved on the transaction that writes the credit note, as invoice numbers already are, and a rollback returns it.
 
 - **A retried billing step no longer pays Stripe Tax for a second calculation (2026-10-12).** When a cycle close, a new subscription's first invoice or a cancel's final invoice failed after its tax was calculated, each retry asked Stripe for a new calculation. The request now carries an idempotency key built from the step and its exact lines, so an identical retry reuses the first calculation; any change in usage or customer data still gets a fresh one. The expiry check now times a reused calculation from when Stripe first created it.

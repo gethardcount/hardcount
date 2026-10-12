@@ -353,6 +353,8 @@ func (m *memStore) ListLineItems(_ context.Context, _, creditNoteID string) ([]d
 // coordinator-tx ATOMICITY is exercised by the real-Postgres test, not here.
 // Issue() guards Commit/Rollback on tx != nil and the *Tx methods below ignore
 // the (nil) tx, mutating the map directly — so the logic still runs end-to-end.
+func (m *memStore) LockInvoicesTx(context.Context, *sql.Tx, string, []string) error { return nil }
+
 func (m *memStore) BeginTx(_ context.Context, _ string) (*sql.Tx, error) {
 	return nil, nil
 }

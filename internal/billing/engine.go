@@ -401,6 +401,10 @@ type CreditNoteAdjuster interface {
 	// issue_pending DRAFT on the caller's coordinator tx (ADR-057), to be issued
 	// post-commit. Used by the atomic cancel-proration-credit path.
 	CreateAdjustmentDraftTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, grossCents int64, reason, description string) (domain.CreditNote, error)
+	// LockInvoicesForDraftsTx takes every listed invoice's credit-note lock
+	// before the first draft, so drafts on several invoices in one tx cannot
+	// deadlock with a concurrent credit note on one of them.
+	LockInvoicesForDraftsTx(ctx context.Context, tx *sql.Tx, tenantID string, invoiceIDs []string) error
 	// Issue issues a previously-created draft credit note (the post-commit relay
 	// of CreateAdjustmentDraftTx). Both already exist on *creditnote.Service.
 	Issue(ctx context.Context, tenantID, id string) (domain.CreditNote, error)
@@ -4788,6 +4792,13 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 		return domain.Relief{}, fmt.Errorf("%s: allocate across funding invoices: %w", what, err)
 	}
 
+	shareIDs := make([]string, 0, len(shares))
+	for _, sh := range shares {
+		shareIDs = append(shareIDs, sh.Source.ID)
+	}
+	if err := e.creditNoteAdjuster.LockInvoicesForDraftsTx(ctx, tx, sub.TenantID, shareIDs); err != nil {
+		return domain.Relief{}, fmt.Errorf("%s: lock funding invoices: %w", what, err)
+	}
 	for _, sh := range shares {
 		src := sh.Source
 		gross := sh.GrossCents

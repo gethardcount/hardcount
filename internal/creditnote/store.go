@@ -45,6 +45,10 @@ type Store interface {
 	// post-commit upstream tax reversal failed (tax_reversal_pending),
 	// cross-tenant + scoped by livemode, for RetryPendingCreditNoteTaxReversal.
 	ListPendingCreditNoteTaxReversal(ctx context.Context, batch int, livemode bool) ([]domain.CreditNote, error)
+	// LockInvoicesTx takes the per-invoice credit-note lock for each invoice,
+	// in sorted order, on the caller's tx — called before the first create by
+	// a transaction that writes credit notes on several invoices.
+	LockInvoicesTx(ctx context.Context, tx *sql.Tx, tenantID string, invoiceIDs []string) error
 	// BeginTx opens the RLS-scoped coordinator tx Issue() owns (ADR-056/061):
 	// the draft→issued CAS and the internal money effect commit together.
 	BeginTx(ctx context.Context, tenantID string) (*sql.Tx, error)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -142,11 +143,38 @@ func (s *PostgresStore) CreateUnderInvoiceLockTxAudited(ctx context.Context, tx 
 	return created, nil
 }
 
-func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+// lockInvoiceTx takes the per-invoice credit-note lock on tx. It is held to
+// commit and is reentrant within the transaction.
+func lockInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) error {
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+":"+invoiceID,
 	); err != nil {
-		return domain.CreditNote{}, fmt.Errorf("acquire credit-note invoice lock: %w", err)
+		return fmt.Errorf("acquire credit-note invoice lock: %w", err)
+	}
+	return nil
+}
+
+// LockInvoicesTx takes the per-invoice credit-note lock for every invoice in
+// invoiceIDs, in sorted order, on the caller's transaction. A transaction that
+// writes credit notes on several invoices calls it BEFORE the first create:
+// each create allocates its number on the tenant's sequence row, which stays
+// locked to commit, so taking a second invoice's lock after that row deadlocks
+// with a concurrent create on that invoice (it holds the invoice lock and
+// waits for the row).
+func (s *PostgresStore) LockInvoicesTx(ctx context.Context, tx *sql.Tx, tenantID string, invoiceIDs []string) error {
+	ids := slices.Clone(invoiceIDs)
+	slices.Sort(ids)
+	for _, id := range slices.Compact(ids) {
+		if err := lockInvoiceTx(ctx, tx, tenantID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+	if err := lockInvoiceTx(ctx, tx, tenantID, invoiceID); err != nil {
+		return domain.CreditNote{}, err
 	}
 
 	existing, err := s.listByInvoiceTx(ctx, tx, invoiceID)
@@ -178,10 +206,8 @@ func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.
 // the per-invoice CN lock, preserving the invoice-CN → customer-advisory →
 // ledger-row order). build returns the header AND its lines.
 func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
-	if _, err := tx.ExecContext(ctx,
-		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+":"+invoiceID,
-	); err != nil {
-		return domain.CreditNote{}, fmt.Errorf("acquire credit-note invoice lock: %w", err)
+	if err := lockInvoiceTx(ctx, tx, tenantID, invoiceID); err != nil {
+		return domain.CreditNote{}, err
 	}
 	existing, err := s.listByInvoiceTx(ctx, tx, invoiceID)
 	if err != nil {

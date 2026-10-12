@@ -514,6 +514,16 @@ func (s *Service) CreateAdjustmentDraftTx(ctx context.Context, tx *sql.Tx, tenan
 	}, tx)
 }
 
+// LockInvoicesForDraftsTx takes the credit-note lock of every invoice the
+// caller is about to write a draft on with CreateAdjustmentDraftTx, on the same
+// transaction. Call it once, before the first draft, whenever one transaction
+// credits more than one invoice: the first draft locks the tenant's number
+// sequence to commit, and asking for another invoice's lock after that
+// deadlocks with a concurrent credit note on that invoice.
+func (s *Service) LockInvoicesForDraftsTx(ctx context.Context, tx *sql.Tx, tenantID string, invoiceIDs []string) error {
+	return s.store.LockInvoicesTx(ctx, tx, tenantID, invoiceIDs)
+}
+
 // RetryPendingClawbackIssue re-issues auto-clawback drafts whose post-commit
 // Issue() NEVER RAN — the note is still status='draft' AND issue_pending (the
 // common case: a crash or transient error in the post-commit window before

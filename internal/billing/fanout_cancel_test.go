@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -88,6 +89,13 @@ func TestBillOnCancel_FansAcrossUpgradeInvoice(t *testing.T) {
 	// to the authoritative total.
 	if len(adjuster.calls) != 2 {
 		t.Fatalf("got %d credit notes, want 2 (one per funding invoice): %+v", len(adjuster.calls), adjuster.calls)
+	}
+	// Both invoices are locked before the first credit note is written, so the
+	// second one's lock is never requested while the number sequence is held.
+	locked := slices.Clone(adjuster.lockedBeforeDrafts)
+	slices.Sort(locked)
+	if !slices.Equal(locked, []string{"inv_base", "inv_up"}) {
+		t.Fatalf("invoices locked before the first credit note = %v, want [inv_base inv_up]", locked)
 	}
 	var sum int64
 	caps := map[string]int64{"inv_base": baseInv.TotalAmountCents, "inv_up": upInv.TotalAmountCents}

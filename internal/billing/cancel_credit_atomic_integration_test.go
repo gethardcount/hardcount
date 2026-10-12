@@ -74,6 +74,9 @@ func (f *failingDraftAdjuster) CreateAndIssueAdjustment(context.Context, string,
 func (f *failingDraftAdjuster) CreateAdjustmentDraftTx(context.Context, *sql.Tx, string, string, int64, string, string) (domain.CreditNote, error) {
 	return domain.CreditNote{}, f.err
 }
+func (f *failingDraftAdjuster) LockInvoicesForDraftsTx(context.Context, *sql.Tx, string, []string) error {
+	return nil
+}
 func (f *failingDraftAdjuster) Issue(context.Context, string, string) (domain.CreditNote, error) {
 	return domain.CreditNote{}, nil
 }

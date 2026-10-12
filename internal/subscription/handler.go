@@ -137,6 +137,10 @@ type CreditNoteIssuer interface {
 	// atomically with the item change; the caller issues it post-commit via
 	// Issue, and RetryPendingClawbackIssue re-issues it if that fails.
 	CreateAdjustmentDraftTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, grossCents int64, reason, description string) (domain.CreditNote, error)
+	// LockInvoicesForDraftsTx takes every listed invoice's credit-note lock
+	// before the first draft, so drafts on several invoices in one tx cannot
+	// deadlock with a concurrent credit note on one of them.
+	LockInvoicesForDraftsTx(ctx context.Context, tx *sql.Tx, tenantID string, invoiceIDs []string) error
 	// Issue finalizes a draft credit note (files the Stripe Tax reversal +
 	// applies the customer-balance credit). Idempotent — safe to retry.
 	Issue(ctx context.Context, tenantID, id string) (domain.CreditNote, error)
@@ -2048,7 +2052,15 @@ func (h *Handler) createClawbackDraftsTx(ctx context.Context, tx *sql.Tx, tenant
 	if h.creditNotes == nil || detail == nil {
 		return nil
 	}
-	for _, p := range clawbackPieces(detail) {
+	pieces := clawbackPieces(detail)
+	pieceIDs := make([]string, 0, len(pieces))
+	for _, p := range pieces {
+		pieceIDs = append(pieceIDs, p.InvoiceID)
+	}
+	if err := h.creditNotes.LockInvoicesForDraftsTx(ctx, tx, tenantID, pieceIDs); err != nil {
+		return fmt.Errorf("lock clawback source invoices: %w", err)
+	}
+	for _, p := range pieces {
 		cn, err := h.creditNotes.CreateAdjustmentDraftTx(ctx, tx, tenantID, p.InvoiceID, p.GrossCents, detail.ClawbackReason, detail.ClawbackMemo)
 		if err != nil {
 			return fmt.Errorf("create clawback credit note draft (source %s, %d cents): %w", p.InvoiceID, p.GrossCents, err)
