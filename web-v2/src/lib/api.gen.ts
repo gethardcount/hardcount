@@ -957,6 +957,12 @@ export interface paths {
                     /** @description Filter to subscriptions with a live item on this plan. */
                     plan_id?: string;
                     status?: string;
+                    /**
+                     * @description `failing` returns only subscriptions that carry a
+                     *     `billing_failure`: those waiting for their next billing attempt
+                     *     and those that are parked. Any other value is a 400.
+                     */
+                    billing?: "failing";
                     /** @description Case-insensitive substring match on display name or code. */
                     search?: string;
                     /** @description One of display_name, status, next_billing_at, trial_end_at, created_at (default). */

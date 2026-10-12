@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { GetV1SubscriptionsBilling } from './getV1SubscriptionsBilling';
 import type { GetV1SubscriptionsDir } from './getV1SubscriptionsDir';
 
 export type GetV1SubscriptionsParams = {
@@ -16,6 +17,12 @@ customer_id?: string;
  */
 plan_id?: string;
 status?: string;
+/**
+ * `failing` returns only subscriptions that carry a
+ * `billing_failure`: those waiting for their next billing attempt
+ * and those that are parked. Any other value is a 400.
+ */
+billing?: GetV1SubscriptionsBilling;
 /**
  * Case-insensitive substring match on display name or code.
  */

@@ -2782,6 +2782,11 @@ func buildSubWhere(f ListFilter) (string, []any) {
 		args = append(args, f.Status)
 		idx++
 	}
+	if f.Billing == ListBillingFailing {
+		// The shared predicate, so the list, the due scans and the gauge
+		// can never disagree about which subscriptions are failing.
+		clauses = append(clauses, domain.SubscriptionBillingFailingSQL("s"))
+	}
 	if f.Search != "" {
 		// One placeholder reused across both columns — Postgres
 		// allows repeating $N, and it keeps the pattern arg single-

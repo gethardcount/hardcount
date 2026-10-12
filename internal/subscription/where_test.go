@@ -3,6 +3,8 @@ package subscription
 import (
 	"strings"
 	"testing"
+
+	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
 func TestBuildSubWhere_Search(t *testing.T) {
@@ -47,5 +49,22 @@ func TestSubscriptionSortColumn_DisplayName(t *testing.T) {
 	}
 	if got := subscriptionSortColumn("name"); got != "s.display_name" {
 		t.Fatalf("name sort = %q, want s.display_name", got)
+	}
+}
+
+// TestBuildSubWhere_BillingFailing: ?billing=failing appends the shared
+// predicate (no placeholder of its own) and composes with the other filters
+// without shifting their placeholders.
+func TestBuildSubWhere_BillingFailing(t *testing.T) {
+	where, args := buildSubWhere(ListFilter{Status: "active", Billing: ListBillingFailing, Search: "acme"})
+	if !strings.Contains(where, domain.SubscriptionBillingFailingSQL("s")) {
+		t.Fatalf("where lacks the shared failing predicate: %s", where)
+	}
+	if !strings.Contains(where, "s.status = $1") || !strings.Contains(where, "ILIKE $2") || len(args) != 2 {
+		t.Fatalf("placeholders shifted: %s / %v", where, args)
+	}
+	// Any other value is not a filter; the handler rejects it before here.
+	if where, _ := buildSubWhere(ListFilter{Billing: "healthy"}); strings.Contains(where, "billing_failed_for") {
+		t.Fatalf("unknown billing value filtered: %s", where)
 	}
 }

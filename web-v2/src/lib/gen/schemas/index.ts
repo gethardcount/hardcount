@@ -38,6 +38,7 @@ export * from './getV1PublicCostDashboardToken200TotalsItem';
 export * from './getV1PublicCostDashboardToken200UsageItem';
 export * from './getV1PublicCostDashboardToken200UsageItemRulesItem';
 export * from './getV1PublicCostDashboardToken200UsageItemRulesItemDimensionMatch';
+export * from './getV1SubscriptionsBilling';
 export * from './getV1SubscriptionsDir';
 export * from './getV1SubscriptionsParams';
 export * from './getV1TestClocks200';

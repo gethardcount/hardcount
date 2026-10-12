@@ -2001,6 +2001,15 @@ paths:
           in: query
           schema:
             type: string
+        - name: billing
+          in: query
+          description: |
+            `failing` returns only subscriptions that carry a
+            `billing_failure`: those waiting for their next billing attempt
+            and those that are parked. Any other value is a 400.
+          schema:
+            type: string
+            enum: [failing]
         - name: search
           in: query
           description: Case-insensitive substring match on display name or code.

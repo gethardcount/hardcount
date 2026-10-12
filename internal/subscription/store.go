@@ -388,11 +388,19 @@ type MeterConflict struct {
 	SubscriptionCode string
 }
 
+// ListBillingFailing is the one value of ListFilter.Billing and of the
+// ?billing= query parameter on GET /v1/subscriptions.
+const ListBillingFailing = "failing"
+
 type ListFilter struct {
 	TenantID   string
 	CustomerID string
 	PlanID     string // Joins subscription_items to filter by item plan
 	Status     string
+	// Billing "failing" keeps only subscriptions with a live billing-failure
+	// record, retrying or parked (ADR-119). Empty = no filter. The handler
+	// rejects any other value.
+	Billing string
 	// Search filters by display_name OR code, case-insensitive
 	// substring (ILIKE, metacharacters escaped). Empty = no filter.
 	// Backs the dashboard list search box and the command palette.

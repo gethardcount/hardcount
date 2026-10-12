@@ -405,3 +405,44 @@ func TestClearBillingFailure(t *testing.T) {
 		}
 	})
 }
+
+// TestList_BillingFailingFilter: GET /v1/subscriptions?billing=failing returns
+// exactly the subscriptions with a live record, retrying and parked, and its
+// total counts the same set. Rows that only look like failures are left out: a
+// record for a due instant the row no longer has, a record on a clock-pinned
+// row, and the columns a canceled subscription keeps as evidence.
+func TestList_BillingFailingFilter(t *testing.T) {
+	s := newBFSeed(t, "list")
+	due := s.now.Add(-48 * time.Hour)
+	next := s.now.Add(time.Hour)
+	onClock := s.frozen.Add(-time.Hour)
+	s.sub(bfRow{id: "sub_ls_healthy", nextBilling: due})
+	s.sub(bfRow{id: "sub_ls_retrying", nextBilling: due, failedFor: &due, count: 2, nextAttempt: &next})
+	s.sub(bfRow{id: "sub_ls_parked", nextBilling: due, failedFor: &due, count: 8})
+	s.sub(bfRow{id: "sub_ls_stale", nextBilling: due, failedFor: ptr(due.Add(-30 * 24 * time.Hour)), count: 8})
+	s.sub(bfRow{id: "sub_ls_clock", nextBilling: onClock, clockID: s.clockID, failedFor: &onClock, count: 8})
+	s.sub(bfRow{id: "sub_ls_canceled", status: "canceled", nextBilling: due, failedFor: &due, count: 8})
+
+	subs, total, err := s.store.List(s.ctx, subscription.ListFilter{
+		TenantID: s.tenantID, Billing: subscription.ListBillingFailing, Sort: "display_name", SortDir: "asc",
+	})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if got := ids(subs); total != 2 || len(got) != 2 || got[0] != "sub_ls_parked" || got[1] != "sub_ls_retrying" {
+		t.Fatalf("billing=failing returned %v (total %d), want [sub_ls_parked sub_ls_retrying] and 2", got, total)
+	}
+	for _, sub := range subs {
+		if sub.BillingFailure == nil {
+			t.Fatalf("%s is in the failing list but reads no billing_failure", sub.ID)
+		}
+	}
+	// It composes with the exact-match status filter.
+	if _, total, err := s.store.List(s.ctx, subscription.ListFilter{TenantID: s.tenantID, Billing: subscription.ListBillingFailing, Status: "trialing"}); err != nil || total != 0 {
+		t.Fatalf("billing=failing&status=trialing: total=%d err=%v, want 0", total, err)
+	}
+	// Control: no filter returns all six.
+	if _, total, err := s.store.List(s.ctx, subscription.ListFilter{TenantID: s.tenantID}); err != nil || total != 6 {
+		t.Fatalf("unfiltered: total=%d err=%v, want 6", total, err)
+	}
+}

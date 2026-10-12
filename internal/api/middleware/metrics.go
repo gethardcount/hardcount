@@ -538,13 +538,28 @@ func RegisterQueueDepthGauges(count func(query string) (float64, error)) {
 	// one tick, so on a busy day one tick can run for hours. That looks like a
 	// wedged tick on velox_leader_last_tick_age_seconds. These two tell the
 	// cases apart: a draining tick shrinks the count; a wedged one doesn't.
-	// The age also grows for a sub that fails on every tick, which otherwise
-	// shows up only as error logs. The predicate is GetDueBilling's: wall-clock
-	// subs only, because test-clock subs bill on Advance.
-	dueHelp := "Subscriptions due for billing now (wall-clock subs; test-clock subs bill on Advance). Spikes on busy billing days and falls as the scheduler drains it. -1 = metric query failed."
-	ageHelp := "Seconds since the oldest due subscription became due; 0 when nothing is due. Alert when it exceeds 2x the billing interval: billing is behind, or a sub fails on every tick. -1 = metric query failed."
+	// The predicate is GetDueBilling's: wall-clock subs only, because
+	// test-clock subs bill on Advance.
+	//
+	// A sub with a saved billing failure (ADR-119) is left out of both and is
+	// counted by velox_billing_failing_subscriptions below, so every owed
+	// wall-clock sub is in exactly one of the two: "due and not failing" or
+	// "failing". What still grows the age here is billing that is behind, and
+	// a sub whose attempts fail without being saved (an interrupted run, a
+	// lost connection); its id is in the "bill subscription failed" log.
+	//
+	// billingFailing is a hand copy of domain.SubscriptionBillingFailingSQL,
+	// as duePredicate is of the scan's: this package imports no domain
+	// package. TestBillingGauges_DueAndFailingPartition pins the two copies
+	// to each other on real rows.
+	const billingFailing = `status IN ('active','trialing') AND test_clock_id IS NULL
+		AND billing_failed_for IS NOT NULL
+		AND billing_failed_for IS NOT DISTINCT FROM LEAST(next_billing_at, CASE WHEN status = 'active' THEN cancel_at END)`
+	dueHelp := "Subscriptions due for billing now whose billing is not failing (wall-clock subs; test-clock subs bill on Advance). Spikes on busy billing days and falls as the scheduler drains it. Subscriptions with a saved billing failure are in velox_billing_failing_subscriptions. -1 = metric query failed."
+	ageHelp := "Seconds since the oldest due subscription whose billing is not failing became due; 0 when there is none. Alert when it exceeds 2x the billing interval: billing is behind, or a subscription's attempts are interrupted or hit connection errors on every tick. -1 = metric query failed."
 	const duePredicate = `status IN ('active', 'trialing') AND test_clock_id IS NULL AND livemode = %t
-		AND (next_billing_at <= now() OR (status = 'active' AND cancel_at IS NOT NULL AND cancel_at <= now()))`
+		AND (next_billing_at <= now() OR (status = 'active' AND cancel_at IS NOT NULL AND cancel_at <= now()))
+		AND NOT (` + billingFailing + `)`
 	for _, m := range []struct {
 		label string
 		live  bool
@@ -561,6 +576,28 @@ func RegisterQueueDepthGauges(count func(query string) (float64, error)) {
 		} {
 			q := g.query
 			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: g.name, Help: g.help, ConstLabels: prometheus.Labels{"mode": m.label}}, func() float64 {
+				n, err := count(q)
+				if err != nil {
+					return -1
+				}
+				return n
+			})
+		}
+	}
+	// Subscriptions whose billing is failing (ADR-119), by state. retrying =
+	// the billing run will attempt it again on its own; parked = eight
+	// attempts failed and nothing retries it until an operator calls
+	// POST /v1/subscriptions/{id}/retry-billing. A cluster fact, computed
+	// from the database on every replica's scrape. The livemode literal is
+	// explicit because the scrape's bypass transaction sets no app.livemode.
+	failingHelp := "Subscriptions with a saved billing failure on the work they have due, by state. retrying = waiting for the next automatic attempt; parked = automatic attempts have stopped and an invoice is not being issued until an operator retries billing. Alert on parked > 0, and on the sum rising: one cause is failing many subscriptions. -1 = metric query failed."
+	for _, m := range []struct {
+		label string
+		live  bool
+	}{{"live", true}, {"test", false}} {
+		for _, st := range []struct{ label, nextAttempt string }{{"retrying", "IS NOT NULL"}, {"parked", "IS NULL"}} {
+			q := fmt.Sprintf(`SELECT COUNT(*) FROM subscriptions WHERE %s AND livemode = %t AND billing_next_attempt_at %s`, billingFailing, m.live, st.nextAttempt)
+			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: "velox_billing_failing_subscriptions", Help: failingHelp, ConstLabels: prometheus.Labels{"mode": m.label, "state": st.label}}, func() float64 {
 				n, err := count(q)
 				if err != nil {
 					return -1

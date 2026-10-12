@@ -493,11 +493,21 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
+	// ?billing=failing lists the subscriptions whose billing is failing
+	// (ADR-119). It is a closed set: an unknown value is a 400, never an
+	// unfiltered list that looks like "everything is failing".
+	billing := r.URL.Query().Get("billing")
+	if billing != "" && billing != ListBillingFailing {
+		respond.BadRequest(w, r, `billing must be "failing" when set`)
+		return
+	}
+
 	subs, total, err := h.svc.List(r.Context(), ListFilter{
 		TenantID:   tenantID,
 		CustomerID: r.URL.Query().Get("customer_id"),
 		PlanID:     r.URL.Query().Get("plan_id"),
 		Status:     r.URL.Query().Get("status"),
+		Billing:    billing,
 		Search:     strings.TrimSpace(r.URL.Query().Get("search")),
 		Limit:      limit,
 		Offset:     offset,

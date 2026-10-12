@@ -863,6 +863,21 @@ func (e PostV1RatingRulesJSONBodyMode) Valid() bool {
 	}
 }
 
+// Defines values for GetV1SubscriptionsParamsBilling.
+const (
+	Failing GetV1SubscriptionsParamsBilling = "failing"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsBilling enum.
+func (e GetV1SubscriptionsParamsBilling) Valid() bool {
+	switch e {
+	case Failing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1SubscriptionsParamsDir.
 const (
 	Asc  GetV1SubscriptionsParamsDir = "asc"
@@ -2099,6 +2114,11 @@ type GetV1SubscriptionsParams struct {
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
 	Status string `form:"status,omitempty" json:"status,omitempty"`
 
+	// Billing `failing` returns only subscriptions that carry a
+	// `billing_failure`: those waiting for their next billing attempt
+	// and those that are parked. Any other value is a 400.
+	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
+
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
@@ -2108,6 +2128,9 @@ type GetV1SubscriptionsParams struct {
 	Limit  int                         `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset int                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// GetV1SubscriptionsParamsBilling defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsBilling string
 
 // GetV1SubscriptionsParamsDir defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsDir string
@@ -4599,6 +4622,19 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "billing" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "billing", r.URL.Query(), &params.Billing, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "billing"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "billing", Err: err})
 		}
 		return
 	}
