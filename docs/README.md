@@ -10,7 +10,8 @@ docs in the order listed. Words you may not know are in the
 2. [What Velox is not](../README.md#what-velox-is-not): the cases where
    another tool is the better choice.
 3. [What's in the box](features.md): every feature, in one list.
-4. [Why Velox exists, and how it compares](why-velox.md).
+4. [How Velox compares](comparison.md) with four open-source billing
+   engines, with sources, and [why Velox exists](why-velox.md).
 5. [How Velox is engineered](ENGINEERING.md): the principles, one page.
 6. [Will it take our volume?](scale.md): what was measured, and where one
    Postgres stops being enough.

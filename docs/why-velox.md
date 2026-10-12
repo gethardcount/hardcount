@@ -1,4 +1,4 @@
-# Why Velox exists, and how it compares
+# Why Velox exists
 
 Velox is built around three market needs that Stripe Billing structurally cannot serve, plus one that every billing system is judged on.
 
@@ -36,44 +36,6 @@ Velox is built for that moment:
 - Every usage line links straight to the events behind it, filtered to that customer, meter and period.
 - The audit log is append-only, enforced by database triggers rather than convention.
 
-## How it fits
+## How it compares
 
-|                          | **Velox** | Stripe Billing | Lago        | Orb / Metronome¹  | OpenMeter²        |
-|--------------------------|-----------|----------------|-------------|-------------------|-------------------|
-| OSS / self-host          | ✅        | ❌             | ✅          | ❌                | ✅                |
-| AI-native pricing        | ✅        | ❌             | ⚠️ generic  | ⚠️ closed source  | ⚠️ metering-first |
-| Full billing engine      | ✅        | ✅             | ✅          | ✅                | ✅ beta           |
-| Stripe-grade primitives  | ✅        | ✅             | ⚠️          | ✅                | ⚠️                |
-| Prepaid commits + drawdown | ✅      | ❌             | ⚠️ wallets  | ✅                | ❌                |
-| Per-customer margin (COGS) | ✅ in-app | ❌           | ❌          | ❌ warehouse join | ⚠️ cost, no margin |
-| Pricing                  | OSS       | 0.5% of GMV    | OSS / cloud | sales-gated       | OSS / cloud       |
-| Licence                  | MIT       | proprietary    | AGPL-3.0    | proprietary       | Apache-2.0        |
-| Dunning without paying³  | ✅        | ✅             | ❌          | ✅                | ⚠️ Stripe Invoicing |
-| Data sovereignty         | ✅        | ❌             | ⚠️          | ❌                | ✅                |
-
-¹ Metronome was acquired by Stripe (Jan 2026). It is still SaaS-only, so your billing data lives on Stripe's servers either way.
-
-² OpenMeter ([acquired by Kong](https://konghq.com/blog/news/kong-acquires-openmeter), Sep 2025) now runs a full invoice lifecycle; billing is marked beta. It ships LLM cost tables with a per-feature, per-customer cost query. That is cost, not margin: nothing subtracts it from revenue. The difference is shape:
-
-- It runs on Kafka + ClickHouse + Postgres.
-- It has no dunning of its own. Collection is handed to Stripe Invoicing (Stripe's percentage fee applies), or to a custom-invoicing integration you build.
-
-Everything in this footnote was checked against the OpenMeter source on 2026-09-28.
-
-³ Open-core self-hosting isn't automatically free of gates. Lago's self-hosted edition checks a `LAGO_LICENSE` key against their licence server. A 30-entry `PREMIUM_INTEGRATIONS` list decides what's enabled. `auto_dunning` is on it, alongside SSO, RBAC, progressive billing and every accounting/CRM integration ([source](https://github.com/getlago/lago-api/blob/main/app/models/organization.rb)). Velox has no licence key and gates nothing. One caveat: some of what Lago gates (SSO, RBAC, revenue recognition) Velox simply doesn't have. See [What Velox is not](../README.md#what-velox-is-not).
-
-**Verified as of 2026-08-17.** On the pricing row, neither Orb nor Metronome publishes an annual list price:
-
-- Orb's three tiers all read "Custom pricing" behind Contact Sales ([pricing](https://www.withorb.com/pricing)).
-- Metronome publishes a Starter rate: 0.8% of billing volume plus $0.04 per 1k ingest events. Its Custom tier is behind sales ([pricing](https://metronome.com/pricing)).
-
-Competitor pricing, licensing and ownership all move. Re-check any cell you plan to rely on.
-
-Velox lives in the empty cell: **OSS + self-host + AI-native + full billing engine.**
-
-The decision tree:
-
-- Pick **Stripe Billing** (or Stripe + Metronome) for hosted SaaS billing.
-- Pick **Lago** for generic OSS billing without AI-shaped pricing.
-- Pick **Orb/Metronome** if you can't self-host and can budget for usage-based contracts.
-- Pick **Velox** when you need AI-native billing that runs in your own VPC.
+A fact-by-fact comparison with Lago, OpenMeter, Flexprice and Kill Bill, with sources: [How Velox compares](comparison.md).
