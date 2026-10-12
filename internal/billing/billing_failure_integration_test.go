@@ -190,6 +190,10 @@ type observedSubs struct {
 	// non-empty page and released its row locks, before the engine sees it.
 	afterFetch func()
 	fetched    sync.Once
+	// beforeFetch, if set, runs before each GetDueBilling with its 1-based
+	// call number.
+	beforeFetch func(call int)
+	fetches     atomic.Int32
 
 	mu      sync.Mutex
 	results []bool // what each RecordBillingFailure call reported
@@ -198,6 +202,9 @@ type observedSubs struct {
 }
 
 func (a *observedSubs) GetDueBilling(ctx context.Context, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+	if n := int(a.fetches.Add(1)); a.beforeFetch != nil {
+		a.beforeFetch(n)
+	}
 	subs, err := a.subStoreAdapter.GetDueBilling(ctx, before, exclude, limit)
 	if err == nil && len(subs) > 0 && a.afterFetch != nil {
 		a.fetched.Do(a.afterFetch)
@@ -792,6 +799,45 @@ func TestBillingFailure_AttemptFromAStalePageIsNotMade(t *testing.T) {
 	}
 	if bf := env.get(t, a.ID).BillingFailure; bf == nil || bf.Attempts != 1 {
 		t.Fatalf("failure = %+v, want attempts 1", bf)
+	}
+}
+
+// TestBillingFailure_GateDeclinedSubIsNotCountedAsNoProgress: a run that the
+// attempt-time gate stopped has not attempted the subscription. If the record
+// is then cleared while that run is still draining (an operator retry whose
+// own attempt did not complete), the subscription comes back on the run's next
+// page. It must not be saved as "made no progress": the run never tried it.
+// The run leaves it for the next run, as it does an uncounted failure.
+func TestBillingFailure_GateDeclinedSubIsNotCountedAsNoProgress(t *testing.T) {
+	env := newBillFailureEnv(t, "Billing Failure Gate Declined")
+	a := env.dueSub(t, "sub-a", env.planBad, env.periodEnd)
+
+	other := env.newEngine(&subStoreAdapter{env.subs}, env.pricing)
+	stale := &observedSubs{subStoreAdapter: &subStoreAdapter{env.subs}}
+	stale.afterFetch = func() {
+		if _, failures := other.RunCycleForTenant(env.ctx, env.tenantID, 50); len(failures) != 1 {
+			t.Errorf("the other run: failures=%v, want the one failure", failures)
+		}
+	}
+	stale.beforeFetch = func(call int) {
+		if call != 2 {
+			return
+		}
+		// Between the stale run's pages the record is cleared and nothing
+		// re-records it: the subscription is due again with no record.
+		if _, err := env.subs.ClearBillingFailure(env.ctx, env.tenantID, a.ID, nil); err != nil {
+			t.Errorf("clear between pages: %v", err)
+		}
+	}
+	gen, errs := env.newEngine(stale, env.pricing).RunCycle(env.ctx, 50, nil)
+	if gen != 0 || len(errs) != 0 {
+		t.Fatalf("the run that never attempted the subscription: generated=%d errors=%v, want nothing reported", gen, errs)
+	}
+	if got := env.pricing.calls.Load(); got != 1 {
+		t.Fatalf("plan was read %d times, want 1 (only the other run's attempt)", got)
+	}
+	if cols := env.billingColumns(t, a.ID); cols != blankBillingColumns {
+		t.Fatalf("a failure was saved for a subscription this run never attempted: %s", cols)
 	}
 }
 

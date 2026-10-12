@@ -116,6 +116,14 @@ const (
 	refusalNoProgress  = "Billing made no progress: the attempt finished without an error but the subscription is still due."
 )
 
+// errBillingGated is returned by billSubscription when the attempt-time gate
+// declined the attempt: the fresh row carries a failure another run saved, and
+// its wait has not passed (or it is parked). Nothing was attempted, so it is
+// not a failure: attemptSub does not record or log it, drainDue leaves the sub
+// out of the rest of the run without reporting it, and BillDueNow treats it as
+// a clean return.
+var errBillingGated = errors.New("billing attempt declined: a saved billing failure is waiting or parked")
+
 // errBillPanic is the cause recorded when a billing attempt panics. The panic
 // value and stack go to the log only.
 var errBillPanic = errors.New("billing attempt panicked")
@@ -265,7 +273,7 @@ func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, logArg
 		}
 	}()
 	n, err = e.billSubscription(ctx, sub, &seen)
-	if err != nil {
+	if err != nil && !errors.Is(err, errBillingGated) {
 		e.reportBillFailure(ctx, seen, n, err, logArgs...)
 	}
 	return n, err
@@ -302,6 +310,11 @@ func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string
 		return 0, fmt.Errorf("read subscription %s: %w", subscriptionID, err)
 	}
 	n, err := e.attemptSub(ctx, sub, logArgs...)
+	if errors.Is(err, errBillingGated) {
+		// A billing run saved a failure between the caller's clear and this
+		// attempt. The response shows that record.
+		return n, nil
+	}
 	if err != nil {
 		return n, err
 	}

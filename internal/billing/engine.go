@@ -1795,6 +1795,13 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 			attempted[sub.ID] = true
 			n, err := e.attemptSub(ctx, sub, logArgs...)
 			generated += n
+			if errors.Is(err, errBillingGated) {
+				// Not attempted, so not a failure and never "still due" in
+				// this run. If its record is cleared while this run is still
+				// draining, the next run attempts it.
+				exclude = append(exclude, sub.ID)
+				continue
+			}
 			if err != nil {
 				exclude = append(exclude, sub.ID)
 				failures = append(failures, SubBillError{SubscriptionID: sub.ID, Err: err})
@@ -1995,11 +2002,12 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 		// Billing-failure gate, re-checked at attempt time (ADR-119). The due
 		// scans already skip a waiting or parked sub, but this row may come
 		// from a page fetched before another run recorded a failure. Without
-		// the re-check that stale page would attempt past the wait. The scan
-		// hides the sub from here on, so it does not come back as still due.
+		// the re-check that stale page would attempt past the wait. The
+		// sentinel tells the caller no attempt was made; count is kept because
+		// an earlier iteration of a catch-up may already have invoiced.
 		// Never set on a clock-pinned sub.
 		if bf := sub.BillingFailure; bf != nil && (bf.NextAttemptAt == nil || bf.NextAttemptAt.After(e.clock.Now(ctx))) {
-			return count, nil
+			return count, errBillingGated
 		}
 
 		// Caught-up check. The clock the sub lives on (test or wall)

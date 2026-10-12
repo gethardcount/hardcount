@@ -297,10 +297,17 @@ func IsCheckViolation(err error) bool {
 // working on cannot cause any of these, so a caller that counts failures
 // against a row (the billing run, ADR-119) does not count one.
 //
-// A timeout is deliberately NOT transient: not a statement timeout (57014),
-// not a lock timeout (55P03), and not a Go deadline. A timeout is the only way
-// a query that is too slow for its own data ever shows up, and it recurs.
-// Resource exhaustion (class 53) is not transient either.
+// A timeout the server or the caller decided is deliberately NOT transient:
+// not a statement timeout (57014), not a lock timeout (55P03), and not a Go
+// deadline. Such a timeout is the only way a query that is too slow for its
+// own data ever shows up, and it recurs. Resource exhaustion (class 53) is not
+// transient either.
+//
+// A network timeout with no ctx error behind it IS transient: the kernel gave
+// up on a connection to a dead or partitioned server (ETIMEDOUT), or a dial
+// timed out. That is a lost connection that never got a reset. The driver
+// reports a Go deadline as a wrapped context error, which the first check
+// below has already turned away, so the two cannot be confused by type.
 func IsTransient(err error) bool {
 	if err == nil {
 		return false
@@ -325,7 +332,7 @@ func IsTransient(err error) bool {
 		return true
 	}
 	var netErr net.Error
-	return errors.As(err, &netErr) && !netErr.Timeout()
+	return errors.As(err, &netErr)
 }
 
 func NullableString(v string) any {

@@ -57,7 +57,9 @@ func TestIsTransient(t *testing.T) {
 		{"net error, not a timeout", fmt.Errorf("write: %w", fakeNetErr{}), true},
 		{"*net.OpError", &net.OpError{Op: "read", Err: errors.New("connection reset by peer")}, true},
 
-		{"net error that is a timeout", fmt.Errorf("write: %w", fakeNetErr{timeout: true}), false},
+		// A kernel or dial timeout: the connection was lost without a reset
+		// (a dead or partitioned server). No ctx error is in the chain.
+		{"net error that is a timeout", fmt.Errorf("write: %w", fakeNetErr{timeout: true}), true},
 		{"context.DeadlineExceeded", fmt.Errorf("query: %w", context.DeadlineExceeded), false},
 		{"context.Canceled", fmt.Errorf("query: %w", context.Canceled), false},
 		{"net error wrapping a deadline", fmt.Errorf("%w: %w", fakeNetErr{}, context.DeadlineExceeded), false},

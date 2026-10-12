@@ -173,6 +173,10 @@ func TestDueScans_WaitingAndParkedAreSkippedBeforeLimit(t *testing.T) {
 
 	s.sub(bfRow{id: "sub_bf_trial_parked", status: "trialing", nextBilling: old(1), trialEnd: ptr(old(3000)), failedFor: ptr(old(1)), count: 8})
 	s.sub(bfRow{id: "sub_bf_trial_healthy", status: "trialing", nextBilling: old(1), trialEnd: ptr(old(2999))})
+	// Parked like the first, but a cancel is scheduled for the trial end. The
+	// free trial-end cancel is not the work that failed, so the trial scan
+	// must still hand this row to it.
+	s.sub(bfRow{id: "sub_bf_trial_parked_cancel", status: "trialing", nextBilling: old(1), trialEnd: ptr(old(2998)), cancelAt: ptr(old(2998)), failedFor: ptr(old(1)), count: 8})
 
 	s.sub(bfRow{id: "sub_bf_clk_parked", clockID: s.clockID, nextBilling: s.frozen.Add(-time.Hour), failedFor: ptr(s.frozen.Add(-time.Hour)), count: 8})
 
@@ -240,8 +244,11 @@ func TestDueScans_WaitingAndParkedAreSkippedBeforeLimit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("scan: %v", err)
 		}
-		if g := ids(got); !slices.Equal(g, []string{"sub_bf_trial_healthy"}) {
-			t.Fatalf("got %v, want [sub_bf_trial_healthy] — a parked trialing sub must not be activated by the trial scan", g)
+		if g := ids(got); !slices.Equal(g, []string{"sub_bf_trial_healthy", "sub_bf_trial_parked_cancel"}) {
+			t.Fatalf("got %v, want [sub_bf_trial_healthy sub_bf_trial_parked_cancel]: a parked trialing sub must not be activated by the trial scan, but one with a cancel due at trial end must still reach the free cancel", g)
+		}
+		if s.get("sub_bf_trial_parked_cancel").BillingFailure == nil {
+			t.Fatal("setup: the cancel-scheduled trialing row must still carry its live record")
 		}
 	})
 

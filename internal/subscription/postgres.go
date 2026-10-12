@@ -2398,6 +2398,13 @@ func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID,
 // gate it would attempt a parked trial flip on every tick, and could activate
 // a sub whose saved failure then still gates its first close. The billing run
 // writes the record; this scan only respects it.
+//
+// The gate covers the activation branch only. A row with a cancel due at
+// trial end (the same test as trialCancelDue) is always returned: the free
+// trial-end cancel is not the work that failed, and a cancel the API accepted
+// on a parked trialing sub must still fire. Cancelling it moves the row out of
+// active/trialing, which ends the record. If the free cancel itself keeps
+// failing, it is re-attempted every tick with a log line, as before ADR-119.
 func (s *PostgresStore) ListExpiredTrials(ctx context.Context, before time.Time, livemode bool, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -2416,7 +2423,9 @@ func (s *PostgresStore) ListExpiredTrials(ctx context.Context, before time.Time,
 		  AND s.test_clock_id IS NULL
 		  AND s.trial_end_at IS NOT NULL
 		  AND s.trial_end_at <= $2
-		  AND `+domain.SubscriptionBillingGateSQL("s", "$2")+`
+		  AND (COALESCE(s.cancel_at_period_end, false)
+		       OR (s.cancel_at IS NOT NULL AND s.cancel_at <= s.trial_end_at)
+		       OR `+domain.SubscriptionBillingGateSQL("s", "$2")+`)
 		ORDER BY s.trial_end_at ASC
 		LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
