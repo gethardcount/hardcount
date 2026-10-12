@@ -3554,6 +3554,19 @@ func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (dom
 	return created, nil
 }
 
+// nextInvoiceNumber allocates an invoice number on the caller's transaction
+// when there is one. Inside a transaction the number must never come from the
+// settings store's own connection: the tenant's sequence row may already be
+// locked by this same transaction (a credit-note number taken earlier holds it
+// to commit), and a second connection then waits on it until the request times
+// out. A rollback also returns the number, so no gap is left.
+func (e *Engine) nextInvoiceNumber(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
+	if tx != nil {
+		return e.settings.NextInvoiceNumberTx(ctx, tx, tenantID)
+	}
+	return e.settings.NextInvoiceNumber(ctx, tenantID)
+}
+
 // BillOnCreateTx is the in-transaction variant of BillOnCreate: it builds and
 // inserts the day-1 in_advance invoice on the caller's tx but does NOT finalize
 // (audit / tax-commit / auto-charge are external and must run after the tx
@@ -3580,10 +3593,7 @@ func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subs
 		return domain.Invoice{}, false, nil
 	}
 
-	// NextInvoiceNumber is monotonic; minting outside the tx means a rolled-back
-	// swap leaves a harmless invoice-number gap (acceptable, like the cycle
-	// path's idempotent-skip note) — never a wrong or duplicate number.
-	invoiceNumber, err := e.settings.NextInvoiceNumber(ctx, sub.TenantID)
+	invoiceNumber, err := e.nextInvoiceNumber(ctx, tx, sub.TenantID)
 	if err != nil {
 		return domain.Invoice{}, false, fmt.Errorf("mint invoice number: %w", err)
 	}
@@ -4421,7 +4431,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	dueAt := now.AddDate(0, 0, netDays)
 	totalWithTax := taxApp.SubtotalCents - taxApp.DiscountCents + taxApp.TaxAmountCents
 
-	invoiceNumber, err := e.settings.NextInvoiceNumber(ctx, sub.TenantID)
+	invoiceNumber, err := e.nextInvoiceNumber(ctx, tx, sub.TenantID)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("mint invoice number on cancel: %w", err)
 	}

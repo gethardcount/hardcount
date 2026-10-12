@@ -59,6 +59,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **An immediate switch between monthly and yearly billing on a paid in-advance plan works again (2026-10-12).** Since the gap-free credit-note numbering change the same day, the swap waited on its own lock until the request timed out, then rolled back. The new period's invoice number is now taken on the swap's transaction. No amounts were affected.
+
 - **A cancel, swap or downgrade that credits several invoices no longer deadlocks with a credit note on one of them (2026-10-12).** Since the gap-free numbering change below, one of the two requests failed with a database deadlock error. The change now takes every funding invoice's lock before it writes its first credit note. No amounts were affected.
 
 - **A failed change no longer leaves a gap in credit-note numbers (2026-10-12).** The number was reserved in its own transaction, so a cancel or swap that rolled back still used one up (CN-000003 was skipped in the ADR-118 walk). It is now reserved on the transaction that writes the credit note, as invoice numbers already are, and a rollback returns it.
