@@ -7,7 +7,9 @@
 #
 # Build context is the REPO ROOT (see docker-compose.yml):
 #   docker build -f deploy/compose/Dockerfile.dashboard .
-FROM node:22-alpine AS build
+# The build stage runs on the machine doing the build: its output is static
+# files, the same for every platform.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 
 # Mirror the repo layout (/repo/web-v2 + /repo/api): the SPA's prebuild
 # hook copies ../api/openapi.yaml into public/ — the build fails without

@@ -9,7 +9,9 @@
 # (the go-version-consistency step in .github/workflows/ci.yml), because the
 # docker job only runs on main: bumping go.mod in a PR used to leave main's
 # image build broken with nothing failing until after the merge.
-FROM golang:1.26.9-alpine AS builder
+# The builder runs on the machine doing the build and cross-compiles for
+# the target, so a multi-platform build needs no emulation.
+FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
@@ -20,7 +22,9 @@ RUN go mod download
 COPY . .
 # VERSION is stamped by the CI release job (git tag) or defaults to "dev".
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build \
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X github.com/sagarsuperuser/velox/internal/version.Version=${VERSION}" \
     -o /velox ./cmd/velox
 

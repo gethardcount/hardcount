@@ -17,6 +17,7 @@ Older entries keep their original text.
 
 ### Changed
 
+- **Release images are built for ARM as well as Intel/AMD (2026-10-12, #959).** `docker pull ghcr.io/getvelox/velox` failed on Apple Silicon Macs and ARM servers with "no matching manifest for linux/arm64". Both images are now published for `linux/amd64` and `linux/arm64`, starting with the next release.
 - **Dashboard build tooling updated; 28 of 35 dependency advisories cleared (2026-10-12).** The API client generator (orval) moves to 8.22.0, the first version with fixes for two critical advisories that apply while generating code, and other build-time packages move to patched versions. Seven advisories remain, all one denial-of-service issue in `braces` reached through build tools, with no fixed version published yet.
 
 ### Fixed
