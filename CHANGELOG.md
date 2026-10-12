@@ -19,6 +19,10 @@ Older entries keep their original text.
 
 - **Dashboard build tooling updated; 28 of 35 dependency advisories cleared (2026-10-12).** The API client generator (orval) moves to 8.22.0, the first version with fixes for two critical advisories that apply while generating code, and other build-time packages move to patched versions. Seven advisories remain, all one denial-of-service issue in `braces` reached through build tools, with no fixed version published yet.
 
+### Fixed
+
+- **The buyer's tax ID no longer prints on top of the tax line in the invoice PDF (2026-10-12, #164).** On an invoice with tax and a buyer tax ID, the ID was drawn over the tax row in the totals. It is now printed once, in the "Bill to" block, and uses the ID recorded on the invoice when it was built, falling back to the customer's billing profile.
+
 ## [0.4.0] - 2026-10-12
 
 The first release since August. It carries the September and October money-path fixes and makes two or more replicas the supported production setup.

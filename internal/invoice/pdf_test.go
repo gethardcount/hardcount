@@ -667,3 +667,33 @@ func TestPaymentTermsLine(t *testing.T) {
 		t.Errorf("Net 30: got %q", got)
 	}
 }
+
+// TestBuyerTaxID pins which tax ID the bill-to block prints. The invoice's
+// snapshot wins over the live billing profile so an issued invoice does not
+// change when the customer edits their profile; the profile is the fallback.
+// The id is drawn in the bill-to block only: it was also drawn in the totals,
+// on top of the tax row (#164).
+//
+// MANUAL: render an invoice with tax above zero and a buyer tax ID, and check
+// the tax row in the totals has nothing printed over it (MANUAL_TEST.md).
+func TestBuyerTaxID(t *testing.T) {
+	withSnapshot := domain.Invoice{}
+	withSnapshot.TaxID = " FR12345678901 "
+
+	cases := []struct {
+		name   string
+		inv    domain.Invoice
+		billTo BillToInfo
+		want   string
+	}{
+		{"snapshot wins over profile", withSnapshot, BillToInfo{TaxID: "FR99999999999"}, "FR12345678901"},
+		{"snapshot alone", withSnapshot, BillToInfo{}, "FR12345678901"},
+		{"profile is the fallback", domain.Invoice{}, BillToInfo{TaxID: "DE123456789"}, "DE123456789"},
+		{"neither", domain.Invoice{}, BillToInfo{}, ""},
+	}
+	for _, tc := range cases {
+		if got := buyerTaxID(tc.inv, tc.billTo); got != tc.want {
+			t.Errorf("%s: buyerTaxID = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

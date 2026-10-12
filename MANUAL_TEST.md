@@ -817,6 +817,7 @@ whole cents — only the RATE gains precision.
 
 ## FLOW B10: Manual tax + customer tax status
 
+- [~] Invoice PDF with tax above zero and a buyer tax ID: the tax row in the totals has nothing printed over it, and "Tax ID: …" appears once, in the Bill to block. *(walked 2026-10-12 by rendering a €100 + 20% VAT invoice with tax ID `FR12345678901`: before the fix the ID was drawn over "VAT (20%) [FR]"; after it, the totals are clean and the ID is under the buyer name. #164.)*
 Manual provider applies one flat tenant rate to every customer regardless of country (the old `tax_home_country` / cross-border zero-rating model was dropped — ADR-038). Exemption is driven solely by the customer's `tax_status` (`standard` / `exempt` / `reverse_charge`). Rate precision is covered by B2. <!-- currency-ok: documents the dropped tax_home_country model -->
 
 - [~] Settings → set tax rate `18` + tax name `IGST` (`tenant_settings.tax_rate=18.0000`; no `tax_rate_bp` / `tax_home_country` columns exist). <!-- currency-ok: states the columns were removed --> *(manual 2026-07-20: via the Settings → Tax tab; DB column 18.0000 exact.)*

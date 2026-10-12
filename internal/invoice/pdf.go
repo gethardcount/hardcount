@@ -244,6 +244,18 @@ type BillToInfo struct {
 	TaxID string
 }
 
+// buyerTaxID is the buyer's tax registration to print in the bill-to block.
+// The invoice's own snapshot wins: it is the id tax was calculated with when
+// the invoice was built, and an issued invoice must not change because the
+// customer later edited their billing profile. Invoices built without a
+// snapshot fall back to the profile.
+func buyerTaxID(inv domain.Invoice, billTo BillToInfo) string {
+	if id := strings.TrimSpace(inv.TaxID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(billTo.TaxID)
+}
+
 // Currency symbol map
 var currencySymbols = map[string]string{
 	"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "CNY": "¥",
@@ -485,11 +497,11 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		textAt(rightX, by, billTo.Country)
 		by += 12
 	}
-	if billTo.TaxID != "" {
+	if id := buyerTaxID(inv, billTo); id != "" {
 		// Buyer registration — same plain label the credit-note PDF
 		// uses (the buyer supplies the id; guessing a jurisdiction
 		// label from their country risks mislabeling it).
-		textAt(rightX, by, "Tax ID: "+billTo.TaxID)
+		textAt(rightX, by, "Tax ID: "+id)
 		by += 12
 	}
 	if billTo.Email != "" {
@@ -607,13 +619,10 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 			y += 4
 		}
 
-		// Show customer's Tax ID below the tax line
-		if inv.TaxID != "" {
-			setFont(false, 7)
-			setColor(120, 120, 120)
-			textAt(totalsX, y-12, inv.TaxID)
-			y += 2
-		}
+		// The buyer's tax ID is printed once, in the bill-to block (see
+		// buyerTaxID). It used to be drawn here as well, 4pt below the tax
+		// row's baseline at the same left edge, which put it on top of the
+		// tax label (#164).
 	} else if inv.TaxReverseCharge {
 		// Even with zero-amount tax, surface the reverse-charge row so the
 		// invoice reads as a deliberate tax treatment rather than a bug.
