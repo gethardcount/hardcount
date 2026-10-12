@@ -200,7 +200,8 @@ type observedSubs struct {
 	fetches     atomic.Int32
 
 	mu      sync.Mutex
-	results []bool // what each RecordBillingFailure call reported
+	scanned []string // every id GetDueBilling returned, in order
+	results []bool   // what each RecordBillingFailure call reported
 	// writes counts every RecordBillingFailure call, including failed ones.
 	writes atomic.Int32
 }
@@ -210,6 +211,11 @@ func (a *observedSubs) GetDueBilling(ctx context.Context, before time.Time, excl
 		a.beforeFetch(n)
 	}
 	subs, err := a.subStoreAdapter.GetDueBilling(ctx, before, exclude, limit)
+	a.mu.Lock()
+	for _, sub := range subs {
+		a.scanned = append(a.scanned, sub.ID)
+	}
+	a.mu.Unlock()
 	if err == nil && len(subs) > 0 && a.afterFetch != nil {
 		a.fetched.Do(a.afterFetch)
 	}
@@ -325,7 +331,8 @@ func onlyFailure(t *testing.T, errs []error, subID string) {
 //  3. Once the wait has passed A is attempted again and the count and wait grow.
 //  4. Once the cause is fixed A bills, and the record is gone in the same read.
 //
-// Mutation checks: drop the gate clause from GetDueBilling → step 2 fails.
+// Mutation checks: drop the gate clause from GetDueBilling → step 2 fails
+// (the scan returns A).
 func TestBillingFailure_FailingSubIsSavedWaitsAndIsSkipped(t *testing.T) {
 	env := newBillFailureEnv(t, "Billing Failure Saved")
 	a := env.dueSub(t, "sub-a-failing", env.planBad, env.periodEnd)
@@ -355,11 +362,18 @@ func TestBillingFailure_FailingSubIsSavedWaitsAndIsSkipped(t *testing.T) {
 		t.Fatalf("last_error = %q, want the generic reference naming %s and no raw error text", bf.LastError, a.ID)
 	}
 
-	// Run 2, same instant: A is waiting, so it is not attempted.
+	// Run 2, same instant: A is waiting, so it is not attempted. The scan
+	// itself must leave it out: the attempt-time re-check would also stop the
+	// attempt, but a waiting subscription that the scan still returns keeps
+	// filling the head of every oldest-first page.
+	watched := &observedSubs{subStoreAdapter: &subStoreAdapter{env.subs}}
 	callsBefore, colsBefore := env.pricing.calls.Load(), env.billingColumns(t, a.ID)
-	gen, errs := env.engine.RunCycle(env.ctx, 50, nil)
+	gen, errs := env.newEngine(watched, env.pricing).RunCycle(env.ctx, 50, nil)
 	if len(errs) != 0 || gen != 0 {
 		t.Fatalf("run 2 at the same instant: generated=%d errors=%v, want 0 and none (A is waiting, B is billed)", gen, errs)
+	}
+	if len(watched.scanned) != 0 {
+		t.Fatalf("run 2's due scan returned %v: a waiting subscription must be skipped by the scan", watched.scanned)
 	}
 	if got := env.pricing.calls.Load(); got != callsBefore {
 		t.Fatalf("run 2 attempted the waiting subscription: plan reads went %d → %d", callsBefore, got)
