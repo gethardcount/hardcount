@@ -167,7 +167,7 @@ services:
       start_period: 5s
 
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.30-alpine
     restart: unless-stopped
     depends_on:
       - velox-api

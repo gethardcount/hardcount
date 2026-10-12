@@ -15,6 +15,11 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Security
+
+- **The dashboard image is now scanned and signed (2026-10-13).** Until now only the server image was; `ghcr.io/getvelox/velox-dashboard` was published with no scan and no signature. Both images are now signed by digest with cosign, and a high-severity finding that has a fix blocks the build for either. Applies to images published after this change; `v0.5.0` and earlier dashboard images stay unsigned.
+- **Dashboard and front-proxy images move from nginx 1.27 to 1.30 (2026-10-13).** 1.27 is no longer maintained. The dashboard image also applies the base image's pending security patches at build time. If you run the compose stack, pull the new `nginx:1.30-alpine` on your next upgrade; no config change is needed.
+
 ## [0.5.0] - 2026-10-13
 
 One day after 0.4.0. It fixes the LiteLLM integration, which recorded nothing from a real proxy, ships two requests from a user, and carries the first audit fix.

@@ -1,0 +1,23 @@
+# Keeps the pinned actions and base images moving. Without this the pins
+# stay frozen at the day they were written. One grouped pull request a
+# month per ecosystem. Go and npm dependencies are updated by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories: ["/", "/deploy/compose"]
+    schedule:
+      interval: monthly
+    groups:
+      base-images:
+        patterns: ["*"]
+    ignore:
+      # The Go builder image moves together with go.mod, by hand.
+      - dependency-name: golang

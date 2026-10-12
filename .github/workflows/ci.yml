@@ -533,7 +533,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
 
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+      # No layer cache: main never hit it (every source change invalidates the
+      # compile layer) and writing it cost about 80 seconds per run.
+      - name: Build and push API image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           # Both platforms, so the image also runs on Apple Silicon and ARM
@@ -544,13 +548,12 @@ jobs:
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       # The operator dashboard image (compose's velox-dashboard service) —
       # published alongside the API so a VPC install never builds from
       # source unless it wants to.
       - name: Build and push dashboard image
+        id: dashbuild
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -558,8 +561,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.dashtags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Scan image for vulnerabilities (Trivy)
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
@@ -568,6 +569,15 @@ jobs:
           # github.sha here scanned a tag release runs never push — the
           # published versioned image sailed through unscanned/unsigned.
           image-ref: ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.ref_tag }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Scan dashboard image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}-dashboard:${{ steps.meta.outputs.ref_tag }}
           format: table
           exit-code: '1'
           severity: CRITICAL,HIGH
@@ -587,9 +597,18 @@ jobs:
           sbom: velox-sbom.spdx.json
           fail-build: true
           severity-cutoff: critical
+          # Print the matches in the log. The default wrote them to a file
+          # nothing read.
+          output-format: table
 
-      - name: Sign image (Cosign)
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
-      - run: cosign sign --yes ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.ref_tag }}
+      # Signed by digest, the exact image this run built, not by a tag that
+      # a later push could move.
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Sign both images (Cosign)
+        run: |
+          cosign sign --yes "${REPO}@${API_DIGEST}"
+          cosign sign --yes "${REPO}-dashboard@${DASH_DIGEST}"
         env:
-          COSIGN_EXPERIMENTAL: "1"
+          REPO: ghcr.io/${{ github.repository }}
+          API_DIGEST: ${{ steps.build.outputs.digest }}
+          DASH_DIGEST: ${{ steps.dashbuild.outputs.digest }}

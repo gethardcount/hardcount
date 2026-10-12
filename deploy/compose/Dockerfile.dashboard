@@ -17,10 +17,10 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 # (No embedded spec viewer — the /docs site was cut 2026-04-29.)
 WORKDIR /repo/web-v2
 COPY web-v2/package.json web-v2/package-lock.json ./
-# --legacy-peer-deps matches CI's frontend job: the lockfile carries a
-# known @typescript-eslint ↔ openapi-typescript peer-range conflict that
-# strict `npm ci` refuses.
-RUN npm install --legacy-peer-deps
+# The same command CI's frontend job runs: `npm ci` installs exactly what
+# the lockfile says. --legacy-peer-deps because the lockfile carries a known
+# @typescript-eslint ↔ openapi-typescript peer-range conflict.
+RUN npm ci --legacy-peer-deps
 
 COPY web-v2/ ./
 COPY api/openapi.yaml /repo/api/openapi.yaml
@@ -29,7 +29,12 @@ COPY api/openapi.yaml /repo/api/openapi.yaml
 # CORS, no build-time URL baking.
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.30-alpine
+
+# Take the base image's pending security fixes. The nginx tag is rebuilt
+# less often than Alpine publishes patches, and the image scan in CI fails
+# on a high-severity finding that already has a fix.
+RUN apk upgrade --no-cache
 
 LABEL org.opencontainers.image.source="https://github.com/getvelox/velox"
 LABEL org.opencontainers.image.description="Velox dashboard (web-v2 SPA)"
