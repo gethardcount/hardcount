@@ -93,6 +93,8 @@ const subCols = `id, tenant_id, code, display_name, customer_id, status, billing
 	COALESCE(billing_anchor_day, 0),
 	usage_cap_units, COALESCE(overage_action,'charge'),
 	COALESCE(test_clock_id,''),
+	billing_failed_for, billing_failure_count, billing_failed_at,
+	billing_next_attempt_at, COALESCE(billing_last_error,''),
 	created_at, updated_at`
 
 const itemCols = `id, tenant_id, subscription_id, plan_id, quantity, metadata,
@@ -1191,6 +1193,12 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, before time.Time, exc
 	// COALESCE is load-bearing: a nil slice reaches Postgres as NULL (see
 	// postgres.StringArray), and NOT (id = ANY(NULL)) is NULL, which would
 	// drop every row. The drain's first page always passes nil.
+	//
+	// Billing-failure gate (ADR-119): a sub whose saved failure is parked, or
+	// whose next attempt is after this run's instant, is skipped. The filter
+	// runs before the LIMIT, so failing subs no longer fill the head of every
+	// oldest-first page. The same clause is in GetDueBillingForTenant and
+	// ListExpiredTrials; the clock scans never carry it.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.status IN ('active', 'trialing')
@@ -1198,6 +1206,7 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, before time.Time, exc
 		  AND s.test_clock_id IS NULL
 		  AND (s.next_billing_at <= $2
 		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $2))
+		  AND `+domain.SubscriptionBillingGateSQL("s", "$2")+`
 		  AND leader_fence($4, $5)
 		  AND NOT (s.id = ANY(COALESCE($6::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $3
@@ -1256,13 +1265,16 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 	// No explicit tenant_id/livemode predicate: TxTenant sets app.tenant_id +
 	// app.livemode and the mode-aware RLS policy scopes both. Adding them to the
 	// WHERE would be redundant with — and weaker than — the policy fence.
-	// exclude: see GetDueBilling (the COALESCE is load-bearing).
+	// exclude: see GetDueBilling (the COALESCE is load-bearing). The
+	// billing-failure gate is the same clause too: a manual run honours wait
+	// and park exactly as the scheduler does (ADR-119).
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.status IN ('active', 'trialing')
 		  AND s.test_clock_id IS NULL
 		  AND (s.next_billing_at <= $1
 		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $1))
+		  AND `+domain.SubscriptionBillingGateSQL("s", "$1")+`
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
 		FOR UPDATE OF s SKIP LOCKED
@@ -1500,6 +1512,124 @@ func (s *PostgresStore) ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID,
 		return ErrWatermarkMoved
 	}
 	return nil
+}
+
+// RecordBillingFailure saves one counted billing failure on a subscription
+// (ADR-119) and reports whether a row was written. It writes only the five
+// billing_* columns: never status, the period, next_billing_at or cancel_at,
+// and not updated_at, so it cannot make any period closer's CAS pass or miss.
+//
+// The WHERE carries the guards; zero rows is a normal outcome, not an error:
+//
+//   - Due instant equals the one the failing attempt read. A failure that
+//     lands after another writer finished that work (a superseded leader, a
+//     manual run that lost the race) matches nothing.
+//   - The count the row holds for this due instant equals the count the
+//     attempt read. Two runs that fail the same attempt count once.
+//   - Wall-clock only. A real-time wait means nothing on a test clock.
+//   - Status is in (active, trialing) but is not compared with the status
+//     read: the trial flip commits on its own and leaves the due instant
+//     unchanged, so a failure right after it is still recorded.
+//
+// Columns left by an older due instant count as zero, so the count restarts
+// at 1 for new work.
+func (s *PostgresStore) RecordBillingFailure(ctx context.Context, tenantID, id string, f BillingFailureWrite) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return false, err
+	}
+	defer postgres.Rollback(tx)
+
+	due := domain.SubscriptionDueInstantSQL("s")
+	res, err := tx.ExecContext(ctx, `
+		UPDATE subscriptions s
+		   SET billing_failed_for      = `+due+`,
+		       billing_failure_count   = $3,
+		       billing_failed_at       = $4,
+		       billing_next_attempt_at = $5,
+		       billing_last_error      = $6
+		 WHERE s.id = $1
+		   AND s.test_clock_id IS NULL
+		   AND s.status IN ('active','trialing')
+		   AND `+due+` IS NOT NULL
+		   AND `+due+` IS NOT DISTINCT FROM $2::timestamptz
+		   AND (CASE WHEN s.billing_failed_for IS NOT DISTINCT FROM `+due+`
+		             THEN s.billing_failure_count ELSE 0 END) = $7
+	`, id, f.DueSeen, f.Attempts, f.FailedAt, postgres.NullableTime(f.NextAttemptAt), f.LastError, f.ObservedAttempts)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	return true, tx.Commit()
+}
+
+// ClearBillingFailure is the operator retry's write (ADR-119): it removes the
+// live failure record of a subscription and runs inTx on the same transaction
+// before commit, so the audit row and the clear share fate. It returns the
+// record that was cleared.
+//
+// A subscription with no live record (never failed, already billed, already
+// cleared by a concurrent retry) gets InvalidState with code
+// billing_not_failing and inTx is not called. errs.ErrNotFound when the row
+// does not exist. Like RecordBillingFailure it writes only the five billing_*
+// columns.
+func (s *PostgresStore) ClearBillingFailure(ctx context.Context, tenantID, id string, inTx func(tx *sql.Tx, cleared domain.BillingFailure) error) (domain.BillingFailure, error) {
+	var cleared domain.BillingFailure
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		var failedAt, nextAttemptAt sql.NullTime
+		// The CTE locks the row and reads the record before the UPDATE nulls
+		// it; a second retry blocked on the lock re-evaluates the predicate
+		// and finds nothing.
+		err := tx.QueryRowContext(ctx, `
+			WITH prev AS (
+				SELECT s.id, s.billing_failure_count, COALESCE(s.billing_last_error,'') AS billing_last_error,
+				       s.billing_failed_at, s.billing_next_attempt_at
+				  FROM subscriptions s
+				 WHERE s.id = $1 AND `+domain.SubscriptionBillingFailingSQL("s")+`
+				   FOR NO KEY UPDATE
+			)
+			UPDATE subscriptions s
+			   SET billing_failed_for = NULL, billing_failure_count = 0, billing_failed_at = NULL,
+			       billing_next_attempt_at = NULL, billing_last_error = NULL
+			  FROM prev
+			 WHERE s.id = prev.id
+			RETURNING prev.billing_failure_count, prev.billing_last_error, prev.billing_failed_at, prev.billing_next_attempt_at
+		`, id).Scan(&cleared.Attempts, &cleared.LastError, &failedAt, &nextAttemptAt)
+		if err == sql.ErrNoRows {
+			var exists bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE id = $1)`, id).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				return errs.ErrNotFound
+			}
+			return errs.InvalidState("billing is not failing on this subscription; there is nothing to retry").WithCode("billing_not_failing")
+		}
+		if err != nil {
+			return err
+		}
+		cleared.MaxAttempts = domain.MaxBillingAttempts
+		cleared.FailedAt = failedAt.Time
+		cleared.Parked = !nextAttemptAt.Valid
+		if nextAttemptAt.Valid {
+			t := nextAttemptAt.Time
+			cleared.NextAttemptAt = &t
+		}
+		if inTx == nil {
+			return nil
+		}
+		return inTx(tx, cleared)
+	})
+	if err != nil {
+		return domain.BillingFailure{}, err
+	}
+	return cleared, nil
 }
 
 // ClosePeriod is the own-tx wrapper of ClosePeriodTx for advance-only callers
@@ -2262,6 +2392,12 @@ func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID,
 //
 // FOR UPDATE SKIP LOCKED so concurrent scheduler ticks (multi-
 // replica) don't double-process the same trialing sub.
+//
+// Billing-failure gate (ADR-119): this scan performs the same activation the
+// billing run's trial flip does, and runs before it on every tick. Without the
+// gate it would attempt a parked trial flip on every tick, and could activate
+// a sub whose saved failure then still gates its first close. The billing run
+// writes the record; this scan only respects it.
 func (s *PostgresStore) ListExpiredTrials(ctx context.Context, before time.Time, livemode bool, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -2280,6 +2416,7 @@ func (s *PostgresStore) ListExpiredTrials(ctx context.Context, before time.Time,
 		  AND s.test_clock_id IS NULL
 		  AND s.trial_end_at IS NOT NULL
 		  AND s.trial_end_at <= $2
+		  AND `+domain.SubscriptionBillingGateSQL("s", "$2")+`
 		ORDER BY s.trial_end_at ASC
 		LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
@@ -2427,6 +2564,9 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 	var pauseResumesAt sql.NullTime
 	var thresholdAmountGTE sql.NullInt64
 	var thresholdResetCycle bool
+	var failedFor, failedAt, nextAttemptAt sql.NullTime
+	var failureCount int
+	var lastError string
 	dest := []any{
 		&sub.ID, &sub.TenantID, &sub.Code, &sub.DisplayName, &sub.CustomerID,
 		&sub.Status, &sub.BillingTime, &sub.TrialStartAt, &sub.TrialEndAt, &sub.StartedAt,
@@ -2439,11 +2579,13 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 		&sub.BillingAnchorDay,
 		&sub.UsageCapUnits, &sub.OverageAction,
 		&sub.TestClockID,
+		&failedFor, &failureCount, &failedAt, &nextAttemptAt, &lastError,
 		&sub.CreatedAt, &sub.UpdatedAt,
 	}
 	if err := row.Scan(dest...); err != nil {
 		return err
 	}
+	sub.BillingFailure = composeBillingFailure(*sub, failedFor, failureCount, failedAt, nextAttemptAt, lastError)
 	if pauseBehavior.Valid {
 		pc := &domain.PauseCollection{
 			Behavior: domain.PauseCollectionBehavior(pauseBehavior.String),
@@ -2473,6 +2615,39 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 	// actually cancels.
 	sub.DeriveCancelEffectiveAt()
 	return nil
+}
+
+// composeBillingFailure is the Go form of
+// domain.SubscriptionBillingFailingSQL: the five billing_* columns become a
+// BillingFailure only on a wall-clock subscription that can still bill and
+// whose record was saved for the due instant the row has now. Anything else is
+// a stale leftover (the columns are never cleared when the due instant moves)
+// and reads as nil. This is the only place the columns are read into Go, so
+// every read path agrees; a real-Postgres test asserts it matches the SQL
+// predicate row for row.
+func composeBillingFailure(sub domain.Subscription, failedFor sql.NullTime, count int, failedAt, nextAttemptAt sql.NullTime, lastError string) *domain.BillingFailure {
+	if !failedFor.Valid || sub.TestClockID != "" {
+		return nil
+	}
+	if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
+		return nil
+	}
+	due := domain.DueInstant(sub)
+	if due == nil || !due.Equal(failedFor.Time) {
+		return nil
+	}
+	bf := &domain.BillingFailure{
+		Attempts:    count,
+		MaxAttempts: domain.MaxBillingAttempts,
+		LastError:   lastError,
+		FailedAt:    failedAt.Time,
+		Parked:      !nextAttemptAt.Valid,
+	}
+	if nextAttemptAt.Valid {
+		t := nextAttemptAt.Time
+		bf.NextAttemptAt = &t
+	}
+	return bf
 }
 
 // hydrateThresholds fills sub.BillingThresholds.ItemThresholds from the

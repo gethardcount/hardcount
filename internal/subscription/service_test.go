@@ -112,6 +112,27 @@ func (m *memStore) Get(ctx context.Context, tenantID, id string) (domain.Subscri
 	return s, nil
 }
 
+// ClearBillingFailure mirrors the store's contract on the in-memory row: a
+// sub with no record is InvalidState(billing_not_failing) and inTx is not run.
+func (m *memStore) ClearBillingFailure(_ context.Context, tenantID, id string, inTx func(tx *sql.Tx, cleared domain.BillingFailure) error) (domain.BillingFailure, error) {
+	s, ok := m.subs[id]
+	if !ok || s.TenantID != tenantID {
+		return domain.BillingFailure{}, errs.ErrNotFound
+	}
+	if s.BillingFailure == nil {
+		return domain.BillingFailure{}, errs.InvalidState("billing is not failing on this subscription; there is nothing to retry").WithCode("billing_not_failing")
+	}
+	cleared := *s.BillingFailure
+	if inTx != nil {
+		if err := inTx(nil, cleared); err != nil {
+			return domain.BillingFailure{}, err
+		}
+	}
+	s.BillingFailure = nil
+	m.subs[id] = s
+	return cleared, nil
+}
+
 func (m *memStore) List(ctx context.Context, filter ListFilter) ([]domain.Subscription, int, error) {
 	var result []domain.Subscription
 	for _, s := range m.subs {

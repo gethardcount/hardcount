@@ -46,7 +46,30 @@ func SnapshotOf(sub domain.Subscription) PeriodSnapshot {
 // move is not — the snapshot, not monotonicity, is the guard (ADR-115).
 var ErrWatermarkMoved = errors.New("subscription: billing period moved under the caller's snapshot")
 
+// BillingFailureWrite is one counted billing failure for
+// PostgresStore.RecordBillingFailure (ADR-119).
+type BillingFailureWrite struct {
+	// DueSeen is domain.DueInstant of the row the failing attempt planned
+	// from. The write lands only while the row's due instant still equals it.
+	DueSeen time.Time
+	// ObservedAttempts is the count that row carried for DueSeen (0 when it
+	// carried no live record). The write lands only while it is unchanged.
+	ObservedAttempts int
+	// Attempts is the new count, ObservedAttempts + 1.
+	Attempts int
+	FailedAt time.Time
+	// NextAttemptAt nil parks the subscription.
+	NextAttemptAt *time.Time
+	LastError     string
+}
+
 type Store interface {
+	// ClearBillingFailure removes a subscription's live billing-failure
+	// record for the operator retry and runs inTx (the audit row) on the same
+	// transaction. InvalidState with code billing_not_failing when there is
+	// no live record; inTx is then not called.
+	ClearBillingFailure(ctx context.Context, tenantID, id string, inTx func(tx *sql.Tx, cleared domain.BillingFailure) error) (domain.BillingFailure, error)
+
 	// CustomerSubPlanCurrencies backs the ADR-100 customer currency pin:
 	// distinct plan currencies (incl. pending swaps) across the customer's
 	// non-terminal subs, excluding excludeSubID ("" = none).

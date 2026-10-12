@@ -485,11 +485,15 @@ type Subscription struct {
 	// bills in the one org timezone (default UTC), resolved live from tenant
 	// settings at compute time and denormalized onto the INVOICE at issue for
 	// historical stability (ADR-077, superseding the ADR-074 per-sub snapshot).
-	UsageCapUnits *int64    `json:"usage_cap_units,omitempty"` // Max usage units per billing period (nil = unlimited)
-	OverageAction string    `json:"overage_action,omitempty"`  // "block" or "charge" (default: charge)
-	TestClockID   string    `json:"test_clock_id,omitempty"`   // Test mode only — attached simulator clock
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	UsageCapUnits *int64 `json:"usage_cap_units,omitempty"` // Max usage units per billing period (nil = unlimited)
+	OverageAction string `json:"overage_action,omitempty"`  // "block" or "charge" (default: charge)
+	TestClockID   string `json:"test_clock_id,omitempty"`   // Test mode only — attached simulator clock
+	// BillingFailure is set while the billing run is failing on the work
+	// this subscription has due now, and nil otherwise (ADR-119). Composed at
+	// the store's row scan; never written through this struct.
+	BillingFailure *BillingFailure `json:"billing_failure,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 
 	// Items is populated by store reads that hydrate the subscription with
 	// its current priced lines. Writes through Store.Create require a
