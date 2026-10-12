@@ -1409,7 +1409,7 @@ func (s *PostgresStore) ApplyCreditNote(ctx context.Context, tenantID, id string
 	}
 	defer postgres.Rollback(tx)
 
-	inv, err := s.ApplyCreditNoteTx(ctx, tx, tenantID, id, amountCents)
+	inv, err := s.ApplyCreditNoteTx(ctx, tx, tenantID, id, amountCents, 0)
 	if err != nil {
 		return domain.Invoice{}, err
 	}
@@ -1419,22 +1419,58 @@ func (s *PostgresStore) ApplyCreditNote(ctx context.Context, tenantID, id string
 	return inv, nil
 }
 
-// ApplyCreditNoteTx reduces amount_due on the caller's coordinator tx, so the
-// reduction commits atomically with the credit note's draft→issued CAS (ADR-061,
-// creditnote.Issue). The single-CAS-gated-caller invariant — exactly one Issue()
-// reaches this per credit note — makes the reduction idempotent by construction,
-// so no source-dedup row is needed. A reviewer adding a second caller of this
-// method MUST reintroduce (tenant, source) dedup; see ADR-061.
-func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string, amountCents int64) (domain.Invoice, error) {
+// LockForCreditNoteTx locks the invoice row on the caller's coordinator tx and
+// returns it as it is under the lock. Credit-note Issue() takes it before
+// anything else and decides from this row, because the amount still due and the
+// payment state can both move between its earlier read and its transaction (a
+// credit application, a settle, a void). FOR NO KEY UPDATE serializes with
+// those writers without blocking the foreign-key checks of rows that reference
+// the invoice.
+func (s *PostgresStore) LockForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string) (domain.Invoice, error) {
+	var inv domain.Invoice
+	err := tx.QueryRowContext(ctx,
+		`SELECT `+invCols+` FROM invoices WHERE id = $1 AND tenant_id = $2 FOR NO KEY UPDATE`,
+		id, tenantID).Scan(s.scanInvDest(&inv)...)
+	if err == sql.ErrNoRows {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Invoice{}, fmt.Errorf("lock invoice for credit note: %w", err)
+	}
+	return inv, nil
+}
+
+// ApplyCreditNoteTx applies an issued credit note to an open receivable on the
+// caller's coordinator tx, so it commits atomically with the note's
+// draft→issued CAS (ADR-061, creditnote.Issue): amount_due goes down by
+// reduceCents, and creditsReturnedCents of customer credits are taken back off
+// the invoice (the caller grants them to the balance on the same tx). The two
+// add up to the note's total.
+//
+// Both subtractions are exact. A note that asks for more than is due, or to
+// take back more credits than are applied, is refused with
+// credit_note_exceeds_invoice: a silent clamp here relieved an invoice by more
+// than its total (ADR-061 amendment, 2026-10-12).
+//
+// The single-CAS-gated-caller invariant — exactly one Issue() reaches this per
+// credit note — makes the reduction idempotent by construction, so no
+// source-dedup row is needed. A reviewer adding a second caller of this method
+// MUST reintroduce (tenant, source) dedup; see ADR-061.
+func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string, reduceCents, creditsReturnedCents int64) (domain.Invoice, error) {
+	if reduceCents < 0 || creditsReturnedCents < 0 {
+		return domain.Invoice{}, fmt.Errorf("apply credit note: negative amount (reduce %d, credits returned %d)", reduceCents, creditsReturnedCents)
+	}
 	now := clock.Now(ctx)
 	var inv domain.Invoice
 	err := tx.QueryRowContext(ctx, `
 		UPDATE invoices SET
-			amount_due_cents = GREATEST(amount_due_cents - $1, 0),
-			updated_at = $2
-		WHERE id = $3 AND status = 'finalized' AND payment_status <> 'succeeded'
+			amount_due_cents = amount_due_cents - $1,
+			credits_applied_cents = credits_applied_cents - $2,
+			updated_at = $3
+		WHERE id = $4 AND status = 'finalized' AND payment_status <> 'succeeded'
+		  AND amount_due_cents >= $1 AND credits_applied_cents >= $2
 		RETURNING `+invCols,
-		amountCents, now, id,
+		reduceCents, creditsReturnedCents, now, id,
 	).Scan(s.scanInvDest(&inv)...)
 
 	if err == sql.ErrNoRows {
@@ -1445,12 +1481,19 @@ func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenan
 		// note against the invoice's current state (a paid one is credited to
 		// the balance instead of losing the relief).
 		var status, payment string
-		rerr := tx.QueryRowContext(ctx, `SELECT status, payment_status FROM invoices WHERE id = $1`, id).Scan(&status, &payment)
+		var due, applied int64
+		rerr := tx.QueryRowContext(ctx, `SELECT status, payment_status, amount_due_cents, credits_applied_cents FROM invoices WHERE id = $1`, id).Scan(&status, &payment, &due, &applied)
 		if rerr == sql.ErrNoRows {
 			return domain.Invoice{}, errs.ErrNotFound
 		}
 		if rerr != nil {
 			return domain.Invoice{}, rerr
+		}
+		if status == string(domain.InvoiceFinalized) && payment != string(domain.PaymentSucceeded) {
+			return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
+				"credit note asks to reduce invoice %s by %d with %d due and to return %d credits with %d applied",
+				id, reduceCents, due, creditsReturnedCents, applied)).
+				WithCode("credit_note_exceeds_invoice")
 		}
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
 			"invoice %s is %s/%s, not an open receivable; the credit note will be re-applied against its current state", id, status, payment)).

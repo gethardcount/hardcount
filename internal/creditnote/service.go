@@ -38,9 +38,15 @@ type InvoiceReader interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
 	ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
 	ApplyCreditNote(ctx context.Context, tenantID, id string, amountCents int64) (domain.Invoice, error)
-	// ApplyCreditNoteTx reduces amount_due on the caller's coordinator tx, so
-	// the reduction commits atomically with Issue()'s draft→issued CAS (ADR-061).
-	ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string, amountCents int64) (domain.Invoice, error)
+	// LockForCreditNoteTx locks the invoice row on Issue()'s coordinator tx and
+	// returns it as it is under the lock; Issue() decides from that row.
+	LockForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string) (domain.Invoice, error)
+	// ApplyCreditNoteTx reduces amount_due by reduceCents and takes
+	// creditsReturnedCents of applied customer credits back off the invoice, on
+	// the caller's coordinator tx, so both commit atomically with Issue()'s
+	// draft→issued CAS (ADR-061). It refuses rather than clamps when either
+	// exceeds what the invoice holds.
+	ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string, reduceCents, creditsReturnedCents int64) (domain.Invoice, error)
 }
 
 // Refunder processes refunds via the payment provider.
@@ -195,7 +201,8 @@ func (s *Service) SetTaxReverser(tr TaxReverser) {
 //
 // For paid invoices, the three amounts must sum to the CN total. For
 // unpaid invoices the allocation is ignored (the CN reduces amount_due
-// directly). If the caller leaves all three fields zero on a paid
+// directly; if customer credits were applied to the invoice after the note
+// was sized, Issue returns the credits it displaces to the balance). If the caller leaves all three fields zero on a paid
 // invoice, the default is `credit_amount = total` — the safest fallback
 // (no cash movement, restorable later). Legacy callers can pass
 // RefundType="refund"/"credit" and the field is translated to the
@@ -398,7 +405,10 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 			}
 			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("credit note amount exceeds remaining creditable amount (%.2f)", float64(remaining)/100))
 		}
-		// For unpaid invoices, credit note cannot exceed current amount_due
+		// For unpaid invoices, credit note cannot exceed current amount_due.
+		// This is an early refusal, not a guarantee: a draft reserves nothing,
+		// and the amount due can fall before the draft is issued. Issue() is
+		// where the note is fitted to what is actually still due.
 		if inv.Status == domain.InvoiceFinalized && subtotal > inv.AmountDueCents {
 			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("credit note amount (%.2f) exceeds amount due (%.2f)", float64(subtotal)/100, float64(inv.AmountDueCents)/100))
 		}
@@ -1432,74 +1442,16 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	// off the credit note we just loaded.
 	ctx = s.bindForInvoice(ctx, tenantID, cn.InvoiceID)
 
-	// Read the source invoice BEFORE the CAS so the two source-state gates below
-	// can decide whether to issue at all without claiming the transition.
+	// A first read of the source invoice, outside any transaction. It only
+	// spares a transaction when the note plainly cannot issue yet; the row
+	// locked inside the coordinator tx below is what every decision is made
+	// from.
 	inv, err := s.invoices.Get(ctx, tenantID, cn.InvoiceID)
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("get invoice: %w", err)
 	}
-
-	// Orphan guard. The source was annulled (voided) or written off
-	// (uncollectible) after this draft was created — Void already reversed the
-	// invoice's tax and zeroed its receivable, so there is nothing left to
-	// relieve. Issuing now would (unpaid branch) re-reverse the same tax
-	// transaction (double under-remit) against a terminal invoice. Void the
-	// draft so it leaves the reconciler scan and never applies. Pure status
-	// flip on a never-applied draft — no money movement, no tax call.
-	if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
-		// The draft→voided flip is a REAL committed mutation on a money
-		// document — it carries its evidence in the same tx (ADR-090;
-		// previously this path had zero audit rows once the handler's
-		// post-hoc row was deleted).
-		var emit func(tx *sql.Tx) error
-		if s.audit != nil {
-			emit = func(tx *sql.Tx) error {
-				return s.audit.LogInTx(ctx, tx, audit.Entry{
-					Action:        domain.AuditActionVoid,
-					ResourceType:  "credit_note",
-					ResourceID:    cn.ID,
-					ResourceLabel: cn.CreditNoteNumber,
-					Metadata: map[string]any{
-						"action":        "orphan_draft_voided",
-						"invoice_id":    cn.InvoiceID,
-						"customer_id":   cn.CustomerID,
-						"source_status": string(inv.Status),
-					},
-				})
-			}
-		}
-		if _, terr := s.store.TransitionStatusAudited(ctx, tenantID, id, domain.CreditNoteDraft, domain.CreditNoteVoided, emit); terr != nil {
-			return domain.CreditNote{}, fmt.Errorf("void orphaned clawback draft (source %s %s): %w", cn.InvoiceID, inv.Status, terr)
-		}
-		slog.InfoContext(ctx, "voided orphaned clawback draft (source annulled before issue)",
-			"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "source_status", string(inv.Status))
-		return s.store.Get(ctx, tenantID, id)
-	}
-
-	// Defer-until-settle gate (ADR-059). The source's charge is still in flight
-	// (processing/unknown) — its captured amount is unknown. Issuing now would
-	// either reduce amount_due before MarkPaid records the captured amount
-	// (under-record / undersized refund cap) or relieve a charge that may yet
-	// succeed. Leave the draft status='draft' + issue_pending so the reconciler
-	// re-drives it once the source reaches a terminal payment state, at which
-	// point the paid/unpaid branch below selects the correct channel. This is
-	// the single chokepoint for ALL issue triggers (engine CreateAndIssueAdjustment,
-	// the post-commit issueClawbackDrafts, and the reconciler), so the automated
-	// clawback paths defer here rather than each gating their own create site.
-	if inv.PaymentStatus.IsInFlight() {
-		slog.InfoContext(ctx, "deferring clawback issue until source payment settles",
-			"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "payment_status", string(inv.PaymentStatus))
-		return cn, nil
-	}
-	// Same defer for a source that is still a DRAFT (a relief note written by
-	// a cancel or plan swap while collection was paused, ADR-118): nothing is
-	// owed on a draft yet, so the note waits — the reconciler re-drives it,
-	// and it applies once the invoice is finalized (or the orphan guard above
-	// voids it if the draft is voided).
-	if inv.Status == domain.InvoiceDraft {
-		slog.InfoContext(ctx, "deferring clawback issue until the source invoice is finalized",
-			"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID)
-		return cn, nil
+	if issueHeld(inv) {
+		return s.holdIssue(ctx, tenantID, cn, inv)
 	}
 
 	// Coordinator transaction (ADR-056 / ADR-061). The draft→issued CAS and the
@@ -1523,6 +1475,21 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	}
 	defer postgres.Rollback(tx)
 
+	// Lock the invoice row first (ADR-078 order: invoice row, then the customer
+	// advisory lock and ledger rows the grant below takes) and decide from it.
+	// Between the read above and this lock a payment may have settled, credits
+	// may have been applied, or the invoice may have been voided; each changes
+	// which branch is right or how much is still due.
+	inv, err = s.invoices.LockForCreditNoteTx(ctx, tx, tenantID, cn.InvoiceID)
+	if err != nil {
+		return domain.CreditNote{}, fmt.Errorf("lock invoice: %w", err)
+	}
+	if issueHeld(inv) {
+		// Release the row before the hold's own write (the orphan void).
+		postgres.Rollback(tx)
+		return s.holdIssue(ctx, tenantID, cn, inv)
+	}
+
 	won, err := s.store.TransitionStatusTx(ctx, tx, tenantID, id, domain.CreditNoteDraft, domain.CreditNoteIssued)
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("claim issue transition: %w", err)
@@ -1533,6 +1500,8 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 		return s.store.Get(ctx, tenantID, id)
 	}
 
+	// What the note did to an unpaid invoice, for the audit row below.
+	var dueReduced, creditsReturned int64
 	if inv.PaymentStatus == domain.PaymentSucceeded {
 		// Re-derive the three-channel allocation from the CURRENT invoice
 		// state. The allocation persisted at Create is frozen against the
@@ -1572,8 +1541,32 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 		// draft→issued CAS guarantees exactly one caller reaches here per credit
 		// note, so the reduction is idempotent by construction (see the tx
 		// comment above): a concurrent/retried Issue() can't double-reduce.
-		if _, err := s.invoices.ApplyCreditNoteTx(ctx, tx, tenantID, cn.InvoiceID, cn.TotalCents); err != nil {
+		//
+		// The note was sized when it was drafted, and customer credits may have
+		// been applied to the invoice since, so less may be due now than the
+		// note's total. The note reduces what is still due; the rest of it
+		// relieves the part those credits covered, so that many credits come
+		// off the invoice and go back to the customer's balance on this same
+		// tx. Without this the invoice was relieved by more than its total and
+		// the customer's credits were spent on nothing (ADR-061 amendment,
+		// 2026-10-12).
+		dueReduced = min(cn.TotalCents, inv.AmountDueCents)
+		creditsReturned = cn.TotalCents - dueReduced
+		if creditsReturned > 0 && s.credits == nil {
+			return domain.CreditNote{}, fmt.Errorf("credit note %s returns %d credits to the balance but no credit granter is wired", cn.ID, creditsReturned)
+		}
+		if _, err := s.invoices.ApplyCreditNoteTx(ctx, tx, tenantID, cn.InvoiceID, dueReduced, creditsReturned); err != nil {
 			return domain.CreditNote{}, fmt.Errorf("reduce invoice amount: %w", err)
+		}
+		if creditsReturned > 0 {
+			if err := s.credits.GrantForCreditNoteTx(ctx, tx, tenantID, cn.ID, CreditGrantInput{
+				CustomerID:  cn.CustomerID,
+				AmountCents: creditsReturned,
+				Description: fmt.Sprintf("Credit note %s — credits returned from invoice %s", cn.CreditNoteNumber, inv.InvoiceNumber),
+				InvoiceID:   cn.InvoiceID,
+			}); err != nil {
+				return domain.CreditNote{}, fmt.Errorf("return credits to balance: %w", err)
+			}
 		}
 	}
 
@@ -1596,6 +1589,8 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 				"refund_amount_cents":      cn.RefundAmountCents,
 				"credit_amount_cents":      cn.CreditAmountCents,
 				"out_of_band_amount_cents": cn.OutOfBandAmountCents,
+				"amount_due_reduced_cents": dueReduced,
+				"credits_returned_cents":   creditsReturned,
 				"reason":                   cn.Reason,
 				"currency":                 cn.Currency,
 			},
@@ -1613,6 +1608,83 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	}
 
 	return s.runPostIssueExternalLegs(ctx, tenantID, id, cn, inv)
+}
+
+// issueHeld reports whether a draft credit note cannot issue against its
+// source invoice as it stands: the source was annulled, its charge is still in
+// flight, or it is still a draft. holdIssue carries out the matching outcome.
+func issueHeld(inv domain.Invoice) bool {
+	return inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible ||
+		inv.PaymentStatus.IsInFlight() || inv.Status == domain.InvoiceDraft
+}
+
+// holdIssue is what Issue() does instead of issuing when issueHeld(inv): void
+// an orphaned draft, or leave the draft for the reconciler to re-drive. It runs
+// outside the coordinator tx.
+func (s *Service) holdIssue(ctx context.Context, tenantID string, cn domain.CreditNote, inv domain.Invoice) (domain.CreditNote, error) {
+	// Orphan guard. The source was annulled (voided) or written off
+	// (uncollectible) after this draft was created — Void already reversed the
+	// invoice's tax and zeroed its receivable, so there is nothing left to
+	// relieve. Issuing now would (unpaid branch) re-reverse the same tax
+	// transaction (double under-remit) against a terminal invoice. Void the
+	// draft so it leaves the reconciler scan and never applies. Pure status
+	// flip on a never-applied draft — no money movement, no tax call.
+	if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
+		// The draft→voided flip is a REAL committed mutation on a money
+		// document — it carries its evidence in the same tx (ADR-090;
+		// previously this path had zero audit rows once the handler's
+		// post-hoc row was deleted).
+		var emit func(tx *sql.Tx) error
+		if s.audit != nil {
+			emit = func(tx *sql.Tx) error {
+				return s.audit.LogInTx(ctx, tx, audit.Entry{
+					Action:        domain.AuditActionVoid,
+					ResourceType:  "credit_note",
+					ResourceID:    cn.ID,
+					ResourceLabel: cn.CreditNoteNumber,
+					Metadata: map[string]any{
+						"action":        "orphan_draft_voided",
+						"invoice_id":    cn.InvoiceID,
+						"customer_id":   cn.CustomerID,
+						"source_status": string(inv.Status),
+					},
+				})
+			}
+		}
+		if _, terr := s.store.TransitionStatusAudited(ctx, tenantID, cn.ID, domain.CreditNoteDraft, domain.CreditNoteVoided, emit); terr != nil {
+			return domain.CreditNote{}, fmt.Errorf("void orphaned clawback draft (source %s %s): %w", cn.InvoiceID, inv.Status, terr)
+		}
+		slog.InfoContext(ctx, "voided orphaned clawback draft (source annulled before issue)",
+			"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "source_status", string(inv.Status))
+		return s.store.Get(ctx, tenantID, cn.ID)
+	}
+
+	// Defer-until-settle gate (ADR-059). The source's charge is still in flight
+	// (processing/unknown) — its captured amount is unknown. Issuing now would
+	// either reduce amount_due before MarkPaid records the captured amount
+	// (under-record / undersized refund cap) or relieve a charge that may yet
+	// succeed. Leave the draft status='draft' + issue_pending so the reconciler
+	// re-drives it once the source reaches a terminal payment state, at which
+	// point the paid/unpaid branch below selects the correct channel. This is
+	// the single chokepoint for ALL issue triggers (engine CreateAndIssueAdjustment,
+	// the post-commit issueClawbackDrafts, and the reconciler), so the automated
+	// clawback paths defer here rather than each gating their own create site.
+	if inv.PaymentStatus.IsInFlight() {
+		slog.InfoContext(ctx, "deferring clawback issue until source payment settles",
+			"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "payment_status", string(inv.PaymentStatus))
+		return cn, nil
+	}
+	// Same defer for a source that is still a DRAFT (a relief note written by
+	// a cancel or plan swap while collection was paused, ADR-118): nothing is
+	// owed on a draft yet, so the note waits — the reconciler re-drives it,
+	// and it applies once the invoice is finalized (or the orphan guard above
+	// voids it if the draft is voided).
+	if inv.Status == domain.InvoiceDraft {
+		slog.InfoContext(ctx, "deferring clawback issue until the source invoice is finalized",
+			"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID)
+		return cn, nil
+	}
+	return cn, nil
 }
 
 // runPostIssueExternalLegs runs the POST-COMMIT external effects shared by

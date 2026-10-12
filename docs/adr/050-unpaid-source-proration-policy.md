@@ -84,7 +84,10 @@ the net proration:
   Issue a tax-reversing **adjustment credit note** against the open invoice,
   reducing `amount_due`, grossed up by the invoice's `Total/Subtotal` ratio and
   **capped at `amount_due`**. No refundable balance credit is granted (no cash was
-  funded). This is the exact `CreateAndIssueAdjustment` primitive the unpaid
+  funded). *(Amended 2026-10-12, ADR-061: this holds when the note is sized.
+  If customer credits are applied to the invoice between sizing and issue, the
+  note returns the credits it displaces to the balance. The cap itself is due
+  to move from `amount_due` to the invoice total in a follow-up.)* This is the exact `CreateAndIssueAdjustment` primitive the unpaid
   **cancel** relief already uses — carried on `ProrationDetail.Clawback*` and
   issued after the tx commits, the same post-commit pattern as the paid clawback
   (ADR-048). `ProrationDetail.Type` gains the value `"adjustment"`.

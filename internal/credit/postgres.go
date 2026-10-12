@@ -1439,6 +1439,22 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 // limit/offset/sort. Powers honest pagination + the complete-CSV export
 // on the credits page (pre-fix the UI paginated, filtered, and exported
 // a silently-capped 50-row slice as if it were the whole ledger).
+func (s *PostgresStore) SumCreditNoteGrantsForInvoice(ctx context.Context, tenantID, customerID, invoiceID string) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer postgres.Rollback(tx)
+
+	var sum int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger
+		WHERE tenant_id = $1 AND customer_id = $2 AND invoice_id = $3
+		  AND entry_type = $4 AND source_credit_note_id IS NOT NULL
+	`, tenantID, customerID, invoiceID, domain.CreditGrant).Scan(&sum)
+	return sum, err
+}
+
 func (s *PostgresStore) CountEntries(ctx context.Context, filter ListFilter) (int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {

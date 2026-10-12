@@ -400,10 +400,10 @@ func (m *memStore) ApplyCreditNote(_ context.Context, tenantID, id string, amoun
 	if !ok || inv.TenantID != tenantID {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
-	inv.AmountDueCents -= amountCents
-	if inv.AmountDueCents < 0 {
-		inv.AmountDueCents = 0
+	if amountCents > inv.AmountDueCents {
+		return domain.Invoice{}, errs.InvalidState("credit note exceeds invoice").WithCode("credit_note_exceeds_invoice")
 	}
+	inv.AmountDueCents -= amountCents
 	m.invoices[id] = inv
 	return inv, nil
 }

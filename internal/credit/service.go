@@ -479,6 +479,20 @@ func (s *Service) reverseForInvoice(ctx context.Context, tenantID, customerID, i
 		return 0, nil // No credits were applied to this invoice
 	}
 
+	// A credit note issued against this invoice while it was unpaid may already
+	// have returned some of those credits to the balance (creditnote.Issue,
+	// ADR-061 amendment 2026-10-12). Hand back only what is still applied.
+	// Every credit-note grant on a voidable invoice is such a return: the other
+	// kind is written for a PAID invoice, which cannot be voided.
+	returned, err := s.store.SumCreditNoteGrantsForInvoice(ctx, tenantID, customerID, invoiceID)
+	if err != nil {
+		return 0, fmt.Errorf("read credits already returned by credit notes: %w", err)
+	}
+	totalUsed -= returned
+	if totalUsed <= 0 {
+		return 0, nil // Credit notes already returned everything that was applied
+	}
+
 	desc := fmt.Sprintf("Reversed — invoice %s voided", invoiceNumber)
 	if invoiceNumber == "" {
 		desc = fmt.Sprintf("Reversed — invoice %s voided", invoiceID)

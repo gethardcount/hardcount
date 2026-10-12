@@ -138,7 +138,9 @@ inside the lock, and the retry reads fresh data.
     needed.
   - Why rejected: a credit note cannot hand back customer credits applied to
     the invoice, or retire a funded commit grant. The invoice would also end
-    finalized at $0 instead of voided.
+    finalized at $0 instead of voided. *(Amended 2026-10-12, ADR-061: a
+    credit note now returns applied credits it displaces at issue. The other
+    two reasons stand.)*
 - **C. Keep the post-commit path but return its error.**
   - Why rejected: the cancel already happened, so the error misreports it,
     and a retry hits "already canceled" without restoring the relief.

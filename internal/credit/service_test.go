@@ -334,6 +334,16 @@ func (m *memStore) RetireCommitGrantForInvoiceTx(_ context.Context, _ *sql.Tx, t
 	return 0, nil
 }
 
+func (m *memStore) SumCreditNoteGrantsForInvoice(_ context.Context, _, customerID, invoiceID string) (int64, error) {
+	var sum int64
+	for _, e := range m.entries {
+		if e.CustomerID == customerID && e.InvoiceID == invoiceID && e.EntryType == domain.CreditGrant && e.SourceCreditNoteID != "" {
+			sum += e.AmountCents
+		}
+	}
+	return sum, nil
+}
+
 func (m *memStore) CountEntries(_ context.Context, filter ListFilter) (int, error) {
 	n := 0
 	for _, e := range m.entries {

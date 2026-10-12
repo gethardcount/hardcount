@@ -30,7 +30,7 @@ func TestApplyCreditNoteTx_RefusesAPaidInvoice(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		defer postgres.Rollback(tx)
-		if _, err := store.ApplyCreditNoteTx(ctx, tx, tenantID, id, 1000); err != nil {
+		if _, err := store.ApplyCreditNoteTx(ctx, tx, tenantID, id, 1000, 0); err != nil {
 			return err
 		}
 		return tx.Commit()

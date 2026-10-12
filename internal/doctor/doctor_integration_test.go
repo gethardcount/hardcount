@@ -138,7 +138,54 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, attempt_count, last_attempt_at, resolved_at, resolution)
 		VALUES ('vlx_drun_doc_escal', $1, 'vlx_inv_doc_max_c', 'cus_doc1', 'vlx_dpol_doc', 'escalated', 3, now(), now(), 'retries_exhausted')`, tenantID)
 
+	// invoice_due_conservation with credit notes. One defect, three controls:
+	//   doc_cn_over  — 100.00 invoice, 60.00 credits applied, an issued 100.00
+	//                  note that reduced it: relieved by 160.00. The old clamp
+	//                  left amount_due at 0, so only the over-total arm sees it.
+	//   doc_cn_split — the same story after the fix: the note returned the
+	//                  credits (credits_applied 0). NOT flagged.
+	//   doc_cn_paid  — a 40.00 note reduced it, then 60.00 was paid. NOT flagged.
+	//   doc_cn_bal   — paid in full, then a 30.00 note credited to the balance
+	//                  (its credit channel carries the total). NOT flagged.
+	seedCNInvoice := func(id, status, payment string, due, paid, applied int64) {
+		mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status,
+				currency, subtotal_cents, total_amount_cents, amount_due_cents, amount_paid_cents, credits_applied_cents,
+				paid_at, billing_period_start, billing_period_end)
+			VALUES ($1, $2, 'cus_doc1', $1, $3, $4, 'USD', 10000, 10000, $5, $6, $7,
+				CASE WHEN $3 = 'paid' THEN now() END, now() - interval '30 days', now())`,
+			id, tenantID, status, payment, due, paid, applied)
+	}
+	seedIssuedNote := func(id, invoiceID string, total, creditChannel int64) {
+		mustExec(`INSERT INTO credit_notes (id, tenant_id, invoice_id, customer_id, credit_note_number, reason, status,
+				subtotal_cents, total_cents, credit_amount_cents, currency)
+			VALUES ($1, $2, $3, 'cus_doc1', $1, 'order_change', 'issued', $4, $4, $5, 'USD')`,
+			id, tenantID, invoiceID, total, creditChannel)
+	}
+	seedCNInvoice("vlx_inv_doc_cn_over", "finalized", "pending", 0, 0, 6000)
+	seedIssuedNote("vlx_cn_doc_over", "vlx_inv_doc_cn_over", 10000, 0)
+	seedCNInvoice("vlx_inv_doc_cn_split", "finalized", "pending", 0, 0, 0)
+	seedIssuedNote("vlx_cn_doc_split", "vlx_inv_doc_cn_split", 10000, 0)
+	seedCNInvoice("vlx_inv_doc_cn_paid", "paid", "succeeded", 0, 6000, 0)
+	seedIssuedNote("vlx_cn_doc_paid", "vlx_inv_doc_cn_paid", 4000, 0)
+	seedCNInvoice("vlx_inv_doc_cn_bal", "paid", "succeeded", 0, 10000, 0)
+	seedIssuedNote("vlx_cn_doc_bal", "vlx_inv_doc_cn_bal", 3000, 3000)
+
 	res = doctor.Run(ctx, admin, doctor.Checks)
+	overRelief := false
+	for _, v := range res.Violations {
+		if v.Check.Name != "invoice_due_conservation" {
+			continue
+		}
+		switch {
+		case strings.Contains(v.RowID, "doc_cn_over"):
+			overRelief = true
+		case strings.Contains(v.RowID, "doc_cn_"):
+			t.Errorf("false positive: a correctly accounted invoice with a credit note is flagged: %s %s", v.RowID, v.Detail)
+		}
+	}
+	if !overRelief {
+		t.Error("an invoice relieved by more than its total (credits applied + a credit note) is NOT caught by invoice_due_conservation")
+	}
 	want := map[string]bool{
 		"invoice_paid_settled_coherence":                  false,
 		"payment_methods_detached_but_still_default":      false,

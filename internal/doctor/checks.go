@@ -26,8 +26,8 @@ var Checks = []Check{
 	{
 		Name:   "invoice_due_conservation",
 		Domain: "invoices",
-		Why:    "amount_due must equal GREATEST(total - paid - credits_applied, 0) absent credit notes; drift means money owed and money booked disagree",
-		SQL:    `SELECT i.id, i.tenant_id, i.status, i.payment_status, i.total_amount_cents, i.amount_paid_cents, i.credits_applied_cents, i.amount_due_cents FROM invoices i WHERE i.stripe_invoice_id IS NULL AND i.id NOT LIKE 'vlx_inv_safe%' AND NOT EXISTS (SELECT 1 FROM credit_notes cn WHERE cn.invoice_id = i.id) AND i.amount_due_cents <> GREATEST(i.total_amount_cents - i.amount_paid_cents - i.credits_applied_cents, 0)`,
+		Why:    "an invoice's total is accounted for exactly once: amount_due = total - paid - credits_applied - the part of issued credit notes that reduced it (a note's total minus its refund/credit/out-of-band channels), and those three never exceed the total. Drift means money owed and money booked disagree. A row that is over its total was relieved twice (before 2026-10-12 a credit note issued after customer credits were applied clamped amount_due at zero and kept the credits); the customer is owed the excess as a manual credit grant",
+		SQL:    `SELECT i.id, i.tenant_id, i.status, i.payment_status, i.total_amount_cents, i.amount_paid_cents, i.credits_applied_cents, COALESCE(cn.reduced, 0) AS credit_notes_reduced_cents, i.amount_due_cents FROM invoices i LEFT JOIN LATERAL (SELECT SUM(total_cents - refund_amount_cents - credit_amount_cents - out_of_band_amount_cents) AS reduced FROM credit_notes WHERE invoice_id = i.id AND status = 'issued') cn ON true WHERE i.stripe_invoice_id IS NULL AND i.id NOT LIKE 'vlx_inv_safe%' AND (i.amount_due_cents <> GREATEST(i.total_amount_cents - i.amount_paid_cents - i.credits_applied_cents - COALESCE(cn.reduced, 0), 0) OR i.amount_paid_cents + i.credits_applied_cents + COALESCE(cn.reduced, 0) > i.total_amount_cents)`,
 	},
 	{
 		Name:   "invoice_paid_settled_coherence",

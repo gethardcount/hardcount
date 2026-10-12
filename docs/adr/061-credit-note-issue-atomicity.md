@@ -246,3 +246,52 @@ its scheduler tick; the `WARN→ERROR` raise; deletion of the now-false
 grant-failure-rolls-back-the-CAS proof, an in-memory failed-reversal-marks-pending
 + sweep-recovers proof, and the existing CAS-idempotency suite (unchanged, still
 green). No new reconciler key beyond the marker; reuses ADR-056/057 primitives.
+
+## Amendment (2026-10-12): issuing never relieves more than the invoice total
+
+### What was wrong
+
+A draft credit note is sized against the invoice's amount due when it is created. The amount due can fall before the draft is issued, because customer credits can be applied to the invoice in between. `ApplyCreditNoteTx` hid this with `GREATEST(amount_due - note, 0)`.
+
+Reproduced on real Postgres with no concurrency:
+
+| Step | Amount due | State |
+|---|---|---|
+| Invoice finalized, unpaid | 100.00 | total 100.00 |
+| Draft credit note created | 100.00 | draft for 100.00 |
+| Customer credits applied | 40.00 | 60.00 of credits consumed |
+| Draft issued | 0.00 | credit note 100.00 issued, no error |
+
+The 100.00 invoice was relieved by 160.00, and the customer's 60.00 of credits bought nothing. It is reachable through the API (a draft and a separate issue call) and through a cancel's relief draft held on a draft invoice, because finalizing that invoice applies the customer's credits.
+
+### Decision
+
+On the unpaid branch, `Issue()` now does this inside its coordinator transaction:
+
+1. It locks the invoice row (`LockForCreditNoteTx`, `FOR NO KEY UPDATE`) before the `draft` to `issued` change, and decides everything from that row: whether to hold the note, which branch applies, and how much is still due. The read taken before the transaction only spares a transaction when the note plainly cannot issue yet.
+2. It reduces amount due by `min(note total, amount due)`.
+3. The rest of the note relieves the part that applied credits had covered. That many credits come off the invoice (`credits_applied_cents` goes down) and are granted back to the customer's balance in the same transaction, through the existing per-credit-note grant.
+4. `ApplyCreditNoteTx` subtracts exactly. A note that asks for more than is due, or to return more credits than are applied, is refused with `credit_note_exceeds_invoice` and the note stays a draft.
+
+The note itself is unchanged: its total, tax and three allocation channels are as created. A note against an unpaid invoice still has all three channels at zero.
+
+### Why the returned credits are recorded on the invoice, not on the note
+
+The alternative was to store the returned amount as the note's `credit_amount_cents`. That gives one field two meanings. Three readers treat a note as either "reduces the invoice" or "money back", and a mixed note breaks each: the `cn_allocation_split_all_or_nothing` doctor check, the invoice PDF totals, and the dashboard totals. Lowering `credits_applied_cents` gives the same money result and those readers need no change. The cost is that the credit-note document does not mention the balance return; the credit ledger entry and the `credit_note.issued` audit row (`amount_due_reduced_cents`, `credits_returned_cents`) do.
+
+### What else had to change
+
+- **Voiding the invoice afterwards.** The void hand-back summed every credit-usage entry for the invoice, so it would have returned the same credits a second time. It now subtracts what credit notes already returned (`SumCreditNoteGrantsForInvoice`). This relies on one fact: a credit-note grant on an invoice that can still be voided is always such a return, because the other kind is written for a paid invoice and a paid invoice cannot be voided.
+- **The doctor.** `invoice_due_conservation` no longer skips invoices that have credit notes. It counts the part of issued notes that reduced the invoice: a note's total minus its three channels. It also flags any invoice whose paid amount, applied credits and credit notes exceed its total. That second condition is needed: on a row the old clamp damaged, amount due is 0 and equals the clamped formula.
+
+### What did not change
+
+- `create()` takes no invoice row lock. Its amount-due cap is an early refusal only: a draft reserves nothing, so two drafts that each fit can together exceed what is due. `Issue()` is where a note is fitted to the invoice. A row lock in `create()` would also invert the lock order of transactions that draft several notes (they take the per-invoice advisory locks first).
+- No backfill. The widened doctor check lists any invoice the old clamp over-relieved; the remedy is a manual credit grant for the excess.
+
+### Not decided here, with triggers
+
+- **Sizing still caps at amount due.** Credits applied before a note is sized are not returned, while credits applied after are. ADR-050 states the first as policy. The owner's decision (2026-10-12) is to return applied credits in general; that moves the four amount-due caps to a cap on the invoice total, in a follow-up change.
+- **A charge already sent to the card network.** It is marked only by the charge lease, which `Issue()` does not read. Trigger: the first payment recorded with an amount that differs from what the card was charged.
+- **What kind of credit comes back.** It is a plain grant with no expiry and no promotional kind, as a void's hand-back already is. Trigger: the first tenant with expiring or promotional credits applied to an invoice that is then credited or voided.
+

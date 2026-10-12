@@ -436,18 +436,28 @@ func (m *memInvoiceReader) ApplyCreditNote(_ context.Context, tenantID, id strin
 	if !ok || inv.TenantID != tenantID {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
-	inv.AmountDueCents -= amountCents
-	if inv.AmountDueCents < 0 {
-		inv.AmountDueCents = 0
-	}
-	m.invoices[id] = inv
-	return inv, nil
+	return m.ApplyCreditNoteTx(context.Background(), nil, tenantID, id, amountCents, 0)
 }
 
-// ApplyCreditNoteTx ignores the (nil) coordinator tx and delegates — the
-// in-memory double can't model rollback; the real-Postgres test covers it.
-func (m *memInvoiceReader) ApplyCreditNoteTx(ctx context.Context, _ *sql.Tx, tenantID, id string, amountCents int64) (domain.Invoice, error) {
-	return m.ApplyCreditNote(ctx, tenantID, id, amountCents)
+func (m *memInvoiceReader) LockForCreditNoteTx(ctx context.Context, _ *sql.Tx, tenantID, id string) (domain.Invoice, error) {
+	return m.Get(ctx, tenantID, id)
+}
+
+// ApplyCreditNoteTx ignores the (nil) coordinator tx — the in-memory double
+// can't model rollback; the real-Postgres test covers it. Like the store, it
+// refuses rather than clamps.
+func (m *memInvoiceReader) ApplyCreditNoteTx(_ context.Context, _ *sql.Tx, tenantID, id string, reduceCents, creditsReturnedCents int64) (domain.Invoice, error) {
+	inv, ok := m.invoices[id]
+	if !ok || inv.TenantID != tenantID {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	if reduceCents > inv.AmountDueCents || creditsReturnedCents > inv.CreditsAppliedCents {
+		return domain.Invoice{}, errs.InvalidState("credit note exceeds invoice").WithCode("credit_note_exceeds_invoice")
+	}
+	inv.AmountDueCents -= reduceCents
+	inv.CreditsAppliedCents -= creditsReturnedCents
+	m.invoices[id] = inv
+	return inv, nil
 }
 
 // TestCreate_IsSimulated locks the per-CN time-domain flag (migration 0117):

@@ -57,6 +57,11 @@ type Store interface {
 	// truncation — the ledger page's CSV silently exported the capped
 	// 50-row slice as if complete before this existed.
 	CountEntries(ctx context.Context, filter ListFilter) (int, error)
+	// SumCreditNoteGrantsForInvoice returns the credits that issued credit
+	// notes have already handed back to the balance for this invoice (grant
+	// entries on the invoice that carry a credit-note source). The void
+	// reversal subtracts it so the same credits are not returned twice.
+	SumCreditNoteGrantsForInvoice(ctx context.Context, tenantID, customerID, invoiceID string) (int64, error)
 
 	// ExpireGrantAtomic retires one expired grant — flips its
 	// consumed_cents to amount_cents and appends the -remaining expiry
