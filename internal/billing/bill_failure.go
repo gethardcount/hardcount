@@ -270,3 +270,19 @@ func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, logArg
 	}
 	return n, err
 }
+
+// BillDueNow bills one subscription now, for the operator's retry-billing
+// action (subscription.Service.RetryBilling). It is the scheduler's own
+// attempt: the same billSubscription, period CAS and failure write, so a
+// retry that races the billing run still produces one invoice per period, and
+// a retry that fails is saved like any other failed attempt.
+//
+// The caller has already cleared the failure record. If a billing run saved a
+// new failure in between, the attempt-time gate stops this attempt.
+func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string) (int, error) {
+	sub, err := e.subs.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
+		return 0, fmt.Errorf("read subscription %s: %w", subscriptionID, err)
+	}
+	return e.attemptSub(ctx, sub, "run", "operator_retry")
+}

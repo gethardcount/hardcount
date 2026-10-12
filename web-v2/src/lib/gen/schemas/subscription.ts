@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { BillingFailure } from './billingFailure';
 import type { SubscriptionBillingTime } from './subscriptionBillingTime';
 import type { SubscriptionStatus } from './subscriptionStatus';
 
@@ -20,4 +21,5 @@ export interface Subscription {
   billing_time?: SubscriptionBillingTime;
   trial_start_at?: string;
   trial_end_at?: string;
+  billing_failure?: BillingFailure;
 }

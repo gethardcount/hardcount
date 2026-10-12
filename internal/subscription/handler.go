@@ -436,6 +436,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Delete("/{id}/pause-collection", h.resumeCollection)
 	r.Post("/{id}/end-trial", h.endTrial)
 	r.Post("/{id}/extend-trial", h.extendTrial)
+	r.Post("/{id}/retry-billing", h.retryBilling)
 
 	// Billing thresholds — Stripe-parity hard-cap config. PUT writes the full
 	// (amount, reset, items) triple; DELETE clears it. Idempotent.
@@ -694,6 +695,29 @@ func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 	// end-trial tx (store-level DispatchTx subset) — do not also fire it here.
 
 	h.respondSub(w, r, http.StatusOK, sub)
+}
+
+// retryBilling is the operator's retry for a subscription whose billing is
+// failing or parked (ADR-119). It clears the saved failure (with its audit row,
+// in one transaction) and bills the subscription now. 200 carries the
+// subscription and the invoices generated; a retry that fails again is still
+// 200, with the new billing_failure on the subscription. 409
+// billing_not_failing when there is nothing to retry. The audit row is the
+// service's; the handler emits none.
+func (h *Handler) retryBilling(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.TenantID(r.Context())
+	id := chi.URLParam(r, "id")
+
+	sub, generated, err := h.svc.RetryBilling(r.Context(), tenantID, id)
+	if err != nil {
+		respond.FromError(w, r, err, "subscription")
+		return
+	}
+	h.stampPeriodDisplay(r.Context(), &sub)
+	respond.JSON(w, r, http.StatusOK, map[string]any{
+		"subscription":       sub,
+		"invoices_generated": generated,
+	})
 }
 
 // extendTrial pushes a trialing subscription's trial_end_at later. Body:
@@ -3145,6 +3169,12 @@ func describeSubscriptionAction(action string, meta map[string]any, planNames ma
 			return "Collection resumed", "", "", "succeeded"
 		case "trial_ended":
 			return "Trial ended early", "", "", "info"
+		case "billing_retried":
+			d := ""
+			if v, ok := meta["attempts_before"].(float64); ok && v > 0 {
+				d = fmt.Sprintf("After %d failed attempt%s", int(v), plural(int(v)))
+			}
+			return "Billing retried", d, "", "info"
 		case "trial_extended":
 			d := ""
 			ts := ""

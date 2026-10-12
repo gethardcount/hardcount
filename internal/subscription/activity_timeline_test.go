@@ -240,3 +240,19 @@ func TestActivityTimeline_SortsByDisplayedSimAxis(t *testing.T) {
 		t.Errorf("same-sim tie must order by wall write time: got %s then %s", resp.Events[3].EventType, resp.Events[4].EventType)
 	}
 }
+
+// TestDescribeSubscriptionAction_BillingRetried: the operator's retry-billing
+// audit row (ADR-119) reads as a sentence on the subscription timeline. The
+// metadata arrives as JSON, so the count is a float64.
+func TestDescribeSubscriptionAction_BillingRetried(t *testing.T) {
+	desc, detail, _, status := describeSubscriptionAction(domain.AuditActionUpdate,
+		map[string]any{"action": "billing_retried", "attempts_before": float64(8), "was_parked": true}, nil)
+	if desc != "Billing retried" || detail != "After 8 failed attempts" || status != "info" {
+		t.Fatalf("got %q / %q / %q", desc, detail, status)
+	}
+	_, detail, _, _ = describeSubscriptionAction(domain.AuditActionUpdate,
+		map[string]any{"action": "billing_retried", "attempts_before": float64(1)}, nil)
+	if detail != "After 1 failed attempt" {
+		t.Fatalf("singular: got %q", detail)
+	}
+}

@@ -840,6 +840,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// (default) — best-effort path that logs but doesn't fail Create
 	// on billing errors (the cycle scheduler picks up later periods).
 	subSvc.SetBiller(engine)
+	// ADR-119: the operator's retry-billing bills one subscription through
+	// the engine's own attempt.
+	subSvc.SetDueBiller(engine)
 	engine.SetCreditGranter(creditSvc)
 	// ADR-031 / #22 / ADR-118: the cancel and plan-swap relief for the unused
 	// part of an in_advance period, written in the change's transaction —

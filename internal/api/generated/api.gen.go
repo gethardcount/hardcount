@@ -1045,6 +1045,43 @@ type AttentionReason string
 // descending: Critical > Warning > Info.
 type AttentionSeverity string
 
+// BillingFailure Present on a subscription while the billing run is failing on the
+// work that subscription has due now (a period close, or a scheduled
+// mid-period cancel). Absent otherwise: a subscription that bills
+// cleanly, or whose due work changed, carries no `billing_failure`.
+//
+// After each failed attempt the billing run waits before the next one:
+// 15 minutes, 1 hour, 4 hours, 12 hours, then 24 hours three times.
+// The eighth failure parks the subscription (`parked: true`, no
+// `next_attempt_at`). A parked subscription is not attempted again
+// until `POST /v1/subscriptions/{id}/retry-billing` is called.
+//
+// Never set on a subscription attached to a test clock.
+type BillingFailure struct {
+	// Attempts Failed attempts on the work that is due now. At least 1.
+	Attempts int `json:"attempts"`
+
+	// FailedAt When the latest attempt failed.
+	FailedAt time.Time `json:"failed_at"`
+
+	// LastError Why the latest attempt failed: a sentence an operator can act
+	// on, or a generic line carrying the subscription id as the
+	// reference to search the server log for. Never raw error text.
+	LastError string `json:"last_error"`
+
+	// MaxAttempts The attempt at which the subscription parks (8).
+	MaxAttempts int `json:"max_attempts"`
+
+	// NextAttemptAt The billing run does not attempt the subscription before this
+	// instant. The attempt happens on the first run at or after it,
+	// so on an hourly schedule it can be up to an hour later. Absent
+	// when parked.
+	NextAttemptAt time.Time `json:"next_attempt_at,omitempty"`
+
+	// Parked True when automatic attempts have stopped.
+	Parked bool `json:"parked"`
+}
+
 // CreditBalance defines model for CreditBalance.
 type CreditBalance struct {
 	BalanceCents int64  `json:"balance_cents,omitempty"`
@@ -1712,15 +1749,28 @@ type RecoveryWarningCode string
 
 // Subscription defines model for Subscription.
 type Subscription struct {
-	BillingTime  SubscriptionBillingTime `json:"billing_time,omitempty"`
-	Code         string                  `json:"code,omitempty"`
-	CustomerId   string                  `json:"customer_id,omitempty"`
-	DisplayName  string                  `json:"display_name,omitempty"`
-	Id           string                  `json:"id,omitempty"`
-	PlanId       string                  `json:"plan_id,omitempty"`
-	Status       SubscriptionStatus      `json:"status,omitempty"`
-	TrialEndAt   time.Time               `json:"trial_end_at,omitempty"`
-	TrialStartAt time.Time               `json:"trial_start_at,omitempty"`
+	// BillingFailure Present on a subscription while the billing run is failing on the
+	// work that subscription has due now (a period close, or a scheduled
+	// mid-period cancel). Absent otherwise: a subscription that bills
+	// cleanly, or whose due work changed, carries no `billing_failure`.
+	//
+	// After each failed attempt the billing run waits before the next one:
+	// 15 minutes, 1 hour, 4 hours, 12 hours, then 24 hours three times.
+	// The eighth failure parks the subscription (`parked: true`, no
+	// `next_attempt_at`). A parked subscription is not attempted again
+	// until `POST /v1/subscriptions/{id}/retry-billing` is called.
+	//
+	// Never set on a subscription attached to a test clock.
+	BillingFailure BillingFailure          `json:"billing_failure,omitempty"`
+	BillingTime    SubscriptionBillingTime `json:"billing_time,omitempty"`
+	Code           string                  `json:"code,omitempty"`
+	CustomerId     string                  `json:"customer_id,omitempty"`
+	DisplayName    string                  `json:"display_name,omitempty"`
+	Id             string                  `json:"id,omitempty"`
+	PlanId         string                  `json:"plan_id,omitempty"`
+	Status         SubscriptionStatus      `json:"status,omitempty"`
+	TrialEndAt     time.Time               `json:"trial_end_at,omitempty"`
+	TrialStartAt   time.Time               `json:"trial_start_at,omitempty"`
 }
 
 // SubscriptionBillingTime defines model for Subscription.BillingTime.
@@ -2531,6 +2581,9 @@ type ServerInterface interface {
 	// Activate draft subscription
 	// (POST /v1/subscriptions/{id}/activate)
 	PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request, id string)
+	// Retry billing on a subscription whose billing is failing
+	// (POST /v1/subscriptions/{id}/retry-billing)
+	PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request, id string)
 	// List test clocks for the active tenant
 	// (GET /v1/test-clocks)
 	GetV1TestClocks(w http.ResponseWriter, r *http.Request)
@@ -2879,6 +2932,12 @@ func (_ Unimplemented) PostV1Subscriptions(w http.ResponseWriter, r *http.Reques
 // Activate draft subscription
 // (POST /v1/subscriptions/{id}/activate)
 func (_ Unimplemented) PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Retry billing on a subscription whose billing is failing
+// (POST /v1/subscriptions/{id}/retry-billing)
+func (_ Unimplemented) PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4672,6 +4731,38 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.Response
 	handler.ServeHTTP(w, r)
 }
 
+// PostV1SubscriptionsIdRetryBilling operation middleware
+func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostV1SubscriptionsIdRetryBilling(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetV1TestClocks operation middleware
 func (siw *ServerInterfaceWrapper) GetV1TestClocks(w http.ResponseWriter, r *http.Request) {
 
@@ -5412,6 +5503,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/subscriptions/{id}/activate", wrapper.PostV1SubscriptionsIdActivate)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/retry-billing", wrapper.PostV1SubscriptionsIdRetryBilling)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/test-clocks", wrapper.GetV1TestClocks)

@@ -1063,6 +1063,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/subscriptions/{id}/retry-billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry billing on a subscription whose billing is failing
+         * @description Clears the subscription's `billing_failure` and bills it now, with
+         *     the same attempt the billing run makes. Use it after fixing the
+         *     cause of a failure, to skip the wait, or to restart a parked
+         *     subscription. An audit log entry records the retry.
+         *
+         *     A retry that fails again is **not** an HTTP error. The response is
+         *     200 and the returned subscription carries a new `billing_failure`
+         *     with `attempts: 1`; the billing run then retries on its own
+         *     schedule. A subscription that was overdue for several periods is
+         *     billed for each of them, one invoice per period.
+         *
+         *     The call bills inline. If it times out part-way through a long
+         *     catch-up, the invoices already created stay, and the next billing
+         *     run finishes the rest.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /**
+                 * @description The retry ran. `subscription.billing_failure` is absent when
+                 *     the subscription billed (or had nothing left to bill), and
+                 *     present when the attempt failed again.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            subscription: components["schemas"]["Subscription"];
+                            /** @description Invoices this call created. */
+                            invoices_generated: number;
+                        };
+                    };
+                };
+                /** @description Subscription not found. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /**
+                 * @description Nothing to retry. Error code `billing_not_failing` when the
+                 *     subscription has no `billing_failure`. Also returned for a
+                 *     subscription attached to a test clock; use the clock's retry
+                 *     advance there.
+                 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage-events": {
         parameters: {
             query?: never;
@@ -3328,6 +3409,48 @@ export interface components {
             trial_start_at?: string;
             /** Format: date-time */
             trial_end_at?: string;
+            billing_failure?: components["schemas"]["BillingFailure"];
+        };
+        /**
+         * @description Present on a subscription while the billing run is failing on the
+         *     work that subscription has due now (a period close, or a scheduled
+         *     mid-period cancel). Absent otherwise: a subscription that bills
+         *     cleanly, or whose due work changed, carries no `billing_failure`.
+         *
+         *     After each failed attempt the billing run waits before the next one:
+         *     15 minutes, 1 hour, 4 hours, 12 hours, then 24 hours three times.
+         *     The eighth failure parks the subscription (`parked: true`, no
+         *     `next_attempt_at`). A parked subscription is not attempted again
+         *     until `POST /v1/subscriptions/{id}/retry-billing` is called.
+         *
+         *     Never set on a subscription attached to a test clock.
+         */
+        BillingFailure: {
+            /** @description Failed attempts on the work that is due now. At least 1. */
+            attempts: number;
+            /** @description The attempt at which the subscription parks (8). */
+            max_attempts: number;
+            /**
+             * @description Why the latest attempt failed: a sentence an operator can act
+             *     on, or a generic line carrying the subscription id as the
+             *     reference to search the server log for. Never raw error text.
+             */
+            last_error: string;
+            /**
+             * Format: date-time
+             * @description When the latest attempt failed.
+             */
+            failed_at: string;
+            /**
+             * Format: date-time
+             * @description The billing run does not attempt the subscription before this
+             *     instant. The attempt happens on the first run at or after it,
+             *     so on an hourly schedule it can be up to an hour later. Absent
+             *     when parked.
+             */
+            next_attempt_at?: string;
+            /** @description True when automatic attempts have stopped. */
+            parked: boolean;
         };
         UsageEvent: {
             id?: string;

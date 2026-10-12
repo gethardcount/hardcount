@@ -245,6 +245,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"DELETE", "/v1/subscriptions/{id}/pause-collection"}:              explicit("subscription.Service.ResumeCollection → Log(update, subscription; metadata action=collection_resumed). The HANDLER emits nothing — the row is the service's."),
 	{"POST", "/v1/subscriptions/{id}/end-trial"}:                       explicit("subscription.Handler.endTrial → Log(update, subscription: trial_ended)."),
 	{"POST", "/v1/subscriptions/{id}/extend-trial"}:                    explicit("subscription.Handler.extendTrial → Log(update, subscription: trial_extended)."),
+	{"POST", "/v1/subscriptions/{id}/retry-billing"}:                   explicit("subscription.Service.RetryBilling → LogInTx(update, subscription; metadata action=billing_retried) on the transaction that clears the failure record; a subscription with no record answers 409 and emits nothing."),
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               explicit("subscription.Handler.setBillingThresholds → Log(update, subscription)."),
 	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            explicit("subscription.Handler.clearBillingThresholds → Log(update, subscription)."),
 	{"POST", "/v1/subscriptions/{id}/items"}:                           explicit("subscription.Handler.addItem → Log(update, subscription) + a proration_failed row on the fallback path."),
