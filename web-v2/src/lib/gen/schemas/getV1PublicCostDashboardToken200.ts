@@ -8,6 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { GetV1PublicCostDashboardToken200BillingPeriod } from './getV1PublicCostDashboardToken200BillingPeriod';
+import type { GetV1PublicCostDashboardToken200Credits } from './getV1PublicCostDashboardToken200Credits';
 import type { GetV1PublicCostDashboardToken200SubscriptionsItem } from './getV1PublicCostDashboardToken200SubscriptionsItem';
 import type { GetV1PublicCostDashboardToken200TotalsItem } from './getV1PublicCostDashboardToken200TotalsItem';
 import type { GetV1PublicCostDashboardToken200UsageItem } from './getV1PublicCostDashboardToken200UsageItem';
@@ -23,4 +24,6 @@ export type GetV1PublicCostDashboardToken200 = {
   totals?: GetV1PublicCostDashboardToken200TotalsItem[];
   /** Projected METERED cost for the current period, in cents. Recurring base fees are not included — an in_advance base is already invoiced at period open. */
   projected_total_cents?: number;
+  /** The customer's credit position. `balance_cents` is the ledger balance: credit is drawn down when an invoice is issued, so it does not move during a billing period. `estimated_remaining_cents` is the balance minus this period's usage so far (`projected_total_cents`), never below zero. It is an estimate: the projection excludes tax, and totals in different currencies are added together. */
+  credits?: GetV1PublicCostDashboardToken200Credits;
 };

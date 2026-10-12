@@ -139,3 +139,13 @@ Token shape is unaffected by the above: Orb's customer-portal URL is likewise
 non-expiring, so Velox's non-expiry is at parity. The plaintext-at-rest storage
 noted under Negative is Velox-specific and remains gated on the first
 production deploy.
+
+## Amendment 2026-10-12: the projection carries the credit position
+
+A user asked for a balance their own customers can see (issue #86). The projection now has a `credits` object: the ledger balance, what is left of the prepaid commit and of promotional credit, and an estimate of what remains after this period's usage so far.
+
+- The estimate exists because the ledger balance does not move during a period: credit is drawn down when the invoice is issued. A page that wants a "live" figure needs the balance minus usage so far.
+- It is labelled an estimate. The projection excludes tax, and totals in different currencies are added together.
+- A failed credit read fails the whole response. A zero balance shown to a customer who holds credit would be wrong and silent.
+- The endpoint is still polled. Push updates were asked for as a preference and are not built.
+

@@ -125,7 +125,7 @@ func TestCostDashboard_ProjectionExcludesUnmatchedRows(t *testing.T) {
 	svc, subs := unmatchedFixtures()
 
 	lookup := fakeTokenLookup{cust: domain.Customer{ID: "cus_1", TenantID: "t1", Livemode: false}}
-	a := NewCostDashboardAssembler(lookup, svc, subs)
+	a := NewCostDashboardAssembler(lookup, svc, subs, &fakeCredits{})
 
 	got, err := a.GetByToken(context.Background(), "vlx_pcd_whatever")
 	if err != nil {

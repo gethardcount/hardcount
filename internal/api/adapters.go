@@ -29,6 +29,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/tenant"
+	"github.com/sagarsuperuser/velox/internal/usage"
 	"github.com/sagarsuperuser/velox/internal/user"
 )
 
@@ -1519,4 +1520,28 @@ func (a *memberTenantNamerAdapter) GetTenantName(ctx context.Context, tenantID s
 		return "", err
 	}
 	return t.Name, nil
+}
+
+// costDashboardCredits adapts the credit service to the narrow reader the
+// public cost-dashboard assembler uses (usage.CostDashboardCreditReader), so
+// the usage package does not import the credit domain.
+type costDashboardCredits struct{ svc *credit.Service }
+
+// CreditSummary returns the customer's ledger balance and what is left of
+// their prepaid commit and promotional credit. Both reads run on a
+// tenant-scoped transaction in the mode already pinned on ctx.
+func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, customerID string) (usage.CostDashboardCredits, error) {
+	bal, err := a.svc.GetBalance(ctx, tenantID, customerID)
+	if err != nil {
+		return usage.CostDashboardCredits{}, fmt.Errorf("credit balance: %w", err)
+	}
+	grants, err := a.svc.ListGrants(ctx, tenantID, customerID, false)
+	if err != nil {
+		return usage.CostDashboardCredits{}, fmt.Errorf("credit grants: %w", err)
+	}
+	return usage.CostDashboardCredits{
+		BalanceCents:              bal.BalanceCents,
+		CommitRemainingCents:      grants.CommitRemainingCents,
+		PromotionalRemainingCents: grants.PromotionalRemainingCents,
+	}, nil
 }

@@ -334,7 +334,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// Wired here so customerH can serve both the operator rotate
 	// endpoint and the public GET-by-token route. See ADR-031 +
 	// MANUAL_TEST FLOW CU8.
-	costDashboardSvc := usage.NewCostDashboardAssembler(customerStore, customerUsageSvc, subStore)
+	costDashboardSvc := usage.NewCostDashboardAssembler(customerStore, customerUsageSvc, subStore, costDashboardCredits{svc: creditSvc})
 	customerH.SetCostDashboardService(costDashboardSvc)
 	// Same loud-boot shape as the HOSTED_INVOICE_BASE_URL / PAYMENT_UPDATE
 	// / DASHBOARD_BASE_URL warns below: unset, the rotate response's

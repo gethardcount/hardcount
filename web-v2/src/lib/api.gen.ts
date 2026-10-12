@@ -275,6 +275,23 @@ export interface paths {
                              * @description Projected METERED cost for the current period, in cents. Recurring base fees are not included — an in_advance base is already invoiced at period open.
                              */
                             projected_total_cents?: number;
+                            /** @description The customer's credit position. `balance_cents` is the ledger balance: credit is drawn down when an invoice is issued, so it does not move during a billing period. `estimated_remaining_cents` is the balance minus this period's usage so far (`projected_total_cents`), never below zero. It is an estimate: the projection excludes tax, and totals in different currencies are added together. */
+                            credits?: {
+                                /** Format: int64 */
+                                balance_cents?: number;
+                                /**
+                                 * Format: int64
+                                 * @description What is left of the customer's prepaid commit.
+                                 */
+                                commit_remaining_cents?: number;
+                                /**
+                                 * Format: int64
+                                 * @description What is left of promotional credit.
+                                 */
+                                promotional_remaining_cents?: number;
+                                /** Format: int64 */
+                                estimated_remaining_cents?: number;
+                            };
                         };
                     };
                 };

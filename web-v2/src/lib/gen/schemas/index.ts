@@ -33,6 +33,7 @@ export * from './getV1ProviderCosts200';
 export * from './getV1PublicCostDashboardToken200';
 export * from './getV1PublicCostDashboardToken200BillingPeriod';
 export * from './getV1PublicCostDashboardToken200BillingPeriodSource';
+export * from './getV1PublicCostDashboardToken200Credits';
 export * from './getV1PublicCostDashboardToken200SubscriptionsItem';
 export * from './getV1PublicCostDashboardToken200TotalsItem';
 export * from './getV1PublicCostDashboardToken200UsageItem';

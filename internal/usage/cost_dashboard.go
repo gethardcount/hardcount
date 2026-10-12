@@ -25,6 +25,14 @@ type CostDashboardAssembler struct {
 	customers     CustomerTokenLookup
 	usageService  *CustomerUsageService
 	subscriptions SubscriptionLister
+	credits       CostDashboardCreditReader
+}
+
+// CostDashboardCreditReader is the narrow surface the assembler uses to read
+// a customer's credit position. The credit service implements it through an
+// adapter in internal/api, so this package does not import the credit domain.
+type CostDashboardCreditReader interface {
+	CreditSummary(ctx context.Context, tenantID, customerID string) (CostDashboardCredits, error)
 }
 
 // CustomerTokenLookup is the narrow surface the assembler uses to
@@ -36,12 +44,13 @@ type CustomerTokenLookup interface {
 }
 
 // NewCostDashboardAssembler wires the public-projection assembler.
-// All three deps are required.
-func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *CustomerUsageService, subs SubscriptionLister) *CostDashboardAssembler {
+// All four deps are required.
+func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *CustomerUsageService, subs SubscriptionLister, credits CostDashboardCreditReader) *CostDashboardAssembler {
 	return &CostDashboardAssembler{
 		customers:     customers,
 		usageService:  usageSvc,
 		subscriptions: subs,
+		credits:       credits,
 	}
 }
 
@@ -66,6 +75,8 @@ func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *Customer
 //   - totals[] (per-currency rollup)
 //   - projected_total_cents (sum across currencies — Stripe-style
 //     single-number summary the widget surfaces as the headline)
+//   - credits (balance, remaining prepaid commit and promotional credit,
+//     and an estimate of what is left after this period's usage so far)
 type CostDashboardProjection struct {
 	CustomerID          string                      `json:"customer_id"`
 	TenantID            string                      `json:"tenant_id"`
@@ -74,11 +85,35 @@ type CostDashboardProjection struct {
 	Usage               []CostDashboardMeter        `json:"usage"`
 	Totals              []CostDashboardTotal        `json:"totals"`
 	ProjectedTotalCents int64                       `json:"projected_total_cents"`
+	Credits             CostDashboardCredits        `json:"credits"`
 	// Livemode marks whether this dashboard reflects real-money usage; the
 	// embed shows a "Test mode" banner when false. Shipped in the JSON
 	// contract pre-outreach so partner UIs never face a mid-pilot schema
 	// addition (ADR-032 consumer-ready JSON).
 	Livemode bool `json:"livemode"`
+}
+
+// CostDashboardCredits is the customer's credit position (issue #86).
+//
+// BalanceCents is the ledger balance: credit is drawn down when an invoice is
+// issued, so it does not move during a billing period. EstimatedRemainingCents
+// is the figure a "live balance" widget wants: the balance minus this period's
+// usage so far (projected_total_cents), never below zero. It is an estimate:
+// the projection excludes tax, and a customer billed in more than one
+// currency has those totals added together.
+type CostDashboardCredits struct {
+	BalanceCents              int64 `json:"balance_cents"`
+	CommitRemainingCents      int64 `json:"commit_remaining_cents"`
+	PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
+	EstimatedRemainingCents   int64 `json:"estimated_remaining_cents"`
+}
+
+// estimatedRemaining is the credit left after this period's usage so far.
+func estimatedRemaining(balanceCents, projectedCents int64) int64 {
+	if left := balanceCents - projectedCents; left > 0 {
+		return left
+	}
+	return 0
 }
 
 type CostDashboardPeriod struct {
@@ -156,6 +191,13 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	if err != nil {
 		return nil, fmt.Errorf("list subscriptions: %w", err)
 	}
+	// A failed credit read fails the response. Showing a zero balance to a
+	// customer who holds credit would be wrong and silent.
+	credits, err := a.credits.CreditSummary(ctx, cust.TenantID, cust.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read credits: %w", err)
+	}
+
 	activeCount := 0
 	for _, s := range subs {
 		if s.Status == domain.SubscriptionActive || s.Status == domain.SubscriptionTrialing {
@@ -163,7 +205,9 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 		}
 	}
 	if activeCount == 0 {
+		credits.EstimatedRemainingCents = estimatedRemaining(credits.BalanceCents, 0)
 		return CostDashboardProjection{
+			Credits:       credits,
 			CustomerID:    cust.ID,
 			TenantID:      cust.TenantID,
 			BillingPeriod: CostDashboardPeriod{Source: "no_subscription"},
@@ -235,6 +279,8 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 		proj.Totals = append(proj.Totals, CostDashboardTotal(t))
 		proj.ProjectedTotalCents += t.AmountCents
 	}
+	credits.EstimatedRemainingCents = estimatedRemaining(credits.BalanceCents, proj.ProjectedTotalCents)
+	proj.Credits = credits
 
 	return proj, nil
 }
