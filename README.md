@@ -78,14 +78,14 @@ To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/se
 
 ## What Velox is **not**
 
-Read this list to decide quickly whether Velox fits you:
+Velox is the wrong choice if you need:
 
-- **Not for vanilla card-first SaaS** with simple per-seat pricing. Stripe Billing is fine for them.
-- **Not multi-PSP (payment service provider) yet.** Stripe is the only payment processor. Razorpay/Adyen come when a paying tenant asks.
-- **Not for marketplaces or Stripe Connect.** Velox bills *your* customers directly; it doesn't split payouts across sub-merchants. Velox itself is multi-tenant (many billing tenants per deployment), but each tenant collects on its own behalf.
-- **No Revenue Recognition / Sigma** (Stripe's revenue-accounting and SQL-analytics products). Bring your own warehouse + dbt.
-- **No Quotes or Subscription Schedules.** Sales-led contract billing should pick Recurly or Maxio.
-- **No 50+ payment-method types.** Cards via Stripe + send-invoice. ACH/SEPA expand from there.
+- **Simple per-seat pricing paid by card.** Stripe Billing already does that well.
+- **A payment processor other than Stripe.** Stripe is the only one today.
+- **A marketplace that splits payouts** between sellers (Stripe Connect). Velox bills your own customers. It does serve many separate businesses from one install, each collecting for itself.
+- **Revenue recognition or accounting reports.** Export the data to your own warehouse.
+- **Quotes or multi-phase contracts** for sales-led deals.
+- **Many payment methods.** Today it is cards through Stripe, or an invoice the customer pays outside Velox.
 
 ---
 

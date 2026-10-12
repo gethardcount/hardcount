@@ -1,263 +1,205 @@
-# Velox — Self-host
+# Self-host Velox
 
-**What this page is:** the operator's reference for running Velox yourself.
-It covers the deployment shape, Postgres requirements, environment
-variables, scaling and observability. **Who it's for:** an engineer who
-sets up or operates an install, whether new to this repo or checking one
-flag mid-deploy.
+This page is for the engineer who installs and runs Velox. It covers the two ways to run it, what Postgres needs, the settings, how much load it takes, and what to watch.
 
-Velox runs as a single Go binary against Postgres. It has two deployment
-shapes:
+Velox is one Go program that talks to Postgres. In production it also needs Redis, which it uses only for rate limiting.
 
-- **Docker Compose on a single VM.** This is the reference and evaluation
-  install, described first below.
-- **The production posture: N ≥ 2 replicas behind a load balancer, on
-  managed Postgres and Redis.** This was decided 2026-08-30; see
-  [Operational posture](#operational-posture) below.
+## Two ways to run it
 
-Only the packaging for the second shape (Helm chart, Terraform) is
-deferred. It waits until a [design partner](glossary.md) (an early
-customer who works with the team) names the platform flavour they run.
+| | Good for | What you run |
+|---|---|---|
+| **One VM with Docker Compose** | Trying Velox, or a small install where a few minutes of downtime during a restart is fine | Five containers on one machine |
+| **Two or more copies behind a load balancer** | Production, where a restart must not cause downtime | Two or more `velox-api` copies, a managed Postgres, a managed Redis |
 
-## Deploying (single-VM compose stack)
+A Helm chart and a Terraform module are not written yet. They will be when an early customer tells us which platform they run.
 
-**The canonical walkthrough is
-[`deploy/compose/README.md`](../deploy/compose/README.md).** It describes a
-containerized five-service stack (postgres, redis, velox-api, velox-dashboard, nginx)
-with its own `.env.example`. It takes five minutes from a fresh VM to a
-working [tenant](glossary.md). A tenant is Velox's unit of
-isolation: one business account with its own data, dashboard users and API
-keys. One install can serve several tenants.
+## One VM with Docker Compose
 
-The steps:
+Follow the step-by-step guide: [`deploy/compose/README.md`](../deploy/compose/README.md).
+
+In short:
 
 1. Set four secrets.
 2. Run `docker compose up -d`.
-3. Make one `POST /v1/bootstrap` call. It returns your dashboard owner login
-   and API keys (test + live).
+3. Make one `POST /v1/bootstrap` call. It returns your dashboard login and your API keys.
 
-The stack serves plain HTTP on port 80. Until you put TLS in front, sign in to
-the dashboard at `http://localhost/` on the server, or through an SSH tunnel.
-Sign-in does not work at `http://<server-ip>/`. The
-[compose guide](../deploy/compose/README.md#tls) covers both.
+That gives you a working [tenant](glossary.md): one business account with its own data, dashboard users and API keys. One install can hold several tenants.
 
-Everything below on this page is reference material that applies to both
-the compose stack and a hand-rolled install. It covers Postgres
-requirements, env vars, scaling and observability.
+**Signing in before you add TLS.** The stack serves plain HTTP on port 80. Until you put TLS in front, sign in to the dashboard at `http://localhost/` on the server, or through an SSH tunnel. Sign-in does not work at `http://<server-ip>/`. The [compose guide](../deploy/compose/README.md#tls) covers both.
 
-## Local development (host Go toolchain, not a deployment)
+**What to expect from one VM:**
+
+- There is one copy of the API. While it restarts, Velox is down.
+- Postgres runs on the same machine, unless you point `DATABASE_URL` at one elsewhere.
+- There is no load balancer.
+
+## Two or more copies behind a load balancer
+
+This is the supported production setup:
+
+- Two or more `velox-api` copies behind a load balancer.
+- A managed Postgres with automatic failover and point-in-time restore.
+- A managed Redis.
+
+Things to know:
+
+- **Background jobs run once, not once per copy.** Billing runs, payment retries and webhook delivery are background jobs. The copies agree, through a row in Postgres, on which one runs each job. The others stand by, and one takes over within about 15 seconds if the first dies.
+- **Connection poolers work.** PgBouncer in transaction mode and RDS Proxy both work for the server. Run database upgrades (migrations) over a direct connection.
+- **Give each copy 120 seconds to shut down.** On a stop signal, a copy first tells the load balancer it is leaving, then finishes its work. The worst case is 90 seconds.
+- **A few features still assume one copy.** The live event stream in the dashboard is one. None of them touch money. The full list is in the [readiness review](dev/ha-readiness-2026-07-06.md).
+
+Rollouts, upgrades and scaling: [`deploy/README.md`](../deploy/README.md).
+
+## Working on Velox locally
+
+This runs the API from source on your machine. It is for development, not for hosting.
 
 ```bash
 git clone https://github.com/getvelox/velox.git
 cd velox
 
-cp .env.example .env   # make dev reads it; local defaults work as-is
+cp .env.example .env   # make dev reads it; the defaults work as they are
 docker compose up -d postgres redis mailpit
 VELOX_BOOTSTRAP_EMAIL=you@example.com VELOX_BOOTSTRAP_PASSWORD=change-me-please1 \
   make bootstrap
 make dev
 ```
 
-`VELOX_BOOTSTRAP_EMAIL` and `VELOX_BOOTSTRAP_PASSWORD` are optional. Without
-them, bootstrap defaults the owner to `admin@velox.local` and prints a
-generated password. Passwords must be at least 12 characters.
+The email and password are optional. Without them, the owner is `admin@velox.local` and bootstrap prints a generated password. A password needs at least 12 characters.
 
-That gives you:
+You now have:
 
-- `postgres` on `:5432` (volume-backed, password `velox`)
-- `redis` on `:6379` (used by the rate limiter).
-  - **Required in production.** The general and hosted-invoice limiters fail
-    closed without it. So `APP_ENV=production` refuses to boot unless
-    `REDIS_URL` points at a reachable Redis (2026-08-30).
-  - Outside production it is optional, and the limiters fail open.
-- `mailpit` on `:1025` SMTP / `:8025` web UI (catches outbound transactional mail)
-- `velox-api` on `:8080` (from `make dev`, not a container)
+| Service | Where | Notes |
+|---|---|---|
+| Postgres | `:5432` | Password `velox`. Data is kept in a Docker volume. |
+| Redis | `:6379` | Used for rate limiting. Optional outside production. |
+| Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Velox sends, so nothing leaves your machine. |
+| The API | `:8080` | Started by `make dev`. Not a container. |
 
-The dashboard:
+The dashboard runs separately:
 
 ```bash
 cd web-v2 && npm install && npm run dev
 # → http://localhost:5173
 ```
 
-## Operational posture
-
-This deployment shape is a **single-VM, single-instance** install:
-
-- API: 1 `velox-api` process. Restart and you have downtime until it
-  comes back up.
-- DB: 1 Postgres instance on the same host (or a managed Postgres if you
-  point `DATABASE_URL` elsewhere).
-- Scheduler: an in-process goroutine inside `velox-api` (ADR-006). ADRs,
-  the numbered architecture decision records, live in `docs/adr/`.
-  - The scheduler and the outbox dispatchers are leader-elected per tick
-    through a Postgres lease row (ADR-114). On a second replica, they stand
-    by instead of running the same work twice. So an accidental N=2
-    is correctness-safe on the money paths.
-  - Outbox dispatchers are the workers that drain the
-    [outbox](glossary.md) tables. Side effects such as outbound
-    webhook deliveries are enqueued there in the same transaction as the
-    state change that caused them.
-  - A few non-money surfaces still assume one process (SSE live tail,
-    per-process throttles). The full list, with evidence, is in
-    [docs/dev/ha-readiness-2026-07-06.md](dev/ha-readiness-2026-07-06.md).
-- LB: none.
-- Shutdown: SIGTERM → readiness 503 `draining` → three bounded stages, 90s
-  worst case. Give the process 120s of grace. See
-  [deploy/README.md](../deploy/README.md) "Rolling deploys and shutdown".
-
-This shape is appropriate for development, evaluation, and single-tenant
-self-hosting where ~minutes of downtime per deploy/restart is acceptable.
-It is **not** a production-with-availability shape.
-
-The supported production posture (decided 2026-08-30) is a load-balanced
-multi-replica deployment. The engine is being designed for it:
-
-- N ≥ 2 `velox-api` behind a load balancer.
-- Managed Postgres with failover + PITR.
-- Managed Redis.
-
-Much of the groundwork already exists: leader-elected scheduling,
-SKIP-LOCKED outbox claims, and DB-backed sessions/idempotency. The remaining
-work list and its status live in the HA-readiness doc above.
-
-Leadership is a per-tick lease row (ADR-114, shipped 2026-08-30). So
-PgBouncer transaction mode and RDS Proxy work for the server. Migrations
-still want a direct or session-mode connection.
-
-Packaging (Helm chart, Terraform module) stays deferred until a design
-partner names the platform flavour. The architecture no longer waits for
-that.
-
 ## Postgres
 
-Compose ships Postgres 16 with default settings — sufficient for eval.
-For your own VM:
+The Compose stack ships Postgres 16 with default settings, which is enough for trying Velox. For your own Postgres:
 
-- Version: 16.x
-- Extensions: `pgcrypto` (provides `gen_random_bytes`), `citext` and `btree_gist`.
-  Migrations run `CREATE EXTENSION IF NOT EXISTS`, so the migrating role
-  needs the `CREATE EXTENSION` permission. On locked-down managed
-  Postgres, pre-create them as
-  [`docs/ops/postgres-requirements.md`](ops/postgres-requirements.md)
-  describes.
-- **A least-privilege runtime role (required for tenant isolation).**
-  Velox enforces multi-tenant isolation with Row-Level Security (RLS).
-  Request traffic runs on the connection in `APP_DATABASE_URL`. That is a
-  role like `velox_app` with its own password, not the admin role. The
-  compose stack creates it from `VELOX_APP_DB_PASSWORD`
-  ([`deploy/compose/postgres-init.sh`](../deploy/compose/postgres-init.sh));
-  on your own Postgres:
+- **Version:** 16.
+- **Extensions:** `pgcrypto`, `citext` and `btree_gist`. Velox creates them during database upgrades, so the role that runs upgrades needs permission to create extensions. If your managed Postgres forbids that, create them first: [Postgres requirements](ops/postgres-requirements.md).
+- **Backups:** take regular `pg_dump` snapshots. How often depends on how much data you can afford to lose. See [backups](ops/backup-considerations.md).
 
-  ```sql
-  -- use psql -v pw='...' and :'pw' quoting, or substitute a literal
-  CREATE ROLE velox_app WITH LOGIN PASSWORD :'pw';
-  GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
-  GRANT ALL ON SCHEMA public TO velox_app;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
-  ```
+### The two database users
 
-  **With `APP_ENV=staging` or `production`, Velox refuses to start**
-  (ADR-073) when `APP_DATABASE_URL`:
+Velox uses two database users, and the second one is what keeps tenants apart.
 
-  - is missing,
-  - carries the default password `velox_app` (or an empty one),
-  - can't be opened, or
-  - points at a role that can bypass RLS (superuser/`BYPASSRLS`). This
-    boot check catches a copied `DATABASE_URL`.
-
-  In `local` it derives `velox_app:velox_app` from `DATABASE_URL` and warns
-  instead, since a single-tenant dev box often uses one superuser URL.
-- Backups: take a `pg_dump` snapshot on whatever cadence your data loss
-  tolerance allows. Velox's outbound webhook outbox and audit log are the
-  two surfaces where lost rows are most expensive. A consistent snapshot
-  covers both.
-
-## Migrations
-
-`RUN_MIGRATIONS_ON_BOOT=true` (set in `.env.example`, which `make dev` loads as `.env`; the compose stack also sets it) runs forward
-migrations on startup. Migrations are versioned and idempotent
-([`internal/platform/migrate/sql/`](../internal/platform/migrate/sql/)).
-Down-migrations exist for development reversal, but production rollbacks
-are forward-only. To recover, write a new forward migration; do not run
-the downs.
-
-## Environment
-
-Required:
-
-| Var | Purpose |
-|---|---|
-| `DATABASE_URL` | Postgres DSN — admin/migration role |
-| `APP_DATABASE_URL` | Postgres DSN — least-privilege `velox_app` runtime role (RLS enforced). Required in `staging`/`production`; local dev derives `velox_app:velox_app` from `DATABASE_URL` when unset |
-| `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data. Required in `production`; the server refuses to start without it |
-| `REDIS_URL` | Redis for rate limiting. Required in `production` |
-| `TRUST_PROXY` | Which proxy headers to trust for the client address. Required in `production` |
-
-Bootstrap-time (read by `make bootstrap` / `cmd/velox-bootstrap`, not the server):
-
-| Var | Purpose |
-|---|---|
-| `VELOX_BOOTSTRAP_EMAIL` | Dashboard owner email (default `admin@velox.local`) |
-| `VELOX_BOOTSTRAP_PASSWORD` | Owner password (unset → generated and printed once) |
-| `VELOX_BOOTSTRAP_TENANT` | Tenant name (default `Demo Tenant`) |
-
-Optional:
-
-| Var | Default | Purpose |
+| Setting | User | Used for |
 |---|---|---|
-| `RUN_MIGRATIONS_ON_BOOT` | `false` | Run migrations on startup (racing replicas serialize on an advisory lock and skip already-applied work) |
-| `APP_ENV` | `local` | `local`/`staging`/`production`. Gates the cookie `Secure` flag and the fail-closed boot checks — `staging`/`production` refuse to start without a valid `APP_DATABASE_URL` (see Postgres above) and refuse a `VELOX_BOOTSTRAP_TOKEN` under 16 chars |
-| `TRUST_PROXY` | _(unset)_ — **required in production** | Comma-separated proxy IPs/CIDRs whose `X-Forwarded-For`/`X-Real-IP` are trusted for client-IP resolution (rate limiting, audit logs). Unset = headers ignored, direct TCP peer used. `none` declares there is no proxy. Production refuses to boot with it unset (every per-IP limit would be one bucket behind a balancer). |
-| `DASHBOARD_BASE_URL` | _(unset)_ | Canonical dashboard origin for password-reset links. **Unset disables password-reset emails** — the origin is never derived from request headers (host-header poisoning). Set to e.g. `http://localhost:5173` in dev |
-| `SMTP_HOST` / `SMTP_PORT` | _(unset)_ | Outbound email relay. Unset → emails are not sent (`ErrSMTPNotConfigured`). The compose path points these at mailpit (`localhost:1025`) |
+| `DATABASE_URL` | The admin user | Database upgrades |
+| `APP_DATABASE_URL` | A limited user, usually `velox_app` | Every API request |
 
-Stripe is configured per-tenant via the dashboard (`POST /v1/settings/stripe`), not env vars — each tenant connects their own Stripe account.
+Postgres hides each tenant's rows from the others (a feature called Row-Level Security). An admin user can bypass that, so requests must never run as the admin.
 
-## Scaling considerations
+The Compose stack creates `velox_app` for you from `VELOX_APP_DB_PASSWORD`. On your own Postgres, create it yourself:
 
-Measured on AWS, in usage events ingested per second (ev/s), with every
-event reconciled against Postgres:
+```sql
+-- use psql -v pw='...' and :'pw' quoting, or substitute a literal
+CREATE ROLE velox_app WITH LOGIN PASSWORD :'pw';
+GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
+GRANT ALL ON SCHEMA public TO velox_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+```
 
-- **1,000 ev/s sustained** on a `db.m7g.2xlarge` (batch 10, five
-  10-minute repeats, 5 of 5 passed).
-- **15,000 ev/s** on a `db.m7g.4xlarge` (batch 100, 4 of 5 repeats).
+With `APP_ENV` set to `staging` or `production`, Velox refuses to start when `APP_DATABASE_URL`:
 
-The limit was database RAM first and write IOPS after that, never the app
-process. On the 4xlarge, RDS CPU stayed at or below 67 % and the app node
-was 75 %+ idle. Full method and every caveat:
-[docs/benchmarks/sustained-throughput.md](benchmarks/sustained-throughput.md).
+- is missing,
+- uses the default password `velox_app`, or an empty one,
+- cannot connect, or
+- points at a user that can bypass Row-Level Security. This catches a copied `DATABASE_URL`.
 
-On one small VM expect far less. The levers, in order:
+With `APP_ENV=local` it builds `velox_app:velox_app` from `DATABASE_URL` and logs a warning instead.
 
-1. The batch endpoint. One commit amortises the write cost across up to
-   1,000 events.
-2. Database RAM.
-3. Provisioned IOPS.
-4. Month-partitioning `usage_events`. Migration 0130 already ships the
-   `(tenant_id, timestamp)` index.
+## Database upgrades (migrations)
 
-## Observability
+A migration is a versioned script that changes the database schema. Velox ships them in [`internal/platform/migrate/sql/`](../internal/platform/migrate/sql/).
 
-Velox exposes Prometheus metrics on `/metrics` and structured logs to
-stdout. Connect these to whatever stack you already run. The v1 install
-does not ship a Grafana / Prometheus / Alertmanager bundle; that is
-deferred. Local dev observability is `tail -f` on the API logs.
+- Set `RUN_MIGRATIONS_ON_BOOT=true` and Velox applies any new ones when it starts. The Compose stack and the local `.env.example` both set it. The default is `false`.
+- If several copies start at once, only one applies them and the others wait.
+- **Never roll back in production.** The "down" scripts exist for development. To undo a change in production, write a new migration.
 
-Key metrics to watch:
+## Settings
 
-- `velox_billing_cycle_duration_seconds` — cycle scan latency
-- `velox_tax_outcome_total{outcome,reason}` — tax-provider failure modes
-- `velox_audit_write_errors_total` — audit log write failures
-- `velox_audit_uncovered_mutation_total{route}` — a request mutated state and left NO audit row (should be flat zero; see the runbook, `docs/ops/runbook.md`)
-- `velox_stripe_breaker_state` — Stripe API circuit breaker (0 = closed, 1 = half-open, 2 = open)
+Velox reads its settings from environment variables.
+
+**Required**
+
+| Variable | What it is |
+|---|---|
+| `DATABASE_URL` | Postgres connection URL for the admin user |
+| `APP_DATABASE_URL` | Postgres connection URL for the limited user. Required in `staging` and `production`. |
+| `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data. 64 hex characters. Required in `production`. |
+| `REDIS_URL` | Redis, for rate limiting. Required in `production`. |
+| `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward. Use `none` if there is no proxy. Required in `production`. |
+
+Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit.
+
+**Read once, when creating the first tenant** (by `make bootstrap`, not by the server)
+
+| Variable | What it is |
+|---|---|
+| `VELOX_BOOTSTRAP_EMAIL` | The dashboard owner's email. Default `admin@velox.local`. |
+| `VELOX_BOOTSTRAP_PASSWORD` | The owner's password. If unset, one is generated and printed once. |
+| `VELOX_BOOTSTRAP_TENANT` | The tenant's name. Default `Demo Tenant`. |
+
+**Optional**
+
+| Variable | Default | What it does |
+|---|---|---|
+| `APP_ENV` | `local` | `local`, `staging` or `production`. Outside `local`, cookies are marked secure and the start-up checks on this page apply. |
+| `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. |
+| `DASHBOARD_BASE_URL` | unset | The dashboard's address, used in password-reset links. If unset, no password-reset emails are sent. For local development use `http://localhost:5173`. |
+| `SMTP_HOST`, `SMTP_PORT` | unset | Your email server. If unset, Velox sends no email. The local `.env.example` points these at Mailpit; the Compose stack leaves them unset. See [email setup](ops/email-setup.md). |
+| `VELOX_BOOTSTRAP_TOKEN` | unset | Allows the `POST /v1/bootstrap` call that creates the first tenant. At least 16 characters outside `local`. |
+
+Stripe is not set here. Each tenant connects its own Stripe account in the dashboard, under Settings.
+
+## How much load it takes
+
+Measured on AWS, counting usage events stored per second, with every event checked against Postgres afterwards:
+
+- **1,000 events per second**, held for five 10-minute runs, on a `db.m7g.2xlarge` database (10 events per request). All five runs passed.
+- **15,000 events per second** on a `db.m7g.4xlarge` (100 events per request). Four of five runs passed.
+
+The database ran out of memory first, then disk write speed. The Velox process was never the limit. The method and every caveat: [sustained throughput](benchmarks/sustained-throughput.md).
+
+One small VM will take far less. To raise the limit, in this order:
+
+1. Send events in batches. One request can carry up to 1,000 events.
+2. Give the database more memory.
+3. Give the database faster disks.
+4. Split the `usage_events` table by month.
+
+## What to watch
+
+Velox serves Prometheus metrics at `/metrics` and writes structured logs to standard output. Connect both to the monitoring you already run. Velox does not ship dashboards or alert rules.
+
+The metrics worth an alert:
+
+| Metric | What it tells you |
+|---|---|
+| `velox_billing_cycle_duration_seconds` | How long a billing run takes |
+| `velox_tax_outcome_total` | Tax calculations that failed, and why |
+| `velox_audit_write_errors_total` | Audit log entries that failed to save |
+| `velox_audit_uncovered_mutation_total` | Changes made with no audit log entry. Should stay at zero. |
+| `velox_stripe_breaker_state` | Whether Velox has paused calls to Stripe after repeated failures. 0 is normal, 2 is paused. |
+
+What to do when one fires: the [operations runbook](ops/runbook.md).
 
 ## Related
 
-- [docs/ops/tax-calculation.md](./ops/tax-calculation.md) — tax
-  providers and their failure handling
-- [docs/ops/stripe-end-to-end-test.md](./ops/stripe-end-to-end-test.md) —
-  manual end-to-end Stripe smoke test
-- [docs/adr/](./adr/) — architecture decisions worth knowing about
-  (PaymentIntent-only, RLS multi-tenancy, in-process scheduler)
+- [Tax calculation](ops/tax-calculation.md): tax providers and what happens when one fails.
+- [Stripe end-to-end test](ops/stripe-end-to-end-test.md): check a real Stripe account before going live.
+- [Decision records](adr/README.md): why Velox is built this way. The ones behind this page are the in-process scheduler (ADR-006), tenant isolation (ADR-003), the limited database user (ADR-073) and how copies share background jobs (ADR-114).
