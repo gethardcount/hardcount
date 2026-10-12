@@ -193,6 +193,8 @@ type observedSubs struct {
 
 	mu      sync.Mutex
 	results []bool // what each RecordBillingFailure call reported
+	// writes counts every RecordBillingFailure call, including failed ones.
+	writes atomic.Int32
 }
 
 func (a *observedSubs) GetDueBilling(ctx context.Context, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
@@ -204,6 +206,7 @@ func (a *observedSubs) GetDueBilling(ctx context.Context, before time.Time, excl
 }
 
 func (a *observedSubs) RecordBillingFailure(ctx context.Context, tenantID, id string, f subscription.BillingFailureWrite) (bool, error) {
+	a.writes.Add(1)
 	if a.recordErr != nil {
 		return false, a.recordErr
 	}
@@ -590,12 +593,19 @@ func TestBillingFailure_MidPeriodCancelFails_ClearingTheCancelVoids(t *testing.T
 // about the subscription. Nothing is saved, no wait starts, and the very next
 // run attempts it. A statement timeout on a live run does count.
 //
+// "Saves nothing" is asserted as "the failure write is not even attempted". A
+// write on a cancelled ctx would fail anyway, so the row alone cannot tell a
+// classifier that skipped the write from one that tried it and logged an
+// error on every shutdown.
+//
 // Mutation seams: make classifyBillFailure ignore ctx.Err() → the two
 // "interrupted" legs fail; make postgres.IsTransient return false → the two
 // database legs fail.
 func TestBillingFailure_UncountedFailuresSaveNothing(t *testing.T) {
 	env := newBillFailureEnv(t, "Billing Failure Uncounted")
 	a := env.dueSub(t, "sub-a", env.planBad, env.periodEnd)
+	watched := &observedSubs{subStoreAdapter: &subStoreAdapter{env.subs}}
+	env.engine = env.newEngine(watched, env.pricing)
 
 	attempted := func(t *testing.T, run func()) {
 		t.Helper()
@@ -612,6 +622,9 @@ func TestBillingFailure_UncountedFailuresSaveNothing(t *testing.T) {
 		}
 		if bf := env.get(t, a.ID).BillingFailure; bf != nil {
 			t.Fatalf("an uncounted failure reads as a record: %+v", bf)
+		}
+		if n := watched.writes.Load(); n != 0 {
+			t.Fatalf("the failure write was attempted %d times for an uncounted failure", n)
 		}
 	}
 
@@ -652,6 +665,9 @@ func TestBillingFailure_UncountedFailuresSaveNothing(t *testing.T) {
 		attempted(t, func() { env.mustFail(t, a.ID) })
 		if bf := env.get(t, a.ID).BillingFailure; bf == nil || bf.Attempts != 1 {
 			t.Fatalf("a statement timeout was not counted: %+v", bf)
+		}
+		if n := watched.writes.Load(); n != 1 {
+			t.Fatalf("%d failure writes for one counted failure, want 1", n)
 		}
 	})
 }
