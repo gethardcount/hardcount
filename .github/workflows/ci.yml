@@ -291,7 +291,7 @@ jobs:
         run: |
           set -euo pipefail
           MOD=$(awk '/^go [0-9]/ {print $2; exit}' go.mod)
-          IMG=$(sed -n 's/^FROM golang:\([0-9.]*\)-alpine AS builder$/\1/p' Dockerfile)
+          IMG=$(sed -n 's/^FROM \(--platform=[^ ]* \)\{0,1\}golang:\([0-9.]*\)-alpine AS builder$/\2/p' Dockerfile)
           if [ -z "$MOD" ] || [ -z "$IMG" ]; then
             echo "could not parse versions (go.mod='$MOD' Dockerfile='$IMG')" >&2
             exit 1
