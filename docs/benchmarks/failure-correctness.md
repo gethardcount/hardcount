@@ -52,8 +52,10 @@ each. Partway through, it is `SIGKILL`ed. It gets no graceful shutdown, no
 deferred unlock, and no chance to finish the row it was on. A second process
 then runs the same cycle.
 
-The kill point is chosen by watching the database, not by sleeping, so the kill
-lands inside the run every time. It is swept across five positions, including
+The kill point is chosen by watching the database, not by sleeping. At the last
+position the leader can still finish before the kill lands; the test then tries
+that position again, up to five times, and fails if the kill never lands inside
+the run. It is swept across five positions, including
 both boundaries: killed after the very first commit, and killed with one
 subscription left.
 

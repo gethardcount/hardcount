@@ -1045,7 +1045,14 @@ func TestThresholdFire_ResetProratesBase_RealStore(t *testing.T) {
 	// = the plan's full monthly interval from cycleStart (month-length
 	// dependent), RoundHalfToEven.
 	segDays := int64(3)
-	fullDays := int64(math.Round(f.cycleStart.AddDate(0, 1, 0).Sub(f.cycleStart).Hours() / 24))
+	// The period length comes from the engine's own helper, not AddDate:
+	// AddDate rolls an out-of-range day into the next month (Oct 31 + 1 month
+	// = Dec 1, 31 days), while billing clamps to the month's last day (Nov 30,
+	// 30 days). With AddDate this test failed whenever "72 hours ago" fell on
+	// a day the next month lacks, about six days a year.
+	anchorDay := domain.AnchorDayFor(f.cycleStart, domain.BillingTimeAnniversary, domain.BillingMonthly, time.UTC)
+	periodEnd := domain.AddBillingInterval(f.cycleStart, domain.BillingMonthly, time.UTC, anchorDay)
+	fullDays := int64(math.Round(periodEnd.Sub(f.cycleStart).Hours() / 24))
 	wantBase := money.RoundHalfToEven(4900*segDays, fullDays)
 
 	invoices := f.listInvoices(t, ctx)

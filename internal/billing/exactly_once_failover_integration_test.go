@@ -208,7 +208,7 @@ func cycleInvoiceCounts(t *testing.T, db *postgres.DB, tenantID string) (total, 
 //
 // The kill point is chosen by watching the database rather than by sleeping:
 // the parent polls until the leader has committed killAfter invoices, then
-// kills it. That puts the kill inside the run every time instead of racing a
+// kills it. That puts the kill inside the run almost every time instead of racing a
 // timer, and makes the interesting boundary (killed immediately after a commit,
 // before the loop advances) reachable on purpose.
 func TestExactlyOnce_LeaderKilledMidRun(t *testing.T) {
@@ -219,12 +219,26 @@ func TestExactlyOnce_LeaderKilledMidRun(t *testing.T) {
 	// middle.
 	for _, killAfter := range []int{1, 5, 12, 25, 39} {
 		t.Run(fmt.Sprintf("killed_after_%d_invoices", killAfter), func(t *testing.T) {
-			runKilledLeaderTrial(t, killAfter)
+			// A trial whose kill lands after the leader already finished
+			// interrupted nothing. It used to skip, which let this proof
+			// silently not run. Try again instead, and fail if the kill
+			// never lands inside the run.
+			const attempts = 5
+			for attempt := 1; attempt <= attempts; attempt++ {
+				if runKilledLeaderTrial(t, killAfter) {
+					return
+				}
+				t.Logf("attempt %d of %d: the leader finished before the kill landed; trying again", attempt, attempts)
+			}
+			t.Fatalf("the kill never landed inside the run in %d attempts, so crash recovery was not "+
+				"tested at this kill point (raise subCount or lower killAfter)", attempts)
 		})
 	}
 }
 
-func runKilledLeaderTrial(t *testing.T, killAfter int) {
+// runKilledLeaderTrial reports whether the kill interrupted the leader. False
+// means the leader had already billed everything, so the trial proved nothing.
+func runKilledLeaderTrial(t *testing.T, killAfter int) bool {
 	db := testutil.SetupTestDB(t)
 	const subCount = 40
 
@@ -270,12 +284,11 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) {
 		// The leader can finish between two polls: with one subscription left,
 		// its last invoice and its exit fit inside the 20ms poll interval, and
 		// the kill then reaches a process that already exited. Nothing was
-		// interrupted, so the run proves nothing: skip it, as the check a few
+		// interrupted, so the run proves nothing: report that, as the check a few
 		// lines down does when the kill lands after the last commit. A normal
 		// exit with work left undone is still a failure.
 		if total, _, _ := cycleInvoiceCounts(t, db, seed.tenantID); total >= subCount {
-			t.Skipf("leader finished all %d subscriptions and exited before the kill landed; nothing was "+
-				"interrupted, so this run proves nothing (raise subCount or lower killAfter)", subCount)
+			return false
 		}
 		t.Fatalf("leader did not die of SIGKILL (state=%v) — the test would be measuring "+
 			"a clean shutdown, which proves nothing about crash recovery", state)
@@ -287,8 +300,7 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) {
 			"before anyone took over", midTotal, midDistinct)
 	}
 	if midTotal >= subCount {
-		t.Skipf("leader finished all %d subscriptions before the kill landed; nothing was "+
-			"interrupted, so this run proves nothing (raise subCount or lower killAfter)", subCount)
+		return false
 	}
 	t.Logf("leader SIGKILLed after committing %d/%d invoices (observed %d at kill time)",
 		midTotal, subCount, committedBeforeKill)
@@ -329,6 +341,7 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) {
 	}
 
 	assertDoctorClean(t)
+	return true
 }
 
 // seedFailingHeadSubscription adds one subscription that can never bill (its
