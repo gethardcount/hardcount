@@ -21,7 +21,6 @@ Everything below ships in the one MIT edition. For the cases Velox does not cove
 - **One application process**: a single Go binary.
   - No queue broker, no worker fleet, no separate scheduler. Background jobs are goroutines and the job queue is a Postgres table, so there is one thing to deploy, restart and reason about.
   - The Compose file adds Postgres, Redis (distributed rate limiting only), the static dashboard and an nginx front door. That makes five containers, one of which is Velox.
-  - Single VM, ~5 min from clone to invoice.
 - **MIT, and nothing is gated**: no licence key, no premium tier, no feature that unlocks when you pay.
   - That includes dunning, the feature that recovers your failed payments.
   - This is a lasting commitment: the engine stays MIT, and nothing that exists today will ever move behind a key.
@@ -35,7 +34,7 @@ Everything below ships in the one MIT edition. For the cases Velox does not cove
 
 - **Subscriptions**: trial state machine with atomic flips · pause-collection · scheduled cancellation · plan changes with proration (you're only charged for the part of the period each price was active).
 - **Pricing & discounts**: per-customer price overrides · prepaid credit ledger drawn against usage. Coupons were deliberately cut, because AI-native peers converge on credits, not promo codes ([ADR-039](adr/)).
-- **Invoicing & collection**: PDF invoices · hosted invoice page with secure tokens · branded emails · dunning with a circuit breaker · invoice preview (`Invoice.upcoming` parity).
+- **Invoicing & collection**: PDF invoices · hosted invoice page with secure tokens · branded emails · dunning with a circuit breaker · invoice preview (subtotal only: no tax or credits).
 - **Spend controls**: hard-cap thresholds (on spend or on usage quantity) that can finalize an invoice mid-cycle.
 - **Credits & refunds**: event-sourced credit ledger · credit notes (the formal "we owe you" document) with refunds.
 - **Reliability & observability**:
