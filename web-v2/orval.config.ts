@@ -40,9 +40,12 @@ export default defineConfig({
           path: './src/lib/orvalClient.ts',
           name: 'orvalClient',
         },
+        // No useQuery/useMutation flags: since orval 8.22 setting both
+        // forces BOTH hook kinds onto every operation (a mutation hook for
+        // each GET, a query hook for each PUT/DELETE). The defaults give
+        // GET a query and every other verb a mutation, which is the shape
+        // the pages are written against.
         query: {
-          useQuery: true,
-          useMutation: true,
           signal: false,
         },
         // Orval 8.x defaults to wrapping responses in
