@@ -2,7 +2,7 @@
 
 This guide shows how to meter LLM usage into Velox through LiteLLM, the open-source proxy that fronts many LLM providers behind one API.
 
-Add a success callback to your LiteLLM proxy config, as step 2 shows. It uses LiteLLM's generic-API logger, which POSTs each completed call to an HTTP endpoint. Every LLM call then lands in Velox as a [usage event](../README.md#glossary). You write no glue code.
+Add a success callback to your LiteLLM proxy config, as step 2 shows. It uses LiteLLM's generic-API logger, which POSTs each completed call to an HTTP endpoint. Every LLM call then lands in Velox as a [usage event](../glossary.md). You write no glue code.
 
 ## 1. Create the `tokens` meter in Velox
 
@@ -60,7 +60,7 @@ The older env-var form (`success_callback: ["generic"]` +
 LiteLLM, but it is legacy. With either form, Velox accepts three payload shapes: single, batched
 (`json_array`), and `{"events": [...]}`.
 
-Point `<your-velox-host>` at your Velox API (local dev: `http://localhost:8080`). Use a **secret** key. Publishable keys (the client-side-safe key type) don't have `PermUsageWrite`, the permission to write usage events. See [API key types](../README.md#glossary) in the glossary.
+Point `<your-velox-host>` at your Velox API (local dev: `http://localhost:8080`). Use a **secret** key. Publishable keys (the client-side-safe key type) don't have `PermUsageWrite`, the permission to write usage events. See [API key types](../glossary.md) in the glossary.
 
 ## 3. Set `user=` on every call
 
@@ -91,7 +91,7 @@ For each completion call, the adapter emits **up to three** usage events. All of
 | `cache_read` | `prompt_tokens_details.cached_tokens` (if any)   | `<litellm_id>:cache_read`   |
 | `output`     | `usage.completion_tokens`                        | `<litellm_id>:output`       |
 
-The [idempotency key](../README.md#glossary) deduplicates retries: a resend with the same key can't count twice.
+The [idempotency key](../glossary.md) deduplicates retries: a resend with the same key can't count twice.
 
 Every event also carries these dimensions:
 
@@ -152,11 +152,11 @@ On a retry, rows that did commit before the abort replay as `deduplicated`. Conf
 
 - **Cost figures**: LiteLLM's `response_cost` does not drive Velox billing.
   - The billable amount comes from your pricing rules.
-  - Per-event COGS (cost of goods sold: what the provider charged you) comes from your provider [cost table](../README.md#glossary). See ADR-079: `PUT /v1/provider-costs`, stamped on each event at ingest as `provider_cost_micros`.
+  - Per-event COGS (cost of goods sold: what the provider charged you) comes from your provider [cost table](../glossary.md). See ADR-079: `PUT /v1/provider-costs`, stamped on each event at ingest as `provider_cost_micros`.
   - LiteLLM's own per-call figure is whole-call: one total that spans up to three per-role events. So Velox does not stamp it per event.
   - A named follow-up would stamp observed cost onto each per-role event (per-half) from `cost_breakdown`.
 - **`tokens` meter must exist**: a missing meter lands as a per-row `errors[]` entry in the 200 response. This is the same path as a missing `user`.
-- **Single tenant per API key**: each Velox API key pins to one [tenant](../README.md#glossary) (one isolated billing account). Multi-tenant LiteLLM proxies route through a separate API key per tenant, not through a metadata field on the call.
+- **Single tenant per API key**: each Velox API key pins to one [tenant](../glossary.md) (one isolated billing account). Multi-tenant LiteLLM proxies route through a separate API key per tenant, not through a metadata field on the call.
 
 ## Design history
 

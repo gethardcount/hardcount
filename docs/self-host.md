@@ -16,7 +16,7 @@ shapes:
   [Operational posture](#operational-posture) below.
 
 Only the packaging for the second shape (Helm chart, Terraform) is
-deferred. It waits until a [design partner](README.md#glossary) (an early
+deferred. It waits until a [design partner](glossary.md) (an early
 customer who works with the team) names the platform flavour they run.
 
 ## Deploying (single-VM compose stack)
@@ -25,7 +25,7 @@ customer who works with the team) names the platform flavour they run.
 [`deploy/compose/README.md`](../deploy/compose/README.md).** It describes a
 containerized five-service stack (postgres, redis, velox-api, velox-dashboard, nginx)
 with its own `.env.example`. It takes five minutes from a fresh VM to a
-working [tenant](README.md#glossary). A tenant is Velox's unit of
+working [tenant](glossary.md). A tenant is Velox's unit of
 isolation: one business account with its own data, dashboard users and API
 keys. One install can serve several tenants.
 
@@ -90,7 +90,7 @@ This deployment shape is a **single-VM, single-instance** install:
     by instead of running the same work twice. So an accidental N=2
     is correctness-safe on the money paths.
   - Outbox dispatchers are the workers that drain the
-    [outbox](README.md#glossary) tables. Side effects such as outbound
+    [outbox](glossary.md) tables. Side effects such as outbound
     webhook deliveries are enqueued there in the same transaction as the
     state change that caused them.
   - A few non-money surfaces still assume one process (SSE live tail,

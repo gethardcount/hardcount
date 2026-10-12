@@ -28,7 +28,7 @@ A non-2xx response means *nothing was recorded*. Retry the same request.
   Together, these mean that sending twice can never double-count.
 - **Per-event key.** For at-least-once pipelines, an `idempotency_key` per
   event is strongly recommended. See *idempotency key* in the
-  [glossary](README.md#pricing-and-usage).
+  [glossary](glossary.md#pricing-and-usage).
 - **`Idempotency-Key` HTTP header.** On ingest routes, a 5xx never pins the
   header's key. That is, Velox does not keep the 5xx to replay for later
   requests with that key. Retry with the same key and the write re-executes.

@@ -7,7 +7,7 @@ the deployment, and it assumes no prior knowledge of this codebase.
 Velox sends all customer-facing email through SMTP:
 
 - invoices, receipts and credit notes
-- [dunning](../README.md#glossary) notices (automated reminders about overdue payments)
+- [dunning](../glossary.md) notices (automated reminders about overdue payments)
 - payment-failed notifications and payment-setup links
 - password resets and team invites
 
@@ -45,7 +45,7 @@ PAYMENT_UPDATE_URL=https://billing.example.com/update-payment   # payment-update
 Restart Velox. The next email queued in `email_outbox` then goes out
 through your provider. `email_outbox` is the Postgres table where every
 outgoing email waits for a background dispatcher to send it (see
-[outbox](../README.md#glossary)).
+[outbox](../glossary.md)).
 
 The server logs a WARN line at boot for each missing env var. A
 misconfiguration is therefore easy to see, and it does not stop startup:
@@ -244,7 +244,7 @@ commands use three shell variables that you set first:
 - `$API`: the base URL of your Velox API.
 - `$KEY`: a secret API key (`vlx_secret_…`) for the tenant that owns the
   invoice, in the same mode (test or live) as the invoice. See
-  [API key types](../README.md#glossary).
+  [API key types](../glossary.md).
 - `$INV_ID`: the ID of a finalized invoice.
 
 ```bash
@@ -283,7 +283,7 @@ it later. Each ESP has its own webhook format for these:
 For v1, configure suppressions inside the ESP's dashboard. This stops
 repeat sends to bouncing addresses without a Velox-side integration.
 Per-ESP webhook receivers can be added later, when a
-[design partner](../README.md#glossary) (DP) needs them.
+[design partner](../glossary.md) (DP) needs them.
 
 ## When to consider an API-based backend
 
@@ -304,7 +304,7 @@ works with every provider.
 
 ## Sending high-volume from one tenant
 
-A [tenant](../README.md#glossary) is one business that uses a Velox
+A [tenant](../glossary.md) is one business that uses a Velox
 install to bill its own customers. If a single tenant sends >10k
 emails/hour:
 

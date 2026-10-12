@@ -1,7 +1,7 @@
 # Stripe end-to-end test runbook
 
 This runbook checks by hand that Velox's Stripe integration works against a real Stripe test account.
-Run it before each [design-partner](../README.md#glossary) cutover, which brings an early pilot
+Run it before each [design-partner](../glossary.md) cutover, which brings an early pilot
 customer live on Velox. Also run it after any change touching
 `internal/payment/`, `internal/tenantstripe/`, or `internal/dunning/`.
 
@@ -104,7 +104,7 @@ rejected the verify call. Common causes:
 
 ## Step 2 — Create a customer with a saved payment method
 
-A [PaymentIntent](../README.md#glossary) is Stripe's object tracking the
+A [PaymentIntent](../glossary.md) is Stripe's object tracking the
 collection of one payment. PaymentIntent flows require a saved payment method.
 The Velox dashboard saves one through Stripe's Setup Intent flow, which saves a card
 for later charges without charging it now.
@@ -157,7 +157,7 @@ but charges decline. Do not use `4000 0000 0000 0002`: it declines at SetupInten
 time too, so it never produces this state.
 
 The Setup Intent succeeds, but the eventual PaymentIntent in step 4 will fail.
-That failure triggers the [dunning](../README.md#glossary) flow:
+That failure triggers the [dunning](../glossary.md) flow:
 automated retry-and-notify handling of a failed payment.
 
 ---
@@ -165,7 +165,7 @@ automated retry-and-notify handling of a failed payment.
 ## Step 3 — Subscribe the customer to a flat plan
 
 Bootstrap seeds no plans, so create one first. Use the dashboard's Pricing
-page, or instantiate a [recipe](../README.md#glossary): a pre-built pricing template shipped with
+page, or instantiate a [recipe](../glossary.md): a pre-built pricing template shipped with
 Velox. The recipe flows live in `MANUAL_TEST.md`.
 
 Price the plan at **2900 cents/month**, because the expected amounts in steps 4 and 7 assume it.
@@ -264,7 +264,7 @@ curl -s "http://localhost:8080/v1/dunning/runs?customer_id=<vlx_cus_...>" \
   -b /tmp/velox-cookies.txt | jq
 ```
 
-**Expected:** a [dunning run](../README.md#glossary) appears **only if a dunning policy is configured
+**Expected:** a [dunning run](../glossary.md) appears **only if a dunning policy is configured
 and set default**. Bootstrap deliberately seeds none (ADR-036 amendment).
 So on a fresh tenant the failed payment skips enrollment with a
 "dunning not configured" WARN, and the runs list stays empty.
@@ -287,7 +287,7 @@ endpoint.
 
 ## Step 7 — Refund via credit note
 
-Issue a [credit note](../README.md#glossary) against the paid invoice from step 4.
+Issue a [credit note](../glossary.md) against the paid invoice from step 4.
 A credit note is the document that records money credited or refunded against an invoice.
 
 ```bash

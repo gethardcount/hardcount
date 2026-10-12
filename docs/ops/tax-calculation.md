@@ -176,7 +176,7 @@ presence.
 
 A test-mode invoice resolves to the test Stripe client, and a live-mode
 invoice to the live client (see
-[test mode and live mode](../README.md#accounts-and-access) in the glossary). This matters
+[test mode and live mode](../glossary.md#accounts-and-access) in the glossary). This matters
 for two reasons:
 
 1. Test-mode keys are rate-limited differently. A test-mode load test

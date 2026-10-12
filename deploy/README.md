@@ -98,7 +98,7 @@ rolling: Kubernetes `Recreate`, or `maxSurge: 0, maxUnavailable: 100%`.
   side-effect tables (outbound webhooks and emails). Two mechanisms guard
   this, so replicas coexist without double-billing or double-sending:
   - per-tick leases in `leader_leases` (`internal/platform/leader`,
-    ADR-114; see [leader lease](../docs/README.md#glossary));
+    ADR-114; see [leader lease](../docs/glossary.md));
   - SKIP-LOCKED row claims: rows another worker already holds are
     skipped, not waited on.
 

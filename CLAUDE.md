@@ -41,7 +41,7 @@ point).
 - **Effect-firer:** code that sends an email, webhook, Stripe call or ledger write on a change.
 - **Gated reader:** code that branches on the state.
 
-See the [glossary](docs/README.md#glossary) for the full entry. Use the playbook at four stages:
+See the [glossary](docs/glossary.md) for the full entry. Use the playbook at four stages:
 
 | Stage | What the playbook gives you |
 |---|---|
@@ -94,7 +94,7 @@ Two or more Claude Code sessions may work this repo at the same time. Rules:
 - **Stripe:** PaymentIntent-only pattern (no Stripe Billing/Invoices to avoid its percentage fee)
 - **Background work:** no Temporal dependency in v1.
   - Background work runs as simple goroutine loops. Each loop is a leader-leased singleton role (`internal/platform/leader`, ADR-114).
-  - A [leader lease](docs/README.md#glossary) is a per-tick lease row on the database clock. Its fence token is re-checked inside every claim statement. The lease is safe behind transaction-mode poolers.
+  - A [leader lease](docs/glossary.md) is a per-tick lease row on the database clock. Its fence token is re-checked inside every claim statement. The lease is safe behind transaction-mode poolers.
   - Redis is used for distributed rate limiting only.
 - **Credits:** event-sourced ledger (immutable append-only)
 

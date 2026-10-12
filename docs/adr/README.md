@@ -37,7 +37,7 @@ messages + CHANGELOG.md, not here.
 
 ## Index
 
-Each row links to the full record. Browse by Topic, or search this page for a term from the [glossary](../README.md#glossary).
+Each row links to the full record. Browse by Topic, or search this page for a term from the [glossary](../glossary.md).
 
 | # | Date | Status | Topic | Decision |
 |---|---|---|---|---|

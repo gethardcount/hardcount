@@ -426,7 +426,7 @@ and that the managed Redis is up.
 
 **Why**: a parked invoice is one whose charge result is unclear, so
 Velox cannot tell if the customer paid (see the
-[glossary](../README.md#glossary)). Here, its charge attempt could not
+[glossary](../glossary.md)). Here, its charge attempt could not
 be identified with the provider (ADR-107).
 - It is deliberately unchargeable. No sweep, no dunning retry and no
   operator "Collect payment" will touch it. That is what makes a double
@@ -450,7 +450,7 @@ time.
 growth over days.
 
 **Why**: a clawback is a credit note Velox issues when a paid, in-advance
-period is cut short (see the [glossary](../README.md#glossary)).
+period is cut short (see the [glossary](../glossary.md)).
 - Drafts deferred behind an in-flight source payment (ADR-059) sit here
   legitimately and do not appear in error logs.
 - The reconciler's eligibility scan skips them by design until the
