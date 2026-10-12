@@ -31,7 +31,7 @@ curl -X POST "$VELOX/v1/meters" \
 ## 2. Configure the LiteLLM proxy
 
 Add the following to your `litellm_config.yaml`. It uses LiteLLM's `generic_api` callback, in the
-current format as of LiteLLM's 2026-08 docs:
+current format. It was checked on 2026-10-12 with a real LiteLLM 1.83.9 proxy posting into Velox:
 
 ```yaml
 litellm_settings:
@@ -79,6 +79,8 @@ response = litellm.completion(
 )
 ```
 
+The proxy logs that value as `end_user` on the record it sends, and Velox reads it from there. A hand-built payload can send `user` instead.
+
 Without `user=`, the adapter rejects the event with `payload.user is required`. The rest of the batch is accepted normally. The failure lands as a per-row entry in the 200 response's `errors[]`.
 
 ## 4. What lands in Velox
@@ -95,8 +97,8 @@ The [idempotency key](../glossary.md) deduplicates retries: a resend with the sa
 
 Every event also carries these dimensions:
 
-- `{model, model_raw, provider, team_id?, request_tags?}`.
-- `request_tags` is LiteLLM's list, joined to a sorted comma-separated string, because dimension values are scalars.
+- `{model, model_raw, provider, team_id?}`.
+- `request_tags` becomes a dimension only when it arrives under `metadata`. A current proxy sends its tags at the top level of the record, so they are not a dimension today.
 - `model` is the **canonical recipe family**, the normalized name that pricing rules key on. The mapper normalizes LiteLLM's raw string, for example `claude-sonnet-4-5-20250929` → `claude-sonnet-4.5`.
 - `model_raw` preserves the verbatim string for audit.
 

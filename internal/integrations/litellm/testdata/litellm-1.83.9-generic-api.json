@@ -1,0 +1,262 @@
+[
+  {
+    "api_base": "",
+    "cache_hit": null,
+    "cache_key": null,
+    "call_type": "acompletion",
+    "completionStartTime": 1791821668.048273,
+    "completion_tokens": 20,
+    "cost_breakdown": {
+      "discount_amount": 0.0,
+      "discount_percent": 0.0,
+      "input_cost": 3e-05,
+      "margin_fixed_amount": 0.0,
+      "margin_percent": 0.0,
+      "margin_total_amount": 0.0,
+      "original_cost": 0.00033000000000000005,
+      "output_cost": 0.00030000000000000003,
+      "tool_usage_cost": 0.0,
+      "total_cost": 0.00033000000000000005
+    },
+    "custom_llm_provider": "anthropic",
+    "endTime": 1791821668.048273,
+    "end_user": "cus_acme_corp",
+    "error_information": {
+      "error_class": "",
+      "error_code": "",
+      "error_message": "",
+      "llm_provider": "",
+      "traceback": ""
+    },
+    "error_str": null,
+    "guardrail_information": null,
+    "hidden_params": {
+      "additional_headers": {
+        "x-litellm-attempted-fallbacks": 0,
+        "x-litellm-attempted-retries": 0,
+        "x-litellm-model-group": "claude-sonnet-4-5-20250929"
+      },
+      "api_base": null,
+      "batch_models": null,
+      "cache_key": null,
+      "litellm_model_name": "anthropic/claude-sonnet-4-5-20250929",
+      "litellm_overhead_time_ms": null,
+      "model_id": "209804a57a76485ab6925fbbda53d4fd708778d7b18de2acd90d0de2e0b89cd6",
+      "response_cost": 0.00033000000000000005,
+      "usage_object": null
+    },
+    "id": "chatcmpl-a50a7087-df14-49a3-a514-af9a6ccd09fa",
+    "messages": [
+      {
+        "content": "Hello",
+        "role": "user"
+      }
+    ],
+    "metadata": {
+      "applied_guardrails": [],
+      "cold_storage_object_key": null,
+      "mcp_tool_call_metadata": null,
+      "prompt_management_metadata": null,
+      "requester_custom_headers": {},
+      "requester_ip_address": "127.0.0.1",
+      "requester_metadata": {
+        "headers": {
+          "accept": "*/*",
+          "content-length": "150",
+          "content-type": "application/json",
+          "host": "127.0.0.1:4911",
+          "user-agent": "curl/8.7.1"
+        },
+        "team_id": "team_engineering"
+      },
+      "spend_logs_metadata": null,
+      "team_alias": null,
+      "team_id": "team_engineering",
+      "usage_object": {
+        "completion_tokens": 20,
+        "completion_tokens_details": null,
+        "prompt_tokens": 10,
+        "prompt_tokens_details": null,
+        "total_tokens": 30
+      },
+      "user_agent": "curl/8.7.1",
+      "user_api_key_alias": null,
+      "user_api_key_auth_metadata": {},
+      "user_api_key_budget_reset_at": null,
+      "user_api_key_end_user_id": "cus_acme_corp",
+      "user_api_key_hash": null,
+      "user_api_key_max_budget": null,
+      "user_api_key_org_alias": null,
+      "user_api_key_org_id": null,
+      "user_api_key_project_alias": null,
+      "user_api_key_project_id": null,
+      "user_api_key_request_route": "/v1/chat/completions",
+      "user_api_key_spend": 0.0,
+      "user_api_key_team_alias": null,
+      "user_api_key_team_id": null,
+      "user_api_key_user_email": null,
+      "user_api_key_user_id": null,
+      "vector_store_request_metadata": null
+    },
+    "model": "anthropic/claude-sonnet-4-5-20250929",
+    "model_group": "claude-sonnet-4-5-20250929",
+    "model_id": "209804a57a76485ab6925fbbda53d4fd708778d7b18de2acd90d0de2e0b89cd6",
+    "model_map_information": {
+      "model_map_key": "claude-sonnet-4-5-20250929",
+      "model_map_value": {
+        "annotation_cost_per_page": null,
+        "cache_creation_input_token_cost": 3.75e-06,
+        "cache_creation_input_token_cost_above_1hr": 6e-06,
+        "cache_creation_input_token_cost_above_200k_tokens": null,
+        "cache_read_input_token_cost": 3e-07,
+        "cache_read_input_token_cost_above_200k_tokens": null,
+        "cache_read_input_token_cost_above_272k_tokens": null,
+        "cache_read_input_token_cost_flex": null,
+        "cache_read_input_token_cost_priority": null,
+        "citation_cost_per_token": null,
+        "input_cost_per_audio_per_second": null,
+        "input_cost_per_audio_token": null,
+        "input_cost_per_character": null,
+        "input_cost_per_image": null,
+        "input_cost_per_image_token": null,
+        "input_cost_per_query": null,
+        "input_cost_per_second": null,
+        "input_cost_per_token": 3e-06,
+        "input_cost_per_token_above_128k_tokens": null,
+        "input_cost_per_token_above_200k_tokens": null,
+        "input_cost_per_token_above_272k_tokens": null,
+        "input_cost_per_token_batches": 1.5e-06,
+        "input_cost_per_token_flex": null,
+        "input_cost_per_token_priority": null,
+        "input_cost_per_video_per_second": null,
+        "key": "claude-sonnet-4-5-20250929",
+        "litellm_provider": "anthropic",
+        "max_input_tokens": 200000,
+        "max_output_tokens": 64000,
+        "max_tokens": 64000,
+        "mode": "chat",
+        "ocr_cost_per_page": null,
+        "output_cost_per_audio_token": null,
+        "output_cost_per_character": null,
+        "output_cost_per_character_above_128k_tokens": null,
+        "output_cost_per_image": null,
+        "output_cost_per_image_token": null,
+        "output_cost_per_reasoning_token": null,
+        "output_cost_per_second": null,
+        "output_cost_per_second_1080p": null,
+        "output_cost_per_token": 1.5e-05,
+        "output_cost_per_token_above_128k_tokens": null,
+        "output_cost_per_token_above_200k_tokens": null,
+        "output_cost_per_token_above_272k_tokens": null,
+        "output_cost_per_token_batches": 7.5e-06,
+        "output_cost_per_token_flex": null,
+        "output_cost_per_token_priority": null,
+        "output_cost_per_video_per_second": null,
+        "output_vector_size": null,
+        "provider_specific_entry": null,
+        "rpm": null,
+        "search_context_cost_per_query": {
+          "search_context_size_high": 0.01,
+          "search_context_size_low": 0.01,
+          "search_context_size_medium": 0.01
+        },
+        "supported_openai_params": [
+          "stream",
+          "stop",
+          "temperature",
+          "top_p",
+          "max_tokens",
+          "max_completion_tokens",
+          "tools",
+          "tool_choice",
+          "extra_headers",
+          "parallel_tool_calls",
+          "response_format",
+          "user",
+          "web_search_options",
+          "speed",
+          "context_management",
+          "cache_control",
+          "thinking",
+          "reasoning_effort"
+        ],
+        "supports_assistant_prefill": true,
+        "supports_audio_input": null,
+        "supports_audio_output": null,
+        "supports_computer_use": true,
+        "supports_embedding_image_input": null,
+        "supports_function_calling": true,
+        "supports_native_streaming": null,
+        "supports_native_structured_output": true,
+        "supports_none_reasoning_effort": null,
+        "supports_pdf_input": true,
+        "supports_prompt_caching": true,
+        "supports_reasoning": true,
+        "supports_response_schema": true,
+        "supports_system_messages": null,
+        "supports_tool_choice": true,
+        "supports_url_context": null,
+        "supports_vision": true,
+        "supports_web_search": true,
+        "supports_xhigh_reasoning_effort": null,
+        "tiered_pricing": null,
+        "tpm": null,
+        "uses_embed_content": null
+      }
+    },
+    "model_parameters": {
+      "stream": false,
+      "user": "cus_acme_corp"
+    },
+    "prompt_tokens": 10,
+    "request_tags": [
+      "User-Agent: curl",
+      "User-Agent: curl/8.7.1"
+    ],
+    "requester_ip_address": "127.0.0.1",
+    "response": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "Hello from the mock.",
+            "function_call": null,
+            "role": "assistant",
+            "tool_calls": null
+          }
+        }
+      ],
+      "created": 1791821668,
+      "id": "chatcmpl-a50a7087-df14-49a3-a514-af9a6ccd09fa",
+      "model": "claude-sonnet-4-5-20250929",
+      "object": "chat.completion",
+      "system_fingerprint": null,
+      "usage": {
+        "completion_tokens": 20,
+        "completion_tokens_details": null,
+        "prompt_tokens": 10,
+        "prompt_tokens_details": null,
+        "total_tokens": 30
+      }
+    },
+    "response_cost": 0.00033000000000000005,
+    "response_cost_failure_debug_info": null,
+    "response_time": 0.00703120231628418,
+    "saved_cache_cost": 0.0,
+    "standard_built_in_tools_params": {
+      "file_search": null,
+      "web_search_options": null
+    },
+    "startTime": 1791821668.041242,
+    "status": "success",
+    "status_fields": {
+      "guardrail_status": "not_run",
+      "llm_api_status": "success"
+    },
+    "stream": null,
+    "total_tokens": 30,
+    "trace_id": "9b2a2935-de17-46e7-82ca-efee334caae0",
+    "user_agent": "curl/8.7.1"
+  }
+]

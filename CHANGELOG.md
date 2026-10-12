@@ -23,6 +23,7 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **The LiteLLM integration now records usage from a real proxy (2026-10-12).** A LiteLLM proxy logs the caller as `end_user` and puts token counts at the top level of each record. Velox read only `user` and `usage`, so it refused every real record inside a 200 response and recorded nothing. It now reads both shapes, including cache counts. If you set this up earlier, usage sent before this fix was not stored and cannot be recovered from Velox.
 - **The buyer's tax ID no longer prints on top of the tax line in the invoice PDF (2026-10-12, #164).** On an invoice with tax and a buyer tax ID, the ID was drawn over the tax row in the totals. It is now printed once, in the "Bill to" block, and uses the ID recorded on the invoice when it was built, falling back to the customer's billing profile.
 
 ## [0.4.0] - 2026-10-12

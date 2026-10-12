@@ -164,10 +164,12 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 	if !p.IsTokenBearing() {
 		return nil, nil
 	}
-	if strings.TrimSpace(p.User) == "" {
+	user := p.callerID()
+	if user == "" {
 		return nil, ErrMissingUser
 	}
-	if p.Usage == nil {
+	usage := p.tokenUsage()
+	if usage == nil {
 		return nil, nil
 	}
 
@@ -246,18 +248,18 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 	// prompt_tokens INCLUDES cache-read tokens, so uncached input is the
 	// remainder. The mapper does this split (the engine never does role math).
 	// Dimensions are cloned per role so each event gets its own token_type.
-	cacheRead := p.Usage.cachedReadTokens()
-	uncachedInput := p.Usage.PromptTokens - cacheRead
+	cacheRead := usage.cachedReadTokens()
+	uncachedInput := usage.PromptTokens - cacheRead
 	if uncachedInput < 0 {
 		// Malformed payload (cached > prompt). Don't emit a negative quantity;
 		// fall back to billing the whole prompt as uncached input.
-		uncachedInput = p.Usage.PromptTokens
+		uncachedInput = usage.PromptTokens
 		cacheRead = 0
 	}
 
 	if uncachedInput > 0 {
 		out = append(out, ExternalIngest{
-			ExternalCustomerID: p.User,
+			ExternalCustomerID: user,
 			MeterKey:           MeterKeyTokens,
 			Quantity:           decimal.NewFromInt(uncachedInput),
 			Dimensions:         dimsWithTokenType(dims, TokenTypeInput),
@@ -269,7 +271,7 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 	}
 	if cacheRead > 0 {
 		out = append(out, ExternalIngest{
-			ExternalCustomerID: p.User,
+			ExternalCustomerID: user,
 			MeterKey:           MeterKeyTokens,
 			Quantity:           decimal.NewFromInt(cacheRead),
 			Dimensions:         dimsWithTokenType(dims, TokenTypeCacheRead),
@@ -281,11 +283,11 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 			Metadata: buildEventMetadata(p, TokenTypeCacheRead),
 		})
 	}
-	if p.Usage.CompletionTokens > 0 {
+	if usage.CompletionTokens > 0 {
 		out = append(out, ExternalIngest{
-			ExternalCustomerID: p.User,
+			ExternalCustomerID: user,
 			MeterKey:           MeterKeyTokens,
-			Quantity:           decimal.NewFromInt(p.Usage.CompletionTokens),
+			Quantity:           decimal.NewFromInt(usage.CompletionTokens),
 			Dimensions:         dimsWithTokenType(dims, TokenTypeOutput),
 			IdempotencyKey:     p.ID + ":" + TokenTypeOutput,
 			Timestamp:          ts,
@@ -300,9 +302,9 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 	// would risk mis-pricing a money path, so cache-write billing is deferred
 	// (ADR-044 follow-up). Log loudly rather than silently drop or guess
 	// (no-silent-fallbacks) so the unbilled usage is visible.
-	if p.Usage.CacheCreationInputTokens > 0 {
+	if usage.CacheCreationInputTokens > 0 {
 		slog.Warn("litellm: cache-write tokens seen but not billed — LiteLLM does not expose the 5m/1h cache-write TTL split (BerriAI/litellm#15056); cache-write billing deferred (ADR-044)",
-			"cache_creation_tokens", p.Usage.CacheCreationInputTokens,
+			"cache_creation_tokens", usage.CacheCreationInputTokens,
 			"model", modelDim, "litellm_id", p.ID)
 	}
 

@@ -6,6 +6,11 @@
 // box. See docs/integrations/litellm.md + ADR-033.
 package litellm
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 // StandardLoggingPayload mirrors LiteLLM Proxy's per-call log shape:
 // https://docs.litellm.ai/docs/proxy/logging_spec
 //
@@ -55,10 +60,23 @@ type StandardLoggingPayload struct {
 	// the adapter refuses to bill "anonymous" usage to "unknown customer".
 	User string `json:"user"`
 
+	// EndUser is where a real LiteLLM proxy puts the caller's `user=` value:
+	// the logged record has no "user" field at all. User above is kept for
+	// hand-built and older payloads; callerID picks whichever is set.
+	EndUser string `json:"end_user"`
+
 	// Usage carries the token counts the adapter maps to two
 	// usage events (input + output). Embedding calls carry only
 	// prompt_tokens; the output event is skipped when 0.
 	Usage *Usage `json:"usage,omitempty"`
+
+	// PromptTokens / CompletionTokens / TotalTokens are the token counts as a
+	// real LiteLLM proxy sends them: top-level, with no "usage" object. The
+	// full usage object, including cache counts, rides in
+	// metadata.usage_object. tokenUsage resolves the three places.
+	PromptTokens     int64 `json:"prompt_tokens,omitempty"`
+	CompletionTokens int64 `json:"completion_tokens,omitempty"`
+	TotalTokens      int64 `json:"total_tokens,omitempty"`
 
 	// ResponseCost is LiteLLM's pre-computed dollar cost for this
 	// call (legacy single-field; cost_breakdown is the newer
@@ -123,6 +141,45 @@ type Usage struct {
 	// CacheCreationInputTokens is the cache-WRITE count (deferred — see above).
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+}
+
+// callerID is the customer reference on the record: the `user=` the caller
+// passed to LiteLLM. A real proxy logs it as end_user (and again as
+// metadata.user_api_key_end_user_id); hand-built payloads use user.
+func (p *StandardLoggingPayload) callerID() string {
+	for _, v := range []string{p.User, p.EndUser} {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	if s, ok := p.Metadata["user_api_key_end_user_id"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+// tokenUsage is the record's token counts, from the first place that has
+// them: an explicit usage object, then metadata.usage_object (what a real
+// proxy sends, and the only place it carries cache counts), then the bare
+// top-level counts. Nil when the record carries no counts at all.
+func (p *StandardLoggingPayload) tokenUsage() *Usage {
+	if p.Usage != nil {
+		return p.Usage
+	}
+	if obj, ok := p.Metadata["usage_object"].(map[string]any); ok {
+		// Round-trip through JSON so the nested details decode exactly as
+		// they would on the top-level usage field.
+		if raw, err := json.Marshal(obj); err == nil {
+			var u Usage
+			if json.Unmarshal(raw, &u) == nil && (u.PromptTokens != 0 || u.CompletionTokens != 0) {
+				return &u
+			}
+		}
+	}
+	if p.PromptTokens != 0 || p.CompletionTokens != 0 {
+		return &Usage{PromptTokens: p.PromptTokens, CompletionTokens: p.CompletionTokens, TotalTokens: p.TotalTokens}
+	}
+	return nil
 }
 
 // PromptTokensDetails is the OpenAI-compatible breakdown of prompt tokens.
