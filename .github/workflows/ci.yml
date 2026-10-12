@@ -18,8 +18,10 @@ on:
 
 # One live run per ref: repeated pushes to a PR cancel the obsolete
 # run instead of queueing behind it — less event pressure, faster
-# feedback, no duplicate spend. Main pushes never cancel (history
-# builds stay complete).
+# feedback, no duplicate spend. On main a RUNNING build is never
+# cancelled, but a build still WAITING is replaced by a newer push, so
+# not every main commit gets its own run. Running main one at a time
+# keeps the :latest image in commit order.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -32,7 +34,9 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the jobs rely on tools preinstalled on the
+    # image (psql, jq, docker). Move every job to the next image in its own PR.
+    runs-on: ubuntu-24.04
     # 35, not 20: measured 2026-08-31 across 12 runs, this job takes 7-10
     # minutes normally — but a slow runner stretches everything uniformly
     # (~3.35x observed across unrelated packages, 323s -> 1060s of package
@@ -54,17 +58,17 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
+          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 15
 
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.9'
+          go-version-file: go.mod
 
       - name: Build
         run: go build ./...
@@ -83,23 +87,17 @@ jobs:
 
       - name: Create test database and app user
         run: |
-          # velox_app is referenced by migration GRANT statements (source of
-          # truth is docker/init.sql for local dev). It must exist cluster-wide
-          # before migrations run or they fail with "role does not exist".
-          #
-          # Separate -c invocations: CREATE DATABASE cannot run inside a
-          # transaction block, and psql wraps multi-statement -c in a txn.
-          PGPASSWORD=velox psql -h localhost -U velox -d velox \
-            -c "CREATE ROLE velox_app WITH LOGIN PASSWORD 'velox_app';" \
-            -c "CREATE DATABASE velox_test OWNER velox;"
-          PGPASSWORD=velox psql -h localhost -U velox -d velox_test -c "
-            CREATE EXTENSION IF NOT EXISTS pgcrypto;
-            CREATE ROLE velox_test_app WITH LOGIN PASSWORD 'velox_test_app';
-            GRANT ALL PRIVILEGES ON DATABASE velox_test TO velox_test_app;
-            GRANT ALL ON SCHEMA public TO velox_test_app;
-            ALTER DEFAULT PRIVILEGES FOR ROLE velox IN SCHEMA public GRANT ALL ON TABLES TO velox_test_app;
-            ALTER DEFAULT PRIVILEGES FOR ROLE velox IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_test_app;
-          "
+          # docker/init.sql is the one definition of the roles, the test
+          # database and its grants; local dev mounts the same file.
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox -f docker/init.sql
+          # This database is thrown away with the job, so it does not need to
+          # survive a crash. Skipping the disk flushes removes the runs where a
+          # slow runner disk made the suite two to four times slower.
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
 
       - name: Integration Tests
         run: go test -p 1 ./... -count=1 -short=false
@@ -126,7 +124,7 @@ jobs:
       - name: Upload Coverage
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
         with:
-          file: coverage.out
+          files: coverage.out
         continue-on-error: true
 
   # The same integration suite with the APP pool behind PgBouncer in
@@ -138,7 +136,7 @@ jobs:
   # job above and fails here. Admin/migration traffic stays direct, as
   # production migrations do (docs/ops/postgres-requirements.md).
   test-pgbouncer:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 35, not 20: measured 2026-08-31 across 12 runs, this job takes 7-10
     # minutes normally — but a slow runner stretches everything uniformly
     # (~3.35x observed across unrelated packages, 323s -> 1060s of package
@@ -160,31 +158,27 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
+          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 15
 
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.9'
+          go-version-file: go.mod
 
       - name: Create test database and app user
         run: |
-          PGPASSWORD=velox psql -h localhost -U velox -d velox \
-            -c "CREATE ROLE velox_app WITH LOGIN PASSWORD 'velox_app';" \
-            -c "CREATE DATABASE velox_test OWNER velox;"
-          PGPASSWORD=velox psql -h localhost -U velox -d velox_test -c "
-            CREATE EXTENSION IF NOT EXISTS pgcrypto;
-            CREATE ROLE velox_test_app WITH LOGIN PASSWORD 'velox_test_app';
-            GRANT ALL PRIVILEGES ON DATABASE velox_test TO velox_test_app;
-            GRANT ALL ON SCHEMA public TO velox_test_app;
-            ALTER DEFAULT PRIVILEGES FOR ROLE velox IN SCHEMA public GRANT ALL ON TABLES TO velox_test_app;
-            ALTER DEFAULT PRIVILEGES FOR ROLE velox IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_test_app;
-          "
+          # Same setup as the test job above.
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox -f docker/init.sql
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
 
       - name: Integration Tests through PgBouncer (transaction mode)
         run: PGB_MODE=ci scripts/pgbouncer-test.sh
@@ -197,7 +191,7 @@ jobs:
   # what keeps the front door structurally unable to lie again (it rotted
   # silently for months once — front-door audit 2026-07-05, PR #374).
   golden-path:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:
@@ -209,10 +203,10 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
+          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 15
     env:
       DATABASE_URL: postgres://velox:velox@localhost:5432/velox?sslmode=disable
     steps:
@@ -220,7 +214,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.9'
+          go-version-file: go.mod
 
       - name: Create app role (mirrors deploy/compose/postgres-init.sh)
         run: |
@@ -260,14 +254,14 @@ jobs:
         run: tail -100 server.log || true
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.9'
+          go-version-file: go.mod
 
       - uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7
         with:
@@ -349,7 +343,7 @@ jobs:
   # checked here: a third-party site being down or rate-limiting would fail
   # unrelated PRs. Run `lychee --offline '**/*.md'` locally for the same check.
   doc-links:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -367,7 +361,7 @@ jobs:
   # locally for the same check.
   doc-style:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -382,14 +376,14 @@ jobs:
           filter_mode: added
 
   codegen-drift:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.9'
+          go-version-file: go.mod
 
       - uses: actions/setup-node@v6
         with:
@@ -411,7 +405,7 @@ jobs:
           fi
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -451,7 +445,7 @@ jobs:
     timeout-minutes: 30
     needs: [test, frontend, lint]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # contents: write — anchore/sbom-action attaches the SBOM to the
       # GitHub release on tag runs (REST call; read-only token fails with

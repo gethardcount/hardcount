@@ -85,7 +85,8 @@ locally before you push, so a failing CI build holds no surprises:
 |---|---|---|
 | Unit tests + race detector | `go test ./... -race -short -count=1` | |
 | Integration tests | `go test -p 1 ./... -count=1 -short=false` | needs `docker compose up -d postgres`; test DBs are auto-provisioned |
-| Money-invariant sweep | `go run ./cmd/velox-doctor` | runs in CI after the integration suite |
+| The same suite through a connection pooler | `scripts/pgbouncer-test.sh` | needs Docker; starts PgBouncer in transaction mode in front of the same Postgres |
+| Money-invariant sweep | `DATABASE_URL=postgres://velox:velox@localhost:5432/velox_test?sslmode=disable go run ./cmd/velox-doctor` | runs in CI after the integration suite, over the rows the tests left behind |
 | golangci-lint | `make lint` | config in `.golangci.yml`; much stricter than `go vet` |
 | Clock discipline | `make lint-clock` | bans bare `time.Now()` in clock-pinned domains; bypass with `// wall-clock: <reason>` |
 | Funding-set invariant | `make lint-funding-set` | period-wide money ops must use the funding-set lookup |
@@ -94,7 +95,9 @@ locally before you push, so a failing CI build holds no surprises:
 | Codegen drift | `make gen` then `git diff --exit-code` | required whenever `api/openapi.yaml` changes |
 | Vulnerability scan | `govulncheck ./...` | can fail when a new Go CVE is published, even if your change is fine. Say so in the PR and we'll handle it |
 | Frontend | `cd web-v2 && npm run build && npm test && npm run lint` | only if you touched `web-v2/` |
-| Golden path | `scripts/demo.sh` | boots a real server and walks recipe → invoice end to end |
+| Golden path | `make bootstrap`, then `make dev`, then `scripts/demo.sh <secret test key>` | CI boots a real server and walks recipe → invoice end to end; the key is printed by `make bootstrap` |
+| Links between docs | `lychee --offline --include-fragments '**/*.md'` | internal links and anchors only |
+| Docs style | `vale <changed .md files>` | advisory: it comments, it does not fail the build |
 
 Fork PRs get the identical CI run, because no gate uses secrets.
 

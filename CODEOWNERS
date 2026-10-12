@@ -1,11 +1,10 @@
-# CODEOWNERS — required reviewer assignment for pull requests
+# CODEOWNERS — default reviewer assignment for pull requests
 #
-# Velox is currently a single-maintainer project. Every PR is owned by
-# the maintainer; CODEOWNERS exists today as the SOC 2 CC8.1 evidence
-# artifact (change management — every change reviewed) and to make the
-# default reviewer assignment automatic. As contributors join, this
-# file should split per-domain ownership rather than carry catch-all
-# `*` ownership only.
+# Velox has one maintainer today, so this only assigns the default
+# reviewer. Review is not enforced: with one maintainer there is nobody
+# else to approve, and pull requests merge on green checks. As
+# contributors join, split ownership per domain and turn on required
+# reviews.
 
 * @sagarsuperuser
 

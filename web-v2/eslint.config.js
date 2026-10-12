@@ -71,7 +71,10 @@ export default defineConfig([
       // export only components) — zero runtime correctness. shadcn-style
       // component files and context/hook co-location trip it ~40×; the
       // industry-standard posture for this template is warn, not error.
-      'react-refresh/only-export-components': 'warn',
+      // Off: it only affects hot reload in development, and its warnings
+      // filled the few annotation slots GitHub shows per run, hiding the
+      // hook warnings that can be real bugs.
+      'react-refresh/only-export-components': 'off',
     },
   },
   {
