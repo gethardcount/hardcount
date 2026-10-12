@@ -16,8 +16,9 @@ import (
 //
 // It opens a dedicated connection, reads that connection's own backend pid,
 // terminates only that pid, and asserts the next statement's error is
-// transient. It touches no other session, and it asserts on whatever error
-// surfaces, so it holds behind PgBouncer too.
+// transient. It touches no other session. Behind a transaction-mode pooler the
+// first case skips (the pooler hides the loss from a statement outside a
+// transaction); the in-transaction case runs on both paths.
 func TestIsTransient_TerminatedBackend(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
@@ -56,8 +57,16 @@ func TestIsTransient_TerminatedBackend(t *testing.T) {
 			t.Fatalf("pid: %v", err)
 		}
 		terminate(t, pid)
-		_, err = conn.ExecContext(ctx, `SELECT 1`)
+		var after int
+		err = conn.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&after)
 		if err == nil {
+			if after != pid {
+				// A transaction-mode pooler gave the next statement another
+				// backend, so this client never saw the loss. The pooled
+				// path is covered by the in-transaction case below, where
+				// the pooler keeps the client on the terminated backend.
+				t.Skipf("statement was re-routed from backend %d to %d by a connection pooler", pid, after)
+			}
 			t.Fatal("a statement on a terminated backend succeeded")
 		}
 		t.Logf("surfaced as %T: %v", err, err)
