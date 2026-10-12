@@ -254,13 +254,23 @@ jobs:
         run: |
           nohup go run ./cmd/velox > server.log 2>&1 &
           for i in $(seq 1 60); do
-            curl -sf http://localhost:8080/health >/dev/null 2>&1 && exit 0
+            curl -sf http://localhost:8080/health >/dev/null 2>&1 && break
             sleep 1
           done
-          echo "server never became healthy"; tail -50 server.log; exit 1
+          curl -sf http://localhost:8080/health >/dev/null || { echo "server never became healthy"; tail -50 server.log; exit 1; }
+          # Without this line the server has fallen back to the owner
+          # connection, where row-level security does not apply, and the
+          # demo would pass without tenant isolation being on.
+          grep -q 'using app database connection (RLS enforced)' server.log \
+            || { echo "server is not on the app connection: row-level security is off"; tail -50 server.log; exit 1; }
 
       - name: Run the golden path (scripts/demo.sh)
         run: ./scripts/demo.sh "$(cat secret.key)"
+
+      # The same sweep the test job runs, here over rows written by the real
+      # server through its API: an invoice, usage, a subscription.
+      - name: Money-invariant sweep over the demo data (velox-doctor)
+        run: go run ./cmd/velox-doctor
 
       - name: Server log on failure
         if: failure()

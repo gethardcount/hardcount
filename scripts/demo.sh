@@ -150,6 +150,15 @@ INV_ID=$(echo "$INVOICES" | jq -r '.data[0].id // empty')
 INV=$(req GET "/v1/invoices/$INV_ID")
 echo "$INV" | jq -r '.invoice | "  \(.invoice_number)  total $\(.total_amount_cents / 100) \(.currency)  status \(.status)"'
 echo "$INV" | jq -r '.line_items[] | "    \(.description)  → $\(.amount_cents / 100)"' | head -8
+# The numbers are checked, not just printed: a draft invoice, a missing line or
+# a subtotal that disagrees with its own lines must fail the demo.
+echo "$INV" | jq -e '.invoice.status == "finalized" or .invoice.status == "paid"' >/dev/null \
+  || { echo "✗ invoice is not finalized (status $(echo "$INV" | jq -r '.invoice.status'))"; exit 1; }
+echo "$INV" | jq -e '(.line_items | length) >= 3' >/dev/null \
+  || { echo "✗ expected at least 3 invoice lines, got $(echo "$INV" | jq '.line_items | length')"; exit 1; }
+echo "$INV" | jq -e '.invoice.subtotal_cents > 0 and .invoice.subtotal_cents == ([.line_items[].amount_cents] | add)' >/dev/null \
+  || { echo "✗ subtotal $(echo "$INV" | jq '.invoice.subtotal_cents') does not equal the sum of its lines $(echo "$INV" | jq '[.line_items[].amount_cents] | add')"; exit 1; }
+SUBTOTAL=$(echo "$INV" | jq '.invoice.subtotal_cents')
 PDF_BYTES=$(curl -sf "$BASE/v1/invoices/$INV_ID/pdf" -H "Authorization: Bearer $API_KEY" | wc -c | tr -d ' ')
 [ "$PDF_BYTES" -gt 5000 ] || { echo "✗ PDF looks empty ($PDF_BYTES bytes)"; exit 1; }
 green "✓ Invoice with per-(model, token_type) lines — PDF renders ($PDF_BYTES bytes)"
@@ -158,6 +167,12 @@ step "9. Margin: what you billed against what the provider cost you"
 MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW&to=$ADV_TO")
 echo "$MARGIN" | jq -r '"  billed  $\(.revenue_cents / 100)\n  cost    $\(.cost_micros / 1000000)\n  margin  \((.margin_bps // 0) / 100)%"'
 echo "$MARGIN" | jq -r '.by_model[] | "    \(.model): cost $\(.cost_micros / 1000000)" + (if .attributed then "  billed $\((.revenue_cents // 0) / 100)" else "" end)'
+# The cost follows from this script's own inputs (the token counts in step 6
+# and the rates in step 5), and the billed amount must match the invoice.
+echo "$MARGIN" | jq -e '.cost_micros == 1277500' >/dev/null \
+  || { echo "✗ provider cost is $(echo "$MARGIN" | jq '.cost_micros') micros, expected 1277500"; exit 1; }
+echo "$MARGIN" | jq -e --argjson s "$SUBTOTAL" '.revenue_cents == $s' >/dev/null \
+  || { echo "✗ margin says billed $(echo "$MARGIN" | jq '.revenue_cents') cents but the invoice subtotal is $SUBTOTAL"; exit 1; }
 green "✓ Per-customer margin from stamped COGS vs rated revenue"
 
 echo ""

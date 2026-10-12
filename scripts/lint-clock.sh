@@ -5,8 +5,7 @@
 # (simulated-time-everywhere on clock-pinned entities).
 #
 # What this enforces:
-#   In service.go and postgres.go files under the high-risk packages
-#   (subscription, invoice, credit, dunning, customer, billing),
+#   In every non-test .go file of the packages listed below,
 #   `time.Now()` must be replaced with one of:
 #     - s.clock.Now(ctx)        — services with a Clock field
 #     - clock.Now(ctx)          — postgres stores / render code
@@ -45,6 +44,7 @@ PACKAGES=(
   "internal/dunning"
   "internal/customer"
   "internal/billing"
+  "internal/creditnote"
   # Ingest doors write usage_event timestamps on clock-pinned customers, so a
   # bare time.Now() here leaks wall-clock into simulated time. The LiteLLM door
   # regressed exactly this (a manufactured time.Now() default defeated the test
@@ -52,55 +52,42 @@ PACKAGES=(
   "internal/integrations/litellm"
 )
 
-# Files within those packages where the rule applies. We don't lint
-# tests (they may legitimately use time.Now to construct fixtures)
-# and don't lint pdf/email render files where ctx is already plumbed
-# through (they're caught at compile time via the RenderPDF(ctx) sig).
-PATTERNS=(
-  "service.go"
-  "postgres.go"
-  "engine.go"
-  "preview.go"
-  "threshold_scan.go"
-  "tax_retry.go"
-)
-
+# Every non-test .go file in each package is scanned. An earlier version
+# matched a short list of file names (service.go, postgres.go, ...) and so
+# read 15 of the 48 files; handler.go, where a wall-clock proration bug once
+# lived, was never looked at.
 violations=0
 violation_lines=""
+files_scanned=0
 
 for pkg in "${PACKAGES[@]}"; do
-  # Integration doors have no service.go/postgres.go shape — their whole
-  # surface is handler/mapper/payload files, so the PATTERNS list matched
-  # ZERO litellm files and the package sat in this list scanning nothing
-  # (2026-07-19 truth audit: the gate's own comment cited the litellm
-  # regression it was silently not guarding). Doors scan every prod file.
-  if [[ "$pkg" == *"/integrations/"* ]]; then
-    pkg_patterns=(".go")
-  else
-    pkg_patterns=("${PATTERNS[@]}")
+  pkg_files=0
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    pkg_files=$((pkg_files + 1))
+    # Match `time.Now(` excluding lines with the wall-clock marker.
+    while IFS=: read -r line_num line_content; do
+      [ -z "$line_num" ] && continue
+      # Skip if the line carries a // wall-clock: justification.
+      if echo "$line_content" | grep -qE "//\s*wall-clock:"; then
+        continue
+      fi
+      # Skip pure comment lines — `time.Now()` mentioned in a doc
+      # comment isn't an actual call.
+      if echo "$line_content" | grep -qE "^\s*//"; then
+        continue
+      fi
+      violations=$((violations + 1))
+      violation_lines="${violation_lines}${file}:${line_num}: ${line_content}\n"
+    done < <(grep -nE "time\.Now\(\)" "$file" 2>/dev/null || true)
+  done < <(find "$pkg" -name "*.go" -not -name "*_test.go" 2>/dev/null || true)
+  # A package that yields no files means the list above is stale (renamed or
+  # moved package) and the gate would pass while checking nothing.
+  if [ "$pkg_files" -eq 0 ]; then
+    echo "lint-clock: package $pkg has no .go files to scan — fix the PACKAGES list" >&2
+    exit 1
   fi
-  for pattern in "${pkg_patterns[@]}"; do
-    # Find all *<pattern> files (not _test) and scan each.
-    while IFS= read -r file; do
-      [ -z "$file" ] && continue
-      # Match `time.Now(` excluding lines with the wall-clock marker.
-      while IFS=: read -r line_num line_content; do
-        [ -z "$line_num" ] && continue
-        # Skip if the line carries a // wall-clock: justification.
-        if echo "$line_content" | grep -qE "//\s*wall-clock:"; then
-          continue
-        fi
-        # Skip pure comment lines — `time.Now()` mentioned in a doc
-        # comment isn't an actual call. Match a leading `//` after
-        # optional whitespace.
-        if echo "$line_content" | grep -qE "^\s*//"; then
-          continue
-        fi
-        violations=$((violations + 1))
-        violation_lines="${violation_lines}${file}:${line_num}: ${line_content}\n"
-      done < <(grep -nE "time\.Now\(\)" "$file" 2>/dev/null || true)
-    done < <(find "$pkg" -name "*${pattern}" -not -name "*_test.go" 2>/dev/null || true)
-  done
+  files_scanned=$((files_scanned + pkg_files))
 done
 
 if [ "$violations" -gt 0 ]; then
@@ -118,4 +105,4 @@ if [ "$violations" -gt 0 ]; then
   exit 1
 fi
 
-echo "lint-clock: ok ($(echo "${PACKAGES[@]}" | wc -w | tr -d ' ') packages scanned, no violations)"
+echo "lint-clock: ok (${#PACKAGES[@]} packages, $files_scanned files scanned, no violations)"
