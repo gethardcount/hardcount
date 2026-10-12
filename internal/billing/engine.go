@@ -1723,12 +1723,13 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 // sub is still due only when a concurrent change raced it: another closer won
 // its period twice in a row (errPeriodMoved), or a cancel or trial change was
 // rescheduled while it fired. The drain does not bill a sub twice in one run,
-// so it reports the sub, and the next run retries it.
+// so it reports the sub.
 //
-// It is saved as a counted failure (ADR-119). A real race costs one 15 minute
-// wait, which the next clean bill voids. A sub that makes no progress on every
-// run parks, where it used to loop with only this log line.
-var errStillDue = refuse(refusalNoProgress, errors.New("still due after a clean billing attempt: the subscription changed concurrently; the next run retries it"))
+// It is saved as a counted failure (ADR-119), so the retry comes after the
+// first wait, not on the next run. A real race costs that one 15 minute wait,
+// which the next clean bill voids. A sub that makes no progress on every
+// attempt parks, where it used to loop with only this log line.
+var errStillDue = refuse(refusalNoProgress, errors.New("still due after a clean billing attempt: the subscription changed concurrently or made no progress"))
 
 // dueFetch returns up to limit due subscriptions, oldest first, leaving out
 // the ids in exclude.
