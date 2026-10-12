@@ -6,21 +6,23 @@ docs in the order listed. Words you may not know are in the
 
 ## Decide if Velox fits
 
-1. [README](../README.md): what Velox is, who it is for, and a 30-second demo.
+1. [README](../README.md): what Velox is, who it is for, and a demo.
 2. [What Velox is not](../README.md#what-velox-is-not): the cases where
    another tool is the better choice.
-3. [ENGINEERING.md](ENGINEERING.md): how it is built, and the evidence for
-   each claim.
-4. [Correctness under failure](benchmarks/failure-correctness.md) and
-   [Sustained throughput](benchmarks/sustained-throughput.md): the measured
-   results.
+3. [What's in the box](features.md): every feature, in one list.
+4. [Why Velox exists, and how it compares](why-velox.md).
+5. [How Velox is engineered](ENGINEERING.md): the principles, one page.
+6. [Will it take our volume?](scale.md): what was measured, and where one
+   Postgres stops being enough.
 
 ## Try it on your machine
 
 1. [Quick start](../README.md#quick-start): Postgres, the API and the
    dashboard on localhost.
 2. [`scripts/demo.sh`](../scripts/demo.sh): the full flow from usage events
-   to a paid invoice, in about 30 seconds.
+   to a paid invoice.
+3. [AI pricing in code](ai-pricing.md): the same thing by hand, in five
+   API calls.
 
 ## Connect your product
 
@@ -62,6 +64,12 @@ docs in the order listed. Words you may not know are in the
    [agent prompting standards](dev/agent-prompting-standards.md).
 
 ## Understand a decision
+
+- [The evidence behind the engineering principles](engineering-evidence.md).
+- [Correctness under failure](benchmarks/failure-correctness.md) and
+  [Sustained throughput](benchmarks/sustained-throughput.md): the measured
+  runs in full.
+- [Roadmap](roadmap.md): what shipped recently and what is deferred.
 
 - [Architecture decision records (ADRs)](adr/README.md): one decision per
   file, with the reasons and the alternatives.
@@ -111,13 +119,13 @@ Grouped by area. Each entry links to the doc that explains it in full.
 - **dimensions (on a usage event)**: Labels on a usage event, such as model or token_type, as key-value pairs. Pricing rules match on them, so one meter can be priced at many rates. Up to 16 keys, scalar values only; stored in the properties column. [More](design-multi-dim-meters.md#subset-match-semantics)
 - **pricing rule**: A meter rule that selects usage events whose dimensions contain every key-value pair in its dimension_match. It combines them into one quantity (sum, count, max or last value) and prices it with a rating rule. If rules overlap, the highest-priority rule claims each event, so nothing counts twice. [More](design-multi-dim-meters.md#priority--claim-semantics)
 - **rating rule**: A versioned price formula, identified by its rule_key, that turns a usage quantity into money: a flat per-unit rate, graduated tiers, or fixed-size packages. Billing uses the active version that was in force when the period opened, so a new version takes effect next period. [More](adr/070-price-change-semantics.md)
-- **plan**: A price package a tenant sells: a currency, a billing interval (monthly or yearly), a fixed base fee, and the meters it charges usage for. A subscription has one or more items, each pairing a plan with a quantity. Status: draft, active or archived. [More](../README.md#whats-in-the-box)
+- **plan**: A price package a tenant sells: a currency, a billing interval (monthly or yearly), a fixed base fee, and the meters it charges usage for. A subscription has one or more items, each pairing a plan with a quantity. Status: draft, active or archived. [More](features.md)
 - **recipe**: A built-in pricing template (anthropic_style, openai_style, replicate_style) that one API call applies. It creates meters, rating rules, pricing rules and plans, sets the tenant's dunning policy, and adds a webhook endpoint that stays inactive until you give it a real URL. Applying the same recipe again changes nothing. [More](adr/085-recipe-idempotent-apply.md)
 - **idempotency key**: A unique string that makes a retry safe: the same key means the same operation, so it takes effect once. The main kinds are the Idempotency-Key HTTP header, the per-event key on usage events, and the key sent to Stripe on each charge. [More](api-surface.md)
 
 ### Subscriptions and invoices
 
-- **subscription**: A customer's agreement to pay for one or more plans over repeating billing periods. It holds items (each a plan plus a quantity) and has a status: draft, trialing, active, canceled or archived. [More](../README.md#stripe-grade-primitives-already-shipped)
+- **subscription**: A customer's agreement to pay for one or more plans over repeating billing periods. It holds items (each a plan plus a quantity) and has a status: draft, trialing, active, canceled or archived. [More](features.md#stripe-grade-primitives-already-shipped)
 - **billing period**: The date range one subscription invoice covers: start included, end excluded, with boundaries at midnight in the tenant's billing timezone. Monthly periods start on the 1st (calendar, after a first partial period) or the start day (anniversary). Yearly periods are always anniversary. [More](adr/012-day-grade-calendar-billing.md)
 - **billing timezone**: The one organization-wide timezone (tenant setting, default UTC) in which Velox places period boundaries at midnight and counts days for proration. Each invoice also stores the zone it was issued under (invoices.billing_timezone) so its dates never shift later. [More](adr/077-org-level-billing-timezone.md)
 - **day-grade billing**: Billing counts whole days, not hours. Normal period boundaries snap to midnight in the billing timezone, the start day counts in full, and day counts are rounded so daylight saving never adds or loses a day. Threshold resets can start periods mid-day. [More](adr/012-day-grade-calendar-billing.md)
@@ -167,6 +175,6 @@ Grouped by area. Each entry links to the doc that explains it in full.
 
 ### Project terms
 
-- **design partner (DP)**: An early customer who works with the team to shape the product. In Velox docs, many features are deferred until a design partner asks for them, for example RBAC or Helm charts. [More](../README.md#explicitly-deferred-on-hold-pending-design-partner)
+- **design partner (DP)**: An early customer who works with the team to shape the product. In Velox docs, many features are deferred until a design partner asks for them, for example RBAC or Helm charts. [More](roadmap.md#explicitly-deferred-on-hold-pending-design-partner)
 - **site-set (and effect-firer, gated reader)**: Every code place that touches one state, such as an invoice status. That means each writer and each effect-firer (code that sends an email, webhook, Stripe call or ledger write on a change). It also means each gated reader (code that branches on the state), each caller and callee, and each crash point. [More](dev/money-path-robustness-playbook.md#2-the-meta-practice-complete-site-set-enumeration)
 - **FLOW (in MANUAL_TEST)**: One named section of MANUAL_TEST.md that a person runs by hand to prove a product feature works end to end. Each flow has a stable ID (for example FLOW S1) and checkbox steps, each with one observable result. [More](../MANUAL_TEST.md#flow-index)

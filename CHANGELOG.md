@@ -29,6 +29,8 @@ Older entries keep their original text.
 
 ### Changed
 
+- **The README is one screen, and the engineering page is a list of principles (2026-10-12).** The README went from about 4,700 words to under 800: what Velox is, a quickstart, six reasons to use it, and what it is not. Everything else moved to its own page under `docs/` and nothing was deleted. Links into the old README sections now point at the new pages.
+
 - **Go 1.26.9 and golang.org/x/net 0.60.0 (2026-10-10).** Clears 11 standard-library and 4 x/net advisories that `govulncheck` reaches from Velox code; CI failed on every branch until this lands. No application code change.
 
 - **One dead webhook endpoint no longer delays every other tenant's retries (2026-08-31).** The retry tick attempted its batch of 10 sequentially with a 13-second budget per row, so a batch's cost was the sum of its slowest members — a tenant whose endpoint is dead, with a backlog, pushed each tick toward 130 seconds while everyone else's retries queued behind it. Rows are now attempted concurrently, bounded at 4 in flight: independent rows, each already claimed by its lease, each spending nearly all its time inside one HTTP call. Worst-case tick drops from ~130s to ~39s, and a background worker still holds only a handful of transient connections from the shared pool.

@@ -186,3 +186,12 @@ prepay a credit balance that usage draws down): subscribe to
 `credit.balance_low` (nudge the customer to top up), `credit.balance_depleted`
 (suspend service), `credit.balance_recovered` (restore), and
 `subscription.canceled` (deprovision).
+
+## Testing deliveries locally
+
+Outbound webhooks can be tested locally without a tunnel:
+
+- `python3 scripts/dev/webhook-sink.py` runs a receiver on `localhost:9099`.
+- It logs every delivery with its `Velox-Signature` header, so you can verify the HMAC offline.
+- Paths under `/fail` return 500, to exercise the retry ladder.
+- Localhost delivery is allowed in development and refused in production.

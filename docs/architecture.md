@@ -36,3 +36,11 @@ internal/                     (abridged — one package per domain)
 
 web-v2/                     — operator dashboard (React 19 + TypeScript + Tailwind)
 ```
+
+## Tech stack
+
+**Backend** — Go 1.26, chi/v5 router, PostgreSQL 16 with RLS, `shopspring/decimal` for money, `signintech/gopdf` for invoices, Prometheus metrics.
+
+**Frontend** — React 19, TypeScript, Vite, TailwindCSS, shadcn/ui, Lucide icons.
+
+**Payments** — Stripe (PaymentIntents + Checkout Sessions). No Stripe Billing dependency.
