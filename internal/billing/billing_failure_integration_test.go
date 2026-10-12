@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"strings"
 	"sync"
@@ -69,6 +70,7 @@ func (p *faultyPricing) GetPlan(ctx context.Context, tenantID, id string) (domai
 // on a fake clock.
 type billFailureEnv struct {
 	db       *postgres.DB
+	admin    *sql.DB
 	ctx      context.Context
 	tenantID string
 	custID   string
@@ -87,9 +89,11 @@ type billFailureEnv struct {
 func newBillFailureEnv(t *testing.T, name string) *billFailureEnv {
 	t.Helper()
 	db := testutil.SetupTestDB(t) // skips under -short
-	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling)
+	// One owner-role pool per test: AdminPool opens a new pool on every call.
+	admin := testutil.AdminPool(t)
+	ctx := leadertest.Token(t, admin, postgres.WithLivemode(context.Background(), false), leader.RoleBilling)
 	env := &billFailureEnv{
-		db: db, ctx: ctx,
+		db: db, ctx: ctx, admin: admin,
 		subs:        subscription.NewPostgresStore(db),
 		invoices:    invoice.NewPostgresStore(db),
 		periodStart: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
@@ -239,6 +243,24 @@ func (a *observedSubs) recorded() (landed, refused int) {
 
 const blankBillingColumns = "-|0|-|-|-"
 
+// captureLogs points the default logger at a buffer for the rest of the test
+// and restores it afterwards. Restoring takes three steps, not one: installing
+// a non-default slog handler also redirects the log package, and setting the
+// previous (default) logger back does not undo that. Without the last two
+// lines every later test in the binary would log into this test's buffer.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var logs bytes.Buffer
+	prev, prevOut, prevFlags := slog.Default(), log.Writer(), log.Flags()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(prevOut)
+		log.SetFlags(prevFlags)
+	})
+	return &logs
+}
+
 // mustFail runs the scheduler's billing run and asserts that subID failed.
 func (env *billFailureEnv) mustFail(t *testing.T, subID string) {
 	t.Helper()
@@ -265,13 +287,15 @@ func (env *billFailureEnv) invoiceCount(t *testing.T, subID string) int {
 }
 
 // billingColumns reads the five saved columns as text, straight from the row,
-// so a test can prove a run left them byte-identical.
+// so a test can prove a run left them byte-identical. The timestamps are
+// rendered in UTC with no offset, whatever the session's TimeZone is.
 func (env *billFailureEnv) billingColumns(t *testing.T, subID string) string {
 	t.Helper()
 	var out string
-	err := testutil.AdminPool(t).QueryRowContext(env.ctx, `
-		SELECT concat_ws('|', COALESCE(billing_failed_for::text,'-'), billing_failure_count::text,
-		       COALESCE(billing_failed_at::text,'-'), COALESCE(billing_next_attempt_at::text,'-'), COALESCE(billing_last_error,'-'))
+	err := env.admin.QueryRowContext(env.ctx, `
+		SELECT concat_ws('|', COALESCE((billing_failed_for AT TIME ZONE 'UTC')::text,'-'), billing_failure_count::text,
+		       COALESCE((billing_failed_at AT TIME ZONE 'UTC')::text,'-'),
+		       COALESCE((billing_next_attempt_at AT TIME ZONE 'UTC')::text,'-'), COALESCE(billing_last_error,'-'))
 		  FROM subscriptions WHERE id = $1`, subID).Scan(&out)
 	if err != nil {
 		t.Fatalf("read billing columns of %s: %v", subID, err)
@@ -383,10 +407,7 @@ func TestBillingFailure_ParksAtTheEighthFailure(t *testing.T) {
 	a := env.dueSub(t, "sub-a-failing", env.planBad, env.periodEnd)
 	b := env.dueSub(t, "sub-b-healthy", env.planOK, env.periodEnd.Add(time.Second))
 
-	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	logs := captureLogs(t)
 
 	first := env.clock.Now(env.ctx)
 	for n := 1; n <= domain.MaxBillingAttempts; n++ {
@@ -513,7 +534,7 @@ func TestBillingFailure_MultiPeriodCatchupRecordsTheFailingPeriod(t *testing.T) 
 	if sub.NextBillingAt == nil || !sub.NextBillingAt.Equal(mar) {
 		t.Fatalf("next_billing_at = %v, want the second period's close %s", sub.NextBillingAt, mar)
 	}
-	if cols := env.billingColumns(t, a.ID); !strings.HasPrefix(cols, "2026-03-01 00:00:00+00|1|") {
+	if cols := env.billingColumns(t, a.ID); !strings.HasPrefix(cols, "2026-03-01 00:00:00|1|") {
 		t.Fatalf("record = %s, want it keyed to the second period's due instant 2026-03-01", cols)
 	}
 
@@ -576,7 +597,7 @@ func TestBillingFailure_MidPeriodCancelFails_ClearingTheCancelVoids(t *testing.T
 	if bf == nil || !bf.Parked {
 		t.Fatalf("setup: %+v, want the failing cancel parked", bf)
 	}
-	if cols := env.billingColumns(t, a.ID); !strings.HasPrefix(cols, cancelAt.Format("2006-01-02 15:04:05+00")+"|8|") {
+	if cols := env.billingColumns(t, a.ID); !strings.HasPrefix(cols, cancelAt.UTC().Format("2006-01-02 15:04:05")+"|8|") {
 		t.Fatalf("record = %s, want it keyed to cancel_at %s", cols, cancelAt)
 	}
 
@@ -751,11 +772,11 @@ func TestBillingFailure_TwoRunsFailTogether_CountOnce(t *testing.T) {
 			t.Error("the two attempts never met at the barrier")
 		}
 	}
+	// Results are checked on the test goroutine: t.Fatalf must not run on
+	// another one.
 	var wg sync.WaitGroup
-	wg.Go(func() {
-		_, errs := one.RunCycle(env.ctx, 50, nil)
-		onlyFailure(t, errs, a.ID)
-	})
+	var oneErrs []error
+	wg.Go(func() { _, oneErrs = one.RunCycle(env.ctx, 50, nil) })
 	<-firstIn
 	wg.Go(func() {
 		if _, failures := two.RunCycleForTenant(env.ctx, env.tenantID, 50); len(failures) != 1 {
@@ -763,6 +784,7 @@ func TestBillingFailure_TwoRunsFailTogether_CountOnce(t *testing.T) {
 		}
 	})
 	wg.Wait()
+	onlyFailure(t, oneErrs, a.ID)
 
 	if landed, refused := watched.recorded(); landed != 1 || refused != 1 {
 		t.Fatalf("failure writes: %d landed, %d refused; want exactly one to land", landed, refused)
@@ -799,6 +821,82 @@ func TestBillingFailure_AttemptFromAStalePageIsNotMade(t *testing.T) {
 	}
 	if bf := env.get(t, a.ID).BillingFailure; bf == nil || bf.Attempts != 1 {
 		t.Fatalf("failure = %+v, want attempts 1", bf)
+	}
+}
+
+// TestBillingFailure_AttemptFromAStalePageOfAParkedSubIsNotMade is the parked
+// arm of the same re-check. The page is fetched at count 7, another run
+// records the eighth failure and parks, and the stale run then reaches the
+// subscription. A parked record has no next attempt at all, so the gate must
+// test for that before it compares instants.
+//
+// Mutation seam: drop the `NextAttemptAt == nil` arm of the check → a nil
+// pointer dereference here.
+func TestBillingFailure_AttemptFromAStalePageOfAParkedSubIsNotMade(t *testing.T) {
+	env := newBillFailureEnv(t, "Billing Failure Stale Parked")
+	a := env.dueSub(t, "sub-a", env.planBad, env.periodEnd)
+	for n := 1; n < domain.MaxBillingAttempts; n++ {
+		env.mustFail(t, a.ID)
+		env.clock.Advance(billLadder[n-1])
+	}
+	if bf := env.get(t, a.ID).BillingFailure; bf == nil || bf.Attempts != 7 || bf.Parked {
+		t.Fatalf("setup: %+v, want seven failures and due again", bf)
+	}
+	calls := env.pricing.calls.Load()
+
+	other := env.newEngine(&subStoreAdapter{env.subs}, env.pricing)
+	stale := &observedSubs{subStoreAdapter: &subStoreAdapter{env.subs}}
+	stale.afterFetch = func() {
+		if _, failures := other.RunCycleForTenant(env.ctx, env.tenantID, 50); len(failures) != 1 {
+			t.Errorf("the other run: failures=%v, want the one failure", failures)
+		}
+	}
+	gen, errs := env.newEngine(stale, env.pricing).RunCycle(env.ctx, 50, nil)
+	if gen != 0 || len(errs) != 0 {
+		t.Fatalf("the run holding the stale page: generated=%d errors=%v, want nothing attempted", gen, errs)
+	}
+	if got := env.pricing.calls.Load(); got != calls+1 {
+		t.Fatalf("plan reads went %d → %d, want exactly the other run's one attempt", calls, got)
+	}
+	if bf := env.get(t, a.ID).BillingFailure; bf == nil || bf.Attempts != 8 || !bf.Parked || bf.NextAttemptAt != nil {
+		t.Fatalf("failure = %+v, want parked at 8", bf)
+	}
+}
+
+// TestBillingFailure_PanicAfterAnInvoiceLogsTheRealCount: three periods are
+// overdue and the second panics. One invoice was committed in that call, and
+// the failure line must say so; the named result of the attempt is never
+// assigned when billSubscription panics. The record is keyed to the period
+// that panicked.
+func TestBillingFailure_PanicAfterAnInvoiceLogsTheRealCount(t *testing.T) {
+	env := newBillFailureEnv(t, "Billing Failure Panic Count")
+	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	feb := jan.AddDate(0, 1, 0)
+	a := env.subWith(t, domain.Subscription{Code: "sub-three-periods", Status: domain.SubscriptionActive}, env.planOK, jan, feb, feb)
+	inserts := 0
+	env.invs.onCreateTx = func(domain.Invoice) error {
+		if inserts++; inserts == 2 {
+			panic("boom in the second period")
+		}
+		return nil
+	}
+	logs := captureLogs(t)
+	recovered := func() (r any) {
+		defer func() { r = recover() }()
+		env.engine.RunCycle(env.ctx, 50, nil)
+		return nil
+	}()
+	if recovered == nil {
+		t.Fatal("the panic was swallowed")
+	}
+	if n := env.invoiceCount(t, a.ID); n != 1 {
+		t.Fatalf("%d invoices, want the first period's 1", n)
+	}
+	if !strings.Contains(logs.String(), "invoices_before_error=1") {
+		t.Fatalf("the failure line does not report the invoice committed before the panic:\n%s", logs.String())
+	}
+	if cols := env.billingColumns(t, a.ID); !strings.HasPrefix(cols, "2026-03-01 00:00:00|1|") {
+		t.Fatalf("record = %s, want it keyed to the second period's due instant", cols)
 	}
 }
 
@@ -922,7 +1020,7 @@ func TestBillingFailure_RecordWriteFails_RunEnds_NextLeaderRecords(t *testing.T)
 	}
 
 	// A successor: a fresh engine under a new lease token.
-	next := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling)
+	next := leadertest.Token(t, env.admin, postgres.WithLivemode(context.Background(), false), leader.RoleBilling)
 	_, errs = env.newEngine(&subStoreAdapter{env.subs}, env.pricing).RunCycle(next, 50, nil)
 	onlyFailure(t, errs, a.ID)
 	if bf := env.get(t, a.ID).BillingFailure; bf == nil || bf.Attempts != 1 {
@@ -994,7 +1092,7 @@ func (env *billFailureEnv) clockSub(t *testing.T, code string, plan domain.Plan)
 	t.Helper()
 	sub = env.dueSub(t, code, plan, env.periodEnd)
 	clockID = postgres.NewID("vlx_tclk")
-	admin := testutil.AdminPool(t)
+	admin := env.admin
 	if _, err := admin.ExecContext(env.ctx, `INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 		VALUES ($1, $2, false, 'billing failure', $3, 'ready')`, clockID, env.tenantID, env.clock.Now(env.ctx)); err != nil {
 		t.Fatalf("test clock: %v", err)
@@ -1013,11 +1111,25 @@ func (env *billFailureEnv) clockSub(t *testing.T, code string, plan domain.Plan)
 func TestRunCycleForClock_SavesNoRecordAndIgnoresOne(t *testing.T) {
 	env := newBillFailureEnv(t, "Billing Failure Clock")
 	a, clockID := env.clockSub(t, "sub-clock", env.planBad)
+	// The store refuses a clock-pinned row on its own, so blank columns alone
+	// cannot show that the engine did not try. Count the write attempts.
+	// Mutation seam: drop `seen.TestClockID != ""` from recordBillFailure and
+	// the count becomes 1.
+	watched := &observedSubs{subStoreAdapter: &subStoreAdapter{env.subs}}
+	env.engine = env.newEngine(watched, env.pricing)
+	logs := captureLogs(t)
 
 	_, errs := env.engine.RunCycleForClock(env.ctx, env.tenantID, clockID, 50)
 	onlyFailure(t, errs, a.ID)
 	if cols := env.billingColumns(t, a.ID); cols != blankBillingColumns {
 		t.Fatalf("a failing clock-pinned subscription saved a record: %s", cols)
+	}
+	if n := watched.writes.Load(); n != 0 {
+		t.Fatalf("the engine attempted %d failure writes for a clock-pinned subscription", n)
+	}
+	// The log line says why a counted failure was not saved.
+	if !strings.Contains(logs.String(), "class=counted recorded=false not_recorded_reason=test_clock") {
+		t.Fatalf("the failure line does not name the reason it was not saved:\n%s", logs.String())
 	}
 
 	env.pricing.fail = func() error { panic("boom on a clock") }
@@ -1032,9 +1144,12 @@ func TestRunCycleForClock_SavesNoRecordAndIgnoresOne(t *testing.T) {
 	if cols := env.billingColumns(t, a.ID); cols != blankBillingColumns {
 		t.Fatalf("a panic on a clock-pinned subscription saved a record: %s", cols)
 	}
+	if n := watched.writes.Load(); n != 0 {
+		t.Fatalf("the engine attempted %d failure writes after a panic on a clock-pinned subscription", n)
+	}
 
 	// A parked record seeded by hand on the clock-pinned row.
-	if _, err := testutil.AdminPool(t).ExecContext(env.ctx, `
+	if _, err := env.admin.ExecContext(env.ctx, `
 		UPDATE subscriptions SET billing_failed_for = next_billing_at, billing_failure_count = 8,
 		       billing_failed_at = next_billing_at, billing_next_attempt_at = NULL, billing_last_error = 'seeded'
 		 WHERE id = $1`, a.ID); err != nil {

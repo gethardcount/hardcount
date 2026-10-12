@@ -18,6 +18,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
@@ -65,8 +66,9 @@ func (r *retryRig) retry(t *testing.T, subID string) (int, retryResponse, string
 	r.router.ServeHTTP(rec, req)
 	var out retryResponse
 	if rec.Code == http.StatusOK {
+		// Errorf, not Fatalf: retry is also called from worker goroutines.
 		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatalf("decode 200 body: %v\n%s", err, rec.Body.String())
+			t.Errorf("decode 200 body: %v\n%s", err, rec.Body.String())
 		}
 	}
 	return rec.Code, out, rec.Body.String()
@@ -193,6 +195,11 @@ func TestRetryBilling_Refusals(t *testing.T) {
 		if code != http.StatusConflict || !strings.Contains(body, "test clock") {
 			t.Fatalf("got %d %s, want 409 pointing at the clock's retry advance", code, body)
 		}
+		// The documented code for this case is invalid_state. It must not be
+		// billing_not_failing, which a client reads as "already healthy".
+		if !strings.Contains(body, `"invalid_state"`) || strings.Contains(body, "billing_not_failing") {
+			t.Fatalf("409 body %s, want code invalid_state", body)
+		}
 		if rows := r.auditRows(t, a.ID); len(rows) != 0 {
 			t.Fatalf("a refused retry wrote %d audit rows", len(rows))
 		}
@@ -278,12 +285,20 @@ func TestRetryBilling_RacingTheScheduler_ExactlyOneInvoice(t *testing.T) {
 	if n := r.invoiceCount(t, a.ID); n != 1 {
 		t.Fatalf("%d invoices after the race, want exactly 1 (codes %v)", n, codes)
 	}
+	cleared := 0
 	for _, c := range codes {
 		// 200: this retry cleared the record. 409: a run billed first (the
 		// record was void) or the other retry cleared it.
 		if c != http.StatusOK && c != http.StatusConflict {
 			t.Fatalf("retry answered %d, want 200 or 409", c)
 		}
+		if c == http.StatusOK {
+			cleared++
+		}
+	}
+	// One audit row per clear, and never one without a clear.
+	if rows := r.auditRows(t, a.ID); len(rows) != cleared {
+		t.Fatalf("%d audit rows for %d retries that answered 200", len(rows), cleared)
 	}
 	if bf := r.get(t, a.ID).BillingFailure; bf != nil {
 		t.Fatalf("billed subscription still reads as failing: %+v", bf)
@@ -359,5 +374,101 @@ func TestRetryBilling_UncountedFailureAnswersStillDue(t *testing.T) {
 	}
 	if n := r.invoiceCount(t, a.ID); n != 1 {
 		t.Fatalf("%d invoices after the next run, want 1: an uncounted failure must leave the subscription due with no wait", n)
+	}
+}
+
+// The race test above releases everything at once and accepts any order, so
+// it can pass with no collision at all. The two tests below place the racing
+// run at an exact point of the retry and assert both sides' outcome.
+
+// TestRetryBilling_RunBillsDuringTheRetrysAttempt: the retry has cleared the
+// record and is inside its attempt when a billing run bills the period. The
+// retry's attempt then fails. Its failure must not be saved (the work is
+// done), and the response must not read as still due.
+func TestRetryBilling_RunBillsDuringTheRetrysAttempt(t *testing.T) {
+	r := newRetryRig(t, "Retry Billing Run Wins", nil)
+	a := r.dueSub(t, "sub-a", r.planBad, r.periodEnd)
+	r.park(t, a.ID)
+
+	winner := r.newEngine(&subStoreAdapter{r.subs}, &pricingStoreAdapter{pricing.NewPostgresStore(r.db)})
+	var once sync.Once
+	r.pricing.onBad = func() {
+		once.Do(func() {
+			if gen, failures := winner.RunCycleForTenant(r.ctx, r.tenantID, 50); gen != 1 || len(failures) != 0 {
+				t.Errorf("the run inside the retry's attempt: generated=%d failures=%v, want 1 and none", gen, failures)
+			}
+		})
+	}
+	code, out, body := r.retry(t, a.ID)
+	if code != http.StatusOK {
+		t.Fatalf("retry: %d %s", code, body)
+	}
+	if out.InvoicesGenerated != 0 || out.Subscription.BillingFailure != nil || out.StillDue {
+		t.Fatalf("invoices_generated=%d billing_failure=%+v still_due=%v, want 0, none and false: the run billed the period", out.InvoicesGenerated, out.Subscription.BillingFailure, out.StillDue)
+	}
+	if n := r.invoiceCount(t, a.ID); n != 1 {
+		t.Fatalf("%d invoices, want exactly 1", n)
+	}
+	if cols := r.billingColumns(t, a.ID); cols != blankBillingColumns {
+		t.Fatalf("the retry's late failure landed on a billed period: %s", cols)
+	}
+	if rows := r.auditRows(t, a.ID); len(rows) != 1 {
+		t.Fatalf("%d audit rows, want the retry's 1", len(rows))
+	}
+}
+
+// interleavedBiller runs before() and then the real BillDueNow: the window
+// between the retry's clear and its attempt.
+type interleavedBiller struct {
+	before func()
+	next   subscription.DueBiller
+}
+
+func (b interleavedBiller) BillDueNow(ctx context.Context, tenantID, id string) (int, error) {
+	b.before()
+	return b.next.BillDueNow(ctx, tenantID, id)
+}
+
+// TestRetryBilling_RunFailsBetweenTheClearAndTheAttempt: after the retry's
+// clear commits, a billing run attempts the subscription, fails and saves
+// attempt 1 with its wait. The retry's own attempt must then not be made: the
+// attempt-time gate stops it. The response shows the run's record, and one
+// failed attempt is counted once.
+//
+// Mutation seam: remove the gate at the top of billSubscription's loop → the
+// retry attempts as well and attempts becomes 2.
+func TestRetryBilling_RunFailsBetweenTheClearAndTheAttempt(t *testing.T) {
+	r := newRetryRig(t, "Retry Billing Run Fails First", nil)
+	a := r.dueSub(t, "sub-a", r.planBad, r.periodEnd)
+	r.park(t, a.ID)
+	now := r.clock.Now(r.ctx)
+
+	other := r.newEngine(&subStoreAdapter{r.subs}, r.pricing)
+	r.svc.SetDueBiller(interleavedBiller{next: r.engine, before: func() {
+		if _, failures := other.RunCycleForTenant(r.ctx, r.tenantID, 50); len(failures) != 1 {
+			t.Errorf("the run between the clear and the attempt: failures=%v, want the one failure", failures)
+		}
+	}})
+	calls := r.pricing.calls.Load()
+
+	code, out, body := r.retry(t, a.ID)
+	if code != http.StatusOK {
+		t.Fatalf("retry: %d %s", code, body)
+	}
+	bf := out.Subscription.BillingFailure
+	if bf == nil || bf.Attempts != 1 || bf.NextAttemptAt == nil || !bf.NextAttemptAt.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("billing_failure = %+v, want the run's record: attempts 1, next attempt in 15 minutes", bf)
+	}
+	if out.InvoicesGenerated != 0 || out.StillDue {
+		t.Fatalf("invoices_generated=%d still_due=%v, want 0 and false", out.InvoicesGenerated, out.StillDue)
+	}
+	if got := r.pricing.calls.Load(); got != calls+1 {
+		t.Fatalf("plan reads went %d → %d, want exactly 1: the retry's own attempt must not be made", calls, got)
+	}
+	if rows := r.auditRows(t, a.ID); len(rows) != 1 {
+		t.Fatalf("%d audit rows, want the retry's 1", len(rows))
+	}
+	if n := r.invoiceCount(t, a.ID); n != 0 {
+		t.Fatalf("%d invoices from two failed attempts", n)
 	}
 }

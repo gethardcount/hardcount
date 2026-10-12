@@ -362,8 +362,6 @@ func (m *mockSettings) Get(_ context.Context, _ string) (domain.TenantSettings, 
 type mockSubs struct {
 	subs         map[string]domain.Subscription
 	cycleUpdated map[string]bool
-	// billingFailures records every RecordBillingFailure call, by sub id.
-	billingFailures map[string][]subscription.BillingFailureWrite
 	// itemChanges feeds ListItemChangesInPeriod. Tests that exercise
 	// segment-aware billing seed this with the change rows the DB
 	// trigger would have produced (migration 0029).
@@ -530,14 +528,10 @@ func (m *mockSubs) Get(_ context.Context, _, id string) (domain.Subscription, er
 	return s, nil
 }
 
-// RecordBillingFailure keeps what the engine asked to save. The mock scans do
-// not gate on it and Get does not read it back: the guards and the gate are
-// proven on real Postgres (billing_failure_integration_test.go).
-func (m *mockSubs) RecordBillingFailure(_ context.Context, _, id string, f subscription.BillingFailureWrite) (bool, error) {
-	if m.billingFailures == nil {
-		m.billingFailures = make(map[string][]subscription.BillingFailureWrite)
-	}
-	m.billingFailures[id] = append(m.billingFailures[id], f)
+// RecordBillingFailure accepts the write and discards it. The write, its
+// guards and the gate are proven on real Postgres
+// (billing_failure_integration_test.go).
+func (m *mockSubs) RecordBillingFailure(context.Context, string, string, subscription.BillingFailureWrite) (bool, error) {
 	return true, nil
 }
 

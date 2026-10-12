@@ -2,6 +2,7 @@ package subscription_test
 
 import (
 	"context"
+	"database/sql"
 	"slices"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ type bfRow struct {
 type bfSeed struct {
 	t        *testing.T
 	db       *postgres.DB
+	admin    *sql.DB
 	ctx      context.Context
 	store    *subscription.PostgresStore
 	tenantID string
@@ -47,9 +49,12 @@ type bfSeed struct {
 func newBFSeed(t *testing.T, suffix string) *bfSeed {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
+	// One owner-role pool for the whole test: AdminPool opens a new pool on
+	// every call and closes it only when the top-level test ends.
+	admin := testutil.AdminPool(t)
 	s := &bfSeed{
-		t: t, db: db,
-		ctx:      leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling),
+		t: t, db: db, admin: admin,
+		ctx:      leadertest.Token(t, admin, postgres.WithLivemode(context.Background(), false), leader.RoleBilling),
 		store:    subscription.NewPostgresStore(db),
 		tenantID: "vlx_ten_bf" + suffix,
 		clockID:  "vlx_tclk_bf" + suffix,
@@ -116,7 +121,7 @@ func (s *bfSeed) sub(r bfRow) string {
 func (s *bfSeed) sqlFailing(id string) bool {
 	s.t.Helper()
 	var failing bool
-	err := testutil.AdminPool(s.t).QueryRowContext(s.ctx,
+	err := s.admin.QueryRowContext(s.ctx,
 		`SELECT `+domain.SubscriptionBillingFailingSQL("s")+` FROM subscriptions s WHERE s.id = $1`, id).Scan(&failing)
 	if err != nil {
 		s.t.Fatalf("predicate for %s: %v", id, err)
@@ -142,7 +147,7 @@ func (s *bfSeed) get(id string) domain.Subscription {
 func (s *bfSeed) rawRecord(id string) string {
 	s.t.Helper()
 	var out string
-	err := testutil.AdminPool(s.t).QueryRowContext(s.ctx, `
+	err := s.admin.QueryRowContext(s.ctx, `
 		SELECT concat_ws('|', COALESCE(billing_failed_for::text,'-'), billing_failure_count::text,
 		       COALESCE(billing_failed_at::text,'-'), COALESCE(billing_next_attempt_at::text,'-'), COALESCE(billing_last_error,'-'))
 		  FROM subscriptions WHERE id = $1`, id).Scan(&out)

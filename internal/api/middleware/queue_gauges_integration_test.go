@@ -141,28 +141,38 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 		VALUES ($1, $2, 'gauges', $3, 'ready', false)`, clockID, tenantID, now)
 	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, created_at, updated_at)
 		VALUES ('cus_bfgauge', $1, 'g', 'BillingGauges', '', $2, $2)`, tenantID, now)
-	seed := func(id, status string, nextBilling time.Time, clock any, failedFor, nextAttempt *time.Time) {
+	seed := func(id, status string, nextBilling time.Time, cancelAt *time.Time, clock any, failedFor, nextAttempt *time.Time) {
 		mustExec(`INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
-			current_billing_period_start, current_billing_period_end, next_billing_at,
+			current_billing_period_start, current_billing_period_end, next_billing_at, cancel_at,
 			livemode, test_clock_id, billing_failed_for, billing_failure_count, billing_next_attempt_at,
 			created_at, updated_at
-		) VALUES ($1, $2, $1, $1, 'cus_bfgauge', $3, 'calendar', $4, $5, $5, false, $6, $7, $8, $9, $4, $4)`,
+		) VALUES ($1, $2, $1, $1, 'cus_bfgauge', $3, 'calendar', $4, $5, $5, $10, false, $6, $7, $8, $9, $4, $4)`,
 			id, tenantID, status, nextBilling.Add(-30*24*time.Hour), nextBilling, clock,
-			postgres.NullableTime(failedFor), map[bool]int{true: 3, false: 0}[failedFor != nil], postgres.NullableTime(nextAttempt))
+			postgres.NullableTime(failedFor), map[bool]int{true: 3, false: 0}[failedFor != nil], postgres.NullableTime(nextAttempt),
+			postgres.NullableTime(cancelAt))
 	}
-	later, stale := now.Add(time.Hour), due.Add(-30*24*time.Hour)
-	seed("sub_g_healthy", "active", due, nil, nil, nil)
+	later, stale, notDue := now.Add(time.Hour), due.Add(-30*24*time.Hour), now.Add(72*time.Hour)
+	earlier := due.Add(-24 * time.Hour)
+	seed("sub_g_healthy", "active", due, nil, nil, nil, nil)
 	// Failing on every run with an error that is never saved (a lost
 	// connection, an interrupted run): it has no record, so it is "due".
-	seed("sub_g_unrecorded", "active", due.Add(time.Hour), nil, nil, nil)
-	seed("sub_g_retrying", "active", due, nil, &due, &later)
-	seed("sub_g_parked", "active", due, nil, &due, nil)
+	seed("sub_g_unrecorded", "active", due.Add(time.Hour), nil, nil, nil, nil)
+	seed("sub_g_retrying", "active", due, nil, nil, &due, &later)
+	seed("sub_g_parked", "active", due, nil, nil, &due, nil)
+	// The cancel arm of the key. An active row parked on a failing mid-period
+	// cancel: its due instant is cancel_at, not next_billing_at. A copy of
+	// the predicate that keyed on next_billing_at alone would call it due.
+	seed("sub_g_cancel_parked", "active", notDue, &due, nil, &due, nil)
+	// A trialing row ignores cancel_at: its due instant is next_billing_at
+	// although an earlier cancel_at is set. A copy that dropped the
+	// status = 'active' test would key it on cancel_at and lose it.
+	seed("sub_g_trial_retrying", "trialing", due, &earlier, nil, &due, &later)
 	// Decoys.
-	seed("sub_g_stale", "active", due, nil, &stale, nil)    // record for another due instant: due, not failing
-	seed("sub_g_clock", "active", due, clockID, &due, nil)  // clock-pinned: neither
-	seed("sub_g_canceled", "canceled", due, nil, &due, nil) // evidence on a canceled row: neither
-	seed("sub_g_notdue", "active", now.Add(72*time.Hour), nil, nil, nil)
+	seed("sub_g_stale", "active", due, nil, nil, &stale, nil)    // record for another due instant: due, not failing
+	seed("sub_g_clock", "active", due, nil, clockID, &due, nil)  // clock-pinned: neither
+	seed("sub_g_canceled", "canceled", due, nil, nil, &due, nil) // evidence on a canceled row: neither
+	seed("sub_g_notdue", "active", notDue, nil, nil, nil, nil)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -179,8 +189,8 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 	}
 	retrying := gaugeValue(t, "velox_billing_failing_subscriptions", test("state", "retrying"))
 	parked := gaugeValue(t, "velox_billing_failing_subscriptions", test("state", "parked"))
-	if retrying != 1 || parked != 1 {
-		t.Errorf("failing: retrying=%v parked=%v, want 1 and 1", retrying, parked)
+	if retrying != 2 || parked != 2 {
+		t.Errorf("failing: retrying=%v parked=%v, want 2 and 2 (one of each keyed to next_billing_at, a parked mid-period cancel, a retrying trial)", retrying, parked)
 	}
 	if got := gaugeValue(t, "velox_billing_failing_subscriptions", map[string]string{"mode": "live", "state": "parked"}); got != 0 {
 		t.Errorf("live-mode parked = %v, want 0: the test-mode rows leaked across the livemode partition", got)

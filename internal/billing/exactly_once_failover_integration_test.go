@@ -267,6 +267,16 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) {
 	}
 	ws, ok := state.Sys().(syscall.WaitStatus)
 	if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
+		// The leader can finish between two polls: with one subscription left,
+		// its last invoice and its exit fit inside the 20ms poll interval, and
+		// the kill then reaches a process that already exited. Nothing was
+		// interrupted, so the run proves nothing: skip it, as the check a few
+		// lines down does when the kill lands after the last commit. A normal
+		// exit with work left undone is still a failure.
+		if total, _, _ := cycleInvoiceCounts(t, db, seed.tenantID); total >= subCount {
+			t.Skipf("leader finished all %d subscriptions and exited before the kill landed; nothing was "+
+				"interrupted, so this run proves nothing (raise subCount or lower killAfter)", subCount)
+		}
 		t.Fatalf("leader did not die of SIGKILL (state=%v) — the test would be measuring "+
 			"a clean shutdown, which proves nothing about crash recovery", state)
 	}
