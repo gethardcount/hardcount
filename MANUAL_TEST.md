@@ -395,6 +395,8 @@ Single tenant-wide timezone used for date input and timestamp display
 - [x] Rotate with `expires_in_seconds=0` → old key 401 `invalid or expired API key` immediately. *(walked on a separate key so it contrasts with the 300s grace above: the old key 401'd on the next request.)* *(auto: `TestRotateKey_ImmediateRevoke`)*
 - [x] Rotate revoked key → 409 `cannot rotate a revoked key`. *(walked — message verbatim.)* *(auto: `TestRotateKey_RejectsAlreadyRevoked`)*
 - [x] `expires_in_seconds > 604800` → 422. *(walked at the boundary+1 (604801) → **422 "must be <= 604800 (7 days)"**, which names the limit in both units.)* *(auto: `TestRotateKey_RejectsExcessiveGrace`)*
+- [x] The database fails while the old key is being retired → 500 `internal_error` with the generic message; the body carries no error text and no key id. *(auto: `TestRotateHandler_RetireStoreFailureIs500Generic`)*
+- [x] An untyped error that is answered as a 422 because of its wording writes one WARN log line, `untyped error answered as 422 by message text`, with `resource`, `method` and `route` (the route pattern, not the path). *(auto: `TestFromError_TextFallbackLogsWarning`)*
 
 ---
 

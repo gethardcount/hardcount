@@ -1,12 +1,16 @@
 package respond
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
@@ -68,6 +72,71 @@ func TestFromError_ValidationMessage(t *testing.T) {
 				t.Errorf("'%s' → status: got %d, want 422", msg, rec.Code)
 			}
 		})
+	}
+}
+
+// captureLogs points the default slog logger at a buffer for one test.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+// The message-text fallback is the one branch that answers from an untyped
+// error's text, so each use must leave a log line naming the route.
+func TestFromError_TextFallbackLogsWarning(t *testing.T) {
+	buf := captureLogs(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/things/tok_123", nil)
+
+	router := chi.NewRouter()
+	router.Post("/v1/things/{id}", func(w http.ResponseWriter, r *http.Request) {
+		FromError(w, r, fmt.Errorf("quantity must be positive"), "thing")
+	})
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status: got %d, want 422", rec.Code)
+	}
+	var entry map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatalf("want exactly one JSON log line, got %q: %v", buf.String(), err)
+	}
+	if entry["level"] != "WARN" {
+		t.Errorf("level: got %v, want WARN", entry["level"])
+	}
+	for k, want := range map[string]string{
+		"error":    "quantity must be positive",
+		"resource": "thing",
+		"method":   "POST",
+		"route":    "/v1/things/{id}",
+	} {
+		if entry[k] != want {
+			t.Errorf("log attr %s: got %v, want %q", k, entry[k], want)
+		}
+	}
+	// The path can carry a token on public routes; only the pattern is logged.
+	if strings.Contains(buf.String(), "tok_123") {
+		t.Errorf("log line carries the raw path: %s", buf.String())
+	}
+}
+
+// A typed validation error does not go through the fallback and logs nothing.
+func TestFromError_TypedValidationDoesNotLog(t *testing.T) {
+	buf := captureLogs(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/things", nil)
+
+	FromError(rec, req, errs.Required("quantity"), "thing")
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status: got %d, want 422", rec.Code)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("typed validation error logged: %s", buf.String())
 	}
 }
 

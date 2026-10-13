@@ -346,11 +346,16 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 		oldAfter, err = s.store.ScheduleExpiry(ctx, tenantID, id, graceUntil)
 	}
 	if err != nil {
-		// The new key is already minted. Leaving it live (and failing rotation)
-		// means callers can retry the rotation using the new key — the old
-		// stays valid until its retry succeeds. A garbage-collection job can
-		// eventually reap the unused new key if the caller never retries.
-		return RotateKeyResult{}, fmt.Errorf("retire old key (replacement %s was created and must be cleaned up if retry fails): %w", created.Key.ID, err)
+		// The replacement is already stored but its secret is never returned,
+		// so nobody can use it; the old key is unchanged and still works. The
+		// caller retries the rotation and revokes the leftover replacement,
+		// which shows in the key list. Its id goes in the error for the log.
+		//
+		// The wording is kept clear of the phrases respond.FromError's
+		// message-text fallback matches (" must be ", " is required", ...), so
+		// a store failure here is logged and answered as a 500, not sent to
+		// the client as a 422 carrying this text.
+		return RotateKeyResult{}, fmt.Errorf("retire old key after creating replacement %s: %w", created.Key.ID, err)
 	}
 
 	return RotateKeyResult{

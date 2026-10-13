@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
@@ -118,10 +120,22 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		// DB errors containing "invalid" don't get mis-mapped to 422 with
 		// their raw message leaked to the client.
 		//
+		// It still classifies by text, so a server fault whose message
+		// happens to match is answered as a 422 carrying that message. The
+		// warning makes every use visible, so the remaining sites can be
+		// found and given typed errors. It logs the matched route pattern,
+		// not the path: some public paths carry a token.
+		//
 		// TODO: migrate all service-layer validation sites to wrap
 		// errs.ErrValidation, then delete this fallback. See
 		// internal/errs/domain.go for the pattern.
 		if looksLikeValidationError(err.Error()) {
+			slog.WarnContext(r.Context(), "untyped error answered as 422 by message text",
+				"error", err,
+				"resource", resource,
+				"method", r.Method,
+				"route", routePattern(r),
+			)
 			Validation(w, r, err.Error())
 			return
 		}
@@ -136,6 +150,16 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		)
 		InternalError(w, r)
 	}
+}
+
+// routePattern returns the matched chi route pattern (for example
+// "/v1/api-keys/{id}/rotate"), or "" when the request did not come through a
+// chi router.
+func routePattern(r *http.Request) string {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		return rctx.RoutePattern()
+	}
+	return ""
 }
 
 // looksLikeValidationError uses anchored prefixes (not substrings) to classify
