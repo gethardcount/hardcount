@@ -718,8 +718,8 @@ sub-cent rates bill linearly. Fixed fees and invoice line amounts/totals stay
 whole cents — only the RATE gains precision.
 
 - [~] Pricing → new flat rating rule, price `$0.000003` per unit → saves (input is not clamped to 2 decimals, not rounded to `$0.00`). *(manual 2026-07-20: created via the Add Rule dialog — which itself advertises "Sub-cent rates allowed" — 201.)*
-- [ ] **A blank price is refused, not saved as free**: Pricing → new flat rating rule, leave the price box empty, Create Rule → a red error appears in the dialog and no rule is created. *(auto, parser only: `web-v2/tests/priceInput.test.ts` — blank or unreadable input yields no price. The dialog is not walked yet.)*
-- [ ] Same dialog, price `0` → the rule saves as a free rate.
+- [~] **A blank price is refused, not saved as free**: Pricing → new flat rating rule, leave the price box empty, Create Rule → a red error appears in the dialog and no rule is created. *(auto, parser only: `web-v2/tests/priceInput.test.ts` — blank or unreadable input yields no price. The dialog is not walked yet.)*
+- [~] Same dialog, price `0` → the rule saves as a free rate.
 - [ ] Same dialog, graduated mode with one tier price cleared → the error names the tier and no rule is created.
 - [ ] Same dialog, package mode with the package price cleared → the error appears and no rule is created.
 - [ ] Customer page → Add override → pick a rule, leave the price empty, Save override → the error appears and no override is created.
