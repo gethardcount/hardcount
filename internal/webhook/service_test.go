@@ -1491,12 +1491,12 @@ func TestRetryPendingDeliveries_DeletedEventFails(t *testing.T) {
 	}
 }
 
-// TestAssertDialAddrAllowed is the SSRF dial-control regression guard. The
-// delivery client's DialContext rejects private/link-local/loopback/metadata
-// targets at the actual dial address, closing the DNS-rebinding window that
-// CreateEndpoint-time validation alone leaves open. In production mode
-// (allowLoopback=false) loopback is blocked like everything else; the dev
-// exception is covered by its own test below.
+// TestAssertDialAddrAllowed covers the host-name pre-check on literal
+// addresses: private/link-local/loopback/metadata targets are refused. It
+// does not cover a host whose DNS answer changes between this check and the
+// connection; TestDial_ChecksTheAddressActuallyConnected and TestDialControl
+// do. In production mode (allowLoopback=false) loopback is blocked like
+// everything else; the dev exception is covered by its own test below.
 func TestAssertDialAddrAllowed(t *testing.T) {
 	blocked := []string{
 		"10.0.0.1",        // RFC 1918
@@ -1571,8 +1571,93 @@ func TestLoopbackException_SameFlagAtBothLayers(t *testing.T) {
 	}
 }
 
-// TestIsBlockedIP covers the predicate directly across IPv4 and IPv6 reserved
-// ranges that the dial control depends on.
+// TestDial_ChecksTheAddressActuallyConnected covers the case where the
+// host-name pre-check and the connection see different DNS answers. The
+// pre-check is told the host is public; the dial then resolves "localhost"
+// for real and reaches a listener on 127.0.0.1. The dial must be refused on
+// the connected address, not allowed on the checked one.
+func TestDial_ChecksTheAddressActuallyConnected(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+
+	orig := lookupIP
+	lookupIP = func(string) ([]net.IP, error) { return []net.IP{net.ParseIP("8.8.8.8")}, nil }
+	defer func() { lookupIP = orig }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	addr := net.JoinHostPort("localhost", port)
+
+	// Production: the pre-check passes, the connected address is loopback.
+	if err := assertDialAddrAllowed("localhost", false); err != nil {
+		t.Fatalf("test premise: pre-check should pass on the public answer, got %v", err)
+	}
+	conn, err := ssrfSafeDialContext(ctx, "tcp4", addr, false)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatalf("prod dial connected to %s, want refused", conn.RemoteAddr())
+	}
+	if !strings.Contains(err.Error(), "refusing to dial private/internal address 127.0.0.1") {
+		t.Errorf("prod dial error = %v, want the address-guard refusal naming 127.0.0.1", err)
+	}
+
+	// Development: the loopback exception still reaches a local receiver.
+	conn, err = ssrfSafeDialContext(ctx, "tcp4", addr, true)
+	if err != nil {
+		t.Fatalf("dev dial = %v, want connected (loopback exception)", err)
+	}
+	_ = conn.Close()
+}
+
+// TestDialControl feeds the hook the resolved addresses a dialer would hand
+// it, in the forms it hands them: IP:port, bracketed IPv6, IPv6 with a zone,
+// and IPv4-mapped IPv6.
+func TestDialControl(t *testing.T) {
+	blocked := []string{
+		"10.0.0.1:443",
+		"172.16.5.4:443",
+		"192.168.1.1:443",
+		"127.0.0.1:443",
+		"169.254.169.254:80", // cloud metadata
+		"100.64.0.1:443",     // carrier-grade NAT
+		"0.0.0.0:443",
+		"[::1]:443",
+		"[fe80::1%lo0]:443",
+		"[fd00::1]:443",
+		"[::ffff:10.0.0.1]:443",
+		"[::ffff:169.254.169.254]:80",
+		"not-an-address",
+	}
+	for _, addr := range blocked {
+		if err := dialControl(false)("tcp", addr, nil); err == nil {
+			t.Errorf("dialControl(prod)(%q) = nil, want refused", addr)
+		}
+	}
+	for _, addr := range []string{"8.8.8.8:443", "[2606:4700:4700::1111]:443"} {
+		if err := dialControl(false)("tcp", addr, nil); err != nil {
+			t.Errorf("dialControl(prod)(%q) = %v, want allowed", addr, err)
+		}
+	}
+
+	// Development: loopback only. Everything else stays refused.
+	for _, addr := range []string{"127.0.0.1:9099", "[::1]:9099", "[::ffff:127.0.0.1]:9099"} {
+		if err := dialControl(true)("tcp", addr, nil); err != nil {
+			t.Errorf("dialControl(dev)(%q) = %v, want allowed", addr, err)
+		}
+	}
+	for _, addr := range []string{"10.0.0.1:443", "169.254.169.254:80", "100.64.0.1:443", "[fd00::1]:443"} {
+		if err := dialControl(true)("tcp", addr, nil); err == nil {
+			t.Errorf("dialControl(dev)(%q) = nil, want refused", addr)
+		}
+	}
+}
+
+// TestIsBlockedIP covers the predicate directly across the IPv4 and IPv6
+// reserved ranges that both dial checks depend on.
 func TestIsBlockedIP(t *testing.T) {
 	cases := []struct {
 		ip   string
@@ -1587,6 +1672,13 @@ func TestIsBlockedIP(t *testing.T) {
 		{"::1", true},
 		{"fe80::1", true},
 		{"fc00::1", true},
+		{"100.64.0.1", true},       // carrier-grade NAT, first address
+		{"100.127.255.254", true},  // carrier-grade NAT, last block
+		{"100.63.255.255", false},  // just below the CGNAT block
+		{"100.128.0.1", false},     // just above the CGNAT block
+		{"::ffff:10.0.0.1", true},  // IPv4-mapped private
+		{"::ffff:127.0.0.1", true}, // IPv4-mapped loopback
+		{"::ffff:8.8.8.8", false},  // IPv4-mapped public
 		{"8.8.8.8", false},
 		{"203.0.113.10", false},
 		{"2606:4700:4700::1111", false},

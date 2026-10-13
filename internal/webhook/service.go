@@ -17,10 +17,12 @@ import (
 	mrand "math/rand/v2"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
@@ -122,12 +124,12 @@ func NewService(store Store, client HTTPClient) *Service {
 	return &Service{store: store, client: client, bus: NewEventBus(), allowLoopback: allowLoopback}
 }
 
-// ssrfHardenedTransport returns an http.Transport whose DialContext rejects
-// connections to private/link-local/loopback/metadata IPs at the actual dial
-// address. validateWebhookURL only resolves at CreateEndpoint time, so a host
-// that resolved publicly then could be re-pointed at an internal address
-// (DNS rebinding) by the time delivery POSTs to the stored URL. Checking the
-// resolved dial target on every connection closes that window.
+// ssrfHardenedTransport returns an http.Transport whose dialer refuses
+// private/link-local/loopback/metadata addresses. validateWebhookURL only
+// resolves at CreateEndpoint time, so a host that resolved publicly then can
+// point at an internal address by the time delivery POSTs to the stored URL
+// (DNS rebinding). The check that decides is dialControl, which runs on the
+// IP the socket is about to connect to.
 func ssrfHardenedTransport(allowLoopback bool) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -136,20 +138,50 @@ func ssrfHardenedTransport(allowLoopback bool) *http.Transport {
 	return t
 }
 
-// ssrfSafeDialContext is the dial predicate wired into the delivery client.
-// It resolves the host portion of addr and refuses to dial if the target
-// address is a blocked (private/internal) IP.
+// ssrfSafeDialContext is the dial function wired into the delivery client.
+// It checks addr twice. assertDialAddrAllowed resolves the host name and
+// refuses when any answer is blocked. That lookup is separate from the one
+// the dialer makes, so on its own it does not bind the connection: the two
+// lookups can return different addresses. dialControl is the check that
+// binds, because it sees the address being connected.
 func ssrfSafeDialContext(ctx context.Context, network, addr string, allowLoopback bool) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(addr)
+	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
 	if err := assertDialAddrAllowed(host, allowLoopback); err != nil {
 		return nil, err
 	}
-	d := &net.Dialer{Timeout: 10 * time.Second}
-	return d.DialContext(ctx, network, net.JoinHostPort(host, port))
+	d := &net.Dialer{Timeout: 10 * time.Second, Control: dialControl(allowLoopback)}
+	return d.DialContext(ctx, network, addr)
 }
+
+// dialControl returns a net.Dialer.Control hook. The dialer calls it after
+// name resolution and before connect, once per address it tries, with the
+// literal IP:port of that attempt. Refusing here means no connection is made
+// to a blocked address whatever the host name resolved to earlier. An address
+// that does not parse is refused. allowLoopback is the same development
+// exception assertDialAddrAllowed applies.
+func dialControl(allowLoopback bool) func(network, address string, _ syscall.RawConn) error {
+	return func(_, address string, _ syscall.RawConn) error {
+		ap, err := netip.ParseAddrPort(address)
+		if err != nil {
+			return fmt.Errorf("refusing to dial unparseable address %q: %w", address, err)
+		}
+		ip := net.IP(ap.Addr().AsSlice())
+		if allowLoopback && ip.IsLoopback() {
+			return nil
+		}
+		if isBlockedIP(ip) {
+			return fmt.Errorf("refusing to dial private/internal address %s", ip)
+		}
+		return nil
+	}
+}
+
+// lookupIP is the resolver behind the host-name pre-check. It is a variable
+// so a test can make the pre-check see a different answer than the dial does.
+var lookupIP = net.LookupIP
 
 // assertDialAddrAllowed resolves host (an IP literal or hostname) and returns
 // an error if any resolved address is a blocked private/internal IP. A
@@ -172,7 +204,7 @@ func assertDialAddrAllowed(host string, allowLoopback bool) error {
 		}
 		return nil
 	}
-	ips, err := net.LookupIP(host)
+	ips, err := lookupIP(host)
 	if err != nil {
 		return fmt.Errorf("resolve %q: %w", host, err)
 	}
@@ -190,6 +222,7 @@ func assertDialAddrAllowed(host string, allowLoopback bool) error {
 // isBlockedIP returns true if ip is private, link-local, loopback, or
 // otherwise reserved — covering both the IPv4 privateRanges table and the
 // IPv6 equivalents (::1, fe80::/10, fc00::/7) that the IPv4-only table misses.
+// An IPv4-mapped IPv6 address (::ffff:a.b.c.d) is judged as its IPv4 address.
 func isBlockedIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsPrivate() || ip.IsUnspecified() {
@@ -234,6 +267,7 @@ var privateRanges = []net.IPNet{
 	parseCIDR("192.168.0.0/16"), // RFC 1918
 	parseCIDR("127.0.0.0/8"),    // Loopback
 	parseCIDR("169.254.0.0/16"), // Link-local
+	parseCIDR("100.64.0.0/10"),  // Carrier-grade NAT (RFC 6598)
 	parseCIDR("0.0.0.0/8"),      // "This" network
 }
 
