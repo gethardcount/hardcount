@@ -8,8 +8,9 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { api, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type DunningPolicyWithCount, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
+import { api, ApiError, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type DunningPolicyWithCount, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
 import { applyApiError, showApiError } from '@/lib/formErrors'
+import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
 import { endOfDayInTZ, startOfDayInTZ } from '@/lib/dates'
 import { Checkbox } from '@/components/ui/checkbox'
 import { MarginCard } from '@/components/MarginCard'
@@ -225,18 +226,26 @@ export default function CustomerDetailPage() {
     enabled: !!id,
   })
 
-  const { data: balanceData } = useQuery({
+  // No catch and no zero fallback: a balance that failed to load must not
+  // read as $0.00. The stat shows a dash with a retry instead.
+  const { data: balanceData, isError: balanceError, refetch: refetchBalance } = useQuery({
     queryKey: ['customer-balance', id],
-    queryFn: () => api.getBalance(id!).catch(() => ({ balance_cents: 0 })),
+    queryFn: () => api.getBalance(id!),
     enabled: !!id,
   })
-  const balance = balanceData?.balance_cents ?? 0
+  const balance = balanceData?.balance_cents
 
-  const { data: billingProfile } = useQuery({
+  // Only a 404 means "no profile". Any other failure must not offer Set Up:
+  // saving that blank form would replace a profile that exists.
+  const { data: billingProfile, isError: billingProfileError, refetch: refetchBillingProfile } = useQuery({
     queryKey: ['customer-billing-profile', id],
-    queryFn: () => api.getBillingProfile(id!).catch(() => null),
+    queryFn: () => profileOrAbsent(
+      () => api.getBillingProfile(id!),
+      err => err instanceof ApiError && err.status === 404,
+    ),
     enabled: !!id,
   })
+  const profileCard = billingProfileCard({ data: billingProfile, isError: billingProfileError })
 
   const { data: metersData } = useQuery({
     queryKey: ['meters'],
@@ -549,19 +558,33 @@ export default function CustomerDetailPage() {
                 )}
               </div>
             </div>
-            <Link to={`/credits?customer=${id}`} className="flex-1 px-6 py-4 hover:bg-accent/50 transition-colors">
-              <p className="text-sm text-muted-foreground">Credit Balance</p>
-              <p className={cn('text-sm font-medium mt-1', balance > 0 ? 'text-emerald-600' : 'text-foreground')}>{formatCents(balance)}</p>
-              {/* Kind split — money-backed commit liability must not read
-                  as one number with free promo credits. */}
-              {creditGrants && (creditGrants.commit_remaining_cents > 0 || creditGrants.promotional_remaining_cents > 0) && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {creditGrants.commit_remaining_cents > 0 && <>Commit {formatCents(creditGrants.commit_remaining_cents)}</>}
-                  {creditGrants.commit_remaining_cents > 0 && creditGrants.promotional_remaining_cents > 0 && ' · '}
-                  {creditGrants.promotional_remaining_cents > 0 && <>Promo {formatCents(creditGrants.promotional_remaining_cents)}</>}
+            {balanceError ? (
+              // A plain cell while the fetch has failed: the retry button
+              // cannot sit inside the link to the ledger.
+              <div className="flex-1 px-6 py-4">
+                <p className="text-sm text-muted-foreground">Credit Balance</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-sm font-medium text-foreground" title="Couldn't load the credit balance">—</p>
+                  <Button variant="outline" size="xs" onClick={() => refetchBalance()}>Retry</Button>
+                </div>
+              </div>
+            ) : (
+              <Link to={`/credits?customer=${id}`} className="flex-1 px-6 py-4 hover:bg-accent/50 transition-colors">
+                <p className="text-sm text-muted-foreground">Credit Balance</p>
+                <p className={cn('text-sm font-medium mt-1', (balance ?? 0) > 0 ? 'text-emerald-600' : 'text-foreground')}>
+                  {balance === undefined ? '—' : formatCents(balance)}
                 </p>
-              )}
-            </Link>
+                {/* Kind split — money-backed commit liability must not read
+                    as one number with free promo credits. */}
+                {creditGrants && (creditGrants.commit_remaining_cents > 0 || creditGrants.promotional_remaining_cents > 0) && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {creditGrants.commit_remaining_cents > 0 && <>Commit {formatCents(creditGrants.commit_remaining_cents)}</>}
+                    {creditGrants.commit_remaining_cents > 0 && creditGrants.promotional_remaining_cents > 0 && ' · '}
+                    {creditGrants.promotional_remaining_cents > 0 && <>Promo {formatCents(creditGrants.promotional_remaining_cents)}</>}
+                  </p>
+                )}
+              </Link>
+            )}
             {/* Outstanding balance — accounts-receivable exposure for
                 this customer (Stripe / Lago / Chargebee / Recurly all
                 surface this on the customer page). Distinct from
@@ -643,7 +666,7 @@ export default function CustomerDetailPage() {
 
       {/* Billing Profile */}
       <Card className="mt-6">
-        {billingProfile ? (
+        {profileCard === 'profile' && billingProfile ? (
           <>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -742,6 +765,24 @@ export default function CustomerDetailPage() {
                     : <span className="text-muted-foreground">Use tenant default</span>}
                 </p>
               </section>
+            </CardContent>
+          </>
+        ) : profileCard !== 'absent' ? (
+          // Loading or failed: whether a profile exists is not known, so
+          // neither Set Up nor Edit is offered.
+          <>
+            <CardHeader>
+              <CardTitle className="text-sm">Billing Profile</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center py-8">
+              {profileCard === 'error' ? (
+                <>
+                  <p className="text-sm text-destructive mb-3">Couldn&apos;t load the billing profile</p>
+                  <Button variant="outline" size="sm" onClick={() => refetchBillingProfile()}>Retry</Button>
+                </>
+              ) : (
+                <Loader2 size={16} className="animate-spin text-muted-foreground mx-auto" />
+              )}
             </CardContent>
           </>
         ) : (
