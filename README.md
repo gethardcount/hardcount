@@ -81,7 +81,7 @@ To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/se
 
 Velox is the wrong choice if you need:
 
-- **Only simple per-seat pricing paid by card.** Velox can do it, but Stripe Billing does it with less to run.
+- **Simple per-seat pricing paid by card.** Stripe Billing already does that well.
 - **A payment processor other than Stripe.** Stripe is the only one today.
 - **A marketplace that splits payouts** between sellers (Stripe Connect). Velox bills your own customers.
 - **Revenue recognition or accounting reports.** Export the data to your own warehouse.
