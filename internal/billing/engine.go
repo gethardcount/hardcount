@@ -3883,11 +3883,15 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 // No-op when:
 //   - sub.Status != canceled (defensive — caller should have flipped it)
 //   - no current period set / canceled_at missing
-//   - canceled_at AT or AFTER current_period_end (clean cancel at
-//     boundary; the cycle close already fired or will fire normally)
 //   - canceled_at AT or BEFORE current_period_start (defensive)
+//   - a never-activated trial (trials are free, ADR-069)
 //   - computed subtotal rounds to zero (no in_arrears base AND no
 //     usage events; matches BillOnCreate's $0-invoice-skip pattern)
+//
+// Refuses (InvalidState, code unbilled_period) when canceled_at is AT or
+// AFTER current_period_end: the period ended and its close has not run.
+// The cycle close skips a canceled subscription, so letting the cancel
+// through would leave that period uninvoiced for good.
 //
 // Idempotent via the standard (subscription_id, period_start,
 // period_end) UNIQUE constraint — the period_end is canceled_at which
@@ -4391,10 +4395,9 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	periodEnd := *sub.CurrentBillingPeriodEnd
 	canceledAt := *sub.CanceledAt
 
-	// Only mid-period cancels need a final invoice. canceled_at at or
-	// after period_end means the cycle close handles the period
-	// normally; canceled_at at or before period_start is defensive.
-	if !canceledAt.After(periodStart) || !canceledAt.Before(periodEnd) {
+	// canceled_at at or before period_start is defensive: nothing of this
+	// period ran, so there is nothing to bill.
+	if !canceledAt.After(periodStart) {
 		return domain.Invoice{}, nil
 	}
 
@@ -4402,16 +4405,36 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// of 'trialing' (activated_at never stamped) emits NO final invoice —
 	// trials are free. The reachable window is the post-trial LAG: the trial
 	// elapsed but the activation scan hadn't flipped the row yet, so
-	// canceled_at lands inside [trial_end = period_start, period_end) and
-	// this function would otherwise bill prorated base + usage for a
+	// canceled_at lands at or after trial_end = period_start and this
+	// function would otherwise bill prorated base + usage for a
 	// never-activated sub. Decided: write off — matches the trial-end
 	// scheduled-cancel semantics ("you won't be charged") rather than
 	// billing on scan lag the customer can't see. Subs created active carry
-	// activated_at (or no trial fields) and are unaffected.
+	// activated_at (or no trial fields) and are unaffected. It sits above the
+	// period-end refusal so a trial stays a free cancel however far behind
+	// its activation is.
 	if sub.TrialEndAt != nil && sub.ActivatedAt == nil {
 		slog.Info("immediate cancel of a never-activated trial — no final invoice (trials are free)",
 			"subscription_id", sub.ID, "tenant_id", sub.TenantID)
 		return domain.Invoice{}, nil
+	}
+
+	// canceled_at at or after period_end: the period ended and nobody closed
+	// it. This function bills only [period_start, canceled_at) inside the
+	// period, and no billing run bills a canceled subscription, so the cancel
+	// is refused and rolls back. subscription.Service.Cancel closes ended
+	// periods before it gets here; this stops the cancel when that close
+	// could not run (billing failing, a deadline mid catch-up, a boundary
+	// crossed in between). sub is the row the cancel's own UPDATE returned,
+	// so nothing can move the period between this check and the commit.
+	if !canceledAt.Before(periodEnd) {
+		next := "retry billing for this subscription, then cancel again"
+		if sub.TestClockID != "" {
+			next = "finish or retry the clock advance, then cancel again"
+		}
+		return domain.Invoice{}, errs.InvalidState(
+			"this subscription has a billing period that ended and is not invoiced yet; " + next).
+			WithCode("unbilled_period")
 	}
 
 	// Threshold watermark (ADR-066 §4/§5): the immediate cancel is the
@@ -4622,7 +4645,7 @@ func (e *Engine) unusedBaseForPeriod(ctx context.Context, sub domain.Subscriptio
 
 // prepareCancelCredit runs the guards + day-based unused-base math for a
 // mid-period cancel. ok=false means there is nothing to credit (not
-// canceled, clean cancel at/after period end, no in_advance items, or zero
+// canceled, a cancel at/after period end, no in_advance items, or zero
 // unused) — both cancel-credit paths no-op. Error only on a malformed sub
 // (canceled with no canceled_at) or a plan lookup failure.
 //
@@ -4659,8 +4682,9 @@ func (e *Engine) prepareCancelCredit(ctx context.Context, sub domain.Subscriptio
 	periodEnd := *sub.CurrentBillingPeriodEnd
 	cancelAt := *sub.CanceledAt
 
-	// Clean cancel (at or after period end): period was billed normally,
-	// no unused portion. cancel_at == period_start is a REAL zero-
+	// At or after period end there is no unused portion to relieve (and the
+	// final-invoice step has already refused the cancel unless nothing was
+	// owed). cancel_at == period_start is a REAL zero-
 	// consumption case (ADR-097: a schedule landing between the loop's
 	// refresh and the boundary's cycle advance cancels a fully-prepaid,
 	// zero-used period) — relieve the whole period rather than keep it;
@@ -4817,12 +4841,26 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 	// the customer credits applied to it, which it hands back. It leaves the
 	// allocation, so its share cannot also spill onto a paid source as balance
 	// credit (that was a double relief whenever credits had been applied).
+	//
+	// Only an invoice that is nothing but that prepaid base is voided. An
+	// in_advance renewal invoice also carries the period that just ended
+	// (its usage, any in_arrears base); voiding it would unbill that period,
+	// and nothing bills it again once the subscription is canceled. Such an
+	// invoice takes the partly-used path below, which relieves the base share
+	// and leaves the rest due.
 	var allocate []domain.Invoice
 	totalUnused := in.TotalUnused
 	for _, src := range sources {
-		if src.PaymentStatus != domain.PaymentSucceeded && src.AmountPaidCents == 0 &&
+		voidable := src.PaymentStatus != domain.PaymentSucceeded && src.AmountPaidCents == 0 &&
 			roundDays(in.CancelAt.Sub(src.BillingPeriodStart)) <= 0 &&
-			!domain.PaymentBlocksAction(src, domain.ActionVoid).Blocked {
+			!domain.PaymentBlocksAction(src, domain.ActionVoid).Blocked
+		if voidable {
+			voidable, err = e.onlyPrepaidBase(ctx, sub.TenantID, src, in.PeriodStart)
+			if err != nil {
+				return domain.Relief{}, fmt.Errorf("%s: read lines of %s: %w", what, src.ID, err)
+			}
+		}
+		if voidable {
 			voided, verr := e.invoiceVoider.VoidUnchangedTx(ctx, tx, sub.TenantID, src)
 			if verr != nil {
 				return domain.Relief{}, fmt.Errorf("%s: void fully-unused %s: %w", what, src.ID, verr)
@@ -4891,6 +4929,39 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 	return r, nil
 }
 
+// onlyPrepaidBase reports whether every line of the invoice is base fee for
+// the period starting at periodStart, or for a later slice of it. An invoice
+// with no lines is not one.
+//
+// A mid-period proration invoice (plan change, quantity change, item add)
+// writes its base-fee lines with no period of their own; the header says which
+// slice they cover (billing_reason subscription_update, source_plan_changed_at).
+// So a line with no period counts only on such an invoice whose change falls at
+// or after periodStart.
+func (e *Engine) onlyPrepaidBase(ctx context.Context, tenantID string, src domain.Invoice, periodStart time.Time) (bool, error) {
+	lines, err := e.invoices.ListLineItems(ctx, tenantID, src.ID)
+	if err != nil {
+		return false, err
+	}
+	proration := src.BillingReason == domain.BillingReasonSubscriptionUpdate &&
+		src.SourcePlanChangedAt != nil && !src.SourcePlanChangedAt.Before(periodStart)
+	for _, li := range lines {
+		if li.LineType != domain.LineTypeBaseFee {
+			return false, nil
+		}
+		if li.BillingPeriodStart == nil {
+			if !proration {
+				return false, nil
+			}
+			continue
+		}
+		if li.BillingPeriodStart.Before(periodStart) {
+			return false, nil
+		}
+	}
+	return len(lines) > 0, nil
+}
+
 // unpaidRelief sizes the relief for an UNPAID, partly-used funding invoice's
 // share (net, tax-exclusive): grossed up by the invoice's own Total/Subtotal
 // ratio so the unused portion's tax is relieved too (Velox invoices carry one
@@ -4899,7 +4970,8 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 // applied to it. An adjustment credit note reduces amount_due first and returns
 // the credits the rest displaces to the balance (ADR-061); on an in-flight
 // source Issue() defers the note until the charge settles (ADR-059). (A
-// fully-unused unpaid source is voided before allocation.)
+// fully-unused unpaid source that is only prepaid base is voided before
+// allocation.)
 func unpaidRelief(src domain.Invoice, net int64) int64 {
 	gross := net
 	if src.SubtotalCents > 0 {

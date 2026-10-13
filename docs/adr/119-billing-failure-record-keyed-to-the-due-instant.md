@@ -229,11 +229,36 @@ invoice.
 
 ### Risks / open items
 
-- **Cancelling an overdue subscription drops its ended period.** An immediate
-  cancel after the period end writes no final invoice. This was already true
-  for every failing subscription. It is more likely now that failing
-  subscriptions are visible. It is tracked as its own money-path issue and is
-  to be fixed before the dashboard banner ships.
+- **Cancelling an overdue subscription dropped its ended period. Fixed
+  2026-10-13 (#991).** An immediate cancel after the period end wrote no
+  final invoice, and no billing run bills a canceled subscription. The
+  disposition has two parts:
+  - The cancel first bills what is due, through the same attempt as the
+    operator retry (`BillDueNow`): one invoice per ended period, the period
+    CAS, and a counted failure if it fails. It does this only for an active
+    subscription that is due. Then the cancel runs as before, inside the
+    current period.
+  - The cancel's final-invoice step refuses a cancel whose `canceled_at` is at
+    or after the period end: 409 with code `unbilled_period`, and the cancel
+    rolls back. This is what holds for a subscription that is waiting or
+    parked, because the attempt above does nothing for it. The operator fixes
+    the cause, calls retry-billing, and cancels again.
+
+  Three consequences were accepted:
+  - A subscription whose billing cannot be fixed cannot be cancelled. A
+    "cancel and write off the ended period" action is not built; add it when
+    a real stuck subscription needs it.
+  - Dunning's final cancel on a failing subscription is refused and tried
+    again on each dunning pass until billing recovers. When the wait has
+    passed, its attempt is a real one and counts toward the park.
+  - On a plan billed in advance the late cancel charges the next period's
+    base and then credits the unused part back, as a billing run followed by
+    a cancel always did. The credit step no longer voids a renewal invoice
+    that also carries the ended period's usage.
+
+  Two sibling paths that move the period of a possibly overdue subscription
+  were not traced and are not changed here: the immediate cross-interval plan
+  swap and the threshold fire that resets the cycle.
 - **A fault that fails every subscription for more than about 3.7 days parks
   them all.** Un-parking is one call per subscription. There is no bulk retry.
   The runbook has the loop, and a page-level alert on the gauge fires long

@@ -239,7 +239,12 @@ func TestReliefTx_FullyUnusedUnpaidWithAppliedCredits_NoDoubleRelief(t *testing.
 		BillingReason: domain.BillingReasonSubscriptionUpdate, SourcePlanChangedAt: &upgradeAt,
 		BillingPeriodStart: upgradeAt, BillingPeriodEnd: periodEnd,
 	}
-	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv, upInv}, []domain.InvoiceLineItem{baseLine})
+	// The upgrade invoice's lines as the proration writer leaves them: a
+	// credit and charge pair of base fee with no period of their own (the
+	// header carries the slice). Only such an invoice is voided.
+	upCredit := domain.InvoiceLineItem{InvoiceID: "inv_up", LineType: domain.LineTypeBaseFee, AmountCents: -9500}
+	upCharge := domain.InvoiceLineItem{InvoiceID: "inv_up", LineType: domain.LineTypeBaseFee, AmountCents: 14567}
+	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv, upInv}, []domain.InvoiceLineItem{baseLine, upCredit, upCharge})
 	pricing.plans["pln_base"] = domain.Plan{ID: "pln_base", Currency: "USD", BillingInterval: domain.BillingMonthly,
 		BaseAmountCents: 23000, BaseBillTiming: domain.BillInAdvance} // post-upgrade base
 	sub.CanceledAt = &upgradeAt // canceled the day of the upgrade: the upgrade's window is unused

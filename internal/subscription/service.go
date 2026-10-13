@@ -46,8 +46,9 @@ type Biller interface {
 	BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
 	// BillFinalOnImmediateCancel emits the final partial-period invoice
 	// for a mid-period immediate cancel (in_arrears prorated base +
-	// usage). No-op when canceled_at is at/after current_period_end
-	// (clean cancel, cycle close handles it).
+	// usage). It refuses (InvalidState, code unbilled_period) when
+	// canceled_at is at/after current_period_end: that period ended
+	// unbilled, and no billing run bills a canceled subscription.
 	BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
 	// BillFinalOnImmediateCancelTx is the in-tx variant: inserts the
 	// final-on-cancel invoice on the caller's coordinator tx (ADR-056); the
@@ -226,8 +227,10 @@ func (s *Service) SetBiller(b Biller) {
 	s.biller = b
 }
 
-// SetDueBiller wires the engine for RetryBilling. Without it a retry still
-// clears the failure record, and the next billing run bills the subscription.
+// SetDueBiller wires the engine for RetryBilling and for Cancel's bill of an
+// ended period. Without it a retry still clears the failure record, and the
+// next billing run bills the subscription; a cancel after the period end is
+// refused until that run has billed the period.
 func (s *Service) SetDueBiller(b DueBiller) {
 	s.dueBiller = b
 }
@@ -1927,14 +1930,47 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 
+	// A cancel can arrive after the period ended and before the billing run
+	// closed it. No run bills a canceled subscription, so the ended periods
+	// are closed first, through the run's own attempt (period CAS, catch-up
+	// over several periods, failure record). The cancel below then lands
+	// inside the current period, as if the run had gone first.
+	//
+	// The attempt's error is not returned: the engine has logged and saved
+	// it, and the final-invoice step below refuses the cancel (code
+	// unbilled_period) for as long as a period is left unbilled.
+	if s.dueBiller != nil {
+		sub, err := s.store.Get(ctx, tenantID, id)
+		if err != nil {
+			return domain.Subscription{}, 0, err
+		}
+		if sub.Status == domain.SubscriptionActive && domain.BillingDueAt(sub, s.clock.Now(ctx)) {
+			if _, billErr := s.dueBiller.BillDueNow(ctx, tenantID, id); billErr != nil {
+				slog.WarnContext(ctx, "cancel: billing the ended period failed",
+					"subscription_id", id, "tenant_id", tenantID, "error", billErr)
+			}
+			// A scheduled cancel that was due fired inside the attempt, at its
+			// contracted instant, with its own invoice, audit row and event.
+			// The subscription is canceled, which is what was asked for.
+			sub, err = s.store.Get(ctx, tenantID, id)
+			if err != nil {
+				return domain.Subscription{}, 0, err
+			}
+			if sub.Status == domain.SubscriptionCanceled {
+				return sub, 0, nil
+			}
+		}
+	}
+
 	// PR-10 / ADR-056: emit the final partial-period invoice (in_arrears
 	// prorated base + usage from current_period_start → canceled_at) IN THE SAME
 	// tx as the cancel flip, so a billing failure rolls the cancel back rather
 	// than leaving a canceled sub with an uninvoiced partial period — a permanent
 	// revenue leak (there is no final-on-cancel reconciler; the prior "G3
-	// deferred reconciler" referenced here never existed). No-op for a clean
-	// cancel (canceled_at at/after current_period_end). The build runs BEFORE
-	// relief so the credit grant doesn't pre-apply against this invoice.
+	// deferred reconciler" referenced here never existed). That includes a
+	// period that ended unbilled (canceled_at at/after current_period_end):
+	// the biller refuses it. The build runs BEFORE relief so the credit grant
+	// doesn't pre-apply against this invoice.
 	var finalInv domain.Invoice
 	var relief domain.Relief
 	canceled, err := s.store.CancelAtomicWithBill(ctx, tenantID, id, func(tx *sql.Tx, c domain.Subscription) error {

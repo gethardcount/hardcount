@@ -48,6 +48,7 @@ POST   /v1/subscriptions                — create subscription
 PATCH  /v1/subscriptions/{id}/items/{itemID}     — plan/quantity change (proration on immediate)
 PUT    /v1/subscriptions/{id}/pause-collection   — keep cycle, invoice as draft
 POST   /v1/subscriptions/{id}/extend-trial       — push trial_end_at later
+POST   /v1/subscriptions/{id}/cancel             — cancel now; bills any ended period first, 409 `unbilled_period` if it cannot
 POST   /v1/subscriptions/{id}/retry-billing      — clear a billing failure and bill now
 GET    /v1/subscriptions?billing=failing         — subscriptions whose billing is failing
 

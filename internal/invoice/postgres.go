@@ -3492,8 +3492,8 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 // the day-1 base invoice AND any mid-period proration invoice that a plan
 // upgrade / quantity increase issued against the same cycle. The single-result
 // FindBaseInvoiceForPeriod misses the latter, because a mid-period proration
-// invoice stamps its base-fee LINE's billing_period_start at the change instant
-// (changeAt), not the cycle's periodStart — so a period-wide credit sized off
+// invoice's base-fee LINES carry no billing_period_start (only its header is
+// stamped, from changeAt) — so a period-wide credit sized off
 // the post-change base (cancel / cross-interval plan-swap / downgrade clawback)
 // overran that one invoice's credit-note cap and was silently dropped. The
 // owed credit must instead be fanned across the full funding set, each piece
@@ -3505,7 +3505,7 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 //   - mid-period upgrade/qty proration invoice: identified by its fully-stamped
 //     HEADER — billing_reason='subscription_update', source_plan_changed_at in
 //     [periodStart, periodEnd), billing_period_end = periodEnd. (Its base-fee
-//     line's billing_period_start is changeAt, so the line predicate can't see
+//     lines' billing_period_start is NULL, so the line predicate can't see
 //     it — the header is the reliable key.)
 //
 // Ordered base-first (subscription_update sorts last) then created_at ASC, so a

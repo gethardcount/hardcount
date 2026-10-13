@@ -544,7 +544,8 @@ failure on the subscription and now waits before each new attempt (ADR-119).
   - an in-advance item changed while the period is overdue is billed from the
     period boundary;
   - usage thresholds do not fire for a period that has already ended;
-  - a cancel after the period end writes no final invoice (ADR-119).
+  - the subscription cannot be cancelled until it is billed: an immediate
+    cancel answers 409 `unbilled_period` (ADR-119).
 
   Retry promptly once the cause is fixed.
 - A cancel scheduled for the end of a trial still fires on a failing or parked
@@ -607,8 +608,11 @@ out the ladder.
    `still_due: true` left the list without being billed. The next billing
    run attempts it.
 
-Do not cancel a subscription to clear a park. An immediate cancel after the
-period has ended writes no final invoice, so the ended period is never billed.
+A cancel does not clear a park. An immediate cancel of a subscription whose
+ended period is not invoiced answers 409 with code `unbilled_period`, and the
+subscription stays active. Fix the cause, retry billing as above, then cancel
+again. A cancel that arrives after the period end on a healthy subscription
+bills the ended period itself and needs no retry.
 
 `POST /v1/billing/run` is not a retry. It skips subscriptions that are
 waiting or parked.

@@ -15,6 +15,12 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A subscription cancelled after its billing period ended is now billed for that period (2026-10-13, #991).** A period that ends is invoiced by the next billing run, up to an hour later, or later still when billing is failing. An immediate cancel in that gap wrote no invoice, and the billing run then skipped the cancelled subscription, so the period's usage and base fee were never invoiced. The cancel now bills every ended period first, one invoice per period, and then cancels. The same applies when dunning cancels a subscription. If the subscription was already scheduled to cancel at that period end, the call returns it cancelled at the scheduled time. Periods lost this way before this release are not billed by the upgrade.
+- **A cancel that cannot bill an ended period is refused with 409 `unbilled_period` (2026-10-13, #991).** This happens when the subscription's billing is failing or parked, or the bill fails during the cancel. The subscription stays active and nothing is lost. Fix the cause, call `POST /v1/subscriptions/{id}/retry-billing`, then cancel again. For a subscription on a test clock, finish or retry the clock advance, then cancel again. If you script cancels, handle this code.
+- **Cancelling just after a renewal no longer voids the previous period's usage on a plan billed in advance (2026-10-13, #991).** On such a plan the renewal invoice carries the next period's base fee and the usage of the period that just ended. A cancel within half a day of the renewal, while that invoice was unpaid, voided the whole invoice, usage included. Now only the unused base fee comes off the invoice and the usage stays owed.
+
 ### Security
 
 - **The dashboard image is now scanned and signed (2026-10-13).** Until now only the server image was; `ghcr.io/getvelox/velox-dashboard` was published with no scan and no signature. Both images are now signed by digest with cosign, and a high-severity finding that has a fix blocks the build for either. Applies to images published after this change; `v0.5.0` and earlier dashboard images stay unsigned.
