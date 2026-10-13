@@ -15,6 +15,15 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-13
+
+Corrects the live credit figure on the public cost page and adds a way to read it with a secret key. No database migration, and nothing to do when upgrading.
+
+**Worth knowing:**
+
+- `estimated_remaining_cents` on the public cost dashboard was wrong in five situations in 0.5.0 and 0.6.0: after a billing-threshold invoice, around trials, with several subscriptions, after a plan change, and with expired credit. For a customer with one ordinary subscription it was right. No invoice or real balance was affected; only this estimate.
+- On the same page, `credits.balance_cents` now leaves out a grant that is past its expiry date, without waiting for the hourly expiry run.
+
 ### Added
 
 - **`GET /v1/credits/balance/{customer_id}/live` returns how much credit a customer has left right now (2026-10-13, #1019).** It is the credit the customer can spend (the settled balance, without any grant that is past its expiry date) less the usage not yet invoiced. Poll it on an interval and cache it to stop serving a prepaid customer who has run out; its cost grows with the customer's usage events. See [Stop usage when credit runs out](docs/stop-usage-when-credit-runs-out.md).
@@ -4813,7 +4822,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/getvelox/velox/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/getvelox/velox/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/getvelox/velox/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/getvelox/velox/compare/v0.3.2...v0.4.0
