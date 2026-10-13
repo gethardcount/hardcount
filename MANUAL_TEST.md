@@ -1016,7 +1016,7 @@ Velox accepts `immediate=true` plan-swaps that change the billing interval as lo
 
 A subscription whose billing fails is saved as failing, waits before each new attempt, parks after eight, and is retried with `POST /v1/subscriptions/{id}/retry-billing`. Wall-clock subscriptions only; a subscription on a test clock stops its clock instead (FLOW TC2).
 
-> **Automated coverage: 20 / 25.** `[x]` items are locked by the named test (run `go test -p 1 -short=false ./internal/billing/ ./internal/subscription/ ./internal/api/middleware/ ./internal/platform/postgres/`). The `[~]` items were walked by hand through the API on 2026-10-12.
+> **Automated coverage: 20 / 28.** `[x]` items are locked by the named test (run `go test -p 1 -short=false ./internal/billing/ ./internal/subscription/ ./internal/api/middleware/ ./internal/platform/postgres/`). The `[~]` items were walked by hand through the API on 2026-10-12.
 
 **Setup for the walk:** a wall-clock subscription on a plan with a base fee, whose period has ended, and a fault that fails its billing: `psql -c "REVOKE INSERT ON invoices FROM velox_app"` (the runtime role). Undo the fault with `GRANT INSERT ON invoices TO velox_app`. **Trap:** backdating only the subscription's period gives "cycle close skipped — no billable lines" and nothing fails, because the item did not exist in that period. Move `billing_intervals.starts_at` and `subscription_item_changes.changed_at` back as well, then set `current_billing_period_start`, `current_billing_period_end` and `next_billing_at`.
 
@@ -1045,6 +1045,9 @@ A subscription whose billing fails is saved as failing, waits before each new at
 - [x] **A subscription on a test clock is refused** — `POST /v1/subscriptions/{id}/retry-billing` → 409 with code `invalid_state`, naming the clock's retry advance. *(auto: `TestRetryBilling_Refusals`)*
 - [x] **A cancel scheduled for the trial end still fires on a parked trialing subscription** — the trial-expiry scan returns it although its billing is parked. *(auto: `TestDueScans_WaitingAndParkedAreSkippedBeforeLimit`)*
 - [x] **A panic while billing one subscription does not block the next run** — the run that panics fails loudly; the next run skips that subscription and bills the others. *(auto: `TestBillingFailure_PanicIsRecordedThenRepanics`)*
+- [~] **The subscriptions list marks a failing subscription** — Subscriptions shows a red `Billing failing` badge beside the status, or `Billing stopped` once it is parked, and the `Billing failing` filter lists only those. *(walked 2026-10-13 on a built stack, screenshots looked at)*
+- [~] **The subscription page says why and what happens next** — a red banner shows the saved reason, `Attempt 1 of 8 failed on <time>`, and when the next automatic attempt is; a parked one says no invoice will be created until you retry. *(walked 2026-10-13; the parked state was set in the database, the failing state was real)*
+- [~] **Retry billing from the page** — undo the fault, press `Retry billing` → a `Billing succeeded` message, the banner goes away, and the subscription leaves the `Billing failing` filter. *(walked 2026-10-13)*
 
 ## FLOW B23: Cancel after the period end (API, #991)
 

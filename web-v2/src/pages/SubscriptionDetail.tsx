@@ -186,6 +186,21 @@ export default function SubscriptionDetailPage() {
     onError: (err) => showApiError(err, 'Failed to activate'),
   })
 
+  const retryBillingMutation = useMutation({
+    mutationFn: () => api.retrySubscriptionBilling(id!),
+    onSuccess: (res) => {
+      invalidateAll()
+      if (res.subscription.billing_failure) {
+        toast.error('Billing failed again. The reason is shown on this page.')
+      } else if (res.still_due) {
+        toast.info('The attempt did not finish. The next billing run will try again.')
+      } else {
+        toast.success('Billing succeeded')
+      }
+    },
+    onError: (err) => showApiError(err, 'Failed to retry billing'),
+  })
+
   const cancelMutation = useMutation({
     mutationFn: () => api.cancelSubscription(id!),
     onSuccess: () => { invalidateAll(); toast.success('Subscription canceled'); setShowCancelConfirm(false) },
@@ -403,6 +418,35 @@ export default function SubscriptionDetailPage() {
           banner is the explainer. */}
       {sub.test_clock_id && (
         <TestClockBanner testClockId={sub.test_clock_id} />
+      )}
+
+      {/* Billing is failing for this subscription: no invoice is being
+          written. Says why, what happens next, and offers the retry. */}
+      {sub.billing_failure && (
+        <div className="mb-6 rounded-md border border-red-300 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle size={16} className="text-red-500 mt-0.5 shrink-0" />
+              <div className="text-sm text-red-900 dark:text-red-300">
+                <span className="font-medium">
+                  {sub.billing_failure.parked ? 'Billing has stopped for this subscription' : 'Billing is failing for this subscription'}
+                </span>
+                <p className="text-xs text-red-800/90 dark:text-red-400/90 mt-0.5">
+                  {sub.billing_failure.last_error}
+                </p>
+                <p className="text-xs text-red-800/90 dark:text-red-400/90 mt-1">
+                  {sub.billing_failure.parked
+                    ? <>It failed {sub.billing_failure.attempts} times, last on {formatDateTime(sub.billing_failure.failed_at)}. No invoice will be created until you retry.</>
+                    : <>Attempt {sub.billing_failure.attempts} of {sub.billing_failure.max_attempts} failed on {formatDateTime(sub.billing_failure.failed_at)}.{sub.billing_failure.next_attempt_at && <> The next automatic attempt is after {formatDateTime(sub.billing_failure.next_attempt_at)}.</>}</>}
+                </p>
+              </div>
+            </div>
+            <Button size="sm" variant="outline" className="shrink-0" disabled={retryBillingMutation.isPending} onClick={() => retryBillingMutation.mutate()}>
+              {retryBillingMutation.isPending && <Loader2 size={14} className="mr-2 animate-spin" />}
+              Retry billing
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* No card on file — this subscription bills automatically. Fires

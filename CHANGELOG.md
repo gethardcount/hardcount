@@ -15,6 +15,10 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Added
+
+- **The dashboard shows subscriptions whose billing is failing, and can retry them (2026-10-13, #960).** The subscriptions list marks them with a red badge and has a `Billing failing` filter. The subscription page shows the reason, which attempt failed, when the next automatic attempt is, and a `Retry billing` button. Until now this was only in the API.
+
 ### Fixed
 
 - **A subscription cancelled after its billing period ended is now billed for that period (2026-10-13, #991).** A period that ends is invoiced by the next billing run, up to an hour later, or later still when billing is failing. An immediate cancel in that gap wrote no invoice, and the billing run then skipped the cancelled subscription, so the period's usage and base fee were never invoiced. The cancel now bills every ended period first, one invoice per period, and then cancels. The same applies when dunning cancels a subscription. If the subscription was already scheduled to cancel at that period end, the call returns it cancelled at the scheduled time. Periods lost this way before this release are not billed by the upgrade.

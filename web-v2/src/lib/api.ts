@@ -372,6 +372,8 @@ export const api = {
     apiRequest<Subscription>('POST', `/subscriptions/${id}/activate`),
   cancelSubscription: (id: string) =>
     apiRequest<Subscription>('POST', `/subscriptions/${id}/cancel`),
+  retrySubscriptionBilling: (id: string) =>
+    apiRequest<{ subscription: Subscription; invoices_generated: number; still_due?: boolean }>('POST', `/subscriptions/${id}/retry-billing`),
   scheduleSubscriptionCancel: (id: string, body: { at_period_end: true } | { cancel_at: string }) =>
     apiRequest<Subscription>('POST', `/subscriptions/${id}/schedule-cancel`, body),
   clearScheduledSubscriptionCancel: (id: string) =>
@@ -730,8 +732,20 @@ export interface AdvanceSummary {
   had_errors: boolean
 }
 
+// Present while the subscription's billing is failing. The billing run
+// retries with growing waits and stops ("parked") after max_attempts.
+export interface BillingFailure {
+  attempts: number
+  max_attempts: number
+  last_error: string
+  failed_at: string
+  next_attempt_at?: string
+  parked: boolean
+}
+
 export interface Subscription {
   id: string
+  billing_failure?: BillingFailure
   code: string
   display_name: string
   customer_id: string

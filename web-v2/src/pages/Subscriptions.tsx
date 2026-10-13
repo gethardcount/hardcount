@@ -93,7 +93,9 @@ export default function SubscriptionsPage() {
     const params = new URLSearchParams()
     params.set('limit', String(PAGE_SIZE))
     params.set('offset', String((page - 1) * PAGE_SIZE))
-    if (filterStatus) params.set('status', filterStatus)
+    // 'billing_failing' is its own server filter, not a status.
+    if (filterStatus === 'billing_failing') params.set('billing', 'failing')
+    else if (filterStatus) params.set('status', filterStatus)
     if (debouncedSearch) params.set('search', debouncedSearch)
     if (sortKey) params.set('sort', sortKey)
     if (sortDir) params.set('dir', sortDir)
@@ -207,6 +209,7 @@ export default function SubscriptionsPage() {
                 { value: 'paused', label: 'Paused' },
                 { value: 'canceled', label: 'Canceled' },
                 { value: 'draft', label: 'Draft' },
+                { value: 'billing_failing', label: 'Billing failing' },
               ].map(f => (
                 <button
                   key={f.value}
@@ -265,7 +268,9 @@ export default function SubscriptionsPage() {
                 title={
                   debouncedSearch
                     ? `No subscriptions match “${debouncedSearch}”`
-                    : `No ${filterStatus} subscriptions`
+                    : filterStatus === 'billing_failing'
+                      ? 'No subscriptions with failing billing'
+                      : `No ${filterStatus} subscriptions`
                 }
                 description="Try a different filter to see more results."
                 action={{
@@ -367,6 +372,11 @@ export default function SubscriptionsPage() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Badge variant={statusBadgeVariant(sub.status)}>{sub.status}</Badge>
+                          {sub.billing_failure && (
+                            <Badge variant="destructive">
+                              {sub.billing_failure.parked ? 'Billing stopped' : 'Billing failing'}
+                            </Badge>
+                          )}
                           <ExpiryBadge
                             expiresAt={sub.trial_end_at}
                             label="Trial ends"
