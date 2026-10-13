@@ -130,6 +130,10 @@ func NewService(store Store, client HTTPClient) *Service {
 // point at an internal address by the time delivery POSTs to the stored URL
 // (DNS rebinding). The check that decides is dialControl, which runs on the
 // IP the socket is about to connect to.
+//
+// The transport keeps the default proxy setting. With HTTPS_PROXY set the
+// socket goes to the proxy, so the address checked is the proxy's and the
+// webhook target is resolved by the proxy, outside this guard.
 func ssrfHardenedTransport(allowLoopback bool) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
