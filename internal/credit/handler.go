@@ -31,6 +31,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/adjust", h.adjust)
 	r.Get("/balances", h.listBalances)
 	r.Get("/balance/{customer_id}", h.getBalance)
+	r.Get("/balance/{customer_id}/live", h.getLiveBalance)
 	r.Get("/ledger/{customer_id}", h.listEntries)
 	r.Get("/grants/{customer_id}", h.listGrants)
 	return r
@@ -124,6 +125,28 @@ func (h *Handler) getBalance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusOK, bal)
+}
+
+// getLiveBalance answers "how much credit does this customer have left right
+// now": the settled balance less the usage no invoice has billed yet. It runs
+// a usage aggregation per meter, so integrations poll it on an interval and
+// cache the answer (docs/stop-usage-when-credit-runs-out.md).
+func (h *Handler) getLiveBalance(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.TenantID(r.Context())
+	customerID := chi.URLParam(r, "customer_id")
+
+	live, err := h.svc.LiveBalance(r.Context(), tenantID, customerID)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "customer")
+		return
+	}
+	if err != nil {
+		respond.InternalError(w, r)
+		slog.ErrorContext(r.Context(), "get live credit balance", "error", err, "customer_id", customerID)
+		return
+	}
+
+	respond.JSON(w, r, http.StatusOK, live)
 }
 
 // listGrants is the commit/promo burndown: per-grant granted/drawn/

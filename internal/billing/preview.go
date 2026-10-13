@@ -277,6 +277,22 @@ func (e *Engine) previewWithWindow(ctx context.Context, sub domain.Subscription,
 // produced here matches the invoice_line_item the cycle scan would
 // persist.
 func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID string, from, to time.Time) ([]PreviewLine, []string, error) {
+	return e.rateMeterWindow(ctx, tenantID, customerID, meterID, from, to, from, nil)
+}
+
+// bucketPricer prices qty units of one usage bucket under its resolved rule.
+// bucketKey is the closer's bucket identity (meter + pricing rule), the key
+// usageLadder.price continues tiers under.
+type bucketPricer func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error)
+
+// rateMeterWindow is previewMeter with the two things a window that does not
+// start at the period open needs (the live credit read after a threshold
+// fire, live_balance.go): pinAt, the instant rules and overrides are resolved
+// at (always the period start, ADR-070, even when the window opens later at
+// the fire's watermark), and price, which lets the caller continue a tier
+// ladder across the fire the way the period close does. A nil price rates the
+// bucket on its own, which is the preview and threshold-fire behavior.
+func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, meterID string, from, to, pinAt time.Time, price bucketPricer) ([]PreviewLine, []string, error) {
 	meter, err := e.pricing.GetMeter(ctx, tenantID, meterID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get meter: %w", err)
@@ -326,9 +342,9 @@ func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID
 
 		// Same resolution rule as the cycle scan and cancel finalize
 		// (resolveRatedRule; ADR-070 pin-at-period-start): version and
-		// override in force at the window open — `from` IS the period
-		// start for both callers (operator preview and the threshold
-		// scan, which persists these lines as a real invoice). This is
+		// override in force at the period open — pinAt, which IS `from`
+		// for the operator preview and the threshold scan (which persists
+		// these lines as a real invoice). This is
 		// what makes preview == invoice hold across a mid-period
 		// publish, and a threshold fire agree with the later close.
 		// Both failures abort, as the cycle close does for the same rule: a
@@ -336,12 +352,17 @@ func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID
 		// skipped line under-billed the fire (the bucket was then not on
 		// the watermark either). A missing PINNED version is not "not set" —
 		// usage is bound to it — so it fails like any other error.
-		ratingRule, err := e.resolveRatedRule(ctx, tenantID, customerID, ratingRuleID, from)
+		ratingRule, err := e.resolveRatedRule(ctx, tenantID, customerID, ratingRuleID, pinAt)
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve pricing for meter %q rule %q: %w", meter.Key, ratingRuleID, err)
 		}
 
-		amount, err := domain.ComputeAmountCents(ratingRule, agg.Quantity)
+		var amount int64
+		if price != nil {
+			amount, err = price(ratingRule, meterID+"|"+agg.RuleID, agg.AggregationMode, agg.Quantity)
+		} else {
+			amount, err = domain.ComputeAmountCents(ratingRule, agg.Quantity)
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("compute amount for meter %q rule %q: %w", meter.Key, ratingRule.RuleKey, err)
 		}

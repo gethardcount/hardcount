@@ -770,6 +770,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// falls back to wall-clock, leaking simulated-time invariants on
 	// operator-driven creates against clock-pinned customers.
 	engine.SetCustomerReader(customerStore)
+	// Issue #1019: the engine computes the live credit figure (settled
+	// balance less unbilled usage) because only it prices usage the way the
+	// period close does. The secret-key read and the public cost dashboard
+	// both serve that one function, so they cannot disagree.
+	engine.SetLiveBalanceReaders(creditSvc, subStore)
+	creditSvc.SetLiveBalanceReader(engine)
+	costDashboardSvc.SetLiveBalanceReader(engine)
 	// Plumb effective-now resolution into dunning so every per-invoice
 	// timestamp dunning writes (next_action_at / last_attempt_at /
 	// resolved_at / created_at) lands in the same time domain the

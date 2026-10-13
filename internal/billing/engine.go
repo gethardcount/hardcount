@@ -74,16 +74,19 @@ type Engine struct {
 	charger            InvoiceCharger
 	profiles           BillingProfileReader
 	customers          CustomerReader
-	taxProviders       TaxProviderResolver
-	taxCalcStore       TaxCalculationWriter
-	clock              clock.Clock
-	testClocks         TestClockReader
-	events             domain.EventDispatcher
-	noPMNotifier       NoPaymentMethodNotifier
-	dunningStarter     DunningStarter
-	dunningResolver    DunningResolver
-	cancelExecutor     ScheduledCancelExecutor
-	auditLogger        AuditWriter
+	// Issue #1019: the two reads LiveCreditBalance composes (live_balance.go).
+	creditBalances  CreditBalanceReader
+	customerSubs    CustomerSubscriptionLister
+	taxProviders    TaxProviderResolver
+	taxCalcStore    TaxCalculationWriter
+	clock           clock.Clock
+	testClocks      TestClockReader
+	events          domain.EventDispatcher
+	noPMNotifier    NoPaymentMethodNotifier
+	dunningStarter  DunningStarter
+	dunningResolver DunningResolver
+	cancelExecutor  ScheduledCancelExecutor
+	auditLogger     AuditWriter
 	// deferredThresholdNotes dedups the crossed-but-deferred loudness
 	// artifact to once per (sub, period) — see noteThresholdDeferred.
 	deferredThresholdNotes sync.Map

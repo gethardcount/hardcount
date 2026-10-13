@@ -66,6 +66,7 @@ func TestCostDashboard_PinsCustomerLivemode(t *testing.T) {
 			// the assembler short-circuits on the no_subscription branch
 			// after pinning livemode, which is exactly the path we assert.
 			a := NewCostDashboardAssembler(lookup, nil, lister, &fakeCredits{})
+			a.SetLiveBalanceReader(&fakeLive{})
 
 			// ctx deliberately carries NO livemode — the public route is
 			// unauthenticated and never set one. The fix must pin it from

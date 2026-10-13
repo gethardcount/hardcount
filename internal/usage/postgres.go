@@ -596,6 +596,23 @@ func (s *PostgresStore) AggregateByPricingRules(
 	defaultMode domain.AggregationMode,
 	from, to time.Time,
 ) ([]domain.RuleAggregation, error) {
+	// A request that carries a memo (the public cost dashboard) runs each
+	// distinct aggregation once; see AggregationMemo. Every other caller,
+	// including every billing writer, has no memo and always reads the table.
+	if memo, ok := ctx.Value(aggregationMemoKey{}).(*AggregationMemo); ok {
+		return memo.through(aggregationMemoKeyFor(tenantID, customerID, meterID, defaultMode, from, to), func() ([]domain.RuleAggregation, error) {
+			return s.aggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+		})
+	}
+	return s.aggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+}
+
+func (s *PostgresStore) aggregateByPricingRules(
+	ctx context.Context,
+	tenantID, customerID, meterID string,
+	defaultMode domain.AggregationMode,
+	from, to time.Time,
+) ([]domain.RuleAggregation, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err

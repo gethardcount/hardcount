@@ -28,6 +28,7 @@ import type {
 
 import type {
   CreditBalance,
+  CreditLiveBalance,
   Customer,
   Error,
   GetV1AuthInviteToken200,
@@ -4883,6 +4884,121 @@ export function useGetV1CreditsBalanceCustomerId<TData = Awaited<ReturnType<type
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetV1CreditsBalanceCustomerIdQueryOptions(customerId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetV1CreditsBalanceCustomerIdLiveUrl = (customerId: string,) => {
+
+
+
+
+  return `/v1/credits/balance/${customerId}/live`
+}
+
+/**
+ * How much credit the customer has left right now: the settled balance
+ * less the usage no invoice has billed yet. Use it to decide in your
+ * own code whether to keep serving a prepaid customer; Velox records
+ * usage and never refuses it.
+ *
+ * The read aggregates the customer's usage events for the current
+ * period on every call, so its cost grows with the number of events.
+ * Poll it on an interval (for example once a minute per active
+ * customer) and cache the answer. Do not call it on every request.
+ * A top-up shows on the next read.
+ *
+ * Not included, so the figure can read high: tax, base fees billed at
+ * period end, and amounts due on unpaid invoices. A subscription with a
+ * blocking usage cap can read low. Requires a secret key.
+ * @summary Get customer live credit balance
+ */
+export const getV1CreditsBalanceCustomerIdLive = async (customerId: string, options?: RequestInit): Promise<CreditLiveBalance> => {
+
+  return orvalClient<CreditLiveBalance>(getGetV1CreditsBalanceCustomerIdLiveUrl(customerId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetV1CreditsBalanceCustomerIdLiveQueryKey = (customerId: string,) => {
+    return [
+    `/v1/credits/balance/${customerId}/live`
+    ] as const;
+    }
+
+
+export const getGetV1CreditsBalanceCustomerIdLiveQueryOptions = <TData = Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError = void>(customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetV1CreditsBalanceCustomerIdLiveQueryKey(customerId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>> = () => getV1CreditsBalanceCustomerIdLive(customerId, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: customerId !== null && customerId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetV1CreditsBalanceCustomerIdLiveQueryResult = NonNullable<Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>>
+export type GetV1CreditsBalanceCustomerIdLiveQueryError = void
+
+
+export function useGetV1CreditsBalanceCustomerIdLive<TData = Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError = void>(
+ customerId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>,
+          TError,
+          Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetV1CreditsBalanceCustomerIdLive<TData = Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError = void>(
+ customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>,
+          TError,
+          Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetV1CreditsBalanceCustomerIdLive<TData = Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError = void>(
+ customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get customer live credit balance
+ */
+
+export function useGetV1CreditsBalanceCustomerIdLive<TData = Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError = void>(
+ customerId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CreditsBalanceCustomerIdLive>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetV1CreditsBalanceCustomerIdLiveQueryOptions(customerId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

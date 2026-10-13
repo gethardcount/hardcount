@@ -1105,6 +1105,22 @@ type CreditBalance struct {
 	TotalUsed    int64  `json:"total_used,omitempty"`
 }
 
+// CreditLiveBalance A customer's credit position right now. `balance_cents` is the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero.
+type CreditLiveBalance struct {
+	// BalanceCents Settled ledger balance. Can be negative.
+	BalanceCents int64 `json:"balance_cents"`
+
+	// ComputedAt When the server computed these figures.
+	ComputedAt time.Time `json:"computed_at"`
+	CustomerId string    `json:"customer_id"`
+
+	// EstimatedRemainingCents `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
+	EstimatedRemainingCents int64 `json:"estimated_remaining_cents"`
+
+	// UnbilledUsageCents Metered usage that the next invoice of each active subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. Trialing subscriptions are not counted.
+	UnbilledUsageCents int64 `json:"unbilled_usage_cents"`
+}
+
 // Customer defines model for Customer.
 type Customer struct {
 	// AdditionalEmails CC'd on billing documents and billing-state emails (invoice,
@@ -2496,6 +2512,9 @@ type ServerInterface interface {
 	// Get customer credit balance
 	// (GET /v1/credits/balance/{customer_id})
 	GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request, customerId string)
+	// Get customer live credit balance
+	// (GET /v1/credits/balance/{customer_id}/live)
+	GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request, customerId string)
 	// Grant credits to customer
 	// (POST /v1/credits/grant)
 	PostV1CreditsGrant(w http.ResponseWriter, r *http.Request)
@@ -2739,6 +2758,12 @@ func (_ Unimplemented) PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Re
 // Get customer credit balance
 // (GET /v1/credits/balance/{customer_id})
 func (_ Unimplemented) GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request, customerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get customer live credit balance
+// (GET /v1/credits/balance/{customer_id}/live)
+func (_ Unimplemented) GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3368,6 +3393,38 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerId(w http.Response
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetV1CreditsBalanceCustomerId(w, r, customerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetV1CreditsBalanceCustomerIdLive operation middleware
+func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetV1CreditsBalanceCustomerIdLive(w, r, customerId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5431,6 +5488,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}", wrapper.GetV1CreditsBalanceCustomerId)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}/live", wrapper.GetV1CreditsBalanceCustomerIdLive)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credits/grant", wrapper.PostV1CreditsGrant)

@@ -31,7 +31,9 @@ docs in the order listed. Words you may not know are in the
    [`api/openapi.yaml`](../api/openapi.yaml).
 2. [API keys](api-keys.md): key types, rotation, and adding tenants.
 3. [Webhooks](webhooks.md): events, signatures, and retries.
-4. [LiteLLM integration](integrations/litellm.md): send token usage from a
+4. [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md):
+   poll a prepaid customer's live credit balance and gate in your own code.
+5. [LiteLLM integration](integrations/litellm.md): send token usage from a
    LiteLLM proxy without writing code.
 
 ## Run it in production

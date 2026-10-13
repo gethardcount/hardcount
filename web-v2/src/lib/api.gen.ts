@@ -275,10 +275,12 @@ export interface paths {
                              * @description Projected METERED cost for the current period, in cents. Recurring base fees are not included — an in_advance base is already invoiced at period open.
                              */
                             projected_total_cents?: number;
-                            /** @description The customer's credit position. `balance_cents` is the ledger balance: credit is drawn down when an invoice is issued, so it does not move during a billing period. `estimated_remaining_cents` is the balance minus this period's usage so far (`projected_total_cents`), never below zero. It is an estimate: the projection excludes tax, and totals in different currencies are added together. */
+                            /** @description The customer's credit position. `balance_cents` is the ledger balance: credit is drawn down when an invoice is issued, so it does not move during a billing period. `unbilled_usage_cents` is the usage no invoice has billed yet, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` can differ from `projected_total_cents`: it leaves out usage a threshold invoice already billed and usage of a trialing subscription, and counts each subscription over its own period. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted, and totals in different currencies are added together. */
                             credits?: {
                                 /** Format: int64 */
                                 balance_cents?: number;
+                                /** Format: int64 */
+                                unbilled_usage_cents?: number;
                                 /**
                                  * Format: int64
                                  * @description What is left of the customer's prepaid commit.
@@ -2902,6 +2904,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/credits/balance/{customer_id}/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get customer live credit balance
+         * @description How much credit the customer has left right now: the settled balance
+         *     less the usage no invoice has billed yet. Use it to decide in your
+         *     own code whether to keep serving a prepaid customer; Velox records
+         *     usage and never refuses it.
+         *
+         *     The read aggregates the customer's usage events for the current
+         *     period on every call, so its cost grows with the number of events.
+         *     Poll it on an interval (for example once a minute per active
+         *     customer) and cache the answer. Do not call it on every request.
+         *     A top-up shows on the next read.
+         *
+         *     Not included, so the figure can read high: tax, base fees billed at
+         *     period end, and amounts due on unpaid invoices. A subscription with a
+         *     blocking usage cap can read low. Requires a secret key.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    customer_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Live credit balance */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreditLiveBalance"];
+                    };
+                };
+                /** @description Customer not found in this tenant and mode */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/test-clocks": {
         parameters: {
             query?: never;
@@ -3970,6 +4033,30 @@ export interface components {
             total_granted?: number;
             /** Format: int64 */
             total_used?: number;
+        };
+        /** @description A customer's credit position right now. `balance_cents` is the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero. */
+        CreditLiveBalance: {
+            customer_id: string;
+            /**
+             * Format: int64
+             * @description Settled ledger balance. Can be negative.
+             */
+            balance_cents: number;
+            /**
+             * Format: int64
+             * @description Metered usage that the next invoice of each active subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. Trialing subscriptions are not counted.
+             */
+            unbilled_usage_cents: number;
+            /**
+             * Format: int64
+             * @description `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
+             */
+            estimated_remaining_cents: number;
+            /**
+             * Format: date-time
+             * @description When the server computed these figures.
+             */
+            computed_at: string;
         };
         /** @description One override key declared in a recipe's `overridable` list. Drives validation at instantiate time and the override form in the dashboard's preview dialog. */
         RecipeOverride: {

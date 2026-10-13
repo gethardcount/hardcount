@@ -972,6 +972,47 @@ components:
           type: integer
           format: int64
 
+    CreditLiveBalance:
+      type: object
+      description: >
+        A customer's credit position right now. `balance_cents` is the settled
+        ledger balance, which moves only when an invoice, grant, adjustment or
+        expiry is written. `unbilled_usage_cents` is the usage of the current
+        period that no invoice has billed yet. `estimated_remaining_cents` is
+        the first minus the second, never below zero.
+      required:
+        - customer_id
+        - balance_cents
+        - unbilled_usage_cents
+        - estimated_remaining_cents
+        - computed_at
+      properties:
+        customer_id:
+          type: string
+        balance_cents:
+          type: integer
+          format: int64
+          description: Settled ledger balance. Can be negative.
+        unbilled_usage_cents:
+          type: integer
+          format: int64
+          description: >
+            Metered usage that the next invoice of each active subscription
+            will bill, priced as the period close prices it. Usage that a
+            mid-period threshold invoice already billed is not counted again.
+            Trialing subscriptions are not counted.
+        estimated_remaining_cents:
+          type: integer
+          format: int64
+          description: >
+            `balance_cents` minus `unbilled_usage_cents`, floored at zero. To
+            see how far past zero a customer is, subtract the two parts
+            yourself.
+        computed_at:
+          type: string
+          format: date-time
+          description: When the server computed these figures.
+
     RecipeOverride:
       type: object
       description: >-
@@ -1563,13 +1604,20 @@ paths:
                       The customer's credit position. `balance_cents` is the
                       ledger balance: credit is drawn down when an invoice is
                       issued, so it does not move during a billing period.
-                      `estimated_remaining_cents` is the balance minus this
-                      period's usage so far (`projected_total_cents`), never
-                      below zero. It is an estimate: the projection excludes
-                      tax, and totals in different currencies are added
-                      together.
+                      `unbilled_usage_cents` is the usage no invoice has billed
+                      yet, and `estimated_remaining_cents` is the balance minus
+                      that, never below zero. These three are the same figures
+                      `GET /v1/credits/balance/{customer_id}/live` returns.
+                      `unbilled_usage_cents` can differ from
+                      `projected_total_cents`: it leaves out usage a threshold
+                      invoice already billed and usage of a trialing
+                      subscription, and counts each subscription over its own
+                      period. It is an estimate: tax, base fees billed at
+                      period end and unpaid invoices are not subtracted, and
+                      totals in different currencies are added together.
                     properties:
                       balance_cents: { type: integer, format: int64 }
+                      unbilled_usage_cents: { type: integer, format: int64 }
                       commit_remaining_cents:
                         type: integer
                         format: int64
@@ -3259,6 +3307,41 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditBalance"
+
+  /v1/credits/balance/{customer_id}/live:
+    get:
+      tags: [Credits]
+      summary: Get customer live credit balance
+      description: |
+        How much credit the customer has left right now: the settled balance
+        less the usage no invoice has billed yet. Use it to decide in your
+        own code whether to keep serving a prepaid customer; Velox records
+        usage and never refuses it.
+
+        The read aggregates the customer's usage events for the current
+        period on every call, so its cost grows with the number of events.
+        Poll it on an interval (for example once a minute per active
+        customer) and cache the answer. Do not call it on every request.
+        A top-up shows on the next read.
+
+        Not included, so the figure can read high: tax, base fees billed at
+        period end, and amounts due on unpaid invoices. A subscription with a
+        blocking usage cap can read low. Requires a secret key.
+      parameters:
+        - name: customer_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Live credit balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLiveBalance"
+        "404":
+          description: Customer not found in this tenant and mode
 
   /v1/test-clocks:
     get:

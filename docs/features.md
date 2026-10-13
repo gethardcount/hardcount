@@ -36,7 +36,7 @@ Everything below ships in the one MIT edition. For the cases Velox does not cove
 - **Pricing & discounts**: per-customer price overrides · prepaid credit ledger drawn against usage. Coupons were deliberately cut, because AI-native peers converge on credits, not promo codes ([ADR-039](adr/)).
 - **Invoicing & collection**: PDF invoices · hosted invoice page with secure tokens · branded emails · dunning with a circuit breaker · invoice preview (subtotal only: no tax or credits).
 - **Billing thresholds**: set a level on spend or on usage quantity, and Velox issues an invoice early when the period's running total reaches it. It fires once per period and is checked by the hourly billing run. It bills earlier; it does not stop usage.
-- **Credits & refunds**: event-sourced credit ledger · credit notes (the formal "we owe you" document) with refunds.
+- **Credits & refunds**: event-sourced credit ledger · a live balance read (credit left after usage not yet invoiced, for [stopping usage when credit runs out](stop-usage-when-credit-runs-out.md)) · credit notes (the formal "we owe you" document) with refunds.
 - **Reliability & observability**:
   - Idempotency keys: retrying a request can never double-charge.
   - Transactional outbox: outbound webhook events commit in the same database transaction as the change that caused them, then a dispatcher delivers them. Customer emails are queued post-commit and delivered at-least-once from the queue.

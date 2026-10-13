@@ -15,6 +15,7 @@ export * from './attentionReason';
 export * from './attentionSeverity';
 export * from './billingFailure';
 export * from './creditBalance';
+export * from './creditLiveBalance';
 export * from './customer';
 export * from './customerStatus';
 export * from './error';

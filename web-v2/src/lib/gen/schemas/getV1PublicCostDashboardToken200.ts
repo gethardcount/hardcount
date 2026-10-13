@@ -24,6 +24,6 @@ export type GetV1PublicCostDashboardToken200 = {
   totals?: GetV1PublicCostDashboardToken200TotalsItem[];
   /** Projected METERED cost for the current period, in cents. Recurring base fees are not included — an in_advance base is already invoiced at period open. */
   projected_total_cents?: number;
-  /** The customer's credit position. `balance_cents` is the ledger balance: credit is drawn down when an invoice is issued, so it does not move during a billing period. `estimated_remaining_cents` is the balance minus this period's usage so far (`projected_total_cents`), never below zero. It is an estimate: the projection excludes tax, and totals in different currencies are added together. */
+  /** The customer's credit position. `balance_cents` is the ledger balance: credit is drawn down when an invoice is issued, so it does not move during a billing period. `unbilled_usage_cents` is the usage no invoice has billed yet, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` can differ from `projected_total_cents`: it leaves out usage a threshold invoice already billed and usage of a trialing subscription, and counts each subscription over its own period. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted, and totals in different currencies are added together. */
   credits?: GetV1PublicCostDashboardToken200Credits;
 };

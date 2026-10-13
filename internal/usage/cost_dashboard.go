@@ -26,7 +26,20 @@ type CostDashboardAssembler struct {
 	usageService  *CustomerUsageService
 	subscriptions SubscriptionLister
 	credits       CostDashboardCreditReader
+	live          CostDashboardLiveBalance
 }
+
+// CostDashboardLiveBalance computes the customer's live credit figure. It is
+// the same function the secret-key read GET /v1/credits/balance/{id}/live
+// serves (billing.Engine.LiveCreditBalance), so the public page and the API
+// never show different numbers for one customer.
+type CostDashboardLiveBalance interface {
+	LiveCreditBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error)
+}
+
+// SetLiveBalanceReader wires the live credit figure. A setter because the
+// billing engine is built after this assembler at boot.
+func (a *CostDashboardAssembler) SetLiveBalanceReader(r CostDashboardLiveBalance) { a.live = r }
 
 // CostDashboardCreditReader is the narrow surface the assembler uses to read
 // a customer's credit position. The credit service implements it through an
@@ -44,7 +57,7 @@ type CustomerTokenLookup interface {
 }
 
 // NewCostDashboardAssembler wires the public-projection assembler.
-// All four deps are required.
+// All four deps are required, and so is SetLiveBalanceReader before serving.
 func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *CustomerUsageService, subs SubscriptionLister, credits CostDashboardCreditReader) *CostDashboardAssembler {
 	return &CostDashboardAssembler{
 		customers:     customers,
@@ -76,7 +89,7 @@ func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *Customer
 //   - projected_total_cents (sum across currencies — Stripe-style
 //     single-number summary the widget surfaces as the headline)
 //   - credits (balance, remaining prepaid commit and promotional credit,
-//     and an estimate of what is left after this period's usage so far)
+//     usage not yet billed, and an estimate of what is left after it)
 type CostDashboardProjection struct {
 	CustomerID          string                      `json:"customer_id"`
 	TenantID            string                      `json:"tenant_id"`
@@ -97,23 +110,22 @@ type CostDashboardProjection struct {
 //
 // BalanceCents is the ledger balance: credit is drawn down when an invoice is
 // issued, so it does not move during a billing period. EstimatedRemainingCents
-// is the figure a "live balance" widget wants: the balance minus this period's
-// usage so far (projected_total_cents), never below zero. It is an estimate:
-// the projection excludes tax, and a customer billed in more than one
-// currency has those totals added together.
+// is the figure a "live balance" widget wants: the balance minus
+// UnbilledUsageCents, never below zero.
+//
+// UnbilledUsageCents is NOT projected_total_cents. The projection is this
+// period's usage over one window; unbilled usage leaves out what a threshold
+// invoice already billed and what a trial will never bill, and counts each
+// subscription over its own period. Subtracting the projection was wrong in
+// exactly those cases (issue #1019), so the three live fields come from
+// CostDashboardLiveBalance and the block adds up on its own:
+// estimated = max(balance - unbilled, 0).
 type CostDashboardCredits struct {
 	BalanceCents              int64 `json:"balance_cents"`
 	CommitRemainingCents      int64 `json:"commit_remaining_cents"`
 	PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
+	UnbilledUsageCents        int64 `json:"unbilled_usage_cents"`
 	EstimatedRemainingCents   int64 `json:"estimated_remaining_cents"`
-}
-
-// estimatedRemaining is the credit left after this period's usage so far.
-func estimatedRemaining(balanceCents, projectedCents int64) int64 {
-	if left := balanceCents - projectedCents; left > 0 {
-		return left
-	}
-	return 0
 }
 
 type CostDashboardPeriod struct {
@@ -180,6 +192,9 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	// The token lookup runs under TxBypass and is the only place we learn
 	// the customer's mode, so we propagate it here.
 	ctx = postgres.WithLivemode(ctx, cust.Livemode)
+	// The usage view and the live credit figure below aggregate the same
+	// meters over the same period; the memo makes that one scan, not two.
+	ctx, _ = WithAggregationMemo(ctx)
 
 	// Empty-state short-circuit. Without an active sub the usage path
 	// requires an explicit window; we don't have one here so we return
@@ -197,6 +212,19 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	if err != nil {
 		return nil, fmt.Errorf("read credits: %w", err)
 	}
+	// Same rule for the live figure: an estimate we could not compute is an
+	// error, never a guess.
+	if a.live == nil {
+		return nil, fmt.Errorf("read live credit balance: reader not wired")
+	}
+	live, err := a.live.LiveCreditBalance(ctx, cust.TenantID, cust.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read live credit balance: %w", err)
+	}
+	// One read supplies all three so the block is consistent with itself.
+	credits.BalanceCents = live.BalanceCents
+	credits.UnbilledUsageCents = live.UnbilledUsageCents
+	credits.EstimatedRemainingCents = live.EstimatedRemainingCents
 
 	activeCount := 0
 	for _, s := range subs {
@@ -205,7 +233,6 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 		}
 	}
 	if activeCount == 0 {
-		credits.EstimatedRemainingCents = estimatedRemaining(credits.BalanceCents, 0)
 		return CostDashboardProjection{
 			Credits:       credits,
 			CustomerID:    cust.ID,
@@ -279,7 +306,6 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 		proj.Totals = append(proj.Totals, CostDashboardTotal(t))
 		proj.ProjectedTotalCents += t.AmountCents
 	}
-	credits.EstimatedRemainingCents = estimatedRemaining(credits.BalanceCents, proj.ProjectedTotalCents)
 	proj.Credits = credits
 
 	return proj, nil

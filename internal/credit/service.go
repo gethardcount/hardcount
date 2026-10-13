@@ -27,11 +27,20 @@ type CustomerReader interface {
 	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
 }
 
+// LiveBalanceReader computes a customer's live credit figure: the settled
+// balance less usage not yet billed. Implemented by *billing.Engine, which
+// owns the computation because it must price usage the way the period close
+// does; wired in router.go. Defined here so credit does not import billing.
+type LiveBalanceReader interface {
+	LiveCreditBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error)
+}
+
 type Service struct {
 	store       Store
 	resolver    clock.Resolver
 	auditLogger AuditEmitter
 	customers   CustomerReader
+	live        LiveBalanceReader
 }
 
 func NewService(store Store) *Service {
@@ -65,7 +74,8 @@ func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
 // foreign-key checks do not apply row-level security, so without this read
 // the insert accepts any existing customer id, including another tenant's or
 // the other mode's. Called only from the operator entry points (Grant,
-// Adjust): engine callers pass a customer id they read from a row in scope.
+// Adjust, and the LiveBalance read): engine callers pass a customer id they
+// read from a row in scope.
 func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID string) error {
 	if s.customers == nil {
 		return nil
@@ -656,6 +666,25 @@ func (s *Service) ListGrants(ctx context.Context, tenantID, customerID string, i
 
 func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error) {
 	return s.store.GetBalance(ctx, tenantID, customerID)
+}
+
+// SetLiveBalanceReader wires the live figure behind LiveBalance.
+func (s *Service) SetLiveBalanceReader(r LiveBalanceReader) { s.live = r }
+
+// LiveBalance is the customer's credit position right now: settled balance,
+// usage not yet billed, and the estimate of what is left (issue #1019).
+//
+// The customer read comes first. Every row behind the figure is hidden by
+// row-level security for a customer of another tenant or the other mode, so
+// without it such an id would answer 200 with zeros instead of 404.
+func (s *Service) LiveBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error) {
+	if s.live == nil {
+		return domain.CreditLiveBalance{}, fmt.Errorf("live balance reader not wired")
+	}
+	if err := s.requireCustomer(ctx, tenantID, customerID); err != nil {
+		return domain.CreditLiveBalance{}, err
+	}
+	return s.live.LiveCreditBalance(ctx, tenantID, customerID)
 }
 
 func (s *Service) ListBalances(ctx context.Context, tenantID string) ([]domain.CreditBalance, error) {

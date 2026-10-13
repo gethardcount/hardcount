@@ -176,16 +176,31 @@ Summary:
 | `subscription.threshold_crossed` | A usage billing threshold crossed (early finalize) |
 | `customer.email_bounced` | A customer email bounced and was suppressed |
 | `dunning.started` / `.escalated` / `.resolved` | Dunning lifecycle |
-| `credit.balance_low` | Balance crossed below the tenant's configured threshold (payload carries `threshold_cents`; transactional) |
-| `credit.balance_depleted` | Balance crossed to ≤ 0 (transactional) |
-| `credit.balance_recovered` | Balance went positive again (transactional) |
+| `credit.balance_low` | Settled balance crossed below the tenant's configured threshold (payload carries `threshold_cents`; transactional) |
+| `credit.balance_depleted` | Settled balance crossed to ≤ 0 (transactional) |
+| `credit.balance_recovered` | Settled balance went positive again (transactional) |
 | `credit.commit_retired` | A relief credit note retired commit credits — payload carries `grant_id`, `credit_note_id`, `retired_cents`, `refunded_gross_cents`, `remaining_after_cents` (transactional) |
 
-Typical entitlement receiver for the commit-drawdown wedge (customers
-prepay a credit balance that usage draws down): subscribe to
-`credit.balance_low` (nudge the customer to top up), `credit.balance_depleted`
-(suspend service), `credit.balance_recovered` (restore), and
-`subscription.canceled` (deprovision).
+### The credit balance events follow the settled balance
+
+`credit.balance_low`, `credit.balance_depleted` and
+`credit.balance_recovered` follow the settled balance: the credit a customer
+holds after every invoice issued so far. They fire when an invoice, a grant,
+an adjustment or an expiry moves that balance. They do not follow usage.
+
+Usage draws on credit only when it is invoiced. A customer billed at the end
+of the period can use up all their credit in the first week, and
+`credit.balance_depleted` fires weeks later, when the invoice is issued.
+
+So use these events to remind a customer to top up, and to keep your own
+records in step. Do not use them to decide whether to keep serving a
+customer. For that, poll `GET /v1/credits/balance/{customer_id}/live`, which
+subtracts the usage not yet invoiced. See
+[Stop usage when credit runs out](stop-usage-when-credit-runs-out.md).
+
+A typical receiver for prepaid customers subscribes to `credit.balance_low`
+(remind the customer to top up), `credit.balance_recovered` (a top-up
+landed), and `subscription.canceled` (deprovision).
 
 ## Testing deliveries locally
 

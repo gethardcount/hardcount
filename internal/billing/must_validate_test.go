@@ -63,7 +63,9 @@ func TestMustValidate_CoversEveryCollaborator(t *testing.T) {
 		// reader mode "off", so the kill switch can never dangle unwired).
 		// Back to 25 at ADR-115: TxRunner is gone — the subscription store
 		// owns the period closer's tx (SubscriptionReader.WithTenantTx).
-		const collaborators = 25
+		// 27 at issue #1019: CreditBalanceReader + CustomerSubscriptionLister,
+		// the two reads behind LiveCreditBalance.
+		const collaborators = 27
 		if nilCount != collaborators {
 			t.Errorf("zero engine names %d nil collaborators, expected %d — Engine's dep set changed; update router wiring + this count deliberately", nilCount, collaborators)
 		}
