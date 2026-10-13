@@ -2027,6 +2027,7 @@ Setup: Mailpit up, a customer with a paid invoice.
 - [~] `curl -I /v1/customers` carries: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cache-Control: no-store`, `Referrer-Policy: strict-origin-when-cross-origin`. *(all four present on the live server, verbatim.)*
 - [~] Staging/prod: `Strict-Transport-Security` present. *(walked with a control rather than alone: a second instance booted with `APP_ENV=staging` returns `Strict-Transport-Security: max-age=31536000; includeSubDomains`, and the same binary in local mode returns no HSTS header at all — so the header is environment-gated, not unconditional. Staging boot also proved its own guard: it refuses to start unless `APP_DATABASE_URL` names a least-privilege role distinct from the documented default, so a throwaway role had to be granted `velox_app` for the test and was dropped afterwards.)*
 - [~] `METRICS_TOKEN=secret123` set → `/metrics` 401 unauth, 200 with Bearer. Unset → `/metrics` accessible (dev). *(with the token set: no header → **401**, wrong bearer → **401**, correct bearer → **200**. The wrong-bearer case is the one worth keeping — without it the check passes on any implementation that merely looks for the header's presence. Unset on the dev server → 200.)*
+- [x] `APP_ENV=production` with `METRICS_TOKEN` unset → `/metrics` answers 401, with or without a bearer header. *(auto: `TestMetricsAuth`)*
 
 ## FLOW X5: PII encryption at rest
 

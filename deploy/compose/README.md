@@ -176,6 +176,9 @@ If the user does not exist at all, create it with the SQL in [Self-host, "The tw
 **`/health/ready` returns 503 with `scheduler: degraded`.**
 The API is up but its background jobs have stopped running. Check the API logs. To see which copy last ran each job, run `SELECT * FROM leader_status;` in the database shell.
 
+**`/metrics` returns 401.**
+`METRICS_TOKEN` is not set, or the scraper did not send it. Set it in `.env` (`openssl rand -hex 32`), start the stack again, and have Prometheus send it as a bearer token.
+
 **Port 80 is already in use.**
 Set `NGINX_HTTP_PORT=8080`, or any free port, in `.env` and start the stack again.
 

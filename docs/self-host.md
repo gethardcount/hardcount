@@ -163,6 +163,7 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 | `DASHBOARD_BASE_URL` | unset | The dashboard's address, used in password-reset links. If unset, no password-reset emails are sent. For local development use `http://localhost:5173`. |
 | `SMTP_HOST`, `SMTP_PORT` | unset | Your email server. If unset, Velox sends no email. The local `.env.example` points these at Mailpit; the Compose stack leaves them unset. See [email setup](ops/email-setup.md). |
 | `VELOX_BOOTSTRAP_TOKEN` | unset | Allows the `POST /v1/bootstrap` call that creates the first tenant. At least 16 characters outside `local`. |
+| `METRICS_TOKEN` | unset | The bearer token a scraper must send to read `/metrics`. If unset, `/metrics` answers 401 in `production` and is open elsewhere. |
 
 Stripe is not set here. Each tenant connects its own Stripe account in the dashboard, under Settings.
 
@@ -185,6 +186,8 @@ One small VM will take far less. To raise the limit, in this order:
 ## What to watch
 
 Velox serves Prometheus metrics at `/metrics` and writes structured logs to standard output. Connect both to the monitoring you already run. Velox does not ship dashboards or alert rules.
+
+In `production`, set `METRICS_TOKEN` and have Prometheus send it as a bearer token. Without it, `/metrics` answers 401. At most three scrapes run at once; a fourth gets a 503.
 
 The metrics worth an alert:
 

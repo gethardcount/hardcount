@@ -130,7 +130,7 @@ services:
       VELOX_COOKIE_DOMAIN: ${VELOX_COOKIE_DOMAIN:-}
       # Optional — CORS origins (comma-separated)
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
-      # Optional — /metrics auth
+      # /metrics bearer token (unset in production = /metrics answers 401)
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       # Optional — blind-index key for encrypted email search (64 hex chars)
       VELOX_EMAIL_BIDX_KEY: ${VELOX_EMAIL_BIDX_KEY:-}

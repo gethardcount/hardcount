@@ -37,7 +37,7 @@ confirm the fix.
 |---|---|---|
 | `GET /health` | Liveness — process running | Kubernetes liveness probe |
 | `GET /health/ready` | Readiness — DB reachable (ping), scheduler ran recently | Kubernetes readiness probe + LB health check |
-| `GET /metrics` | Prometheus scrape (Bearer `METRICS_TOKEN` when set) | Metrics-collection job |
+| `GET /metrics` | Prometheus scrape. Send `METRICS_TOKEN` as a bearer token. In production with no token set it answers 401. | Metrics-collection job |
 
 The scheduler is the background loop that drives billing.
 `/health/ready` returns 503 if the scheduler has not ticked in 2× the

@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -36,23 +38,41 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 }
 
 // MetricsAuth protects the /metrics endpoint with a bearer token.
-// If METRICS_TOKEN is not set, /metrics is open (backward compatible for dev).
-// In production, set METRICS_TOKEN and configure Prometheus to send it.
+// Without METRICS_TOKEN the endpoint is open outside production, for local
+// dev. In production it answers 401 to everyone: the scrape is operational
+// data and costs database queries, and an address allowlist in front of it
+// stops holding once a load balancer makes every caller a private address.
+// It refuses the scrape rather than the boot, so an install that does not
+// scrape metrics keeps billing through the upgrade.
 func MetricsAuth(next http.Handler) http.Handler {
 	token := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
+	prod := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+	if token == "" && prod {
+		slog.Warn("METRICS_TOKEN not set — /metrics answers 401 in production. Set METRICS_TOKEN and have Prometheus send it as a bearer token")
+	}
+
+	unauthorized := func(w http.ResponseWriter) {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// No token configured — allow access (dev mode)
+		// No token configured. Decided before the compare below, because an
+		// empty bearer equals an empty token.
 		if token == "" {
+			if prod {
+				unauthorized(w)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Check Authorization: Bearer <token>
-		auth := r.Header.Get("Authorization")
-		if auth == "" || !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != token {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		// Check Authorization: Bearer <token>, in constant time so the
+		// response time does not depend on how much of the token matched.
+		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+			unauthorized(w)
 			return
 		}
 

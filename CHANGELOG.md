@@ -23,6 +23,7 @@ Older entries keep their original text.
 
 ### Security
 
+- **In production, `/metrics` now requires a bearer token (2026-10-13).** With `APP_ENV=production` and no `METRICS_TOKEN`, `/metrics` answers 401 to everyone; before, it was open to anyone who could reach it. The Compose stack runs in production mode, so set `METRICS_TOKEN` in `.env` (`openssl rand -hex 32`) and have Prometheus send it as a bearer token. Outside production nothing changes. The token is now compared in constant time.
 - **The dashboard image is now scanned and signed (2026-10-13).** Until now only the server image was; `ghcr.io/getvelox/velox-dashboard` was published with no scan and no signature. Both images are now signed by digest with cosign, and a high-severity finding that has a fix blocks the build for either. Applies to images published after this change; `v0.5.0` and earlier dashboard images stay unsigned.
 - **Dashboard and front-proxy images move from nginx 1.27 to 1.30 (2026-10-13).** 1.27 is no longer maintained. The dashboard image also applies the base image's pending security patches at build time. If you run the compose stack, pull the new `nginx:1.30-alpine` on your next upgrade; no config change is needed.
 
