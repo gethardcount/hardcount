@@ -173,6 +173,20 @@ func (m *memStore) GetByProrationSource(_ context.Context, tenantID, subscriptio
 	return domain.CreditLedgerEntry{}, errs.ErrNotFound
 }
 
+func (m *memStore) GetSpendableBalance(_ context.Context, _, customerID string, at time.Time) (int64, error) {
+	var spendable int64
+	for _, e := range m.entries {
+		if e.CustomerID != customerID {
+			continue
+		}
+		spendable += e.AmountCents
+		if e.AmountCents > 0 && e.ConsumedCents < e.AmountCents && e.ExpiresAt != nil && !e.ExpiresAt.After(at) {
+			spendable -= e.AmountCents - e.ConsumedCents
+		}
+	}
+	return spendable, nil
+}
+
 func (m *memStore) GetBalance(_ context.Context, _, customerID string) (domain.CreditBalance, error) {
 	var b domain.CreditBalance
 	b.CustomerID = customerID

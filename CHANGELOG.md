@@ -17,12 +17,13 @@ Older entries keep their original text.
 
 ### Added
 
-- **`GET /v1/credits/balance/{customer_id}/live` returns how much credit a customer has left right now (2026-10-13, #1019).** It is the settled balance less the usage not yet invoiced. Poll it on an interval and cache it to stop serving a prepaid customer who has run out; its cost grows with the customer's usage events. See [Stop usage when credit runs out](docs/stop-usage-when-credit-runs-out.md).
+- **`GET /v1/credits/balance/{customer_id}/live` returns how much credit a customer has left right now (2026-10-13, #1019).** It is the credit the customer can spend (the settled balance, without any grant that is past its expiry date) less the usage not yet invoiced. Poll it on an interval and cache it to stop serving a prepaid customer who has run out; its cost grows with the customer's usage events. See [Stop usage when credit runs out](docs/stop-usage-when-credit-runs-out.md).
 - **The public cost dashboard's `credits` object has `unbilled_usage_cents` (2026-10-13, #1019).** It is the amount `estimated_remaining_cents` subtracts from `balance_cents`, so the three numbers add up on the page. They are the same figures the new live read returns.
 
 ### Fixed
 
-- **`estimated_remaining_cents` on the public cost dashboard was wrong in three cases (2026-10-13, #1019).** After a billing-threshold invoice that kept the billing cycle it read too low, often zero, for the rest of the period: usage the invoice had already taken from credit was subtracted again. During a trial it read too low, because trial usage was subtracted although a trial is not billed. For a customer with several subscriptions on different billing cycles it read too high, because the usage of an earlier-started subscription before the newest one's period began was left out. No invoice or balance was wrong.
+- **`estimated_remaining_cents` on the public cost dashboard was wrong in three cases (2026-10-13, #1019).** After a billing-threshold invoice that kept the billing cycle it read too low, often zero, for the rest of the period: usage the invoice had already taken from credit was subtracted again. For a trialing subscription it read too low when the trial was set to cancel at its end, or ran past the stored billing period: that usage was subtracted although no invoice bills it. Usage on the last day of an ordinary trial is still counted, because the first paid period starts at the beginning of the day the trial ends. For a customer with several subscriptions on different billing cycles it read too high, because the usage of an earlier-started subscription before the newest one's period began was left out. No invoice or balance was wrong.
+- **The public cost dashboard no longer counts an expired grant as credit (2026-10-13, #1019).** A grant past its expiry date stayed in `credits.balance_cents` and `estimated_remaining_cents` for up to an hour, until the expiry run wrote it off, although no invoice could draw on it. Both now leave it out at once. `GET /v1/credits/balance/{customer_id}` is unchanged and still shows the ledger sum.
 
 ## [0.6.0] - 2026-10-13
 

@@ -1060,6 +1060,82 @@ func mergeUsageIntervals(ivs []usageInterval) []usageInterval {
 	return out
 }
 
+// meterUsageIntervals builds, per meter, the windows a period close bills
+// usage over. Each item x segment contributes [seg.start, seg.end] to every
+// meter in its segment's plan, so a meter is billed only for the time a plan
+// carrying it was on the subscription: a mid-period plan swap, item add or
+// item removal splits the period. segsByItem also holds items that left the
+// subscription during the window. The period close (buildLineItems) and the
+// live credit read (unbilledUsageCents) both call this.
+//
+// TWO maps (ADR-066 §4): clamped carries the watermark-CLAMPED windows that
+// additive (sum/count) buckets bill from; usage in
+// [periodStart, billedThrough) already landed on the mid-cycle threshold
+// invoice. full carries the UNCLAMPED windows: non-additive (max/last)
+// buckets that the fire deliberately deferred (no line on the watermark
+// invoice) must aggregate over the full window, because clamping a max to
+// the residual window drops a pre-fire peak (partial-window mis-bill), and
+// splitting it double-bills. With no watermark full is empty and only
+// clamped is used. Intervals are not merged; callers run mergeUsageIntervals.
+func meterUsageIntervals(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, billedThrough *time.Time) (clamped, full map[string][]usageInterval) {
+	clamped = map[string][]usageInterval{}
+	full = map[string][]usageInterval{}
+	addMeterInterval := func(mid string, start, end time.Time) {
+		if billedThrough != nil && end.After(start) {
+			full[mid] = append(full[mid], usageInterval{start, end})
+		}
+		// Clamp to the threshold watermark. Intervals fully inside the
+		// billed window drop out entirely. Nil watermark = no threshold
+		// fire = full period, unchanged.
+		if billedThrough != nil && start.Before(*billedThrough) {
+			start = *billedThrough
+		}
+		if !end.After(start) {
+			return
+		}
+		clamped[mid] = append(clamped[mid], usageInterval{start, end})
+	}
+	present := make(map[string]struct{}, len(sub.Items))
+	for _, it := range sub.Items {
+		present[it.ID] = struct{}{}
+		segments := segsByItem[it.ID]
+		if len(segments) == 0 {
+			// Item present at period_end but no segments (e.g. zero-duration
+			// boundary swap collapsed by the helper). Treat the post-change
+			// plan's meters as active for the full period — defensive
+			// fallback that preserves pre-segment-aware behavior.
+			for _, mid := range plans[it.PlanID].MeterIDs {
+				addMeterInterval(mid, periodStart, periodEnd)
+			}
+			continue
+		}
+		for _, seg := range segments {
+			segPlan, ok := plans[seg.planID]
+			if !ok {
+				continue
+			}
+			for _, mid := range segPlan.MeterIDs {
+				addMeterInterval(mid, seg.start, seg.end)
+			}
+		}
+	}
+	for itemID, segments := range segsByItem {
+		if _, stillPresent := present[itemID]; stillPresent {
+			continue
+		}
+		for _, seg := range segments {
+			segPlan, ok := plans[seg.planID]
+			if !ok {
+				continue
+			}
+			for _, mid := range segPlan.MeterIDs {
+				addMeterInterval(mid, seg.start, seg.end)
+			}
+		}
+	}
+	return clamped, full
+}
+
 // emitBaseSegmentLine pushes a base-fee line item for one [start, end]
 // segment of an in_arrears period. Prorated against the cycle length
 // (full plan-interval cycle from periodStart) so a 14-day segment of
@@ -2432,7 +2508,7 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 		// activate-and-bill. Pre-route on the snapshot; the activation
 		// UPDATE's SQL guard is the atomic backstop for a schedule landing
 		// after it.
-		if sub.CancelAtPeriodEnd || (sub.CancelAt != nil && sub.TrialEndAt != nil && !sub.CancelAt.After(*sub.TrialEndAt)) {
+		if trialCancelsFree(sub) {
 			return sub, true, e.cancelTrialAtEndFromEngine(ctx, sub)
 		}
 		var firstInv domain.Invoice
@@ -2858,72 +2934,10 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 		}
 	}
 
-	// Build (meter, intervals) maps from item segments + removed-item
-	// segments. Each item × segment contributes [seg.start, seg.end]
-	// to every meter in its segment's plan.
-	//
-	// TWO maps (ADR-066 §4): meterIntervals carries the watermark-CLAMPED
-	// windows that additive (sum/count) buckets bill from — usage in
-	// [periodStart, thresholdBilledThrough) already landed on the mid-cycle
-	// threshold invoice. meterIntervalsFull carries the UNCLAMPED windows:
-	// non-additive (max/last) buckets that the fire deliberately deferred
-	// (no line on the watermark invoice) must aggregate over the full
-	// window — clamping a max to the residual window drops a pre-fire peak
-	// (partial-window mis-bill), and splitting it double-bills. With no
-	// watermark the two maps are identical and only the clamped one is used.
-	meterIntervals := map[string][]usageInterval{}
-	meterIntervalsFull := map[string][]usageInterval{}
-	addMeterInterval := func(mid string, start, end time.Time) {
-		if thresholdBilledThrough != nil && end.After(start) {
-			meterIntervalsFull[mid] = append(meterIntervalsFull[mid], usageInterval{start, end})
-		}
-		// Clamp to the threshold watermark. Intervals fully inside the
-		// billed window drop out entirely. Nil watermark = no threshold
-		// fire = full period, unchanged.
-		if thresholdBilledThrough != nil && start.Before(*thresholdBilledThrough) {
-			start = *thresholdBilledThrough
-		}
-		if !end.After(start) {
-			return
-		}
-		meterIntervals[mid] = append(meterIntervals[mid], usageInterval{start, end})
-	}
-	for _, it := range sub.Items {
-		segments := segsByItem[it.ID]
-		if len(segments) == 0 {
-			// Item present at period_end but no segments (e.g. zero-duration
-			// boundary swap collapsed by the helper). Treat the post-change
-			// plan's meters as active for the full period — defensive
-			// fallback that preserves pre-segment-aware behavior.
-			for _, mid := range plans[it.PlanID].MeterIDs {
-				addMeterInterval(mid, periodStart, periodEnd)
-			}
-			continue
-		}
-		for _, seg := range segments {
-			segPlan, ok := plans[seg.planID]
-			if !ok {
-				continue
-			}
-			for _, mid := range segPlan.MeterIDs {
-				addMeterInterval(mid, seg.start, seg.end)
-			}
-		}
-	}
-	for itemID, segments := range segsByItem {
-		if _, stillPresent := itemsByID[itemID]; stillPresent {
-			continue
-		}
-		for _, seg := range segments {
-			segPlan, ok := plans[seg.planID]
-			if !ok {
-				continue
-			}
-			for _, mid := range segPlan.MeterIDs {
-				addMeterInterval(mid, seg.start, seg.end)
-			}
-		}
-	}
+	// The windows each meter is billed over, from item segments and
+	// removed-item segments (meterUsageIntervals; shared with the live
+	// credit read so the two cannot drift).
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, thresholdBilledThrough)
 
 	// Cache per-interval aggregation so a meter active across N
 	// non-overlapping intervals incurs at most N queries (and 1 query

@@ -1215,6 +1215,35 @@ func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID str
 	return b, err
 }
 
+// GetSpendableBalance is the credit a draw at `at` could use: the ledger sum,
+// less what is left of every positive block already past its expires_at. Such
+// a block stays in the sum until the expiry sweep writes its expiry entry,
+// but drainPositiveBlocks skips it (expires_at > now), so an invoice issued
+// in between draws nothing from it. The expired predicate is the exact
+// complement of the drain's liveness predicate; keep the two in step.
+// One statement, so the sum and the expired part are the same snapshot.
+func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer postgres.Rollback(tx)
+
+	var spendable int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(amount_cents), 0)
+		     - COALESCE(SUM(CASE
+		           WHEN amount_cents > 0
+		            AND consumed_cents < amount_cents
+		            AND expires_at IS NOT NULL AND expires_at <= $3
+		           THEN amount_cents - consumed_cents
+		           ELSE 0
+		       END), 0)
+		FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2
+	`, tenantID, customerID, at).Scan(&spendable)
+	return spendable, err
+}
+
 func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]domain.CreditBalance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

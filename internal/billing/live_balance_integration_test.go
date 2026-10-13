@@ -378,13 +378,77 @@ func TestLiveBalance_PricesAtThePeriodOpenAfterAFire(t *testing.T) {
 	}
 }
 
-// (b) A trial is not billed: the close advances a trialing period without an
-// invoice, so its usage never draws credit and must not be subtracted.
-func TestLiveBalance_TrialingSubscription_UsageNotSubtracted(t *testing.T) {
+// (b) A trial is not billed, but the first paid period is, and the service
+// starts that period at the beginning of the day the trial ends. Usage sent on
+// that last day, before the flip to active, is inside the period the close
+// bills; usage before it is not. The subscription is built by the real Create
+// (a trialing row has no billing_intervals until it converts), then moved back
+// in time so the trial ends two seconds from now.
+func TestLiveBalance_Trial_CountsOnlyTheFirstPaidPeriod(t *testing.T) {
 	lf := newLiveFixture(t, "Live Balance Trial", 10000)
+	lf.exec(t, `UPDATE subscriptions SET status = 'canceled', canceled_at = now() WHERE id = $1`, lf.subID)
+
+	sub, err := lf.subSvc.Create(lf.ctx, lf.tenantID, subscription.CreateInput{
+		Code: "trial-sub", DisplayName: "Trial Sub", CustomerID: lf.customerID,
+		Items:     []subscription.CreateItemInput{{PlanID: lf.planID, Quantity: 1}},
+		TrialDays: 1,
+	})
+	if err != nil {
+		t.Fatalf("create trialing subscription: %v", err)
+	}
+	if sub.Status != domain.SubscriptionTrialing || sub.TrialEndAt == nil || sub.CurrentBillingPeriodStart == nil {
+		t.Fatalf("created subscription = status %s, trial_end %v, period start %v; want a trialing row with both set", sub.Status, sub.TrialEndAt, sub.CurrentBillingPeriodStart)
+	}
+	if !sub.CurrentBillingPeriodStart.Before(*sub.TrialEndAt) {
+		t.Skipf("the trial ends at the very start of a day (%v); no last-day window to test", sub.TrialEndAt)
+	}
+	trialEnd := time.Now().UTC().Add(2 * time.Second).Truncate(time.Microsecond)
+	shift := sub.TrialEndAt.Sub(trialEnd)
+	lf.exec(t, `
+		UPDATE subscriptions SET
+			trial_start_at = trial_start_at - $1 * interval '1 microsecond',
+			trial_end_at = trial_end_at - $1 * interval '1 microsecond',
+			current_billing_period_start = current_billing_period_start - $1 * interval '1 microsecond',
+			current_billing_period_end = current_billing_period_end - $1 * interval '1 microsecond',
+			next_billing_at = next_billing_at - $1 * interval '1 microsecond'
+		WHERE id = $2
+	`, shift.Microseconds(), sub.ID)
+	periodStart := sub.CurrentBillingPeriodStart.Add(-shift)
+	lastDay := periodStart.Add(time.Until(periodStart) / -2) // midway between the period start and now
+	if !lastDay.After(periodStart) || !lastDay.Before(time.Now()) {
+		t.Skipf("no room between the period start %v and now", periodStart)
+	}
+
+	lf.insertUsage(t, lf.meterID, 3000, periodStart.Add(-2*time.Hour)) // $30.00 in the trial, before the first paid period
+	lf.insertUsage(t, lf.meterID, 2000, lastDay)                       // $20.00 on the trial's last day, inside the first paid period
+
+	if got := lf.estimated(t); got != 8000 {
+		t.Errorf("estimated remaining while trialing = %d, want 8000; 10000 leaves out last-day usage the close will bill, 5000 counts trial usage nobody bills", got)
+	}
+
+	time.Sleep(time.Until(trialEnd.Add(500 * time.Millisecond)))
+	if n, errs := lf.subSvc.ProcessExpiredTrials(lf.ctx, 50); n != 1 || len(errs) > 0 {
+		t.Fatalf("trial expiry: processed=%d errs=%v, want 1", n, errs)
+	}
+	if got := lf.estimated(t); got != 8000 {
+		t.Errorf("estimated remaining after the trial converted = %d, want 8000 (no jump at the flip)", got)
+	}
+	if n := lf.closeEveryPeriod(t); n != 1 {
+		t.Fatalf("cycle close produced %d invoices, want 1", n)
+	}
+	if got := lf.balance(t); got != 8000 {
+		t.Errorf("settled balance after the close = %d, want 8000 (what the estimate said)", got)
+	}
+}
+
+// A trial that runs past the end of the stored period: the close advances the
+// period without an invoice (handleTrialState), so that period's usage never
+// draws credit and is not counted.
+func TestLiveBalance_TrialOutlastsThePeriod_UsageNotSubtracted(t *testing.T) {
+	lf := newLiveFixture(t, "Live Balance Long Trial", 10000)
 
 	lf.exec(t, `UPDATE subscriptions SET status = 'trialing', trial_start_at = $1, trial_end_at = $2 WHERE id = $3`,
-		lf.cycleStart, time.Now().UTC().Add(14*24*time.Hour), lf.subID)
+		lf.cycleStart, lf.cycleEnd.Add(14*24*time.Hour), lf.subID)
 	lf.ingestUsage(t, lf.ctx, 25, 100) // $25.00 of usage during the trial
 
 	if got := lf.estimated(t); got != 10000 {
@@ -399,6 +463,117 @@ func TestLiveBalance_TrialingSubscription_UsageNotSubtracted(t *testing.T) {
 	}
 	if got := lf.balance(t); got != 10000 {
 		t.Errorf("settled balance after the trial period closed = %d, want 10000", got)
+	}
+}
+
+// A trialing subscription that is set to cancel at the end of its trial is
+// canceled without an invoice, so its usage is not counted.
+func TestLiveBalance_TrialSetToCancel_UsageNotSubtracted(t *testing.T) {
+	lf := newLiveFixture(t, "Live Balance Trial Cancel", 10000)
+
+	lf.exec(t, `UPDATE subscriptions SET status = 'trialing', trial_start_at = $1, trial_end_at = $2, cancel_at_period_end = true WHERE id = $3`,
+		lf.cycleStart.Add(-24*time.Hour), time.Now().UTC().Add(time.Hour), lf.subID)
+	lf.ingestUsage(t, lf.ctx, 25, 100)
+
+	if got := lf.estimated(t); got != 10000 {
+		t.Errorf("estimated remaining = %d, want 10000; 7500 counts usage of a trial that cancels free", got)
+	}
+}
+
+// A plan change in the middle of a period. The close bills each meter for the
+// time its plan was on the subscription (billing_intervals), so usage on the
+// outgoing plan's meter before the swap is still owed after the swap.
+func TestLiveBalance_PlanSwapMidPeriod_OutgoingMeterStillCounted(t *testing.T) {
+	lf := newLiveFixture(t, "Live Balance Plan Swap", 10000)
+
+	rrv, err := lf.pricingSvc.CreateRatingRule(lf.ctx, lf.tenantID, pricing.CreateRatingRuleInput{
+		RuleKey: "tok_flat", Name: "Tok Flat",
+		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+	})
+	if err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+	tok, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
+		Key: "tok", Name: "Tok", Unit: "tok", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+	})
+	if err != nil {
+		t.Fatalf("create meter: %v", err)
+	}
+	planB, err := lf.pricingSvc.CreatePlan(lf.ctx, lf.tenantID, pricing.CreatePlanInput{
+		Code: "pln_tok", Name: "Tok Plan", Currency: "USD", BillingInterval: domain.BillingMonthly,
+		MeterIDs: []string{tok.ID},
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+
+	lf.ingestUsage(t, lf.ctx, 20, 100) // $20.00 of calls on the first plan
+	if got := lf.estimated(t); got != 8000 {
+		t.Fatalf("estimated remaining before the swap = %d, want 8000", got)
+	}
+	res, err := lf.subSvc.UpdateItem(lf.ctx, lf.tenantID, lf.subID, lf.itemID, subscription.UpdateItemInput{NewPlanID: planB.ID, Immediate: true})
+	if err != nil {
+		t.Fatalf("swap plan: %v", err)
+	}
+	lf.insertUsage(t, tok.ID, 500, res.EffectiveAt.Add(time.Millisecond))     // $5.00 of tok after the swap
+	lf.insertUsage(t, tok.ID, 900, lf.cycleStart.Add(time.Hour))              // $9.00 of tok BEFORE the plan carried the meter: not billed
+	lf.insertUsage(t, lf.meterID, 700, res.EffectiveAt.Add(time.Millisecond)) // $7.00 of calls AFTER the plan dropped the meter: not billed
+
+	if got := lf.estimated(t); got != 7500 {
+		t.Errorf("estimated remaining after the swap = %d, want 7500 ($100 less $20 calls before and $5 tok after); 8600 prices only the new plan's meter over the whole period", got)
+	}
+	if n := lf.closeEveryPeriod(t); n != 1 {
+		t.Fatalf("cycle close produced %d invoices, want 1", n)
+	}
+	if got := lf.balance(t); got != 7500 {
+		t.Errorf("settled balance after the close = %d, want 7500 (what the estimate said)", got)
+	}
+}
+
+// A grant past its expiry that the hourly sweep has not written off yet is
+// still in the ledger sum, but the close will not draw on it. The live read
+// leaves it out, so it reports what a draw at this instant could spend.
+func TestLiveBalance_ExpiredGrantNotYetSwept_NotSpendable(t *testing.T) {
+	lf := newLiveFixture(t, "Live Balance Expired Grant", 5000) // $50.00 that never expires
+
+	expires := time.Now().UTC().Add(2 * time.Second)
+	if _, err := lf.creditSvc.Grant(lf.ctx, lf.tenantID, credit.GrantInput{
+		CustomerID: lf.customerID, AmountCents: 10000, Description: "promo", ExpiresAt: &expires,
+	}); err != nil {
+		t.Fatalf("grant expiring credit: %v", err)
+	}
+	lf.ingestUsage(t, lf.ctx, 20, 100) // $20.00 of usage
+	if got := lf.estimated(t); got != 13000 {
+		t.Fatalf("estimated remaining before the expiry = %d, want 13000", got)
+	}
+	time.Sleep(time.Until(expires.Add(500 * time.Millisecond)))
+
+	if got := lf.balance(t); got != 15000 {
+		t.Fatalf("ledger sum = %d, want 15000 (the sweep has not run)", got)
+	}
+	if got := lf.estimated(t); got != 3000 {
+		t.Errorf("estimated remaining = %d, want 3000; 13000 counts a grant the close will not draw on", got)
+	}
+	if got := lf.live(t).BalanceCents; got != 5000 {
+		t.Errorf("live balance_cents = %d, want 5000 (the credit that can still be spent)", got)
+	}
+
+	// The close draws the $20.00 from the unexpired grant only.
+	if n := lf.closeEveryPeriod(t); n != 1 {
+		t.Fatalf("cycle close produced %d invoices, want 1", n)
+	}
+	if got := lf.live(t).BalanceCents; got != 3000 {
+		t.Errorf("live balance_cents after the close = %d, want 3000 (what the estimate said)", got)
+	}
+	// The sweep then writes the expiry; the figure does not move.
+	if _, errs := lf.creditSvc.ExpireCredits(lf.ctx); len(errs) > 0 {
+		t.Fatalf("expire credits: %v", errs)
+	}
+	if got := lf.balance(t); got != 3000 {
+		t.Errorf("ledger sum after the sweep = %d, want 3000", got)
+	}
+	if got := lf.estimated(t); got != 3000 {
+		t.Errorf("estimated remaining after the sweep = %d, want 3000", got)
 	}
 }
 

@@ -44,6 +44,10 @@ type Store interface {
 	// amount would be negative.
 	AdjustAtomic(ctx context.Context, tenantID, customerID, description string, amountCents int64) (domain.CreditLedgerEntry, error)
 	GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error)
+	// GetSpendableBalance is the balance less what is left of grants already
+	// past their expiry at `at` that the expiry sweep has not written off:
+	// the amount a draw at that instant could use.
+	GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (int64, error)
 	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error)
 	// GetByCreditNoteSource fetches the grant row created by a specific
 	// credit-note Issue(). Used by GrantForCreditNote to recover from

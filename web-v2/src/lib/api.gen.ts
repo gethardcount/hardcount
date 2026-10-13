@@ -275,7 +275,7 @@ export interface paths {
                              * @description Projected METERED cost for the current period, in cents. Recurring base fees are not included — an in_advance base is already invoiced at period open.
                              */
                             projected_total_cents?: number;
-                            /** @description The customer's credit position. `balance_cents` is the ledger balance: credit is drawn down when an invoice is issued, so it does not move during a billing period. `unbilled_usage_cents` is the usage no invoice has billed yet, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` can differ from `projected_total_cents`: it leaves out usage a threshold invoice already billed and usage of a trialing subscription, and counts each subscription over its own period. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted, and totals in different currencies are added together. */
+                            /** @description The customer's credit position. `balance_cents` is the ledger balance, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` can differ from `projected_total_cents`: it leaves out usage a threshold invoice already billed and usage sent before a trial's first paid period, and counts each subscription over its own period. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted, and totals in different currencies are added together. */
                             credits?: {
                                 /** Format: int64 */
                                 balance_cents?: number;
@@ -4034,17 +4034,17 @@ export interface components {
             /** Format: int64 */
             total_used?: number;
         };
-        /** @description A customer's credit position right now. `balance_cents` is the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero. */
+        /** @description A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero. */
         CreditLiveBalance: {
             customer_id: string;
             /**
              * Format: int64
-             * @description Settled ledger balance. Can be negative.
+             * @description Settled ledger balance, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
              */
             balance_cents: number;
             /**
              * Format: int64
-             * @description Metered usage that the next invoice of each active subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. Trialing subscriptions are not counted.
+             * @description Metered usage that the next invoice of each subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
              */
             unbilled_usage_cents: number;
             /**

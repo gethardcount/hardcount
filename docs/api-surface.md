@@ -58,7 +58,7 @@ GET    /v1/billing/preview/{sub_id}     — invoice preview (dry run)
 POST   /v1/credit-notes                 — issue credit note (credit or refund)
 POST   /v1/credits/grant                — grant prepaid credits to a customer
 GET    /v1/credits/balance/{customer_id} — settled balance (moves when an invoice, grant, adjustment or expiry is written)
-GET    /v1/credits/balance/{customer_id}/live — settled balance less usage not yet invoiced; poll and cache it
+GET    /v1/credits/balance/{customer_id}/live — spendable balance (settled, without expired grants) less usage not yet invoiced; poll and cache it
 
 GET    /v1/dunning/runs                 — list dunning runs
 POST   /v1/webhook-endpoints/endpoints  — register an outbound webhook endpoint

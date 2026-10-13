@@ -106,8 +106,10 @@ type CreditBalance struct {
 }
 
 // CreditLiveBalance is a customer's credit position right now (issue #1019):
-// the settled ledger balance, the usage of the current period(s) that no
-// invoice has billed yet, and the difference, floored at zero. The parts are
+// the credit that can be spent (the settled ledger balance, without any grant
+// past its expiry that the sweep has not written off), the usage of the
+// current period(s) that no invoice has billed yet, and the difference,
+// floored at zero. The parts are
 // returned beside the result so a caller can see how far past zero a customer
 // is (BalanceCents - UnbilledUsageCents) and so the arithmetic on a page adds
 // up. Computed on read by billing.Engine.LiveCreditBalance; nothing is stored.

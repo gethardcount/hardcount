@@ -10,11 +10,13 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
-// CreditBalanceReader reads a customer's settled credit balance: the ledger
-// sum, which moves only when an invoice, grant, adjustment or expiry is
-// written. Implemented by *credit.Service.
+// CreditBalanceReader reads the credit a customer can spend right now: the
+// ledger sum, less what is left of any grant that is past its expiry but has
+// not been written off by the expiry sweep yet. A draw skips such a grant, so
+// counting it would promise credit no invoice can use. Implemented by
+// *credit.Service.
 type CreditBalanceReader interface {
-	GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error)
+	SpendableBalance(ctx context.Context, tenantID, customerID string) (int64, error)
 }
 
 // CustomerSubscriptionLister lists a customer's subscriptions, hydrated with
@@ -34,42 +36,44 @@ func (e *Engine) SetLiveBalanceReaders(credits CreditBalanceReader, subs Custome
 // computed (issue #1019). The secret-key read and the public cost dashboard
 // both call it, so the two can never disagree.
 //
-//	estimated remaining = max(settled balance - unbilled usage, 0)
+//	estimated remaining = max(spendable balance - unbilled usage, 0)
 //
 // Unbilled usage is what the period close would bill for usage if every
-// active subscription closed now: each subscription over its OWN current
-// period, with the same threshold-watermark clamp and tier continuation the
-// close applies (unbilledUsageCents). It lives in the engine because the
-// figure is only right while it prices usage the way the close does; the
-// earlier estimate in the usage package had drifted from the close in three
-// ways (no watermark, trials counted, one window for every subscription).
+// billable subscription closed now: each subscription over its OWN current
+// period, over the same per-meter windows, with the same threshold-watermark
+// clamp and tier continuation the close applies (unbilledUsageCents). It
+// lives in the engine because the figure is only right while it prices usage
+// the way the close does; the earlier estimate in the usage package had
+// drifted from the close in three ways (no watermark, trial usage counted,
+// one window for every subscription).
 //
 // Left out on purpose, so the figure can read HIGH: tax, base fees billed in
-// arrears (until the period closes), and amounts due on unpaid invoices.
-// It can read LOW for a subscription with a blocking usage cap, which the
-// close applies and this does not. Currencies are added as raw cents; the
-// ledger has no currency.
+// arrears (until the period closes), amounts due on unpaid invoices, and a
+// grant that will expire before the period closes (it is spendable now, but
+// will not be there for the close to draw on). It can read LOW for a
+// subscription with a blocking usage cap, which the close applies and this
+// does not. Currencies are added as raw cents; the ledger has no currency.
 //
 // The reads are separate transactions (balance, subscriptions, then per
-// subscription the watermark and per meter the aggregation). A threshold
-// fire or period close that commits between them can make one response
-// wrong: reading the balance before the invoice draws it and the usage after
-// the period moves reads high. Nothing is stored here, so the next read is
-// right again. A caller that stores the figure or acts on a crossing must
-// close that gap first.
+// subscription the watermark and intervals, and per meter the aggregation).
+// A threshold fire or period close that commits between them can make one
+// response wrong: reading the balance before the invoice draws it and the
+// usage after the period moves reads high. Nothing is stored here, so the
+// next read is right again. A caller that stores the figure or acts on a
+// crossing must close that gap first.
 //
-// Cost: one usage aggregation per meter per active subscription, each a scan
-// of that customer's events in the period. Callers poll and cache; this is
+// Cost: one usage aggregation per meter window per subscription, each a scan
+// of that customer's events in the window. Callers poll and cache; this is
 // not a per-request check.
 func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error) {
 	if e.creditBalances == nil || e.customerSubs == nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: readers not wired")
 	}
-	bal, err := e.creditBalances.GetBalance(ctx, tenantID, customerID)
+	balance, err := e.creditBalances.SpendableBalance(ctx, tenantID, customerID)
 	if err != nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: read balance: %w", err)
 	}
-	subs, err := e.activeSubscriptions(ctx, tenantID, customerID)
+	subs, err := e.billableSubscriptions(ctx, tenantID, customerID)
 	if err != nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: list subscriptions: %w", err)
 	}
@@ -85,51 +89,92 @@ func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID str
 	}
 	return domain.CreditLiveBalance{
 		CustomerID:              customerID,
-		BalanceCents:            bal.BalanceCents,
+		BalanceCents:            balance,
 		UnbilledUsageCents:      unbilled,
-		EstimatedRemainingCents: max(bal.BalanceCents-unbilled, 0),
+		EstimatedRemainingCents: max(balance-unbilled, 0),
 		ComputedAt:              e.clock.Now(ctx),
 	}, nil
 }
 
-// activeSubscriptions returns every ACTIVE subscription of the customer.
-// Trialing subscriptions are left out: the close advances a trial period
-// without an invoice (handleTrialState), so trial usage never draws credit.
-// It pages to the end because the list is capped per call, and a customer's
-// canceled history must not push an active subscription off the page.
-func (e *Engine) activeSubscriptions(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error) {
+// billableSubscriptions returns the customer's subscriptions whose stored
+// current period the close will bill: every active one, and a trialing one
+// unless its period closes without an invoice (trialPeriodBilled). It pages
+// to the end because the list is capped per call, and a customer's canceled
+// history must not push a live subscription off the page.
+func (e *Engine) billableSubscriptions(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error) {
 	const page = 100
 	var out []domain.Subscription
-	for offset := 0; ; offset += page {
-		subs, _, err := e.customerSubs.List(ctx, subscription.ListFilter{
-			TenantID:   tenantID,
-			CustomerID: customerID,
-			Status:     string(domain.SubscriptionActive),
-			Limit:      page,
-			Offset:     offset,
-		})
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, subs...)
-		if len(subs) < page {
-			return out, nil
+	for _, status := range []domain.SubscriptionStatus{domain.SubscriptionActive, domain.SubscriptionTrialing} {
+		for offset := 0; ; offset += page {
+			subs, _, err := e.customerSubs.List(ctx, subscription.ListFilter{
+				TenantID:   tenantID,
+				CustomerID: customerID,
+				Status:     string(status),
+				Limit:      page,
+				Offset:     offset,
+			})
+			if err != nil {
+				return nil, err
+			}
+			for _, sub := range subs {
+				if sub.Status == domain.SubscriptionTrialing && !trialPeriodBilled(sub) {
+					continue
+				}
+				out = append(out, sub)
+			}
+			if len(subs) < page {
+				break
+			}
 		}
 	}
+	return out, nil
+}
+
+// trialCancelsFree reports whether a trialing subscription has a cancel due
+// at trial end. The engine then cancels it without an invoice (ADR-069).
+func trialCancelsFree(sub domain.Subscription) bool {
+	return sub.CancelAtPeriodEnd || (sub.CancelAt != nil && sub.TrialEndAt != nil && !sub.CancelAt.After(*sub.TrialEndAt))
+}
+
+// trialPeriodBilled reports whether the close will bill a trialing
+// subscription's stored current period. The filter is the period, not the
+// status. The subscription service stamps the first PAID period on a trialing
+// row, starting at the beginning of the day the trial ends
+// (firstPeriodAfterTrial); conversion opens the items' billing intervals at
+// that period start, not at the flip, and the close bills usage from there.
+// So usage sent on the trial's last day is billed, and it is counted here
+// while the status still says trialing. Usage before the stored period start,
+// the trial proper, falls outside the window on its own.
+//
+// Two trialing periods close without an invoice (handleTrialState): one the
+// trial outlasts (the close only advances it), and one with a cancel due at
+// trial end.
+func trialPeriodBilled(sub domain.Subscription) bool {
+	if trialCancelsFree(sub) {
+		return false
+	}
+	if sub.TrialEndAt != nil && sub.CurrentBillingPeriodEnd != nil && sub.TrialEndAt.After(*sub.CurrentBillingPeriodEnd) {
+		return false
+	}
+	return true
 }
 
 // unbilledUsageCents is the usage amount the period close would bill for
 // this subscription's current period, given what a threshold invoice has
-// already billed (ADR-066 §4). It follows buildLineItems' two passes:
+// already billed (ADR-066 §4). It follows buildLineItems:
 //
-//   - No threshold invoice this period: every bucket over the whole period.
+//   - Each meter is counted over the windows a plan carrying it was on the
+//     subscription (meterUsageIntervals, the close's own builder). After a
+//     mid-period plan swap the outgoing plan's meter still counts up to the
+//     swap and the incoming plan's meter counts only from it.
+//   - No threshold invoice this period: every bucket over those windows.
 //   - A reset=false threshold invoice exists: it billed usage up to its
 //     billing_period_end, and credit already paid for it. Additive buckets
 //     (sum, count) count only from that instant on, priced continuing the
 //     tiers the invoice reached. Non-additive buckets (max, last) that the
-//     invoice left off still count over the WHOLE period, because the close
-//     bills them once, full-window. Clamping those would drop a peak that
-//     predates the invoice.
+//     invoice left off still count over the UNCLAMPED windows, because the
+//     close bills them once, full-window. Clamping those would drop a peak
+//     that predates the invoice.
 //
 // Usage is aggregated per customer and meter, with no subscription key, the
 // same as the close. Two subscriptions on one meter would each bill the same
@@ -137,9 +182,7 @@ func (e *Engine) activeSubscriptions(ctx context.Context, tenantID, customerID s
 // (rejectMeterOverlap); if such rows exist the estimate counts the usage
 // once per subscription, as the closes will.
 //
-// Not replicated from the close: the blocking usage cap, and a meter that a
-// mid-period plan change added or removed (the close bills it only for the
-// time it was on the subscription).
+// Not replicated from the close: the blocking usage cap.
 func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription) (int64, error) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return 0, nil
@@ -150,64 +193,94 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 	if err != nil {
 		return 0, err
 	}
-	clampedStart := periodStart
-	if wm.exists() && clampedStart.Before(*wm.billedThrough) {
-		clampedStart = *wm.billedThrough
-	}
-	ladder := newUsageLadder(wm, false)
 
-	var total int64
-	seen := map[string]struct{}{}
-	for _, it := range sub.Items {
-		plan, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
-		if err != nil {
-			return 0, fmt.Errorf("get plan %s: %w", it.PlanID, err)
+	plans := map[string]domain.Plan{}
+	loadPlan := func(planID string) error {
+		if _, ok := plans[planID]; ok || planID == "" {
+			return nil
 		}
-		for _, meterID := range plan.MeterIDs {
-			if _, ok := seen[meterID]; ok {
-				continue
-			}
-			seen[meterID] = struct{}{}
-
-			// Clamped pass: everything except buckets the fire deferred.
-			if periodEnd.After(clampedStart) {
-				price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
-					return ladder.price(rule, meterID, bucketKey, mode, qty)
+		plan, err := e.pricing.GetPlan(ctx, sub.TenantID, planID)
+		if err != nil {
+			return fmt.Errorf("get plan %s: %w", planID, err)
+		}
+		plans[planID] = plan
+		return nil
+	}
+	for _, it := range sub.Items {
+		if err := loadPlan(it.PlanID); err != nil {
+			return 0, err
+		}
+	}
+	// A trialing subscription has no billing intervals yet: conversion opens
+	// one per item at the stored period start. With no segments,
+	// meterUsageIntervals gives each current item the whole period, which is
+	// what those intervals will say.
+	var segsByItem map[string][]baseSegment
+	if sub.Status != domain.SubscriptionTrialing {
+		segsByItem, err = e.windowSegments(ctx, sub, periodStart, periodEnd)
+		if err != nil {
+			return 0, fmt.Errorf("resolve segments: %w", err)
+		}
+		for _, segs := range segsByItem {
+			for _, seg := range segs {
+				if err := loadPlan(seg.planID); err != nil {
+					return 0, err
 				}
-				lines, _, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, clampedStart, periodEnd, periodStart, price)
+			}
+		}
+	}
+	clamped, full := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough)
+	meterIDs := map[string]struct{}{}
+	for mid := range clamped {
+		meterIDs[mid] = struct{}{}
+	}
+	for mid := range full {
+		meterIDs[mid] = struct{}{}
+	}
+
+	ladder := newUsageLadder(wm, false)
+	var total int64
+	for meterID := range meterIDs {
+		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
+			return ladder.price(rule, meterID, bucketKey, mode, qty)
+		}
+		// sum adds the lines of one pass over the given windows: the clamped
+		// pass takes every bucket except those the fire deferred, the full
+		// pass only those. Rules are pinned at the period start (ADR-070).
+		sum := func(windows []usageInterval, deferred bool) error {
+			for _, iv := range mergeUsageIntervals(windows) {
+				lines, _, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
 				if err != nil {
-					return 0, fmt.Errorf("rate meter %s: %w", meterID, err)
+					return fmt.Errorf("rate meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
 				}
 				for _, l := range lines {
-					if !wm.deferredBucket(l.AggregationMode, meterID, l.RatingRuleVersionID) {
+					if wm.deferredBucket(l.AggregationMode, meterID, l.RatingRuleVersionID) == deferred {
 						total += l.AmountCents
 					}
 				}
 			}
+			return nil
+		}
+		if err := sum(clamped[meterID], false); err != nil {
+			return 0, err
+		}
 
-			// Full-window pass: only the buckets the fire deferred. Skipped
-			// for a meter that cannot have one, so that after a fire a
-			// sum-only meter costs one aggregation over the short post-fire
-			// window instead of a second one over the whole period.
-			if !wm.exists() {
-				continue
-			}
-			nonAdditive, err := e.meterHasNonAdditiveBucket(ctx, sub.TenantID, meterID)
-			if err != nil {
-				return 0, err
-			}
-			if !nonAdditive {
-				continue
-			}
-			lines, _, err := e.previewMeter(ctx, sub.TenantID, sub.CustomerID, meterID, periodStart, periodEnd)
-			if err != nil {
-				return 0, fmt.Errorf("rate meter %s over the full period: %w", meterID, err)
-			}
-			for _, l := range lines {
-				if wm.deferredBucket(l.AggregationMode, meterID, l.RatingRuleVersionID) {
-					total += l.AmountCents
-				}
-			}
+		// Full-window pass. Skipped for a meter that cannot have a deferred
+		// bucket, so that after a fire a sum-only meter costs one aggregation
+		// over the short post-fire window instead of a second one over the
+		// whole period.
+		if !wm.exists() {
+			continue
+		}
+		nonAdditive, err := e.meterHasNonAdditiveBucket(ctx, sub.TenantID, meterID)
+		if err != nil {
+			return 0, err
+		}
+		if !nonAdditive {
+			continue
+		}
+		if err := sum(full[meterID], true); err != nil {
+			return 0, err
 		}
 	}
 	return total, nil

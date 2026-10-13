@@ -668,6 +668,15 @@ func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (
 	return s.store.GetBalance(ctx, tenantID, customerID)
 }
 
+// SpendableBalance is the credit a draw could use right now: the ledger
+// balance less any grant past its expiry that the sweep has not written off
+// yet. "Now" is the customer's own clock (the frozen time of a test clock the
+// customer is pinned to), the same instant a draw would judge expiry at.
+func (s *Service) SpendableBalance(ctx context.Context, tenantID, customerID string) (int64, error) {
+	ctx = s.bindForCustomer(ctx, tenantID, customerID)
+	return s.store.GetSpendableBalance(ctx, tenantID, customerID, clock.Now(ctx))
+}
+
 // SetLiveBalanceReader wires the live figure behind LiveBalance.
 func (s *Service) SetLiveBalanceReader(r LiveBalanceReader) { s.live = r }
 
