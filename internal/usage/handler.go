@@ -158,6 +158,13 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, ca
 	if !ok {
 		cust, err := h.customers.GetByExternalID(ctx, tenantID, extCust)
 		if err != nil {
+			// Both lookup stores return errs.ErrNotFound only on
+			// sql.ErrNoRows. Any other error means the store gave no answer,
+			// and calling that "not found" tells the client to stop retrying
+			// usage that was never recorded.
+			if !errors.Is(err, errs.ErrNotFound) {
+				return IngestInput{}, fmt.Errorf("%w: customer lookup: %w", errIngestUnavailable, err)
+			}
 			return IngestInput{}, errs.Invalid("external_customer_id", fmt.Sprintf("customer %q not found", extCust))
 		}
 		custID = cust.ID
@@ -168,6 +175,9 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, ca
 	if !ok {
 		meter, err := h.meters.GetMeterByKey(ctx, tenantID, eventName)
 		if err != nil {
+			if !errors.Is(err, errs.ErrNotFound) {
+				return IngestInput{}, fmt.Errorf("%w: meter lookup: %w", errIngestUnavailable, err)
+			}
 			return IngestInput{}, errs.Invalid("event_name", fmt.Sprintf("meter %q not found", eventName))
 		}
 		meterID = meter.ID
@@ -222,6 +232,10 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 
 	input, err := h.resolve(r.Context(), tenantID, evt, nil)
 	if err != nil {
+		if errors.Is(err, errIngestUnavailable) {
+			respondIngestUnavailable(w, r, tenantID, err)
+			return
+		}
 		respond.FromError(w, r, err, "usage_event")
 		return
 	}
@@ -233,6 +247,24 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusCreated, event)
+}
+
+// errIngestUnavailable marks a NON-verdict from resolve: a customer or meter
+// lookup the store could not answer (failover, a lost pool, a cancelled
+// request). The three ingest doors answer it with 503 so the client retries,
+// the same contract as the LiteLLM door. Never returned to the caller as text.
+var errIngestUnavailable = errors.New("usage: lookup store unavailable")
+
+// respondIngestUnavailable writes the 503 for errIngestUnavailable. The raw
+// error is logged, never sent to the caller (ADR-026). "Nothing was recorded"
+// holds at every door because resolve runs before any write.
+func respondIngestUnavailable(w http.ResponseWriter, r *http.Request, tenantID string, err error) {
+	slog.ErrorContext(r.Context(), "usage ingest: lookup store unavailable — request refused for client retry",
+		"tenant_id", tenantID,
+		"error", err,
+	)
+	respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "ingest_unavailable",
+		"usage store temporarily unavailable — nothing was recorded; retry the request")
 }
 
 // respondIngestError translates ingest failures, treating an idempotency
@@ -278,6 +310,10 @@ func (h *Handler) backfill(w http.ResponseWriter, r *http.Request) {
 
 	input, err := h.resolve(r.Context(), tenantID, evt, nil)
 	if err != nil {
+		if errors.Is(err, errIngestUnavailable) {
+			respondIngestUnavailable(w, r, tenantID, err)
+			return
+		}
 		respond.FromError(w, r, err, "usage_event")
 		return
 	}
@@ -462,6 +498,13 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	for i, evt := range events {
 		input, err := h.resolve(r.Context(), tenantID, evt, cache)
 		if err != nil {
+			// A store that cannot answer is not a verdict on this event, so
+			// it must not join errors[] as one. Refuse the whole batch now:
+			// the remaining events would each wait on the same failing store.
+			if errors.Is(err, errIngestUnavailable) {
+				respondIngestUnavailable(w, r, tenantID, err)
+				return
+			}
 			resolveErrs = append(resolveErrs, fmt.Sprintf("event[%d]: %s", i, err.Error()))
 			continue
 		}
