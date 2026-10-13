@@ -151,7 +151,9 @@ were already delivered, you'll get duplicate deliveries. Mitigation:
 -- Optionally mark all pending outbox rows as dispatched if you're
 -- confident downstream consumers are idempotent and you want to
 -- skip the re-fire. Document this in the restore log.
-UPDATE email_outbox SET status = 'dispatched', dispatched_at = now() WHERE status = 'pending';
+UPDATE email_outbox SET status = 'dispatched', dispatched_at = now(),
+  payload = payload - '{setup_url,update_url,password_reset_url,invite_url,public_token,pdf}'::text[]
+  WHERE status = 'pending';
 UPDATE webhook_outbox SET status = 'dispatched', dispatched_at = now() WHERE status = 'pending';
 ```
 
