@@ -1369,3 +1369,41 @@ func TestOperatorCreditNote_UnpinnedStaysWallClock(t *testing.T) {
 		t.Errorf("created_at = %s, want wall-clock (>= %s) on a non-simulated invoice", cn.CreatedAt, before)
 	}
 }
+
+// A credit-note line may name the invoice line it credits. The column has no
+// foreign key, so the service must refuse an id that is not a line of the
+// named invoice; otherwise any string, including another tenant's line id, is
+// stored as given.
+func TestCreate_LineMustBelongToTheInvoice(t *testing.T) {
+	ctx := context.Background()
+	inv := domain.Invoice{
+		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
+		Status: domain.InvoiceFinalized, Currency: "USD",
+		TotalAmountCents: 10000, AmountDueCents: 10000,
+	}
+	newSvc := func() *Service {
+		s := NewService(newMemStore(), &memInvoiceReader{
+			invoices:  map[string]domain.Invoice{inv.ID: inv},
+			lineItems: map[string][]domain.InvoiceLineItem{inv.ID: {{ID: "ili_own", InvoiceID: inv.ID}}},
+		}, nil)
+		s.SetNumberGenerator(&fakeCNNumbers{})
+		return s
+	}
+	mk := func(lineID string) CreateInput {
+		return CreateInput{InvoiceID: inv.ID, Reason: "billing error", Lines: []CreditLineInput{
+			{InvoiceLineItemID: lineID, Description: "adj", Quantity: 1, UnitAmountCents: 1000},
+		}}
+	}
+
+	if _, err := newSvc().Create(ctx, "t1", mk("ili_someone_elses")); err == nil {
+		t.Fatal("a line id that is not on this invoice was accepted")
+	} else if !strings.Contains(err.Error(), "not a line of this invoice") {
+		t.Fatalf("got %v, want the line refused as not on this invoice", err)
+	}
+	if _, err := newSvc().Create(ctx, "t1", mk("ili_own")); err != nil {
+		t.Fatalf("the invoice's own line was refused: %v", err)
+	}
+	if _, err := newSvc().Create(ctx, "t1", mk("")); err != nil {
+		t.Fatalf("a line with no invoice line id was refused: %v", err)
+	}
+}

@@ -367,6 +367,29 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 		lineAmounts[i] = amount
 	}
 
+	// A line may name the invoice line it credits. The column has no foreign
+	// key, so the id is checked here: it must be a line of the named invoice,
+	// read on the caller's tenant and mode.
+	var ownLines map[string]bool
+	for i, line := range input.Lines {
+		if line.InvoiceLineItemID == "" {
+			continue
+		}
+		if ownLines == nil {
+			invLines, err := s.invoices.ListLineItems(ctx, tenantID, input.InvoiceID)
+			if err != nil {
+				return domain.CreditNote{}, fmt.Errorf("list invoice line items: %w", err)
+			}
+			ownLines = make(map[string]bool, len(invLines))
+			for _, li := range invLines {
+				ownLines[li.ID] = true
+			}
+		}
+		if !ownLines[line.InvoiceLineItemID] {
+			return domain.CreditNote{}, errs.Invalid(fmt.Sprintf("lines[%d].invoice_line_item_id", i), "not a line of this invoice")
+		}
+	}
+
 	// Line rows are built up front and committed in the SAME transaction as
 	// the header (CreateUnderInvoiceLock) — pre-fix they were inserted one by
 	// one after the header committed, so a partial failure left an orphan
