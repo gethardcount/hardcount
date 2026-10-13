@@ -330,7 +330,7 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 		}
 	}
 
-	// 0.5 Billing thresholds — Stripe-parity hard-cap scan. Runs before the
+	// 0.5 Billing thresholds — early-invoice scan. Runs before the
 	// natural cycle so a threshold-fired invoice and (when reset_billing_cycle
 	// is true) the cycle advance both land on this tick. The partial unique
 	// index on invoices(tenant, sub, billing_period_start) WHERE

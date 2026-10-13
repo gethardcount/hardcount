@@ -903,7 +903,7 @@ export default function SubscriptionDetailPage() {
           <div className="space-y-1">
             <CardTitle className="text-sm">Spend thresholds</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Stripe-parity hard cap. Fires an early invoice the moment the running cycle subtotal or any item's running quantity crosses a configured cap.
+              Issues an invoice early when this period's running total, or an item's usage, reaches a set level. Checked by the hourly billing run. Usage is not stopped.
             </p>
           </div>
           {sub.status !== 'canceled' && sub.status !== 'archived' && (
@@ -1863,7 +1863,7 @@ function RemoveItemConfirm({ subscriptionID, item, plan, onClose, onRemoved }: {
   )
 }
 
-// EditBillingThresholdsDialog sets or clears the Stripe-parity hard cap. The
+// EditBillingThresholdsDialog sets or clears the billing thresholds. The
 // PUT body is replace-all: any per-item row not in the submitted list is
 // deleted by the store, so we always send the full set the operator sees.
 // amount_gte is captured in major units in the input and converted to integer
@@ -1953,7 +1953,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
         <DialogHeader>
           <DialogTitle>{existing ? 'Edit spend thresholds' : 'Set spend thresholds'}</DialogTitle>
           <DialogDescription>
-            Configure a hard cap. The billing engine fires an early invoice the moment the running cycle subtotal or any item's running quantity crosses a configured cap. At least one cap is required.
+            When this period's running total, or an item's usage, reaches a level you set, an invoice is issued early at the next hourly billing run. Usage is not stopped. Set at least one level.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-5">

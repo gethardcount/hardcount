@@ -382,7 +382,7 @@ export const api = {
     apiRequest<Subscription>('PUT', `/subscriptions/${id}/pause-collection`, body),
   resumeSubscriptionCollection: (id: string) =>
     apiRequest<Subscription>('DELETE', `/subscriptions/${id}/pause-collection`),
-  // Billing thresholds — Stripe-parity hard-cap config. PUT is replace-all
+  // Billing thresholds — early-invoice (billing threshold) config. PUT is replace-all
   // (omitted item_thresholds rows are deleted by the backend store);
   // DELETE removes the configuration entirely. The body must contain at
   // least one of amount_gte or item_thresholds[] — a body with neither is
@@ -684,7 +684,7 @@ export interface SubscriptionItemThreshold {
   usage_gte: string
 }
 
-// BillingThresholds is the Stripe-parity hard-cap config attached to a
+// BillingThresholds is the early-invoice (billing threshold) config attached to a
 // subscription. Either amount_gte alone, item_thresholds[] alone, or both.
 // item_thresholds is always-array (the dashboard's .map() works in all
 // cases). amount_gte is integer cents in the subscription's currency;
@@ -781,7 +781,7 @@ export interface Subscription {
     behavior: 'keep_as_draft'
     resumes_at?: string
   }
-  // billing_thresholds is the Stripe-parity hard-cap config. Nil/missing
+  // billing_thresholds is the early-invoice (billing threshold) config. Nil/missing
   // means no cap is configured. When the running cycle subtotal crosses
   // amount_gte, or any item's running quantity crosses its usage_gte, the
   // billing engine fires an early finalize.

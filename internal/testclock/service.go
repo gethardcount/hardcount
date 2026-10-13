@@ -65,7 +65,7 @@ type BillingRunner interface {
 	// THIS advance, not on a future wall-clock tick. ADR-029 Phase 1.
 	RetryPendingChargesForClock(ctx context.Context, tenantID, clockID string, limit int) (int, []error)
 
-	// ScanThresholdsForClock fires hard-cap (Stripe-parity billing-
+	// ScanThresholdsForClock fires early-invoice (Stripe-parity billing-
 	// thresholds) invoices for clock-pinned subs whose running cycle
 	// subtotal has crossed a configured threshold. Runs during catchup
 	// after period generation; without it, the wall-clock cron would
@@ -621,7 +621,7 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 		sum.InvoicesGenerated = periodCount
 		runErrs = append(runErrs, periodErrs...)
 
-		// Phase 1.5 (ADR-029 Phase 3): threshold scan for hard-cap
+		// Phase 1.5 (ADR-029 Phase 3): threshold scan for early-invoice
 		// invoices. Runs after period generation (so the latest
 		// running cycle is the one being evaluated) but before tax
 		// retry / charge so any threshold-fired invoices get the

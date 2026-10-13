@@ -35,7 +35,7 @@ Everything below ships in the one MIT edition. For the cases Velox does not cove
 - **Subscriptions**: trial state machine with atomic flips · pause-collection · scheduled cancellation · plan changes with proration (you're only charged for the part of the period each price was active).
 - **Pricing & discounts**: per-customer price overrides · prepaid credit ledger drawn against usage. Coupons were deliberately cut, because AI-native peers converge on credits, not promo codes ([ADR-039](adr/)).
 - **Invoicing & collection**: PDF invoices · hosted invoice page with secure tokens · branded emails · dunning with a circuit breaker · invoice preview (subtotal only: no tax or credits).
-- **Spend controls**: hard-cap thresholds (on spend or on usage quantity) that can finalize an invoice mid-cycle.
+- **Billing thresholds**: set a level on spend or on usage quantity, and Velox issues an invoice early when the period's running total reaches it. It fires once per period and is checked by the hourly billing run. It bills earlier; it does not stop usage.
 - **Credits & refunds**: event-sourced credit ledger · credit notes (the formal "we owe you" document) with refunds.
 - **Reliability & observability**:
   - Idempotency keys: retrying a request can never double-charge.

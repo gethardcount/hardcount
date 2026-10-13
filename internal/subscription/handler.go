@@ -438,7 +438,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/{id}/extend-trial", h.extendTrial)
 	r.Post("/{id}/retry-billing", h.retryBilling)
 
-	// Billing thresholds — Stripe-parity hard-cap config. PUT writes the full
+	// Billing thresholds — early-invoice (billing threshold) config. PUT writes the full
 	// (amount, reset, items) triple; DELETE clears it. Idempotent.
 	r.Put("/{id}/billing-thresholds", h.setBillingThresholds)
 	r.Delete("/{id}/billing-thresholds", h.clearBillingThresholds)
@@ -803,7 +803,7 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 	h.respondSub(w, r, http.StatusOK, sub)
 }
 
-// setBillingThresholds writes the Stripe-parity hard-cap config onto a
+// setBillingThresholds writes the early-invoice (billing threshold) config onto a
 // subscription. Body shape:
 //
 //	{

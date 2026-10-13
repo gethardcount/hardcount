@@ -337,7 +337,8 @@ type SubscriptionItemThreshold struct {
 	UsageGTE           decimal.Decimal `json:"usage_gte"`
 }
 
-// BillingThresholds is the Stripe-parity hard-cap configuration. Two
+// BillingThresholds is the early-invoice configuration (Stripe's billing
+// thresholds). It bills sooner; it does not cap or stop usage. Two
 // independent threshold types:
 //
 //   - AmountGTE: the running cycle subtotal (cents) at which the engine
@@ -351,8 +352,8 @@ type SubscriptionItemThreshold struct {
 // Either alone or both. First to fire wins.
 //
 // ResetBillingCycle controls whether the cycle resets after fire. When
-// true (default), the new cycle starts at fire time and the next bill
-// is the natural cycle invoice for the new cycle. When false, the
+// true, the new cycle starts at fire time and the next bill
+// is the natural cycle invoice for the new cycle. When false (the default), the
 // original cycle continues and a second invoice fires at the natural
 // cycle end with whatever residual usage accumulated.
 type BillingThresholds struct {
@@ -456,7 +457,7 @@ type Subscription struct {
 	// Status=paused, which is the hard freeze (sub excluded from
 	// GetDueBilling entirely). Nil means collection is running normally.
 	PauseCollection *PauseCollection `json:"pause_collection,omitempty"`
-	// BillingThresholds holds the Stripe-parity hard-cap config. When
+	// BillingThresholds holds the early-invoice (billing threshold) config. When
 	// non-nil, the threshold scan tick computes the in-cycle running
 	// totals and fires an early finalize once any configured cap is
 	// crossed. Nil means no threshold; the cycle scan is the only

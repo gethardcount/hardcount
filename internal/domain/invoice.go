@@ -30,7 +30,7 @@ const (
 // SubscriptionCycle is the natural-cycle end invoice the cycle scan
 // emits at period boundaries. SubscriptionCreate is the prorated
 // initial invoice when a subscription starts mid-cycle. Manual is an
-// operator-initiated standalone invoice. Threshold is the hard-cap
+// operator-initiated standalone invoice. Threshold is the early-invoice
 // early finalize fired by the threshold scan tick.
 type InvoiceBillingReason string
 

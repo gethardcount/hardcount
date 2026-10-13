@@ -69,7 +69,7 @@ type AdvanceSummary struct {
 	// PausesResumed is the number of paused subscriptions whose scheduled
 	// resume time elapsed and auto-resumed (Phase 0.7).
 	PausesResumed int `json:"pauses_resumed"`
-	// ThresholdsFired is the number of hard-cap billing-threshold invoices
+	// ThresholdsFired is the number of billing-threshold invoices
 	// issued this advance (Phase 1.5).
 	ThresholdsFired int `json:"thresholds_fired"`
 	// TaxRetried is the number of tax-pending invoices whose tax retry ran
