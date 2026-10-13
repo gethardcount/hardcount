@@ -207,6 +207,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// the plan. UpdatePlan needs to count live subs; subStore implements
 	// the narrow CountLiveSubsByPlan query.
 	pricingSvc.SetSubscriptionPlanUsageReader(subStore)
+	pricingSvc.SetCustomerReader(customerStore)
 	customerSvc := customer.NewService(customerStore)
 	customerSvc.SetStripeSyncer(payment.NewStripeBillingSync(stripeClients), customerStore)
 	customerH := customer.NewHandler(customerSvc)
@@ -712,6 +713,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// exists; before this point customer creation always rejects
 	// test_clock_id (defensive default).
 	customerSvc.SetTestClockChecker(testClockStore)
+	customerSvc.SetDunningPolicyReader(dunningStore)
 	// Archive/currency guard (ADR-067): customer.Update refuses to archive
 	// while any subscription still bills, and UpsertBillingProfile refuses a
 	// currency that would re-denominate an active sub's plan prices. The

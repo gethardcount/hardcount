@@ -121,7 +121,20 @@ type Service struct {
 	resolver      clock.Resolver
 	subChecker    SubscriptionChecker
 	auditLogger   AuditEmitter
+	dunningPolicy DunningPolicyReader
 }
+
+// DunningPolicyReader fetches a dunning policy by id on a tenant- and
+// mode-scoped transaction. Implemented by *dunning.PostgresStore, wired in
+// router.go.
+type DunningPolicyReader interface {
+	GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error)
+}
+
+// SetDunningPolicyReader wires the policy read Update runs before assigning a
+// customer to a dunning policy. When unwired (narrow unit tests) the read is
+// skipped.
+func (s *Service) SetDunningPolicyReader(r DunningPolicyReader) { s.dunningPolicy = r }
 
 func NewService(store Store) *Service {
 	return &Service{store: store}
@@ -491,7 +504,20 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 		existing.Status = status
 	}
 	if input.DunningPolicyID != nil {
-		existing.DunningPolicyID = strings.TrimSpace(*input.DunningPolicyID)
+		policyID := strings.TrimSpace(*input.DunningPolicyID)
+		// An empty id clears the assignment. A set one must be a policy in
+		// the caller's tenant and mode: the foreign key is on the id alone
+		// and foreign-key checks do not apply row-level security, so the
+		// update would accept another tenant's or the other mode's policy.
+		if policyID != "" && s.dunningPolicy != nil {
+			if _, err := s.dunningPolicy.GetPolicyByID(ctx, tenantID, policyID); err != nil {
+				if errors.Is(err, errs.ErrNotFound) {
+					return domain.Customer{}, errs.NotFound("dunning policy")
+				}
+				return domain.Customer{}, fmt.Errorf("get dunning policy: %w", err)
+			}
+		}
+		existing.DunningPolicyID = policyID
 	}
 	if input.AdditionalEmails != nil {
 		cc, err := normalizeAdditionalEmails(*input.AdditionalEmails, existing.Email)
@@ -598,6 +624,16 @@ func deriveProfileStatus(bp domain.CustomerBillingProfile) domain.BillingProfile
 func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp domain.CustomerBillingProfile) (domain.CustomerBillingProfile, error) {
 	if bp.CustomerID == "" {
 		return domain.CustomerBillingProfile{}, errs.Required("customer_id")
+	}
+	// The customer must be the caller's. The foreign key on customer_id is on
+	// the id alone and foreign-key checks do not apply row-level security, so
+	// without this read the upsert accepts any existing customer id,
+	// including another tenant's or the other mode's.
+	if _, err := s.store.Get(ctx, tenantID, bp.CustomerID); err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return domain.CustomerBillingProfile{}, errs.NotFound("customer")
+		}
+		return domain.CustomerBillingProfile{}, fmt.Errorf("get customer: %w", err)
 	}
 	ctx = s.bindForCustomer(ctx, tenantID, bp.CustomerID)
 	if phone := strings.TrimSpace(bp.Phone); phone != "" {

@@ -39,10 +39,17 @@ type SubscriptionPlanUsageReader interface {
 	CountLiveSubsByPlan(ctx context.Context, tenantID, planID string) (int, error)
 }
 
+// CustomerReader fetches a customer by id on a tenant- and mode-scoped
+// transaction. Implemented by *customer.PostgresStore, wired in router.go.
+type CustomerReader interface {
+	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
+}
+
 type Service struct {
 	store        Store
 	subPlanUsage SubscriptionPlanUsageReader
 	auditLogger  AuditEmitter
+	customers    CustomerReader
 }
 
 func NewService(store Store) *Service {
@@ -55,6 +62,10 @@ func NewService(store Store) *Service {
 // narrow unit tests fake-friendly. The handler's remaining post-hoc
 // AuditWriter (plan/meter create, rule upsert, override) is a separate seam.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.auditLogger = a }
+
+// SetCustomerReader wires the customer read CreateOverride runs before
+// writing. When unwired (narrow unit tests) the read is skipped.
+func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
 
 // SetSubscriptionPlanUsageReader wires the live-sub counter used by
 // UpdatePlan to gate billing-affecting field mutations. Optional —
@@ -304,6 +315,19 @@ func (s *Service) CreateMeter(ctx context.Context, tenantID string, input Create
 	}
 	if agg != "sum" && agg != "count" && agg != "max" && agg != "last" {
 		return domain.Meter{}, errs.Invalid("aggregation", "must be one of: sum, count, max, last")
+	}
+
+	// The default binding must be a rating rule in the caller's tenant and
+	// mode, as UpdateMeter already requires. The foreign key is on the id
+	// alone and foreign-key checks do not apply row-level security, so the
+	// insert would accept another tenant's or the other mode's rule.
+	if rid := strings.TrimSpace(input.RatingRuleVersionID); rid != "" {
+		if _, err := s.store.GetRatingRule(ctx, tenantID, rid); err != nil {
+			if errors.Is(err, errs.ErrNotFound) {
+				return domain.Meter{}, errs.Invalid("rating_rule_version_id", "rating rule not found")
+			}
+			return domain.Meter{}, fmt.Errorf("get rating rule: %w", err)
+		}
 	}
 
 	return s.store.CreateMeter(ctx, tenantID, domain.Meter{

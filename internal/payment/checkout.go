@@ -114,15 +114,20 @@ func (h *CheckoutHandler) createSetupSession(w http.ResponseWriter, r *http.Requ
 	// Check if customer already has a Stripe customer ID
 	// A read error is not "no Stripe customer": creating one would re-map the
 	// customer and strand their saved card on the old Stripe customer.
-	var stripeCustomerID string
+	//
+	// Not-found means the customer is not in the caller's tenant and mode
+	// (this read is scoped to both). Stop here, before a Stripe customer is
+	// created for an id the caller does not own.
 	existing, err := h.store.GetPaymentSetup(r.Context(), tenantID, req.CustomerID)
-	if err != nil && !errors.Is(err, errs.ErrNotFound) {
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.FromError(w, r, errs.NotFound("customer"), "customer")
+		return
+	}
+	if err != nil {
 		respond.FromError(w, r, err, "payment_setup")
 		return
 	}
-	if err == nil {
-		stripeCustomerID = existing.StripeCustomerID
-	}
+	stripeCustomerID := existing.StripeCustomerID
 
 	// Create or update Stripe customer
 	if stripeCustomerID == "" {

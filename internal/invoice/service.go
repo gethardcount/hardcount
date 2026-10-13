@@ -351,8 +351,9 @@ func (s *Service) SetDunningRunReader(r DunningRunReader) {
 }
 
 // SubscriptionPauseReader is the narrow subscription lookup the tax-retry
-// auto-finalize gate uses to honour `pause_collection`. Satisfied by
-// *subscription.PostgresStore.
+// auto-finalize gate uses to honour `pause_collection`, and that Create uses
+// to confirm an operator-supplied subscription id is the caller's. The read
+// is tenant- and mode-scoped. Satisfied by *subscription.PostgresStore.
 type SubscriptionPauseReader interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 }
@@ -443,10 +444,34 @@ func (s *Service) customerOnTestClock(ctx context.Context, tenantID, customerID 
 		return false, nil
 	}
 	cust, err := s.customerReader.Get(ctx, tenantID, customerID)
+	if errors.Is(err, errs.ErrNotFound) {
+		// This read runs in the caller's tenant and mode. The foreign key on
+		// invoices.customer_id is on the id alone and foreign-key checks do
+		// not apply row-level security, so the insert would accept another
+		// tenant's or the other mode's customer.
+		return false, errs.NotFound("customer")
+	}
 	if err != nil {
 		return false, fmt.Errorf("read customer test-clock pin: %w", err)
 	}
 	return cust.TestClockID != "", nil
+}
+
+// requireSubscription confirms an operator-supplied subscription id exists in
+// the caller's tenant and mode. Same reason as the customer read above: the
+// foreign key on invoices.subscription_id is on the id alone. Unwired reader
+// (narrow unit tests) skips the read.
+func (s *Service) requireSubscription(ctx context.Context, tenantID, subscriptionID string) error {
+	if s.subPauseReader == nil || subscriptionID == "" {
+		return nil
+	}
+	if _, err := s.subPauseReader.Get(ctx, tenantID, subscriptionID); err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return errs.NotFound("subscription")
+		}
+		return fmt.Errorf("get subscription: %w", err)
+	}
+	return nil
 }
 
 // SetStripeChecker wires the per-tenant Stripe-connected probe used
@@ -484,6 +509,16 @@ type CreateInput struct {
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Invoice, error) {
 	if input.CustomerID == "" {
 		return domain.Invoice{}, errs.Required("customer_id")
+	}
+	// Both references are read in the caller's tenant and mode before
+	// anything is written, including the invoice number: a refused request
+	// must not use one up.
+	onClock, err := s.customerOnTestClock(ctx, tenantID, input.CustomerID)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if err := s.requireSubscription(ctx, tenantID, input.SubscriptionID); err != nil {
+		return domain.Invoice{}, err
 	}
 	// SubscriptionID is OPTIONAL: cycle invoices carry a subscription, one-off
 	// invoices (operator composer, ad-hoc charges) do not. The DB column is
@@ -553,10 +588,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	issuedAt := now
 	dueAt := now.AddDate(0, 0, netDays)
 
-	onClock, err := s.customerOnTestClock(ctx, tenantID, input.CustomerID)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
 	inv := domain.Invoice{
 		CustomerID:         input.CustomerID,
 		SubscriptionID:     input.SubscriptionID,

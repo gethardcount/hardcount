@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -261,6 +262,19 @@ func (s *Service) CreateOverride(ctx context.Context, tenantID string, input Cre
 	}
 	if strings.TrimSpace(input.RatingRuleVersionID) == "" {
 		return domain.CustomerPriceOverride{}, errs.Required("rating_rule_version_id")
+	}
+
+	// The customer must be the caller's. The foreign key on customer_id is on
+	// the id alone and foreign-key checks do not apply row-level security, so
+	// without this read the insert accepts any existing customer id,
+	// including another tenant's or the other mode's.
+	if s.customers != nil {
+		if _, err := s.customers.Get(ctx, tenantID, input.CustomerID); err != nil {
+			if errors.Is(err, errs.ErrNotFound) {
+				return domain.CustomerPriceOverride{}, errs.NotFound("customer")
+			}
+			return domain.CustomerPriceOverride{}, fmt.Errorf("get customer: %w", err)
+		}
 	}
 
 	// Resolve the referenced rule IN-TENANT (RLS scopes the read): a

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -38,13 +39,29 @@ func (h *Handler) Routes() chi.Router {
 func (h *Handler) grant(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var input GrantInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	// The request carries only the documented fields. GrantInput also has
+	// invoice and source_* ids the engine sets on its own grants; decoding the
+	// body straight into it let a caller stamp those onto a ledger row
+	// unchecked, including ids from another tenant or the other mode.
+	var req struct {
+		CustomerID  string           `json:"customer_id"`
+		AmountCents int64            `json:"amount_cents"`
+		Description string           `json:"description"`
+		ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
+		GrantKind   domain.GrantKind `json:"grant_kind,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
 	}
 
-	entry, err := h.svc.Grant(r.Context(), tenantID, input)
+	entry, err := h.svc.Grant(r.Context(), tenantID, GrantInput{
+		CustomerID:  req.CustomerID,
+		AmountCents: req.AmountCents,
+		Description: req.Description,
+		ExpiresAt:   req.ExpiresAt,
+		GrantKind:   req.GrantKind,
+	})
 	if err != nil {
 		respond.FromError(w, r, err, "credit")
 		return
