@@ -3,37 +3,21 @@ package middleware
 import (
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
+
+	"github.com/sagarsuperuser/velox/internal/config"
 )
 
 // ParseTrustedProxies parses a comma-separated TRUST_PROXY spec of CIDRs and/or
 // bare IPs into networks. A bare IP becomes a /32 (IPv4) or /128 (IPv6).
-// Blank/invalid entries are skipped. Empty input yields an empty slice, which
-// means "trust no proxy" — forwarding headers are then never honored.
+// Empty input or "none" yields an empty slice, which means "trust no proxy" —
+// forwarding headers are then never honored.
+//
+// It uses config.ParseTrustProxy, the parser behind the boot check, which
+// refuses to start on an entry that does not parse. An invalid entry is
+// skipped here only for a caller that did not go through config.Load.
 func ParseTrustedProxies(spec string) []*net.IPNet {
-	if strings.EqualFold(strings.TrimSpace(spec), "none") {
-		return nil // explicit "no proxy in front" — trust nothing, no warning
-	}
-	var nets []*net.IPNet
-	for _, raw := range strings.Split(spec, ",") {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-		if !strings.Contains(raw, "/") {
-			if ip := net.ParseIP(raw); ip != nil {
-				bits := 32
-				if ip.To4() == nil {
-					bits = 128
-				}
-				raw += "/" + strconv.Itoa(bits)
-			}
-		}
-		if _, n, err := net.ParseCIDR(raw); err == nil {
-			nets = append(nets, n)
-		}
-	}
+	nets, _ := config.ParseTrustProxy(spec)
 	return nets
 }
 

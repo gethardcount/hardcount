@@ -71,20 +71,17 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	db, err := loadDBConfig(dbURL)
+	if err != nil {
+		return Config{}, err
+	}
+	db.AppURL = strings.TrimSpace(os.Getenv("APP_DATABASE_URL"))
+
 	cfg := Config{
-		Port:    envOr("PORT", "8080"),
-		Env:     env,
-		Migrate: boolEnv("RUN_MIGRATIONS_ON_BOOT", false),
-		DB: DBConfig{
-			URL:             dbURL,
-			AppURL:          strings.TrimSpace(os.Getenv("APP_DATABASE_URL")),
-			MaxOpenConns:    intEnv("DB_MAX_OPEN_CONNS", 20),
-			MaxIdleConns:    intEnv("DB_MAX_IDLE_CONNS", 5),
-			ConnMaxLifetime: time.Duration(intEnv("DB_CONN_MAX_LIFETIME_MIN", 30)) * time.Minute,
-			ConnMaxIdleTime: time.Duration(intEnv("DB_CONN_MAX_IDLE_TIME_SEC", 120)) * time.Second,
-			PingTimeout:     time.Duration(intEnv("DB_PING_TIMEOUT_SEC", 5)) * time.Second,
-			QueryTimeout:    time.Duration(intEnv("DB_QUERY_TIMEOUT_MS", 5000)) * time.Millisecond,
-		},
+		Port:           envOr("PORT", "8080"),
+		Env:            env,
+		Migrate:        boolEnv("RUN_MIGRATIONS_ON_BOOT", false),
+		DB:             db,
 		RedisURL:       strings.TrimSpace(os.Getenv("REDIS_URL")),
 		TrustProxy:     strings.TrimSpace(os.Getenv("TRUST_PROXY")),
 		BootstrapToken: strings.TrimSpace(os.Getenv("VELOX_BOOTSTRAP_TOKEN")),
@@ -115,6 +112,14 @@ func Load() (Config, error) {
 func (c Config) validateFatal() error {
 	encKey := strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY"))
 
+	// The production checks below, and every other APP_ENV reader in the
+	// binary, test for exactly "production". A near-miss such as "prod" or
+	// "production-eu" would pass them all and run with those checks off, so
+	// it is refused. Any other unrecognised name keeps its Validate warning.
+	if c.Env != "production" && strings.HasPrefix(c.Env, "prod") {
+		return fmt.Errorf("APP_ENV=%q is not a recognized environment — did you mean \"production\"? Refusing to start because the production safety checks apply only when APP_ENV is exactly \"production\" (expected: local, staging, production)", c.Env)
+	}
+
 	if c.Env == "production" && encKey == "" {
 		return fmt.Errorf("VELOX_ENCRYPTION_KEY is required in production — refusing to start with plaintext PII storage")
 	}
@@ -123,6 +128,13 @@ func (c Config) validateFatal() error {
 	}
 	if c.Env == "production" && c.TrustProxy == "" {
 		return fmt.Errorf("TRUST_PROXY is required in production — behind a load balancer or ingress every request's client address is the balancer's, so the per-IP limits on the public pay pages (60/min) and on /v1/auth (100/min) become ONE bucket shared by every customer and operator of the install; set TRUST_PROXY to the balancer/ingress CIDR(s), or TRUST_PROXY=none if replicas accept client connections directly (deploy/README.md)")
+	}
+
+	// A set value must mean what it says in every environment: the router
+	// skips an entry it cannot parse, so a typo would pass the check above
+	// and then behave exactly as unset.
+	if _, err := ParseTrustProxy(c.TrustProxy); err != nil {
+		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (deploy/README.md)", err)
 	}
 
 	if encKey != "" {
@@ -201,15 +213,33 @@ func LoadDBOnly() (DBConfig, error) {
 	if err != nil {
 		return DBConfig{}, err
 	}
-	return DBConfig{
+	return loadDBConfig(dbURL)
+}
+
+// loadDBConfig reads the DB_* pool settings shared by Load and LoadDBOnly.
+// The first setting that is not an integer is returned as an error.
+func loadDBConfig(dbURL string) (DBConfig, error) {
+	var firstErr error
+	n := func(key string, fallback int) int {
+		v, err := intEnv(key, fallback)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		return v
+	}
+	cfg := DBConfig{
 		URL:             dbURL,
-		MaxOpenConns:    intEnv("DB_MAX_OPEN_CONNS", 20),
-		MaxIdleConns:    intEnv("DB_MAX_IDLE_CONNS", 5),
-		ConnMaxLifetime: time.Duration(intEnv("DB_CONN_MAX_LIFETIME_MIN", 30)) * time.Minute,
-		ConnMaxIdleTime: time.Duration(intEnv("DB_CONN_MAX_IDLE_TIME_SEC", 120)) * time.Second,
-		PingTimeout:     time.Duration(intEnv("DB_PING_TIMEOUT_SEC", 5)) * time.Second,
-		QueryTimeout:    time.Duration(intEnv("DB_QUERY_TIMEOUT_MS", 5000)) * time.Millisecond,
-	}, nil
+		MaxOpenConns:    n("DB_MAX_OPEN_CONNS", 20),
+		MaxIdleConns:    n("DB_MAX_IDLE_CONNS", 5),
+		ConnMaxLifetime: time.Duration(n("DB_CONN_MAX_LIFETIME_MIN", 30)) * time.Minute,
+		ConnMaxIdleTime: time.Duration(n("DB_CONN_MAX_IDLE_TIME_SEC", 120)) * time.Second,
+		PingTimeout:     time.Duration(n("DB_PING_TIMEOUT_SEC", 5)) * time.Second,
+		QueryTimeout:    time.Duration(n("DB_QUERY_TIMEOUT_MS", 5000)) * time.Millisecond,
+	}
+	if firstErr != nil {
+		return DBConfig{}, firstErr
+	}
+	return cfg, nil
 }
 
 func OpenPostgres(cfg DBConfig) (*sql.DB, error) {
@@ -271,16 +301,65 @@ func envOr(key, fallback string) string {
 	return v
 }
 
-func intEnv(key string, fallback int) int {
+// intEnv reads an integer setting: unset → fallback. A value that does not
+// parse is a configuration error, not a silent default — an operator who
+// wrote DB_QUERY_TIMEOUT_MS=5s would otherwise run on a number they never set.
+func intEnv(key string, fallback int) (int, error) {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
-		return fallback
+		return fallback, nil
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("%s=%q is not a whole number", key, v)
 	}
-	return n
+	return n, nil
+}
+
+// ParseTrustProxy parses a TRUST_PROXY value: "none", or a comma-separated
+// list of CIDRs and bare IPs (a bare IP is taken as /32, or /128 for IPv6).
+// Blank entries are skipped. It is the one parser behind the boot check and
+// the router's trusted-proxy list, so a value cannot pass the first and mean
+// nothing to the second.
+//
+// The error names every entry that did not parse, or reports a value that
+// names no address at all. The networks that did parse are returned with it.
+func ParseTrustProxy(spec string) ([]*net.IPNet, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" || strings.EqualFold(spec, "none") {
+		return nil, nil // unset, or the explicit "no proxy in front"
+	}
+	var nets []*net.IPNet
+	var invalid []string
+	for _, raw := range strings.Split(spec, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		entry := raw
+		if !strings.Contains(entry, "/") {
+			if ip := net.ParseIP(entry); ip != nil {
+				bits := 32
+				if ip.To4() == nil {
+					bits = 128
+				}
+				entry += "/" + strconv.Itoa(bits)
+			}
+		}
+		_, n, err := net.ParseCIDR(entry)
+		if err != nil {
+			invalid = append(invalid, strconv.Quote(raw))
+			continue
+		}
+		nets = append(nets, n)
+	}
+	if len(invalid) > 0 {
+		return nets, fmt.Errorf("TRUST_PROXY has entries that are not an IP address or CIDR: %s", strings.Join(invalid, ", "))
+	}
+	if len(nets) == 0 {
+		return nil, fmt.Errorf("TRUST_PROXY=%q names no proxy address", spec)
+	}
+	return nets, nil
 }
 
 func boolEnv(key string, fallback bool) bool {

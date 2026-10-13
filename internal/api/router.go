@@ -1352,7 +1352,15 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	if corsEnv == "" {
 		corsEnv = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
 	}
-	allowedOrigins := strings.Split(corsEnv, ",")
+	// Trimmed here, once, for both consumers (CORS and the CSRF origin
+	// allowlist). CORS matches entries exactly, so "a, b" would otherwise
+	// never allow " b"; a blank entry would match a request with no Origin.
+	var allowedOrigins []string
+	for _, o := range strings.Split(corsEnv, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			allowedOrigins = append(allowedOrigins, o)
+		}
+	}
 	r.Use(mw.CORS(allowedOrigins))
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)

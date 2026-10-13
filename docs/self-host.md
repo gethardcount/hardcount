@@ -142,7 +142,7 @@ Velox reads its settings from environment variables.
 | `APP_DATABASE_URL` | Postgres connection URL for the limited user. Required in `staging` and `production`. |
 | `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data. 64 hex characters. Required in `production`. |
 | `REDIS_URL` | Redis, for rate limiting. Required in `production`. |
-| `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward. Use `none` if there is no proxy. Required in `production`. |
+| `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward. Use `none` if there is no proxy. Required in `production`. Velox refuses to start if an entry is not an IP address or CIDR. |
 
 Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit.
 
@@ -158,7 +158,7 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `APP_ENV` | `local` | `local`, `staging` or `production`. Outside `local`, cookies are marked secure and the start-up checks on this page apply. |
+| `APP_ENV` | `local` | `local`, `staging` or `production`. Outside `local`, cookies are marked secure and the start-up checks on this page apply. A value that starts with `prod` but is not exactly `production`, such as `prod`, stops start-up. |
 | `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. |
 | `DASHBOARD_BASE_URL` | unset | The dashboard's address, used in password-reset links. If unset, no password-reset emails are sent. For local development use `http://localhost:5173`. |
 | `SMTP_HOST`, `SMTP_PORT` | unset | Your email server. If unset, Velox sends no email. The local `.env.example` points these at Mailpit; the Compose stack leaves them unset. See [email setup](ops/email-setup.md). |

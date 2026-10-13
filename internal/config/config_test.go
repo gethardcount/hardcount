@@ -335,3 +335,110 @@ func TestLoad_ProductionRequiresTrustProxy(t *testing.T) {
 		}
 	}
 }
+
+// A near-miss of "production" must refuse to boot. Every production safety
+// check tests for the exact value "production", so "prod" used to start with
+// all of them switched off. Other names (an install's own "dev" or "test")
+// keep booting with the Validate warning.
+func TestLoad_RejectsNearMissOfProduction(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("REDIS_URL", "")
+	t.Setenv("TRUST_PROXY", "")
+
+	for _, env := range []string{"prod", " Prod ", "production-eu", "prodution", "productoin"} {
+		t.Setenv("APP_ENV", env)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "APP_ENV") {
+			t.Errorf("APP_ENV=%q must refuse to boot naming APP_ENV, got: %v", env, err)
+		}
+	}
+	for _, env := range []string{"", "local", "staging", " Staging ", "development", "dev", "test", "foo"} {
+		t.Setenv("APP_ENV", env)
+		if _, err := Load(); err != nil {
+			t.Errorf("APP_ENV=%q must boot, got: %v", env, err)
+		}
+	}
+}
+
+// A TRUST_PROXY value the router cannot parse used to pass the "is it set"
+// gate and then behave exactly as unset. Every entry must parse, in every
+// environment.
+func TestLoad_TrustProxyMustParse(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
+	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+
+	for _, env := range []string{"production", "local"} {
+		t.Setenv("APP_ENV", env)
+		for _, bad := range []string{"10.0.0.0/33", "10.0.0.0/8,bogus", "true", "lb.internal", "10.0.0.0-10.0.0.9", ",", "none,10.0.0.0/8"} {
+			t.Setenv("TRUST_PROXY", bad)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "TRUST_PROXY") {
+				t.Errorf("APP_ENV=%s TRUST_PROXY=%q must refuse to boot naming TRUST_PROXY, got: %v", env, bad, err)
+			}
+		}
+		for _, ok := range []string{"none", " NONE ", "10.0.0.0/8", " 10.0.0.0/8 , 127.0.0.1 ", "fd00::/8,::1", "10.0.0.0/8,"} {
+			t.Setenv("TRUST_PROXY", ok)
+			if _, err := Load(); err != nil {
+				t.Errorf("APP_ENV=%s TRUST_PROXY=%q must boot, got: %v", env, ok, err)
+			}
+		}
+	}
+}
+
+// ParseTrustProxy is the one parser behind both the boot check and the
+// router's trusted-proxy list, so the two cannot disagree about a value.
+// The valid networks come back alongside the error naming the bad entries.
+func TestParseTrustProxy(t *testing.T) {
+	nets, err := ParseTrustProxy("10.0.0.0/8, 127.0.0.1 , , bogus, ::1, 10.0.0.0/33")
+	if len(nets) != 3 {
+		t.Errorf("parsed %d networks, want 3 (CIDR + two bare IPs)", len(nets))
+	}
+	if err == nil || !strings.Contains(err.Error(), `"bogus", "10.0.0.0/33"`) {
+		t.Errorf("error must name both bad entries, got: %v", err)
+	}
+	for _, spec := range []string{"", "  ", "none", " None "} {
+		if nets, err := ParseTrustProxy(spec); nets != nil || err != nil {
+			t.Errorf("ParseTrustProxy(%q) = %v, %v; want nil, nil", spec, nets, err)
+		}
+	}
+	if _, err := ParseTrustProxy(" , "); err == nil {
+		t.Error("a value with no address in it must be an error")
+	}
+}
+
+// A DB_* pool setting that is not an integer used to fall back to the default
+// without a word. It is a configuration error, for the server and for the
+// migrate command alike.
+func TestLoad_RejectsUnparseableInt(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_ENV", "local")
+	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("TRUST_PROXY", "")
+
+	for _, key := range []string{
+		"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME_MIN",
+		"DB_CONN_MAX_IDLE_TIME_SEC", "DB_PING_TIMEOUT_SEC", "DB_QUERY_TIMEOUT_MS",
+	} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, "5s")
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("Load with %s=5s must fail naming it, got: %v", key, err)
+			}
+			if _, err := LoadDBOnly(); err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("LoadDBOnly with %s=5s must fail naming it, got: %v", key, err)
+			}
+		})
+	}
+
+	t.Setenv("DB_MAX_OPEN_CONNS", " 40 ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("a parseable value must load: %v", err)
+	}
+	if cfg.DB.MaxOpenConns != 40 {
+		t.Errorf("max_open_conns: got %d, want 40", cfg.DB.MaxOpenConns)
+	}
+}
