@@ -240,7 +240,11 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	before := time.Now().UTC() // the engine's clock is fixed when it is built
+	// Truncated to the microsecond: Postgres stores timestamps at that
+	// precision, so a time written in the same microsecond as `before`
+	// reads back a few hundred nanoseconds earlier than it and failed the
+	// lower bound below (seen in CI on 2026-10-13). Same in the test after.
+	before := time.Now().UTC().Truncate(time.Microsecond) // the engine's clock is fixed when it is built
 	svc := dunning.NewService(dstore, nil, nil)
 	e := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, dunningServiceStarter{svc: svc})
 	svc.SetResolver(e)
@@ -348,7 +352,7 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	before := time.Now().UTC() // the engine's clock is fixed when it is built
+	before := time.Now().UTC().Truncate(time.Microsecond) // the engine's clock is fixed when it is built
 	svc := dunning.NewService(dstore, decliningRetrier{}, nil)
 	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
 	resolver.SetCustomerReader(customer.NewPostgresStore(h.db))
