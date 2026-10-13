@@ -231,6 +231,11 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	if set.ID != aLive.ID || !set.HasWebhookSecret || set.WebhookSecretLast4 != "AW03" {
 		t.Errorf("SetWebhookSecret returned (%q, has=%v, last4=%q), want (%q, true, AW03)", set.ID, set.HasWebhookSecret, set.WebhookSecretLast4, aLive.ID)
 	}
+	// SetWebhookSecret is the second writer of the encrypted column: what
+	// it stores must be ciphertext, not the secret it was given.
+	if _, rawWH := rawSecrets(t, admin, aLive.ID); !rawWH.Valid || !strings.HasPrefix(rawWH.String, "enc:") || strings.Contains(rawWH.String, aLiveWH) {
+		t.Errorf("SetWebhookSecret stored %q: want an enc: value that does not contain the secret", rawWH.String)
+	}
 	wantPlain("set webhook", tenantA, true, aLiveSK2, aLiveWH)
 	wantPlain("set webhook", tenantA, false, aTestSK2, aTestWH2)
 	wantPlain("set webhook", tenantB, false, bTestSK, bTestWH)
