@@ -14,7 +14,7 @@ Velox is built around three needs that Stripe covers only through a hosted produ
 - "Pay $9k up front, get $10k of usage to draw down" is a common AI-infra contract (a prepaid commit).
 - Stripe's basic usage-based billing has prepaid credit grants but [no commits](https://docs.stripe.com/billing/subscriptions/usage-based/use-cases/credits-based-pricing-model). Orb and Metronome (now part of Stripe) offer commits as hosted services. Open-source engines offer prepaid wallets: see [How Velox compares](comparison.md).
 - In Velox a commit is one line on an invoice. When the invoice finalizes, the prepaid balance is funded in one atomic step. Usage drains it, promotional credits first.
-- `credit.balance_low / _depleted / _recovered` webhooks drive your top-up nudges.
+- `credit.balance_low / _depleted / _recovered` webhooks fire when the settled balance changes, which for usage is when an invoice is issued. For a figure that follows usage, see [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md).
 
 **3. Some businesses must keep billing records on infrastructure they control.**
 
