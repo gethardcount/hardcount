@@ -19,6 +19,10 @@ Older entries keep their original text.
 
 - **The dashboard shows subscriptions whose billing is failing, and can retry them (2026-10-13, #960).** The subscriptions list marks them with a red badge and has a `Billing failing` filter. The subscription page shows the reason, which attempt failed, when the next automatic attempt is, and a `Retry billing` button. Until now this was only in the API.
 
+### Changed
+
+- **Billing thresholds are described as what they are (2026-10-13).** The features page and the dashboard called them a "hard cap" that fires "the moment" a level is crossed. A threshold issues an invoice early, once per period, at the next hourly billing run, and does not stop usage. Only the wording changed.
+
 ### Fixed
 
 - **A price box left blank no longer saves a free rate (2026-10-13).** In the dashboard, creating a pricing rule or a customer price override with an empty or unreadable price saved it at $0. This covered the per-unit price, a tier price and the package price. The form now shows an error and saves nothing. Type `0` to make a rate free on purpose. Rules and overrides already saved are not changed, so check any that show $0 by mistake.
