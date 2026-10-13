@@ -197,7 +197,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// local dev falls through to http://localhost:5173 (the Vite dev
 	// server). Without this set, a deployment behind a different host
 	// would redirect customers back to localhost — broken UX in prod.
-	paymentMethodsSvc.SetPortalBaseURL(strings.TrimSpace(os.Getenv("CUSTOMER_PORTAL_URL")))
+	customerPortalURL := strings.TrimSpace(os.Getenv("CUSTOMER_PORTAL_URL"))
+	if customerPortalURL == "" {
+		slog.Warn("CUSTOMER_PORTAL_URL NOT SET — after a customer saves a card on Stripe's page, Stripe sends them to http://localhost:5173/payment-method-added, which only exists in local development. The card is still saved. Set this to your dashboard's address, e.g. https://app.example.com")
+	}
+	paymentMethodsSvc.SetPortalBaseURL(customerPortalURL)
 	// compositePaymentSetupStore presents the customer_payment_setups
 	// wire shape (domain.CustomerPaymentSetup) on top of canonical
 	// sources. Lets payment/checkout.go + payment/stripe.go +

@@ -46,7 +46,10 @@ var _ StripeAPI = (*StripeAdapter)(nil)
 func (a *StripeAdapter) client(ctx context.Context) (*stripe.Client, error) {
 	c := a.clients.ForCtx(ctx)
 	if c == nil {
-		return nil, errors.New("stripe not configured for this mode")
+		// Typed, so the API answers 409 with a sentence the operator can act
+		// on. As a bare error it reached the caller as a 500 "internal error".
+		return nil, errs.InvalidState("Stripe is not connected for this mode. Connect it under Settings, then try again.").
+			WithCode("stripe_not_connected")
 	}
 	return c, nil
 }

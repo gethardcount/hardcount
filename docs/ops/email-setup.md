@@ -54,7 +54,7 @@ misconfiguration is therefore easy to see, and it does not stop startup:
 |---|---|---|
 | `SMTP_HOST` | `SMTP NOT CONFIGURED — …` | Every send returns `ErrSMTPNotConfigured`, dispatcher retries → DLQ. No stdout fallback. |
 | `HOSTED_INVOICE_BASE_URL` | `HOSTED_INVOICE_BASE_URL NOT SET — …` | Invoice / receipt / dunning / payment-failed emails render with **no link** in the CTA button. |
-| `CUSTOMER_PORTAL_URL` | *(no dedicated boot warning)* | Not a customer email variable — it is the SPA base for the Stripe payment-method-setup return URL. Unset → the return URL silently defaults to `http://localhost:5173`. |
+| `CUSTOMER_PORTAL_URL` | `CUSTOMER_PORTAL_URL NOT SET — …` | Not a customer email variable. It is the dashboard address Stripe returns a customer to after they save a card. Unset → the return address is `http://localhost:5173`; the card is still saved. |
 | `DASHBOARD_BASE_URL` | `DASHBOARD_BASE_URL NOT SET — …` | Password-reset emails are not sent. Team invites fail because the accept link cannot be built. |
 | `PAYMENT_UPDATE_URL` | `PAYMENT_UPDATE_URL NOT SET — …` | Payment-update-request emails (no-PM-at-finalize, charge-failure) skipped at send time. |
 

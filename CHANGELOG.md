@@ -15,6 +15,11 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Asking for a card-setup page with no Stripe account connected answers 409, not 500 (2026-10-13).** `POST /v1/customers/{id}/payment-methods/setup-session` answered `internal_error`. It now answers 409 with code `stripe_not_connected` and says to connect Stripe under Settings.
+- **Velox warns at start-up when `CUSTOMER_PORTAL_URL` is not set (2026-10-13).** Without it, a customer who saves a card on Stripe's page is sent to `http://localhost:5173`, which exists only in local development. The card is still saved. Set it to your dashboard's address. The Compose example value was wrong (it had a path) and is corrected.
+
 ## [0.6.1] - 2026-10-13
 
 Corrects the live credit figure on the public cost page and adds a way to read it with a secret key. No database migration, and nothing to do when upgrading.

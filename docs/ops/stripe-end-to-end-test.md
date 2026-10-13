@@ -40,6 +40,16 @@ DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" \
 Confirm the API is up: `curl -sf http://localhost:8080/health` returns
 `{"status":"ok"}`.
 
+To test a published release instead, start the Compose stack from
+[`deploy/compose`](../../deploy/compose/README.md) with `VELOX_IMAGE` and
+`VELOX_DASHBOARD_IMAGE` set to the release tag, and use its address in place of
+`http://localhost:8080` and `http://localhost:5173`. A secret API key
+(`Authorization: Bearer vlx_secret_test_…`) works in place of the cookie in every call below.
+
+**Do step 5 before step 2b.** A saved card reaches Velox through the
+`setup_intent.succeeded` webhook. Without the webhook secret in place, Stripe's page
+says the card is saved and the customer still has no payment method in Velox.
+
 Login as the owner the bootstrap step printed and capture cookies for the curl
 calls below:
 
@@ -169,7 +179,18 @@ page, or instantiate a [recipe](../glossary.md): a pre-built pricing template sh
 Velox. The recipe flows live in `MANUAL_TEST.md`.
 
 Price the plan at **2900 cents/month**, because the expected amounts in steps 4 and 7 assume it.
-Then pick it:
+Set its base fee to bill **in advance** (`base_bill_timing: in_advance`): step 4 expects an invoice
+the moment the subscription starts, and the default, in arrears, bills at the end of the period.
+
+```bash
+curl -s -X POST http://localhost:8080/v1/plans \
+  -b /tmp/velox-cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"flat-29","name":"Flat 29","currency":"USD","billing_interval":"monthly",
+       "base_amount_cents":2900,"base_bill_timing":"in_advance"}'
+```
+
+Then subscribe the customer to it:
 
 ```bash
 PLAN_ID=$(curl -s http://localhost:8080/v1/plans -b /tmp/velox-cookies.txt \
@@ -179,9 +200,12 @@ curl -s -X POST http://localhost:8080/v1/subscriptions \
   -b /tmp/velox-cookies.txt \
   -H 'Content-Type: application/json' \
   -d "{
+    \"code\": \"stripe-e2e-smoke\",
+    \"display_name\": \"Stripe E2E Smoke\",
     \"customer_id\": \"<vlx_cus_...>\",
-    \"plan_id\": \"$PLAN_ID\",
-    \"start_at\": \"now\"
+    \"items\": [{\"plan_id\": \"$PLAN_ID\", \"quantity\": 1}],
+    \"billing_time\": \"anniversary\",
+    \"start_now\": true
   }"
 ```
 
@@ -200,9 +224,9 @@ curl -s "http://localhost:8080/v1/invoices?customer_id=<vlx_cus_...>" \
   -b /tmp/velox-cookies.txt | jq '.data[0]'
 ```
 
-**Expected:** an invoice with `status=open` (or `paid` if the auto-finalize
-window has passed), `amount_due_cents=2900`, and `stripe_payment_intent_id`
-populated. The PaymentIntent ID also shows up on the Stripe dashboard under
+**Expected:** an invoice with `total_amount_cents=2900` and `stripe_payment_intent_id`
+populated. With the `4242` card it is `status=paid`, `payment_status=succeeded` and
+`amount_due_cents=0` within a few seconds. The PaymentIntent ID also shows up on the Stripe dashboard under
 **Test data → Payments**.
 
 If the customer has the `4242` card from step 2b, the PaymentIntent should
@@ -327,8 +351,8 @@ curl -s -X DELETE http://localhost:8080/v1/settings/stripe/test \
 ```
 
 **Expected:** 204. The credentials row is deleted, and the encrypted blobs are
-purged. Subsequent payment attempts fail with a
-`"stripe not configured for this mode"` error rather than panicking.
+purged. Asking for a card-setup session afterwards answers 409 with code
+`stripe_not_connected`.
 
 ---
 
@@ -370,6 +394,7 @@ response header.
 | Date | Velox SHA | Stripe API version | Verified by | Result |
 |---|---|---|---|---|
 | 2026-04-27 | `f1b2301` | `2025-08-27.basil` (default) | maintainer | Step 1 (connect + verify) ✅; steps 2–8 documented as runbook, full flow validated during sandbox cutover for first design partner |
+| 2026-10-13 | `v0.6.1` (published images, Compose) | `2026-03-25.dahlia` (Stripe CLI) | maintainer | Steps 1 to 5, 7 and 8 passed: account verified; cards `4242` and `0341` attached through Checkout; a 2,900 cent charge succeeded and a decline opened a dunning run, both matching Stripe's own PaymentIntent records; full refund through a credit note matched Stripe's refund; 23 webhook events, all answered 200. Not run: the dunning retry and recovery in step 6 (the first retry is three days out). Found and fixed in the same change: card setup after disconnect answered 500. |
 
 Re-run and append a row after every change touching `internal/payment/`,
 `internal/tenantstripe/`, or `internal/dunning/`.
