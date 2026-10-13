@@ -15,6 +15,20 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-13
+
+Fixes from a security review and a billing audit, plus the dashboard screens for subscriptions whose billing is failing. No database migration.
+
+**Before upgrading:**
+
+- **Set `METRICS_TOKEN` if you scrape `/metrics` in production.** With `APP_ENV=production` and no token, `/metrics` now answers 401. The Compose stack runs in production mode.
+- **Check three settings.** Velox now refuses to start on an `APP_ENV` such as `prod` (it must be `production`), a `TRUST_PROXY` entry that is not an IP or CIDR, or a `DB_*` pool setting that is not a whole number.
+- **`GET /health/ready` no longer fails when the billing scheduler stalls.** It answers 503 only while draining or when the database ping fails. Alert on `velox_scheduler_last_run_timestamp_seconds` instead.
+- **A cancel can now answer 409 `unbilled_period`,** when a billing period has ended and cannot be invoiced. Retry billing, then cancel again. If you script cancels, handle this code.
+- **Several endpoints now answer 404 or 422 for an id that is not yours,** where they used to answer 2xx. See the two entries under Security.
+- **Webhook endpoints in `100.64.0.0/10` are refused.** Some private overlay networks use that range.
+- **Images are signed with cosign 3.** Verifying an image from this release needs cosign 3 or newer.
+
 ### Added
 
 - **The dashboard shows subscriptions whose billing is failing, and can retry them (2026-10-13, #960).** The subscriptions list marks them with a red badge and has a `Billing failing` filter. The subscription page shows the reason, which attempt failed, when the next automatic attempt is, and a `Retry billing` button. Until now this was only in the API.
@@ -4789,7 +4803,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/getvelox/velox/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/getvelox/velox/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/getvelox/velox/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/getvelox/velox/compare/v0.3.1...v0.3.2
