@@ -68,6 +68,7 @@ To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/se
 ## Why use it
 
 - **Price AI usage the way it is sold.** Model × token type on one meter, prepaid commits that usage draws down, and a base fee plus usage on one invoice. [AI pricing in code](docs/ai-pricing.md)
+- **If you are building usage billing around Stripe yourself.** Velox is that layer, already built: usage records that cannot be counted twice, prepaid credit that usage draws down, a different price for one customer, invoices, and retries when a payment fails. Stripe still takes the payment. [Why Velox exists](docs/why-velox.md)
 - **Know your margin.** Provider cost is stamped on every event, so "which customers lose us money?" is one API call. [What's in the box](docs/features.md)
 - **Run it yourself, simply.** One Go binary, Postgres, and Redis for rate limiting. No queue, no warehouse, no workflow engine. [Self-host](docs/self-host.md) · [Will it take our volume?](docs/scale.md)
 - **MIT, and nothing is gated.** No licence key, no paid tier, no telemetry. Dunning, credit notes, refunds and the audit log are all in the one edition. [What's in the box](docs/features.md#self-host-first)
@@ -80,12 +81,13 @@ To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/se
 
 Velox is the wrong choice if you need:
 
-- **Simple per-seat pricing paid by card.** Stripe Billing already does that well.
+- **Only simple per-seat pricing paid by card.** Velox can do it, but Stripe Billing does it with less to run.
 - **A payment processor other than Stripe.** Stripe is the only one today.
 - **A marketplace that splits payouts** between sellers (Stripe Connect). Velox bills your own customers.
 - **Revenue recognition or accounting reports.** Export the data to your own warehouse.
 - **Quotes or multi-phase contracts** for sales-led deals.
 - **Many payment methods.** Today it is cards through Stripe, or an invoice the customer pays outside Velox.
+- **Something that stops a customer at zero credit.** Velox records usage and never refuses it. It gives you a live balance to check, and your own code does the stopping. [Stop usage when credit runs out](docs/stop-usage-when-credit-runs-out.md)
 
 ---
 
