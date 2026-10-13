@@ -13,7 +13,7 @@ confirm the fix.
 
 | If you see | Go to |
 |---|---|
-| `/health/ready` returns 503, or no invoices are being generated | [1. Scheduler stalled](#1-scheduler-stalled) |
+| `/health/ready` shows `scheduler: degraded`, or no invoices are being generated | [1. Scheduler stalled](#1-scheduler-stalled) |
 | `email_outbox` growing, or customers report missing invoice emails | [2. Email outbox backed up](#2-email-outbox-backed-up) |
 | `webhook_outbox` growing, or one customer's webhook endpoint failing | [3. Webhook outbox backed up or one endpoint failing](#3-webhook-outbox-backed-up-or-one-endpoint-failing) |
 | `velox_stripe_breaker_state == 2`, or dunning retries skipped | [4. Dunning circuit breaker open](#4-dunning-circuit-breaker-open) |
@@ -36,14 +36,20 @@ confirm the fix.
 | Endpoint | Purpose | Use for |
 |---|---|---|
 | `GET /health` | Liveness — process running | Kubernetes liveness probe |
-| `GET /health/ready` | Readiness — DB reachable (ping), scheduler ran recently | Kubernetes readiness probe + LB health check |
+| `GET /health/ready` | Readiness — 503 when the DB ping fails or the process is shutting down, else 200. The body also reports whether the scheduler ran recently | Kubernetes readiness probe + LB health check |
 | `GET /metrics` | Prometheus scrape. Send `METRICS_TOKEN` as a bearer token. In production with no token set it answers 401. | Metrics-collection job |
 
-The scheduler is the background loop that drives billing.
-`/health/ready` returns 503 if the scheduler has not ticked in 2× the
-configured interval. So the readiness probe catches a stalled scheduler,
-without waiting for a liveness restart. See
-[Scheduler stalled](#1-scheduler-stalled).
+The scheduler is the background loop that drives billing. If it has not
+ticked in 2× the configured interval, the `/health/ready` body shows
+`scheduler: degraded`, but the status code stays 200: taking the replica
+out of the load balancer would not restart the scheduler. The readiness
+probe therefore does not catch a stalled scheduler. Alert on the scheduler
+and leader metrics in [Key metrics to alert on](#key-metrics-to-alert-on),
+and see [Scheduler stalled](#1-scheduler-stalled).
+
+When the database ping fails, the body says `database: error` and nothing
+more. The cause is in the application log, in the
+`readiness: database ping failed` line.
 
 ## Key metrics to alert on
 
@@ -59,7 +65,7 @@ alerting tier: what should page someone, and what is only informational.
 | `sum(velox_billing_failing_subscriptions{mode="live"})` | above a threshold you choose (suggested 20), or rising for 30m | One cause is failing many subscriptions: a bad deploy, or a tax provider that is set but not configured. Nothing parks before 3 days 17 hours after its first failure, so there is time to fix the cause. See [14](#14-subscriptions-whose-billing-is-failing) |
 | `up{job="velox"}` | == 0 | Process down |
 | Postgres connection errors (count) | > 10/min | DB connectivity broken |
-| `time() - velox_scheduler_last_run_timestamp_seconds` | > 2× tick interval | Scheduler stalled (also flips `/health/ready` to 503) |
+| `time() - velox_scheduler_last_run_timestamp_seconds` | > 2× tick interval | Scheduler stalled on this replica. `/health/ready` shows it in its body but stays 200, so this alert is how you find out |
 | `velox_leader_last_tick_age_seconds{role}` | > 3× the role's interval | The role has not finished a tick on any replica. This is the cluster-wide stall signal that a per-replica liveness gauge cannot give. `SELECT * FROM leader_status;` shows the holder and whether an operator paused the role ([runbook-leader-leases.md](runbook-leader-leases.md)). **For billing, a busy billing day also trips this:** a tick bills every due subscription before it ends. If `velox_billing_due_subscriptions` is falling, the tick is draining; do not restart it |
 | `increase(velox_leader_lease_lost_total[1h])` | > 0 | Split by `reason`. `panicked`: the role's tick panicked and ran nothing past the panic; it repeats every `min(interval, 60 s)` until the bad input or code is fixed, so restarting does not help. The stack is in the `scheduler panic recovered` ERROR log. A panic while billing one subscription is the exception. It is saved as a billing failure on that subscription, and later ticks skip the subscription until its wait ends. Each attempt that panics again ends that one tick early; the tick that follows about 60 s later skips the subscription and does the rest of the work. So the page fires once per attempt, not every 60 s. That is at most eight times over 3 days 17 hours, spaced on the wait ladder (15m, 1h, 4h, 12h, 24h three times). Then the subscription parks and the panic stops. On the hourly production tick the first three attempts land on three ticks in a row. The subscription shows up in `velox_billing_failing_subscriptions`, and its id and stack are in the `bill subscription panicked` ERROR log; see [14](#14-subscriptions-whose-billing-is-failing). Any other reason: a leader could not keep its lease mid-tick (frozen process, DB stall, pooler hiccup); correctness held (fence + row CAS), but find out why. `paused` is an operator action, so exclude it |
 
@@ -100,19 +106,20 @@ alerting tier: what should page someone, and what is only informational.
 
 ### 1. Scheduler stalled
 
-**Symptom**: `/health/ready` returns 503; subscriptions due for billing
-are not being invoiced; `velox_billing_cycles_total` rate drops to 0.
+**Symptom**: the `/health/ready` body shows `scheduler: degraded` (the
+status code stays 200); subscriptions due for billing are not being
+invoiced; `velox_billing_cycles_total` rate drops to 0.
 
 Before you treat a gap in invoices as an outage, check the tick interval
 in [Scheduler interval tuning](#scheduler-interval-tuning).
-`/health/ready` returns 503 only after 2× that interval.
+`/health/ready` shows `scheduler: degraded` only after 2× that interval.
 
 **Why it happens**:
 - Long-running transaction holding row locks (e.g., a tenant with
   millions of usage events on a single subscription).
 - DB primary failover; connections lost mid-tick.
 - Not a panic. A tick that panics is recovered and the poll loop keeps
-  running, so `/health/ready` stays green. A panicking tick shows up instead
+  running, so the `/health/ready` scheduler check stays `ok`. A panicking tick shows up instead
   as `velox_leader_lease_lost_total{reason="panicked"}` and a growing
   `velox_leader_last_tick_age_seconds{role="billing"}`, with the stack in the
   `scheduler panic recovered` ERROR log.

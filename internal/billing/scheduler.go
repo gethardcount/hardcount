@@ -378,8 +378,9 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 	// 1. Billing cycle — bill every due sub before moving on (P27). The drain
 	// can outlast the interval (thousands of subs due on the 1st, each charged
 	// inline), so it stamps this replica's liveness after every page: the
-	// stamp normally fires between ticks, and /health/ready reports 503 once
-	// it is 2x the interval old.
+	// stamp normally fires between ticks, and the scheduler-stalled alert
+	// (velox_scheduler_last_run_timestamp_seconds) and the /health/ready
+	// body report it stale once it is 2x the interval old.
 	generated, errs := s.engine.RunCycle(ctx, s.batch, s.onRun)
 	// Record the cycle execution + its invoice count. Per-mode (live, then
 	// test), so billing_cycles_total counts mode-passes and invoices_generated

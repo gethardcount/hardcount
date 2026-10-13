@@ -229,7 +229,8 @@ func serve() {
 	scheduler.SetPaymentReconciler(server.PaymentReconciler)
 	scheduler.SetGate(gate)
 
-	// Wire scheduler health tracking so /health/ready can detect stalled schedulers
+	// Wire scheduler health tracking so /health/ready can report a stalled
+	// scheduler in its body (it does not change the status code)
 	api.SetSchedulerInterval(billingInterval)
 	scheduler.SetOnRun(api.RecordSchedulerRun)
 

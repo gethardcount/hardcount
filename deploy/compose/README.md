@@ -69,7 +69,7 @@ curl -fsS http://localhost/health/ready
 ```
 
 - `/health` says the process is running.
-- `/health/ready` says it can reach the database and its background jobs are running. Point a load balancer's health check here.
+- `/health/ready` says it can reach the database. Point a load balancer's health check here. Its body also reports whether background jobs have run recently; that does not change the status code.
 
 ## 4. Create your first tenant
 
@@ -173,8 +173,8 @@ If the user does not exist at all, create it with the SQL in [Self-host, "The tw
 **The API exits with `role can BYPASS row-level security`.**
 `APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `velox_app`.
 
-**`/health/ready` returns 503 with `scheduler: degraded`.**
-The API is up but its background jobs have stopped running. Check the API logs. To see which copy last ran each job, run `SELECT * FROM leader_status;` in the database shell.
+**`/health/ready` shows `scheduler: degraded`.**
+The API is up and still answers 200 here, but its background jobs have stopped running. Check the API logs. To see which copy last ran each job, run `SELECT * FROM leader_status;` in the database shell.
 
 **`/metrics` returns 401.**
 `METRICS_TOKEN` is not set, or the scraper did not send it. Set it in `.env` (`openssl rand -hex 32`), start the stack again, and have Prometheus send it as a bearer token.

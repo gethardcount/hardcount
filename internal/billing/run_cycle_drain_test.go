@@ -143,10 +143,9 @@ func TestDrain_SubStillDueAfterCleanAttemptIsReportedOnce(t *testing.T) {
 }
 
 // The scheduler must hand its liveness stamp to the drain. The stamp normally
-// fires between ticks; /health/ready goes 503 when it is 2x the interval old,
-// and on a single replica that pulls the only API server out of the load
-// balancer. A drain of thousands of subs (each charged inline) can run that
-// long, so it stamps after every page.
+// fires between ticks; the scheduler-stalled alert and the /health/ready body
+// report it stale when it is 2x the interval old. A drain of thousands of
+// subs (each charged inline) can run that long, so it stamps after every page.
 func TestScheduler_BillingDrainStampsLivenessPerPage(t *testing.T) {
 	subs := subsMock(dueSubFixture("sub_1"), dueSubFixture("sub_2"), dueSubFixture("sub_3"))
 	stamps := 0

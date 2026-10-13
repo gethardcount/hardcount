@@ -1742,7 +1742,13 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
 
+		// The status code and the body answer different questions. The code
+		// is for the load balancer: 503 only when this replica cannot serve
+		// requests (draining, or the database is unreachable). The body also
+		// reports the billing tick, which a balancer cannot fix by routing
+		// elsewhere.
 		overallStatus := "ok"
+		status := http.StatusOK
 		checks := map[string]string{"api": "ok"}
 
 		// Draining: the replica is shutting down. Readiness-first so the
@@ -1756,16 +1762,25 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 			return
 		}
 
-		// Database check
+		// Database check. This endpoint is unauthenticated and the driver's
+		// error names the database user, database and host, so the body gets
+		// a fixed word and the detail goes to the log.
 		if err := db.Pool.PingContext(ctx); err != nil {
-			checks["database"] = "error: " + err.Error()
+			slog.ErrorContext(ctx, "readiness: database ping failed", "error", err)
+			checks["database"] = "error"
 			overallStatus = "degraded"
+			status = http.StatusServiceUnavailable
 		} else {
 			checks["database"] = "ok"
 		}
 
 		// Scheduler check — degraded if no run recorded within 2x the interval.
 		// Before the first run completes the scheduler is considered ok (just started).
+		// Reported in the body only: a stale tick leaves the status code at
+		// 200, because pulling this replica from the balancer does not restart
+		// the tick and on a single replica it would take the API down too.
+		// Alert on velox_scheduler_last_run_timestamp_seconds and
+		// velox_leader_last_tick_age_seconds instead (docs/ops/runbook.md).
 		schedulerMu.RLock()
 		lastRun := schedulerLastRun
 		interval := schedulerInterval
@@ -1783,11 +1798,6 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 			checks["scheduler"] = "ok: awaiting first run"
 		} else {
 			checks["scheduler"] = "ok: not configured"
-		}
-
-		status := http.StatusOK
-		if overallStatus != "ok" {
-			status = http.StatusServiceUnavailable
 		}
 
 		respond.JSON(w, r, status, map[string]any{

@@ -63,7 +63,7 @@ gates inbound Stripe webhook signature verification.
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Liveness — returns 200 if the process is running. |
-| `GET /health/ready` | Readiness — returns 200 if DB is reachable AND the scheduler is healthy. |
+| `GET /health/ready` | Readiness — returns 200 if the database is reachable, and 503 if it is not or the process is shutting down. The body also reports the billing scheduler, which does not change the status code. |
 
 Wire your load balancer / ingress / probes to `/health/ready`. Both
 endpoints are exempt from rate limiting and audit logging.
