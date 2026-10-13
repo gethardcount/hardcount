@@ -8,12 +8,12 @@ import {
   api,
   formatCents,
   formatDate,
-  dollarsToRateCents,
   getCurrencySymbol,
   getActiveCurrency,
   type Meter,
   type RatingRule,
 } from '@/lib/api'
+import { dollarsToRateCents } from '@/lib/priceInput'
 import { Layout } from '@/components/Layout'
 import { priceRate, shiftDecimal } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
@@ -531,7 +531,7 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
     return versions.length ? versions.reduce((a, b) => (b.version > a.version ? b : a)) : null
   })()
   const stampCurrency = existingLatest?.currency
-  const [tierError, setTierError] = useState('')
+  const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const modeDescriptions: Record<string, string> = {
@@ -543,7 +543,7 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
-    setTierError('')
+    setFormError('')
     try {
       // Publishing under an EXISTING key keeps that key's currency — this
       // form has no currency field, and stamping the tenant's current
@@ -551,24 +551,35 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
       // (refused by the ADR-100 guard) after a Settings currency switch.
       const currency = stampCurrency ?? getActiveCurrency()
       const payload: Record<string, unknown> = { rule_key: ruleKey, name, mode, currency }
+      // A blank or unreadable price is refused here: the server accepts 0 as
+      // a deliberate free rate, so it cannot catch a price left empty.
       if (mode === 'flat') {
-        payload.flat_amount_cents = dollarsToRateCents(flatAmount)
+        const cents = dollarsToRateCents(flatAmount)
+        if (cents === null) { setFormError('Price per unit: enter a price as a plain number, for example 0.01. Use 0 for free.'); setSaving(false); return }
+        payload.flat_amount_cents = cents
       }
       if (mode === 'graduated') {
         for (let i = 0; i < tiers.length - 1; i++) {
           const current = parseInt(tiers[i].upTo) || 0
           const next = tiers[i + 1].upTo === '' ? Infinity : (parseInt(tiers[i + 1].upTo) || 0)
-          if (current <= 0) { setTierError(`Tier ${i + 1}: "Up to" must be greater than 0`); setSaving(false); return }
-          if (next !== Infinity && next <= current) { setTierError(`Tier ${i + 2}: "Up to" must be greater than ${current}`); setSaving(false); return }
+          if (current <= 0) { setFormError(`Tier ${i + 1}: "Up to" must be greater than 0`); setSaving(false); return }
+          if (next !== Infinity && next <= current) { setFormError(`Tier ${i + 2}: "Up to" must be greater than ${current}`); setSaving(false); return }
         }
-        payload.graduated_tiers = tiers.map(t => ({
+        const tierCents: string[] = []
+        for (let i = 0; i < tiers.length; i++) {
+          const cents = dollarsToRateCents(tiers[i].price)
+          if (cents === null) { setFormError(`Tier ${i + 1}: enter a price as a plain number, for example 0.01. Use 0 for free.`); setSaving(false); return }
+          tierCents.push(cents)
+        }
+        payload.graduated_tiers = tiers.map((t, i) => ({
           up_to: t.upTo === '' ? 0 : parseInt(t.upTo) || 0,
-          unit_amount_cents: dollarsToRateCents(t.price),
+          unit_amount_cents: tierCents[i],
         }))
       }
       if (mode === 'package') {
         payload.package_size = parseInt(packageSize) || 1
-        payload.package_amount_cents = Math.round(parseFloat(packageAmount || '0') * 100)
+        if (dollarsToRateCents(packageAmount) === null) { setFormError('Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.'); setSaving(false); return }
+        payload.package_amount_cents = Math.round(parseFloat(packageAmount) * 100)
       }
       await api.createRatingRule(payload as Parameters<typeof api.createRatingRule>[0])
       onCreated()
@@ -687,9 +698,9 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
             </div>
           )}
 
-          {tierError && (
+          {formError && (
             <div className="px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20">
-              <p className="text-destructive text-sm">{tierError}</p>
+              <p className="text-destructive text-sm">{formError}</p>
             </div>
           )}
 

@@ -718,6 +718,11 @@ sub-cent rates bill linearly. Fixed fees and invoice line amounts/totals stay
 whole cents — only the RATE gains precision.
 
 - [~] Pricing → new flat rating rule, price `$0.000003` per unit → saves (input is not clamped to 2 decimals, not rounded to `$0.00`). *(manual 2026-07-20: created via the Add Rule dialog — which itself advertises "Sub-cent rates allowed" — 201.)*
+- [ ] **A blank price is refused, not saved as free**: Pricing → new flat rating rule, leave the price box empty, Create Rule → a red error appears in the dialog and no rule is created. *(auto, parser only: `web-v2/tests/priceInput.test.ts` — blank or unreadable input yields no price. The dialog is not walked yet.)*
+- [ ] Same dialog, price `0` → the rule saves as a free rate.
+- [ ] Same dialog, graduated mode with one tier price cleared → the error names the tier and no rule is created.
+- [ ] Same dialog, package mode with the package price cleared → the error appears and no rule is created.
+- [ ] Customer page → Add override → pick a rule, leave the price empty, Save override → the error appears and no override is created.
 - [~] Rule detail renders the sub-cent rate (`$0.000003`), not `$0.00`. *(manual 2026-07-20: Rules table price cell reads $0.000003.)*
 - [x] `GET /v1/rating-rules/<id>` → `flat_amount_cents` is a JSON string (`"0.0003"`), not a number. *(manual 2026-07-20: create response + list both carry the string "0.0003".)* It's a decimal per-unit rate **in cents** — `0.0003`¢/unit — which is what enables sub-cent linear pricing. *(auto: `TestRatingRuleVersion_FlatAmountCents_SerializesAsDecimalString`)*
 - [x] Meter on that rule + customer with 1,000,000 usage units + cycle close → usage line `amount_cents=300` ($3.00) exactly — i.e. `0.0003`¢/unit × 1,000,000 units = `300`¢ (not `0`, which is what rounding the rate to int cents would give; not `300000000`, which is billing `300`¢ *per unit*). *(manual 2026-07-20: NIM-000138 — qty 1,000,000 → amount_cents=300 exact via a clock cycle.)* *(auto: `TestComputeAmountCents_SubCentFlatRate`)*

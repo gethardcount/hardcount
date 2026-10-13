@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Trash2 } from 'lucide-react'
-import { api, formatRate, formatDate, dollarsToRateCents, type PriceOverride, type RatingRule } from '@/lib/api'
+import { api, formatRate, formatDate, type PriceOverride, type RatingRule } from '@/lib/api'
+import { dollarsToRateCents } from '@/lib/priceInput'
 import { showApiError } from '@/lib/formErrors'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -182,7 +183,7 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
   const [packageSize, setPackageSize] = useState('100')
   const [packageAmount, setPackageAmount] = useState('10.00')
   const [reason, setReason] = useState('')
-  const [tierError, setTierError] = useState('')
+  const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const selectedRule = rules.find(r => r.id === versionId)
@@ -201,7 +202,7 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
     e.preventDefault()
     if (!versionId) return
     setSaving(true)
-    setTierError('')
+    setFormError('')
     try {
       const payload: Parameters<typeof api.createPriceOverride>[0] = {
         customer_id: customerId,
@@ -209,22 +210,35 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
         mode,
         reason: reason.trim() || undefined,
       }
-      if (mode === 'flat') payload.flat_amount_cents = dollarsToRateCents(flatAmount)
+      // A blank or unreadable price is refused here: the server accepts 0 as
+      // a deliberate free rate, so it cannot catch a price left empty.
+      if (mode === 'flat') {
+        const cents = dollarsToRateCents(flatAmount)
+        if (cents === null) { setFormError('Price per unit: enter a price as a plain number, for example 0.01. Use 0 for free.'); setSaving(false); return }
+        payload.flat_amount_cents = cents
+      }
       if (mode === 'graduated') {
         for (let i = 0; i < tiers.length - 1; i++) {
           const current = parseInt(tiers[i].upTo) || 0
           const next = tiers[i + 1].upTo === '' ? Infinity : (parseInt(tiers[i + 1].upTo) || 0)
-          if (current <= 0) { setTierError(`Tier ${i + 1}: "Up to" must be greater than 0`); setSaving(false); return }
-          if (next !== Infinity && next <= current) { setTierError(`Tier ${i + 2}: "Up to" must be greater than ${current}`); setSaving(false); return }
+          if (current <= 0) { setFormError(`Tier ${i + 1}: "Up to" must be greater than 0`); setSaving(false); return }
+          if (next !== Infinity && next <= current) { setFormError(`Tier ${i + 2}: "Up to" must be greater than ${current}`); setSaving(false); return }
         }
-        payload.graduated_tiers = tiers.map(t => ({
+        const tierCents: string[] = []
+        for (let i = 0; i < tiers.length; i++) {
+          const cents = dollarsToRateCents(tiers[i].price)
+          if (cents === null) { setFormError(`Tier ${i + 1}: enter a price as a plain number, for example 0.01. Use 0 for free.`); setSaving(false); return }
+          tierCents.push(cents)
+        }
+        payload.graduated_tiers = tiers.map((t, i) => ({
           up_to: t.upTo === '' ? 0 : parseInt(t.upTo) || 0,
-          unit_amount_cents: dollarsToRateCents(t.price),
+          unit_amount_cents: tierCents[i],
         }))
       }
       if (mode === 'package') {
         payload.package_size = parseInt(packageSize) || 1
-        payload.package_amount_cents = Math.round(parseFloat(packageAmount || '0') * 100)
+        if (dollarsToRateCents(packageAmount) === null) { setFormError('Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.'); setSaving(false); return }
+        payload.package_amount_cents = Math.round(parseFloat(packageAmount) * 100)
       }
       await api.createPriceOverride(payload)
       onCreated()
@@ -353,9 +367,9 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
             <p className="text-xs text-muted-foreground mt-1">Shown on this card and in the audit trail.</p>
           </div>
 
-          {tierError && (
+          {formError && (
             <div className="px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20">
-              <p className="text-destructive text-sm">{tierError}</p>
+              <p className="text-destructive text-sm">{formError}</p>
             </div>
           )}
 

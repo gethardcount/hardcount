@@ -1840,28 +1840,6 @@ export function formatTaxRate(rate: number): string {
 // of the rate survives; we keep a minimum of 2 fractional digits and never
 // round a nonzero rate down to "$0.00". Invoice line amounts and totals stay
 // whole cents (formatCents).
-// dollarsToRateCents converts an operator-entered dollar amount into decimal
-// cents as a string, preserving sub-cent precision (e.g. "0.000003" dollars →
-// "0.0003" cents). Per-unit rates can be fractions of a cent, so we must not
-// round to whole cents. We shift the decimal point two places right via string
-// math rather than multiplying by 100 in floating point, which would introduce
-// artifacts like 0.000003 * 100 = 0.00030000000000000003.
-export function dollarsToRateCents(input: string): string {
-  const raw = (input || '0').trim()
-  const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(raw)
-  if (!m) return '0'
-  const sign = m[1]
-  let intPart = m[2] || '0'
-  let frac = m[3] || ''
-  // Shift two places right: borrow up to two digits from the fraction.
-  intPart += frac.slice(0, 2).padEnd(2, '0')
-  frac = frac.slice(2)
-  intPart = intPart.replace(/^0+(?=\d)/, '')
-  let out = frac ? `${intPart}.${frac}` : intPart
-  out = out.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
-  return out === '0' || out === '' ? '0' : `${sign}${out}`
-}
-
 export function formatRate(cents: string | number, currency?: string): string {
   const symbol = getCurrencySymbol(currency)
   let s = (typeof cents === 'number' ? String(cents) : cents).trim()
