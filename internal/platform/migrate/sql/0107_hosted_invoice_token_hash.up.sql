@@ -9,7 +9,10 @@
 --   * public_token_encrypted — AES-GCM ciphertext (app key, not in the DB),
 --                              decrypted only to rebuild the URL on re-send so
 --                              the hosted URL stays stable across sends.
--- The raw token now lives only in the emitted URL.
+-- The raw token is no longer stored on the invoice. It is still written to
+-- email_outbox.payload (key public_token) for each email that links to the
+-- invoice, and removed from that row when the email is sent or skipped; a
+-- failed row keeps it (internal/email/outbox.go, comment corrected 2026-10-13).
 ALTER TABLE invoices ADD COLUMN public_token_encrypted text;
 ALTER TABLE invoices ADD COLUMN public_token_hash text;
 

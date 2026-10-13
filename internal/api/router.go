@@ -159,7 +159,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 			sharedEnc = enc
 			customerStore.SetEncryptor(enc)
 			invoiceStore.SetEncryptor(enc)
-			slog.Info("encryption at rest enabled for customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens")
+			// The key does not cover email_outbox.payload: a queued or
+			// failed email holds its link token or URL as written, and the
+			// sent mark removes it (email.scrubbedPayloadKeys).
+			slog.Info("encryption at rest enabled for customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens on invoices; an unsent email in email_outbox holds its link token unencrypted until it is sent")
 		}
 	} else {
 		slog.Warn("VELOX_ENCRYPTION_KEY not set — customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens stored in plaintext")

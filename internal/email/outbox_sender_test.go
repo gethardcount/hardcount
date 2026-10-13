@@ -3,6 +3,8 @@ package email
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/dunning"
@@ -84,4 +86,46 @@ type suppressionFake struct {
 
 func (f suppressionFake) IsSuppressed(_ context.Context, _, _ string) (bool, string, error) {
 	return f.suppressed, f.reason, f.err
+}
+
+// TestOutboxMessage_EveryPayloadKeyIsClassified makes adding a field to
+// outboxMessage a decision about storage: the new key is either removed
+// when the email is sent (scrubbedPayloadKeys) or listed here as safe to
+// keep on the sent row. A new link or token field that nobody classified
+// would otherwise stay in the database for good.
+func TestOutboxMessage_EveryPayloadKeyIsClassified(t *testing.T) {
+	t.Parallel()
+	keptAfterSend := map[string]bool{
+		"to": true, "cc": true, "customer_name": true, "invoice_number": true,
+		"credit_note_number": true, "amount_cents": true, "currency": true,
+		"trigger": true, "attempt_number": true, "max_attempts": true,
+		"next_retry_date": true, "reason": true, "failure_reason": true,
+		"escalation_outcome": true, "operator_note": true, "inviter_email": true,
+		"tenant_name": true, "invoice_written_off": true,
+	}
+	scrubbed := map[string]bool{}
+	for _, k := range scrubbedPayloadKeys {
+		scrubbed[k] = true
+	}
+	for _, want := range []string{"setup_url", "update_url", "password_reset_url", "invite_url", "public_token", "pdf"} {
+		if !scrubbed[want] {
+			t.Errorf("%q must be removed from sent rows", want)
+		}
+	}
+
+	typ := reflect.TypeOf(outboxMessage{})
+	for i := 0; i < typ.NumField(); i++ {
+		key, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		if keptAfterSend[key] == scrubbed[key] {
+			t.Errorf("payload key %q (field %s) must be in exactly one of scrubbedPayloadKeys or keptAfterSend",
+				key, typ.Field(i).Name)
+		}
+	}
+	// Keys the readers of sent rows depend on; scrubbing one breaks the
+	// invoice timeline, the Sent-emails panel or the Postmark webhook.
+	for _, k := range []string{"to", "invoice_number", "attempt_number", "trigger"} {
+		if scrubbed[k] {
+			t.Errorf("%q is read from sent rows and must not be scrubbed", k)
+		}
+	}
 }

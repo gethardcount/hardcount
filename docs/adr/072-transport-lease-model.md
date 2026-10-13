@@ -144,3 +144,27 @@ stand. `webhook_outbox` dispatched rows are pure transport intent —
 safe to prune at any age; Velox does not do so automatically (register:
 outbox-pruner, trigger recorded in velox-ops).
 
+## Amendment 2026-10-13 — sent and skipped rows drop their secrets
+
+The scrub named above is in. The mark that sets a row `dispatched` or
+`skipped` also removes six keys from `payload`, in the same UPDATE:
+`setup_url`, `update_url`, `password_reset_url`, `invite_url`,
+`public_token` and `pdf` (`scrubbedPayloadKeys` in
+`internal/email/outbox_sender.go`). Every other key stays, so the invoice
+timeline, the Sent-emails panel and the Postmark webhook read what they
+read before (`to`, `invoice_number`, `attempt_number`, `trigger`).
+
+What is still stored unencrypted, and for how long:
+
+- A `pending` row holds all six keys until it is sent. That is seconds in
+  normal running and up to about 72 hours while a send is retried.
+- A `failed` row keeps its whole payload with no time limit, so the
+  requeue in decision 5 still sends a complete email. Deleting or
+  requeueing the row is the operator's call.
+- Rows marked `dispatched` or `skipped` before this change were not
+  rewritten. No backfill ships with it.
+
+A sent row can no longer be sent again by flipping it back to `pending`:
+its link and PDF are gone. Send a new email from the dashboard or the API
+instead. The residual's other proposal, encrypting the payload fields of
+unsent rows, is not done.

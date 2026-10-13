@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
@@ -112,6 +113,33 @@ type outboxMessage struct {
 	PublicToken       string `json:"public_token,omitempty"`
 	PDF               []byte `json:"pdf,omitempty"`
 }
+
+// scrubbedPayloadKeys are the outboxMessage keys removed from a row's
+// payload once the row will not be sent again (status dispatched or
+// skipped). Each one is a credential or a document copy that only the
+// send itself needs: a link whose token grants access (setup, payment
+// update, password reset, invite), the hosted-invoice token, and the
+// rendered PDF. Sent rows are kept as the delivery record, so without
+// this these values would stay readable in the database for as long as
+// the row exists. Every other key stays; the invoice timeline, the
+// Sent-emails panel and the Postmark webhook read to, invoice_number,
+// attempt_number and trigger from sent rows.
+//
+// A new outboxMessage field must be added here or to the kept list in
+// TestOutboxMessage_EveryPayloadKeyIsClassified.
+var scrubbedPayloadKeys = []string{
+	"setup_url",
+	"update_url",
+	"password_reset_url",
+	"invite_url",
+	"public_token",
+	"pdf",
+}
+
+// scrubbedPayloadSQL is the payload expression the terminal marks assign:
+// jsonb minus a text[] of keys. The keys are the constants above, never
+// input, so building the literal is safe.
+var scrubbedPayloadSQL = `payload - '{` + strings.Join(scrubbedPayloadKeys, ",") + `}'::text[]`
 
 // OutboxSender satisfies the four domain email interfaces (invoice.EmailSender,
 // dunning.EmailNotifier, payment.EmailReceipt, payment.EmailPaymentUpdate) by

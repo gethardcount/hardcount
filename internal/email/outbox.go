@@ -399,10 +399,15 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	markCtx, markCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer markCancel()
 
+	// The two marks that end a row's sending life (dispatched, skipped)
+	// also drop the link tokens and PDF from the payload, in the same
+	// UPDATE so no committed terminal row still holds them. A failed row
+	// keeps its payload: an operator can still re-send it.
 	if hErr == nil {
 		s.markCAS(markCtx, row.ID, `
 			UPDATE email_outbox
-			SET status = 'dispatched', dispatched_at = now(), last_error = NULL
+			SET status = 'dispatched', dispatched_at = now(), last_error = NULL,
+			    payload = `+scrubbedPayloadSQL+`
 			WHERE id = $1 AND status = 'pending'
 		`)
 		return
@@ -413,7 +418,8 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	if errors.Is(hErr, ErrEmailObsolete) {
 		s.markCAS(markCtx, row.ID, `
 			UPDATE email_outbox
-			SET status = 'skipped', last_error = `+"$2"+`
+			SET status = 'skipped', last_error = `+"$2"+`,
+			    payload = `+scrubbedPayloadSQL+`
 			WHERE id = $1 AND status = 'pending'
 		`, truncateError(hErr.Error()))
 		slog.Info("email outbox: row skipped as obsolete",

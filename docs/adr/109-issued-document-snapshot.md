@@ -50,6 +50,11 @@ document, and nothing renders *from* it), but it does mean a
 pre-snapshot record of what a customer actually received already exists
 and is worth consulting during any dispute.
 
+**Update (2026-10-13):** this copy no longer outlives the send. The mark
+that sets an email row `dispatched` or `skipped` now removes the `pdf` key
+(ADR-072 amendment 2026-10-13). Rows sent before that change still hold
+their PDF; a `failed` row keeps it.
+
 Consequences, in order of severity:
 
 1. **The document a customer received stops matching the document they
