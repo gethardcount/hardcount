@@ -248,9 +248,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 		return d.sender.SendCreditNote(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName,
 			msg.CreditNoteNumber, msg.InvoiceNumber, msg.AmountCents, msg.Currency, msg.PDF)
 	default:
-		// Retryable, not permanent: see ErrUnknownEmailType. The type name
-		// goes in the log attrs, deliberately NOT in the error text — the
-		// permanent-bounce classifier scans error text for 55x tokens.
+		// Retryable, not permanent: see ErrUnknownEmailType.
 		slog.WarnContext(ctx, "email outbox: unknown email_type in this binary — retrying so a newer replica can claim it (rolling-deploy skew?)",
 			"outbox_id", row.ID, "tenant_id", row.TenantID, "email_type", row.EmailType, "attempts", row.Attempts)
 		return fmt.Errorf("%w — no dispatcher case in this binary", ErrUnknownEmailType)

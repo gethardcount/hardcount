@@ -274,10 +274,11 @@ When the SMTP server rejects the recipient, Velox marks the customer's
 reply whose status starts with 5.1 or 5.2. This catches synchronous
 failures.
 
-Sender-side failures never mark a customer bounced: an authentication
-error (535), a policy rejection (a 5.7.x status such as
+These do not mark a customer bounced, and Velox retries them: an
+authentication error (535), a policy rejection (a 5.7.x status such as
 `550 5.7.1 relaying denied`), a 4xx reply, or a network error such as a
-timeout. Velox retries these.
+timeout. A 550 to 553 reply with no 5.7.x status counts as a bounce at
+any stage of the conversation, including a rejected From address.
 
 Asynchronous bounces don't flow back through SMTP. In an asynchronous
 bounce, the ESP accepts the message but the recipient mailbox rejects
