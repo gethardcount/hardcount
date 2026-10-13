@@ -268,9 +268,16 @@ How to read the result:
 
 ## Bounce + complaint handling (deferred)
 
-When SMTP returns a permanent 5xx, Velox marks the customer's
+When the SMTP server rejects the recipient, Velox marks the customer's
 `email_status` as `bounced` (via `bounceReporterAdapter` in
-`router.go`). This catches synchronous failures.
+`router.go`). A rejection is a 550, 551, 552 or 553 reply, or any 5xx
+reply whose status starts with 5.1 or 5.2. This catches synchronous
+failures.
+
+Sender-side failures never mark a customer bounced: an authentication
+error (535), a policy rejection (a 5.7.x status such as
+`550 5.7.1 relaying denied`), a 4xx reply, or a network error such as a
+timeout. Velox retries these.
 
 Asynchronous bounces don't flow back through SMTP. In an asynchronous
 bounce, the ESP accepts the message but the recipient mailbox rejects

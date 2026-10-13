@@ -233,11 +233,14 @@ func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) erro
 //	  538 - encryption required
 //	  554 - transaction failed (ambiguous; conservatively excluded)
 //
-//	Enhanced status (X.Y.Z) interpretation:
-//	  5.1.x - addressing (recipient)  → bounce
-//	  5.2.x - mailbox (recipient)     → bounce
-//	  5.7.x - security/policy (sender) → not a bounce
-//	  5.3.x - mail system (server)     → not a bounce
+//	Enhanced status (X.Y.Z) at the start of the reply text:
+//	  5.1.x - addressing (recipient)   → bounce on any 5xx code
+//	  5.2.x - mailbox (recipient)      → bounce on any 5xx code
+//	  5.7.x - security/policy (sender) → not a bounce, even on 550-553:
+//	          relay denied, SPF/DMARC failure and blocklisted-IP replies
+//	          arrive as 550 5.7.1, and one misconfigured relay would
+//	          otherwise flag every customer
+//	  anything else, or none           → the basic code decides
 //
 // Pre-2026-05-29 every 5xx was treated as a recipient bounce.
 // Surfaced live during Postmark token misconfiguration: a wrong
@@ -246,85 +249,41 @@ func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) erro
 // had to manually `UPDATE customers SET email_status='unknown'` to
 // recover. The auth failure was a sender-side error all along.
 //
-// Heuristic string-match because stdlib net/smtp wraps the underlying
-// textproto.Error by the time callers see it. Bias: false negatives
+// Only a server REPLY can be a bounce, so the verdict is read from the
+// typed *textproto.Error (every wrap from deliver up to the outbox uses
+// %w) and never from the error text: a dial or read timeout prints
+// addresses and ports, and "10.5.1.2:587" or a local port 55012 reads
+// like a status or a 550 to a text scan. Bias: false negatives
 // (real bounces missed) cost a wasted retry; false positives
 // (sender errors marked as recipient bounces) cost the operator a
 // manual recovery — much worse, so the classifier is conservative
 // toward "not a bounce."
 func isPermanentSMTPBounce(err error) (bool, string) {
-	if err == nil {
+	var reply *textproto.Error
+	if !errors.As(err, &reply) {
 		return false, ""
 	}
-	msg := err.Error()
-
-	// Enhanced status code in the addressing/mailbox classes wins
-	// over the basic code's classification — 5.1.x and 5.2.x are
-	// unambiguously recipient-side per RFC 3463. Some MX servers
-	// send only the enhanced form (no leading 550 token), so this
-	// check is independent of the basic-code scan below.
-	if hasEnhancedRecipientStatus(msg) {
-		return true, msg
-	}
-
-	for i := 0; i <= len(msg)-3; i++ {
-		if msg[i] != '5' {
-			continue
-		}
-		if !isDigit(msg[i+1]) || !isDigit(msg[i+2]) {
-			continue
-		}
-		if i > 0 {
-			prev := msg[i-1]
-			if isDigit(prev) || isLetter(prev) {
-				continue
-			}
-		}
-		// Found a 5xx token. Only the recipient-rejection codes
-		// (550-553) classify as a bounce. Everything else is sender
-		// or server-side and should be surfaced to the operator
-		// without flipping recipient state.
-		code := msg[i : i+3]
-		if code == "550" || code == "551" || code == "552" || code == "553" {
-			return true, msg
-		}
-		// Sender-side or ambiguous 5xx — surface but don't bounce
-		// the recipient.
+	// A 4xx reply is transient even when its text quotes a 5.x.x status.
+	if reply.Code < 500 || reply.Code > 599 {
 		return false, ""
+	}
+	var class, subject, detail int
+	if n, _ := fmt.Sscanf(reply.Msg, "%d.%d.%d", &class, &subject, &detail); n == 3 && class == 5 {
+		switch subject {
+		case 1, 2:
+			return true, err.Error()
+		case 7:
+			return false, ""
+		}
+	}
+	// Only the recipient-rejection codes classify as a bounce. Every
+	// other 5xx is sender or server-side and is surfaced to the
+	// operator without flipping recipient state.
+	if reply.Code >= 550 && reply.Code <= 553 {
+		return true, err.Error()
 	}
 	return false, ""
 }
-
-// hasEnhancedRecipientStatus returns true when msg contains an RFC
-// 3463 enhanced status code in the 5.1.x (addressing) or 5.2.x
-// (mailbox) classes — both indicate the recipient is the problem.
-// 5.7.x (security/policy) and 5.3.x (mail system) are excluded as
-// sender/server-side.
-func hasEnhancedRecipientStatus(msg string) bool {
-	for i := 0; i <= len(msg)-5; i++ {
-		if msg[i] != '5' || msg[i+1] != '.' {
-			continue
-		}
-		if msg[i+2] != '1' && msg[i+2] != '2' {
-			continue
-		}
-		if msg[i+3] != '.' || !isDigit(msg[i+4]) {
-			continue
-		}
-		// Boundary check on the left so "x5.1.x" doesn't match.
-		if i > 0 {
-			prev := msg[i-1]
-			if isDigit(prev) || isLetter(prev) {
-				continue
-			}
-		}
-		return true
-	}
-	return false
-}
-
-func isDigit(c byte) bool  { return c >= '0' && c <= '9' }
-func isLetter(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') }
 
 // reportBounceIfPermanent forwards a permanent-failure SMTP error to
 // the configured BounceReporter. ctx must carry livemode (caller

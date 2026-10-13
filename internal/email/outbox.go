@@ -111,9 +111,8 @@ func ClaimLease(batchSize int) time.Duration {
 func IsPermanentSendError(err error) bool {
 	// Classification statement, not a second guard: an email_type this
 	// binary does not know is RETRYABLE (rolling-deploy skew — a newer
-	// replica will claim it), so it must never reach the SMTP-bounce text
-	// scan below, which could misread a future type name containing a
-	// 55x token as a permanent bounce.
+	// replica will claim it), so it is decided here, before the
+	// SMTP-bounce classifier below gets a say.
 	if errors.Is(err, ErrUnknownEmailType) {
 		return false
 	}

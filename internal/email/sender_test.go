@@ -3,7 +3,11 @@ package email
 import (
 	"context"
 	"errors"
+	"fmt"
 	"html/template"
+	"net"
+	"net/textproto"
+	"os"
 	"strings"
 	"testing"
 )
@@ -96,60 +100,78 @@ func TestRenderInvoiceHTML(t *testing.T) {
 	}
 }
 
-// TestIsPermanentSMTPBounce checks the heuristic classifier used by
-// the bounce-capture hook. 5xx codes in the error message → permanent,
-// 4xx → transient, random 5-digit strings → must NOT misclassify.
+// smtpReply builds the error net/smtp returns for a server reply, wrapped
+// the way deliver and sendRich wrap it on the way to the classifier.
+func smtpReply(code int, msg string) error {
+	return fmt.Errorf("send email: %w", fmt.Errorf("smtp rcpt to: %w", &textproto.Error{Code: code, Msg: msg}))
+}
+
+// TestIsPermanentSMTPBounce checks the classifier behind the
+// bounce-capture hook and the outbox's dead-letter decision. Only a
+// server REPLY can be a bounce: 550-553 or a 5.1.x / 5.2.x status →
+// permanent; sender-side 5xx, 4xx and every non-reply error → not.
 func TestIsPermanentSMTPBounce(t *testing.T) {
 	tests := []struct {
 		name      string
-		msg       string
+		err       error
 		permanent bool
 	}{
-		{"no error", "", false},
-		// Recipient-rejection codes — should classify as bounce
-		{"classic 550", "550 5.1.1 User unknown", true},
-		{"553 relaying", "553 relaying denied", true},
-		{"552 too big", "552 message size exceeds limits", true},
-		{"550 mailbox unavailable", "550 mailbox unavailable", true},
-		{"wrapped 550", "send email: smtp: 550 mailbox unavailable", true},
-		{"enhanced 5.1.1 no basic", "smtp: 5.1.1 user unknown", true},
-		{"enhanced 5.2.2 over quota", "5.2.2 mailbox full", true},
+		{"no error", nil, false},
+		// Recipient-rejection replies — should classify as bounce
+		{"classic 550", smtpReply(550, "5.1.1 User unknown"), true},
+		{"551 user not local", smtpReply(551, "user not local"), true},
+		{"553 relaying", smtpReply(553, "relaying denied"), true},
+		{"552 too big", smtpReply(552, "message size exceeds limits"), true},
+		{"550 mailbox unavailable", smtpReply(550, "mailbox unavailable"), true},
+		{"unwrapped 550", &textproto.Error{Code: 550, Msg: "mailbox unavailable"}, true},
+		{"enhanced 5.1.1 on an ambiguous 554", smtpReply(554, "5.1.1 user unknown"), true},
+		{"enhanced 5.2.2 over quota", smtpReply(552, "5.2.2 mailbox full"), true},
+		{"multi-line 550", smtpReply(550, "5.1.1 The email account that you tried to reach does not exist.\n5.1.1 Check the address and try again."), true},
 		// Sender/server-side 5xx — must NOT classify as bounce (the
 		// recipient is fine; OUR side has a problem). Pre-fix every
 		// 5xx mapped to bounce; surfaced 2026-05-29 when a wrong
 		// Postmark Server Token returned 535 and Velox flagged
 		// every recipient as bounced as a result.
-		{"535 auth failed (Postmark token mismatch)", "535 5.7.8 Error: authentication failed", false},
-		{"530 access denied", "530 5.7.0 authentication required", false},
-		{"521 server doesn't accept mail", "521 mail not accepted", false},
-		{"534 auth too weak", "534 5.7.9 auth too weak", false},
-		{"538 encryption required", "538 5.7.11 encryption required", false},
-		{"554 transaction failed ambiguous", "554 transaction failed", false},
-		{"enhanced 5.7.x security policy", "smtp: 5.7.1 message rejected by policy", false},
-		// Transient + non-SMTP — not bounces
-		{"421 transient", "421 try again later", false},
-		{"450 soft bounce", "450 mailbox busy", false},
-		{"timeout", "dial tcp: i/o timeout", false},
-		{"zip code false-positive", "SMTP relay error for customer at 95014", false},
+		{"535 auth failed (Postmark token mismatch)", smtpReply(535, "5.7.8 Error: authentication failed"), false},
+		{"530 access denied", smtpReply(530, "5.7.0 authentication required"), false},
+		{"521 server doesn't accept mail", smtpReply(521, "mail not accepted"), false},
+		{"534 auth too weak", smtpReply(534, "5.7.9 auth too weak"), false},
+		{"538 encryption required", smtpReply(538, "5.7.11 encryption required"), false},
+		{"554 transaction failed ambiguous", smtpReply(554, "transaction failed"), false},
+		// 5.7.x on a 550-553 reply is a policy rejection of the SENDER
+		// (relay denied, SPF/DMARC failure, blocklisted IP): one
+		// misconfigured relay would otherwise flag every customer.
+		{"550 5.7.1 policy reject", smtpReply(550, "5.7.1 message rejected by policy"), false},
+		{"553 5.7.1 sender address rejected", smtpReply(553, "5.7.1 Sender address rejected: not owned by user"), false},
+		{"550 5.7.1 quoting 5.1.1 later in the text", smtpReply(550, "5.7.1 blocked by policy, see section 5.1.1 of the postmaster guide"), false},
+		// Transient replies — not bounces, whatever their text quotes
+		{"421 transient", smtpReply(421, "try again later"), false},
+		{"450 soft bounce", smtpReply(450, "mailbox busy"), false},
+		{"451 quoting 5.2.1", smtpReply(451, "4.3.0 deferred: upstream answered 550 5.2.1 mailbox disabled"), false},
+		{"451 carrying a mismatched 5.2.1 status", smtpReply(451, "5.2.1 mailbox temporarily disabled"), false},
+		{"421 quoting 550", smtpReply(421, "4.7.0 try again later (previous reply was 550)"), false},
+		// Not a server reply at all — an address, a port or free text
+		// that happens to look like a status must never mark a
+		// recipient bounced.
+		{"dial timeout to an address containing 5.1.2", fmt.Errorf("send email: %w", fmt.Errorf("smtp dial (starttls): %w",
+			&net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(10, 5, 1, 2), Port: 587}, Err: os.ErrDeadlineExceeded})), false},
+		{"read timeout from an address containing 5.2.7", fmt.Errorf("send email: %w", fmt.Errorf("smtp rcpt to: %w",
+			&net.OpError{Op: "read", Net: "tcp", Source: &net.TCPAddr{IP: net.IPv4(10, 0, 0, 9), Port: 41000}, Addr: &net.TCPAddr{IP: net.IPv4(10, 5, 2, 7), Port: 587}, Err: os.ErrDeadlineExceeded})), false},
+		{"read timeout from local port 55012", fmt.Errorf("send email: %w", fmt.Errorf("smtp data close: %w",
+			&net.OpError{Op: "read", Net: "tcp", Source: &net.TCPAddr{IP: net.IPv4(10, 0, 0, 9), Port: 55012}, Addr: &net.TCPAddr{IP: net.IPv4(203, 0, 113, 7), Port: 587}, Err: os.ErrDeadlineExceeded})), false},
+		{"bounce-looking text that is not a reply", errors.New("550 5.1.1 user unknown"), false},
+		{"timeout", errors.New("dial tcp: i/o timeout"), false},
+		{"zip code false-positive", errors.New("SMTP relay error for customer at 95014"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var err error
-			if tt.msg != "" {
-				err = wrapErr(tt.msg)
-			}
-			got, _ := isPermanentSMTPBounce(err)
+			got, _ := isPermanentSMTPBounce(tt.err)
 			if got != tt.permanent {
-				t.Errorf("isPermanentSMTPBounce(%q) = %v, want %v", tt.msg, got, tt.permanent)
+				t.Errorf("isPermanentSMTPBounce(%v) = %v, want %v", tt.err, got, tt.permanent)
 			}
 		})
 	}
 }
-
-type testErr struct{ m string }
-
-func (e *testErr) Error() string { return e.m }
-func wrapErr(m string) error     { return &testErr{m: m} }
 
 // TestHostedInvoiceURL covers the base-URL-and-token assembly rules.
 func TestHostedInvoiceURL(t *testing.T) {
