@@ -161,6 +161,22 @@ func Forbidden(message string) *DomainError {
 	}
 }
 
+// NotFound marks a referenced resource that does not exist for the caller.
+// Maps to HTTP 404 with the message "<resource> not found". Use it when the
+// missing thing is not the resource the endpoint is named after (a
+// customer_id in the body of a credit grant), so the response names what was
+// actually missing. A row hidden by tenant or mode isolation reports the same
+// way as one that does not exist.
+//
+//	return errs.NotFound("customer")
+func NotFound(resource string) *DomainError {
+	return &DomainError{
+		Kind:    ErrNotFound,
+		Code:    "not_found",
+		Message: resource + " not found",
+	}
+}
+
 // Sentinel errors for store and service layers.
 var (
 	ErrNotFound           = errors.New("not found")

@@ -29,8 +29,9 @@ type SettingsReader interface {
 	Get(ctx context.Context, tenantID string) (domain.TenantSettings, error)
 }
 
-// CustomerReader fetches a customer by id — narrow shape used by
-// Create to read customer.test_clock_id for inheritance (ADR-027).
+// CustomerReader fetches a customer by id on a tenant- and mode-scoped
+// transaction — narrow shape used by Create to confirm the customer is the
+// caller's and to read customer.test_clock_id for inheritance (ADR-027).
 // Implemented by *customer.PostgresStore.
 type CustomerReader interface {
 	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
@@ -160,10 +161,11 @@ func (s *Service) SetSettingsReader(r SettingsReader) {
 }
 
 // SetCustomerReader wires the customer fetcher used at sub-create time
-// to inherit test_clock_id from the owning customer (ADR-027). When
-// unwired (narrow unit tests), the new sub has no clock unless the
-// caller stamps one directly. Production wires the real customer
-// store via router.go.
+// to refuse a customer outside the caller's tenant and mode and to
+// inherit test_clock_id from the owning customer (ADR-027). When
+// unwired (narrow unit tests), neither happens: the new sub has no
+// clock unless the caller stamps one directly. Production wires the
+// real customer store via router.go.
 func (s *Service) SetCustomerReader(r CustomerReader) {
 	s.customers = r
 }
@@ -699,23 +701,27 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	var inheritedClockID string
 	if s.customers != nil {
 		cust, err := s.customers.Get(ctx, tenantID, input.CustomerID)
-		if err != nil && !errors.Is(err, errs.ErrNotFound) {
+		if errors.Is(err, errs.ErrNotFound) {
+			// This read runs in the caller's tenant and mode and is the only
+			// check that does. The foreign key on customer_id is on the id
+			// alone and foreign-key checks do not apply row-level security,
+			// so the insert accepts another tenant's or the other mode's
+			// customer.
+			return domain.Subscription{}, errs.NotFound("customer")
+		}
+		if err != nil {
 			// A read error must not skip the archived guard or the clock
 			// inheritance (a clock customer's sub would bill on wall time).
 			return domain.Subscription{}, fmt.Errorf("get customer: %w", err)
 		}
-		if err == nil {
-			// Archived customer = no NEW subscriptions (ADR-067). Archive's
-			// contract is "hide + stop new business"; without this guard a
-			// direct API call quietly starts billing a customer the operator
-			// explicitly retired.
-			if cust.Status == domain.CustomerStatusArchived {
-				return domain.Subscription{}, errs.InvalidState("customer is archived — unarchive the customer before creating a subscription")
-			}
-			inheritedClockID = cust.TestClockID
+		// Archived customer = no NEW subscriptions (ADR-067). Archive's
+		// contract is "hide + stop new business"; without this guard a
+		// direct API call quietly starts billing a customer the operator
+		// explicitly retired.
+		if cust.Status == domain.CustomerStatusArchived {
+			return domain.Subscription{}, errs.InvalidState("customer is archived — unarchive the customer before creating a subscription")
 		}
-		// Not found: fall through — the downstream FK check on
-		// customer_id fails with a clean 400.
+		inheritedClockID = cust.TestClockID
 	}
 
 	// Archived plans accept no new subscriptions (ADR-067; same enforcement

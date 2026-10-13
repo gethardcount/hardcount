@@ -241,6 +241,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	subSvc.SetPlanReader(pricingStore)
 	creditStore := credit.NewPostgresStore(db)
 	creditSvc := credit.NewService(creditStore)
+	creditSvc.SetCustomerReader(customerStore)
 	creditH := credit.NewHandler(creditSvc)
 	creditNoteStore := creditnote.NewPostgresStore(db)
 

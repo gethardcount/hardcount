@@ -21,10 +21,17 @@ type AuditEmitter interface {
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
 
+// CustomerReader fetches a customer by id on a tenant- and mode-scoped
+// transaction. Implemented by *customer.PostgresStore, wired in router.go.
+type CustomerReader interface {
+	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
+}
+
 type Service struct {
 	store       Store
 	resolver    clock.Resolver
 	auditLogger AuditEmitter
+	customers   CustomerReader
 }
 
 func NewService(store Store) *Service {
@@ -47,6 +54,29 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.auditLogger = a }
 // subscription / invoice / dunning.
 func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
+}
+
+// SetCustomerReader wires the customer read that Grant and Adjust run before
+// writing. When unwired (narrow unit tests) the read is skipped.
+func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
+
+// requireCustomer confirms the customer exists in the caller's tenant and
+// mode. The ledger's foreign key to customers is on the id alone and
+// foreign-key checks do not apply row-level security, so without this read
+// the insert accepts any existing customer id, including another tenant's or
+// the other mode's. Called only from the operator entry points (Grant,
+// Adjust): engine callers pass a customer id they read from a row in scope.
+func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID string) error {
+	if s.customers == nil {
+		return nil
+	}
+	if _, err := s.customers.Get(ctx, tenantID, customerID); err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return errs.NotFound("customer")
+		}
+		return fmt.Errorf("get customer: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {
@@ -99,6 +129,9 @@ type GrantInput struct {
 func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) (domain.CreditLedgerEntry, error) {
 	if input.CustomerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
+	}
+	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
+		return domain.CreditLedgerEntry{}, err
 	}
 	ctx = s.bindForCustomer(ctx, tenantID, input.CustomerID)
 	if input.AmountCents <= 0 {
@@ -646,6 +679,9 @@ type AdjustInput struct {
 func (s *Service) Adjust(ctx context.Context, tenantID string, input AdjustInput) (domain.CreditLedgerEntry, error) {
 	if input.CustomerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
+	}
+	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
+		return domain.CreditLedgerEntry{}, err
 	}
 	// Bind effective-now from the customer pin so a deduct/credit on a
 	// clock-pinned customer stamps the ledger entry's created_at in
