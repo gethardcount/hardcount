@@ -35,6 +35,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Dashboard login works in Safari at `http://localhost` (2026-10-14).** The quickstart runs in production mode, which marks the login cookie `Secure`. Safari drops a `Secure` cookie set over plain http, even on localhost, so login failed with "this browser did not keep you signed in". Chrome and Firefox were not affected. The cookie is now `Secure` unless the browser itself is on plain http at a localhost address, judged from the request's `Origin` (or `Referer`) header. A site served over https keeps `Secure`.
+
 - **The demo's output reads right for a newcomer (2026-10-14).** Amounts print with two decimals (`$1.20`, not `$1.2`), the first step shows the address you opened (`http://localhost:8080`), not the stack's internal `http://nginx`, and the last lines link straight to the demo's invoice and customer in the dashboard, with a note that the home page totals leave out test-clock customers and so still read $0.
 
 - **A spend-threshold invoice that leaves usage without a price now logs it (2026-10-14, #981).** The period-end and cancel invoices logged such usage; the threshold invoice logged nothing. On a meter with no pricing rules, the period close after it bills only from the threshold invoice on, so no log ever named the usage before it. On a meter with rules, the close logged the whole period, so usage after the threshold invoice was logged twice. Now the threshold invoice logs its own usage and the close logs each usage once.

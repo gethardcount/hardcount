@@ -1,7 +1,9 @@
 package session
 
 import (
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -35,7 +37,7 @@ func DefaultCookieConfig() CookieConfig {
 // SetCookie writes the session cookie on the response. Exported so the
 // auth login handler in internal/userauth can call it after Issue
 // without depending on internals here.
-func (c CookieConfig) SetCookie(w http.ResponseWriter, raw string, expires time.Time) {
+func (c CookieConfig) SetCookie(w http.ResponseWriter, r *http.Request, raw string, expires time.Time) {
 	maxAge := int(time.Until(expires).Seconds())
 	if maxAge < 0 {
 		maxAge = 0
@@ -48,14 +50,14 @@ func (c CookieConfig) SetCookie(w http.ResponseWriter, raw string, expires time.
 		Expires:  expires,
 		MaxAge:   maxAge,
 		HttpOnly: true,
-		Secure:   c.Secure,
+		Secure:   c.secureFor(r),
 		SameSite: c.SameSite,
 	})
 }
 
 // ClearCookie writes a cleared (Max-Age=-1) cookie on the response.
 // Used by the logout handler.
-func (c CookieConfig) ClearCookie(w http.ResponseWriter) {
+func (c CookieConfig) ClearCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    "",
@@ -63,9 +65,41 @@ func (c CookieConfig) ClearCookie(w http.ResponseWriter) {
 		Domain:   c.Domain,
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   c.Secure,
+		Secure:   c.secureFor(r),
 		SameSite: c.SameSite,
 	})
+}
+
+// secureFor keeps Secure except when the browser is on plain http at a
+// loopback address. The quickstart runs APP_ENV=production at
+// http://localhost, and Safari drops a Secure cookie set over http even on
+// localhost (Chrome and Firefox keep it), so login silently failed there.
+// The signal is the browser's own Origin (or Referer) header, not Host:
+// behind a TLS proxy that forwards to localhost:8080, Host can say
+// localhost while the browser is on https. A client that forges Origin
+// only weakens its own cookie. Without either header, Secure stays on.
+func (c CookieConfig) secureFor(r *http.Request) bool {
+	if !c.Secure || r == nil {
+		return c.Secure
+	}
+	src := r.Header.Get("Origin")
+	if src == "" || src == "null" {
+		src = r.Header.Get("Referer")
+	}
+	u, err := url.Parse(src)
+	if err != nil || u.Scheme != "http" {
+		return true
+	}
+	return !isLoopbackHost(u.Hostname())
+}
+
+func isLoopbackHost(h string) bool {
+	h = strings.ToLower(h)
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
 
 // ClientIP pulls the caller's IP, preferring X-Forwarded-For (set by

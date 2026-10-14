@@ -217,7 +217,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.cookie.SetCookie(w, rawID, sess.ExpiresAt)
+	h.cookie.SetCookie(w, r, rawID, sess.ExpiresAt)
 	// No email in the label: resource_id IS the user id, and the reader resolves the
 	// address from the (erasable) users row. audit_log is append-only — an email
 	// written here could never be deleted.
@@ -344,7 +344,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		h.auditAuthEvent(r.Context(), r, sess.Livemode, sess.UserID, sess.TenantID, "logout", sess.UserID, "", nil)
 	}
 
-	h.cookie.ClearCookie(w)
+	h.cookie.ClearCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
