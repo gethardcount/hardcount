@@ -321,6 +321,17 @@ Five non-negotiable patterns:
    reaches it either way; the *instants* are what regress. *Pattern:*
    `TestProcessDueRunsForClock_RecoveryStampsContractedInstant`,
    `TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant`.
+6. **Lock order: the invoice row first.** A transaction that writes a row
+   belonging to an invoice (a charge attempt, for example) locks the invoice
+   row before it writes that row. An insert takes its own unique slot, then
+   waits on the invoice for the foreign-key check, so the opposite order
+   deadlocks against a settle that holds the invoice. That happened in #989:
+   the charge path's attempt write against a webhook settle of the same
+   payment. **Decision (2026-10-14): one real-Postgres race test per pair of
+   writers, no general lock-order checker.** Revisit if a deadlock reaches a
+   release that a pair test did not cover. *Pattern:*
+   `TestSettleSucceeded_ConcurrentSources_RecordsOnce`,
+   `internal/creditnote/number_lock_order_integration_test.go`.
 
 ---
 

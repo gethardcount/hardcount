@@ -3990,6 +3990,15 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 	}
 	defer postgres.Rollback(tx)
 
+	// Lock order: the invoice row first, then the attempt row. A settle for
+	// the same PaymentIntent (webhook, reconciler) locks the invoice FOR
+	// UPDATE and then upserts this attempt row. Inserting first instead takes
+	// the attempt's unique slot and then waits on the invoice for the foreign
+	// key check, which deadlocks against that settle (#989).
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR UPDATE`, a.InvoiceID); err != nil {
+		return err
+	}
+
 	if a.StripePaymentIntentID == "" {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO invoice_charge_attempts
