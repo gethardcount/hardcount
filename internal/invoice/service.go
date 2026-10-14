@@ -1294,8 +1294,18 @@ func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.Invoice
 	// committed, silently stripped the customer of paid-with credits on any
 	// transient failure (no reconciler re-drove it). The 0106 dedup index keeps
 	// the in-tx reversal exactly-once across redelivery.
-	voided, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceVoided, func(tx *sql.Tx, prior domain.InvoiceStatus) error {
-		return s.voidEffectsTx(ctx, tx, tenantID, inv, prior)
+	//
+	// The refusal above ran on a copy read before the row lock; a charge can
+	// claim the invoice between that read and this write (#975), so it runs
+	// again on the locked row, with the charge hold.
+	voided, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceVoided, func(tx *sql.Tx, locked domain.Invoice) error {
+		if err := voidRefusal(locked); err != nil {
+			return err
+		}
+		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionVoid); err != nil {
+			return err
+		}
+		return s.voidEffectsTx(ctx, tx, tenantID, locked, locked.Status)
 	})
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1320,6 +1330,27 @@ func voidRefusal(inv domain.Invoice) error {
 	// the same rule ("you can't void an invoice with open payments"). Checked
 	// before any tax reversal can fire.
 	if b := domain.PaymentBlocksAction(inv, domain.ActionVoid); b.Blocked {
+		return errs.InvalidState(b.Message).WithCode(b.Code)
+	}
+	return nil
+}
+
+// refuseWhileChargeHeld is the payment-state refusal for void, write-off and
+// offline payment, run on the row read under the row lock in tx. Beyond
+// PaymentBlocksAction it refuses while a charge holds the invoice: a charge
+// between its claim and its outcome leaves payment_status 'pending' or
+// 'failed' and writes only the hold, so without this the three actions went
+// through while Stripe could be taking the money — a charge then succeeding
+// on a voided invoice, or a customer paying twice after an offline payment
+// (#975, ADR-059 amendment). The hold can outlive a charge that was never
+// sent (breaker open, credentials unreadable); that costs an operator a
+// refusal of at most five minutes, which is accepted.
+func (s *Service) refuseWhileChargeHeld(ctx context.Context, tx *sql.Tx, locked domain.Invoice, action domain.InvoiceAction) error {
+	held, err := s.store.ChargeHeldTx(ctx, tx, locked.ID)
+	if err != nil {
+		return err
+	}
+	if b := domain.PaymentBlocksActionHeld(locked, action, held); b.Blocked {
 		return errs.InvalidState(b.Message).WithCode(b.Code)
 	}
 	return nil
@@ -1484,7 +1515,13 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 		return domain.Invoice{}, errs.InvalidState(b.Message).WithCode(b.Code)
 	}
 
-	updated, err := s.store.UpdateStatus(ctx, tenantID, id, domain.InvoiceUncollectible)
+	// Re-run under the row lock, with the charge hold: the check above read
+	// the invoice before the lock, and a charge can claim it in between
+	// (#975). A parked invoice still passes (the hold is not consulted on
+	// 'unknown'), so ADR-107's only exit stays open.
+	updated, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceUncollectible, func(tx *sql.Tx, locked domain.Invoice) error {
+		return s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionMarkUncollectible)
+	})
 	if err != nil {
 		return domain.Invoice{}, err
 	}
@@ -1609,7 +1646,14 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 	// amount_paid=amount_due, amount_due=0 — same end-state as a
 	// successful engine charge, so downstream reports / customer
 	// balance / dunning scans treat the recovery identically.
-	updated, err := s.store.MarkPaid(ctx, tenantID, id, "out_of_band:"+now.UTC().Format(time.RFC3339), now)
+	//
+	// The payment refusal runs again under MarkPaidOffline's row lock, with
+	// the charge hold: a charge claimed after the read above would otherwise
+	// collect the same invoice a second time (#975).
+	updated, err := s.store.MarkPaidOffline(ctx, tenantID, id, "out_of_band:"+now.UTC().Format(time.RFC3339), now,
+		func(tx *sql.Tx, locked domain.Invoice) error {
+			return s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionRecordOfflinePayment)
+		})
 	if err != nil {
 		return domain.Invoice{}, err
 	}

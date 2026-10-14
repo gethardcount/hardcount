@@ -220,3 +220,42 @@ func TestEmailActionsRefuseAnUnresolvedPayment(t *testing.T) {
 		}
 	}
 }
+
+// TestPaymentBlocksActionHeld_Matrix (#975): the charge hold refuses only on
+// 'pending' and 'failed'. On 'unknown' the hold is ignored, so a parked
+// invoice stays writable-off with a live hold (ADR-107); 'processing' and
+// 'unknown' with a PaymentIntent keep their own refusal.
+func TestPaymentBlocksActionHeld_Matrix(t *testing.T) {
+	actions := []InvoiceAction{ActionVoid, ActionMarkUncollectible, ActionRecordOfflinePayment}
+	cases := []struct {
+		name     string
+		ps       InvoicePaymentStatus
+		pi       string
+		held     bool
+		action   InvoiceAction
+		wantCode string // "" = allowed
+	}{
+		{"pending held", PaymentPending, "", true, "", "payment_in_flight"},
+		{"failed held", PaymentFailed, "pi_1", true, "", "payment_in_flight"},
+		{"pending free", PaymentPending, "", false, "", ""},
+		{"failed free", PaymentFailed, "pi_1", false, "", ""},
+		{"processing free", PaymentProcessing, "pi_1", false, "", "payment_in_flight"},
+		{"parked held, write-off", PaymentUnknown, "", true, ActionMarkUncollectible, ""},
+		{"parked held, void", PaymentUnknown, "", true, ActionVoid, "payment_unidentifiable"},
+		{"parked held, offline", PaymentUnknown, "", true, ActionRecordOfflinePayment, "payment_unidentifiable"},
+	}
+	for _, c := range cases {
+		for _, a := range actions {
+			if c.action != "" && c.action != a {
+				continue
+			}
+			b := PaymentBlocksActionHeld(Invoice{Status: InvoiceFinalized, PaymentStatus: c.ps, StripePaymentIntentID: c.pi}, a, c.held)
+			if b.Code != c.wantCode || b.Blocked != (c.wantCode != "") {
+				t.Errorf("%s / %s: got blocked=%v code=%q, want code %q", c.name, a, b.Blocked, b.Code, c.wantCode)
+			}
+			if b.Blocked && b.Message == "" {
+				t.Errorf("%s / %s: a refusal must say what to do", c.name, a)
+			}
+		}
+	}
+}

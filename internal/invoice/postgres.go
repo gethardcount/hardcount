@@ -581,29 +581,27 @@ func (s *PostgresStore) UpdateStatus(ctx context.Context, tenantID, id string, s
 // Mirrors subscription.CreateWithBill — the store owns the tx, the cross-domain
 // effect is a callback so no peer-package import leaks in.
 func (s *PostgresStore) UpdateStatusWithReversal(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx) error) (domain.Invoice, error) {
-	var fn func(tx *sql.Tx, prior domain.InvoiceStatus) error
+	var fn func(tx *sql.Tx, locked domain.Invoice) error
 	if reverseFn != nil {
-		fn = func(tx *sql.Tx, _ domain.InvoiceStatus) error { return reverseFn(tx) }
+		fn = func(tx *sql.Tx, _ domain.Invoice) error { return reverseFn(tx) }
 	}
 	return s.UpdateStatusWithReversalPrior(ctx, tenantID, id, status, fn)
 }
 
 // UpdateStatusWithReversalPrior is UpdateStatusWithReversal handing the
-// closure the invoice's TRUE prior status, read FOR UPDATE on this same tx
-// before the flip — the service's earlier snapshot races concurrent
-// transitions, and an audit row stamping status_before from it could
-// permanently record the wrong provenance (ADR-090 PR4 review).
-func (s *PostgresStore) UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx, prior domain.InvoiceStatus) error) (domain.Invoice, error) {
+// closure the invoice as it is UNDER THE ROW LOCK, read FOR UPDATE on this
+// same tx before the flip. The service's earlier snapshot races concurrent
+// transitions: an audit row stamping status_before from it could permanently
+// record the wrong provenance (ADR-090 PR4 review), and a refusal decided on
+// it misses a charge that started after the read (#975). A closure error
+// rolls the flip back.
+func (s *PostgresStore) UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
 
-	var fn func(tx *sql.Tx, prior domain.Invoice) error
-	if reverseFn != nil {
-		fn = func(tx *sql.Tx, prior domain.Invoice) error { return reverseFn(tx, prior.Status) }
-	}
 	inv, err := s.UpdateStatusWithReversalPriorTx(ctx, tx, tenantID, id, status, fn)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -654,7 +652,10 @@ func (s *PostgresStore) UpdateStatusWithReversalPriorTx(ctx context.Context, tx 
 // MarkUncollectible's switch) read an EARLIER snapshot on a different tx —
 // without the predicate, a pay-vs-void race flips paid→voided and retires
 // credits the customer just paid for, and a void-vs-finalize race resurrects
-// an annulled invoice. Allowed sources per target (matching the service-layer
+// an annulled invoice. The CAS covers status only. Payment state and the
+// charge hold are checked by Void and MarkUncollectible on the row their
+// locking variant reads (#975), not here: this body also serves
+// draft→finalized, and a parked invoice must stay writable-off. Allowed sources per target (matching the service-layer
 // state machine): finalized←draft; voided←draft/finalized/uncollectible
 // (never paid — "issue a credit note instead"); uncollectible←finalized.
 // 0 rows → re-read → typed conflict with the actual current status.
@@ -840,9 +841,10 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 // from someone else's.
 //
 // Writes that do not record an outcome leave the seq alone and so do not
-// block the stamp: a void or write-off that lands mid-charge (neither takes
-// the charge lease) still gets it, and on those rows it is the reconciler's
-// only handle on a PaymentIntent that may have captured.
+// block the stamp: a void or write-off that lands mid-charge still gets it,
+// and on those rows it is the reconciler's only handle on a PaymentIntent that
+// may have captured. Since #975 both refuse while the charge hold is live, so
+// they land mid-charge only once the hold has lapsed under a stalled charger.
 //
 // The CAS is in the UPDATE's own WHERE, so under READ COMMITTED it is
 // re-checked against a concurrent settle's committed row after waiting on its
@@ -1128,7 +1130,20 @@ func (s *PostgresStore) MarkPaid(ctx context.Context, tenantID, id string, strip
 // catch — fires them once, not twice. invoice.paid itself is already
 // once-only (enqueued inside this tx, after the no-op branch returns).
 func (s *PostgresStore) MarkPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, bool, error) {
-	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, false, nil)
+	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, false, nil, nil)
+}
+
+// MarkPaidOffline is MarkPaid for an operator-recorded payment (cheque,
+// wire): check runs on the invoice as it is under this transition's row lock,
+// before anything is written, and its error refuses the payment. It exists so
+// the offline path can refuse while a card charge is in progress (#975) —
+// the service's own read comes before the lock and can miss a charge that
+// started after it. Only the offline path gets a check: the card settlement
+// and the credit-covered settles run inside the charge's own hold and must
+// always be able to record it.
+func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
+	inv, _, err := s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, false, check, nil)
+	return inv, err
 }
 
 // MarkPaidCardSettlementTransition is MarkPaidReportingTransition for the CARD
@@ -1149,7 +1164,7 @@ func (s *PostgresStore) MarkPaidReportingTransition(ctx context.Context, tenantI
 // suppresses every later attempt). It receives the freshly-written row
 // because the receipt's amount is the amount actually booked here.
 func (s *PostgresStore) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
-	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, true, then)
+	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, true, nil, then)
 }
 
 // markPaidReportingTransition is the shared core. cardSettlement=true also
@@ -1157,7 +1172,8 @@ func (s *PostgresStore) MarkPaidCardSettlementTransition(ctx context.Context, te
 // transition, so exactly-once). Both event enqueues live inside this one tx, so
 // they are atomic with finalized/uncollectible→paid: tx rolls back → no events;
 // commits → the dispatcher delivers.
-func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, cardSettlement bool, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+// check (nil = none) is MarkPaidOffline's refusal, run under the row lock.
+func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, cardSettlement bool, check func(tx *sql.Tx, locked domain.Invoice) error, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Invoice{}, false, err
@@ -1193,6 +1209,17 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 			return domain.Invoice{}, false, errs.ErrNotFound
 		}
 		return domain.Invoice{}, false, fmt.Errorf("load invoice for mark-paid: %w", err)
+	}
+	if check != nil {
+		// The row is locked above, so this read is the state the write acts on.
+		var locked domain.Invoice
+		if err := tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, id).
+			Scan(s.scanInvDest(&locked)...); err != nil {
+			return domain.Invoice{}, false, fmt.Errorf("read locked invoice for mark-paid check: %w", err)
+		}
+		if err := check(tx, locked); err != nil {
+			return domain.Invoice{}, false, err
+		}
 	}
 	switch domain.InvoiceStatus(status) {
 	case domain.InvoiceFinalized, domain.InvoiceUncollectible:
@@ -2247,6 +2274,27 @@ func (s *PostgresStore) ReleaseAutoChargeClaim(ctx context.Context, tenantID, id
 		return err
 	}
 	return tx.Commit()
+}
+
+// ChargeHeldTx reports whether a charge holds this invoice: the charge hold
+// (auto_charge_claimed_until) that every charge claim takes is still live.
+// The caller must hold the invoice's row lock on tx — every claim takes that
+// lock before it writes the hold, so the answer cannot change before tx
+// commits. Same expression as the hosted-page claim, on the database's
+// clock (the claims write the hold with now(), so a Go-side compare would
+// mix clocks). #975: void, write-off and offline payment refuse while it
+// holds.
+func (s *PostgresStore) ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
+	var held bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(auto_charge_claimed_until > now(), false) FROM invoices WHERE id = $1`, id,
+	).Scan(&held); err != nil {
+		if err == sql.ErrNoRows {
+			return false, errs.ErrNotFound
+		}
+		return false, fmt.Errorf("read charge hold: %w", err)
+	}
+	return held, nil
 }
 
 // ClaimChargeForDunningRetry is the dunning-side twin of

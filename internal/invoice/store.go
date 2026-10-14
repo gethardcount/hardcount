@@ -38,10 +38,11 @@ type Store interface {
 	// consumed-credit reversal on void) on the SAME tx — either both commit or
 	// neither, so a void never strands the customer's applied credits unrestored.
 	UpdateStatusWithReversal(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx) error) (domain.Invoice, error)
-	// UpdateStatusWithReversalPrior additionally hands the closure the TRUE
-	// prior status read under the row lock (ADR-090: audit rows must not
-	// stamp status_before from a racy pre-tx snapshot).
-	UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx, prior domain.InvoiceStatus) error) (domain.Invoice, error)
+	// UpdateStatusWithReversalPrior additionally hands the closure the invoice
+	// as read under the row lock (ADR-090: audit rows must not stamp
+	// status_before from a racy pre-tx snapshot; #975: refusals re-run there).
+	// A closure error rolls the flip back.
+	UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
 	// UpdateStatusWithReversalPriorTx is the same flip on the caller's tx; the
 	// closure receives the invoice as read under the row lock.
 	UpdateStatusWithReversalPriorTx(ctx context.Context, tx *sql.Tx, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, prior domain.Invoice) error) (domain.Invoice, error)
@@ -73,6 +74,11 @@ type Store interface {
 	// collection produces the same invoice end-state as a successful
 	// engine charge.
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
+	// MarkPaidOffline is MarkPaid for Record Offline Payment: check runs on
+	// the row under the lock and can refuse. Never for a card settlement.
+	MarkPaidOffline(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
+	// ChargeHeldTx: is the charge hold live? Caller holds the row lock on tx.
+	ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (bool, error)
 	ApplyCreditNote(ctx context.Context, tenantID, id string, amountCents int64) (domain.Invoice, error)
 
 	SetAutoChargePending(ctx context.Context, tenantID, id string, pending bool) error

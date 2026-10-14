@@ -76,9 +76,9 @@ func TestUpdateStatusWithReversalPrior_TruePriorAndSharedFate(t *testing.T) {
 		var gotPrior domain.InvoiceStatus
 		calls := 0
 		voided, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceVoided,
-			func(tx *sql.Tx, prior domain.InvoiceStatus) error {
+			func(tx *sql.Tx, locked domain.Invoice) error {
 				calls++
-				gotPrior = prior
+				gotPrior = locked.Status
 				// The real void emission (invoice.Service.Void) stamps
 				// status_before from exactly this value.
 				return logger.LogInTx(ctx, tx, audit.Entry{
@@ -91,7 +91,7 @@ func TestUpdateStatusWithReversalPrior_TruePriorAndSharedFate(t *testing.T) {
 						"customer_id":        inv.CustomerID,
 						"total_amount_cents": inv.TotalAmountCents,
 						"currency":           inv.Currency,
-						"status_before":      string(prior),
+						"status_before":      string(locked.Status),
 					},
 				})
 			})
@@ -135,10 +135,10 @@ func TestUpdateStatusWithReversalPrior_TruePriorAndSharedFate(t *testing.T) {
 
 		calls := 0
 		_, err := store.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceVoided,
-			func(tx *sql.Tx, prior domain.InvoiceStatus) error {
+			func(tx *sql.Tx, locked domain.Invoice) error {
 				calls++
-				if prior != domain.InvoiceFinalized {
-					t.Errorf("prior handed to the closure: got %q, want finalized", prior)
+				if locked.Status != domain.InvoiceFinalized {
+					t.Errorf("prior handed to the closure: got %q, want finalized", locked.Status)
 				}
 				return errInjectedAuditEmit
 			})

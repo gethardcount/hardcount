@@ -136,6 +136,43 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 	}
 }
 
+// PaymentBlocksActionHeld is PaymentBlocksAction plus the charge hold, for the
+// three actions that settle what is owed: void, write-off and offline payment
+// (#975). chargeHeld is COALESCE(auto_charge_claimed_until > now(), false) —
+// the same expression the hosted-page claim uses — read in the same
+// transaction as inv, with the invoice row locked. Called on any other copy
+// it answers a question about the past.
+//
+// Why the hold counts as in flight here: every charge claim writes only the
+// hold, and payment_status stays 'pending' or 'failed' until Stripe answers
+// (up to 30 seconds), so PaymentBlocksAction alone sees nothing while Stripe
+// may be taking the money. A void that lands there leaves a successful charge
+// on a voided invoice; an offline payment makes the customer pay twice.
+//
+// Only 'pending' and 'failed' consult the hold. 'processing' and 'unknown' are
+// decided above, and an unknown outcome keeps its hold for the full five
+// minutes, so applying the hold to 'unknown' would refuse the write-off of a
+// parked invoice — its only exit (ADR-107).
+//
+// The card settlement path must never call this: the charge holding the hold
+// has to be able to record its own success.
+func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, chargeHeld bool) PaymentBlock {
+	if b := PaymentBlocksAction(inv, action); b.Blocked {
+		return b
+	}
+	if chargeHeld && (inv.PaymentStatus == PaymentPending || inv.PaymentStatus == PaymentFailed) {
+		return PaymentBlock{
+			Blocked: true,
+			Code:    "payment_in_flight",
+			// The hold can outlive a charge that was never sent (a breaker-open
+			// or credentials failure returns without releasing it), so the
+			// advice is a short wait, never "check Stripe".
+			Message: "a charge on this invoice is in progress — try again in a few minutes",
+		}
+	}
+	return PaymentBlock{}
+}
+
 // parkedMessage always ends by naming mark-uncollectible, because it is the one
 // action that works on a parked invoice and an operator who is not told that
 // has no way out.

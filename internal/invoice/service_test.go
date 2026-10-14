@@ -249,18 +249,27 @@ func (m *memStore) UpdateStatus(_ context.Context, tenantID, id string, status d
 	return inv, nil
 }
 
-// Prior variant: the fake's "prior" is the current in-memory status —
+// Prior variant: the fake's "locked" row is the current in-memory invoice —
 // exact, since the fake is single-threaded.
-func (m *memStore) UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, reverseFn func(tx *sql.Tx, prior domain.InvoiceStatus) error) (domain.Invoice, error) {
-	prior := domain.InvoiceStatus("")
-	if inv, ok := m.invoices[id]; ok {
-		prior = inv.Status
+func (m *memStore) UpdateStatusWithReversalPrior(ctx context.Context, tenantID, id string, status domain.InvoiceStatus, fn func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
+	return m.UpdateStatusWithReversalPriorTx(ctx, nil, tenantID, id, status, fn)
+}
+
+// ChargeHeldTx: the fake does not model the charge lease (its claims ignore
+// it too), so no charge ever holds an invoice here. The hold is pinned
+// against real Postgres in charge_hold_guard_integration_test.go.
+func (m *memStore) ChargeHeldTx(_ context.Context, _ *sql.Tx, _ string) (bool, error) {
+	return false, nil
+}
+
+// MarkPaidOffline: check sees the current in-memory invoice as the locked row.
+func (m *memStore) MarkPaidOffline(ctx context.Context, tenantID, id, stripeID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
+	if inv, ok := m.invoices[id]; ok && inv.TenantID == tenantID && check != nil {
+		if err := check(nil, inv); err != nil {
+			return domain.Invoice{}, err
+		}
 	}
-	var fn func(tx *sql.Tx) error
-	if reverseFn != nil {
-		fn = func(tx *sql.Tx) error { return reverseFn(tx, prior) }
-	}
-	return m.UpdateStatusWithReversal(ctx, tenantID, id, status, fn)
+	return m.MarkPaid(ctx, tenantID, id, stripeID, paidAt)
 }
 
 // Tx variant: the fake ignores tx; the closure sees the current in-memory

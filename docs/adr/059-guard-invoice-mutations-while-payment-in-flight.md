@@ -70,6 +70,50 @@ One canonical predicate, in-flight guards on the status writers, a single void w
   behaviour. Pinned by `TestListPendingClawbackDrafts_ParkedSourceReleasedByWriteOff`.
 - **Industry parity.** Operator block matches Stripe exactly. The automated defer-then-act-on-settled-state matches Lago's terminate-subscription rule (*"the unused paid amount is refunded; any unpaid unused amount is credited back"*) — Velox just sequences it after settlement instead of guessing the channel mid-flight.
 
+## Amendment 2026-10-14: the charge hold counts as in flight (#975)
+
+**What was wrong.** This ADR defined in flight as `processing || unknown`
+and checked it on the copy of the invoice the service read before taking
+the row lock. Neither was enough once charges took a hold. Every charge
+claim (the automatic charge, a dunning retry, Collect) writes only
+`auto_charge_claimed_until`, five minutes ahead, and `payment_status` stays
+`pending` or `failed` until Stripe answers. So for the whole time Stripe
+could be taking the money, `IsInFlight()` said no, and a charge claimed
+after the service's read was invisible anyway. Outcomes: a void followed by
+a successful charge left money on a voided invoice (credits handed back,
+tax reversed, only an alert); an offline payment followed by a successful
+charge made the customer pay twice.
+
+**What changed.** `Void`, `MarkUncollectible` and `RecordOfflinePayment`
+now run the refusal again on the row read under the row lock. That second
+check also refuses while the hold is live (`domain.PaymentBlocksActionHeld`).
+The answer is 409 `payment_in_flight`: "a charge on this invoice is in
+progress — try again in a few minutes".
+
+- The hold is read as `COALESCE(auto_charge_claimed_until > now(), false)`,
+  the hosted-page claim's expression, on the database's clock.
+- It is consulted only on `pending` and `failed`. An unknown outcome keeps
+  its hold for the full five minutes, and a parked invoice must stay
+  writable-off (ADR-107).
+- `MarkUncollectible` moved from the plain status write to the locking
+  variant. `RecordOfflinePayment` uses `MarkPaidOffline`, which runs the
+  check under the paid transition's existing `FOR UPDATE`. The card
+  settlement and the credit-covered settles do not get it: they run inside
+  the charge's own hold and must be able to record it.
+- The shared status compare-and-set is unchanged. It also serves
+  draft→finalized.
+
+**Accepted cost.** A breaker-open or credentials failure returns without
+releasing the hold, so an operator can be refused for up to five minutes
+when no charge was sent. Dunning's final write-off treats the refusal as a
+failed terminal action and retries it 24 hours later.
+
+**Not covered.** The engine's relief void (`VoidUnchangedTx`, during a
+cancel or plan swap) re-checks the locked row but not the hold. An
+amount-reducing credit note does not read the hold either; that one is
+deferred under its own trigger in velox-ops dp-readiness. Pinned by the
+`TestChargeHold_*` tests in `internal/invoice`.
+
 ## Deferred / follow-ups
 
 | Item | Affects correctness? | Trigger |

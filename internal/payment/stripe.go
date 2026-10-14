@@ -521,11 +521,13 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// finalized ONLY (ADR-113: nothing initiates money against a written-off
 	// invoice). This belt gate is not redundant with the claims: every claim
 	// reads BEFORE the handler re-reads the invoice, so a MarkUncollectible
-	// landing between claim and charge (the status CAS does not consult the
-	// charge lease, and PaymentBlocksAction does not block on `failed`)
-	// arrives here carrying `uncollectible` — and until 2026-08-06 this line
-	// admitted it, which would have minted a PaymentIntent against a debt the
-	// books say is dead. Found by the ADR-113 removal sweep.
+	// landing between claim and charge arrives here carrying `uncollectible`
+	// — and until 2026-08-06 this line admitted it, which would have minted a
+	// PaymentIntent against a debt the books say is dead. Found by the ADR-113
+	// removal sweep. Since #975 the write-off (and void) refuse while the
+	// charge hold is live, but the status CAS itself still does not read the
+	// hold, so a write-off that lands after the hold lapsed (a charger stalled
+	// past five minutes) still reaches here; keep the gate.
 	if inv.Status != domain.InvoiceFinalized {
 		return domain.Invoice{}, fmt.Errorf("can only charge a finalized invoice, current status: %s", inv.Status)
 	}
