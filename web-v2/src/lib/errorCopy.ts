@@ -136,6 +136,9 @@ export interface ErrorToast {
   // false: show nothing. A 401 is handled once for the whole dashboard
   // (sign-in redirect), so each failed request must not also toast.
   show: boolean
+  // 'warning' when the action may have gone through (no answer came back):
+  // that is uncertain, not a failure, so it is not drawn as an error.
+  tone: 'error' | 'warning'
   title: string
   description?: string
   copyId?: string
@@ -151,10 +154,10 @@ export function errorToast(err: unknown, title?: string): ErrorToast {
     // Stripe's own sentence says what happens next; a request with no
     // response has nothing to add beyond "check before retrying".
     if (asApiError(err)?.code === 'payment_outcome_unknown') {
-      return { show, title: 'Payment result unknown', description: body, copyId }
+      return { show, tone: 'warning', title: 'Payment result unknown', description: body, copyId }
     }
-    return { show, title: NO_ANSWER_TITLE, description: NO_ANSWER_MESSAGE, copyId }
+    return { show, tone: 'warning', title: NO_ANSWER_TITLE, description: NO_ANSWER_MESSAGE, copyId }
   }
-  if (!title) return { show, title: body, copyId }
-  return { show, title, description: body, copyId }
+  if (!title) return { show, tone: 'error', title: body, copyId }
+  return { show, tone: 'error', title, description: body, copyId }
 }

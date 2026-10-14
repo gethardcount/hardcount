@@ -77,7 +77,7 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
               and taxes — this is usage unit economics, not accounting margin.
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               aria-label="Margin window"
               className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
@@ -90,8 +90,10 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
             </select>
             {preset === 'custom' && (
               <>
-                <DatePicker value={customFrom} onChange={setCustomFrom} placeholder="From" className="w-40" />
-                <DatePicker value={customTo} onChange={setCustomTo} placeholder="To" className="w-40"
+                {/* w-48: the field also holds a calendar icon, a clear button and
+                    a chevron, so w-40 cut the year off "Sep 30, 2026". */}
+                <DatePicker value={customFrom} onChange={setCustomFrom} placeholder="From" className="w-48" />
+                <DatePicker value={customTo} onChange={setCustomTo} placeholder="To" className="w-48"
                   minDate={customFrom ? new Date(customFrom + 'T00:00:00') : undefined} />
               </>
             )}

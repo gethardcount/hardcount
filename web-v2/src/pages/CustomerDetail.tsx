@@ -452,7 +452,7 @@ export default function CustomerDetailPage() {
 
       {/* Archived Banner */}
       {isArchived && (
-        <Card className="mb-4 border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20">
+        <Card className="mb-4 ring-amber-200 bg-amber-50 dark:ring-amber-900/50 dark:bg-amber-950/20">
           <CardContent className="px-5 py-3 flex items-center justify-between">
             <p className="text-sm text-amber-800 dark:text-amber-300">This customer has been archived. All data is read-only.</p>
             <Button variant="outline" size="sm"
@@ -469,8 +469,8 @@ export default function CustomerDetailPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold text-foreground">{customer.display_name}</h1>
             {/* Customer-level test-clock attach (ADR-027). Badge on
@@ -482,7 +482,7 @@ export default function CustomerDetailPage() {
             <CopyButton text={customer.id} />
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {!isArchived && (
             <Button size="sm" onClick={() => setShowNewInvoice(true)}>
               <FilePlus2 size={14} className="mr-1.5" />

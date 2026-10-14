@@ -170,6 +170,7 @@ export default function PricingPage() {
   }
   const loading = plansLoading || metersLoading || rulesLoading
   const error = plansError || metersError || rulesError
+  const showCounts = !loading && !error
 
   const showAdd =
     (tab === 'plans' && plans.length > 0) ||
@@ -193,9 +194,11 @@ export default function PricingPage() {
 
       <Tabs value={tab} onValueChange={setTab} className="mt-6">
         <TabsList>
-          <TabsTrigger value="plans">Plans ({plans.length})</TabsTrigger>
-          <TabsTrigger value="meters">Meters ({meters.length})</TabsTrigger>
-          <TabsTrigger value="rules">Rules ({currentRules.length})</TabsTrigger>
+          {/* Counts only once the lists have loaded: "(0)" over a load
+              error or a skeleton claims an empty list nobody has seen. */}
+          <TabsTrigger value="plans">Plans{showCounts ? ` (${plans.length})` : ''}</TabsTrigger>
+          <TabsTrigger value="meters">Meters{showCounts ? ` (${meters.length})` : ''}</TabsTrigger>
+          <TabsTrigger value="rules">Rules{showCounts ? ` (${currentRules.length})` : ''}</TabsTrigger>
         </TabsList>
 
         <Card className="mt-4">

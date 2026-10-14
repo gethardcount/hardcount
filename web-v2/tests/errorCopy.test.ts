@@ -36,6 +36,7 @@ test('a refused request keeps the caller title and shows the server sentence, wi
   const err = new FakeApiError('a payment for this invoice is already in progress', 409, { code: 'invalid_state', requestId: 'req_1' })
   assert.deepEqual(errorToast(err, "Couldn't charge"), {
     show: true,
+    tone: 'error',
     title: "Couldn't charge",
     description: 'A payment for this invoice is already in progress.',
     copyId: undefined,
@@ -46,6 +47,7 @@ test('email not set up: the action title over the server sentence, no Copy ID', 
   const err = new FakeApiError("Email isn't set up on this server, so nothing was sent.", 409, { code: 'email_not_configured', requestId: 'req_2' })
   assert.deepEqual(errorToast(err, 'Failed to send setup link'), {
     show: true,
+    tone: 'error',
     title: 'Failed to send setup link',
     description: "Email isn't set up on this server, so nothing was sent.",
     copyId: undefined,
@@ -113,6 +115,7 @@ test('a change with no response says the result is unknown, not that it failed',
     assert.equal(outcomeUnknown(err), true)
     assert.deepEqual(errorToast(err, "Couldn't charge"), {
       show: true,
+      tone: 'warning',
       title: NO_ANSWER_TITLE,
       description: NO_ANSWER_MESSAGE,
       copyId: undefined,
@@ -124,6 +127,7 @@ test('a load with no response stays a connection problem (nothing could have cha
   const err = new FakeApiError('Failed to fetch', 0, { code: 'network', method: 'GET' })
   assert.equal(outcomeUnknown(err), false)
   assert.equal(errorToast(err, 'Export failed').title, 'Export failed')
+  assert.equal(errorToast(err, 'Export failed').tone, 'error')
   assert.match(errorToast(err, 'Export failed').description!, /Couldn't reach the server/)
 })
 
@@ -135,6 +139,7 @@ test('Stripe never answering a charge reads as unknown, with its own sentence an
   )
   const t = errorToast(err, "Couldn't charge")
   assert.equal(t.title, 'Payment result unknown')
+  assert.equal(t.tone, 'warning')
   assert.match(t.description!, /didn't confirm whether the charge went through/)
   assert.equal(t.copyId, 'req_7')
 })

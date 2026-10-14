@@ -102,7 +102,7 @@ function RecipeCard({ recipe, onConfigure }: { recipe: RecipeListItem; onConfigu
   const installed = !!recipe.instantiated
 
   return (
-    <Card className={installed ? 'border-primary/40' : ''}>
+    <Card className={installed ? 'ring-primary/40' : ''}>
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div>

@@ -56,7 +56,8 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
   return (
     // A finished advance is information: neutral card. Amber only when the
     // advance ended with an error, and then only on the line that says so.
-    <Card className={cn('mt-4', summary.had_errors && 'border-amber-300 dark:border-amber-500/30')}>
+    // Card draws its edge with ring-1, so the amber edge is a ring colour.
+    <Card className={cn('mt-4', summary.had_errors && 'ring-amber-300 dark:ring-amber-500/40')}>
       <CardContent className="px-6 py-5">
         <div className="flex items-center gap-2">
           <FastForward size={16} className="text-muted-foreground" />
@@ -70,7 +71,9 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
         ) : (
           <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-2 sm:grid-cols-3">
             {rows.map(([label, n]) => (
-              <div key={label} className="flex items-baseline justify-between gap-3">
+              // Value right after its label: spread to the cell's edge, a
+              // lone row left its number a column-width away.
+              <div key={label} className="flex items-baseline gap-2">
                 <dt className="text-sm text-muted-foreground">{label}</dt>
                 <dd className="text-sm font-semibold tabular-nums">{n}</dd>
               </div>
@@ -256,7 +259,7 @@ export default function TestClockDetailPage() {
       </div>
 
       {clock.status === 'internal_failure' && (
-        <Card className="mt-4 border-destructive/30 bg-destructive/5">
+        <Card className="mt-4 ring-destructive/30 bg-destructive/5">
           <CardContent className="px-6 py-4 flex items-start gap-3">
             <AlertTriangle size={16} className="text-destructive shrink-0 mt-0.5" />
             <div className="text-sm flex-1 min-w-0">

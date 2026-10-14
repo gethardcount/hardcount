@@ -621,7 +621,10 @@ export default function SettingsPage() {
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">{symbol}</span>
                       <Input id="settings-credit-balance-low-threshold" inputMode="decimal"
                         {...register('credit_balance_low_threshold')}
-                        className={cn('pl-7', formErrors.credit_balance_low_threshold && 'border-destructive')}
+                        className={cn(formErrors.credit_balance_low_threshold && 'border-destructive')}
+                        // The prefix runs from "$" to "CA$": pad by its length
+                        // so the value and placeholder start after it.
+                        style={{ paddingLeft: `calc(0.75rem + ${symbol.length}ch + 0.25rem)` }}
                         placeholder="Off" />
                     </div>
                     {formErrors.credit_balance_low_threshold
@@ -799,8 +802,10 @@ export default function SettingsPage() {
                         className="shrink-0 mt-0.5"
                       />
                     </div>
-                    {/* A worked example, not a warning: plain helper text. */}
-                    {form.tax_rate > 0 && (() => {
+                    {/* A worked example, not a warning: plain helper text.
+                        Hidden while the rate is out of range: the field shows
+                        the error, and an example at 150% would be nonsense. */}
+                    {form.tax_rate > 0 && form.tax_rate <= 100 && !formErrors.tax_rate && (() => {
                       const ex = taxExampleAmounts(form.tax_rate, form.tax_inclusive, form.default_currency || 'USD')
                       return (
                         <p className="mt-4 text-xs text-muted-foreground flex items-start gap-2">

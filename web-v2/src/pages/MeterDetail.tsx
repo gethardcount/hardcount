@@ -173,8 +173,8 @@ export default function MeterDetailPage() {
       <DetailBreadcrumb to="/pricing?tab=meters" parentLabel="Meters" currentLabel={meter.name} />
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold text-foreground">{meter.name}</h1>
           <div className="flex items-center gap-2 mt-1">
             <span className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{meter.id}</span>

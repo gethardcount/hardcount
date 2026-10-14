@@ -465,7 +465,7 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
 
           {/* Warnings */}
           {data.warnings.length > 0 && (
-            <Card className="border-amber-200 dark:border-amber-900">
+            <Card className="ring-amber-200 dark:ring-amber-900">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 text-xs font-medium mb-2">
                   <AlertTriangle size={12} />

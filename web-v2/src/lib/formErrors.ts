@@ -72,7 +72,8 @@ export function showApiError(err: unknown, title: string): void {
 function showErrorToast(t: ErrorToast): void {
   if (!t.show) return
   const copyId = t.copyId
-  toast.error(t.title, {
+  const show = t.tone === 'warning' ? toast.warning : toast.error
+  show(t.title, {
     description: t.description,
     action: copyId
       ? {

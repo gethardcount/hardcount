@@ -655,8 +655,8 @@ export default function InvoiceDetailPage() {
       <DetailBreadcrumb to="/invoices" parentLabel="Invoices" currentLabel={invoice.invoice_number} />
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold text-foreground">{invoice.invoice_number}</h1>
           </div>
@@ -684,7 +684,7 @@ export default function InvoiceDetailPage() {
             it as a flat header button preserves the "you're editing
             this draft" affordance. Everything else sits in the
             overflow. */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm"
             onClick={() => navigate(`/audit-log?resource_type=invoice&resource_id=${invoice.id}`)}>
             <History size={14} className="mr-1.5" />
@@ -912,7 +912,7 @@ export default function InvoiceDetailPage() {
           consequence + the recovery paths so the operator isn't
           left wondering why most buttons disappeared. */}
       {invoice.status === 'uncollectible' && (
-        <Callout tone="amber" className="mt-4" title="Marked uncollectible">
+        <Callout tone="amber" className="mb-6" title="Marked uncollectible">
           <p className="text-xs">
             Recorded as bad debt. Dunning automation has halted and no further collection is attempted.
             The invoice stays on the books for audit. The subscription remains <strong>active</strong> —

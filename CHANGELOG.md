@@ -38,6 +38,7 @@ Older entries keep their original text.
 - **Settings Save explains an invalid field on another tab (2026-10-14).** It did nothing. It now opens that tab and says what to fix.
 - **Unknown addresses show "Page not found" (2026-10-14).** The screen was blank. The crash screen keeps the raw error inside Details.
 - **No raw codes on screen (2026-10-14).** The invoice notice's support code moved into Details. "payment_anomaly", the invoice list hover, the "payment: unknown" filter and Dunning reasons now read as words, for example "Why recovery started: No payment method on file".
+- **Dashboard layout fixes (2026-10-15).** Toasts follow dark mode and sit above the Settings save bar. "Result unknown" is an amber warning, not a red error. Detail-page header buttons wrap on a phone. Pricing shows no "(0)" counts over a load error, the tax example hides while the rate is invalid, and coloured card edges (clock advance with an error, recipes, warnings) now draw.
 - **Amber is kept for problems (2026-10-14).** The test-mode strip, the Dashboard open-invoices row, an unlinked price, the tax example and a finished clock advance are no longer amber. The sidebar Dunning count is amber, as on the Dashboard. Notices share one shape, with dark-mode colours.
 
 ## [0.7.0] - 2026-10-14

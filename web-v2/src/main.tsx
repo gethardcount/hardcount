@@ -3,7 +3,7 @@ import type { ReactNode, ErrorInfo } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { returnPath } from '@/lib/returnPath'
-import { Toaster } from 'sonner'
+import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { ModeAwareQueryProvider } from '@/contexts/QueryProvider'
@@ -221,8 +221,18 @@ const App = () => (
           because its list is local component state seeded to [] and
           filled only by the subscription it registers on mount — it
           never reads sonner's module-level store back, so toasts
-          published to the outgoing instance are simply lost. */}
-      <Toaster position="bottom-right" richColors closeButton />
+          published to the outgoing instance are simply lost.
+          The bottom offset clears what is pinned to the bottom edge: the
+          Settings Discard/Save bar (about 57px tall) and the onboarding
+          pill (bottom 20px, about 34px tall), so a toast never covers the
+          button the operator needs next. */}
+      <Toaster
+        position="bottom-right"
+        richColors
+        closeButton
+        offset={{ bottom: 72, right: 24 }}
+        mobileOffset={{ bottom: 72, right: 16, left: 16 }}
+      />
     </AuthProvider>
   </ErrorBoundary>
 )

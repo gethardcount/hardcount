@@ -335,8 +335,8 @@ export default function SubscriptionDetailPage() {
       <DetailBreadcrumb to="/subscriptions" parentLabel="Subscriptions" currentLabel={sub.display_name} />
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold text-foreground">{sub.display_name}</h1>
             {/* Test-clock chip lives next to the title alongside the
@@ -346,13 +346,13 @@ export default function SubscriptionDetailPage() {
                 on the right with the action buttons. Stripe / Linear /
                 Vercel all separate the two zones this way. */}
           </div>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex flex-wrap items-center gap-2 mt-1">
             <span className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{sub.id}</span>
             <CopyButton text={sub.id} />
             <span className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{sub.code}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline"
             onClick={() => navigate(`/audit-log?resource_type=subscription&resource_id=${sub.id}`)}>
             <History size={16} className="mr-1.5" />
