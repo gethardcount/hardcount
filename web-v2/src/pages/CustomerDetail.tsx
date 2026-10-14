@@ -250,6 +250,14 @@ export default function CustomerDetailPage() {
   })
   const profileCard = billingProfileCard({ data: billingProfile, isError: billingProfileError })
 
+  // Credits have no currency of their own: the ledger is drawn down 1:1
+  // against whatever currency this customer's invoices are in (ADR-100).
+  // So show them in the customer's billing currency, then their invoices'
+  // currency; the workspace default only when neither exists.
+  const creditCurrency = billingProfile?.currency
+    || overview?.recent_invoices?.find(inv => inv.currency)?.currency
+    || undefined
+
   const { data: metersData } = useQuery({
     queryKey: ['meters'],
     queryFn: () => api.listMeters(),
@@ -575,15 +583,15 @@ export default function CustomerDetailPage() {
               <Link to={`/credits?customer=${id}`} className="flex-1 px-6 py-4 hover:bg-accent/50 transition-colors">
                 <p className="text-sm text-muted-foreground">Credit Balance</p>
                 <p className={cn('text-sm font-medium mt-1', (balance ?? 0) > 0 ? 'text-emerald-600' : 'text-foreground')}>
-                  {balance === undefined ? '—' : formatCents(balance)}
+                  {balance === undefined ? '—' : formatCents(balance, creditCurrency)}
                 </p>
                 {/* Kind split — money-backed commit liability must not read
                     as one number with free promo credits. */}
                 {creditGrants && (creditGrants.commit_remaining_cents > 0 || creditGrants.promotional_remaining_cents > 0) && (
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {creditGrants.commit_remaining_cents > 0 && <>Commit {formatCents(creditGrants.commit_remaining_cents)}</>}
+                    {creditGrants.commit_remaining_cents > 0 && <>Commit {formatCents(creditGrants.commit_remaining_cents, creditCurrency)}</>}
                     {creditGrants.commit_remaining_cents > 0 && creditGrants.promotional_remaining_cents > 0 && ' · '}
-                    {creditGrants.promotional_remaining_cents > 0 && <>Promo {formatCents(creditGrants.promotional_remaining_cents)}</>}
+                    {creditGrants.promotional_remaining_cents > 0 && <>Promo {formatCents(creditGrants.promotional_remaining_cents, creditCurrency)}</>}
                   </p>
                 )}
               </Link>
@@ -906,9 +914,9 @@ export default function CustomerDetailPage() {
                         : g.grant_kind === 'promotional' ? <Badge variant="secondary">Promo</Badge>
                         : <Badge variant="outline">Credit</Badge>}
                     </TableCell>
-                    <TableCell className="text-sm text-right">{formatCents(g.amount_cents)}</TableCell>
-                    <TableCell className="text-sm text-right">{formatCents(g.consumed_cents)}</TableCell>
-                    <TableCell className="text-sm text-right font-medium">{formatCents(g.remaining_cents)}</TableCell>
+                    <TableCell className="text-sm text-right">{formatCents(g.amount_cents, creditCurrency)}</TableCell>
+                    <TableCell className="text-sm text-right">{formatCents(g.consumed_cents, creditCurrency)}</TableCell>
+                    <TableCell className="text-sm text-right font-medium">{formatCents(g.remaining_cents, creditCurrency)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{g.expires_at ? formatDate(g.expires_at) : 'never'}</TableCell>
                   </TableRow>
                 ))}
