@@ -958,11 +958,6 @@ export default function CustomerDetailPage() {
                 tone="amber"
                 className="mx-6 my-4"
                 title={NO_CARD_TITLE}
-                actions={!isArchived ? (
-                  <Button size="sm" variant="outline" onClick={() => setSetupLinkDialogOpen(true)}>
-                    Add payment method
-                  </Button>
-                ) : undefined}
               >
                 {NO_CARD_SENTENCE}
               </Callout>

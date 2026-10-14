@@ -181,13 +181,14 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
 
             {rep.unresolved_events > 0 && (
               <p className="text-xs text-muted-foreground mt-3">
-                {rep.unresolved_events.toLocaleString()} usage events have no matching
-                provider rate — they were recorded before a rate existed or their model
-                isn't in your Provider costs table. New events are costed automatically
-                once a rate matches.
+                {rep.unresolved_events === 1
+                  ? '1 usage event has no provider cost'
+                  : `${rep.unresolved_events.toLocaleString()} usage events have no provider cost`}
+                : no rate in Provider costs matched it when it arrived. Events that arrive
+                after you add a matching rate are costed.
               </p>
             )}
-            {rep.by_model.length === 0 && rep.revenue_cents === 0 && (
+            {rep.by_model.length === 0 && rep.revenue_cents === 0 && rep.unresolved_events === 0 && (
               <p className="text-sm text-muted-foreground mt-2">
                 No usage in the window yet. Add provider rates under Provider costs,
                 send usage, and margin appears here.
