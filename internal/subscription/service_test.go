@@ -235,7 +235,7 @@ func (m *memStore) ScheduleCancellation(ctx context.Context, tenantID, id string
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
-		return domain.Subscription{}, fmt.Errorf("cannot schedule cancellation on %s subscription", s.Status)
+		return domain.Subscription{}, fmt.Errorf("A %s subscription can't be scheduled to cancel.", s.Status)
 	}
 	// Mirror the store's ADR-069 status CAS.
 	if s.Status != observedStatus {
@@ -316,7 +316,7 @@ func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, 
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
-		return domain.Subscription{}, fmt.Errorf("cannot pause collection on %s subscription", s.Status)
+		return domain.Subscription{}, fmt.Errorf("Collection can't be paused on a %s subscription.", s.Status)
 	}
 	pcCopy := pc
 	if pc.ResumesAt != nil {
@@ -354,7 +354,7 @@ func (m *memStore) ActivateAfterTrial(ctx context.Context, tenantID, id string, 
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if s.Status != domain.SubscriptionTrialing {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot end trial on %s subscription", s.Status))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be ended. This one is %s.", s.Status))
 	}
 	s.Status = domain.SubscriptionActive
 	if s.ActivatedAt == nil {
@@ -374,7 +374,7 @@ func (m *memStore) ActivateDraftWithBill(ctx context.Context, tenantID, id strin
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if s.Status != domain.SubscriptionDraft {
-		return domain.Subscription{}, errs.InvalidState("can only activate draft subscriptions")
+		return domain.Subscription{}, errs.InvalidState("Only a draft subscription can be activated.")
 	}
 	s.Status = domain.SubscriptionActive
 	s.ActivatedAt, s.StartedAt = &at, &at
@@ -416,7 +416,7 @@ func (m *memStore) EndTrialEarly(ctx context.Context, tenantID, id string, at, p
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if s.Status != domain.SubscriptionTrialing {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot end trial on %s subscription", s.Status))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be ended. This one is %s.", s.Status))
 	}
 	s.Status = domain.SubscriptionActive
 	if s.ActivatedAt == nil {
@@ -564,7 +564,7 @@ func (m *memStore) ExtendTrial(ctx context.Context, tenantID, id string, newTria
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if s.Status != domain.SubscriptionTrialing {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot extend trial on %s subscription", s.Status))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be extended. This one is %s.", s.Status))
 	}
 	t := newTrialEnd
 	ps := periodStart

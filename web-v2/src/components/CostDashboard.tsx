@@ -30,9 +30,12 @@ import { useEffectiveNow, useEffectiveNowResolver } from '@/hooks/useClockFrozen
 
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadError } from '@/components/LoadError'
+import { Callout } from '@/components/Callout'
+import { Button } from '@/components/ui/button'
+import { UNPRICED_SENTENCE, UNPRICED_TITLE, unpricedLine, unpricedMeters } from '@/lib/unpricedUsage'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ChevronDown, ChevronRight, Activity, AlertTriangle, Loader2, Receipt } from 'lucide-react'
+import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-react'
 
 // ============================================================================
 // Top-level wrapper
@@ -386,6 +389,7 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
     },
   })
 
+  const unpriced = useMemo(() => unpricedMeters(data?.meters ?? []), [data])
   const totalCents = data?.totals.reduce((sum, t) => sum + t.amount_cents, 0) ?? 0
   const totalEvents = data?.meters.reduce((sum, m) => sum + Number(m.total_quantity), 0) ?? 0
 
@@ -460,21 +464,45 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
               their per-customer view around. Hidden if no events. */}
           {data.buckets.length > 0 && data.meters.length > 0 && <UsageChart usage={data} />}
 
-          {/* Warnings */}
-          {data.warnings.length > 0 && (
-            <Card className="ring-amber-200 dark:ring-amber-900">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 text-xs font-medium mb-2">
-                  <AlertTriangle size={12} />
-                  {data.warnings.length} warning{data.warnings.length !== 1 ? 's' : ''}
-                </div>
-                <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1">
-                  {data.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
+          {/* Usage with no price: a plain notice built from the unmatched
+              rows, with the quantity per meter and a link to the meter. The
+              server's own warning sentences go in Details. */}
+          {unpriced.length > 0 ? (
+            <Callout
+              tone="amber"
+              title={UNPRICED_TITLE}
+              actions={unpriced.length === 1 ? (
+                <Button size="sm" variant="outline" render={<Link to={`/meters/${unpriced[0].meterId}`} />}>
+                  Open meter
+                </Button>
+              ) : undefined}
+              details={data.warnings.length > 0 ? (
+                <ul className="space-y-1">
+                  {data.warnings.map((w, i) => <li key={i}>{w}</li>)}
                 </ul>
-              </CardContent>
-            </Card>
+              ) : undefined}
+            >
+              <p>{UNPRICED_SENTENCE}</p>
+              {unpriced.map(m => (
+                <p key={m.meterId}>
+                  {unpriced.length > 1
+                    ? <Link to={`/meters/${m.meterId}`} className="text-primary underline-offset-2 hover:underline">{unpricedLine(m)}</Link>
+                    : unpricedLine(m)}
+                </p>
+              ))}
+            </Callout>
+          ) : data.warnings.length > 0 && (
+            <Callout
+              tone="amber"
+              title="Usage may be incomplete"
+              details={
+                <ul className="space-y-1">
+                  {data.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              }
+            >
+              The server reported a problem working out this usage; Details has its message.
+            </Callout>
           )}
 
           {/* Per-meter cards with rule-resolution drill-down */}
@@ -724,7 +752,7 @@ function RuleRow({
       <div className="px-5 py-3 border-b border-border last:border-b-0 space-y-1">
         <div className="flex items-baseline justify-between gap-4">
           <span className="text-xs font-medium text-amber-500">
-            No pricing rule matched — check event dimension values
+            No price matches this usage
           </span>
           <span className="text-xs font-semibold text-amber-500 shrink-0">not billed</span>
         </div>

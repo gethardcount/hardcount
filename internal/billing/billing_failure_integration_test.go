@@ -965,7 +965,7 @@ func TestBillingFailure_StillDueAfterACleanAttemptIsCounted(t *testing.T) {
 	_, errs := env.newEngine(stuck, env.pricing).RunCycle(env.ctx, 50, nil)
 	onlyFailure(t, errs, a.ID)
 	bf := env.get(t, a.ID).BillingFailure
-	if bf == nil || bf.Attempts != 1 || !strings.HasPrefix(bf.LastError, "Billing made no progress") {
+	if bf == nil || bf.Attempts != 1 || !strings.HasPrefix(bf.LastError, "Billing didn't finish") {
 		t.Fatalf("failure = %+v, want attempts 1 with the no-progress text", bf)
 	}
 }

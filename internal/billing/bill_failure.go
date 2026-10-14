@@ -114,7 +114,7 @@ const (
 	refusalNetTerms    = "The net payment terms in settings are negative. Set them to zero or more, then retry billing."
 	refusalTimezone    = "The billing timezone in settings cannot be loaded. Set a valid timezone, then retry billing."
 	refusalTaxProvider = "The tax provider in settings cannot be used. Choose a tax provider that is configured, then retry billing."
-	refusalNoProgress  = "Billing made no progress: the attempt finished without an error but the subscription is still due."
+	refusalNoProgress  = "Billing didn't finish, and the subscription is still due. Retry billing, or wait for the next automatic try."
 )
 
 // errBillingGated is returned by billSubscription when the attempt-time gate

@@ -408,10 +408,10 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 		}
 		if currentStatus != string(observedStatus) {
 			return domain.Subscription{}, errs.InvalidState(fmt.Sprintf(
-				"subscription changed from %s to %s while scheduling — re-read and retry (the cancel's meaning depends on status)",
+				"This subscription just changed from %s to %s. Refresh the page and try again.",
 				observedStatus, currentStatus))
 		}
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot schedule cancellation on %s subscription", currentStatus))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("A %s subscription can't be scheduled to cancel.", currentStatus))
 	}
 	if err != nil {
 		return domain.Subscription{}, err
@@ -666,7 +666,7 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 		if err2 != nil {
 			return domain.Subscription{}, err2
 		}
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot pause collection on %s subscription", currentStatus))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", currentStatus))
 	}
 	if err != nil {
 		return domain.Subscription{}, err
@@ -780,7 +780,7 @@ func (s *PostgresStore) ActivateDraftWithBill(ctx context.Context, tenantID, id 
 	if err == sql.ErrNoRows {
 		// Row exists in another status (or not at all) — surface the same
 		// typed error the pre-fix service check produced.
-		return domain.Subscription{}, errs.InvalidState("can only activate draft subscriptions")
+		return domain.Subscription{}, errs.InvalidState("Only a draft subscription can be activated.")
 	}
 	if err != nil {
 		return domain.Subscription{}, err
@@ -897,7 +897,7 @@ func (s *PostgresStore) classifyActivationConflict(ctx context.Context, tx *sql.
 	if currentStatus == "trialing" && (cancelAt.Valid || cancelAtPeriodEnd) {
 		return ErrTrialCancelDue
 	}
-	return errs.InvalidState(fmt.Sprintf("cannot end trial on %s subscription", currentStatus))
+	return errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be ended. This one is %s.", currentStatus))
 }
 
 // EndTrialEarly atomically flips status 'trialing' → 'active', stamps
@@ -1031,9 +1031,9 @@ func (s *PostgresStore) ExtendTrial(ctx context.Context, tenantID, id string, ne
 			return domain.Subscription{}, err2
 		}
 		if currentStatus == "trialing" && cancelAt.Valid {
-			return domain.Subscription{}, errs.InvalidState("subscription has a scheduled cancellation with an explicit date — clear the scheduled cancel first, then extend the trial")
+			return domain.Subscription{}, errs.InvalidState("This subscription is scheduled to cancel on a set date. Undo the scheduled cancellation first, then extend the trial.")
 		}
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot extend trial on %s subscription", currentStatus))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be extended. This one is %s.", currentStatus))
 	}
 	if err != nil {
 		return domain.Subscription{}, err
@@ -2127,7 +2127,7 @@ func (s *PostgresStore) SetBillingThresholds(ctx context.Context, tenantID, id s
 		if err2 != nil {
 			return domain.Subscription{}, err2
 		}
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot set billing threshold on %s subscription", currentStatus))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Spend thresholds can't be set on a %s subscription.", currentStatus))
 	}
 	if err != nil {
 		return domain.Subscription{}, err

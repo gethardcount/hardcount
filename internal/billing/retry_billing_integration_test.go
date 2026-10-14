@@ -326,7 +326,7 @@ func TestRetryBilling_NoProgressIsSavedInTheSameCall(t *testing.T) {
 		t.Fatalf("retry: %d %s", code, body)
 	}
 	bf := out.Subscription.BillingFailure
-	if bf == nil || bf.Attempts != 1 || !strings.HasPrefix(bf.LastError, "Billing made no progress") ||
+	if bf == nil || bf.Attempts != 1 || !strings.HasPrefix(bf.LastError, "Billing didn't finish") ||
 		bf.NextAttemptAt == nil || !bf.NextAttemptAt.Equal(now.Add(15*time.Minute)) {
 		t.Fatalf("billing_failure = %+v, want attempts 1 with the no-progress text and the first wait", bf)
 	}

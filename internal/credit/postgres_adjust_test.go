@@ -69,7 +69,7 @@ func TestAdjustAtomic_NoOversellUnderContention(t *testing.T) {
 				mu.Unlock()
 				return
 			}
-			if !strings.Contains(err.Error(), "insufficient balance") {
+			if !strings.Contains(err.Error(), "Insufficient balance") {
 				t.Errorf("unexpected error: %v", err)
 			}
 		}()
@@ -129,7 +129,7 @@ func TestAdjustAtomic_DeductionExceedsBalance(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected insufficient-balance error, got nil")
 	}
-	if !strings.Contains(err.Error(), "insufficient balance") {
+	if !strings.Contains(err.Error(), "Insufficient balance") {
 		t.Fatalf("expected insufficient-balance error, got: %v", err)
 	}
 

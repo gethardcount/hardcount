@@ -628,7 +628,7 @@ func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 			}
 		}
 		swapAt := r.f.cycleStart.Add(20 * time.Minute)
-		assertPeriodMoved409(t, sw.swap(t, r, swapAt), "re-read the subscription and retry")
+		assertPeriodMoved409(t, sw.swap(t, r, swapAt), "Refresh the page and try again")
 
 		if got := r.itemPlan(t); got != r.f.planID {
 			t.Fatalf("item plan = %s after a refused swap, want unchanged %s", got, r.f.planID)
@@ -761,7 +761,7 @@ func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 			}
 		}
 		swapAt := r.f.cycleStart.Add(20 * time.Minute)
-		assertPeriodMoved409(t, sw.swap(t, r, swapAt), "already billed this subscription past the requested effective instant")
+		assertPeriodMoved409(t, sw.swap(t, r, swapAt), "already billed this subscription past the current time")
 		if got := r.itemPlan(t); got != r.f.planID {
 			t.Fatalf("item plan = %s after a refused swap, want unchanged", got)
 		}

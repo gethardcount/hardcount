@@ -456,7 +456,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 		// exceeding the available balance, not a server fault (was a plain
 		// fmt.Errorf that respond.FromError mapped to 500 internal_error).
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents",
-			fmt.Sprintf("insufficient balance: available %.2f, deduction %.2f",
+			fmt.Sprintf("Insufficient balance: only %.2f is available, so %.2f can't be deducted.",
 				float64(currentBalance)/100, float64(-amountCents)/100))
 	}
 
@@ -481,7 +481,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 			// errs.Invalid → 400 for the same reason as the balance check
 			// above: operator asked for more than the drainable balance.
 			return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", fmt.Sprintf(
-				"insufficient drainable balance: active credit blocks cover %.2f of the %.2f deduction — the rest of the balance is expired credit pending the expiry sweep",
+				"Insufficient balance: only %.2f of the %.2f can be deducted. The rest of the balance has expired.",
 				float64(drained)/100, float64(-amountCents)/100))
 		}
 		drainedFrom = blocks

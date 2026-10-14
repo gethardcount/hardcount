@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
+import { cancelImmediatelyText, pauseCollectionToast, planChangeToast, scheduleCancelToast } from '@/lib/subscriptionCopy'
 import { api, formatCents, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
 import { formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
@@ -12,6 +13,12 @@ import { Layout } from '@/components/Layout'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { Callout } from '@/components/Callout'
+import { NoticeRow } from '@/components/NoticeRow'
+import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
+import {
+  NO_CARD_SENTENCE, NO_CARD_TITLE, billingFailureNextLine, billingFailureTitle, cancelScheduledSentence,
+  collectionPausedSentence, hasScheduledCancel, subscriptionNoticeLayout, type SubscriptionNoticeKind,
+} from '@/lib/subscriptionNotices'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { cn } from '@/lib/utils'
@@ -80,6 +87,7 @@ export default function SubscriptionDetailPage() {
   const [pauseResumesAt, setPauseResumesAt] = useState('')
   const [itemDialog, setItemDialog] = useState<ItemDialogState>(null)
   const [showThresholdsDialog, setShowThresholdsDialog] = useState(false)
+  const [setupLinkOpen, setSetupLinkOpen] = useState(false)
 
   const { data: sub, isLoading, error: loadError, refetch } = useQuery({
     queryKey: ['subscription', id],
@@ -219,11 +227,8 @@ export default function SubscriptionDetailPage() {
       invalidateAll()
       // ADR-069: on a trialing sub the flag cancels FREE at trial end — the
       // old hardcoded 'at period end' toast promised the wrong date.
-      toast.success(
-        updated?.status === 'trialing' && updated?.cancel_effective_at
-          ? `Cancellation scheduled at trial end (${formatDate(updated.cancel_effective_at)}) — the customer won't be charged`
-          : 'Cancellation scheduled at period end',
-      )
+      const t = scheduleCancelToast(updated, updated?.cancel_effective_at ? formatDate(updated.cancel_effective_at) : undefined)
+      toast.success(t.title, { description: t.description })
       setShowCancelChoice(false)
     },
     onError: (err) => { invalidateAll(); showApiError(err, 'Failed to schedule cancellation') },
@@ -231,7 +236,7 @@ export default function SubscriptionDetailPage() {
 
   const clearScheduledCancelMutation = useMutation({
     mutationFn: () => api.clearScheduledSubscriptionCancel(id!),
-    onSuccess: () => { invalidateAll(); toast.success('Scheduled cancellation cleared') },
+    onSuccess: () => { invalidateAll(); toast.success('Cancellation undone', { description: 'The subscription will renew as usual.' }) },
     onError: (err) => { invalidateAll(); showApiError(err, 'Failed to clear scheduled cancellation') },
   })
 
@@ -248,9 +253,11 @@ export default function SubscriptionDetailPage() {
       }
       return api.pauseSubscriptionCollection(id!, body)
     },
-    onSuccess: () => {
+    onSuccess: (updated) => {
       invalidateAll()
-      toast.success(pauseResumesAt ? 'Collection paused — auto-resumes on the date you picked' : 'Collection paused — invoices will draft only')
+      const resumesAt = updated?.pause_collection?.resumes_at
+      const t = pauseCollectionToast(resumesAt ? formatDate(resumesAt) : undefined)
+      toast.success(t.title, { description: t.description })
       setShowPauseConfirm(false)
       setPauseResumesAt('')
     },
@@ -259,7 +266,7 @@ export default function SubscriptionDetailPage() {
 
   const resumeCollectionMutation = useMutation({
     mutationFn: () => api.resumeSubscriptionCollection(id!),
-    onSuccess: () => { invalidateAll(); toast.success('Collection resumed') },
+    onSuccess: () => { invalidateAll(); toast.success('Collection resumed', { description: 'New invoices are finalized and charged again.' }) },
     onError: (err) => { invalidateAll(); showApiError(err, 'Failed to resume collection') },
   })
 
@@ -271,9 +278,9 @@ export default function SubscriptionDetailPage() {
 
   const extendTrialMutation = useMutation({
     mutationFn: (trialEnd: string) => api.extendSubscriptionTrial(id!, { trial_end: trialEnd }),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       invalidateAll()
-      toast.success('Trial extended')
+      toast.success('Trial extended', updated?.trial_end_at ? { description: `The trial now ends ${formatDateTime(updated.trial_end_at)}.` } : undefined)
       setShowExtendTrial(false)
       setExtendTrialDate('')
       setExtendTrialTime('')
@@ -327,6 +334,82 @@ export default function SubscriptionDetailPage() {
   }
 
   const firstItemPlan = items[0] ? planById(items[0].plan_id) : undefined
+
+  const cancelScheduled = hasScheduledCancel(sub)
+  const noticeLayout = subscriptionNoticeLayout({
+    billingFailure: !!sub.billing_failure,
+    needsCard: subNeedsCard,
+    cancelScheduled,
+    collectionPaused: !!sub.pause_collection,
+  })
+
+  // One notice, drawn as the page's box or as a one-line row under the
+  // header. Same words and the same button either way.
+  const renderNotice = (kind: SubscriptionNoticeKind, as: 'box' | 'row') => {
+    switch (kind) {
+      case 'billing_failure': {
+        const f = sub.billing_failure!
+        const next = billingFailureNextLine(f, f.next_attempt_at ? formatDateTime(f.next_attempt_at) : undefined)
+        const action = (
+          <Button size="sm" variant="outline" disabled={retryBillingMutation.isPending} onClick={() => retryBillingMutation.mutate()}>
+            {retryBillingMutation.isPending && <Loader2 size={14} className="mr-2 animate-spin" />}
+            Retry billing
+          </Button>
+        )
+        // Billing failure outranks the others, so it is always the box.
+        return (
+          <Callout
+            tone="red"
+            className="mb-6"
+            title={billingFailureTitle(f)}
+            actions={action}
+            details={<p>Last failed {formatDateTime(f.failed_at)}.</p>}
+          >
+            <p>{f.last_error}</p>
+            {next && <p>{next}</p>}
+          </Callout>
+        )
+      }
+      case 'no_card': {
+        const action = (
+          <Button size="sm" variant="outline" onClick={() => setSetupLinkOpen(true)}>
+            Add payment method
+          </Button>
+        )
+        return as === 'box'
+          ? <Callout tone="amber" className="mb-6" title={NO_CARD_TITLE} actions={action}>{NO_CARD_SENTENCE}</Callout>
+          : <NoticeRow tone="amber" title={NO_CARD_TITLE} action={action}>{NO_CARD_SENTENCE}</NoticeRow>
+      }
+      case 'cancel_scheduled': {
+        const action = (
+          <Button variant="outline" size="sm" onClick={() => clearScheduledCancelMutation.mutate()} disabled={acting}>
+            {clearScheduledCancelMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Undoing…</> : 'Undo'}
+          </Button>
+        )
+        // cancel_effective_at is the backend's authoritative answer — on a
+        // TRIALING sub the flag means trial end (free), NOT the first paid
+        // period's end (ADR-069).
+        const sentence = cancelScheduledSentence(sub, sub.cancel_effective_at ? formatDateTime(sub.cancel_effective_at) : undefined)
+        return as === 'box'
+          ? <Callout tone="amber" className="mb-6" title="Cancellation scheduled" actions={action}>{sentence}</Callout>
+          : <NoticeRow tone="amber" title="Cancellation scheduled" action={action}>{sentence}</NoticeRow>
+      }
+      case 'collection_paused': {
+        // Distinct from the hard pause (status=paused): the sub stays active
+        // but invoices generate as drafts and skip finalize/charge/dunning
+        // until resumed. A deliberate state, so the neutral tone.
+        const action = (
+          <Button variant="outline" size="sm" onClick={() => resumeCollectionMutation.mutate()} disabled={acting}>
+            {resumeCollectionMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Resuming…</> : 'Resume collection'}
+          </Button>
+        )
+        const sentence = collectionPausedSentence(sub.pause_collection?.resumes_at ? formatDateTime(sub.pause_collection.resumes_at) : undefined)
+        return as === 'box'
+          ? <Callout className="mb-6" title="Collection paused" actions={action}>{sentence}</Callout>
+          : <NoticeRow title="Collection paused" action={action}>{sentence}</NoticeRow>
+      }
+    }
+  }
 
   return (
     <Layout>
@@ -421,103 +504,16 @@ export default function SubscriptionDetailPage() {
         <TestClockBanner testClockId={sub.test_clock_id} />
       )}
 
-      {/* Billing is failing for this subscription: no invoice is being
-          written. Says why, what happens next, and offers the retry. */}
-      {sub.billing_failure && (
-        <Callout
-          tone="red"
-          className="mb-6"
-          title={sub.billing_failure.parked ? 'Billing has stopped for this subscription' : 'Billing is failing for this subscription'}
-          actions={
-            <Button size="sm" variant="outline" disabled={retryBillingMutation.isPending} onClick={() => retryBillingMutation.mutate()}>
-              {retryBillingMutation.isPending && <Loader2 size={14} className="mr-2 animate-spin" />}
-              Retry billing
-            </Button>
-          }
-        >
-          <p>{sub.billing_failure.last_error}</p>
-          <p className="text-xs">
-            {sub.billing_failure.parked
-              ? <>It failed {sub.billing_failure.attempts} times, last on {formatDateTime(sub.billing_failure.failed_at)}. No invoice will be created until you retry.</>
-              : <>Attempt {sub.billing_failure.attempts} of {sub.billing_failure.max_attempts} failed on {formatDateTime(sub.billing_failure.failed_at)}.{sub.billing_failure.next_attempt_at && <> The next automatic attempt is after {formatDateTime(sub.billing_failure.next_attempt_at)}.</>}</>}
-          </p>
-        </Callout>
+      {/* Notices: at most one box, the most urgent present (billing failure,
+          then no card, then scheduled cancel, then collection paused; see
+          lib/subscriptionNotices). Any other that applies is a one-line row
+          that keeps its own button. */}
+      {noticeLayout.rows.length > 0 && (
+        <div className="mb-4 space-y-1.5">
+          {noticeLayout.rows.map(kind => <div key={kind}>{renderNotice(kind, 'row')}</div>)}
+        </div>
       )}
-
-      {/* No card on file — this subscription bills automatically. Fires
-          before the first invoice (the reactive no-payment-method invoice
-          banner takes over after finalize). */}
-      {subNeedsCard && (
-        <Callout
-          tone="amber"
-          className="mb-6"
-          title="No card on file"
-          actions={sub.customer_id ? (
-            <Button size="sm" variant="outline" onClick={() => navigate(`/customers/${sub.customer_id}`)}>
-              Add payment method
-            </Button>
-          ) : undefined}
-        >
-          This subscription bills automatically, but the customer has no payment method saved. Add one before the next renewal so the charge goes through.
-        </Callout>
-      )}
-
-      {/* Scheduled cancellation. Surfaces both modes (at_period_end
-          and explicit cancel_at) with an obvious Undo so an operator who
-          set this in error can clear it without guessing the API surface. */}
-      {(sub.cancel_at_period_end || sub.cancel_at) && (
-        <Callout
-          tone="amber"
-          className="mb-6"
-          title="Cancellation scheduled"
-          actions={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => clearScheduledCancelMutation.mutate()}
-              disabled={acting}
-            >
-              {clearScheduledCancelMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Undoing…</> : 'Undo'}
-            </Button>
-          }
-        >
-          {/* cancel_effective_at is the backend's authoritative answer —
-              on a TRIALING sub the flag means trial end (free), NOT the
-              first paid period's end, so deriving the date client-side
-              showed the wrong day (ADR-069). */}
-          {sub.cancel_effective_at ? (
-            sub.status === 'trialing' && sub.cancel_at_period_end
-              ? <>At trial end ({formatDateTime(sub.cancel_effective_at)}); the customer won't be charged.</>
-              : <>{sub.cancel_at_period_end ? 'At end of current period' : 'On'} {formatDateTime(sub.cancel_effective_at)}.</>
-          ) : null}
-        </Callout>
-      )}
-
-      {/* Collection paused. Distinct from the hard pause (status=paused)
-          — sub stays active but invoices generate as drafts and skip
-          finalize/charge/dunning until resumed. A deliberate state, so a
-          neutral notice; it had no dark-mode colours as a hand-made box. */}
-      {sub.pause_collection && (
-        <Callout
-          className="mb-6"
-          title="Collection paused"
-          actions={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => resumeCollectionMutation.mutate()}
-              disabled={acting}
-            >
-              {resumeCollectionMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Resuming…</> : 'Resume collection'}
-            </Button>
-          }
-        >
-          Invoices will generate as drafts and skip charge until resumed
-          {sub.pause_collection.resumes_at && (
-            <> (auto-resumes {formatDateTime(sub.pause_collection.resumes_at)})</>
-          )}.
-        </Callout>
-      )}
+      {noticeLayout.box && renderNotice(noticeLayout.box, 'box')}
 
       {/* Subscription Timeline */}
       {(() => {
@@ -699,8 +695,8 @@ export default function SubscriptionDetailPage() {
       {/* Key metrics */}
       <Card>
         <CardContent className="p-0">
-          <div className="flex divide-x divide-border">
-            <div className="flex-1 px-6 py-4">
+          <div className="flex flex-col divide-y divide-border md:flex-row md:divide-y-0 md:divide-x">
+            <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Customer</p>
               {customer ? (
                 <Link to={`/customers/${customer.id}`} className="text-lg font-semibold text-primary hover:underline mt-1 block">
@@ -710,7 +706,7 @@ export default function SubscriptionDetailPage() {
                 <p className="text-lg font-semibold text-foreground mt-1">{sub.customer_id.slice(0, 8)}...</p>
               )}
             </div>
-            <div className="flex-1 px-6 py-4">
+            <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Items</p>
               {items.length === 0 ? (
                 <p className="text-lg font-semibold text-foreground mt-1">—</p>
@@ -728,7 +724,7 @@ export default function SubscriptionDetailPage() {
                 <p className="text-lg font-semibold text-foreground mt-1">{items.length} items</p>
               )}
             </div>
-            <div className="flex-1 px-6 py-4">
+            <div className="flex-1 min-w-0 px-6 py-4">
               {sub.status === 'trialing' && sub.trial_start_at && sub.trial_end_at ? (
                 <>
                   <p className="text-sm text-muted-foreground">Trial period</p>
@@ -783,7 +779,7 @@ export default function SubscriptionDetailPage() {
                 </>
               )}
             </div>
-            <div className="flex-1 px-6 py-4">
+            <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Status</p>
               <div className="mt-1.5">
                 <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
@@ -910,11 +906,11 @@ export default function SubscriptionDetailPage() {
             <div className="divide-y divide-border">
               {sub.billing_thresholds.amount_gte != null && (
                 <div className="flex items-center justify-between px-6 py-3">
-                  <span className="text-sm text-muted-foreground w-40 shrink-0">Subtotal cap</span>
+                  <span className="text-sm text-muted-foreground w-40 shrink-0">Period total</span>
                   <span className="text-sm text-foreground">
                     {formatCents(sub.billing_thresholds.amount_gte, items[0] ? planById(items[0].plan_id)?.currency : undefined)}
                     <span className="text-xs text-muted-foreground ml-2">
-                      ({sub.billing_thresholds.reset_billing_cycle ? 'resets cycle on fire' : 'continues cycle on fire'})
+                      ({sub.billing_thresholds.reset_billing_cycle ? 'starts a new billing period' : 'keeps the billing period'})
                     </span>
                   </span>
                 </div>
@@ -931,7 +927,7 @@ export default function SubscriptionDetailPage() {
               })}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">No spend cap configured. The cycle scan is the only invoice-emitting path.</p>
+            <p className="text-sm text-muted-foreground">No spend thresholds. Invoices are issued only on the regular billing schedule.</p>
           )}
         </CardContent>
       </Card>
@@ -1259,7 +1255,7 @@ export default function SubscriptionDetailPage() {
           <DialogHeader>
             <DialogTitle>Pause collection</DialogTitle>
             <DialogDescription>
-              Future invoices on this subscription will be created as drafts and skip auto-charge until collection is resumed. The billing cycle keeps running so you can still see what was owed across the pause. <strong>On resume, the full current period bills — paused days are not pro-rated. Issue a credit grant after resuming if you want to offset them.</strong>
+              New invoices stay as drafts and aren't charged until you resume; paused days are still billed then.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
@@ -1271,8 +1267,14 @@ export default function SubscriptionDetailPage() {
               minDate={nowDate}
             />
             <p className="text-xs text-muted-foreground">
-              Leave blank to pause indefinitely; you can resume manually any time. Set a date to auto-resume — the next cycle on or after this date bills normally.
+              Leave blank to pause until you resume it. With a date, collection resumes on that day.
             </p>
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none hover:text-foreground">Details</summary>
+              <p className="mt-1.5">
+                The billing period keeps running while collection is paused, so the invoices show what was owed. Paused days are not taken off; to offset them, grant credit after you resume.
+              </p>
+            </details>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowPauseConfirm(false); setPauseResumesAt('') }} disabled={pauseCollectionMutation.isPending}>
@@ -1289,10 +1291,10 @@ export default function SubscriptionDetailPage() {
       <TypedConfirmDialog
         open={showCancelConfirm}
         onOpenChange={setShowCancelConfirm}
-        title="Cancel Subscription"
-        description="Cancelling ends billing and stops future invoices for this subscription. This action cannot be undone."
+        title="Cancel subscription now"
+        description={cancelImmediatelyText(sub.status)}
         confirmWord="CANCEL"
-        confirmLabel="Cancel Subscription"
+        confirmLabel="Cancel subscription"
         onConfirm={() => cancelMutation.mutate()}
         loading={cancelMutation.isPending}
       />
@@ -1341,7 +1343,7 @@ export default function SubscriptionDetailPage() {
               disabled={acting}
               destructive
               title="Immediately"
-              description="Stops billing right now. Cannot be undone."
+              description={cancelImmediatelyText(sub.status)}
             />
           </div>
           <AlertDialogFooter>
@@ -1437,7 +1439,8 @@ export default function SubscriptionDetailPage() {
             if (res.proration) {
               toast.success(prorationText(res.proration, planById(res.proration.new_plan_id)?.currency))
             } else {
-              toast.success('Plan change saved')
+              const t = planChangeToast(res.item, res.item?.pending_plan_effective_at ? formatDate(res.item.pending_plan_effective_at) : undefined)
+              toast.success(t.title, t.description ? { description: t.description } : undefined)
             }
           }}
         />
@@ -1475,6 +1478,17 @@ export default function SubscriptionDetailPage() {
         />
       )}
 
+      {/* Add payment method — the shared dialog that emails or copies a
+          setup link, opened from the no-card notice. */}
+      {sub.customer_id && (
+        <SendSetupLinkDialog
+          open={setupLinkOpen}
+          onOpenChange={setSetupLinkOpen}
+          customerId={sub.customer_id}
+          customerEmail={customer?.email}
+        />
+      )}
+
       {/* Edit Billing Thresholds */}
       {showThresholdsDialog && (
         <EditBillingThresholdsDialog
@@ -1482,7 +1496,7 @@ export default function SubscriptionDetailPage() {
           items={items}
           planById={planById}
           onClose={() => setShowThresholdsDialog(false)}
-          onSaved={(verb) => { setShowThresholdsDialog(false); invalidateAll(); toast.success(verb) }}
+          onSaved={(title) => { setShowThresholdsDialog(false); invalidateAll(); toast.success(title) }}
         />
       )}
     </Layout>
@@ -1541,7 +1555,7 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
     if (!selectedPlan) return
     const qty = parseInt(quantity, 10)
     if (!Number.isFinite(qty) || qty < 1) {
-      toast.error('Quantity must be a positive integer')
+      toast.error('Enter a whole number of 1 or more')
       return
     }
     setSubmitting(true)
@@ -1562,7 +1576,7 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
         <DialogHeader>
           <DialogTitle>Add Item</DialogTitle>
           <DialogDescription>
-            Add a plan to this subscription. Mid-cycle adds are prorated against the remaining period.
+            Add a plan to this subscription. Added mid-period, it's billed only for the rest of the period.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
@@ -1688,9 +1702,8 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
             />
             {hiddenCount > 0 && (
               <p className="text-xs text-muted-foreground">
-                {hiddenCount} plan{hiddenCount === 1 ? '' : 's'} with a different billing timing
-                {hiddenCount === 1 ? ' is' : ' are'} not shown — a plan swap keeps its billing timing.
-                To move to {currentPlan?.base_bill_timing === 'in_advance' ? 'arrears' : 'advance'} billing,
+                {hiddenCount} plan{hiddenCount === 1 ? '' : 's'} billed at the {currentPlan?.base_bill_timing === 'in_advance' ? 'end' : 'start'} of
+                the period {hiddenCount === 1 ? 'is' : 'are'} not shown, because a plan change can't switch that. To switch,
                 cancel and create a new subscription.
               </p>
             )}
@@ -1703,14 +1716,14 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
               className="mt-0.5"
             />
             <div>
-              <span className="font-medium text-foreground">Apply immediately (with proration)</span>
+              <span className="font-medium text-foreground">Change now</span>
               {immediate ? (
                 <p className="text-xs text-muted-foreground mt-1">
-                  The remaining time on the current billing period will be prorated. A credit or charge is applied based on the price difference between plans.
+                  The price difference for the rest of the period is charged or credited now.
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Scheduled — the plan swap will apply at the next billing cycle boundary. No proration.
+                  Unchecked, the new plan starts at the next billing period and nothing is charged or credited now.
                 </p>
               )}
             </div>
@@ -1751,11 +1764,11 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
     e.preventDefault()
     const qty = parseInt(quantity, 10)
     if (!Number.isFinite(qty) || qty < 1) {
-      toast.error('Quantity must be a positive integer')
+      toast.error('Enter a whole number of 1 or more')
       return
     }
     if (qty === item.quantity) {
-      toast.error('New quantity is the same as current quantity')
+      toast.error('That is already the quantity')
       return
     }
     setSubmitting(true)
@@ -1776,7 +1789,7 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
         <DialogHeader>
           <DialogTitle>Change Quantity</DialogTitle>
           <DialogDescription>
-            Applied immediately. Quantity increases charge prorated incrementally; decreases credit the customer.
+            Takes effect now. An increase is charged for the rest of the period; a decrease is credited.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
@@ -1842,7 +1855,7 @@ function RemoveItemConfirm({ subscriptionID, item, plan, onClose, onRemoved, onF
         <AlertDialogHeader>
           <AlertDialogTitle>Remove item from subscription?</AlertDialogTitle>
           <AlertDialogDescription>
-            Remove <strong>{plan?.name || item.plan_id}</strong> (qty {item.quantity}) from this subscription. If removed mid-period, a credit will be issued for the unused portion.
+            Removes <strong>{plan?.name || 'this item'}</strong> (quantity {item.quantity}). Removed mid-period, the unused part of the period is credited.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -1866,7 +1879,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
   items: SubscriptionItem[]
   planById: (planID: string) => Plan | undefined
   onClose: () => void
-  onSaved: (verb: string) => void
+  onSaved: (title: string) => void
 }) {
   const existing = subscription.billing_thresholds
   const subCurrency = items[0] ? planById(items[0].plan_id)?.currency : undefined
@@ -1894,7 +1907,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     if (trimmedAmount !== '') {
       const amt = Number(trimmedAmount)
       if (!Number.isFinite(amt) || amt <= 0) {
-        toast.error('Subtotal cap must be a positive number')
+        toast.error('The period total must be more than zero')
         return
       }
       body.amount_gte = Math.round(amt * 100)
@@ -1905,7 +1918,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
       const raw = (perItem[item.id] ?? '').trim()
       if (raw === '') continue
       if (!/^\d+(\.\d+)?$/.test(raw)) {
-        toast.error(`Per-item cap for ${planById(item.plan_id)?.name || item.id} must be a non-negative number`)
+        toast.error(`The threshold for ${planById(item.plan_id)?.name || 'an item'} must be a number of 0 or more`)
         return
       }
       itemThresholds.push({ subscription_item_id: item.id, usage_gte: raw })
@@ -1915,14 +1928,14 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     }
 
     if (body.amount_gte == null && (body.item_thresholds == null || body.item_thresholds.length === 0)) {
-      toast.error('Set at least one cap (subtotal or per-item)')
+      toast.error('Set a period total or at least one item threshold')
       return
     }
 
     setSubmitting(true)
     try {
       await api.setSubscriptionBillingThresholds(subscription.id, body)
-      onSaved(existing ? 'Thresholds updated' : 'Thresholds set')
+      onSaved('Spend thresholds saved')
     } catch (err) {
       showApiError(err, 'Failed to save thresholds')
       setSubmitting(false)
@@ -1933,7 +1946,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     setSubmitting(true)
     try {
       await api.clearSubscriptionBillingThresholds(subscription.id)
-      onSaved('Thresholds cleared')
+      onSaved('Spend thresholds cleared')
     } catch (err) {
       showApiError(err, 'Failed to clear thresholds')
       setSubmitting(false)
@@ -1951,7 +1964,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="amount-gte">Subtotal cap{subCurrency ? ` (${subCurrency.toUpperCase()})` : ''}</Label>
+            <Label htmlFor="amount-gte">Period total{subCurrency ? ` (${subCurrency.toUpperCase()})` : ''}</Label>
             <Input
               id="amount-gte"
               type="number"
@@ -1963,7 +1976,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
               onChange={(e) => setAmountStr(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Fires when the running cycle subtotal crosses this amount. Leave blank for no subtotal cap.
+              An invoice is issued early when the period's total reaches this amount. Leave blank for none.
             </p>
           </div>
 
@@ -1974,16 +1987,16 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
               onCheckedChange={(v) => setResetCycle(v === true)}
             />
             <div className="space-y-1">
-              <Label htmlFor="reset-cycle" className="font-normal">Reset billing cycle on fire</Label>
+              <Label htmlFor="reset-cycle" className="font-normal">Start a new billing period when reached</Label>
               <p className="text-xs text-muted-foreground">
-                When checked, a new billing cycle starts at fire time. When unchecked (default), the original cycle continues and the remaining usage bills at the natural cycle end.
+                Unchecked, the period keeps running and the rest of its usage is billed at its normal end.
               </p>
             </div>
           </div>
 
           {items.length > 0 && (
             <div className="space-y-2">
-              <Label>Per-item caps</Label>
+              <Label>Item thresholds</Label>
               <div className="rounded-md border divide-y divide-border">
                 {items.map(item => {
                   const plan = planById(item.plan_id)
@@ -2004,7 +2017,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
                 })}
               </div>
               <p className="text-xs text-muted-foreground">
-                Fires when any item's running cycle quantity crosses its cap. Decimal allowed (cached-token ratios, GPU-hours).
+                An invoice is issued early when an item's usage in the period reaches its level. Decimals are allowed.
               </p>
             </div>
           )}

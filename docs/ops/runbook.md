@@ -643,7 +643,7 @@ waiting or parked.
 | Response | Meaning |
 |---|---|
 | no `billing_failure`, `still_due: false` | Billed, or nothing was left to bill. |
-| `billing_failure` present | The attempt failed again. `attempts` is back to 1 and the billing run retries on its own. This includes an attempt that ended without an error but left the subscription due ("Billing made no progress"). |
+| `billing_failure` present | The attempt failed again. `attempts` is back to 1 and the billing run retries on its own. This includes an attempt that ended without an error but left the subscription due ("Billing didn't finish, and the subscription is still due"). |
 | no `billing_failure`, `still_due: true` | The attempt did not complete: a database connection was lost, or a deadlock. Nothing was saved and the subscription is unbilled. The next billing run attempts it, and the server log has the reason (`retry-billing: the attempt failed`). A second call answers 409, because the failure is already cleared. |
 
 `invoices_generated` is not the success test. It counts period-close invoices

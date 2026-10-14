@@ -904,7 +904,7 @@ func (s *Service) Activate(ctx context.Context, tenantID, id string) (domain.Sub
 		return domain.Subscription{}, err
 	}
 	if sub.Status != domain.SubscriptionDraft {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("can only activate draft subscriptions, current status: %s", sub.Status))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a draft subscription can be activated. This one is %s.", sub.Status))
 	}
 
 	// Currency pin (ADR-100): drafts predating the pin (or created while a
@@ -1110,7 +1110,7 @@ func (s *Service) AddItem(ctx context.Context, tenantID, subscriptionID string, 
 		return domain.SubscriptionItem{}, err
 	}
 	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
-		return domain.SubscriptionItem{}, errs.InvalidState(fmt.Sprintf("cannot add items to %s subscriptions", sub.Status))
+		return domain.SubscriptionItem{}, errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
 	}
 
 	// Mixed-interval guard: new item's plan must match the sub's
@@ -1181,7 +1181,7 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 		return domain.SubscriptionItem{}, err
 	}
 	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
-		return domain.SubscriptionItem{}, errs.InvalidState(fmt.Sprintf("cannot add items to %s subscriptions", sub.Status))
+		return domain.SubscriptionItem{}, errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
 	}
 
 	if s.plans != nil && len(sub.Items) > 0 {
@@ -1244,7 +1244,7 @@ func (s *Service) UpdateItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 		return ItemChangeResult{}, err
 	}
 	if sub.Status != domain.SubscriptionActive {
-		return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("can only modify items on active subscriptions, current status: %s", sub.Status))
+		return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
 	}
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	now := s.clock.Now(ctx)
@@ -1401,7 +1401,7 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 		return ItemChangeResult{}, err
 	}
 	if sub.Status != domain.SubscriptionActive {
-		return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("can only modify items on active subscriptions, current status: %s", sub.Status))
+		return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
 	}
 
 	// Bind via sub pin: pending_plan_effective_at (and the immediate-
@@ -1580,7 +1580,7 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 // the request's read and its write (ADR-115). Everything else passes through.
 func mapPeriodMoved(err error) error {
 	if errors.Is(err, ErrWatermarkMoved) {
-		return errs.InvalidState("subscription billing period changed while this request ran — re-read the subscription and retry").WithCode("subscription_period_moved")
+		return errs.InvalidState("This subscription just moved to a new billing period. Refresh the page and try again.").WithCode("subscription_period_moved")
 	}
 	return err
 }
@@ -1666,7 +1666,7 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 			return ItemChangeResult{}, fmt.Errorf("plan-swap threshold watermark: %w", err)
 		}
 		if billedThrough != nil && billedThrough.After(now) {
-			return ItemChangeResult{}, errs.InvalidState("a threshold invoice already billed this subscription past the requested effective instant — retry after it").WithCode("subscription_period_moved")
+			return ItemChangeResult{}, errs.InvalidState("A spend-threshold invoice already billed this subscription past the current time. Schedule the plan change for the next period, or try again later.").WithCode("subscription_period_moved")
 		}
 	}
 
@@ -1796,7 +1796,7 @@ func (s *Service) RemoveItem(ctx context.Context, tenantID, subscriptionID, item
 		return err
 	}
 	if sub.Status == domain.SubscriptionActive && len(sub.Items) <= 1 {
-		return errs.InvalidState("cannot remove the last item from an active subscription; cancel the subscription instead")
+		return errs.InvalidState("A subscription needs at least one item. To stop billing, cancel the subscription instead.")
 	}
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	return s.store.RemoveItem(ctx, tenantID, itemID)
@@ -1821,7 +1821,7 @@ func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 		return err
 	}
 	if sub.Status == domain.SubscriptionActive && len(sub.Items) <= 1 {
-		return errs.InvalidState("cannot remove the last item from an active subscription; cancel the subscription instead")
+		return errs.InvalidState("A subscription needs at least one item. To stop billing, cancel the subscription instead.")
 	}
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	return s.store.RemoveItemTx(ctx, tx, tenantID, itemID)
@@ -2533,7 +2533,7 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 		return domain.Subscription{}, err
 	}
 	if sub.Status != domain.SubscriptionTrialing {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot end trial on %s subscription", sub.Status))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be ended. This one is %s.", sub.Status))
 	}
 	// A pending cancel schedule blocks the early end (ADR-069, no silent
 	// precedence): ending the trial would activate + bill period 1 while the
@@ -2542,7 +2542,7 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 	// is the fast operator feedback; the store UPDATE's schedule-empty
 	// predicate is the atomic backstop for a schedule racing this read.
 	if sub.CancelAtPeriodEnd || sub.CancelAt != nil {
-		return domain.Subscription{}, errs.InvalidState("subscription has a scheduled cancellation — clear the scheduled cancel first, then end the trial")
+		return domain.Subscription{}, errs.InvalidState("This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial.")
 	}
 
 	loc, err := s.tenantLocation(ctx, sub.TenantID)
@@ -2576,7 +2576,7 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 		if errors.Is(err, ErrTrialCancelDue) {
 			// The SQL backstop caught a schedule that raced past the check
 			// above — same operator answer.
-			return domain.Subscription{}, errs.InvalidState("subscription has a scheduled cancellation — clear the scheduled cancel first, then end the trial")
+			return domain.Subscription{}, errs.InvalidState("This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial.")
 		}
 		return domain.Subscription{}, err
 	}
@@ -3026,10 +3026,10 @@ func (s *Service) ExtendTrial(ctx context.Context, tenantID, id string, newTrial
 		return domain.Subscription{}, err
 	}
 	if current.Status != domain.SubscriptionTrialing {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot extend trial on %s subscription", current.Status))
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be extended. This one is %s.", current.Status))
 	}
 	if current.TrialEndAt != nil && !newTrialEnd.After(*current.TrialEndAt) {
-		return domain.Subscription{}, errs.Invalid("trial_end", "must be after the current trial_end_at — use end-trial to shorten")
+		return domain.Subscription{}, errs.Invalid("trial_end", "Pick a date after the current trial end. To end the trial sooner, use End trial now.")
 	}
 	// A pending EXPLICIT cancel_at blocks the extension (ADR-069): extending
 	// past the pinned timestamp strands it — nothing fires inside a running
@@ -3039,7 +3039,7 @@ func (s *Service) ExtendTrial(ctx context.Context, tenantID, id string, newTrial
 	// feedback here; the store UPDATE's cancel_at IS NULL predicate is the
 	// atomic backstop.
 	if current.CancelAt != nil {
-		return domain.Subscription{}, errs.InvalidState("subscription has a scheduled cancellation with an explicit date — clear the scheduled cancel first, then extend the trial")
+		return domain.Subscription{}, errs.InvalidState("This subscription is scheduled to cancel on a set date. Undo the scheduled cancellation first, then extend the trial.")
 	}
 
 	// Re-anchor the first chargeable cycle on the new trial_end. Without
@@ -3115,7 +3115,7 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 	}
 	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
 		return domain.Subscription{}, errs.InvalidState(
-			fmt.Sprintf("cannot configure billing thresholds on %s subscriptions", sub.Status))
+			fmt.Sprintf("Spend thresholds can't be set on a %s subscription.", sub.Status))
 	}
 
 	itemIDs := make(map[string]struct{}, len(sub.Items))

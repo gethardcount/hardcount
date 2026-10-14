@@ -284,7 +284,7 @@ func (m *memStore) AdjustAtomic(ctx context.Context, tenantID, customerID, descr
 		return domain.CreditLedgerEntry{}, err
 	}
 	if amountCents < 0 && bal.BalanceCents+amountCents < 0 {
-		return domain.CreditLedgerEntry{}, fmt.Errorf("insufficient balance: available %.2f, deduction %.2f",
+		return domain.CreditLedgerEntry{}, fmt.Errorf("Insufficient balance: only %.2f is available, so %.2f can't be deducted.",
 			float64(bal.BalanceCents)/100, float64(-amountCents)/100)
 	}
 	// Mirror PostgresStore.AdjustAtomic: stamp created_at from the
