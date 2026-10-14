@@ -208,7 +208,7 @@ go test -p 1 ./internal/billing/ -short=false -run TestExactlyOnce -v
 go test -p 1 ./internal/platform/leader/ -short=false -run TestLeaseFailover -v
 ```
 
-The partition figure comes from `scripts/partition-drill.sh` (see the appendix).
+The partition figure (9 s) comes from `scripts/partition-drill.sh` (see [section 5](#5-how-fast-a-dead-leader-is-replaced)).
 
 To reproduce the negative control, drop `idx_invoices_billing_idempotency` from
 the test database and re-run the first command. On the code these runs measured
