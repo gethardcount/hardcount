@@ -30,6 +30,10 @@ command -v jq >/dev/null || { echo "demo.sh needs jq (brew install jq / apt inst
 green() { printf "\033[32m%s\033[0m\n" "$1"; }
 blue()  { printf "\033[34m%s\033[0m\n" "$1"; }
 step()  { echo ""; blue "━━━ $1 ━━━"; }
+# Cents to dollars with two decimals ("$1.20", not jq's "$1.2"). Provider
+# cost stays in full precision: it is in millionths of a dollar.
+USD='def usd: (if . < 0 then "-" else "" end) + "$" + ((fabs / 100 | floor) | tostring) + "." + ((fabs % 100) | tostring | if length < 2 then "0" + . else . end); '
+
 
 # req METHOD PATH [JSON_BODY] — curl with auth, fail-fast on non-2xx,
 # echo the response body.
@@ -52,7 +56,7 @@ req() {
 
 step "1. Health check"
 curl -sf "$BASE/health" >/dev/null || { echo "✗ API not reachable at $BASE — run 'make dev' first"; exit 1; }
-green "✓ API is up at $BASE"
+green "✓ API is up at ${VELOX_PUBLIC_URL:-$BASE}"
 
 step "2. Install Anthropic-style pricing (one call)"
 # One recipe = the tokens meter + a per-{model, token_type} price matrix
@@ -97,7 +101,7 @@ SUB=$(req POST "/v1/subscriptions" "{
 }")
 SUB_ID=$(echo "$SUB" | jq -r '.id')
 [ "$SUB_ID" != "null" ] || { echo "✗ subscription create failed"; echo "$SUB" | jq .; exit 1; }
-green "✓ Subscription $SUB_ID active ($(echo "$SUB" | jq -r '.status'))"
+green "✓ Subscription $SUB_ID, status $(echo "$SUB" | jq -r '.status')"
 
 step "5. Tell Velox what YOU pay Anthropic (provider cost table)"
 for rate in \
@@ -148,8 +152,8 @@ INVOICES=$(req GET "/v1/invoices?customer_id=$CUST_ID")
 INV_ID=$(echo "$INVOICES" | jq -r '.data[0].id // empty')
 [ -n "$INV_ID" ] || { echo "✗ no invoice generated"; echo "$INVOICES" | jq .; exit 1; }
 INV=$(req GET "/v1/invoices/$INV_ID")
-echo "$INV" | jq -r '.invoice | "  \(.invoice_number)  total $\(.total_amount_cents / 100) \(.currency)  status \(.status)"'
-echo "$INV" | jq -r '.line_items[] | "    \(.description)  → $\(.amount_cents / 100)"' | head -8
+echo "$INV" | jq -r "$USD"'.invoice | "  \(.invoice_number)  total \(.total_amount_cents | usd) \(.currency)  status \(.status)"'
+echo "$INV" | jq -r "$USD"'.line_items[] | "    \(.description)  → \(.amount_cents | usd)"' | head -8
 # The numbers are checked, not just printed: a draft invoice, a missing line or
 # a subtotal that disagrees with its own lines must fail the demo.
 echo "$INV" | jq -e '.invoice.status == "finalized" or .invoice.status == "paid"' >/dev/null \
@@ -165,8 +169,8 @@ green "✓ Invoice with per-(model, token_type) lines — PDF renders ($PDF_BYTE
 
 step "9. Margin: what you billed against what the provider cost you"
 MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW&to=$ADV_TO")
-echo "$MARGIN" | jq -r '"  billed  $\(.revenue_cents / 100)\n  cost    $\(.cost_micros / 1000000)\n  margin  \((.margin_bps // 0) / 100)%"'
-echo "$MARGIN" | jq -r '.by_model[] | "    \(.model): cost $\(.cost_micros / 1000000)" + (if .attributed then "  billed $\((.revenue_cents // 0) / 100)" else "" end)'
+echo "$MARGIN" | jq -r "$USD"'"  billed  \(.revenue_cents | usd)\n  cost    $\(.cost_micros / 1000000)\n  margin  \((.margin_bps // 0) / 100)%"'
+echo "$MARGIN" | jq -r "$USD"'.by_model[] | "    \(.model): cost $\(.cost_micros / 1000000)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" else "" end)'
 # The cost follows from this script's own inputs (the token counts in step 6
 # and the rates in step 5), and the billed amount must match the invoice.
 echo "$MARGIN" | jq -e '.cost_micros == 1277500' >/dev/null \
@@ -184,4 +188,10 @@ echo "  ✓ Provider cost table → COGS stamped per event at ingest"
 echo "  ✓ Simulated month via test clock → real invoice + PDF"
 echo "  ✓ Per-customer margin (billed vs provider cost, by model)"
 echo ""
-echo "  Dashboard: ${VELOX_DASHBOARD_URL:-http://localhost:5173} → Customers → ACME Corp"
+DASH="${VELOX_DASHBOARD_URL:-http://localhost:5173}"
+echo "  See it in the dashboard (it opens in test mode, where the demo ran):"
+echo "    Invoice:  $DASH/invoices/$INV_ID"
+echo "    Customer: $DASH/customers/$CUST_ID"
+echo ""
+echo "  The home page totals leave out customers on a test clock, so they"
+echo "  still read \$0 after the demo. Open the links above instead."

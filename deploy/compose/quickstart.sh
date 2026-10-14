@@ -142,6 +142,7 @@ cmd_demo() {
     -v "$(cd ../.. && pwd)/scripts:/scripts:ro" \
     -e VELOX_BASE=http://nginx \
     -e VELOX_DASHBOARD_URL="http://localhost:${p}" \
+    -e VELOX_PUBLIC_URL="http://localhost:${p}" \
     alpine:3.22 sh -c 'apk add --no-cache -q bash curl jq coreutils >/dev/null && bash /scripts/demo.sh "$0"' "$key"
 }
 
