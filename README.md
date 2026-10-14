@@ -66,7 +66,7 @@ To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/se
 - **Run it yourself, simply.** One Go binary, Postgres, and Redis for rate limiting, plus a static dashboard. Background jobs run inside the binary and queue in Postgres, so there is no queue broker, warehouse or workflow engine to run. [Self-host](docs/self-host.md) · [Will it take our volume?](docs/scale.md)
 - **MIT, and nothing is gated.** No licence key, no paid tier, no telemetry. Dunning, credit notes, refunds and the audit log are all in the one edition. [What's in the box](docs/features.md#self-host-first)
 - **Test a billing change before it bills anyone.** In test mode, a test clock moves a test customer through months of billing without waiting for real time, up to a year per call. [What's in the box](docs/features.md#billing-building-blocks)
-- **Built so the invoice is right.** Every period close locks the subscription and checks its period, and Postgres refuses a second invoice for the same subscription and period. A voided invoice does not count. [How Velox is engineered](docs/ENGINEERING.md)
+- **Built so the invoice is right.** Every period close locks the subscription and checks its period, and Postgres refuses a second period-end invoice for the same subscription and period. A voided invoice does not count. [How Velox is engineered](docs/ENGINEERING.md)
 
 ---
 
