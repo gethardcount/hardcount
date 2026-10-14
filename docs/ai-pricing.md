@@ -1,12 +1,14 @@
 # AI pricing in code
 
-In five steps, with no Stripe Billing objects, you can:
+With no Stripe Billing objects, you can:
 
 - bill Anthropic-style multi-dimensional pricing with **one meter**,
 - sell a prepaid commit (an up-front purchase of usage credit) against it,
-- and read per-customer margin.
+- and read one customer's usage margin.
 
-The API comes from `make dev` and the key from `make bootstrap` (see [Quick start](../README.md#quick-start)).
+The calls below show the main parts. You also need a customer (here with external ID `cust_acme`), a rating rule for each price, and a plan and subscription, because usage is billed on the subscription's cycle invoice.
+
+Start Velox with the [Quick start](../README.md#quick-start). It prints a test API key; put it in `$VELOX_SECRET`.
 
 ```bash
 # 1. Create one meter for "tokens"
@@ -14,7 +16,16 @@ curl -X POST http://localhost:8080/v1/meters \
   -H "Authorization: Bearer $VELOX_SECRET" \
   -d '{"key": "tokens", "name": "LLM tokens", "unit": "token"}'
 
-# 2. Ingest events that carry the dimensions inline
+# 2. Set what your model provider charges you per token. Velox stamps each
+#    event's cost when it arrives, so set rates first: a rate change applies
+#    only to later events.
+curl -X PUT http://localhost:8080/v1/provider-costs \
+  -H "Authorization: Bearer $VELOX_SECRET" \
+  -d '{"provider": "openai", "model": "gpt-4", "token_type": "input",
+       "cost_per_token": "0.00003"}'
+
+# 3. Ingest events that carry the dimensions inline
+#    (cost is stamped only when the event has provider, model and token_type)
 curl -X POST http://localhost:8080/v1/usage-events \
   -H "Authorization: Bearer $VELOX_SECRET" \
   -H "Idempotency-Key: req_8f2c..." \
@@ -22,21 +33,22 @@ curl -X POST http://localhost:8080/v1/usage-events \
     "event_name": "tokens",
     "external_customer_id": "cust_acme",
     "quantity": "12450",
-    "dimensions": {"model": "gpt-4", "token_type": "input"}
+    "dimensions": {"provider": "openai", "model": "gpt-4", "token_type": "input"}
   }'
 
-# 3. Define one pricing rule per (dimension subset, rate)
+# 4. Define one pricing rule per (dimension subset, rate)
+#    (rating_rule_version_id: the id of a rating rule you created for this price)
 curl -X POST http://localhost:8080/v1/meters/$METER_ID/pricing-rules \
   -H "Authorization: Bearer $VELOX_SECRET" \
   -d '{
     "dimension_match": {"model": "gpt-4", "token_type": "input"},
-    "rating_rule_version_id": "rrv_gpt4_input",
+    "rating_rule_version_id": "vlx_rrv_...",
     "aggregation_mode": "sum",
     "priority": 100
   }'
 
-# 4. Sell a $10k prepaid commit for $9k — the credit block funds when the
-#    invoice finalizes, and usage draws it down
+# 5. Sell a $10k prepaid commit for $9k. The credit block is granted when the
+#    invoice finalizes. Later invoices for this customer draw it down.
 #    ($INVOICE_ID: a draft one-off invoice from POST /v1/invoices — elided for brevity)
 curl -X POST http://localhost:8080/v1/invoices/$INVOICE_ID/line-items \
   -H "Authorization: Bearer $VELOX_SECRET" \
@@ -46,16 +58,17 @@ curl -X POST http://localhost:8080/v1/invoices/$INVOICE_ID/line-items \
 curl -X POST http://localhost:8080/v1/invoices/$INVOICE_ID/finalize \
   -H "Authorization: Bearer $VELOX_SECRET"
 
-# 5. Know which customers lose you money — stamped provider COGS vs rated revenue
+# 6. Read one customer's usage margin: rated usage revenue against stamped
+#    provider cost (last 30 days unless you pass from/to)
 curl http://localhost:8080/v1/customers/$CUSTOMER_ID/margin \
   -H "Authorization: Bearer $VELOX_SECRET"
 ```
 
-Already running a LiteLLM proxy? Skip step 2. Point its spend callback at `POST /v1/integrations/litellm/spend`, and every completion lands as dimensioned token events (`model`, `token_type`). Replays are deduped, and no SDK is needed. See [`docs/integrations/litellm.md`](integrations/litellm.md).
+Already running a LiteLLM proxy? Skip step 3. Point its callback at `POST /v1/integrations/litellm/spend`. Each chat, completion or embedding call becomes token events on the `tokens` meter, with `model`, `provider` and `token_type` dimensions. LiteLLM's `user` must match the customer's external ID. Replays are deduplicated, and no SDK is needed. Cache-write tokens are not billed yet. See [`docs/integrations/litellm.md`](integrations/litellm.md).
 
 Each event is claimed by at most one pricing rule: the highest-priority match (the priority + claim resolver), so nothing is double-counted.
 
-- Token roles are disjoint, so each `{model, token_type}` maps to exactly one rule at equal priority.
+- Token roles do not overlap. If you create one rule per `{model, token_type}`, each event matches exactly one rule. An event no rule matches falls to the meter's default price, if it has one (see below).
 - You can also mix a coarse catch-all rule (`{"model": "gpt-4"}`) with finer per-role rules. Priority decides which one claims each event.
 
 **Usage that no rule claims has no price.** A new model name with no rule is the common case. If the meter has a default price (`PATCH /v1/meters/{id}` with `rating_rule_version_id`), that price bills it. If not, Velox builds and sends the invoice without that usage, as Lago, Metronome and Orb do. You see it in four places:
@@ -67,4 +80,4 @@ Each event is claimed by at most one pricing rule: the highest-priority match (t
 
 To bill it, add a rule or a default price; invoices not built yet then include it. Bill periods already invoiced with a one-off invoice ([runbook §16](ops/runbook.md#16-usage-with-no-price)). Velox refuses (409) to remove a meter's last price while a plan with a live subscription uses the meter.
 
-The full design lives in [`docs/design-multi-dim-meters.md`](design-multi-dim-meters.md): schema, aggregation semantics, decimal quantities, and all five aggregation modes.
+The original design is in [`docs/design-multi-dim-meters.md`](design-multi-dim-meters.md): schema, aggregation rules, decimal quantities and the five aggregation modes. ADR-044, ADR-045 and ADR-070 record what changed since.

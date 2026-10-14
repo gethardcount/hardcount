@@ -90,7 +90,7 @@ For each completion call, the adapter emits **up to three** usage events. All of
 | `token_type` | Quantity                                         | Idempotency key             |
 |--------------|--------------------------------------------------|-----------------------------|
 | `input`      | `prompt_tokens − cached_tokens` (uncached input) | `<litellm_id>:input`        |
-| `cache_read` | `prompt_tokens_details.cached_tokens` (if any)   | `<litellm_id>:cache_read`   |
+| `cache_read` | `prompt_tokens_details.cached_tokens` or `cache_read_input_tokens` (if any) | `<litellm_id>:cache_read`   |
 | `output`     | `usage.completion_tokens`                        | `<litellm_id>:output`       |
 
 The [idempotency key](../glossary.md) deduplicates retries: a resend with the same key can't count twice.
@@ -126,6 +126,7 @@ You should see one or more `tokens` events per LiteLLM call (up to three when pr
 ```json
 {
   "accepted": 12,
+  "deduplicated": 0,
   "skipped": 1,
   "errors": [
     {
@@ -139,6 +140,8 @@ You should see one or more `tokens` events per LiteLLM call (up to three when pr
 `skipped` covers non-token-bearing calls (image generation, moderation) and zero-token failed completions.
 
 `errors[]` lists per-row reasons. Each is a verdict Velox reached on that row: an unmapped `user`, a missing meter, or a payload that failed validation. These never make the batch fail, so monitor `errors[]`.
+
+A row in `errors[]` is **not kept** for a later retry. LiteLLM sees a 200 and treats the batch as delivered. So usage for a customer that does not exist yet in Velox is lost unless you resend it after creating the customer.
 
 The status code answers a different question: could Velox record the batch at all?
 
@@ -155,8 +158,8 @@ On a retry, rows that did commit before the abort replay as `deduplicated`. Conf
 - **Cost figures**: LiteLLM's `response_cost` does not drive Velox billing.
   - The billable amount comes from your pricing rules.
   - Per-event COGS (cost of goods sold: what the provider charged you) comes from your provider [cost table](../glossary.md). See ADR-079: `PUT /v1/provider-costs`, stamped on each event at ingest as `provider_cost_micros`.
-  - LiteLLM's own per-call figure is whole-call: one total that spans up to three per-role events. So Velox does not stamp it per event.
-  - A named follow-up would stamp observed cost onto each per-role event (per-half) from `cost_breakdown`.
+  - When LiteLLM sends `cost_breakdown`, Velox stores its `input_cost` on the `input` event and its `output_cost` on the `output` event, and uses those in place of your cost table. It never uses `response_cost`, the total for the whole call. Events without `cost_breakdown`, and `cache_read` events, take their cost from your cost table.
+- **Provider for Claude on Bedrock or Vertex**: the `provider` dimension comes from LiteLLM's `custom_llm_provider`. Claude called through AWS Bedrock arrives with provider `bedrock`, and through Google Vertex with provider `vertex_ai`, not `anthropic`. Cost rates match on provider, so add rates for `bedrock` or `vertex_ai` too. Without them, those events get no cost and the margin report counts them as unresolved.
 - **`tokens` meter must exist**: a missing meter lands as a per-row `errors[]` entry in the 200 response. This is the same path as a missing `user`.
 - **Single tenant per API key**: each Velox API key pins to one [tenant](../glossary.md) (one isolated billing account). Multi-tenant LiteLLM proxies route through a separate API key per tenant, not through a metadata field on the call.
 

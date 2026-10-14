@@ -25,7 +25,7 @@ The words Velox docs use, grouped by area. Each entry links to the doc that expl
 
 ## Subscriptions and invoices
 
-- **subscription**: A customer's agreement to pay for one or more plans over repeating billing periods. It holds items (each a plan plus a quantity) and has a status: draft, trialing, active, canceled or archived. [More](features.md#stripe-grade-primitives-already-shipped)
+- **subscription**: A customer's agreement to pay for one or more plans over repeating billing periods. It holds items (each a plan plus a quantity) and has a status: draft, trialing, active, canceled or archived. [More](features.md#billing-building-blocks)
 - **billing period**: The date range one subscription invoice covers: start included, end excluded, with boundaries at midnight in the tenant's billing timezone. Monthly periods start on the 1st (calendar, after a first partial period) or the start day (anniversary). Yearly periods are always anniversary. [More](adr/012-day-grade-calendar-billing.md)
 - **billing timezone**: The one organization-wide timezone (tenant setting, default UTC) in which Velox places period boundaries at midnight and counts days for proration. Each invoice also stores the zone it was issued under (invoices.billing_timezone) so its dates never shift later. [More](adr/077-org-level-billing-timezone.md)
 - **day-grade billing**: Billing counts whole days, not hours. Normal period boundaries snap to midnight in the billing timezone, the start day counts in full, and day counts are rounded so daylight saving never adds or loses a day. Threshold resets can start periods mid-day. [More](adr/012-day-grade-calendar-billing.md)

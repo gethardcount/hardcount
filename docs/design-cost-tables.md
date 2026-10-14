@@ -103,6 +103,10 @@ model; remaining revenue in an explicit "not model-attributed" row.
 Rendered as a card on CustomerDetail (operator side). NEVER on the
 customer-facing cost dashboard. Currency: no FX (no currency conversion) — if cost currency ≠
 tenant billing currency, show cost separately, no margin %, loud note.
+*(Not built as of 2026-10-14: the margin report does not compare currencies.
+It subtracts cost from revenue as if both were in the same currency, and the
+dashboard card shows revenue in USD. Margin is only right when your cost table
+and your prices use the same currency.)*
 
 **D7. Uncosted honesty, scoped.** The card counts 'unresolved' token
 events separately from 'not_applicable' (else api_calls meters drown the
@@ -124,6 +128,19 @@ micros rounding named-mode; RLS + livemode isolation on the new table
 flat rule → not-attributed row); export columns; stamp rides every funnel
 path (live/batch/backfill/LiteLLM). MANUAL_TEST flow orders rates BEFORE
 ingest.
+
+## Limits to know today
+
+- **Provider must match.** A cost rate matches an event on `provider`, `model`
+  and `token_type`. LiteLLM sets `provider` from `custom_llm_provider`, so
+  Claude called through AWS Bedrock arrives with provider `bedrock`, and through
+  Google Vertex with provider `vertex_ai`, not `anthropic`. Add rates for those
+  providers too, or those events get no cost and count as unresolved.
+- **Unknown customers are not kept.** LiteLLM usage for a customer that does not
+  exist in Velox comes back in the response's `errors[]` with a 200. It is not
+  stored for a later retry, so it never reaches the margin report.
+- **Usage margin only.** Revenue is rated usage. Base fees, credits and tax are
+  left out.
 
 ## Phase 2+ (trigger-gated)
 

@@ -65,7 +65,7 @@ To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/se
 - **Know your margin.** Provider cost is stamped on every event, so "which customers lose us money?" is one API call. [What's in the box](docs/features.md)
 - **Run it yourself, simply.** One Go binary, Postgres, and Redis for rate limiting. No queue, no warehouse, no workflow engine. [Self-host](docs/self-host.md) · [Will it take our volume?](docs/scale.md)
 - **MIT, and nothing is gated.** No licence key, no paid tier, no telemetry. Dunning, credit notes, refunds and the audit log are all in the one edition. [What's in the box](docs/features.md#self-host-first)
-- **Test a billing change before it bills anyone.** Test clocks move one test customer through months of billing in seconds. [What's in the box](docs/features.md#stripe-grade-primitives-already-shipped)
+- **Test a billing change before it bills anyone.** Test clocks move one test customer through months of billing in seconds. [What's in the box](docs/features.md#billing-building-blocks)
 - **Built so the invoice is right.** A billing period cannot be invoiced twice, because the database refuses it. [How Velox is engineered](docs/ENGINEERING.md)
 
 ---

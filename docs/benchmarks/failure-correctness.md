@@ -205,12 +205,18 @@ this document argues against.
 ```bash
 docker compose up -d postgres
 go test -p 1 ./internal/billing/ -short=false -run TestExactlyOnce -v
-go test -p 1 ./internal/platform/postgres/ -short=false -run TestLeaderFailover -v
+go test -p 1 ./internal/platform/leader/ -short=false -run TestLeaseFailover -v
 ```
 
+The partition figure comes from `scripts/partition-drill.sh` (see the appendix).
+
 To reproduce the negative control, drop `idx_invoices_billing_idempotency` from
-the test database and re-run the first command. It should fail, loudly, with the
-duplicate count. If it passes, the experiment did not do what it claims.
+the test database and re-run the first command. On the code these runs measured
+(2026-08-15), it failed loudly with the duplicate count. Since
+[ADR-115](../adr/115-one-closer-for-the-billing-period.md), every period close
+also locks the subscription row and checks its period, so dropping the index
+alone may no longer produce duplicates. The control has not been re-run on that
+code.
 
 > **Companion:** [sustained-throughput.md](sustained-throughput.md) measures
 > what the ingest API sustains on named AWS hardware under a gated, reconciled
