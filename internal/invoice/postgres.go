@@ -2479,11 +2479,20 @@ func (s *PostgresStore) SetTaxTransaction(ctx context.Context, tenantID, id stri
 //
 // One-off invoices (no subscription) are unaffected — NOT EXISTS holds when
 // there is nothing to join to.
-func notPausedForCollection(alias string) string {
+//
+// The pause is read as in force at `at` (an SQL expression for the sweep's
+// now): a timed pause whose resumes_at has passed no longer holds collection,
+// even while the row still carries it. The scheduled resumer leaves it there
+// until the sub's periods ending before resumes_at are closed (a parked
+// billing failure can hold it indefinitely), and those closes read it; the
+// sub's other invoices resume at resumes_at. Mirrors
+// domain.PauseCollection.InForceAt.
+func notPausedForCollection(alias, at string) string {
 	return `NOT EXISTS (
 			SELECT 1 FROM subscriptions ps
 			 WHERE ps.id = ` + alias + `.subscription_id
 			   AND ps.pause_collection_behavior IS NOT NULL
+			   AND (ps.pause_collection_resumes_at IS NULL OR ps.pause_collection_resumes_at > ` + at + `)
 		)`
 }
 
@@ -2527,7 +2536,7 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.
 		  AND i.status = 'finalized'
 		  AND i.livemode = $1
 		  AND i.is_simulated = false
-		  AND `+notPausedForCollection("i")+`
+		  AND `+notPausedForCollection("i", "now()")+`
 		  AND (i.created_at, i.id) > ($3, $4)
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT $2
@@ -2648,7 +2657,7 @@ func (s *PostgresStore) ListAutoChargePendingForClock(ctx context.Context, tenan
 		  AND i.status = 'finalized'
 		  AND i.tenant_id = $1
 		  AND c.test_clock_id = $2
-		  AND `+notPausedForCollection("i")+`
+		  AND `+notPausedForCollection("i", "(SELECT tc.frozen_time FROM test_clocks tc WHERE tc.id = $2)")+`
 		  AND (i.created_at, i.id) > ($4, $5)
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT $3

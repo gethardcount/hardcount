@@ -405,7 +405,7 @@ func (s *Service) SetPaymentPageReader(r PaymentPageReader) {
 }
 
 // collectionPaused reports whether the invoice's subscription has
-// pause_collection set. An unwired reader, no subscription id or a subscription
+// pause_collection in force now. An unwired reader, no subscription id or a subscription
 // that no longer exists answers false (nothing to pause). Any other read error
 // is returned: the auto-finalize gate must not issue and charge an invoice on a
 // guess that collection is not paused.
@@ -420,7 +420,10 @@ func (s *Service) collectionPaused(ctx context.Context, tenantID, subscriptionID
 	if err != nil {
 		return false, fmt.Errorf("read subscription pause state: %w", err)
 	}
-	return sub.PauseCollection != nil, nil
+	// In force now, not merely set: a timed pause past resumes_at can stay on
+	// the row until the sub's paused periods are closed (see
+	// domain.PauseCollection.InForceAt).
+	return sub.PauseCollection.InForceAt(s.clock.Now(ctx)), nil
 }
 
 // SetCustomerReader wires the customer lookup used to (a) stamp is_simulated

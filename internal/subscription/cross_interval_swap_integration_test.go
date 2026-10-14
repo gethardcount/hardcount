@@ -48,7 +48,7 @@ func (b *billOnCreateTxErrBiller) BillOnPlanSwapDraftsTx(context.Context, *sql.T
 	return domain.Relief{}, nil
 }
 func (b *billOnCreateTxErrBiller) FinishRelief(context.Context, domain.Subscription, domain.Relief) {}
-func (b *billOnCreateTxErrBiller) BillOnCreateTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, bool, error) {
+func (b *billOnCreateTxErrBiller) BillOnCreateTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Invoice, bool, error) {
 	return domain.Invoice{}, false, b.err
 }
 func (b *billOnCreateTxErrBiller) FinalizeOnCreateInvoice(context.Context, domain.Subscription, domain.Invoice) {

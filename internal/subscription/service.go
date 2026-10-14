@@ -85,8 +85,10 @@ type Biller interface {
 	// in_advance invoice on the caller's tx (no finalize). ok=false means there
 	// was nothing to bill (no in_advance items / zero subtotal) or an idempotent
 	// skip. Used by the atomic cross-interval swap so the new-period invoice
-	// commits atomically with the plan write + watermark advance.
-	BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Invoice, bool, error)
+	// commits atomically with the plan write + watermark advance. startAt is
+	// the instant the billed period began (the trial end on a trial flip,
+	// the request's now otherwise); the pause is read as it stood then.
+	BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, startAt time.Time) (domain.Invoice, bool, error)
 	// FinalizeOnCreateInvoice runs the post-commit external steps (audit, tax
 	// commit, auto-charge) for an invoice inserted via BillOnCreateTx. Called
 	// AFTER the tx commits — never inside it.
@@ -863,7 +865,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		if s.biller == nil || created.Status != domain.SubscriptionActive {
 			return nil
 		}
-		inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, created)
+		inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, created, now)
 		if billErr != nil {
 			return fmt.Errorf("first-invoice-on-create: %w", billErr)
 		}
@@ -952,7 +954,7 @@ func (s *Service) Activate(ctx context.Context, tenantID, id string) (domain.Sub
 		if s.biller == nil {
 			return nil
 		}
-		inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, a)
+		inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, a, now)
 		if billErr != nil {
 			return fmt.Errorf("first-invoice-on-activate: %w", billErr)
 		}
@@ -1708,7 +1710,7 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 		}
 		prospective.Items = items
 
-		inv, ok, err := s.biller.BillOnCreateTx(ctx, tx, prospective)
+		inv, ok, err := s.biller.BillOnCreateTx(ctx, tx, prospective, now)
 		if err != nil {
 			return ItemChangeResult{}, fmt.Errorf("plan-swap new in_advance bill: %w", err)
 		}
@@ -2553,7 +2555,7 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 		if s.biller == nil {
 			return nil
 		}
-		inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, a)
+		inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, a, now)
 		if billErr != nil {
 			return fmt.Errorf("first-invoice-on-trial-end: %w", billErr)
 		}
@@ -2690,7 +2692,7 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			if s.biller == nil {
 				return nil
 			}
-			inv, ok, billErr := s.biller.BillOnCreateTx(bound, tx, a)
+			inv, ok, billErr := s.biller.BillOnCreateTx(bound, tx, a, trialEndAt)
 			if billErr != nil {
 				return fmt.Errorf("first-invoice-on-trial-expiry: %w", billErr)
 			}
@@ -2808,7 +2810,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 			if s.biller == nil {
 				return nil
 			}
-			inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, a)
+			inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, a, trialEndAt)
 			if billErr != nil {
 				return fmt.Errorf("first-invoice-on-trial-expiry: %w", billErr)
 			}

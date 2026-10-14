@@ -196,7 +196,7 @@ func TestBillOnCreateTx_EverySettingsReadFailsClosed(t *testing.T) {
 	failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
 		engine, sub, invoices := onCreateFixture(s)
 		engine.SetTaxCalculationStore(taxCalcs)
-		_, _, err := engine.BillOnCreateTx(context.Background(), nil, sub)
+		_, _, err := engine.BillOnCreateTx(context.Background(), nil, sub, *sub.CurrentBillingPeriodStart)
 		return len(invoices.invoices), err
 	})
 }
@@ -206,7 +206,7 @@ func TestBillOnCreateTx_HonorsDueOnReceipt(t *testing.T) {
 	ts.NetPaymentTerms = 0
 	engine, sub, _ := onCreateFixture(&flakySettings{ts: ts})
 
-	inv, ok, err := engine.BillOnCreateTx(context.Background(), nil, sub)
+	inv, ok, err := engine.BillOnCreateTx(context.Background(), nil, sub, *sub.CurrentBillingPeriodStart)
 	if err != nil || !ok {
 		t.Fatalf("BillOnCreateTx: ok=%v err=%v", ok, err)
 	}

@@ -1573,7 +1573,7 @@ func TestBillOnCreateTx_PricesNewPlanOverNewPeriod(t *testing.T) {
 		Items:                     []domain.SubscriptionItem{{ID: "si_1", PlanID: "p_m_adv", Quantity: 1}},
 	}
 
-	inv, ok, err := engine.BillOnCreateTx(context.Background(), nil, prospective)
+	inv, ok, err := engine.BillOnCreateTx(context.Background(), nil, prospective, now)
 	if err != nil {
 		t.Fatalf("BillOnCreateTx: %v", err)
 	}

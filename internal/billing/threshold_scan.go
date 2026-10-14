@@ -212,14 +212,14 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return false, nil
 	}
+	now := e.effectiveNow(ctx, sub)
 	// pause_collection neuters the financial side; firing a threshold under
 	// pause would emit a draft that can't be charged or dunned. Skip — the
-	// scan resumes when collection does.
-	if sub.PauseCollection != nil {
+	// scan resumes when collection does: at resumes_at, even while the row
+	// still carries a timed pause waiting on a paused period's close.
+	if sub.PauseCollection.InForceAt(now) {
 		return false, nil
 	}
-
-	now := e.effectiveNow(ctx, sub)
 	periodStart := *sub.CurrentBillingPeriodStart
 	if !now.After(periodStart) {
 		return false, nil

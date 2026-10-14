@@ -318,8 +318,9 @@ func TestLateClose_PauseWithoutResumesAt_CatchUp_AllDraft(t *testing.T) {
 //
 // Mutation seams: drop resumeNotWaitingOnCloseSQL from
 // ListExpiredPauseCollectionsForClock → the early resumer clears the pause;
-// run the catchup's resume phase before Phase 1 → the pause is cleared before
-// the close and [P0, P1) is finalized.
+// run the catchup's resume phase before Phase 1 → the store skip still holds
+// the pause, so [P0, P1) stays a draft, but the pause is left on the row after
+// the advance (not cleared in the same advance).
 func TestLateClose_ScheduledResume_TestClock_AdvancePastResume(t *testing.T) {
 	r := newCancelRig(t, "close lag scheduled resume on a test clock")
 	p0, p1 := r.f.cycleStart, r.f.cycleEnd
@@ -441,5 +442,130 @@ func TestCloseLag_CrossIntervalSwap_OnEndedPeriod_RefusedInTx(t *testing.T) {
 	postgres.Rollback(tx)
 	if sub := r.sub(t); !sub.CurrentBillingPeriodStart.Equal(p0) || sub.Items[0].PlanID != r.f.planID {
 		t.Fatalf("after the refusal: period start=%v plan=%s, want [P0, P1) on the monthly plan", sub.CurrentBillingPeriodStart, sub.Items[0].PlanID)
+	}
+}
+
+// trialFlipRig turns the rig's plan in_advance and its subscription into a
+// trial ending at trialEnd, paused a day into the trial until resumesAt. The
+// post-trial period is [trialEnd, trialEnd+1 month).
+func (r *cancelRig) trialFlipRig(t *testing.T, trialEnd, resumesAt time.Time) {
+	t.Helper()
+	r.exec(t, `UPDATE plans SET base_bill_timing = 'in_advance' WHERE id = $1`, r.f.planID)
+	// A trialing item has no billable interval yet; the flip opens it.
+	r.exec(t, `DELETE FROM billing_intervals WHERE subscription_item_id = $1`, r.f.itemID)
+	r.exec(t, `UPDATE subscriptions SET status = 'trialing', trial_start_at = $1, trial_end_at = $2, activated_at = NULL,
+		current_billing_period_start = $2, current_billing_period_end = $3, next_billing_at = $3 WHERE id = $4`,
+		r.f.cycleStart, trialEnd, trialEnd.AddDate(0, 1, 0), r.f.subID)
+	r.pauseUntil(t, &resumesAt)
+}
+
+// TestTrialFlipAfterResume_FirstInvoiceReadsPauseAtTrialEnd: an in_advance
+// subscription's trial ends at T while collection is paused until T+30m, and
+// the trial flip runs at T+45m. The day-1 invoice bills the period that began
+// at T, while collection was paused: a draft.
+//
+// Mutation seam: pass the flip's clock now (or `now` in buildOnCreateInvoice)
+// instead of trialEndAt to BillOnCreateTx → the invoice is finalized.
+func TestTrialFlipAfterResume_FirstInvoiceReadsPauseAtTrialEnd(t *testing.T) {
+	r := newCancelRig(t, "trial flip after resume")
+	trialEnd := r.f.cycleStart.Add(48 * time.Hour)
+	r.trialFlipRig(t, trialEnd, trialEnd.Add(30*time.Minute))
+
+	if n, errs := r.f.subSvc.ProcessExpiredTrials(r.at(trialEnd.Add(45*time.Minute)), 100); n != 1 || len(errs) != 0 {
+		t.Fatalf("trial expiry: flipped=%d errs=%v, want 1 and none", n, errs)
+	}
+	invs, _ := r.liveInvoices(t)
+	wantStatus(t, invoiceFor(t, invs, trialEnd, trialEnd.AddDate(0, 1, 0)), domain.InvoiceDraft,
+		"the period began at trial end, while collection was paused (resumes_at trial end+30m)")
+}
+
+// TestTrialFlipAfterResume_TestClock: the same on a test clock, one advance
+// from before the trial end to past resumes_at (Phase 0.5).
+func TestTrialFlipAfterResume_TestClock(t *testing.T) {
+	r := newCancelRig(t, "trial flip after resume on a test clock")
+	trialEnd := r.f.cycleStart.Add(48 * time.Hour)
+	r.trialFlipRig(t, trialEnd, trialEnd.Add(30*time.Minute))
+
+	frozen := trialEnd.Add(45 * time.Minute)
+	clockID := postgres.NewID("vlx_tclk")
+	execTx(t, r.f.db, r.base, r.f.tenantID,
+		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'trial flip clock', $3, 'advancing')`,
+		clockID, r.f.tenantID, frozen)
+	r.exec(t, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.customerID)
+	r.exec(t, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.subID)
+	clocks := testclock.NewPostgresStore(r.f.db)
+	r.f.engine.SetTestClockReader(clocks)
+	r.f.subSvc.SetResolver(r.f.engine)
+
+	orchestrator := testclock.NewService(clocks)
+	orchestrator.SetBillingRunner(r.f.engine)
+	orchestrator.SetTrialExpirer(r.f.subSvc)
+	orchestrator.SetPauseResumer(r.f.subSvc)
+	if err := orchestrator.RunCatchup(r.base, testclock.CatchupJob{TenantID: r.f.tenantID, ClockID: clockID, PrevFrozenTime: r.f.cycleStart}); err != nil {
+		t.Fatalf("catchup: %v", err)
+	}
+	if sub := r.sub(t); sub.Status != domain.SubscriptionActive {
+		t.Fatalf("status after the advance = %s, want active", sub.Status)
+	}
+	invs, _ := r.liveInvoices(t)
+	wantStatus(t, invoiceFor(t, invs, trialEnd, trialEnd.AddDate(0, 1, 0)), domain.InvoiceDraft,
+		"the period began at trial end, while collection was paused (resumes_at trial end+30m)")
+}
+
+// TestHeldTimedPause_DoesNotBlockOtherInvoicesPastResumesAt: a timed pause
+// whose resumes_at has passed stays on the row while the subscription still
+// owes a close before resumes_at (here: billing parked on a failure). Its
+// other invoices resume collection at resumes_at all the same: the auto-charge
+// sweep picks up an invoice finalized before the pause. A pause still in
+// force, and one with no resumes_at, keep it out.
+//
+// Mutation seam: drop the resumes_at arm from notPausedForCollection → the
+// sweep skips the invoice while the expired pause is held.
+func TestHeldTimedPause_DoesNotBlockOtherInvoicesPastResumesAt(t *testing.T) {
+	r := newCancelRig(t, "held timed pause collection")
+	p0, p1 := r.f.cycleStart, r.f.cycleEnd
+	if gen, failures := r.f.engine.RunCycleForTenant(r.at(p1.Add(time.Hour)), r.f.tenantID, 50); gen != 1 || len(failures) != 0 {
+		t.Fatalf("close [P0, P1): generated=%d failures=%v", gen, failures)
+	}
+	invs, _ := r.liveInvoices(t)
+	inv := invoiceFor(t, invs, p0, p1)
+	if inv.Status != domain.InvoiceFinalized || !inv.AutoChargePending {
+		t.Fatalf("invoice status=%s auto_charge_pending=%v, want finalized and queued (card-less)", inv.Status, inv.AutoChargePending)
+	}
+
+	// The sweep reads the database clock, so the pause is stamped against
+	// it. next_billing_at before resumes_at is the shape of a close still
+	// owed (a parked billing failure): the resumer must keep the pause.
+	r.exec(t, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft',
+		pause_collection_resumes_at = now() - interval '1 hour', next_billing_at = now() - interval '2 hours' WHERE id = $1`, r.f.subID)
+	r.resumeExpired(t, time.Now().UTC())
+	if sub := r.sub(t); sub.PauseCollection == nil {
+		t.Fatal("the resumer cleared a pause while a close before resumes_at is still owed")
+	}
+
+	queued := func() bool {
+		t.Helper()
+		list, err := r.f.invStore.ListAutoChargePending(r.base, domain.InvoiceKeyset{}, 1000)
+		if err != nil {
+			t.Fatalf("list auto-charge pending: %v", err)
+		}
+		for _, q := range list {
+			if q.ID == inv.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if !queued() {
+		t.Error("the auto-charge sweep skips the invoice although the pause's resumes_at has passed")
+	}
+
+	r.exec(t, `UPDATE subscriptions SET pause_collection_resumes_at = now() + interval '1 hour' WHERE id = $1`, r.f.subID)
+	if queued() {
+		t.Error("the auto-charge sweep picks up the invoice while the pause is in force")
+	}
+	r.exec(t, `UPDATE subscriptions SET pause_collection_resumes_at = NULL WHERE id = $1`, r.f.subID)
+	if queued() {
+		t.Error("the auto-charge sweep picks up the invoice under a pause with no resumes_at")
 	}
 }

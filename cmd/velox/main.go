@@ -221,10 +221,11 @@ func serve() {
 	// ~30 days past actual trial-end.
 	scheduler.SetTrialExpirer(server.SubscriptionSvc)
 	// Wall-clock pause-resume — clear pause_collection on subs
-	// whose resumes_at has elapsed BEFORE the cycle scan reads the
-	// due list. Stripe-parity (resume AT resumes_at, not next cycle
-	// close). Without this, a paused sub whose next_billing_at is
-	// in the future stays paused indefinitely.
+	// whose resumes_at has elapsed. Runs AFTER the billing run and
+	// skips a sub that still owes a close before resumes_at, so that
+	// close reads the pause as it stood at the period's end. Without
+	// this, a paused sub whose next_billing_at is in the future stays
+	// paused indefinitely.
 	scheduler.SetPauseResumer(server.SubscriptionSvc)
 	scheduler.SetPaymentReconciler(server.PaymentReconciler)
 	scheduler.SetGate(gate)

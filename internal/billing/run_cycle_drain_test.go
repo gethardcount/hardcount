@@ -158,6 +158,38 @@ func TestScheduler_BillingDrainStampsLivenessPerPage(t *testing.T) {
 	}
 }
 
+// pauseResumerFunc adapts a func to PauseResumer.
+type pauseResumerFunc func(ctx context.Context, batch int) (int, []error)
+
+func (f pauseResumerFunc) ProcessExpiredPauseCollections(ctx context.Context, batch int) (int, []error) {
+	return f(ctx, batch)
+}
+
+// The tick resumes expired pauses AFTER the billing run, so a period that
+// ended before resumes_at closes with the pause still on the row and the pause
+// then clears in the same tick. (The resumer's store query also skips a sub
+// that still owes such a close, so the order decides how soon the pause
+// clears, not whether the close reads it.)
+func TestScheduler_PauseResumeRunsAfterBillingRun(t *testing.T) {
+	subs := subsMock(dueSubFixture("sub_1"))
+	resumerCalls, closesBeforeResume := 0, -1
+	s := &Scheduler{engine: tenantRunEngine(subs), batch: 50,
+		pauseResumer: pauseResumerFunc(func(context.Context, int) (int, []error) {
+			resumerCalls++
+			closesBeforeResume = subs.closePeriodCalls
+			return 0, nil
+		})}
+
+	s.runBillingCycleForMode(postgres.WithLivemode(context.Background(), true), true)
+
+	if resumerCalls != 1 {
+		t.Fatalf("pause resumer ran %d times in one mode pass, want 1", resumerCalls)
+	}
+	if closesBeforeResume < 1 {
+		t.Fatalf("pause resumer ran before the billing run closed the due period (closes before resume = %d)", closesBeforeResume)
+	}
+}
+
 // Shutdown or a lost lease in the middle of a page: the drain stops at the
 // next sub instead of failing every remaining sub with the same ctx error.
 func TestDrain_StopsAtTheNextSubWhenCtxEnds(t *testing.T) {

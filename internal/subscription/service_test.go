@@ -1247,7 +1247,7 @@ func (f *fakeBiller) FinishRelief(_ context.Context, _ domain.Subscription, r do
 	f.finishedDrafts = append(f.finishedDrafts, r.DraftIDs...)
 }
 
-func (f *fakeBiller) BillOnCreateTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Invoice, bool, error) {
+func (f *fakeBiller) BillOnCreateTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, _ time.Time) (domain.Invoice, bool, error) {
 	f.createTxCalls++
 	return f.createTxInv, f.createTxOK, f.createTxErr
 }
