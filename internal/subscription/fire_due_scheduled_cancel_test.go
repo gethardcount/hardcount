@@ -69,6 +69,9 @@ func TestFireDueScheduledCancel_FlipsAndBillsAtomically(t *testing.T) {
 	if biller.finishCalls != 1 || len(biller.finishedDrafts) != 1 {
 		t.Errorf("post-commit FinishRelief: calls %d drafts %v, want 1 call with the relief draft", biller.finishCalls, biller.finishedDrafts)
 	}
+	if biller.afterCommitCalls != 1 {
+		t.Errorf("post-commit unpriced count: got %d, want 1 (#981)", biller.afterCommitCalls)
+	}
 }
 
 // A billing failure inside the tx must roll the flip back — the sub stays
@@ -168,5 +171,11 @@ func TestFireDueScheduledCancel_ReliefRefusalSurfaces(t *testing.T) {
 	}
 	if got := store.subs["sub_due"]; got.Status != domain.SubscriptionActive || got.CancelAt == nil {
 		t.Errorf("flip must roll back on a relief refusal: status %q cancel_at %v", got.Status, got.CancelAt)
+	}
+	// The billing run retries a refused cancel on backoff (ADR-119). The
+	// unpriced-usage count runs only after a commit, so a retry does not add
+	// the same usage again (#981).
+	if biller.afterCommitCalls != 0 {
+		t.Errorf("unpriced count ran %d time(s) for a rolled-back cancel, want 0", biller.afterCommitCalls)
 	}
 }

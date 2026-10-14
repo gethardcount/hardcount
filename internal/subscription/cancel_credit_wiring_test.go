@@ -48,6 +48,9 @@ func TestCancel_ReliefWrittenInTxThenFinished(t *testing.T) {
 	if fb.finishCalls != 1 || len(fb.finishedDrafts) != 1 || fb.finishedDrafts[0] != "cn_draft_1" {
 		t.Errorf("FinishRelief not run with the drafts; calls=%d ids=%v", fb.finishCalls, fb.finishedDrafts)
 	}
+	if fb.afterCommitCalls != 1 {
+		t.Errorf("unpriced count ran %d time(s) after the committed cancel, want 1 (#981)", fb.afterCommitCalls)
+	}
 }
 
 // TestCancel_DraftError_FailsCancel: a draft-create failure inside the cancel tx
@@ -67,5 +70,8 @@ func TestCancel_DraftError_FailsCancel(t *testing.T) {
 	}
 	if fb.finishCalls != 0 {
 		t.Errorf("FinishRelief ran %d time(s) after a rolled-back cancel, want 0", fb.finishCalls)
+	}
+	if fb.afterCommitCalls != 0 {
+		t.Errorf("unpriced count ran %d time(s) after a rolled-back cancel, want 0 (#981)", fb.afterCommitCalls)
 	}
 }

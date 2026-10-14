@@ -38,8 +38,8 @@ func (b *billOnCreateTxErrBiller) BillOnCreate(context.Context, domain.Subscript
 func (b *billOnCreateTxErrBiller) BillFinalOnImmediateCancel(context.Context, domain.Subscription) (domain.Invoice, error) {
 	return domain.Invoice{}, nil
 }
-func (b *billOnCreateTxErrBiller) BillFinalOnImmediateCancelTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, error) {
-	return domain.Invoice{}, nil
+func (b *billOnCreateTxErrBiller) BillFinalOnImmediateCancelTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, func(), error) {
+	return domain.Invoice{}, func() {}, nil
 }
 func (b *billOnCreateTxErrBiller) BillOnCancelDraftsTx(context.Context, *sql.Tx, domain.Subscription) (domain.Relief, error) {
 	return domain.Relief{}, nil

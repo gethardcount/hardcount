@@ -484,7 +484,7 @@ func TestImmediateCancel_vs_ThresholdFire_Concurrent(t *testing.T) {
 					done <- fireOut{fired, errs}
 				}()
 				waitForLockWaiter(t, r.base, admin, "UPDATE subscriptions")
-				_, err := r.closer.engine.BillFinalOnImmediateCancelTx(ctxCancel, tx, canceled)
+				_, _, err := r.closer.engine.BillFinalOnImmediateCancelTx(ctxCancel, tx, canceled)
 				return err
 			}); err != nil {
 				t.Fatalf("cancel: %v", err)
@@ -793,7 +793,7 @@ func TestImmediateCancel_vs_BoundaryClose_NoDoubleBill(t *testing.T) {
 		r.closer.subs.beforeTx = nil
 		ctxCancel := r.at(r.tc)
 		if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, func(tx *sql.Tx, canceled domain.Subscription) error {
-			_, err := r.fire.engine.BillFinalOnImmediateCancelTx(ctxCancel, tx, canceled)
+			_, _, err := r.fire.engine.BillFinalOnImmediateCancelTx(ctxCancel, tx, canceled)
 			return err
 		}); err != nil {
 			t.Fatalf("cancel: %v", err)

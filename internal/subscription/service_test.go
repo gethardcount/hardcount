@@ -1208,6 +1208,9 @@ type fakeBiller struct {
 	// and swap share it).
 	finishCalls    int
 	finishedDrafts []string
+	// afterCommitCalls counts runs of BillFinalOnImmediateCancelTx's
+	// afterCommit (the unpriced-usage count, #981): post-commit only.
+	afterCommitCalls int
 }
 
 func (f *fakeBiller) BillOnCreate(_ context.Context, _ domain.Subscription) (domain.Invoice, error) {
@@ -1220,9 +1223,9 @@ func (f *fakeBiller) BillFinalOnImmediateCancel(_ context.Context, _ domain.Subs
 	return domain.Invoice{}, f.finalCancelErr
 }
 
-func (f *fakeBiller) BillFinalOnImmediateCancelTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Invoice, error) {
+func (f *fakeBiller) BillFinalOnImmediateCancelTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Invoice, func(), error) {
 	f.finalCalls++
-	return f.finalCancelInv, f.finalCancelErr
+	return f.finalCancelInv, func() { f.afterCommitCalls++ }, f.finalCancelErr
 }
 
 func (f *fakeBiller) BillOnCancelDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Relief, error) {

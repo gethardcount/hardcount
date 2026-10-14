@@ -181,23 +181,29 @@ var (
 	// no price and was left off an invoice (#981). It is a signal, not a
 	// record: it resets on restart and is not per customer. The per-customer
 	// view is the unmatched row of GET /v1/customers/{id}/usage. meter_id
-	// is bounded by the meters a tenant creates.
+	// is bounded by the meters a tenant creates. mode is live or test, as on
+	// velox_parked_invoices; test-clock simulations are not counted.
 	usageUnpricedQuantity = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_usage_unpriced_quantity_total",
-			Help: "Usage quantity that matched no pricing rule on a meter with no default price, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by meter. Bill it with a one-off invoice; add a price so later invoices include it.",
+			Help: "Usage quantity that matched no pricing rule on a meter with no default price, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by meter. Test-clock simulations are not counted. Bill it with a one-off invoice; add a price so later invoices include it.",
 		},
-		[]string{"meter_id"},
+		[]string{"meter_id", "mode"},
 	)
 )
 
 // RecordUsageUnpriced adds the quantity of one meter's usage that an invoice
-// was built without because no price matched it.
-func RecordUsageUnpriced(meterID string, quantity float64) {
+// was built without because no price matched it. live is the mode the
+// invoice was built in.
+func RecordUsageUnpriced(meterID string, live bool, quantity float64) {
 	if quantity <= 0 {
 		return
 	}
-	usageUnpricedQuantity.WithLabelValues(meterID).Add(quantity)
+	mode := "test"
+	if live {
+		mode = "live"
+	}
+	usageUnpricedQuantity.WithLabelValues(meterID, mode).Add(quantity)
 }
 
 // RecordLeaderLeaseLost counts a lost lease (leader.LostFunc adapter).

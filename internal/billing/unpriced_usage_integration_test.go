@@ -9,6 +9,7 @@ package billing_test
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -23,8 +24,9 @@ import (
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
-// unpricedCounter reads velox_usage_unpriced_quantity_total for one meter;
-// 0 when the series does not exist.
+// unpricedCounter reads velox_usage_unpriced_quantity_total for one meter
+// in test mode (every test here runs with livemode=false); 0 when the
+// series does not exist.
 func unpricedCounter(t *testing.T, meterID string) float64 {
 	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
@@ -36,10 +38,17 @@ func unpricedCounter(t *testing.T, meterID string) float64 {
 			continue
 		}
 		for _, m := range mf.GetMetric() {
+			var meterOK, modeOK bool
 			for _, lp := range m.GetLabel() {
-				if lp.GetName() == "meter_id" && lp.GetValue() == meterID {
-					return m.GetCounter().GetValue()
+				switch lp.GetName() {
+				case "meter_id":
+					meterOK = lp.GetValue() == meterID
+				case "mode":
+					modeOK = lp.GetValue() == "test"
 				}
+			}
+			if meterOK && modeOK {
+				return m.GetCounter().GetValue()
 			}
 		}
 	}
@@ -408,7 +417,9 @@ func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
 
 // TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted runs the cancel's
 // production path (the caller's transaction): the final invoice carries the
-// priced usage and the unpriced quantity is counted.
+// priced usage and the unpriced quantity is counted, once, after the commit.
+// A first attempt whose transaction rolls back (as a refused relief does,
+// and the billing run then retries it) counts nothing.
 func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -430,27 +441,40 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 	ingestUnpricedAt(t, ctx, f, custID, tok.ID, 33, f.cycleStart.Add(2*time.Minute), map[string]any{"model": "b"})
 
 	canceledAt := time.Now().UTC().Truncate(time.Microsecond)
-	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET status = 'canceled', canceled_at = $1 WHERE id = $2`, canceledAt, subID); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
 	sub, err := f.subStore.Get(ctx, f.tenantID, subID)
 	if err != nil {
 		t.Fatalf("get sub: %v", err)
 	}
 	sub.Status = domain.SubscriptionCanceled
 	sub.CanceledAt = &canceledAt
-	inv, err := f.engine.BillFinalOnImmediateCancelTx(ctx, tx, sub)
-	if err != nil {
-		t.Fatalf("bill final (tx): %v", err)
+	attempt := func() (domain.Invoice, func(), *sql.Tx) {
+		tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET status = 'canceled', canceled_at = $1 WHERE id = $2`, canceledAt, subID); err != nil {
+			t.Fatalf("cancel: %v", err)
+		}
+		inv, afterCommit, err := f.engine.BillFinalOnImmediateCancelTx(ctx, tx, sub)
+		if err != nil {
+			t.Fatalf("bill final (tx): %v", err)
+		}
+		return inv, afterCommit, tx
 	}
+
+	// First attempt: the caller's later step fails and the tx rolls back.
+	_, _, tx := attempt()
+	postgres.Rollback(tx)
+	if got := unpricedCounter(t, tok.ID); got != 0 {
+		t.Fatalf("after a rolled-back cancel: counter = %v, want 0", got)
+	}
+
+	// Retry: commits, and the caller runs afterCommit.
+	inv, afterCommit, tx := attempt()
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
+	afterCommit()
 	if inv.ID == "" || inv.SubtotalCents != 12 {
 		t.Fatalf("final invoice = %q subtotal %d, want one invoice of 12c (model=a only)", inv.ID, inv.SubtotalCents)
 	}

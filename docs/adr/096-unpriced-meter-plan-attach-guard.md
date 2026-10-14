@@ -84,8 +84,11 @@ the meter's last pricing rule. The other clears its default binding (the
 meter's default price). New model names are also routine in AI pricing: a
 meter with rules for some models and no default leaves every new model
 unpriced. And one invoice path was silent. A spend-threshold invoice
-dropped unpriced usage with no log, and the period's last invoice bills
-only from the threshold invoice on.
+dropped unpriced usage with no log. On a meter with no pricing rules the
+period close bills only from the threshold invoice on, so no log named
+the usage before it. On a meter with rules the close's full-window pass
+logged the whole period, so that usage was logged, but the usage after
+the threshold invoice was logged twice.
 
 **What other products do** (checked 2026-10-14; full notes in the velox-ops
 research file `wrong-invoice-holes-981-980-design-2026-10-14.json`):
@@ -124,7 +127,11 @@ ADR-120). Close the two gaps:
    signals report that too.
 2. **Signals.** Each place that builds an invoice without unpriced usage
    logs a WARN with meter and quantity, and adds the quantity to
-   `velox_usage_unpriced_quantity_total{meter_id}`. That covers the period
+   `velox_usage_unpriced_quantity_total{meter_id, mode}` (`mode` is live
+   or test; test-clock simulations are not counted, as in the other
+   billing metrics). It counts after the commit that makes the invoice
+   decision final. For a cancel, that is the caller's commit, so a cancel
+   rolled back and retried by the billing run counts once. That covers the period
    close (with or without an invoice), the cancel final invoice (with or
    without one) and the spend-threshold invoice, which now logs too. Usage
    is counted once. A period close after a threshold invoice reports only

@@ -62,7 +62,7 @@ Each event is claimed by at most one pricing rule: the highest-priority match (t
 
 - the "unmatched usage — not billed" row of the customer's usage (`GET /v1/customers/{id}/usage`, and the customer page);
 - the invoice preview warning, which gives the quantity;
-- the `velox_usage_unpriced_quantity_total{meter_id}` counter;
+- the `velox_usage_unpriced_quantity_total{meter_id, mode}` counter (test-clock simulations are not counted);
 - a server log line when the invoice is built.
 
 To bill it, add a rule or a default price; invoices not built yet then include it. Bill periods already invoiced with a one-off invoice ([runbook §16](ops/runbook.md#16-usage-with-no-price)). Velox refuses (409) to remove a meter's last price while a plan with a live subscription uses the meter.

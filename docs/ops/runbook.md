@@ -28,7 +28,7 @@ confirm the fix.
 | `velox_audit_uncovered_mutation_total` rising | [13. Mutation without an audit row](#13-mutation-without-an-audit-row) |
 | `velox_billing_failing_subscriptions` above zero, or a subscription is not being invoiced | [14. Subscriptions whose billing is failing](#14-subscriptions-whose-billing-is-failing) |
 | A period ended but its invoice is not built yet, or usage is missing from an invoice | [15. Invoice timing and late usage](#15-invoice-timing-and-late-usage) |
-| `velox_usage_unpriced_quantity_total` rising, or a "matched no rating rule" WARN | [16. Usage with no price](#16-usage-with-no-price) |
+| `velox_usage_unpriced_quantity_total` rising, or a WARN with "no rating rule" and "not billed" | [16. Usage with no price](#16-usage-with-no-price) |
 | Write I/O high for minutes after a bulk load | [After a large backfill](#after-a-large-backfill-expect-a-few-minutes-of-elevated-write-io) |
 | p99 jumps, p50 flat, after a quiet spell (RDS) | [Size the WAL segment pool](#on-rds-size-the-wal-segment-pool--the-defaults-let-commits-stall-after-a-quiet-spell) |
 | p50 lifts for everyone for seconds on a large table | [Autovacuum stall](#autovacuum-on-a-large-insert-only-table-can-stall-every-commit-for-seconds) |
@@ -93,7 +93,7 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_audit_write_errors_total{outcome="row_lost"}` | rate > 0/s | **Audit evidence permanently lost.** Treat as a compliance incident. See [§12](#12-audit-write-errors) |
 | `velox_audit_write_errors_total{outcome="mutation_refused"}` | rate > 0/s | **Nothing is missing.** An availability problem, not an evidence problem. See [§12](#12-audit-write-errors) |
 | `velox_audit_uncovered_mutation_total{route}` | any increase | A route mutated state and wrote no audit row. Should be **flat zero**. See [§13](#13-mutation-without-an-audit-row) |
-| `increase(velox_usage_unpriced_quantity_total[1d])` by `meter_id` | > 0 | An invoice was built without usage that matched no price. That usage is not billed unless you bill it. See [§16](#16-usage-with-no-price) |
+| `increase(velox_usage_unpriced_quantity_total{mode="live"}[1d])` by `meter_id` | > 0 | An invoice was built without usage that matched no price. That usage is not billed unless you bill it. See [§16](#16-usage-with-no-price) |
 
 ### Info (dashboards, no alert)
 
@@ -732,10 +732,17 @@ at the period end.
 
 ### 16. Usage with no price
 
-**Symptom**: `velox_usage_unpriced_quantity_total{meter_id}` rises. Or the
-server logs a WARN such as `cycle: usage matched no rating rule and meter
-has no default binding — not billed` (the prefix is `cycle`, `cancel` or
-`threshold`), with `meter`, `quantity` and `subscription_id`.
+**Symptom**: `velox_usage_unpriced_quantity_total{meter_id, mode}` rises
+(`mode` is `live` or `test`; test-clock simulations are not counted). Or
+the server logs a WARN with `meter`, `quantity` and `subscription_id`, in
+one of two shapes. The prefix is `cycle`, `cancel` or `threshold`:
+
+- `cycle: usage matched no rating rule and meter has no default binding —
+  not billed`: the meter has pricing rules, and none matched.
+- `cycle: usage on a meter with no rating rule — not billed (unpriced
+  meter on plan; ADR-096)`: the meter has no rules and no default price.
+
+Both contain "no rating rule" and "not billed".
 
 **Why**: the usage matched no pricing rule on its meter, and the meter has
 no default price. A common cause is a new model name on an AI meter that
@@ -743,7 +750,8 @@ has rules for the older models only. Velox builds and sends the invoice
 without that usage, as Lago, Metronome and Orb do, and does not bill it
 later on its own (ADR-096 amendment). The counter adds the quantity once
 per invoice built without it: period close, cancel final invoice or
-spend-threshold invoice. It resets when the process restarts.
+spend-threshold invoice, once that invoice's transaction commits. It
+resets when the process restarts.
 
 **Check**:
 

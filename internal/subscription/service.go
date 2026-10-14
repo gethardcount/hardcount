@@ -54,8 +54,11 @@ type Biller interface {
 	// BillFinalOnImmediateCancelTx is the in-tx variant: inserts the
 	// final-on-cancel invoice on the caller's coordinator tx (ADR-056); the
 	// external finalize runs post-commit via FinalizeOnCreateInvoice. Empty
-	// invoice (nil error) for the no-op cases.
-	BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Invoice, error)
+	// invoice (nil error) for the no-op cases. afterCommit is never nil; the
+	// caller runs it only once the tx commits (it counts usage the invoice
+	// left unpriced, which a rolled-back, retried cancel must not count
+	// twice).
+	BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, afterCommit func(), err error)
 	// BillOnCancelDraftsTx writes the cancel-proration relief on the caller's
 	// cancel tx (ADR-057, ADR-118): credit-note drafts (issue_pending) for
 	// paid and partly-used unpaid funding invoices, and an in-place void of a
@@ -1893,6 +1896,7 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 	ctx = s.bindForSub(ctx, tenantID, id)
 
 	var finalInv domain.Invoice
+	afterBillCommit := func() {}
 	var relief domain.Relief
 	canceled, err := s.store.FireScheduledCancellationWithBill(ctx, tenantID, id, at, func(tx *sql.Tx, c domain.Subscription) error {
 		emitAudit := func(credited int64, currency string) error {
@@ -1924,11 +1928,12 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 		if s.biller == nil {
 			return emitAudit(0, "")
 		}
-		inv, billErr := s.biller.BillFinalOnImmediateCancelTx(ctx, tx, c)
+		inv, afterCommit, billErr := s.biller.BillFinalOnImmediateCancelTx(ctx, tx, c)
 		if billErr != nil {
 			return fmt.Errorf("final-on-scheduled-cancel invoice: %w", billErr)
 		}
 		finalInv = inv
+		afterBillCommit = afterCommit
 		r, reliefErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
 		if reliefErr != nil {
 			return fmt.Errorf("scheduled-cancel proration relief: %w", reliefErr)
@@ -1948,6 +1953,8 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 		}
 		return err
 	}
+
+	afterBillCommit()
 
 	// Post-commit external legs — identical to Cancel: finalize (tax commit +
 	// auto-charge) for the final invoice, then the relief's legs (each
@@ -2068,6 +2075,7 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	// the biller refuses it. The build runs BEFORE relief so the credit grant
 	// doesn't pre-apply against this invoice.
 	var finalInv domain.Invoice
+	afterBillCommit := func() {}
 	var relief domain.Relief
 	canceled, err := s.store.CancelAtomicWithBill(ctx, tenantID, id, func(tx *sql.Tx, c domain.Subscription) error {
 		// ADR-090 in-tx emission runs at the END of this closure (emitCancelAudit)
@@ -2113,11 +2121,12 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 		if s.biller == nil {
 			return emitCancelAudit(0, "")
 		}
-		inv, billErr := s.biller.BillFinalOnImmediateCancelTx(ctx, tx, c)
+		inv, afterCommit, billErr := s.biller.BillFinalOnImmediateCancelTx(ctx, tx, c)
 		if billErr != nil {
 			return fmt.Errorf("final-on-cancel invoice: %w", billErr)
 		}
 		finalInv = inv
+		afterBillCommit = afterCommit
 		// Cancel-proration relief (ADR-057, ADR-118): written IN this tx AFTER
 		// the final invoice (so the credit isn't sized against it), for every
 		// funding invoice, paid or unpaid. Any failure rolls the whole cancel
@@ -2133,6 +2142,7 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	if err != nil {
 		return domain.Subscription{}, 0, err
 	}
+	afterBillCommit()
 
 	// Post-commit external finalize for the final invoice (audit + tax commit +
 	// auto-charge) — Stripe calls must never ride a DB tx; the invoice is now

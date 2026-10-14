@@ -329,7 +329,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 			"subscription_id", sub.ID)
 		unpriced.add(u.MeterID, u.Quantity)
 	}
-	unpriced.record()
+	unpriced.record(ctx, sub)
 	return true, nil
 }
 

@@ -3390,7 +3390,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		}
 		// The period closed with no invoice; any unpriced usage in it is
 		// now billed nowhere, so it counts here, after the commit.
-		unpriced.record()
+		unpriced.record(ctx, sub)
 		if out.canceled != nil {
 			e.afterScheduledCancel(ctx, sub, *out.canceled, now)
 		}
@@ -3565,7 +3565,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	inv := out.inv
 	// Counted after the commit: a close that lost its CAS or rolled back
 	// counted nothing, and the retry that wins counts once.
-	unpriced.record()
+	unpriced.record(ctx, sub)
 	// The period is closed (or the sub terminated) — every leg from here is
 	// post-commit and at-least-once.
 	if out.canceled != nil {
@@ -3988,7 +3988,7 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 // marked auto_charge_pending and the no-PM notifier fires. Dunning
 // takes over from there on a failed charge.
 func (e *Engine) BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {
-	return e.billFinalOnImmediateCancelImpl(ctx, nil, sub)
+	return e.billFinalOnImmediateCancelImpl(ctx, nil, sub, unpricedUsage{})
 }
 
 // BillFinalOnImmediateCancelTx is the in-tx variant: it inserts the
@@ -3998,8 +3998,16 @@ func (e *Engine) BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subs
 // failure rolls the cancel back rather than orphaning a canceled sub with an
 // uninvoiced partial period. Returns an empty invoice (nil error) for the no-op
 // cases (nothing to bill on cancel).
-func (e *Engine) BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Invoice, error) {
-	return e.billFinalOnImmediateCancelImpl(ctx, tx, sub)
+//
+// afterCommit counts the usage the cancel left unpriced (#981). It is never
+// nil, and the caller runs it once its transaction commits. Counting here
+// instead would count again on every retry of a cancel whose transaction
+// rolled back after this returned: a refused relief is saved as a billing
+// failure and retried on backoff (ADR-119).
+func (e *Engine) BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, afterCommit func(), err error) {
+	unpriced := unpricedUsage{}
+	inv, err = e.billFinalOnImmediateCancelImpl(ctx, tx, sub, unpriced)
+	return inv, func() { unpriced.record(ctx, sub) }, err
 }
 
 // resolveRatedRule is the single pricing-resolution path every rater
@@ -4463,7 +4471,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	return lineItems, subtotal, nil
 }
 
-func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Invoice, error) {
+func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx, sub domain.Subscription, unpriced unpricedUsage) (domain.Invoice, error) {
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillFinalOnImmediateCancel",
 		trace.WithAttributes(
 			attribute.String("subscription_id", sub.ID),
@@ -4580,13 +4588,10 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		return domain.Invoice{}, err
 	}
 	// The cancel's final invoice is the last one for this period, so usage
-	// it leaves unpriced is billed nowhere. It is counted where this
-	// function decides: no invoice, or the invoice written. On the Tx path
-	// the caller's transaction can still roll back after this returns (the
-	// cancel relief or audit fails), and a retried cancel then counts again.
-	// The counter is a signal, so that rare over-count is accepted rather
-	// than widening the subscription Biller interface for a post-commit hook.
-	unpriced := unpricedUsage{}
+	// it leaves unpriced is billed nowhere. Without tx it is counted here
+	// once the decision is durable: no invoice, or the invoice written. With
+	// tx, the caller's transaction can still roll back, so it is left in
+	// unpriced for the caller to count after its commit.
 	lineItems, subtotal, err := e.buildCancelLineItems(ctx, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc, unpriced)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -4596,7 +4601,9 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		// Nothing to bill — no in_arrears base AND no usage. The
 		// customer canceled before they consumed anything billable.
 		// Skip the $0 invoice (matches BillOnCreate's behavior).
-		unpriced.record()
+		if tx == nil {
+			unpriced.record(ctx, sub)
+		}
 		return domain.Invoice{}, nil
 	}
 
@@ -4656,7 +4663,6 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
 			return domain.Invoice{}, fmt.Errorf("finalize audit (cancel tx): %w", err)
 		}
-		unpriced.record()
 		return created, nil
 	}
 
@@ -4672,7 +4678,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		}
 		return domain.Invoice{}, fmt.Errorf("create final-on-cancel invoice: %w", err)
 	}
-	unpriced.record()
+	unpriced.record(ctx, sub)
 
 	// The finalize AUDIT row already committed inside the create tx above; here
 	// only the post-commit WEBHOOK fires.
