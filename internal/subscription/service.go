@@ -1603,6 +1603,15 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 	newTiming domain.BillTiming,
 	now time.Time,
 ) (ItemChangeResult, error) {
+	// The swap re-anchors the period at `now`. Run on a period that has
+	// already ended unbilled, it would skip that period's close entirely
+	// (in_advance) or stretch it past its end (in_arrears). The handler
+	// closes such a period first (CloseEndedPeriodFirst); this refuses a
+	// boundary that passed after that. The period CAS below proves the row
+	// still equals sub, so the check holds at the write.
+	if domain.BillingDueAt(sub, now) {
+		return ItemChangeResult{}, errUnbilledPeriod(sub)
+	}
 	loc, err := s.tenantLocation(ctx, sub.TenantID)
 	if err != nil {
 		return ItemChangeResult{}, err
@@ -1745,6 +1754,23 @@ func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscri
 		return item, nil
 	}
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
+	// A pending change due at a boundary that has passed has taken effect,
+	// even if the billing run has not closed the period yet: the close runs
+	// first and applies it, and the cancel is then refused rather than
+	// reported as a cancel.
+	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, subscriptionID); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	after, err := s.store.GetItem(ctx, tenantID, itemID)
+	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	if after.PendingPlanID == "" {
+		if after.PlanID == item.PendingPlanID {
+			return domain.SubscriptionItem{}, errs.InvalidState("the pending plan change already took effect when the billing period ended")
+		}
+		return after, nil
+	}
 	return s.store.ClearItemPendingPlan(ctx, tenantID, itemID)
 }
 
@@ -1933,6 +1959,75 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 	return nil
 }
 
+// closeEndedPeriods closes the periods of an active subscription that have
+// ended and that the billing run has not closed yet. The billing run closes a
+// period on its first tick after the boundary (up to an hour today, longer
+// after downtime or a failed attempt), and until then the row still describes
+// the ended period. A write that lands in that gap would act on the ended
+// period, and the close would then read the result: a cancel scheduled "at
+// period end" would cancel retroactively at the boundary, a pause or resume
+// would decide the ended period's invoice, a plan or quantity change would
+// skip its proration. So every subscription write runs this first, and then
+// acts on the period that is running, as if the billing run had gone first.
+//
+// The close is the billing run's own attempt (BillDueNow): the period CAS,
+// catch-up over several periods and the failure record (ADR-119). Its error
+// is logged here, not returned: the engine has already logged and saved it,
+// and the caller learns the outcome from the returned row (still due or not).
+//
+// Trialing subscriptions are left to the trial scans, as Cancel always has
+// (ADR-069: a trial cancel is free however late it lands). closed reports
+// whether an attempt ran; sub is the row read after it.
+func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string) (sub domain.Subscription, closed bool, err error) {
+	sub, err = s.store.Get(ctx, tenantID, id)
+	if err != nil {
+		return domain.Subscription{}, false, err
+	}
+	if s.dueBiller == nil || sub.Status != domain.SubscriptionActive || !domain.BillingDueAt(sub, s.clock.Now(ctx)) {
+		return sub, false, nil
+	}
+	if _, billErr := s.dueBiller.BillDueNow(ctx, tenantID, id); billErr != nil {
+		slog.WarnContext(ctx, "billing the ended period before a subscription write failed",
+			"subscription_id", id, "tenant_id", tenantID, "error", billErr)
+	}
+	sub, err = s.store.Get(ctx, tenantID, id)
+	if err != nil {
+		return domain.Subscription{}, true, err
+	}
+	return sub, true, nil
+}
+
+// errUnbilledPeriod is the refusal of a write that would act on a period that
+// ended and could not be closed. Code unbilled_period, the same answer an
+// immediate cancel gives (billing.Engine.billFinalOnImmediateCancelImpl).
+func errUnbilledPeriod(sub domain.Subscription) error {
+	next := "retry billing for this subscription, then try again"
+	if sub.TestClockID != "" {
+		next = "finish or retry the clock advance, then try again"
+	}
+	return errs.InvalidState("this subscription has a billing period that ended and is not invoiced yet; " + next).
+		WithCode("unbilled_period")
+}
+
+// CloseEndedPeriodFirst is the pre-step every subscription write other than
+// Cancel runs before it reads the subscription it plans from (see
+// closeEndedPeriods). It returns the row after the close. When the close could
+// not bill (billing failing, waiting or parked), the write is refused with
+// unbilled_period rather than acting on the ended period; retry-billing is the
+// operator's way out. The item handlers call it before their proration
+// snapshot, so the snapshot is the new period's.
+func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+	ctx = s.bindForSub(ctx, tenantID, id)
+	sub, _, err := s.closeEndedPeriods(ctx, tenantID, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if sub.Status == domain.SubscriptionActive && domain.BillingDueAt(sub, s.clock.Now(ctx)) {
+		return domain.Subscription{}, errUnbilledPeriod(sub)
+	}
+	return sub, nil
+}
+
 func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 
@@ -1945,27 +2040,15 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	// The attempt's error is not returned: the engine has logged and saved
 	// it, and the final-invoice step below refuses the cancel (code
 	// unbilled_period) for as long as a period is left unbilled.
-	if s.dueBiller != nil {
-		sub, err := s.store.Get(ctx, tenantID, id)
-		if err != nil {
-			return domain.Subscription{}, 0, err
-		}
-		if sub.Status == domain.SubscriptionActive && domain.BillingDueAt(sub, s.clock.Now(ctx)) {
-			if _, billErr := s.dueBiller.BillDueNow(ctx, tenantID, id); billErr != nil {
-				slog.WarnContext(ctx, "cancel: billing the ended period failed",
-					"subscription_id", id, "tenant_id", tenantID, "error", billErr)
-			}
-			// A scheduled cancel that was due fired inside the attempt, at its
-			// contracted instant, with its own invoice, audit row and event.
-			// The subscription is canceled, which is what was asked for.
-			sub, err = s.store.Get(ctx, tenantID, id)
-			if err != nil {
-				return domain.Subscription{}, 0, err
-			}
-			if sub.Status == domain.SubscriptionCanceled {
-				return sub, 0, nil
-			}
-		}
+	sub, closed, err := s.closeEndedPeriods(ctx, tenantID, id)
+	if err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	if closed && sub.Status == domain.SubscriptionCanceled {
+		// A scheduled cancel that was due fired inside the attempt, at its
+		// contracted instant, with its own invoice, audit row and event. The
+		// subscription is canceled, which is what was asked for.
+		return sub, 0, nil
 	}
 
 	// PR-10 / ADR-056: emit the final partial-period invoice (in_arrears
@@ -2210,7 +2293,10 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 		return domain.Subscription{}, errs.Invalid("body", "at_period_end and cancel_at cannot be set together; pick one")
 	}
 
-	sub, err := s.store.Get(ctx, tenantID, id)
+	// "Period end" is the end of the period that is running. In the gap
+	// after a boundary the row still holds the ended period, and a flag set
+	// there would cancel retroactively at that boundary.
+	sub, err := s.CloseEndedPeriodFirst(ctx, tenantID, id)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -2264,8 +2350,23 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 
 // ClearScheduledCancel undoes any prior schedule. Idempotent — a row
 // without a schedule returns unchanged.
+//
+// A schedule whose boundary has passed has already taken effect, even if the
+// billing run has not closed the period yet: the close runs first and fires
+// it, and the clear is then refused rather than reported as a clear.
 func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
+	before, err := s.store.Get(ctx, tenantID, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	after, err := s.CloseEndedPeriodFirst(ctx, tenantID, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if before.Status == domain.SubscriptionActive && after.Status == domain.SubscriptionCanceled {
+		return domain.Subscription{}, errs.InvalidState("the scheduled cancel already took effect when the billing period ended; the subscription is canceled")
+	}
 	return s.store.ClearScheduledCancellation(ctx, tenantID, id)
 }
 
@@ -2320,6 +2421,12 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 	// auditCtxForSub to wall-clock audit rows.
 	ctx = s.bindForSub(ctx, tenantID, id)
 
+	// The ended period's invoice follows the pause state at its end, so a
+	// pause landing after the boundary must not turn it into a draft.
+	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
+		return domain.Subscription{}, err
+	}
+
 	pc := domain.PauseCollection{Behavior: input.Behavior}
 	if input.ResumesAt != nil {
 		ts := input.ResumesAt.UTC()
@@ -2366,6 +2473,11 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 // way PauseCollection does today.
 func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
+	// A period that ended while paused keeps a draft invoice; the resume
+	// applies from the period that is running.
+	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
+		return domain.Subscription{}, err
+	}
 	sub, err := s.store.ClearPauseCollection(ctx, tenantID, id)
 	if errors.Is(err, ErrNotPaused) {
 		// Idempotent for the operator: nothing changed, nothing announced.

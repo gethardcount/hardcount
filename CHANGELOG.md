@@ -21,6 +21,14 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Subscription changes made just after a period ends apply to the new period (2026-10-14, #961).** Until the billing run invoiced the ended period (up to an hour, longer after an outage), a change acted on that period instead. A cancel scheduled "at period end" cancelled at the end just passed, and the new period went unbilled. A pause or resume decided the ended period's invoice. A plan or quantity change was not prorated. The change now bills the ended period first, or answers 409 `unbilled_period` if it cannot.
+
+- **A plan swap to another billing interval no longer drops an ended period's usage (2026-10-14, #961).** On a plan billed in advance, a swap made after a period ended and before the billing run invoiced it skipped that period: its usage was never billed. The swap now bills the period first.
+
+- **A "last value ever" price bills the value at the period end (2026-10-14, #961).** A period invoiced late (the next scheduler tick, after an outage, or several periods at once) billed the latest value, even one recorded after the period ended. Each period now bills the value it had at its end. Affects pricing rules with `last_ever` aggregation.
+
+- **A spend threshold no longer bills past a scheduled cancel date (2026-10-14, #961).** When a `cancel_at` fell inside a period, the threshold check could run after it and bill the period up to the check: the full base fee and usage recorded after the cancel. The cancel's own final invoice now bills the period up to `cancel_at`.
+
 - **A card payment and its Stripe webhook arriving at the same moment no longer deadlock (2026-10-14, #989).** When Stripe's "payment succeeded" webhook arrived while Velox was still recording its own charge attempt, the two database transactions could wait on each other until Postgres cancelled one. The webhook then failed and Stripe resent it, or the attempt was recorded without its source. No payment was recorded twice. The charge path now takes the invoice lock first, like every other payment writer.
 
 - **A Stripe rate limit during a charge no longer parks the invoice (2026-10-14, #978).** When Stripe answered "too many requests" (HTTP 429), the charge had not run, but Velox recorded the outcome as unknown and parked the invoice until someone checked it. It is now treated like any request that never reached Stripe: the invoice is left as it was, no retry attempt is used, no email is sent, and the next billing run tries again. Most likely during a large billing run.

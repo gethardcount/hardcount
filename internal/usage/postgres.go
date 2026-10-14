@@ -718,9 +718,10 @@ func (s *PostgresStore) aggregateByPricingRules(
 	// period pass's LATERAL top-1 claim and filtering on the winner's mode
 	// AFTER the claim closes the double-count.
 	//
-	// The probe below is what makes the doc comment above true. This pass is
-	// deliberately unbounded in time — that is what last_ever MEANS — so
-	// running it unconditionally walked the customer's entire lifetime of
+	// The probe below is what makes the doc comment above true. This pass has
+	// no lower time bound — that is what last_ever MEANS (the latest value as
+	// of the window end, however old) — so running it unconditionally walked
+	// the customer's entire lifetime of
 	// events for the meter on every invoice, every preview, and every hourly
 	// threshold scan, including for the overwhelming majority of meters that
 	// have no last_ever rule at all. The probe is an index hit on
@@ -764,13 +765,19 @@ func (s *PostgresStore) aggregateByPricingRules(
 			WHERE e.tenant_id   = $1
 			  AND e.meter_id    = $2
 			  AND e.customer_id = $3
+			  -- The latest value AS OF the window end. No lower bound
+			  -- (that is what last_ever means), but an upper one: a close
+			  -- that runs after its period ended (the next tick, a catch-up
+			  -- over several periods, a test-clock advance) must not bill a
+			  -- value set after the period it is billing.
+			  AND e.timestamp   < $4
 			  AND rr.aggregation_mode = 'last_ever'
 		)
 		SELECT DISTINCT ON (rule_id)
 			rule_id, rating_rule_version_id, quantity
 		FROM claims
 		ORDER BY rule_id, timestamp DESC
-	`, tenantID, meterID, customerID)
+	`, tenantID, meterID, customerID, to)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate by pricing rules (last_ever): %w", err)
 	}

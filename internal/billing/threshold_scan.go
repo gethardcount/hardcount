@@ -246,6 +246,15 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	if !now.Before(*sub.CurrentBillingPeriodEnd) {
 		return false, nil
 	}
+	// A due cancel_at ends the period early, so it gets the same skip. The
+	// billing run's cancel arm bills [period_start, cancel_at) at the
+	// contracted instant (ADR-097), but the scheduler runs this scan first in
+	// its tick: a fire here would bill [period_start, now), usage stamped after
+	// the subscription ended and the full in_arrears base included, and the
+	// cancel's final invoice would then find the window already billed.
+	if sub.CancelAt != nil && !now.Before(*sub.CancelAt) {
+		return false, nil
+	}
 
 	// Fire-once probe: if a threshold invoice already exists for this cycle,
 	// this sub is done until the period rolls (reset=false) or the cycle

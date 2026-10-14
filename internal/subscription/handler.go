@@ -954,6 +954,13 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 	ctx := h.bindForSub(r.Context(), tenantID, id)
 	r = r.WithContext(ctx)
 
+	// Close an ended, unbilled period first, so the snapshot below is the
+	// period that is running (Service.CloseEndedPeriodFirst).
+	if _, err := h.svc.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
+		respond.FromError(w, r, err, "subscription")
+		return
+	}
+
 	// Snapshot the pre-add subscription for proration. Factor is computed
 	// from the period boundaries which don't change when an item is added
 	// mid-cycle, so a pre-add read is equivalent to a post-add read here.
@@ -1133,6 +1140,14 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 	// stamps run in simulated time on clock-pinned subs (PR-12).
 	ctx := h.bindForSub(r.Context(), tenantID, subID)
 	r = r.WithContext(ctx)
+
+	// Close an ended, unbilled period first, so the change (and its
+	// proration snapshot below, and a scheduled change's effective date) is
+	// planned from the period that is running (Service.CloseEndedPeriodFirst).
+	if _, err := h.svc.CloseEndedPeriodFirst(ctx, tenantID, subID); err != nil {
+		respond.FromError(w, r, err, "subscription")
+		return
+	}
 
 	// Capture the pre-change item/plan only when we're about to drive proration
 	// — the old plan id, old quantity, and the subscription's remaining period
@@ -1431,6 +1446,13 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	// Bind effective-now from the sub pin (PR-12).
 	ctx := h.bindForSub(r.Context(), tenantID, subID)
 	r = r.WithContext(ctx)
+
+	// Close an ended, unbilled period first, so the snapshot below is the
+	// period that is running (Service.CloseEndedPeriodFirst).
+	if _, err := h.svc.CloseEndedPeriodFirst(ctx, tenantID, subID); err != nil {
+		respond.FromError(w, r, err, "subscription")
+		return
+	}
 
 	// Capture the pre-delete item + sub for proration. Removing mid-period
 	// should credit back the unused portion of what the customer already paid

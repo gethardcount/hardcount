@@ -209,7 +209,7 @@ When billing finalizes for `(customer, meter, period_start, period_end)`:
      - `sum` → `SUM(quantity)`
      - `count` → `COUNT(*)`
      - `last_during_period` → quantity of the latest event by `timestamp` within the period
-     - `last_ever` → quantity of the latest event by `timestamp` across all time, regardless of period (used for "current state" billing like seat counts)
+     - `last_ever` → quantity of the latest event by `timestamp` before the period end, however far back it lies (used for "current state" billing like seat counts). An event stamped after the period end belongs to a later period, even when the period is billed late
      - `max` → `MAX(quantity)`
    - Resolve the aggregated quantity → cents via the rule's `rating_rule_version` (existing flat / graduated / package logic, unchanged).
 3. Events not claimed by any pricing rule fall back to the meter's default `rating_rule_version_id` with mode `meters.aggregation`.

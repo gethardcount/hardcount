@@ -259,6 +259,20 @@ invoice.
   Two sibling paths that move the period of a possibly overdue subscription
   were not traced and are not changed here: the immediate cross-interval plan
   swap and the threshold fire that resets the cycle.
+
+  **Amended 2026-10-14.** Every other subscription write had the same gap, not
+  only the swap: a write between the period end and its close acted on the
+  ended period, and the close then read the result (a period-end cancel
+  scheduled after the boundary cancelled at it; a pause or resume decided the
+  ended period's invoice; a plan or quantity change skipped its proration; the
+  swap re-anchored past the ended period and never billed it). Each write now
+  runs the cancel's pre-step first (`Service.CloseEndedPeriodFirst`, the same
+  `BillDueNow` attempt) and is refused with `unbilled_period` when the period
+  is still due after it, so dunning's final pause on a failing subscription
+  is refused and tried again exactly like its final cancel. The swap also
+  refuses inside its transaction. The
+  threshold fire that resets the cycle is unchanged: it does not fire on a
+  period that has ended (the boundary skip), nor after a due `cancel_at`.
 - **A fault that fails every subscription for more than about 3.7 days parks
   them all.** Un-parking is one call per subscription. There is no bulk retry.
   The runbook has the loop, and a page-level alert on the gauge fires long
@@ -270,8 +284,9 @@ invoice.
   parks.** It is not saved either. It shows as a small, flat oldest-due age,
   with the id in the log.
 - **Late invoices have existing side effects** that a wait can widen. Prepaid
-  credits that expired in the meantime do not apply. An in-advance item
-  changed while the period is overdue is billed from the boundary.
+  credits that expired in the meantime do not apply. (An in-advance item
+  changed while the period was overdue used to be billed from the boundary;
+  since 2026-10-14 the change is refused until the period is billed.)
 - **The five columns go stale.** They are not cleared when the due instant
   moves. An architecture test (`internal/arch`) fails the build if a new file
   reads them without the predicate, and the column comment warns hand-written

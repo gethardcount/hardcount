@@ -36,8 +36,9 @@ type Store interface {
 	// the rule's aggregation_mode. Events that match no rule are returned
 	// as an unclaimed entry (RuleID=="") aggregated with defaultMode.
 	//
-	// last_ever rules ignore the period bounds and pick the latest event
-	// across all time (for "current state" billing like seat counts).
+	// last_ever rules ignore the period start and pick the latest event
+	// stamped before `to` (for "current state" billing like seat counts):
+	// the value as of the window end, however late the window is read.
 	AggregateByPricingRules(ctx context.Context, tenantID, customerID, meterID string, defaultMode domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error)
 
 	// AggregateDailyBuckets returns events bucketed to UTC-day granularity

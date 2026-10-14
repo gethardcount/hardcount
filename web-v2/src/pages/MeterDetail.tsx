@@ -49,7 +49,7 @@ const AGGREGATION_MODES: { value: MeterAggregationMode; label: string; help: str
   { value: 'sum', label: 'Sum', help: 'Add all event values in the period.' },
   { value: 'count', label: 'Count', help: 'Count matching events; ignore values.' },
   { value: 'last_during_period', label: 'Last value in period', help: 'Take the latest event in the period.' },
-  { value: 'last_ever', label: 'Last value ever', help: 'Take the latest event across all time (state-style billing).' },
+  { value: 'last_ever', label: 'Last value ever', help: 'Take the latest value as of the end of the period, however old (state-style billing).' },
   { value: 'max', label: 'Maximum', help: 'Take the largest value in the period.' },
 ]
 

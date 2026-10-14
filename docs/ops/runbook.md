@@ -548,11 +548,12 @@ failure on the subscription and now waits before each new attempt (ADR-119).
   every period it missed, one invoice per period. Waiting still has a cost:
   - prepaid credits that expire in the meantime do not apply to the late
     invoice;
-  - an in-advance item changed while the period is overdue is billed from the
-    period boundary;
   - usage thresholds do not fire for a period that has already ended;
-  - the subscription cannot be cancelled until it is billed: an immediate
-    cancel answers 409 `unbilled_period` (ADR-119).
+  - the subscription cannot be cancelled or changed until it is billed. An
+    immediate cancel, a scheduled cancel or its removal, a collection pause or
+    resume, and any item or plan change answer 409 `unbilled_period`
+    (ADR-119), because each one would otherwise act on the period that ended
+    instead of the one that is running.
 
   Retry promptly once the cause is fixed.
 - A cancel scheduled for the end of a trial still fires on a failing or parked
@@ -588,8 +589,9 @@ out the ladder.
 
 **Fix**:
 
-1. Fix the cause. Do this before changing the subscription's items: an item
-   changed while a period is overdue is billed from the period boundary.
+1. Fix the cause. Until the period is billed, every change to the
+   subscription (items, plan, a scheduled cancel, a collection pause) is
+   refused with 409 `unbilled_period`.
 2. Retry the subscription. This clears the saved failure, writes an audit log
    entry, and bills at once:
 
