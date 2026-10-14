@@ -32,7 +32,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 import { Button } from '@/components/ui/button'
-import { UNPRICED_SENTENCE, UNPRICED_TITLE, unpricedLine, unpricedMeters } from '@/lib/unpricedUsage'
+import { UNPRICED_SENTENCE, UNPRICED_TITLE, meterQuantityLine, unpricedLine, unpricedMeters } from '@/lib/unpricedUsage'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-react'
@@ -632,7 +632,6 @@ function MeterRow({ meter }: { meter: CustomerUsageMeter }) {
   const [expanded, setExpanded] = useState(false)
   const hasUnmatched = meter.rules.some(r => r.unmatched)
   const hasMultipleRules = meter.rules.length > 1 || hasUnmatched
-  const totalQty = useMemo(() => Number(meter.total_quantity), [meter.total_quantity])
 
   const visibleRules = useMemo<CustomerUsageRule[]>(() => {
     // Unmatched rows never fold into the "(N more)" bucket and always
@@ -684,14 +683,11 @@ function MeterRow({ meter }: { meter: CustomerUsageMeter }) {
               {meter.meter_name}
               {hasUnmatched && (
                 <span className="ml-2 inline-flex items-center text-[10px] font-medium text-amber-500 border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                  unmatched usage — not billed
+                  usage with no price
                 </span>
               )}
             </p>
-            <p className="text-xs text-muted-foreground font-mono">
-              {totalQty.toLocaleString(undefined, { maximumFractionDigits: 6 })} {meter.unit}
-              {hasMultipleRules && <span className="ml-2">· {meter.rules.filter(r => !r.unmatched).length} rules</span>}
-            </p>
+            <p className="text-xs text-muted-foreground font-mono">{meterQuantityLine(meter)}</p>
           </div>
           <p className="text-sm font-semibold text-foreground tabular-nums shrink-0">
             {formatCents(meter.total_amount_cents, meter.currency)}

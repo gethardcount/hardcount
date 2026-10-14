@@ -62,11 +62,17 @@ test('cycleProgress measures against the anchor and clamps to 100%', () => {
   assert.equal(over.daysIn, over.totalDays)
 })
 
-test('rollingWindow ends exactly at the anchor', () => {
-  const now = effectiveNow('2027-08-08T00:00:00.000Z')
+test('rollingWindow includes the anchor instant (to is exclusive on the server)', () => {
+  // A test clock frozen at Nov 15 23:00 stamps an untimestamped event at
+  // exactly 23:00:00. The server keeps `timestamp < to`, so `to` must be past
+  // the anchor or the 30d window misses the customer's newest usage.
+  const now = effectiveNow('2026-11-15T23:00:00.000Z')
   const w = rollingWindow(30, now)
-  assert.equal(w.to, '2027-08-08T00:00:00.000Z')
-  assert.equal(w.from, '2027-07-09T00:00:00.000Z')
+  const event = Date.parse('2026-11-15T23:00:00.000Z')
+  assert.ok(event < Date.parse(w.to), 'an event stamped at the anchor is inside the window')
+  assert.ok(event >= Date.parse(w.from))
+  assert.equal(w.to, '2026-11-15T23:00:00.001Z')
+  assert.equal(w.from, '2026-10-16T23:00:00.000Z')
 })
 
 test('effectiveNow(undefined) and wallClockNow() both fall to wall time', () => {

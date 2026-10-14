@@ -148,12 +148,19 @@ export function cycleProgress(
 }
 
 // rollingWindow returns the {from, to} ISO bounds of a trailing N-day window
-// ending at the anchor — the upper bound of a "last 7/30/90d" usage query. For
-// a clock-pinned customer this frames the simulated window, not a wall-clock one
-// that predates the simulated events.
+// that INCLUDES the anchor — a "last 7/30/90d" usage query. For a clock-pinned
+// customer this frames the simulated window, not a wall-clock one that
+// predates the simulated events.
+//
+// `to` is one millisecond past the anchor because the usage and margin queries
+// treat `to` as exclusive (`timestamp < to`), and an event sent without a
+// timestamp to a clock-pinned customer is stamped at exactly the clock's
+// frozen_time (usage.Service.Ingest). With `to` equal to the anchor, that
+// event, the newest usage the customer has, fell outside every rolling window
+// while the current-cycle view showed it.
 export function rollingWindow(days: number, now: EffectiveNow): { from: string; to: string } {
   return {
     from: new Date(now - days * 86_400_000).toISOString(),
-    to: new Date(now).toISOString(),
+    to: new Date(now + 1).toISOString(),
   }
 }

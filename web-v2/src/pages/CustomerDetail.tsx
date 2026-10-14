@@ -54,6 +54,7 @@ import {
 import { Loader2, Pencil, CreditCard, Archive, Wand2, FilePlus2, Plus, Trash2, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { CopyButton } from '@/components/CopyButton'
+import { DetailRow } from '@/components/DetailRow'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 import { Combobox } from '@/components/Combobox'
@@ -647,42 +648,29 @@ export default function CustomerDetailPage() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-border">
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">External ID</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm text-foreground font-mono">{customer.external_id}</span>
-                {/* external_id is the identifier operators paste into
-                    API calls and support threads — same copy affordance
-                    as the internal ID below. */}
-                <CopyButton text={customer.external_id} />
-              </div>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Email</span>
-              <span className="text-sm text-foreground flex items-center gap-2">
-                {customer.email || '—'}
-                {customer.email_status === 'bounced' && customer.email_last_bounced_at && (
-                  <Badge variant="destructive" className="text-xs" title={customer.email_bounce_reason || 'Permanent delivery failure'}>
-                    Bounced · {formatDate(customer.email_last_bounced_at)}
-                  </Badge>
-                )}
-              </span>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Status</span>
+            <DetailRow label="External ID">
+              <span className="min-w-0 font-mono">{customer.external_id}</span>
+              {/* external_id is the identifier operators paste into
+                  API calls and support threads — same copy affordance
+                  as the internal ID below. */}
+              <CopyButton text={customer.external_id} />
+            </DetailRow>
+            <DetailRow label="Email">
+              <span className="min-w-0">{customer.email || '—'}</span>
+              {customer.email_status === 'bounced' && customer.email_last_bounced_at && (
+                <Badge variant="destructive" className="text-xs" title={customer.email_bounce_reason || 'Permanent delivery failure'}>
+                  Bounced · {formatDate(customer.email_last_bounced_at)}
+                </Badge>
+              )}
+            </DetailRow>
+            <DetailRow label="Status">
               <Badge variant={statusVariant(customer.status)}>{customer.status}</Badge>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Created</span>
-              <span className="text-sm text-foreground">{formatDateTime(customer.created_at)}</span>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">ID</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm text-foreground font-mono">{customer.id}</span>
-                <CopyButton text={customer.id} />
-              </div>
-            </div>
+            </DetailRow>
+            <DetailRow label="Created">{formatDateTime(customer.created_at)}</DetailRow>
+            <DetailRow label="ID">
+              <span className="min-w-0 font-mono">{customer.id}</span>
+              <CopyButton text={customer.id} />
+            </DetailRow>
           </div>
         </CardContent>
       </Card>

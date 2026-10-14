@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/table'
 import { Loader2, Plus, HelpCircle, History } from 'lucide-react'
 import { CopyButton } from '@/components/CopyButton'
+import { DetailRow } from '@/components/DetailRow'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -942,33 +943,29 @@ export default function SubscriptionDetailPage() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-border">
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground w-40 shrink-0">Code</span>
-              <span className="text-sm text-foreground font-mono">{sub.code}</span>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground w-40 shrink-0">Customer</span>
+            <DetailRow label="Code" labelClassName="sm:w-40">
+              <span className="min-w-0 font-mono">{sub.code}</span>
+            </DetailRow>
+            <DetailRow label="Customer" labelClassName="sm:w-40">
               {/* Customer ID stays copyable whether or not the customer
                   record has resolved — operators paste it into API
                   calls and support threads. */}
-              <div className="flex items-center gap-1.5">
-                {customer ? (
-                  <Link to={`/customers/${customer.id}`} className="text-sm font-medium text-primary hover:underline">
-                    {customer.display_name}
-                  </Link>
-                ) : (
-                  <span className="text-sm text-foreground font-mono">{sub.customer_id}</span>
-                )}
-                <CopyButton text={sub.customer_id} title="Copy customer ID" />
-              </div>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground w-40 shrink-0">Status</span>
+              {customer ? (
+                <Link to={`/customers/${customer.id}`} className="min-w-0 font-medium text-primary hover:underline">
+                  {customer.display_name}
+                </Link>
+              ) : (
+                <span className="min-w-0 font-mono">{sub.customer_id}</span>
+              )}
+              <CopyButton text={sub.customer_id} title="Copy customer ID" />
+            </DetailRow>
+            <DetailRow label="Status" labelClassName="sm:w-40">
               <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
-            </div>
+            </DetailRow>
             {sub.billing_time && (
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground w-40 shrink-0 inline-flex items-center gap-1.5">
+              <DetailRow
+                labelClassName="sm:w-40 inline-flex items-center gap-1.5"
+                label={<>
                   Billing alignment
                   <Tooltip>
                     <TooltipTrigger render={<span className="inline-flex cursor-help" />}>
@@ -984,76 +981,52 @@ export default function SubscriptionDetailPage() {
                       </p>
                     </TooltipContent>
                   </Tooltip>
-                </span>
-                <span className="text-sm text-foreground">{sub.billing_time === 'anniversary' ? 'Anniversary' : 'Calendar'}</span>
-              </div>
+                </>}
+              >
+                {sub.billing_time === 'anniversary' ? 'Anniversary' : 'Calendar'}
+              </DetailRow>
             )}
             {sub.status === 'trialing' && sub.trial_start_at && sub.trial_end_at && (
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground w-40 shrink-0">Trial period</span>
-                <span className="text-sm text-foreground">
-                  {formatDate(sub.trial_start_at)} {'\u2014'} {formatDate(sub.trial_end_at)}
-                </span>
-              </div>
+              <DetailRow label="Trial period" labelClassName="sm:w-40">
+                {formatDate(sub.trial_start_at)} {'\u2014'} {formatDate(sub.trial_end_at)}
+              </DetailRow>
             )}
             {/* Third surface that has to respect a scheduled cancel — the
                 timeline bar and the Billing-cycle summary are the other two.
                 All three keyed off the period end alone, so one page could
                 say "Cancels Sep 1" and "Renews on Sep 1" at the same time. */}
             {sub.status !== 'trialing' && sub.status !== 'canceled' && sub.current_billing_period_end && (
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground w-40 shrink-0">
-                  {sub.cancel_at_period_end || sub.cancel_at ? 'Cancels on' : 'Renews on'}
-                </span>
-                <span className="text-sm text-foreground">
-                  {formatDate(
-                    sub.cancel_at_period_end || sub.cancel_at
-                      ? sub.cancel_effective_at || sub.cancel_at || sub.current_billing_period_end
-                      : sub.current_billing_period_end,
-                  )}
-                </span>
-              </div>
+              <DetailRow label={sub.cancel_at_period_end || sub.cancel_at ? 'Cancels on' : 'Renews on'} labelClassName="sm:w-40">
+                {formatDate(
+                  sub.cancel_at_period_end || sub.cancel_at
+                    ? sub.cancel_effective_at || sub.cancel_at || sub.current_billing_period_end
+                    : sub.current_billing_period_end,
+                )}
+              </DetailRow>
             )}
             {/* A trial canceled at trial end never billed its "first paid
                 period" — showing those dates reads as a period that existed.
                 Render the trial range instead (ADR-069). */}
             {sub.status === 'canceled' && sub.trial_end_at && sub.canceled_at && new Date(sub.canceled_at) <= new Date(sub.trial_end_at) ? (
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground w-40 shrink-0">Trial</span>
-                <span className="text-sm text-foreground">
-                  {formatCivilPeriod(sub.trial_start_at, sub.trial_end_at, undefined) || '\u2014'} — canceled at trial end
-                </span>
-              </div>
+              <DetailRow label="Trial" labelClassName="sm:w-40">
+                {formatCivilPeriod(sub.trial_start_at, sub.trial_end_at, undefined) || '\u2014'} — canceled at trial end
+              </DetailRow>
             ) : (
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground w-40 shrink-0">
-                  {sub.status === 'trialing' ? 'First billing period' : 'Current period'}
-                </span>
-                <span className="text-sm text-foreground">
-                  {sub.current_billing_period_display || '\u2014'}
-                </span>
-              </div>
+              <DetailRow label={sub.status === 'trialing' ? 'First billing period' : 'Current period'} labelClassName="sm:w-40">
+                {sub.current_billing_period_display || '\u2014'}
+              </DetailRow>
             )}
             {sub.usage_cap_units != null && (
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground w-40 shrink-0">Usage Cap</span>
-                <span className="text-sm text-foreground">
-                  {sub.usage_cap_units.toLocaleString()} units / period
-                  <span className="text-xs text-muted-foreground ml-2">({sub.overage_action === 'block' ? 'hard cap' : 'charge overage'})</span>
-                </span>
-              </div>
+              <DetailRow label="Usage Cap" labelClassName="sm:w-40">
+                <span>{sub.usage_cap_units.toLocaleString()} units / period</span>
+                <span className="text-xs text-muted-foreground">({sub.overage_action === 'block' ? 'hard cap' : 'charge overage'})</span>
+              </DetailRow>
             )}
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground w-40 shrink-0">Created</span>
-              <span className="text-sm text-foreground">{formatDateTime(sub.created_at)}</span>
-            </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground w-40 shrink-0">ID</span>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-foreground font-mono">{sub.id}</span>
-                <CopyButton text={sub.id} />
-              </div>
-            </div>
+            <DetailRow label="Created" labelClassName="sm:w-40">{formatDateTime(sub.created_at)}</DetailRow>
+            <DetailRow label="ID" labelClassName="sm:w-40">
+              <span className="min-w-0 font-mono">{sub.id}</span>
+              <CopyButton text={sub.id} />
+            </DetailRow>
           </div>
         </CardContent>
       </Card>

@@ -27,6 +27,9 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **A meter's row in Activity no longer reads "0 tokens · 0 rules" when its usage has no price (2026-10-15).** It now says both numbers, as in "0 tokens billed · 12,400 tokens not billed · no price matched", matching the notice above it.
+- **Activity's 7d, 30d and 90d windows include the latest usage (2026-10-15).** The window ended exactly at "now" and left out events stamped at that instant, which is every event sent without a timestamp to a customer on a test clock. The 30d view showed $0.00 while the Cycle view showed the usage. The Margin card had the same gap.
+- **Long emails and IDs no longer run over their labels (2026-10-15).** On a phone, the customer Details card and the subscription Properties card put each value under its label and wrap long values.
 - **The customer page's credit balance updates after Save & send (2026-10-15).** Finalizing a new invoice spends credit, but the balance kept its old value until a reload.
 - **Customer and subscription stats fit a phone (2026-10-15).** At 390px wide, Billing cycle, Trial period and Outstanding were clipped; the cells now stack.
 - **Cancel immediately says it bills a final invoice (2026-10-15).** It said "Stops billing right now"; time and usage so far are billed on a final invoice. The archived-customer notice no longer says "All data is read-only", since unpaid invoices are still collected. Pause collection says drafts made while paused stay drafts after the resume ("finalize them to collect"); it read as if they were charged on resume. Change plan, Change quantity and Remove item say "charged or credited now" only on advance-billed plans; on arrears-billed plans the period is billed at its end. A trial set to cancel at trial end no longer shows "No payment method".

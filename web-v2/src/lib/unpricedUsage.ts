@@ -32,3 +32,27 @@ export function unpricedLine(m: UnpricedMeter): string {
   const qty = m.quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })
   return `${qty}${m.unit ? ` ${m.unit}` : ''} on ${m.meterName} not billed.`
 }
+
+// The quantity line under a meter's name on the cost dashboard. The meter's
+// total_quantity counts only billed usage (usage with no price stays out of
+// the totals so they match the invoice), so a meter whose usage all matched no
+// price used to read "0 tokens · 0 rules" right under a notice saying 12,400
+// tokens were not billed. Say both numbers, in the notice's words:
+//   "12,400 tokens"
+//   "12,400 tokens · 3 prices"
+//   "0 tokens billed · 12,400 tokens not billed · no price matched"
+export function meterQuantityLine(m: {
+  unit: string
+  total_quantity: string
+  rules: { unmatched?: boolean; quantity: string }[]
+}): string {
+  const qty = (n: number) => `${n.toLocaleString('en-US', { maximumFractionDigits: 4 })}${m.unit ? ` ${m.unit}` : ''}`
+  const billed = Number(m.total_quantity)
+  const notBilled = m.rules.filter(r => r.unmatched).reduce((sum, r) => sum + Number(r.quantity), 0)
+  const prices = m.rules.filter(r => !r.unmatched).length
+  const parts = notBilled > 0 ? [`${qty(billed)} billed`, `${qty(notBilled)} not billed`] : [qty(billed)]
+  if (notBilled > 0 || prices > 1) {
+    parts.push(prices === 0 ? 'no price matched' : `${prices} price${prices === 1 ? '' : 's'}`)
+  }
+  return parts.join(' · ')
+}
