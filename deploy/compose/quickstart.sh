@@ -31,7 +31,7 @@ fail() { printf 'quickstart: %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || fail "Docker is not installed. Get it from https://docs.docker.com/get-docker/"
 docker compose version >/dev/null 2>&1 || fail "the Docker Compose plugin is missing (need 'docker compose', Docker 24 or newer)."
-docker info >/dev/null 2>&1 || fail "Docker is installed but not running. Start Docker and run this again."
+docker info >/dev/null 2>&1 || fail "Docker is not running, or this user cannot use it. Start Docker and run this again. On Linux, add yourself to the docker group (then log out and back in), or run this with sudo."
 
 # 32 random bytes as 64 hex characters, without needing openssl.
 rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
@@ -80,22 +80,40 @@ json_field() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" "$CREDS" | head -1; }
 
 bootstrap() {
   if [ -s "$CREDS" ]; then return 0; fi
-  local token reply
+  local token reply err status errf
   token=$(sed -n 's/^VELOX_BOOTSTRAP_TOKEN=//p' .env | tail -1)
-  # busybox wget prints the body of a 2xx only; a 409 means it was done before.
+  errf=$(mktemp)
+  # busybox wget prints the body of a 2xx only. On any other status it
+  # prints "server returned error: HTTP/1.1 <code> <reason>" to stderr.
   if reply=$(in_stack wget -qO- \
       --header "Authorization: Bearer ${token}" \
       --header "Content-Type: application/json" \
       --post-data '{"tenant_name":"My company"}' \
-      http://velox-api:8080/v1/bootstrap 2>/dev/null); then
+      http://velox-api:8080/v1/bootstrap 2>"$errf"); then
+    rm -f "$errf"
     umask 077
     printf '%s\n' "$reply" > "$CREDS"
-  else
-    say ""
+    return 0
+  fi
+  err=$(tr -d '\r' < "$errf" | head -3); rm -f "$errf"
+  status=$(printf '%s\n' "$err" | sed -n 's/.*server returned error: HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' | head -1)
+  say ""
+  if [ "$status" = 409 ]; then
+    # 409 is the only answer that means a first login already exists.
     say "The first login was created earlier, and its password is shown only once."
     say "If you have lost it, run './quickstart.sh destroy' and start again."
     return 1
   fi
+  # Anything else (a rate limit, a server error, no answer) created nothing:
+  # the first login is made in one transaction, so trying again is safe.
+  say "Velox could not create the first login: ${err:-no reply from Velox}"
+  if [ "$status" = 429 ]; then
+    say "Velox is limiting requests. Wait a minute, then run ./quickstart.sh again."
+  else
+    say "See 'docker compose logs velox-api' for the cause, then run ./quickstart.sh again."
+  fi
+  say "Your data is kept. Do not run destroy for this."
+  exit 1
 }
 
 show_login() {

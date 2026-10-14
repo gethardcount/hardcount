@@ -30,9 +30,11 @@ command -v jq >/dev/null || { echo "demo.sh needs jq (brew install jq / apt inst
 green() { printf "\033[32m%s\033[0m\n" "$1"; }
 blue()  { printf "\033[34m%s\033[0m\n" "$1"; }
 step()  { echo ""; blue "━━━ $1 ━━━"; }
-# Cents to dollars with two decimals ("$1.20", not jq's "$1.2"). Provider
-# cost stays in full precision: it is in millionths of a dollar.
-USD='def usd: (if . < 0 then "-" else "" end) + "$" + ((fabs / 100 | floor) | tostring) + "." + ((fabs % 100) | tostring | if length < 2 then "0" + . else . end); '
+# Cents to dollars with two decimals ("$1.20", not jq's "$1.2").
+# usd_micros does the same for provider cost, which is in millionths of a
+# dollar: it rounds half up to the cent first (1277500 is "$1.28").
+# pct1 turns basis points into a percent with one decimal (6707 is "67.1%").
+USD='def usd: (if . < 0 then "-" else "" end) + "$" + ((fabs / 100 | floor) | tostring) + "." + ((fabs % 100) | tostring | if length < 2 then "0" + . else . end); def usd_micros: (if . < 0 then -1 else 1 end) * ((fabs + 5000) / 10000 | floor) | usd; def pct1: (if . < 0 then "-" else "" end) + ((fabs + 5) / 10 | floor | ((. / 10 | floor | tostring) + "." + (. % 10 | tostring))) + "%"; '
 
 
 # req METHOD PATH [JSON_BODY] — curl with auth, fail-fast on non-2xx,
@@ -169,8 +171,8 @@ green "✓ Invoice with per-(model, token_type) lines — PDF renders ($PDF_BYTE
 
 step "9. Margin: what you billed against what the provider cost you"
 MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW&to=$ADV_TO")
-echo "$MARGIN" | jq -r "$USD"'"  billed  \(.revenue_cents | usd)\n  cost    $\(.cost_micros / 1000000)\n  margin  \((.margin_bps // 0) / 100)%"'
-echo "$MARGIN" | jq -r "$USD"'.by_model[] | "    \(.model): cost $\(.cost_micros / 1000000)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" else "" end)'
+echo "$MARGIN" | jq -r "$USD"'"  billed  \(.revenue_cents | usd)\n  cost    \(.cost_micros | usd_micros)\n  margin  \((.margin_bps // 0) | pct1)"'
+echo "$MARGIN" | jq -r "$USD"'.by_model[] | "    \(.model): cost \(.cost_micros | usd_micros)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" else "" end)'
 # The cost follows from this script's own inputs (the token counts in step 6
 # and the rates in step 5), and the billed amount must match the invoice.
 echo "$MARGIN" | jq -e '.cost_micros == 1277500' >/dev/null \
