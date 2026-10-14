@@ -18,6 +18,8 @@ import { showOutcome } from '@/lib/outcomeToast'
 import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { Callout } from '@/components/Callout'
+import { pickInvoiceNotice, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
+import { classifyError } from '@/lib/errorCopy'
 import { useGetInvoice } from '@/lib/gen/queries.gen'
 import type { Invoice } from '@/lib/gen/schemas/invoice'
 import type { InvoiceLineItem as LineItem } from '@/lib/gen/schemas/invoiceLineItem'
@@ -50,7 +52,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 
-import { Loader2, Mail, CreditCard, Link2, RotateCw, Info, MoreHorizontal, Download, Eye, XCircle, Receipt, AlertOctagon, History, ArrowRight } from 'lucide-react'
+import { Loader2, Mail, CreditCard, Link2, RotateCw, MoreHorizontal, Download, Eye, XCircle, Receipt, AlertOctagon, History, ArrowRight, FileX, ChevronRight } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -504,10 +506,15 @@ export default function InvoiceDetailPage() {
   // at finalize (Stripe Checkout in setup mode → add a card → engine
   // auto-charges). Goes straight to the customer's email — no recipient modal,
   // unlike the hosted-invoice "pay" email behind setShowEmailModal.
-  const resendSetupLinkMutation = useMutation({
+  //
+  // Two buttons send it — "Resend setup link" on the payment notice and
+  // "Email a payment-method link" on the written-off notice — so the caller
+  // passes the failure title that matches the button the operator pressed.
+  // The variable is the failure title; the request itself needs nothing.
+  const resendSetupLinkMutation = useMutation<Awaited<ReturnType<typeof api.resendSetupLink>>, Error, string>({
     mutationFn: () => api.resendSetupLink(id!),
-    onSuccess: () => toast.success('Payment-method link emailed to the customer'),
-    onError: (err) => showApiError(err, "Couldn't email the payment-method link"),
+    onSuccess: () => toast.success('Setup link emailed to the customer'),
+    onError: (err, failureTitle) => showApiError(err, failureTitle),
   })
 
   // Stripe-parity operator actions on finalized / uncollectible invoices.
@@ -591,8 +598,8 @@ export default function InvoiceDetailPage() {
       if (updated.tax_status === 'ok') {
         toast.success('Tax recalculated successfully')
       } else {
-        toast.message('Tax retry attempted', {
-          description: 'Still pending — see the attention card for the latest reason.',
+        toast.message('Tax still not calculated', {
+          description: 'The notice above the invoice shows why.',
         })
       }
     },
@@ -630,6 +637,25 @@ export default function InvoiceDetailPage() {
     )
   }
 
+  // Not found is an answer, not a failure: no Retry (it would find nothing
+  // again) and not the server's raw "invoice could not be found".
+  if (error && classifyError(loadError) === 'notfound') {
+    return (
+      <Layout>
+        <div className="flex flex-col items-center px-6 py-16 text-center">
+          <FileX size={20} className="mb-2 text-muted-foreground" aria-hidden />
+          <p className="text-sm font-medium text-foreground">Invoice not found</p>
+          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+            It may be in the other mode (test or live), or the link may be wrong.
+          </p>
+          <Button size="sm" variant="outline" className="mt-3" render={<Link to="/invoices" />}>
+            Go to Invoices
+          </Button>
+        </div>
+      </Layout>
+    )
+  }
+
   if (error) {
     return (
       <Layout>
@@ -647,6 +673,7 @@ export default function InvoiceDetailPage() {
   }
 
   const seller = sellerBlock(invoice, settings)
+  const notice = pickInvoiceNotice(invoice)
 
   return (
     <Layout>
@@ -892,109 +919,119 @@ export default function InvoiceDetailPage() {
         </div>
       </div>
 
-      {/* Test-clock banner — the page-level "Currently at <sim time>"
-          anchor. Gated on the AUTHORITATIVE invoice.is_simulated (not the
-          subscription's clock id), so manual one-off invoices get the
-          banner too — they were previously left with the "Simulated" chip
-          but no reference point. resolvedTestClockId falls back to the
-          customer's pin; if it's empty (clock since deleted) the banner
-          renders its deleted-clock variant. */}
+      {/* Simulated-time line (ADR-099): one quiet line under the title, not
+          a box. Gated on the AUTHORITATIVE invoice.is_simulated (not the
+          subscription's clock id), so manual one-off invoices get it too.
+          resolvedTestClockId falls back to the customer's pin. */}
       {invoice.is_simulated && (
         <TestClockBanner testClockId={resolvedTestClockId} />
       )}
 
-      {/* Uncollectible status banner — Stripe-parity bad-debt
-          framing. Stands in for the operator-context card (which is
-          intentionally hidden on uncollectible) so the page still
-          explains the state clearly. Surfaces the accounting
-          consequence + the recovery paths so the operator isn't
-          left wondering why most buttons disappeared. */}
-      {invoice.status === 'uncollectible' && (
-        <Callout tone="amber" className="mb-6" title="Marked uncollectible">
-          <p className="text-xs">
-            Recorded as bad debt. Dunning automation has halted and no further collection is attempted.
-            The invoice stays on the books for audit. The subscription remains <strong>active</strong> —
-            {' '}{subscription?.id ? (
-              <Link to={`/subscriptions/${subscription.id}`} className="text-primary hover:underline">cancel it separately</Link>
-            ) : 'cancel it separately'} if you also want to stop future billing.
-          </p>
-          <p className="text-xs pt-1">
-            If the customer pays after all, use <strong>Record Payment</strong> above for money received
-            offline. To collect by card, issue a fresh <strong>recovery invoice</strong> for the amount —
-            it runs on normal rails (hosted payment page, auto-charge once a card is on file) and this
-            invoice stays honestly written off; bad-debt recovery books as new income. A written-off
-            invoice is never charged directly (ADR-113). To reclassify as cancelled rather than
-            written-off, use <strong>Void</strong>.
-          </p>
-          {/* No card on file: offer the secure add-a-card link. The card is
-              account-scoped — it serves the recovery invoice and future
-              billing; nothing charges THIS invoice (ADR-113). The attention
-              banner that normally offers this action returns null for
-              terminal invoices, so it has to live here. */}
-          {invoice.amount_due_cents > 0 && !hasPaymentMethod && (
-            <div className="mt-2 border-l-2 border-border pl-3">
-              <p className="text-xs">
-                <strong className="text-foreground">No payment method on file.</strong>{' '}
-                Email {customer?.display_name || 'the customer'} a secure link to add a card, then
-                collect through a recovery invoice. Adding a card never charges this invoice.
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-2"
-                disabled={acting || resendSetupLinkMutation.isPending}
-                onClick={() => resendSetupLinkMutation.mutate()}
-              >
-                {resendSetupLinkMutation.isPending ? 'Sending…' : 'Email a payment-method link'}
+      {/* At most one notice above the invoice: the most urgent of the
+          server's attention notice and the written-off notice
+          (pickInvoiceNotice says why attention wins). Supporting facts sit
+          in "Payment details" below the invoice. */}
+      {notice === 'written_off' && (() => {
+        const subLine = writtenOffSubscriptionLine(subscription)
+        // A card serves new invoices only (ADR-113: a written-off invoice is
+        // never charged), so this line exists to set up future collection.
+        const showCardLine = invoice.amount_due_cents > 0 && !hasPaymentMethod
+        return (
+          <Callout
+            tone="neutral"
+            icon={FileX}
+            className="mb-6"
+            title="Written off"
+            actions={
+              <Button size="sm" variant="outline" onClick={() => setShowRecordPaymentDialog(true)} disabled={acting}>
+                <Receipt size={14} className="mr-1.5" />
+                Record payment
               </Button>
-            </div>
-          )}
-        </Callout>
-      )}
+            }
+            details={
+              <>
+                <p>
+                  To collect by card, create a new invoice for the amount. It can be paid on the
+                  payment page or charged to a saved card, and this invoice stays written off.
+                </p>
+                <p>To record it as cancelled rather than bad debt, void it from the ⋯ menu.</p>
+              </>
+            }
+          >
+            <p className="text-foreground">
+              Recorded as bad debt, so Velox won&apos;t collect it; if the customer pays later, record the payment.
+            </p>
+            {subLine && (
+              <p className="flex flex-wrap items-center gap-x-2">
+                {subLine.text}
+                {subLine.openSubscription && subscription && (
+                  <Link to={`/subscriptions/${subscription.id}`} className="inline-flex items-center text-primary hover:underline">
+                    Open subscription <ChevronRight size={14} aria-hidden />
+                  </Link>
+                )}
+              </p>
+            )}
+            {showCardLine && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-1">
+                <span>No card on file. A card the customer adds is used for new invoices, never this one.</span>
+                {/* The email goes to the customer's address, so it is offered
+                    only when there is one; otherwise the customer page can
+                    copy the link or add an address. */}
+                {customer?.email ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={acting || resendSetupLinkMutation.isPending}
+                    onClick={() => resendSetupLinkMutation.mutate("Couldn't email the payment-method link")}
+                  >
+                    {resendSetupLinkMutation.isPending ? 'Sending…' : 'Email a payment-method link'}
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" render={<Link to={`/customers/${invoice.customer_id}`} />}>
+                    Open customer page
+                  </Button>
+                )}
+              </div>
+            )}
+          </Callout>
+        )
+      })()}
 
-      {/* Unified attention banner — typed reason + prescribed actions
-          for tax/payment/overdue. Computed server-side; renders only
-          when invoice.attention is set (healthy + terminal-state
-          invoices return no attention). See ADR-009. */}
-      <InvoiceAttention
-        invoice={invoice as unknown as ApiInvoice}
-        onRetryTax={() => retryTaxMutation.mutate()}
-        onChargeNow={() => collectMutation.mutate()}
-        // send_reminder is state-aware. At the no_payment_method stage the
-        // matching action is to re-send the payment-METHOD setup link the
-        // engine already emailed (Checkout setup mode → add a card → engine
-        // auto-charges); that goes straight to the customer, no recipient
-        // modal. Every other reason (awaiting_payment, payment_failed,
-        // overdue) opens the email dialog to send the hosted-invoice "pay"
-        // link, where the operator confirms the recipient.
-        onSendReminder={() =>
-          invoice?.attention?.reason === 'no_payment_method' ||
-          invoice?.attention?.reason === 'dunning_exhausted'
-            ? resendSetupLinkMutation.mutate()
-            : setShowEmailModal(true)
-        }
-        // Reuses the page's existing void confirmation rather than voiding
-        // straight from the banner: void is irreversible, and the dialog is
-        // where the consequences are spelled out.
-        onVoidInvoice={() => setShowVoidConfirm(true)}
-        retrying={retryTaxMutation.isPending}
-        charging={collectMutation.isPending}
-        // ADR-030 / simulated-time discipline: anchor "since X ago" on the
-        // owning sub's test-clock frozen_time, not wall-clock. Without this, a
-        // sub frozen at 2024-02-01 on a wall-clock 2026-05-15 dashboard shows
-        // "since 833d ago" on a fresh attention state. effectiveNow(undefined)
-        // for a wall-clock invoice → wall time.
-        now={effectiveNow(testClock?.frozen_time)}
-      />
-
-      {/* Operator context — diagnostic detail (dunning, payment intent
-          ids, attempt counts) below the attention banner. Hidden on
-          terminal states. */}
-      {showOperatorContext && (
-        <OperatorContextCard
-          invoice={invoice}
-          dunningRun={activeDunningRun}
-          timeline={timeline}
+      {/* Unified attention notice — typed reason + prescribed actions,
+          computed server-side (ADR-009). */}
+      {notice === 'attention' && (
+        <InvoiceAttention
+          invoice={invoice as unknown as ApiInvoice}
+          onRetryTax={() => retryTaxMutation.mutate()}
+          onChargeNow={() => collectMutation.mutate()}
+          // send_reminder is state-aware. At the no_payment_method stage the
+          // matching action is to re-send the payment-METHOD setup link the
+          // engine already emailed (Checkout setup mode → add a card → engine
+          // auto-charges); that goes straight to the customer, no recipient
+          // modal. Every other reason (awaiting_payment, payment_failed,
+          // overdue) opens the email dialog to send the hosted-invoice "pay"
+          // link, where the operator confirms the recipient.
+          onSendReminder={() =>
+            invoice?.attention?.reason === 'no_payment_method' ||
+            invoice?.attention?.reason === 'dunning_exhausted'
+              ? resendSetupLinkMutation.mutate("Couldn't resend the setup link")
+              : setShowEmailModal(true)
+          }
+          // Reuses the page's existing void confirmation rather than voiding
+          // straight from the notice: void is irreversible, and the dialog is
+          // where the consequences are spelled out.
+          onVoidInvoice={() => setShowVoidConfirm(true)}
+          // Same for the parked invoice's write-off.
+          onMarkUncollectible={() => setShowMarkUncollectibleConfirm(true)}
+          retrying={retryTaxMutation.isPending}
+          charging={collectMutation.isPending}
+          sending={resendSetupLinkMutation.isPending}
+          // ADR-030 / simulated-time discipline: anchor "since X ago" on the
+          // owning sub's test-clock frozen_time, not wall-clock. Without this, a
+          // sub frozen at 2024-02-01 on a wall-clock 2026-05-15 dashboard shows
+          // "since 833d ago" on a fresh attention state. effectiveNow(undefined)
+          // for a wall-clock invoice → wall time.
+          now={effectiveNow(testClock?.frozen_time)}
         />
       )}
 
@@ -1448,6 +1485,18 @@ export default function InvoiceDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Payment details — the supporting facts (tax retries, payment
+          attempts, the Stripe payment id, the recovery schedule), collapsed
+          BELOW the invoice so nothing stacks above it. Facts the notice
+          already states are left out. Hidden on terminal states. */}
+      {showOperatorContext && (
+        <OperatorContextCard
+          invoice={invoice}
+          dunningRun={activeDunningRun}
+          timeline={timeline}
+        />
+      )}
+
       {/* Terminal-state banners (Paid, Voided) intentionally not
           rendered. The header status pill + the activity timeline
           (with ADR-020's "Invoice paid · via Visa •••• 4242"
@@ -1532,30 +1581,35 @@ export default function InvoiceDetailPage() {
         </Card>
       )}
 
-      {/* Void Confirm */}
+      {/* Void Confirm — short: what voiding does, then the one choice an
+          operator most often gets wrong (void vs mark uncollectible). */}
       <TypedConfirmDialog
         open={showVoidConfirm}
         onOpenChange={setShowVoidConfirm}
-        title="Void Invoice"
-        // The commit clause is CONDITIONAL, keyed on the server's own
+        title="Void invoice"
+        // The prepaid-credit clause is CONDITIONAL, keyed on the server's own
         // void_invoice action — present exactly when this invoice funded
-        // prepaid credit that is still unspent. Two reasons it can't be
-        // unconditional: it would be noise on the ordinary invoices that are
-        // the overwhelming majority, and the sentence already there ("any
-        // applied credits are returned") points the OTHER WAY — that is credit
-        // applied to PAY this invoice coming back. An operator voiding a
-        // commit invoice would otherwise read it as the customer getting
-        // credit back, when voiding is what takes their credit away.
+        // prepaid credit that is still unspent. It can't be unconditional:
+        // "applied credits are returned" points the OTHER WAY (credit applied
+        // to PAY this invoice coming back), and an operator voiding a commit
+        // invoice would read it as the customer getting credit back, when
+        // voiding is what takes their unspent credit away.
         description={
           (invoice?.attention?.actions ?? []).some((a) => a.code === 'void_invoice')
-            ? "Voiding annuls the invoice — it'll be treated as if it was never owed. This invoice bought prepaid credit, and voiding cancels whatever the customer has not spent yet; credit they have already spent is not clawed back. Any open charge attempt is cancelled. Voiding is blocked while a payment is unresolved: if the charge is still being confirmed the server will refuse until it reports an outcome, and if its outcome can never be identified the invoice must be marked uncollectible instead. This action cannot be undone."
-            : "Voiding annuls the invoice — it'll be treated as if it was never owed. Any applied credits are returned and any open charge attempt is cancelled. Voiding is blocked while a payment is unresolved: if the charge is still being confirmed the server will refuse until it reports an outcome, and if its outcome can never be identified the invoice must be marked uncollectible instead. Use this when the invoice was created in error. For 'we tried to collect and failed', use Mark Uncollectible instead. This action cannot be undone."
+            ? "The invoice is cancelled as if it was never owed, and the unspent prepaid credit it bought is cancelled; spent credit stays spent. This can't be undone."
+            : "The invoice is cancelled as if it was never owed, and any credits applied to it are returned. This can't be undone."
         }
         confirmWord="VOID"
-        confirmLabel="Void Invoice"
+        confirmLabel="Void invoice"
         onConfirm={() => voidMutation.mutate()}
         loading={voidMutation.isPending}
-      />
+      >
+        {invoice.status !== 'uncollectible' && (
+          <p className="text-xs text-muted-foreground">
+            Void is for an invoice created by mistake. If the customer didn&apos;t pay, mark it uncollectible instead.
+          </p>
+        )}
+      </TypedConfirmDialog>
 
       {/* Mark Uncollectible Confirm — Stripe-parity bad-debt write-off.
           Distinct from Void: invoice stays on the books, halts
@@ -1723,11 +1777,13 @@ export default function InvoiceDetailPage() {
   )
 }
 
-// OperatorContextCard renders diagnostic supporting detail below the
-// unified InvoiceAttention banner — dunning state, payment intent ids,
-// attempt counts, deferred timestamps. The "why is this stuck" headline
-// and the per-reason actions live in InvoiceAttention; this card is
-// the field-level dl for engineers debugging beyond the banner.
+// OperatorContextCard is the collapsed "Payment details" section below the
+// invoice: tax retries, payment attempts, the Stripe payment id and the
+// recovery schedule. The notice above the invoice says what is wrong and
+// what to do; this section holds the supporting facts and never repeats the
+// notice (the old "Diagnostic detail" box sat above the invoice and restated
+// the parked-invoice text, "Reconciler will query Stripe…", and a second copy
+// of the Stripe decline, which the notice's Provider response already has).
 function OperatorContextCard({
   invoice,
   dunningRun,
@@ -1745,158 +1801,111 @@ function OperatorContextCard({
     t => t.source === 'stripe' && (t.event_type === 'payment_intent.succeeded' || t.event_type === 'payment_intent.payment_failed')
   ).length
 
-  // tax_status badge styling. Pending = amber (transient, retrying);
-  // failed = destructive (manual action needed); ok = muted (unlikely
-  // here since the card hides on terminal states but kept for safety).
-  const taxStatusBadge = invoice.tax_status && invoice.tax_status !== 'ok' ? (
-    <Badge
-      variant={invoice.tax_status === 'failed' ? 'destructive' : 'outline'}
-      className={invoice.tax_status === 'pending' ? 'border-amber-300 text-amber-700 dark:text-amber-400' : ''}
-    >
-      {invoice.tax_status}
-    </Badge>
-  ) : null
+  const taxState = invoice.tax_status === 'failed' ? 'Failed' : invoice.tax_status === 'pending' ? 'Retrying' : null
 
-  // Don't render the card at all when there's nothing diagnostic to
-  // show. A freshly-finalized invoice that's awaiting its first charge
-  // has no tax issues, no payment attempts, no dunning — so every dl
-  // entry below is conditional-false and the card reads as empty
-  // noise. The InvoiceAttention banner already explains the state;
-  // operators don't need an empty "Diagnostic detail" card alongside.
-  const hasAnyDiagnostic =
-    !!taxStatusBadge ||
+  // Nothing to show → no section. A freshly finalized invoice awaiting its
+  // first charge has no tax issue, no attempt and no recovery run.
+  const hasAny =
+    !!taxState ||
     (invoice.tax_retry_count ?? 0) > 0 ||
     !!invoice.tax_deferred_at ||
     paymentAttempts > 0 ||
-    !!invoice.last_payment_error ||
-    invoice.payment_status === 'unknown' ||
     !!invoice.stripe_payment_intent_id ||
     !!dunningRun
-  if (!hasAnyDiagnostic) return null
+  if (!hasAny) return null
 
   return (
-    <Card className="mb-6 border-border bg-muted/30">
-      <CardHeader className="flex-row items-center gap-2 space-y-0 pb-3">
-        <Info size={16} className="text-muted-foreground" />
-        <CardTitle className="text-sm font-medium">Diagnostic detail</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2">
-          {taxStatusBadge && (
-            <>
-              <dt className="text-xs text-muted-foreground self-center">Tax status</dt>
-              <dd className="flex items-center gap-2 flex-wrap">
-                {taxStatusBadge}
-              </dd>
-            </>
-          )}
-
-          {(invoice.tax_retry_count ?? 0) > 0 && (
-            <>
-              <dt className="text-xs text-muted-foreground">Tax retries</dt>
-              <dd className="text-foreground">{invoice.tax_retry_count}</dd>
-            </>
-          )}
-
-          {invoice.tax_deferred_at && (
-            <>
-              <dt className="text-xs text-muted-foreground">Tax deferred at</dt>
-              <dd className="text-foreground">{formatDateTime(invoice.tax_deferred_at)}</dd>
-            </>
-          )}
-
-          {paymentAttempts > 0 && (
-            <>
-              <dt className="text-xs text-muted-foreground">Payment attempts</dt>
-              <dd className="text-foreground">{paymentAttempts}</dd>
-            </>
-          )}
-
-          {invoice.last_payment_error && (
-            <>
-              <dt className="text-xs text-muted-foreground">Last payment failure</dt>
-              <dd className="text-foreground">{invoice.last_payment_error}</dd>
-            </>
-          )}
-
-          {invoice.payment_status === 'unknown' && (
-            <>
-              <dt className="text-xs text-muted-foreground">Payment outcome</dt>
-              {/*
-                Two cases, and stating the wrong one here is worse than saying
-                nothing: this card sits directly under the attention banner, so
-                a PARKED invoice once showed "Velox will not resolve this"
-                immediately above "Reconciler will query Stripe" — adjacent
-                panels asserting opposites (found walking the page as an
-                operator, 2026-07-31). The parked sentence drifted AGAIN when
-                ADR-108 shipped: it said "this will not resolve on its own",
-                unconditional, two inches under a banner explaining the search
-                sweep — the same contradiction class, caught by the same kind
-                of walk (2026-08-02). Both sentences now match the banner's
-                bounded truth.
-              */}
-              <dd className="text-foreground">
-                {invoice.stripe_payment_intent_id
-                  ? 'Reconciler will query Stripe after the cool-off window.'
-                  : 'No payment intent was recorded, so there is nothing to query directly. Velox searches the provider for the attempt hourly and adopts it if found; if it cannot be found, this will not resolve on its own.'}
-              </dd>
-            </>
-          )}
-
-          {invoice.stripe_payment_intent_id && (
-            <>
-              <dt className="text-xs text-muted-foreground">Payment intent</dt>
-              <dd className="font-mono text-xs text-foreground">{invoice.stripe_payment_intent_id}</dd>
-            </>
-          )}
-
-          {dunningRun && (() => {
-            // For a card-less invoice the scheduled dunning tick can't
-            // collect (it re-discovers no card, counts an attempt, sends a
-            // reminder) — so labelling it "Next retry: <date>" told the
-            // operator a charge would happen when it won't (2026-07-22
-            // audit, P1-3). Relabel to "Next reminder" and, once the run
-            // has escalated, drop the future-step line entirely. Real
-            // decline dunning (has-card) keeps "Next retry". attempt 0 is
-            // humanized to match the Dunning list's "No retries yet" (P2-2).
-            const cardless =
-              invoice.attention?.reason === 'no_payment_method' ||
-              invoice.attention?.reason === 'dunning_exhausted'
-            const escalated = dunningRun.state === 'escalated'
-            const attemptLabel =
-              dunningRun.attempt_count === 0
-                ? 'No retries yet'
-                : `${dunningRun.attempt_count} ${dunningRun.attempt_count === 1 ? 'retry' : 'retries'}`
-            return (
+    <Card className="mt-6">
+      <details className="group">
+        <summary className="flex cursor-pointer select-none items-center gap-2 px-6 py-4 text-sm font-medium text-foreground">
+          <ChevronRight size={14} aria-hidden className="text-muted-foreground transition-transform group-open:rotate-90" />
+          Payment details
+        </summary>
+        <CardContent className="pt-0 text-sm">
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2">
+            {taxState && (
               <>
-                <dt className="text-xs text-muted-foreground">Payment recovery</dt>
-                <dd className="flex items-center gap-2">
-                  <Badge variant="outline" className="border-amber-300 text-amber-700 dark:text-amber-400">
-                    {escalated ? 'ended' : dunningRun.state}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">{attemptLabel}</span>
-                </dd>
-
-                {dunningRun.next_action_at && !escalated && (
-                  <>
-                    <dt className="text-xs text-muted-foreground">{cardless ? 'Next reminder' : 'Next retry'}</dt>
-                    <dd className="text-foreground">
-                      {formatDateTime(dunningRun.next_action_at)}
-                      {cardless && (
-                        <span className="block text-xs text-muted-foreground">Won't charge until a card is attached.</span>
-                      )}
-                      {invoice.attention?.code === 'payment.page_open' && (
-                        <span className="block text-xs text-muted-foreground">Held while the customer's payment page is open.</span>
-                      )}
-                    </dd>
-                  </>
-                )}
+                <dt className="text-xs text-muted-foreground">Tax calculation</dt>
+                <dd className="text-foreground">{taxState}</dd>
               </>
-            )
-          })()}
-        </dl>
+            )}
 
-      </CardContent>
+            {(invoice.tax_retry_count ?? 0) > 0 && (
+              <>
+                <dt className="text-xs text-muted-foreground">Tax retries</dt>
+                <dd className="text-foreground">{invoice.tax_retry_count}</dd>
+              </>
+            )}
+
+            {invoice.tax_deferred_at && (
+              <>
+                <dt className="text-xs text-muted-foreground">Tax first failed</dt>
+                <dd className="text-foreground">{formatDateTime(invoice.tax_deferred_at)}</dd>
+              </>
+            )}
+
+            {paymentAttempts > 0 && (
+              <>
+                <dt className="text-xs text-muted-foreground">Payment attempts</dt>
+                <dd className="text-foreground">{paymentAttempts}</dd>
+              </>
+            )}
+
+            {invoice.stripe_payment_intent_id && (
+              <>
+                <dt className="text-xs text-muted-foreground">Stripe payment ID</dt>
+                <dd className="flex items-center gap-1.5 font-mono text-xs text-foreground">
+                  {invoice.stripe_payment_intent_id}
+                  <CopyButton text={invoice.stripe_payment_intent_id} />
+                </dd>
+              </>
+            )}
+
+            {dunningRun && (() => {
+              // For a card-less invoice the scheduled recovery step can't
+              // collect (it re-discovers no card, counts an attempt, sends a
+              // reminder) — so labelling it "Next retry: <date>" told the
+              // operator a charge would happen when it won't (2026-07-22
+              // audit, P1-3). Relabel to "Next reminder" and, once the run
+              // has escalated, drop the future-step line entirely. Real
+              // decline recovery (has-card) keeps "Next retry". attempt 0 is
+              // humanized to match the Dunning list's "No retries yet" (P2-2).
+              const cardless =
+                invoice.attention?.reason === 'no_payment_method' ||
+                invoice.attention?.reason === 'dunning_exhausted'
+              const escalated = dunningRun.state === 'escalated'
+              const attemptLabel =
+                dunningRun.attempt_count === 0
+                  ? 'No retries yet'
+                  : `${dunningRun.attempt_count} ${dunningRun.attempt_count === 1 ? 'retry' : 'retries'}`
+              return (
+                <>
+                  <dt className="text-xs text-muted-foreground">Payment recovery</dt>
+                  <dd className="text-foreground">
+                    {escalated ? 'Ended' : dunningRun.state === 'active' ? 'Running' : dunningRun.state}
+                    <span className="text-xs text-muted-foreground"> · {attemptLabel}</span>
+                  </dd>
+
+                  {dunningRun.next_action_at && !escalated && (
+                    <>
+                      <dt className="text-xs text-muted-foreground">{cardless ? 'Next reminder' : 'Next retry'}</dt>
+                      <dd className="text-foreground">
+                        {formatDateTime(dunningRun.next_action_at)}
+                        {cardless && (
+                          <span className="block text-xs text-muted-foreground">Won't charge until a card is added.</span>
+                        )}
+                        {invoice.attention?.code === 'payment.page_open' && (
+                          <span className="block text-xs text-muted-foreground">On hold while the customer's payment page is open.</span>
+                        )}
+                      </dd>
+                    </>
+                  )}
+                </>
+              )
+            })()}
+          </dl>
+        </CardContent>
+      </details>
     </Card>
   )
 }

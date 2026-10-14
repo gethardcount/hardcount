@@ -15,11 +15,20 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Changed
+
+- **Invoice notices are one short sentence (2026-10-15).** API: `attention.message` was reworded for every reason. It is now one sentence, plus a second line after a newline when a fact must show up front (the setup-link email, prepaid credit at risk). The explanation and payment ids moved to `attention.detail`. Match on `reason` and `code`, not on the text.
+- **Notices say what will really happen (2026-10-15).** The no-payment-method and recovery-ended notices now say when collection is paused, so adding a card charges nothing until it resumes. They also say when email isn't set up and when the invoice follows a test clock. The written-off notice says whether the subscription is still billing, paused or canceled.
+- **One notice above the invoice (2026-10-15).** The invoice page shows only the most urgent notice. "Diagnostic detail" is now a collapsed "Payment details" section below the invoice. The test-clock banner is one line: "Simulated time: … Dates on this page follow the test clock." (ADR-099 amended).
+- **A parked invoice offers Mark uncollectible, and a payment anomaly offers Open in Stripe (2026-10-15).** API: new action code `mark_uncollectible`; `reconcile_payment` is now offered on `payment_anomaly`.
+
 ### Fixed
+
+- **An invoice link that matches nothing says "Invoice not found" (2026-10-15).** It showed the server's raw text with a Retry button that could never work.
 
 - **Charge now on an invoice paid entirely from credit now ends its dunning run (2026-10-15).** The invoice was marked paid, but its run stayed active at $0.00 until the next retry date, often days away, and kept counting in the Dashboard and the sidebar badge. The run now closes as payment recovered, as it does for a card payment.
 - **After logging in, the dashboard opens the page you were trying to reach (2026-10-14).** Opening a link to an invoice or customer while logged out went to login, then to the home page. It now returns to the linked page. Only paths inside the dashboard are followed.
-- **The "No payment method" notice no longer promises an email that cannot be sent (2026-10-14).** It said Velox emails the customer a setup link; without email set up (as in the quickstart) nothing is sent. It now says the link is emailed if email sending is set up.
+- **The "No payment method" notice no longer promises an email that cannot be sent (2026-10-14).** It said Velox emails the customer a setup link; without email set up (as in the quickstart) nothing is sent. It now says when email sending isn't set up and offers the customer page instead of Resend.
 - **Amounts show in the invoice's own currency (2026-10-14).** Record offline payment, the invoice page's credit-note and line-item dialogs, and dunning runs showed a non-default-currency invoice with the workspace currency symbol. The credit grant confirm no longer hard-codes "$".
 - **The Dashboard's outstanding total names every currency (2026-10-14).** It summed only the default currency next to a count of all open invoices. It now lists each currency, for example "$200.00 + €300.00 outstanding". The API adds `outstanding_by_currency` to the analytics overview.
 - **Charge now says what happened (2026-10-14).** "Payment initiated" showed even when credit paid the invoice with no charge. The message now reads paid, payment started, or failed, from the returned invoice.

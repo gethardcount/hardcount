@@ -68,49 +68,52 @@ func (e AnalyticsPeriod) Valid() bool {
 
 // Defines values for AttentionAction.
 const (
-	AddPaymentMethod    AttentionAction = "add_payment_method"
-	ChargeNow           AttentionAction = "charge_now"
-	ConnectTaxProvider  AttentionAction = "connect_tax_provider"
-	EditBillingProfile  AttentionAction = "edit_billing_profile"
-	ReconcilePayment    AttentionAction = "reconcile_payment"
-	RetryPayment        AttentionAction = "retry_payment"
-	RetryTax            AttentionAction = "retry_tax"
-	ReviewRegistration  AttentionAction = "review_registration"
-	RotateApiKey        AttentionAction = "rotate_api_key"
-	SendReminder        AttentionAction = "send_reminder"
-	UpdatePaymentMethod AttentionAction = "update_payment_method"
-	VoidInvoice         AttentionAction = "void_invoice"
-	WaitProvider        AttentionAction = "wait_provider"
+	AttentionActionAddPaymentMethod    AttentionAction = "add_payment_method"
+	AttentionActionChargeNow           AttentionAction = "charge_now"
+	AttentionActionConnectTaxProvider  AttentionAction = "connect_tax_provider"
+	AttentionActionEditBillingProfile  AttentionAction = "edit_billing_profile"
+	AttentionActionMarkUncollectible   AttentionAction = "mark_uncollectible"
+	AttentionActionReconcilePayment    AttentionAction = "reconcile_payment"
+	AttentionActionRetryPayment        AttentionAction = "retry_payment"
+	AttentionActionRetryTax            AttentionAction = "retry_tax"
+	AttentionActionReviewRegistration  AttentionAction = "review_registration"
+	AttentionActionRotateApiKey        AttentionAction = "rotate_api_key"
+	AttentionActionSendReminder        AttentionAction = "send_reminder"
+	AttentionActionUpdatePaymentMethod AttentionAction = "update_payment_method"
+	AttentionActionVoidInvoice         AttentionAction = "void_invoice"
+	AttentionActionWaitProvider        AttentionAction = "wait_provider"
 )
 
 // Valid indicates whether the value is a known member of the AttentionAction enum.
 func (e AttentionAction) Valid() bool {
 	switch e {
-	case AddPaymentMethod:
+	case AttentionActionAddPaymentMethod:
 		return true
-	case ChargeNow:
+	case AttentionActionChargeNow:
 		return true
-	case ConnectTaxProvider:
+	case AttentionActionConnectTaxProvider:
 		return true
-	case EditBillingProfile:
+	case AttentionActionEditBillingProfile:
 		return true
-	case ReconcilePayment:
+	case AttentionActionMarkUncollectible:
 		return true
-	case RetryPayment:
+	case AttentionActionReconcilePayment:
 		return true
-	case RetryTax:
+	case AttentionActionRetryPayment:
 		return true
-	case ReviewRegistration:
+	case AttentionActionRetryTax:
 		return true
-	case RotateApiKey:
+	case AttentionActionReviewRegistration:
 		return true
-	case SendReminder:
+	case AttentionActionRotateApiKey:
 		return true
-	case UpdatePaymentMethod:
+	case AttentionActionSendReminder:
 		return true
-	case VoidInvoice:
+	case AttentionActionUpdatePaymentMethod:
 		return true
-	case WaitProvider:
+	case AttentionActionVoidInvoice:
+		return true
+	case AttentionActionWaitProvider:
 		return true
 	default:
 		return false
@@ -1556,19 +1559,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
-	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
-	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	Failed    WebhookEventDeliveryAttemptStatus = "failed"
+	Pending   WebhookEventDeliveryAttemptStatus = "pending"
+	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case WebhookEventDeliveryAttemptStatusFailed:
+	case Failed:
 		return true
-	case WebhookEventDeliveryAttemptStatusPending:
+	case Pending:
 		return true
-	case WebhookEventDeliveryAttemptStatusSucceeded:
+	case Succeeded:
 		return true
 	default:
 		return false
@@ -2573,16 +2576,25 @@ type Attention struct {
 	// bump. Stripe parity.
 	Code string `json:"code,omitempty"`
 
-	// Detail Raw provider payload (Stripe Tax JSON envelope, last
-	// payment error message). Disclosed in a collapsible
-	// section for diagnostic depth.
+	// Detail Velox's own explanation behind `message`: why the state
+	// holds, what Velox does on its own, and ids support may ask
+	// for (for example the payment intent ids of a payment
+	// anomaly). Plain text; may contain blank-line paragraph
+	// breaks. Never a provider payload — that is
+	// `provider_response`.
 	Detail string `json:"detail,omitempty"`
 
 	// DocUrl Deep link to operator-facing documentation for this
 	// reason. Stripe parity.
 	DocUrl string `json:"doc_url,omitempty"`
 
-	// Message Human-readable headline copy, safe to render verbatim.
+	// Message Human-readable copy, safe to render verbatim: one plain
+	// sentence saying what happens and what to do. When a second
+	// fact must show up front (the setup-link email on an invoice
+	// with no payment method, prepaid credit at risk), it follows
+	// on a second line after a newline (`\n`). Wording may change
+	// between releases; switch on `reason` and `code`, not on this
+	// text.
 	Message string `json:"message"`
 
 	// Param Dotted-path pointer at the entity field the operator must
@@ -2590,6 +2602,11 @@ type Attention struct {
 	// `customer.address.postal_code`). Stripe parity. Empty
 	// when the resolution isn't field-scoped.
 	Param string `json:"param,omitempty"`
+
+	// ProviderResponse The provider's own response (Stripe Tax error envelope,
+	// Stripe's last payment error), exactly as received. Present
+	// only when Velox called the provider.
+	ProviderResponse string `json:"provider_response,omitempty"`
 
 	// Reason Closed, typed code naming why an invoice needs operator
 	// attention. Stable public-API contract — codes are never
@@ -2627,7 +2644,12 @@ type Attention struct {
 
 // AttentionAction Operator's recommended next step. Closed enum because every
 // code maps to a concrete server endpoint or frontend route,
-// and audit logs key off the code. `void_invoice` is offered only
+// and audit logs key off the code. `reconcile_payment` opens the
+// payment in Stripe; it is offered on `payment_anomaly`, where the
+// refund or correction is made there. `mark_uncollectible` opens
+// the write-off and is offered only when a payment's outcome can
+// never be identified (payment status unknown with no payment
+// intent recorded). `void_invoice` is offered only
 // on prepaid-commit exposure, and only while some of the granted
 // credit is still unspent: voiding retires the unspent balance
 // (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -2639,7 +2661,12 @@ type AttentionAction string
 type AttentionActionItem struct {
 	// Code Operator's recommended next step. Closed enum because every
 	// code maps to a concrete server endpoint or frontend route,
-	// and audit logs key off the code. `void_invoice` is offered only
+	// and audit logs key off the code. `reconcile_payment` opens the
+	// payment in Stripe; it is offered on `payment_anomaly`, where the
+	// refund or correction is made there. `mark_uncollectible` opens
+	// the write-off and is offered only when a payment's outcome can
+	// never be identified (payment status unknown with no payment
+	// intent recorded). `void_invoice` is offered only
 	// on prepaid-commit exposure, and only while some of the granted
 	// credit is still unspent: voiding retires the unspent balance
 	// (ADR-078) and is the sole recovery for an unpaid invoice whose

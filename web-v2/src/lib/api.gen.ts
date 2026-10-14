@@ -6193,7 +6193,12 @@ export interface components {
         /**
          * @description Operator's recommended next step. Closed enum because every
          *     code maps to a concrete server endpoint or frontend route,
-         *     and audit logs key off the code. `void_invoice` is offered only
+         *     and audit logs key off the code. `reconcile_payment` opens the
+         *     payment in Stripe; it is offered on `payment_anomaly`, where the
+         *     refund or correction is made there. `mark_uncollectible` opens
+         *     the write-off and is offered only when a payment's outcome can
+         *     never be identified (payment status unknown with no payment
+         *     intent recorded). `void_invoice` is offered only
          *     on prepaid-commit exposure, and only while some of the granted
          *     credit is still unspent: voiding retires the unspent balance
          *     (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -6201,7 +6206,7 @@ export interface components {
          *     is never clawed back (2026-08-04).
          * @enum {string}
          */
-        AttentionAction: "edit_billing_profile" | "retry_tax" | "retry_payment" | "wait_provider" | "rotate_api_key" | "reconcile_payment" | "review_registration" | "charge_now" | "send_reminder" | "add_payment_method" | "update_payment_method" | "connect_tax_provider" | "void_invoice";
+        AttentionAction: "edit_billing_profile" | "retry_tax" | "retry_payment" | "wait_provider" | "rotate_api_key" | "reconcile_payment" | "review_registration" | "charge_now" | "send_reminder" | "add_payment_method" | "update_payment_method" | "connect_tax_provider" | "void_invoice" | "mark_uncollectible";
         AttentionActionItem: {
             code: components["schemas"]["AttentionAction"];
             /**
@@ -6222,7 +6227,15 @@ export interface components {
         Attention: {
             severity: components["schemas"]["AttentionSeverity"];
             reason: components["schemas"]["AttentionReason"];
-            /** @description Human-readable headline copy, safe to render verbatim. */
+            /**
+             * @description Human-readable copy, safe to render verbatim: one plain
+             *     sentence saying what happens and what to do. When a second
+             *     fact must show up front (the setup-link email on an invoice
+             *     with no payment method, prepaid credit at risk), it follows
+             *     on a second line after a newline (`\n`). Wording may change
+             *     between releases; switch on `reason` and `code`, not on this
+             *     text.
+             */
             message: string;
             /**
              * @description Prescribed next steps. First item is the primary CTA; the
@@ -6249,11 +6262,20 @@ export interface components {
              */
             param?: string;
             /**
-             * @description Raw provider payload (Stripe Tax JSON envelope, last
-             *     payment error message). Disclosed in a collapsible
-             *     section for diagnostic depth.
+             * @description Velox's own explanation behind `message`: why the state
+             *     holds, what Velox does on its own, and ids support may ask
+             *     for (for example the payment intent ids of a payment
+             *     anomaly). Plain text; may contain blank-line paragraph
+             *     breaks. Never a provider payload — that is
+             *     `provider_response`.
              */
             detail?: string;
+            /**
+             * @description The provider's own response (Stripe Tax error envelope,
+             *     Stripe's last payment error), exactly as received. Present
+             *     only when Velox called the provider.
+             */
+            provider_response?: string;
             /**
              * Format: date-time
              * @description When the attention condition started — operators triage

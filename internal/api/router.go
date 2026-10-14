@@ -655,6 +655,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// SMTP is not set up — the queued email would otherwise fail unseen
 	// after the action reported "sent".
 	invoiceH.SetEmailConfigured(emailSender.IsConfigured())
+	// The no-payment-method notice says a setup link is emailed only when
+	// this server can send one.
+	invoiceSvc.SetEmailConfigured(emailSender.IsConfigured())
 	customerEmailAdapter := &customerEmailFetcherAdapter{store: customerStore}
 	dunningSvc.SetEmailNotifier(dunningEmail)
 	dunningSvc.SetCustomerEmailFetcher(customerEmailAdapter)

@@ -63,7 +63,7 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		if inv.Attention == nil || inv.Attention.Reason != domain.AttentionReasonNoPaymentMethod {
 			t.Fatalf("expected no_payment_method attention, got %+v", inv.Attention)
 		}
-		if !strings.Contains(inv.Attention.Message, "emails the customer a setup link") {
+		if !strings.Contains(inv.Attention.Message, "\nA setup link is emailed to the customer once") {
 			t.Errorf("has-email variant must state the engine's send behavior, got %q", inv.Attention.Message)
 		}
 		if strings.Contains(inv.Attention.Message, "has been emailed") {
@@ -110,6 +110,32 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 			t.Fatalf("expected the lookup to be attempted once, got %d", spy.calls)
 		}
 		assertNoEmailVariant(t, inv.Attention)
+	})
+
+	t.Run("email sending not set up -> no-send variant, no resend", func(t *testing.T) {
+		// The server flag, not the customer: an address on file is no use when
+		// nothing can be sent, and Resend would answer 409.
+		spy := &spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}}
+		svc := NewService(newMemStore(), nil, newMemNumberer())
+		svc.SetCustomerReader(spy)
+		svc.SetEmailConfigured(false)
+
+		att := svc.attachAttention(ctx, finalizedUnpaidNoPM()).Attention
+		if att == nil || !strings.Contains(att.Message, "\nEmail sending isn't set up, so no setup link was emailed") {
+			t.Fatalf("email-off variant missing, got %+v", att)
+		}
+		for _, a := range att.Actions {
+			if a.Code == domain.AttentionActionSendReminder {
+				t.Errorf("email-off variant must not offer a resend that is refused, got %+v", att.Actions)
+			}
+		}
+
+		// Control: the same service with email configured says the link is sent.
+		svc.SetEmailConfigured(true)
+		att = svc.attachAttention(ctx, finalizedUnpaidNoPM()).Attention
+		if att == nil || !strings.Contains(att.Message, "\nA setup link is emailed to the customer once") {
+			t.Fatalf("configured control lost the sent variant, got %+v", att)
+		}
 	})
 
 	t.Run("paid invoice -> no customer lookup (lazy guard: status)", func(t *testing.T) {
@@ -163,12 +189,54 @@ func assertNoEmailVariant(t *testing.T, att *domain.Attention) {
 	if strings.Contains(att.Message, "has been emailed") {
 		t.Errorf("no-email variant must NOT claim a send happened, got %q", att.Message)
 	}
-	if !strings.Contains(att.Message, "only when the customer has an email address on file") {
+	if !strings.Contains(att.Message, "\nSetup links are emailed only to customers with an email address") {
 		t.Errorf("no-email variant must state the conditional engine behavior, got %q", att.Message)
 	}
 	for _, a := range att.Actions {
 		if a.Code == domain.AttentionActionSendReminder {
 			t.Errorf("no-email variant must NOT offer a resend that can't send, got %+v", att.Actions)
 		}
+	}
+}
+
+// TestAttachAttention_NoPaymentMethod_ReadsPauseForCardlessInvoices pins the
+// service half of the paused branch: the pause state used to be read only for
+// queued invoices with a card, so a card-less invoice on a paused
+// subscription promised "charged automatically once the customer adds a card"
+// although the sweep that charges on attach skips paused subscriptions.
+func TestAttachAttention_NoPaymentMethod_ReadsPauseForCardlessInvoices(t *testing.T) {
+	ctx := context.Background()
+	inv := finalizedUnpaidNoPM()
+	inv.SubscriptionID = "sub_1"
+	inv.AutoChargePending = false // not queued: the old guard skipped the read
+
+	for _, paused := range []bool{true, false} {
+		pauses := &stubPauseReader{paused: paused}
+		svc := NewService(newMemStore(), nil, newMemNumberer())
+		svc.SetCustomerReader(&spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}})
+		svc.SetSubscriptionPauseReader(pauses)
+
+		att := svc.attachAttention(ctx, inv).Attention
+		if att == nil || att.Reason != domain.AttentionReasonNoPaymentMethod {
+			t.Fatalf("paused=%v: want no_payment_method, got %+v", paused, att)
+		}
+		if pauses.calls != 1 {
+			t.Errorf("paused=%v: pause state read %d times, want 1", paused, pauses.calls)
+		}
+		pausedLine := strings.HasPrefix(att.Message, "Collection is paused on the subscription")
+		if pausedLine != paused {
+			t.Errorf("paused=%v: message = %q", paused, att.Message)
+		}
+	}
+
+	// A card on file and nothing queued never reaches either branch that
+	// reads the pause, so it must not pay for the read.
+	pauses := &stubPauseReader{paused: true}
+	svc := NewService(newMemStore(), nil, newMemNumberer())
+	svc.SetPaymentMethodReader(readyPMReader{})
+	svc.SetSubscriptionPauseReader(pauses)
+	_ = svc.attachAttention(ctx, inv)
+	if pauses.calls != 0 {
+		t.Errorf("has-card, unqueued invoice read the pause state %d times, want 0", pauses.calls)
 	}
 }

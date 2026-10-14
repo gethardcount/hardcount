@@ -651,10 +651,16 @@ components:
         - update_payment_method
         - connect_tax_provider
         - void_invoice
+        - mark_uncollectible
       description: |
         Operator's recommended next step. Closed enum because every
         code maps to a concrete server endpoint or frontend route,
-        and audit logs key off the code. `void_invoice` is offered only
+        and audit logs key off the code. `reconcile_payment` opens the
+        payment in Stripe; it is offered on `payment_anomaly`, where the
+        refund or correction is made there. `mark_uncollectible` opens
+        the write-off and is offered only when a payment's outcome can
+        never be identified (payment status unknown with no payment
+        intent recorded). `void_invoice` is offered only
         on prepaid-commit exposure, and only while some of the granted
         credit is still unspent: voiding retires the unspent balance
         (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -691,7 +697,14 @@ components:
           $ref: "#/components/schemas/AttentionReason"
         message:
           type: string
-          description: Human-readable headline copy, safe to render verbatim.
+          description: |
+            Human-readable copy, safe to render verbatim: one plain
+            sentence saying what happens and what to do. When a second
+            fact must show up front (the setup-link email on an invoice
+            with no payment method, prepaid credit at risk), it follows
+            on a second line after a newline (`\n`). Wording may change
+            between releases; switch on `reason` and `code`, not on this
+            text.
         actions:
           type: array
           items:
@@ -721,9 +734,18 @@ components:
         detail:
           type: string
           description: |
-            Raw provider payload (Stripe Tax JSON envelope, last
-            payment error message). Disclosed in a collapsible
-            section for diagnostic depth.
+            Velox's own explanation behind `message`: why the state
+            holds, what Velox does on its own, and ids support may ask
+            for (for example the payment intent ids of a payment
+            anomaly). Plain text; may contain blank-line paragraph
+            breaks. Never a provider payload — that is
+            `provider_response`.
+        provider_response:
+          type: string
+          description: |
+            The provider's own response (Stripe Tax error envelope,
+            Stripe's last payment error), exactly as received. Present
+            only when Velox called the provider.
         since:
           type: string
           format: date-time

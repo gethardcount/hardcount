@@ -186,6 +186,9 @@ const (
 	AttentionActionRetryPayment       AttentionAction = "retry_payment"
 	AttentionActionWaitProvider       AttentionAction = "wait_provider"
 	AttentionActionRotateAPIKey       AttentionAction = "rotate_api_key"
+	// AttentionActionReconcilePayment opens the payment in the provider's
+	// dashboard, where the refund or correction is made. Offered on payment
+	// anomalies (ADR-068): the operator is the refund mechanism there.
 	AttentionActionReconcilePayment   AttentionAction = "reconcile_payment"
 	AttentionActionReviewRegistration AttentionAction = "review_registration"
 	// AttentionActionChargeNow triggers an immediate auto-charge (calls
@@ -229,6 +232,12 @@ const (
 	// credit-exposure banner would be a lie in the machine-readable field, and
 	// unlike the label nothing downstream would ever correct it.
 	AttentionActionVoidInvoice AttentionAction = "void_invoice"
+	// AttentionActionMarkUncollectible opens the invoice's write-off
+	// confirmation. Offered only on a PARKED invoice (payment status unknown
+	// and no PaymentIntent to look up, ADR-107): there it is the one action
+	// the product allows, and before this code existed the notice could only
+	// name a menu item.
+	AttentionActionMarkUncollectible AttentionAction = "mark_uncollectible"
 )
 
 // AttentionActionItem is one entry in Attention.Actions. Frontend
@@ -260,10 +269,15 @@ type AttentionActionItem struct {
 // healthy (matches Stripe's `last_finalization_error: null` ergonomic
 // — clients render `if (invoice.attention)` without nested checks).
 type Attention struct {
-	Severity AttentionSeverity     `json:"severity"`
-	Reason   AttentionReason       `json:"reason"`
-	Message  string                `json:"message"`
-	Actions  []AttentionActionItem `json:"actions,omitempty"`
+	Severity AttentionSeverity `json:"severity"`
+	Reason   AttentionReason   `json:"reason"`
+	// Message is what the operator reads first: one plain sentence of 25
+	// words or fewer saying what happens and what to do. A notice that must
+	// show a second fact up front (the setup-link email on a no-card invoice,
+	// prepaid credit at risk) adds it as a second line after a "\n". How
+	// the engine works and longer instructions go in Detail.
+	Message string                `json:"message"`
+	Actions []AttentionActionItem `json:"actions,omitempty"`
 
 	// Code is the open, dotted, provider-specific code for programmatic
 	// clients. New codes ship without a major-version bump. Examples:
@@ -282,13 +296,13 @@ type Attention struct {
 	// the resolution isn't field-scoped.
 	Param string `json:"param,omitempty"`
 
-	// Detail is Velox's own classification context — always operator-
-	// safe and always our framing. Populated when there's something
-	// useful beyond the headline (e.g., "engine retried 3 times before
-	// giving up"). NOT a place for upstream provider payloads — those
-	// go in ProviderResponse so the UI can label them honestly.
-	// May be empty when the headline + typed code + actions cover
-	// everything an operator needs.
+	// Detail is Velox's own explanation behind Message — always operator-
+	// safe and always our framing: why the state holds, what Velox does on
+	// its own, and ids support may ask for. The dashboard shows it in the
+	// notice's collapsed Details, so nothing the operator must act on lives
+	// only here. NOT a place for upstream provider payloads — those go in
+	// ProviderResponse so the UI can label them honestly. May be empty when
+	// Message + actions cover everything.
 	Detail string `json:"detail,omitempty"`
 
 	// ProviderResponse is the raw upstream payload from a third-party
@@ -388,10 +402,20 @@ type AttentionContext struct {
 	// payment_scheduled copy would promise a charge that never fires.
 	// Reached whenever a subscription is paused after its invoice was
 	// already queued (dunning's `pause` final action does exactly that).
+	// The no-payment-method notice reads it too: "charged once the customer
+	// adds a card" is false while collection is paused, so the invoice
+	// service populates it for card-less invoices as well as queued ones.
 	// Zero-value (false) keeps the scheduled copy — safe for callers
 	// without the signal, and the honest default for the common case
 	// where nothing is paused.
 	CollectionPaused bool
+
+	// EmailOff is true when this server cannot send email (SMTP not set up).
+	// Read only by the no-payment-method notice: with it set, no setup link
+	// can have been emailed and Resend would be refused, so the notice says
+	// so and offers the customer page instead. Zero value (false) means
+	// sending works — what every production boot wires explicitly.
+	EmailOff bool
 
 	// CommitGrantDrawableCents and CommitGrantConsumedCents describe the
 	// prepaid-commit grant this invoice funded (ADR-078). Drawable is what the
@@ -595,10 +619,10 @@ func classifyRecoveryInFlight(inv Invoice) *Attention {
 		Severity: AttentionSeverityInfo,
 		Reason:   AttentionReasonPaymentProcessing,
 		Code:     "payment.recovery_processing",
-		Message: "This invoice was written off, and a payment is still in flight at the payment provider. " +
-			"It stays written off until that payment reports an outcome.",
-		DocURL: docURL("payment-processing"),
-		Since:  &since,
+		Message:  "Stripe is still confirming a payment on this written-off invoice, so don't charge it again.",
+		Detail:   "The invoice stays written off until that payment succeeds or fails.",
+		DocURL:   docURL("payment-processing"),
+		Since:    &since,
 	}
 }
 
@@ -634,9 +658,10 @@ func attentionSeverityRank(s AttentionSeverity) int {
 // Severity is raised to a floor, never lowered: exposure can make an existing
 // banner more urgent, but a Critical cause stays Critical.
 //
-// The message goes in Message, deliberately, not Detail: the dashboard renders
+// The amount goes in Message, deliberately, not Detail: the dashboard renders
 // detail inside a collapsed <details> (InvoiceAttention.tsx), and money leaving
-// the building behind a disclosure triangle is not surfaced.
+// the building behind a disclosure triangle is not surfaced. It is a second
+// line after the cause's sentence, so each line stays one plain sentence.
 func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Attention {
 	drawable, spent := atc.CommitGrantDrawableCents, atc.CommitGrantConsumedCents
 	if drawable <= 0 && spent <= 0 {
@@ -663,18 +688,20 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 	}
 
 	amount := FormatMoneyMinor(drawable, inv.Currency)
-	var sentence string
+	var sentence, detail string
 	switch {
 	case spent <= 0:
-		sentence = "This invoice hasn't been paid, and the prepaid credit it bought is already available for the customer to spend: " +
-			amount + ". Voiding this invoice cancels the unspent balance."
+		sentence = "The customer can already spend " + amount +
+			" from this invoice, and voiding it cancels that credit."
+		detail = "This invoice bought prepaid credit, and the credit was granted when the invoice was finalized, before any payment."
 	case drawable > 0:
-		sentence = "This invoice hasn't been paid, and the prepaid credit it bought is already available for the customer to spend: " +
-			amount + " left, " + FormatMoneyMinor(spent, inv.Currency) + " already spent. " +
-			"Voiding this invoice cancels the unspent balance — credit the customer has already spent stays spent."
+		sentence = "The customer can still spend " + amount + " (" +
+			FormatMoneyMinor(spent, inv.Currency) + " already spent), and voiding cancels the unspent " + amount + "."
+		detail = "Voiding cancels only credit that hasn't been spent; credit the customer already spent stays spent."
 	default:
-		sentence = "This invoice hasn't been paid, and the prepaid credit it bought — " +
-			FormatMoneyMinor(spent, inv.Currency) + " — has already been spent in full. Voiding this invoice cannot recover it."
+		sentence = "The customer already spent all " +
+			FormatMoneyMinor(spent, inv.Currency) + " this invoice bought, so voiding cannot recover it."
+		detail = "Voiding cancels only credit that hasn't been spent, and none is left."
 	}
 
 	// Void is offered only when there is something left to cancel. On a
@@ -699,6 +726,7 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 			Reason:   AttentionReasonCommitExposure,
 			Code:     "credit.commit_exposure",
 			Message:  sentence,
+			Detail:   detail,
 			DocURL:   docURL("commit-exposure"),
 			Actions:  voidAction,
 			Since:    &since,
@@ -710,7 +738,10 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 	if attentionSeverityRank(floor) > attentionSeverityRank(folded.Severity) {
 		folded.Severity = floor
 	}
-	folded.Message = strings.TrimSpace(folded.Message) + " " + sentence
+	// Labelled, because under another notice's title the line needs its own
+	// name ("The customer can…" alone would read as part of the cause).
+	folded.Message = strings.TrimSpace(folded.Message) + "\nUnpaid prepaid credit: t" + strings.TrimPrefix(sentence, "T")
+	folded.Detail = joinDetail(folded.Detail, detail)
 	// Appended, never prepended: the cause banner's first action is its primary
 	// CTA (fix the card, add a payment method), and that is still the right
 	// first move. Void is the fallback for when collection has failed.
@@ -813,7 +844,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 	switch errorCode {
 	case "customer_data_invalid":
 		att.Reason = AttentionReasonTaxLocationRequired
-		att.Message = "The customer's billing profile has missing or invalid data the tax provider requires (postal code, country, or tax ID)."
+		att.Message = "Tax can't be calculated because the customer's address or tax ID is missing or invalid, so fix it, then retry tax."
 		att.Param = "customer.address.postal_code"
 		att.DocURL = docURL("tax-location-required")
 		att.Actions = []AttentionActionItem{
@@ -822,7 +853,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 		}
 	case "jurisdiction_unsupported":
 		att.Reason = AttentionReasonTaxCalculationFailed
-		att.Message = "The provider can't compute tax for this customer's region. Register with the provider in that jurisdiction or override tax manually."
+		att.Message = "The tax provider can't calculate tax for this customer's region, so register for tax there with the provider, then retry tax."
 		att.DocURL = docURL("tax-jurisdiction-unsupported")
 		att.Actions = []AttentionActionItem{
 			{Code: AttentionActionReviewRegistration, Label: "Review tax registration"},
@@ -831,9 +862,9 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 	case "provider_outage":
 		att.Reason = AttentionReasonTaxCalculationFailed
 		if exhausted {
-			att.Message = "The tax provider stayed unreachable through all automatic retries. Retry manually once the provider recovers."
+			att.Message = "The tax provider stayed unreachable through every automatic retry, so retry tax once it's back."
 		} else {
-			att.Message = fmt.Sprintf("The tax provider is temporarily unreachable. The engine retries automatically (%d of %d attempts used).", inv.TaxRetryCount, MaxTaxRetryAttempts)
+			att.Message = fmt.Sprintf("The tax provider can't be reached right now, and Velox retries automatically (%d of %d attempts used).", inv.TaxRetryCount, MaxTaxRetryAttempts)
 		}
 		att.DocURL = docURL("tax-provider-outage")
 		att.Actions = []AttentionActionItem{
@@ -842,7 +873,7 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 		}
 	case "provider_auth":
 		att.Reason = AttentionReasonTaxCalculationFailed
-		att.Message = "The configured tax-provider API key is invalid or revoked. Rotate the key in Settings."
+		att.Message = "The tax provider rejected the API key, so update the key in Settings, then retry tax."
 		att.DocURL = docURL("tax-provider-auth")
 		att.Actions = []AttentionActionItem{
 			{Code: AttentionActionRotateAPIKey, Label: "Rotate API key"},
@@ -863,17 +894,17 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 		// before the tick fires.
 		if atc.StripeConnected && !exhausted {
 			att.Severity = AttentionSeverityInfo
-			att.Message = "Tax calculation is queued. The engine retries automatically now that Stripe is connected. Click Retry now to recompute immediately."
+			att.Message = "Tax calculation is queued now that Stripe is connected; use Retry now to run it right away."
 			att.Actions = []AttentionActionItem{
 				{Code: AttentionActionRetryTax, Label: "Retry now"},
 			}
 		} else if atc.StripeConnected {
-			att.Message = "Automatic tax retries are exhausted for this invoice. Click Retry now to recompute it."
+			att.Message = "Automatic tax retries have stopped for this invoice, so use Retry now to calculate it again."
 			att.Actions = []AttentionActionItem{
 				{Code: AttentionActionRetryTax, Label: "Retry now"},
 			}
 		} else {
-			att.Message = "Stripe Tax is selected in Settings → Tax but Stripe isn't connected for this mode. Connect your Stripe keys for the active mode (test or live) in Settings → Payments."
+			att.Message = "Tax can't be calculated because Stripe isn't connected in this mode, so connect Stripe, then retry tax."
 			att.Actions = []AttentionActionItem{
 				{Code: AttentionActionConnectTaxProvider, Label: "Connect Stripe"},
 				{Code: AttentionActionRetryTax, Label: "Retry tax"},
@@ -882,9 +913,9 @@ func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionS
 	default:
 		att.Reason = AttentionReasonTaxCalculationFailed
 		if exhausted {
-			att.Message = "Tax calculation kept failing for an unrecognised reason and automatic retries are exhausted. See the raw provider response below."
+			att.Message = "Tax calculation kept failing for an unknown reason and automatic retries have stopped, so retry tax to try again."
 		} else {
-			att.Message = "Tax calculation failed for an unrecognised reason. See the raw provider response below."
+			att.Message = fmt.Sprintf("Tax calculation failed for an unknown reason, and Velox retries automatically (%d of %d attempts used).", inv.TaxRetryCount, MaxTaxRetryAttempts)
 		}
 		att.DocURL = docURL("tax-calculation-failed")
 		att.Actions = []AttentionActionItem{
@@ -981,15 +1012,17 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 			// still needs a human's eventual decision, and demoting it on the
 			// hope of a future find would hide exactly the rows that never get
 			// found.
-			Message: "This invoice's charge attempt could not be identified with the payment provider, so Velox cannot confirm whether the customer was charged. " +
-				"Velox keeps searching the provider for the attempt and adopts it automatically if it can be found; if it cannot be found, this will not resolve on its own — and no further charge will be attempted, deliberately, to rule out charging twice. " +
-				"Find the attempt in Stripe (search by customer and amount). If money was taken, it will settle here once the provider reports it; if nothing was taken, mark this invoice uncollectible to close it out.",
+			Message: "Velox can't tell if this charge went through, so it won't charge again; check Stripe, and if nothing was taken, mark it uncollectible.",
+			Detail: "Velox keeps searching Stripe for the charge and records it here if found. If it cannot be found, this will not resolve on its own. " +
+				"No new charge is made, so the customer is never charged twice. Search Stripe by customer and amount.",
 			DocURL: docURL("payment-unconfirmed"),
 			Since:  &since,
-			// No Actions entry: the invoice page already carries a
-			// Mark-uncollectible control, which the service refused for this
-			// state until now. The message names it rather than adding a
-			// second, differently-worded route to the same button.
+			// The way out sits in the notice, not only in the ⋯ menu: an
+			// operator told "mark it uncollectible" should not have to go
+			// looking for the control.
+			Actions: []AttentionActionItem{
+				{Code: AttentionActionMarkUncollectible, Label: "Mark uncollectible"},
+			},
 		}
 	}
 
@@ -1012,9 +1045,11 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 		// reaching this banner. A live requires_action PaymentIntent comes from
 		// the hosted checkout, where the customer is present and mid-3DS, and
 		// that one expires with its session inside the hour.
-		Message: "Payment outcome unconfirmed by the provider — Velox re-checks automatically and resolves once Stripe reports a final outcome. If it sits here for hours the charge may be waiting on customer action (e.g. 3-D Secure): check the payment in Stripe, then cancel or retry it.",
-		DocURL:  docURL("payment-unconfirmed"),
-		Since:   &since,
+		Message: "Stripe hasn't confirmed this charge yet, and Velox re-checks automatically until it does.",
+		Detail: "If it stays here for hours, the charge may be waiting on the customer (for example 3-D Secure). " +
+			"Check the payment in Stripe, then cancel or retry it there.",
+		DocURL: docURL("payment-unconfirmed"),
+		Since:  &since,
 	}
 }
 
@@ -1039,7 +1074,8 @@ func classifyPaymentProcessing(inv Invoice, atc AttentionContext) *Attention {
 			Severity: AttentionSeverityWarning,
 			Reason:   AttentionReasonPaymentProcessing,
 			Code:     "payment.processing",
-			Message:  "Payment has been awaiting confirmation at the provider for an unusually long time — check this payment in Stripe.",
+			Message:  fmt.Sprintf("Stripe still hasn't confirmed this payment after %d hours, so check it in Stripe.", int(processingStaleAfter.Hours())),
+			Detail:   "Card payments are usually confirmed within seconds, so a payment this old needs a look.",
 			DocURL:   docURL("payment-processing"),
 			Since:    &since,
 		}
@@ -1049,7 +1085,7 @@ func classifyPaymentProcessing(inv Invoice, atc AttentionContext) *Attention {
 		Severity: AttentionSeverityInfo,
 		Reason:   AttentionReasonPaymentProcessing,
 		Code:     "payment.processing",
-		Message:  "Payment is in flight at the provider — Velox confirms it automatically when the provider responds.",
+		Message:  "Stripe is confirming this payment, and this page updates automatically when it's done.",
 		DocURL:   docURL("payment-processing"),
 		Since:    &since,
 	}
@@ -1067,7 +1103,7 @@ func classifyPaymentPageOpen() *Attention {
 		Severity: AttentionSeverityInfo,
 		Reason:   AttentionReasonPaymentProcessing,
 		Code:     "payment.page_open",
-		Message:  "The customer has the payment page open, or has just paid on it. Velox won't charge the card or retry until that's done, usually within an hour.",
+		Message:  "The customer has the payment page open or just paid on it, so Velox holds charges until that finishes, usually within an hour.",
 		DocURL:   docURL("payment-processing"),
 	}
 }
@@ -1081,24 +1117,29 @@ func classifyPaymentScheduled(inv Invoice) *Attention {
 	// payment_scheduled fires when auto_charge_pending=true and the
 	// invoice is still unpaid: the finalize-time collection didn't finish
 	// (a transient failure, or the process stopped), and the auto-charge
-	// sweep will pick it up on its next tick. We don't surface a precise
-	// next_attempt_at — "on its next tick" is honest.
+	// sweep will pick it up on its next run. We don't surface a precise
+	// next_attempt_at; "usually within an hour" is honest because the
+	// sweep runs on the billing tick, hourly by default (every 5 minutes in
+	// local dev, cmd/velox/main.go).
 	//
 	// A clock-pinned (simulated) invoice is the exception: the wall-clock
 	// sweep EXCLUDES it (ADR-028/029 disjoint flows — ListAutoChargePending
 	// filters out subs with a test_clock_id), so the retry fires only when
-	// the operator advances the test clock. Saying "next tick" there is a
+	// the operator advances the test clock. "Within an hour" there is a
 	// lie — in real time the invoice sits indefinitely, so adding a payment
 	// method and waiting looks broken. Surface the clock-advance reality.
-	message := "Auto-charge is scheduled — the engine will attempt the charge on its next tick."
+	message := "The card on file is charged automatically, usually within an hour; use Charge now to collect it right away."
+	detail := "Automatic charges run on a schedule, hourly by default."
 	if inv.IsSimulated {
-		message = "Auto-charge runs on the next test-clock advance — advance the clock to trigger it, or use Charge now to collect immediately."
+		message = "The card on file is charged on the next clock advance; use Charge now to collect it right away."
+		detail = "Simulated invoices are charged only when the test clock is advanced, never on the real-time schedule."
 	}
 	return &Attention{
 		Severity: AttentionSeverityInfo,
 		Reason:   AttentionReasonPaymentScheduled,
 		Code:     "payment.scheduled",
 		Message:  message,
+		Detail:   detail,
 		DocURL:   docURL("payment-scheduled"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionChargeNow, Label: "Charge now"},
@@ -1123,7 +1164,8 @@ func classifyCollectionPaused(inv Invoice) *Attention {
 		Severity: AttentionSeverityInfo,
 		Reason:   AttentionReasonCollectionPaused,
 		Code:     "payment.collection_paused",
-		Message:  "Collection is paused on this subscription, so this invoice will not be charged automatically. Resume collection on the subscription, or use Charge now to collect this one invoice.",
+		Message:  "Collection is paused on the subscription, so this invoice won't be charged automatically; use Charge now to collect it anyway.",
+		Detail:   "Resume collection on the subscription page to go back to automatic charges. This invoice is then charged on the next run.",
 		DocURL:   docURL("collection-paused"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionChargeNow, Label: "Charge now"},
@@ -1149,7 +1191,7 @@ func classifyAwaitingPayment(inv Invoice) *Attention {
 		Severity: AttentionSeverityInfo,
 		Reason:   AttentionReasonAwaitingPayment,
 		Code:     "payment.awaiting",
-		Message:  "Invoice is finalized and awaiting first charge attempt.",
+		Message:  "This invoice hasn't been charged yet; use Charge now, or email the customer a payment link.",
 		DocURL:   docURL("awaiting-payment"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionChargeNow, Label: "Charge now"},
@@ -1163,162 +1205,172 @@ func classifyAwaitingPayment(inv Invoice) *Attention {
 // classifyNoPaymentMethod surfaces the finalized-unpaid invoice whose
 // customer has no PaymentSetup ready. The invoice IS queued
 // (auto_charge_pending) and dunning ages it out — but automation cannot
-// conjure the card, so the operator/customer is the mover. Splits three
-// ways: dunning already escalated (recovery over — say so), customer has
-// an email (link was sent — resend/share), no email (share directly).
+// conjure the card, so the operator/customer is the mover.
+//
+// Message line 1 says what happens to THIS invoice when a card arrives,
+// which depends on two real signals: collection paused (the sweep that
+// charges on attach skips paused subscriptions, so nothing happens until
+// resume) and simulated time (the wall-clock sweep excludes clock-pinned
+// invoices, so the charge waits for the next clock advance). Line 2 says
+// what happened to the setup link, which depends on two more: whether the
+// customer has an email and whether this server can send email at all.
+//
+// Once dunning has escalated, the notice becomes "Payment recovery ended"
+// and line 1 branches on pause the same way.
 //
 // Severity = warning (operator action required, not financially
 // broken). Promoting to critical would make a perfectly normal "send-
 // invoice" collection mode look alarming.
 func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 	since := attentionSince(inv)
-	hasEmail := atc.CustomerHasEmail
-	// Auto-collect framing: post-ADR-013 b18d2d3 the engine queues
-	// no-PM invoices via auto_charge_pending and the scheduler picks
-	// them up the moment a PaymentSetup flips to ready (Chargebee's
-	// "Collect Invoice on Card Update"). So attaching a PM is enough
-	// — Collect Payment is the operator's *manual override* for
-	// immediate charge.
-	//
-	// The auto-charge reassurance is CLOCK-AWARE (2026-07-22 audit,
-	// P1-1): the wall-clock sweep excludes clock-pinned subs (ADR-028/029
-	// disjoint flows), so on a simulated invoice a card-attach collects
-	// only on the next test-clock advance — the flat "auto-charges once
-	// attached" promise was a lie on exactly the demo artifacts.
-	// classifyPaymentScheduled got this branch first; this one now
-	// matches. The sentence lives HERE, server-owned, so the client
-	// can't drift a duplicate copy of it (it used to hardcode one).
-	autoCharge := "Attaching a card auto-charges this invoice on the next billing tick — no operator action needed."
+	// Resend can only send to an address, from a server that can send.
+	canEmail := atc.CustomerHasEmail && !atc.EmailOff
+
+	// What adding a card does. The charge-on-attach promise is the server's
+	// own (post-ADR-013 the scheduler picks the invoice up the moment a
+	// PaymentSetup flips to ready, Chargebee's "Collect Invoice on Card
+	// Update"), and it lives HERE, server-owned, so the client can't drift a
+	// duplicate copy of it (it used to hardcode one).
+	charge := "This invoice is charged automatically once the customer adds a card."
 	if inv.IsSimulated {
-		autoCharge = "Attaching a card auto-charges this invoice on the next test-clock advance."
+		charge = "This invoice is charged on the next clock advance once the customer adds a card."
+	}
+	if atc.CollectionPaused {
+		charge = "Collection is paused on the subscription, so adding a card won't charge this invoice until you resume it."
 	}
 
-	// Dunning has escalated: automatic recovery ended without collecting
-	// and the policy's final action fired (default pauses the
-	// subscription's collection). The reassuring pre-escalation framing
-	// is no longer the whole story — say so (2026-07-22 audit, P1-4).
-	// Charge-on-attach works only while collection is not paused: the
-	// pending-charge sweep skips paused subscriptions. After the default
-	// pause action the copy below overpromises (registered follow-up).
+	// What happened to the setup link. Card details are always a customer
+	// action (PCI: entered by the cardholder on Stripe's hosted page); the
+	// operator's levers are resending the emailed link and the customer
+	// page, whose "Add payment method" dialog copies the link to share
+	// directly or lets them add an email address.
+	//
+	// "is emailed … once" states the engine's send-once behavior
+	// (no_pm_notified_at) rather than asserting this invoice's send, which
+	// the outbox may still fail; the Details point at where delivery shows.
+	var emailLine, emailDetail string
+	switch {
+	case !atc.CustomerHasEmail:
+		// False also when the customer read failed, so the sentence states
+		// Velox's rule rather than this customer's state: honest either way,
+		// and the customer page shows the real address.
+		emailLine = "Setup links are emailed only to customers with an email address, so copy one from the customer page and send it."
+		emailDetail = "Adding an email address on the customer page lets Velox send the link."
+	case atc.EmailOff:
+		emailLine = "Email sending isn't set up, so no setup link was emailed; copy one from the customer page instead."
+		emailDetail = "Set up email sending (SMTP) to let Velox email setup links, receipts and reminders."
+	default:
+		emailLine = "A setup link is emailed to the customer once; use Resend setup link to send it again."
+		emailDetail = "The invoice's activity shows whether the email was sent. The customer page can also copy the link to share directly."
+	}
+
+	actions := []AttentionActionItem{
+		{Code: AttentionActionAddPaymentMethod, Label: "Open customer page"},
+	}
+	if canEmail {
+		actions = append([]AttentionActionItem{
+			{Code: AttentionActionSendReminder, Label: "Resend setup link"},
+		}, actions...)
+	}
+
+	// Dunning has escalated: automatic recovery ended without collecting and
+	// the policy's final step ran (default: pause the subscription's
+	// collection). The pre-escalation framing is no longer the whole story
+	// (2026-07-22 audit, P1-4), and the fix depends on whether that final
+	// step paused collection: if it did, a card alone collects nothing.
 	if atc.DunningEscalated {
-		msg := "Payment recovery has ended without collecting — the customer still has no payment method on file, and the recovery policy's final action has fired (check the subscription: collection may be paused or it may have been canceled). " + autoCharge
-		actions := []AttentionActionItem{
-			{Code: AttentionActionAddPaymentMethod, Label: "Open customer page"},
-		}
-		if hasEmail {
-			actions = append([]AttentionActionItem{
-				{Code: AttentionActionSendReminder, Label: "Resend setup link"},
-			}, actions...)
+		var msg string
+		switch {
+		case atc.CollectionPaused:
+			msg = "Retries stopped and collection is paused; ask the customer to add a card, then resume collection."
+		case inv.IsSimulated:
+			msg = "Retries stopped; this invoice is charged on the next clock advance once the customer adds a card."
+		default:
+			msg = "Retries stopped; this invoice is charged automatically once the customer adds a card."
 		}
 		return &Attention{
 			Severity: AttentionSeverityWarning,
 			Reason:   AttentionReasonDunningExhausted,
 			Code:     "payment.dunning_exhausted",
 			Message:  msg,
-			DocURL:   docURL("dunning-exhausted"),
-			Actions:  actions,
-			Since:    &since,
-			DueBy:    inv.DueAt,
+			Detail: joinDetail("Automatic payment recovery ended without collecting, and the recovery policy's final step ran. "+
+				"Check the subscription to see what that step did.", emailLine+" "+emailDetail),
+			DocURL:  docURL("dunning-exhausted"),
+			Actions: actions,
+			Since:   &since,
+			DueBy:   inv.DueAt,
 		}
 	}
 
-	// The message splits on whether the customer has an email on file,
-	// because the finalize-time setup-link email (NotifyNoPaymentMethod)
-	// skips when the customer has no address — the adapter treats a
-	// missing email as "a delivery gap, not a billing failure" and
-	// returns without sending. A single hardcoded "the customer has been
-	// emailed a setup link" then lied to the operator on exactly the
-	// invoices where it mattered most: no address means no send AND no
-	// resend (the resend path can't email either), so telling the
-	// operator to wait or resend strands the invoice. hasEmail comes
-	// from AttentionContext.CustomerHasEmail, populated by the invoice
-	// service from the customer record.
-	//
-	// Card details are always a *customer* action (PCI: entered by the
-	// cardholder via Stripe's hosted flow). The operator's levers are
-	// (a) resend the emailed link and (b) open the customer page, whose
-	// "Add payment method" dialog can copy a secure setup link to hand
-	// to the customer directly (call/chat) or add an email to the record.
-	if !hasEmail {
-		// hasEmail is false in two cases: the customer confirmably has no
-		// address, OR the service couldn't determine it (read error / no
-		// reader). The copy is phrased to be honest in BOTH — it states
-		// behavior ("we email a link only when there's an address on
-		// file") rather than asserting this customer's email state or
-		// claiming a link was/wasn't sent, so a rare transient customer-
-		// read error can't make the banner assert a falsifiable fact.
-		// Either way the operator's path is the same and always works:
-		// open the customer page (see the real email, copy a secure link,
-		// or add an address). The "Resend setup link" action is dropped —
-		// with no confirmed recipient it can't reliably send, and the
-		// customer-page dialog offers both send-email and copy-link once
-		// the operator is there.
-		return &Attention{
-			Severity: AttentionSeverityWarning,
-			Reason:   AttentionReasonNoPaymentMethod,
-			Code:     "payment.no_payment_method",
-			Message:  "No payment method on file. We email a setup link only when the customer has an email address on file — open the customer page to copy a secure setup link and share it with the customer directly, or add an email so it can be sent. " + autoCharge,
-			DocURL:   docURL("no-payment-method"),
-			Actions: []AttentionActionItem{
-				{Code: AttentionActionAddPaymentMethod, Label: "Open customer page"},
-			},
-			Since: &since,
-			DueBy: inv.DueAt,
-		}
-	}
 	return &Attention{
 		Severity: AttentionSeverityWarning,
 		Reason:   AttentionReasonNoPaymentMethod,
 		Code:     "payment.no_payment_method",
-		Message:  "No payment method on file. Velox emails the customer a setup link when an invoice finalizes, if email sending is set up — the invoice timeline and Sent emails show whether it was delivered. Resend the link if they haven't acted, or open the customer page to copy it and share it directly. " + autoCharge,
+		Message:  charge + "\n" + emailLine,
+		Detail:   emailDetail,
 		DocURL:   docURL("no-payment-method"),
-		Actions: []AttentionActionItem{
-			{Code: AttentionActionSendReminder, Label: "Resend setup link"},
-			{Code: AttentionActionAddPaymentMethod, Label: "Open customer page"},
-		},
-		Since: &since,
-		DueBy: inv.DueAt,
+		Actions:  actions,
+		Since:    &since,
+		DueBy:    inv.DueAt,
 	}
 }
 
-// classifyPaymentAnomaly renders the ADR-068 durable marker: Critical, both
-// PaymentIntents in the message, deep-linkable PI id in Meta. The action is
-// manual reconciliation (refund the duplicate / adjust the books), so the
-// message says exactly what was detected.
+// classifyPaymentAnomaly renders the ADR-068 durable marker: Critical, and
+// the action is manual reconciliation at Stripe (refund the duplicate /
+// adjust the books). The sentence says what was detected in plain words;
+// the PaymentIntent ids go in Detail, where support and the Stripe search
+// need them, and the action opens the payment in Stripe.
 func classifyPaymentAnomaly(inv Invoice) *Attention {
-	msg := ""
+	pi := inv.PaymentAnomalyPaymentIntentID
+	var msg, detail string
 	switch inv.PaymentAnomalyKind {
 	case EventPaymentDuplicateCharge:
-		msg = fmt.Sprintf("A second payment (%s) succeeded on this invoice after it was already paid%s. The extra charge exists only in Stripe — review and refund it.",
-			inv.PaymentAnomalyPaymentIntentID, recordedPISuffix(inv))
+		msg = "A second payment succeeded after this invoice was already paid, so refund the extra charge in Stripe."
+		detail = "Extra payment: " + pi + "."
+		if inv.StripePaymentIntentID != "" {
+			detail += " Original payment: " + inv.StripePaymentIntentID + "."
+		}
+		detail += " The extra charge exists only in Stripe; Velox records one payment."
 	case EventPaymentAmountMismatch:
 		// Formatted, not raw minor units: this sentence used to read "Stripe
 		// captured 9652 (minor units) … booked 10000", handing an operator two
 		// unlabelled integers and a unit they do not think in, in the one banner
 		// whose entire job is comparing two amounts.
-		msg = fmt.Sprintf("Stripe captured %s for payment %s but this invoice booked %s. Reconcile the difference — the recorded paid amount drives refund limits.",
-			FormatMoneyMinor(inv.PaymentAnomalyCapturedCents, inv.Currency), inv.PaymentAnomalyPaymentIntentID, FormatMoneyMinor(inv.AmountPaidCents, inv.Currency))
+		msg = fmt.Sprintf("Stripe captured %s but this invoice recorded %s as paid, so reconcile the difference.",
+			FormatMoneyMinor(inv.PaymentAnomalyCapturedCents, inv.Currency), FormatMoneyMinor(inv.AmountPaidCents, inv.Currency))
+		detail = "Payment: " + pi + ". The recorded paid amount sets how much can be refunded."
 	case EventPaymentReceivedOnVoidedInvoice:
-		msg = fmt.Sprintf("Payment %s succeeded against this voided invoice. The customer paid money that is not owed — refund it in Stripe.",
-			inv.PaymentAnomalyPaymentIntentID)
+		msg = "A payment succeeded on this voided invoice, so the customer paid money they don't owe; refund it in Stripe."
+		detail = "Payment: " + pi + "."
 	case EventPaymentCurrencyMismatch:
-		msg = fmt.Sprintf("Payment %s was charged in a different currency than this invoice shows. The amounts were not converted — review the charge in Stripe and correct the invoice or refund.",
-			inv.PaymentAnomalyPaymentIntentID)
+		msg = "A payment was charged in a different currency than this invoice, so review it in Stripe and refund or correct it."
+		detail = "Payment: " + pi + ". The amounts were not converted."
 	default:
-		msg = fmt.Sprintf("A payment anomaly (%s) was detected on this invoice — review payment %s in Stripe.",
-			inv.PaymentAnomalyKind, inv.PaymentAnomalyPaymentIntentID)
+		msg = "Velox found a payment on this invoice that doesn't match its records, so review it in Stripe."
+		detail = "Kind: " + inv.PaymentAnomalyKind + ". Payment: " + pi + "."
 	}
-	return &Attention{
+	att := &Attention{
 		Reason:   AttentionReasonPaymentAnomaly,
 		Severity: AttentionSeverityCritical,
 		Code:     inv.PaymentAnomalyKind,
 		Message:  msg,
+		Detail:   detail,
 	}
+	// The refund or correction is made in Stripe, so the action opens the
+	// payment there. Without an id there is nothing to open.
+	if pi != "" {
+		att.Actions = []AttentionActionItem{{Code: AttentionActionReconcilePayment, Label: "Open in Stripe"}}
+	}
+	return att
 }
 
-func recordedPISuffix(inv Invoice) string {
-	if inv.StripePaymentIntentID == "" {
-		return ""
+// joinDetail appends one Detail paragraph to another, blank-line separated.
+func joinDetail(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
 	}
-	return fmt.Sprintf(" (original payment %s)", inv.StripePaymentIntentID)
+	return a + "\n\n" + b
 }

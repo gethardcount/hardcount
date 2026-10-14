@@ -24,8 +24,16 @@ func TestClassifyInvoiceAttention_PaymentAnomalyPiercesTerminal(t *testing.T) {
 	if att.Reason != AttentionReasonPaymentAnomaly || att.Severity != AttentionSeverityCritical {
 		t.Fatalf("attention = %s/%s, want payment_anomaly/critical", att.Reason, att.Severity)
 	}
-	if !strings.Contains(att.Message, "pi_B") || !strings.Contains(att.Message, "pi_A") {
-		t.Errorf("message must name both PaymentIntents: %q", att.Message)
+	// The ids are for support and the Stripe search, so they sit in Detail;
+	// the sentence an operator reads first stays plain.
+	if strings.Contains(att.Message, "pi_") {
+		t.Errorf("message must not carry raw payment ids: %q", att.Message)
+	}
+	if !strings.Contains(att.Detail, "pi_B") || !strings.Contains(att.Detail, "pi_A") {
+		t.Errorf("detail must name both PaymentIntents: %q", att.Detail)
+	}
+	if len(att.Actions) != 1 || att.Actions[0].Code != AttentionActionReconcilePayment {
+		t.Errorf("actions = %+v, want [reconcile_payment] (open in Stripe)", att.Actions)
 	}
 
 	voidedPay := Invoice{

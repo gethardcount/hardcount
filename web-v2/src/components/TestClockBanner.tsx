@@ -2,92 +2,75 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FlaskConical } from 'lucide-react'
 import { api, formatDateTime, ApiError } from '@/lib/api'
-import { Callout } from '@/components/Callout'
+import { cn } from '@/lib/utils'
 
-// TestClockBanner sits at the top of any detail page whose entity is
-// pinned (directly or via its subscription) to a test clock. Test
-// clocks let operators advance simulated time independently of
-// wall-clock; rows finalized / billed / dunned during a clock-advance
-// carry the simulated timestamp, which can render as a future date in
-// the activity timeline (e.g. "Invoice finalized · Jun 1, 2026" while
-// the operator is reading the page on May 2). The banner sets the
-// expectation upfront so the operator stops wondering "why is this in
-// the future."
+// TestClockBanner is the one line on a detail page whose record is pinned
+// (directly or through its subscription) to a test clock. It is the only
+// place on the page that says "simulated" (ADR-099); nothing lower on the
+// page repeats it.
 //
-// Crucially, the banner shows the test clock's CURRENT frozen_time so
-// the operator has a reference point. Without this, an invoice with
-// "Due Jul 17, 2026" rendered alongside a "Past due" pill looks
-// contradictory — until you know the simulation has been advanced to
-// Sep 2, 2026 and Jul 17 is genuinely past in simulation time.
-// Industry pattern (Stripe Test Clocks UI): the simulation timestamp
-// is always visible on every page that consults it.
+// One line, not a box (ADR-099 amendment, 2026-10-15): it states a fact
+// about the page, not a problem, so it uses the neutral tone and stays out
+// of the way of notices that need action. It shows the clock's current time
+// so a "Past due" pill next to a future-looking due date makes sense. How
+// simulated and real times appear on the page sits in a collapsed Details.
 //
-// React Query dedupes the test-clock fetch across components — the
-// parent page often already loads the same clock for other UI
-// purposes, so this hook adds no network round-trip.
-export function TestClockBanner({ testClockId }: { testClockId: string }) {
+// React Query dedupes the test-clock fetch across components, so this adds
+// no network round-trip when the page already loads the same clock.
+export function TestClockBanner({ testClockId, className }: { testClockId: string; className?: string }) {
   const { data: clock, error } = useQuery({
     queryKey: ['test-clock', testClockId],
     queryFn: () => api.getTestClock(testClockId),
     enabled: !!testClockId,
-    // Don't retry on 404 — the clock has been deleted (ADR-016 keeps
-    // the historical pointer on the customer / subscription / invoice
-    // even after the clock itself is soft-deleted, so the banner has
-    // to render this state without 4 wasted retries first).
+    // Don't retry on 404: the clock is gone, and the line must say so
+    // without four wasted retries first.
     retry: (failureCount, err) => {
       if (err instanceof ApiError && err.status === 404) return false
       return failureCount < 3
     },
   })
 
-  // Deleted-clock state: customer / sub / invoice still references the
-  // clock by id (intentionally preserved per ADR-016 for audit), but
-  // the clock itself is gone. Render an explanatory variant without
-  // the View-clock link — the link would 404 and the operator
-  // shouldn't be invited into a dead route.
+  // Deleting a clock now deletes its records too, so this is rare (a page
+  // left open while the clock was deleted). It stays as one line, without
+  // the View-clock link, which would open a dead page.
   const clockDeleted = error instanceof ApiError && error.status === 404
 
-  // Drawn with the shared Callout. The copy is unchanged here; ADR-099
-  // decides what this banner says, and shortening it waits for that ADR's
-  // amendment.
   return (
-    <Callout
-      tone="amber"
-      icon={FlaskConical}
-      className="mb-6"
-      title={clockDeleted ? 'Test clock deleted.' : 'Test clock simulation.'}
-      actions={!clockDeleted ? (
-        <Link
-          to={`/test-clocks/${testClockId}`}
-          className="text-xs underline-offset-2 hover:underline"
-        >
-          View clock
-        </Link>
-      ) : undefined}
-    >
-      {clockDeleted ? (
-        <>
-          This record was attached to a test clock that has since been
-          deleted. Some dates below carry simulated timestamps from when
-          the clock was active — they follow the clock's calendar, not
-          today's date.
-        </>
-      ) : clock ? (
-        <>
-          Currently at <span className="font-mono font-medium">{formatDateTime(clock.frozen_time)}</span>.
-          Dates on this page follow the clock's calendar — rows produced
-          during a clock advance (finalize, dunning runs, retries) carry
-          the simulated timestamp, with any real-world moment shown as a
-          "Recorded" line beneath.
-        </>
-      ) : (
-        <>
-          Dates on this page follow the clock's calendar — rows produced
-          during a clock advance (finalize, dunning runs, retries) carry
-          the simulated timestamp, with any real-world moment shown as a
-          "Recorded" line beneath.
-        </>
-      )}
-    </Callout>
+    <div className={cn('mb-6 text-sm text-muted-foreground', className)}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <FlaskConical size={14} aria-hidden className="shrink-0" />
+        {clockDeleted ? (
+          <span>
+            <span className="font-medium text-foreground">Test clock deleted.</span>{' '}
+            Dates on this page follow that clock&apos;s calendar, not today&apos;s date.
+          </span>
+        ) : (
+          <>
+            <span>
+              <span className="font-medium text-foreground">Simulated time</span>
+              {clock && <>: <span className="text-foreground">{formatDateTime(clock.frozen_time)}</span></>}.
+              {' '}Dates on this page follow the test clock.
+            </span>
+            {/* The id can be empty for a moment while the page resolves which
+                clock its record is pinned to; no link until it is known. */}
+            {testClockId && <Link
+              to={`/test-clocks/${testClockId}`}
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              View clock
+            </Link>}
+          </>
+        )}
+      </div>
+      <details className="mt-1 pl-[22px] text-xs">
+        <summary className="cursor-pointer select-none hover:text-foreground">Details</summary>
+        <p className="mt-1.5 max-w-2xl">
+          Anything that happens when the clock is advanced (an invoice being
+          finalized, a payment retry, a reminder) is dated with the clock&apos;s
+          time. When it also happened in the real world, such as an email being
+          sent, a &quot;Recorded&quot; line under it shows the real time.
+        </p>
+      </details>
+    </div>
   )
 }

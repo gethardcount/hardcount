@@ -12,8 +12,15 @@ test('payment_anomaly has a label', () => {
 })
 
 test('a parked invoice is told apart by its code', () => {
-  assert.equal(attentionReasonLabel('payment_unconfirmed', 'payment.unidentifiable'), 'Payment unidentifiable')
-  assert.equal(attentionReasonLabel('payment_unconfirmed', 'payment.unconfirmed'), 'Payment unconfirmed')
+  assert.equal(attentionReasonLabel('payment_unconfirmed', 'payment.unidentifiable'), 'Payment status unknown')
+  assert.equal(attentionReasonLabel('payment_unconfirmed', 'payment.unconfirmed'), 'Confirming payment')
+})
+
+test('the payment_processing cases are told apart by code', () => {
+  assert.equal(attentionReasonLabel('payment_processing', 'payment.processing'), 'Payment processing')
+  assert.equal(attentionReasonLabel('payment_processing', 'payment.page_open'), 'Customer is paying')
+  assert.equal(attentionReasonLabel('payment_processing', 'payment.recovery_processing'), 'Payment in progress')
+  assert.equal(attentionReasonLabel('payment_scheduled', 'payment.scheduled'), 'Payment scheduled')
 })
 
 test('an unmapped reason never shows the raw code', () => {

@@ -341,9 +341,17 @@ func TestClassifyInvoiceAttention_PaymentScheduled(t *testing.T) {
 	if len(att.Actions) == 0 || att.Actions[0].Code != AttentionActionChargeNow {
 		t.Errorf("expected primary action charge_now, got %+v", att.Actions)
 	}
-	// Wall-clock invoice: message points at the scheduler tick.
-	if !strings.Contains(att.Message, "next tick") {
-		t.Errorf("wall-clock message = %q, want it to mention the scheduler tick", att.Message)
+	// Wall-clock invoice: the sweep runs on the billing tick, hourly by
+	// default, so the sentence promises "within an hour" and nothing about
+	// the clock.
+	if !strings.Contains(att.Message, "usually within an hour") {
+		t.Errorf("wall-clock message = %q, want the hourly-schedule promise", att.Message)
+	}
+	if strings.Contains(att.Message, "clock advance") {
+		t.Errorf("wall-clock message = %q must not mention a test clock", att.Message)
+	}
+	if !strings.Contains(att.Detail, "hourly") {
+		t.Errorf("wall-clock detail = %q, want the schedule explained", att.Detail)
 	}
 
 	// Simulated (clock-pinned) invoice: the wall-clock sweep excludes it, so
@@ -354,11 +362,11 @@ func TestClassifyInvoiceAttention_PaymentScheduled(t *testing.T) {
 	if simAtt == nil || simAtt.Reason != AttentionReasonPaymentScheduled {
 		t.Fatalf("simulated: expected payment_scheduled attention, got %+v", simAtt)
 	}
-	if !strings.Contains(simAtt.Message, "test-clock advance") {
-		t.Errorf("simulated message = %q, want it to mention the test-clock advance", simAtt.Message)
+	if !strings.Contains(simAtt.Message, "next clock advance") {
+		t.Errorf("simulated message = %q, want it to mention the next clock advance", simAtt.Message)
 	}
-	if strings.Contains(simAtt.Message, "next tick") {
-		t.Errorf("simulated message = %q must NOT promise a wall-clock tick", simAtt.Message)
+	if strings.Contains(simAtt.Message, "within an hour") {
+		t.Errorf("simulated message = %q must NOT promise a real-time charge", simAtt.Message)
 	}
 }
 
@@ -456,8 +464,14 @@ func TestClassifyInvoiceAttention_NoPaymentMethod(t *testing.T) {
 	if strings.Contains(att.Message, "has been emailed") {
 		t.Errorf("banner must not assert a completed send it cannot observe, got %q", att.Message)
 	}
-	if !strings.Contains(att.Message, "emails the customer a setup link") {
-		t.Errorf("has-email variant must state the engine's send behavior, got %q", att.Message)
+	// Line 1: what adding a card does. Line 2: the setup-link email.
+	want := "This invoice is charged automatically once the customer adds a card.\n" +
+		"A setup link is emailed to the customer once; use Resend setup link to send it again."
+	if att.Message != want {
+		t.Errorf("has-email message =\n%q\nwant\n%q", att.Message, want)
+	}
+	if !strings.Contains(att.Detail, "activity shows whether the email was sent") {
+		t.Errorf("has-email detail must say where delivery shows, got %q", att.Detail)
 	}
 	if att.NextAttemptAt != nil {
 		t.Errorf("no_payment_method must not set NextAttemptAt — engine won't auto-charge without PM, got %v", att.NextAttemptAt)
@@ -486,11 +500,12 @@ func TestClassifyInvoiceAttention_NoPaymentMethod_NoEmail(t *testing.T) {
 	if strings.Contains(att.Message, "has been emailed") {
 		t.Errorf("no-email variant must NOT claim a setup link was emailed, got %q", att.Message)
 	}
-	// Honest under uncertainty: states engine behavior ("only when … an email
-	// address on file"), never asserts this customer's email state — so it's
-	// correct whether the address is confirmably absent or merely undetermined.
-	if !strings.Contains(att.Message, "only when the customer has an email address on file") {
-		t.Errorf("no-email variant must state the conditional engine behavior, got %q", att.Message)
+	// Honest under uncertainty: states engine behavior ("only to customers
+	// with an email address"), never asserts this customer's email state — so
+	// it's correct whether the address is confirmably absent or merely
+	// undetermined.
+	if !strings.Contains(att.Message, "\nSetup links are emailed only to customers with an email address, so copy one from the customer page") {
+		t.Errorf("no-email variant must state the conditional engine behavior on line 2, got %q", att.Message)
 	}
 	codes := make(map[AttentionAction]bool)
 	for _, a := range att.Actions {
@@ -679,11 +694,11 @@ func TestClassifyInvoiceAttention_NoPaymentMethod_Simulated(t *testing.T) {
 	if att == nil || att.Reason != AttentionReasonNoPaymentMethod {
 		t.Fatalf("expected no_payment_method, got %+v", att)
 	}
-	if !strings.Contains(att.Message, "next test-clock advance") {
+	if !strings.HasPrefix(att.Message, "This invoice is charged on the next clock advance once the customer adds a card.\n") {
 		t.Errorf("simulated no-PM banner must promise collection on the next clock advance, got %q", att.Message)
 	}
-	if strings.Contains(att.Message, "next billing tick") {
-		t.Errorf("simulated no-PM banner must not promise a wall-clock tick that excludes clock-pinned subs, got %q", att.Message)
+	if strings.Contains(att.Message, "charged automatically") {
+		t.Errorf("simulated no-PM banner must not promise a real-time charge the wall-clock sweep never makes, got %q", att.Message)
 	}
 }
 
@@ -711,11 +726,11 @@ func TestClassifyInvoiceAttention_DunningExhausted(t *testing.T) {
 	if att.Code != "payment.dunning_exhausted" {
 		t.Errorf("code = %s, want payment.dunning_exhausted", att.Code)
 	}
-	if !strings.Contains(att.Message, "ended without collecting") {
-		t.Errorf("escalated banner must state recovery ended, got %q", att.Message)
+	if att.Message != "Retries stopped; this invoice is charged automatically once the customer adds a card." {
+		t.Errorf("escalated (not paused) banner must state retries stopped and keep charge-on-attach as the fix, got %q", att.Message)
 	}
-	if !strings.Contains(att.Message, "Attaching a card") {
-		t.Errorf("escalated banner must keep charge-on-attach as the fix, got %q", att.Message)
+	if !strings.Contains(att.Detail, "ended without collecting") {
+		t.Errorf("escalated detail must state recovery ended, got %q", att.Detail)
 	}
 	codes := make(map[AttentionAction]bool)
 	for _, a := range att.Actions {
@@ -803,7 +818,7 @@ func TestClassify_CollectionPaused_BeatsPaymentScheduled(t *testing.T) {
 	if paused.Reason != AttentionReasonCollectionPaused {
 		t.Errorf("paused: reason = %s, want collection_paused", paused.Reason)
 	}
-	if strings.Contains(paused.Message, "next tick") || strings.Contains(paused.Message, "next test-clock advance") {
+	if strings.Contains(paused.Message, "within an hour") || strings.Contains(paused.Message, "clock advance") {
 		t.Errorf("paused copy must not promise an automatic charge, got %q", paused.Message)
 	}
 	// Charge now survives: a manual collect is an explicit operator override

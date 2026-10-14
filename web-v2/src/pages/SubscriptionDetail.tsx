@@ -415,10 +415,8 @@ export default function SubscriptionDetailPage() {
         </div>
       </div>
 
-      {/* Test-clock banner — sets expectation that period_end / next_billing /
-          dunning timestamps below may reflect simulated time, not wall-clock.
-          The header already carries a small badge linking to the clock; the
-          banner is the explainer. */}
+      {/* Simulated-time line (ADR-099): the one place on this page that says
+          the dates below follow a test clock, not today's date. */}
       {sub.test_clock_id && (
         <TestClockBanner testClockId={sub.test_clock_id} />
       )}

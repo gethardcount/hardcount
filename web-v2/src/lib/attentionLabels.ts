@@ -8,9 +8,9 @@ const REASON_LABELS: Record<string, string> = {
   tax_calculation_failed: 'Tax calculation failed',
   tax_location_required: 'Customer address required',
   payment_failed: 'Payment failed',
-  payment_unconfirmed: 'Payment unconfirmed',
+  payment_unconfirmed: 'Confirming payment',
   payment_processing: 'Payment processing',
-  payment_scheduled: 'Auto-charge scheduled',
+  payment_scheduled: 'Payment scheduled',
   awaiting_payment: 'Awaiting first charge',
   no_payment_method: 'No payment method',
   dunning_exhausted: 'Payment recovery ended',
@@ -29,7 +29,11 @@ export function attentionReasonLabel(reason: string, code?: string): string {
   // genuinely still being confirmed, but they are opposite situations — one
   // resolves itself, the other never will. The server distinguishes them by
   // CODE, so the label does too.
-  if (code === 'payment.unidentifiable') return 'Payment unidentifiable'
+  if (code === 'payment.unidentifiable') return 'Payment status unknown'
+  // Two more cases share payment_processing: the customer is on the payment
+  // page, or a payment on a written-off invoice is being confirmed.
+  if (code === 'payment.page_open') return 'Customer is paying'
+  if (code === 'payment.recovery_processing') return 'Payment in progress'
   return REASON_LABELS[reason] ?? 'Needs attention'
 }
 

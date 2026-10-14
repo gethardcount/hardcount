@@ -1,7 +1,7 @@
 # ADR-099: Simulated-time disclosure — once per scope, one word, banner teaches / chip flags
 
 **Date:** 2026-07-21
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-15: the banner is one line, see the end)
 **Extends:** ADR-030 (simulated time on clock-pinned entities), ADR-086 §4 (FE relative-time anchors).
 **Supersedes (partially):** the per-row Activity chip clause of ADR-030's 2026-07-18 amendment — its sim-primary / wall-subline rendering rule stands; only the redundant chip is gone (noted in place there).
 
@@ -46,7 +46,8 @@ below it. The word is "Simulated". The banner teaches; the chip flags.**
    open the clock". Raw clock IDs never appear in visible copy — tooltips
    and link targets may carry them for navigation.
 3. **Banner = teacher, chip = flag.** The banner keeps the full explanation,
-   the View-clock link, and the deleted-clock variant. Chips never explain;
+   the View-clock link, and the deleted-clock variant (amended 2026-10-15:
+   the explanation now sits in the banner's collapsed Details). Chips never explain;
    one word plus a tooltip.
 
 ## Consequences
@@ -65,3 +66,31 @@ below it. The word is "Simulated". The banner teaches; the chip flags.**
 - Trade-off accepted: a screenshot of *only* an invoice header no longer
   carries the badge — the banner sits directly above and is part of any
   honest capture; the PDF never had a badge and is unchanged.
+
+## Amendment 2026-10-15: the banner becomes one line
+
+**What changed.** The page banner is still the one place on a detail page
+that says "simulated". It is now a single quiet line, not an amber box with a
+paragraph:
+
+> Simulated time: ⟨clock time⟩. Dates on this page follow the test clock. [View clock]
+
+The explanation that used to fill the box moves into a collapsed
+**Details** under that line: dates written during a clock advance carry the
+simulated time, and a "Recorded" line under a row shows the real time. The
+deleted-clock variant stays, shortened to one line: "Test clock deleted.
+Dates on this page follow that clock's calendar, not today's date."
+
+**Why.** Rule 3 above said "the banner keeps the full explanation". In
+practice the banner sat above every other notice on the page and took 43
+words to say "these dates are simulated". On an invoice with a payment
+problem it pushed the notice that needed action below a box that needed
+none (operator-message audit, 2026-10-14). Amber also says "act soon";
+simulated time is a fact about the page, not a problem, so the line uses the
+neutral tone with the flask icon.
+
+**What stays.** The scope rule (one indicator per page), the vocabulary
+("Simulated", with the flask icon), the View-clock link, and the rule that
+nothing lower on the page repeats the flag. Rule 3 now reads: the banner
+names the state in one line and keeps the explanation in Details; chips
+never explain.

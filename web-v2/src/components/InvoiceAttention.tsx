@@ -12,14 +12,16 @@ import { timeAgo, isOlderThan, type EffectiveNow } from '@/lib/effectiveNow'
 import { Callout } from '@/components/Callout'
 import { toneForSeverity } from '@/lib/calloutTone'
 import { attentionReasonLabel, supportCodeLine } from '@/lib/attentionLabels'
+import { messageLines, stripePaymentUrl } from '@/lib/invoiceNotice'
+import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 
 // InvoiceAttention is the unified "this invoice needs operator
 // attention" notice, drawn with the shared Callout. Reads server-derived
 // invoice.attention and renders nothing when absent (healthy or
-// terminal-state): reason label as the title, the server's message,
-// prescribed actions, and a collapsed Details holding the explanation and
-// the support code.
+// terminal-state): reason label as the title, the server's sentence (plus
+// its optional second line), prescribed actions, and a collapsed Details
+// holding the server's explanation and the support code.
 //
 // Stays purely presentational: the typed reason / action / severity
 // codes come from the server via ADR-009. Adding a new code on the
@@ -31,15 +33,20 @@ export function InvoiceAttention({
   onChargeNow,
   onSendReminder,
   onVoidInvoice,
+  onMarkUncollectible,
   retrying,
   charging,
   sending,
   now,
+  className = 'mb-6',
 }: {
   invoice: Invoice
   onRetryTax?: () => void
   onChargeNow?: () => void
   onSendReminder?: () => void
+  // Opens the write-off confirmation. Offered by the server only when a
+  // payment's outcome can never be identified (ADR-107).
+  onMarkUncollectible?: () => void
   // Opens the invoice's existing void confirmation. Surfaced only on
   // prepaid-commit exposure, where voiding is the sole way to stop credit
   // going out against an invoice nobody paid (ADR-078).
@@ -55,6 +62,7 @@ export function InvoiceAttention({
   // wall-clock sits in 2026. Build the anchor with effectiveNow(...) —
   // the type makes passing it non-optional so this can't regress.
   now: EffectiveNow
+  className?: string
 }) {
   const att = invoice.attention
   if (!att) return null
@@ -67,7 +75,7 @@ export function InvoiceAttention({
     <Callout
       tone={tone}
       icon={Icon}
-      className="mb-6"
+      className={className}
       title={
         <span className="flex flex-wrap items-center gap-2">
           {attentionReasonLabel(att.reason, att.code)}
@@ -97,6 +105,7 @@ export function InvoiceAttention({
               onChargeNow={onChargeNow}
               onSendReminder={onSendReminder}
               onVoidInvoice={onVoidInvoice}
+              onMarkUncollectible={onMarkUncollectible}
               retrying={retrying}
               charging={charging}
               sending={sending}
@@ -132,16 +141,19 @@ export function InvoiceAttention({
         </details>
       ) : undefined}
     >
-      {/* The auto-collect ("attaching a card auto-charges…") reassurance
-          is SERVER-OWNED — it lives inside att.message, where it is
-          clock-aware (wall tick vs next test-clock advance). A second
-          hardcoded copy here drifted from that truth and repeated the
-          promise twice in one banner (2026-07-22 audit, P1-1/P2-1). */}
-      <p className="text-foreground">{att.message}</p>
+      {/* The sentence is SERVER-OWNED, including the clock-aware "charged
+          on the next clock advance" wording; a second hardcoded copy here
+          once drifted from it and repeated the promise twice in one notice
+          (2026-07-22 audit, P1-1/P2-1). A second line (setup-link email,
+          prepaid credit at risk) comes after a newline and is shown, never
+          folded into Details: it carries money or the next step. */}
+      {messageLines(att.message).map((line, i) => (
+        <p key={i} className={i === 0 ? 'text-foreground' : undefined}>{line}</p>
+      ))}
       {att.next_attempt_at && (
         <p className="text-xs text-muted-foreground flex items-center gap-1.5">
           <Calendar size={11} className="shrink-0" />
-          Engine will retry: <span className="text-foreground">{formatDateTime(att.next_attempt_at)}</span>
+          Next automatic retry: <span className="text-foreground">{formatDateTime(att.next_attempt_at)}</span>
         </p>
       )}
       {att.due_by && (
@@ -174,6 +186,7 @@ function ActionButton({
   onChargeNow,
   onSendReminder,
   onVoidInvoice,
+  onMarkUncollectible,
   retrying,
   charging,
   sending,
@@ -186,6 +199,7 @@ function ActionButton({
   onChargeNow?: () => void
   onSendReminder?: () => void
   onVoidInvoice?: () => void
+  onMarkUncollectible?: () => void
   retrying?: boolean
   charging?: boolean
   sending?: boolean
@@ -291,7 +305,18 @@ function ActionButton({
           invoice={invoice}
         />
       )
+    case 'mark_uncollectible':
+      // The parked invoice's one way out (ADR-107). Opens the page's existing
+      // write-off confirmation, which states the consequences.
+      return (
+        <Button variant={variant} size="sm" onClick={onMarkUncollectible} disabled={!onMarkUncollectible}>
+          {display}
+        </Button>
+      )
     case 'reconcile_payment':
+      // Payment anomaly: the refund or correction is made in Stripe, so the
+      // button opens the payment there.
+      return <OpenInStripeButton variant={variant} display={display} paymentIntentId={invoice.payment_anomaly_payment_intent_id} />
     default:
       return (
         <Button variant={variant} size="sm" disabled>
@@ -299,6 +324,23 @@ function ActionButton({
         </Button>
       )
   }
+}
+
+function OpenInStripeButton({ variant, display, paymentIntentId }: { variant: 'default' | 'outline'; display: string; paymentIntentId?: string }) {
+  const { user } = useAuth()
+  if (!paymentIntentId) {
+    return <Button variant={variant} size="sm" disabled>{display}</Button>
+  }
+  return (
+    <Button
+      render={<a href={stripePaymentUrl(paymentIntentId, user?.livemode ?? false)} target="_blank" rel="noopener noreferrer" />}
+      variant={variant}
+      size="sm"
+    >
+      {display}
+      <ExternalLink size={12} className="ml-1" />
+    </Button>
+  )
 }
 
 // UpdatePaymentMethodButton opens the shared SendSetupLinkDialog
@@ -353,7 +395,7 @@ function defaultLabel(action: AttentionAction): string {
     retry_payment: 'Retry payment',
     wait_provider: 'Check provider status',
     rotate_api_key: 'Rotate API key',
-    reconcile_payment: 'Reconcile',
+    reconcile_payment: 'Open in Stripe',
     review_registration: 'Review tax registration',
     charge_now: 'Charge now',
     // send_reminder = server-side email to the customer with a
@@ -369,6 +411,7 @@ function defaultLabel(action: AttentionAction): string {
     update_payment_method: 'Update payment method',
     connect_tax_provider: 'Connect Stripe',
     void_invoice: 'Void invoice',
+    mark_uncollectible: 'Mark uncollectible',
   }
   return map[action] ?? action
 }

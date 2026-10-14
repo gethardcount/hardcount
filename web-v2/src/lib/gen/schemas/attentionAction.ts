@@ -11,7 +11,12 @@
 /**
  * Operator's recommended next step. Closed enum because every
  * code maps to a concrete server endpoint or frontend route,
- * and audit logs key off the code. `void_invoice` is offered only
+ * and audit logs key off the code. `reconcile_payment` opens the
+ * payment in Stripe; it is offered on `payment_anomaly`, where the
+ * refund or correction is made there. `mark_uncollectible` opens
+ * the write-off and is offered only when a payment's outcome can
+ * never be identified (payment status unknown with no payment
+ * intent recorded). `void_invoice` is offered only
  * on prepaid-commit exposure, and only while some of the granted
  * credit is still unspent: voiding retires the unspent balance
  * (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -35,4 +40,5 @@ export const AttentionAction = {
   update_payment_method: 'update_payment_method',
   connect_tax_provider: 'connect_tax_provider',
   void_invoice: 'void_invoice',
+  mark_uncollectible: 'mark_uncollectible',
 } as const;

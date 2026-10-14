@@ -841,6 +841,7 @@ export type AttentionAction =
   | 'update_payment_method'
   | 'connect_tax_provider'
   | 'void_invoice'
+  | 'mark_uncollectible'
 
 export interface AttentionActionItem {
   code: AttentionAction
@@ -851,6 +852,8 @@ export interface AttentionActionItem {
 export interface InvoiceAttention {
   severity: AttentionSeverity
   reason: AttentionReason
+  // One sentence; a second line after "\n" when a second fact must show up
+  // front (the setup-link email, prepaid credit at risk).
   message: string
   actions?: AttentionActionItem[]
   // Open dotted code (e.g. "tax.customer_data_invalid"). Stable but
@@ -942,6 +945,9 @@ export interface Invoice {
   // ad-hoc/legacy invoices → helpers fall back to the live tenant TZ.
   billing_timezone?: string
   stripe_payment_intent_id?: string
+  // The payment a payment anomaly is about (ADR-068); the notice's
+  // "Open in Stripe" opens it.
+  payment_anomaly_payment_intent_id?: string
   last_payment_error?: string
   issued_at?: string
   due_at?: string

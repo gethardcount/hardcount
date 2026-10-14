@@ -34,28 +34,39 @@ func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
 	if strings.Contains(att.Message, "re-checks automatically") {
 		t.Error("the banner still promises automatic resolution for an invoice that will never resolve automatically")
 	}
+	// The sentence an operator reads first: Velox can't tell, it won't charge
+	// again, and what to do. The rest of the truth lives in Detail, which the
+	// dashboard shows under Details.
+	if att.Message != "Velox can't tell if this charge went through, so it won't charge again; check Stripe, and if nothing was taken, mark it uncollectible." {
+		t.Errorf("message = %q", att.Message)
+	}
+	all := att.Message + " " + att.Detail
 	// It must say the three things an operator needs (ADR-108): that Velox is
 	// actively searching the provider, that an UNFOUND attempt will not
 	// resolve on its own, and what to do instead. The bound matters in both
 	// directions — an absolute "will not resolve" is a lie now that search
 	// adopts found PIs, and an unconditional "resolves automatically" would be
 	// the pre-#682 lie again for the rows search never finds.
-	if !strings.Contains(att.Message, "searching the provider") {
-		t.Error("the banner does not say Velox is searching — an operator would go do the search by hand")
+	if !strings.Contains(att.Detail, "keeps searching Stripe") {
+		t.Error("the notice does not say Velox is searching — an operator would go do the search by hand")
 	}
-	if !strings.Contains(att.Message, "will not resolve on its own") {
-		t.Error("the banner does not tell the operator that an unfound attempt stays stuck")
+	if !strings.Contains(att.Detail, "will not resolve on its own") {
+		t.Error("the notice does not tell the operator that an unfound attempt stays stuck")
 	}
-	if !strings.Contains(att.Message, "if it cannot be found") {
-		t.Error("the banner states futility unconditionally — false since ADR-108's search sweep adopts found PaymentIntents")
+	if !strings.Contains(att.Detail, "If it cannot be found") {
+		t.Error("the notice states futility unconditionally — false since ADR-108's search sweep adopts found PaymentIntents")
 	}
 	if !strings.Contains(strings.ToLower(att.Message), "uncollectible") {
-		t.Error("the banner names no way out — mark-uncollectible is the one action the product allows here")
+		t.Error("the sentence names no way out — mark-uncollectible is the one action the product allows here")
+	}
+	// The way out is a button in the notice, not only a menu item.
+	if len(att.Actions) != 1 || att.Actions[0].Code != AttentionActionMarkUncollectible {
+		t.Errorf("actions = %+v, want exactly [mark_uncollectible]", att.Actions)
 	}
 	// And it must explain the deliberate no-charge choice, or the operator will
 	// read the silence as a bug and go looking for a retry button.
-	if !strings.Contains(strings.ToLower(att.Message), "twice") {
-		t.Error("the banner does not explain WHY no further charge is attempted, so the silence looks like a defect")
+	if !strings.Contains(strings.ToLower(all), "twice") {
+		t.Error("the notice does not explain WHY no further charge is attempted, so the silence looks like a defect")
 	}
 }
 
@@ -80,5 +91,11 @@ func TestUnconfirmedWithAPaymentIntentKeepsTheWaitingCopy(t *testing.T) {
 	}
 	if !strings.Contains(att.Message, "re-checks automatically") {
 		t.Error("a resolvable charge should still tell the operator to wait")
+	}
+	if len(att.Actions) != 0 {
+		t.Errorf("a charge that resolves itself must not offer a write-off, got %+v", att.Actions)
+	}
+	if !strings.Contains(att.Detail, "Check the payment in Stripe") {
+		t.Errorf("detail must keep the stuck-for-hours advice, got %q", att.Detail)
 	}
 }

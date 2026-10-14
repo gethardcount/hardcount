@@ -23,7 +23,15 @@ import type { AttentionSeverity } from './attentionSeverity';
 export interface Attention {
   severity: AttentionSeverity;
   reason: AttentionReason;
-  /** Human-readable headline copy, safe to render verbatim. */
+  /**
+     * Human-readable copy, safe to render verbatim: one plain
+     * sentence saying what happens and what to do. When a second
+     * fact must show up front (the setup-link email on an invoice
+     * with no payment method, prepaid credit at risk), it follows
+     * on a second line after a newline (`\n`). Wording may change
+     * between releases; switch on `reason` and `code`, not on this
+     * text.
+     */
   message: string;
   /**
      * Prescribed next steps. First item is the primary CTA; the
@@ -50,11 +58,20 @@ export interface Attention {
      */
   param?: string;
   /**
-     * Raw provider payload (Stripe Tax JSON envelope, last
-     * payment error message). Disclosed in a collapsible
-     * section for diagnostic depth.
+     * Velox's own explanation behind `message`: why the state
+     * holds, what Velox does on its own, and ids support may ask
+     * for (for example the payment intent ids of a payment
+     * anomaly). Plain text; may contain blank-line paragraph
+     * breaks. Never a provider payload — that is
+     * `provider_response`.
      */
   detail?: string;
+  /**
+     * The provider's own response (Stripe Tax error envelope,
+     * Stripe's last payment error), exactly as received. Present
+     * only when Velox called the provider.
+     */
+  provider_response?: string;
   /**
      * When the attention condition started — operators triage
      * by age. tax_deferred_at for tax reasons; due_at for

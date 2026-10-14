@@ -544,11 +544,9 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
-      {/* Test-clock banner — top of the detail page when the customer
-          is pinned (ADR-027). Carries the clock's current frozen_time
-          + a "View clock" link, same shape used on SubscriptionDetail
-          and InvoiceDetail. The header badge above is the at-a-glance
-          marker; the banner is the explainer + navigation. */}
+      {/* Simulated-time line (ADR-099) for a customer pinned to a test clock
+          (ADR-027): the clock's current time and a View-clock link, the same
+          line SubscriptionDetail and InvoiceDetail show. */}
       {customer.test_clock_id && (
         <TestClockBanner testClockId={customer.test_clock_id} />
       )}
