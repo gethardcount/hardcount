@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/sagarsuperuser/velox/internal/platform/leader"
 	"log/slog"
@@ -282,7 +283,13 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		p.ID, p.Name, p.Enabled, scheduleJSON, p.MaxRetryAttempts,
 		p.FinalSubscriptionAction, p.FinalInvoiceAction, p.GracePeriodDays, now,
 	)
-	return scanPolicy(row)
+	stored, err := scanPolicy(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No row has that id in this tenant and mode. Without this mapping
+		// the miss reached the client as a 500.
+		return domain.DunningPolicy{}, errs.ErrNotFound
+	}
+	return stored, err
 }
 
 // CreateRun inserts a run row and nothing else. Production starts a run with

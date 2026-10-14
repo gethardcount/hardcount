@@ -748,11 +748,11 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 		TrialEnd time.Time `json:"trial_end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respond.Error(w, r, http.StatusBadRequest, "invalid_body", "invalid request body", "")
+		respond.BadRequest(w, r, "invalid JSON body")
 		return
 	}
 	if body.TrialEnd.IsZero() {
-		respond.Error(w, r, http.StatusUnprocessableEntity, "validation_error", "trial_end is required", "trial_end")
+		respond.ValidationField(w, r, "trial_end", "trial_end is required")
 		return
 	}
 
@@ -856,9 +856,8 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if len(seen) > 1 {
-				respond.Error(w, r, http.StatusUnprocessableEntity, "validation_error",
-					"billing thresholds are not supported on multi-currency subscriptions",
-					"billing_thresholds")
+				respond.ValidationField(w, r, "billing_thresholds",
+					"billing thresholds are not supported on multi-currency subscriptions")
 				return
 			}
 		}

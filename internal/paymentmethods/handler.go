@@ -317,8 +317,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if email == "" {
-		respond.Error(w, r, http.StatusUnprocessableEntity, "invalid_state",
-			"missing_email",
+		respond.ValidationCoded(w, r, "", "missing_email",
 			"this customer has no email on file — add one before sending a setup link")
 		return
 	}

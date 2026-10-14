@@ -675,7 +675,7 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	collectible := (inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible) &&
 		inv.PaymentStatus != domain.PaymentSucceeded
 	if !collectible {
-		respond.Error(w, r, http.StatusConflict, "invalid_state", "invoice_not_collectible",
+		respond.ConflictCoded(w, r, "", "invoice_not_collectible",
 			"setup link can only be resent for an unpaid invoice that is finalized or written off")
 		return
 	}
@@ -686,7 +686,7 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	// keep, triggerable by an operator button (found by the honesty sweep,
 	// 2026-07-31).
 	if b := domain.PaymentBlocksAction(inv, domain.ActionResendSetupLink); b.Blocked {
-		respond.Error(w, r, http.StatusConflict, "invalid_state", b.Code, b.Message)
+		respond.ConflictCoded(w, r, "", b.Code, b.Message)
 		return
 	}
 	if h.noPMNotifier == nil {
@@ -709,7 +709,7 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 		// toast for a send that never happened (the notifier's no-email
 		// skip was a silent nil). The typed outcome makes the endpoint
 		// honest: nothing was sent, tell the operator what works instead.
-		respond.Error(w, r, http.StatusConflict, "invalid_state", "no_email_on_file",
+		respond.ConflictCoded(w, r, "", "no_email_on_file",
 			"customer has no email on file — add one on the customer record, or copy the setup link from the customer page and share it directly")
 		return
 	}
@@ -899,7 +899,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// may already have taken from them — and for a parked invoice (ADR-107) the
 	// hosted page will not even offer a Pay button when they arrive.
 	if b := domain.PaymentBlocksAction(inv, domain.ActionEmailInvoice); b.Blocked {
-		respond.Error(w, r, http.StatusConflict, "invalid_state", b.Code, b.Message)
+		respond.ConflictCoded(w, r, "", b.Code, b.Message)
 		return
 	}
 	if err != nil {
@@ -1033,7 +1033,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		// stop exactly that divergence; it only works if callers pass both
 		// halves through.
 		b := domain.PaymentBlocksAction(inv, domain.ActionCollectPayment)
-		respond.Error(w, r, http.StatusConflict, "invalid_state", b.Code, b.Message)
+		respond.ConflictCoded(w, r, "", b.Code, b.Message)
 		return
 	}
 	if inv.AmountDueCents <= 0 {

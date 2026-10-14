@@ -38,6 +38,10 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Editing a dunning policy that does not exist answers 404 `not_found`, not 500 (2026-10-14, #962).** `PATCH /v1/dunning/policies/{id}` with an unknown id now answers like the other policy routes.
+
+- **Some error responses now put `type`, `code` and `message` in the right fields (2026-10-14, #962).** `POST /v1/subscriptions/{id}/extend-trial` and the multi-currency refusal of `PUT /v1/subscriptions/{id}/billing-thresholds` had the message in `code`. Invoice `send`, `collect` and `resend-setup-link` refusals, and the setup-link email's `missing_email`, had `type` `invalid_state`. All now use `invalid_request_error` with a snake_case `code`. If you matched the old values, match the new ones.
+
 - **The Compose stack no longer shows healthy containers as unhealthy, and nginx follows a recreated API container (2026-10-14).** The dashboard's healthcheck called `http://localhost/`, which resolves to IPv6 `::1` inside the container while nginx listens on IPv4, so `docker ps` showed it as unhealthy on every install although the page served fine. The checks now use `127.0.0.1`. The front nginx also kept sending to the old address after `velox-api` was recreated (a new image or an upgrade) and answered 502 until it was restarted. It now looks the containers up again (nginx `resolve`, Docker's DNS).
 
 - **A LiteLLM record with no call `id` is refused, not silently dropped (2026-10-14, #980).** Each event's dedup key is built from the call id, so every record without one shared the same keys and all but the first were dropped as duplicates. It is now reported in `errors[]`. Real LiteLLM proxies always send an id.

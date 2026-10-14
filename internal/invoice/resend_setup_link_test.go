@@ -66,6 +66,34 @@ func TestResendSetupLink_DoesNotClaimAFinalizeThatNeverRan(t *testing.T) {
 // never happened — the operator got a success toast and waited on an email
 // with no recipient. Now: sent -> 200; skipped_no_email -> typed 409 telling
 // the operator what actually works (add an email / copy the link).
+// TestResendSetupLink_NotCollectibleEnvelope: a draft invoice has no setup
+// link to resend. The refusal used to carry type "invalid_state".
+func TestResendSetupLink_NotCollectibleEnvelope(t *testing.T) {
+	store := newMemStore()
+	inv, err := store.Create(context.Background(), "t1", domain.Invoice{
+		InvoiceNumber: "INV-DRAFT", Status: domain.InvoiceDraft,
+		PaymentStatus: domain.PaymentPending, AmountDueCents: 5000,
+		CustomerID: "cus_1", Currency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: &outcomeNoPMNotifier{outcome: domain.NotifySent}}
+	req := httptest.NewRequest(http.MethodPost, "/"+inv.ID+"/resend-setup-link", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", inv.ID)
+	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	req = req.WithContext(context.WithValue(reqCtx, chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+	h.resendSetupLink(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status: got %d, want 409. body=%s", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); !strings.Contains(body, `"type":"invalid_request_error","code":"invoice_not_collectible"`) {
+		t.Errorf("want type invalid_request_error with code invoice_not_collectible, got %s", body)
+	}
+}
+
 func TestResendSetupLink_HonestDispositions(t *testing.T) {
 	ctx := context.Background()
 	newReq := func(t *testing.T, invID string) (*http.Request, *httptest.ResponseRecorder) {
@@ -116,8 +144,8 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 			t.Fatalf("status: got %d, want 409. body=%s", rr.Code, rr.Body.String())
 		}
 		body := rr.Body.String()
-		if !strings.Contains(body, "no_email_on_file") {
-			t.Errorf("expected typed code no_email_on_file, got %s", body)
+		if !strings.Contains(body, `"type":"invalid_request_error","code":"no_email_on_file"`) {
+			t.Errorf("expected type invalid_request_error with code no_email_on_file, got %s", body)
 		}
 		if strings.Contains(body, `"status":"sent"`) {
 			t.Errorf("must never claim sent on a skip, got %s", body)

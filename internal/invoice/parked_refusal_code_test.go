@@ -83,12 +83,19 @@ func TestParkedRefusalsAnswerOneCode(t *testing.T) {
 
 			var envelope struct {
 				Error struct {
+					Type    string `json:"type"`
 					Code    string `json:"code"`
 					Message string `json:"message"`
 				} `json:"error"`
 			}
 			if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
 				t.Fatalf("decode body %q: %v", rr.Body.String(), err)
+			}
+			// collect, send and resend-setup-link used to answer type
+			// "invalid_state", a type no other endpoint uses; void answered
+			// invalid_request_error.
+			if envelope.Error.Type != "invalid_request_error" {
+				t.Errorf("type: got %q, want invalid_request_error", envelope.Error.Type)
 			}
 			if envelope.Error.Code != "payment_unidentifiable" {
 				t.Errorf("code: got %q, want payment_unidentifiable — a consumer branches on this, so one handler answering differently makes the single source useless over HTTP", envelope.Error.Code)
