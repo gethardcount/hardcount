@@ -87,8 +87,10 @@ export function cancelScheduledSentence(
 }
 
 // The collection-paused sentence. resumesLabel is the formatted resumes_at.
+// It must not read as "charged once resumed": a draft made while paused
+// stays a draft after the resume (subscription.Service.ResumeCollection).
 export function collectionPausedSentence(resumesLabel?: string): string {
   return resumesLabel
-    ? `Invoices will generate as drafts and skip charge until resumed (auto-resumes ${resumesLabel}).`
-    : 'Invoices will generate as drafts and skip charge until resumed.'
+    ? `New invoices are saved as drafts and not charged. Collection resumes ${resumesLabel}.`
+    : 'New invoices are saved as drafts and not charged.'
 }

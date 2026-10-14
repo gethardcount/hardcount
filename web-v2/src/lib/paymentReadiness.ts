@@ -16,10 +16,17 @@ import type { Subscription, CustomerPaymentMethod } from '@/lib/api'
 // fires on the customer/subscription surfaces BEFORE any invoice exists;
 // the banner fires on a finalized invoice. The two never co-render.
 
-export function subscriptionWillAutoCharge(sub: Pick<Subscription, 'status' | 'pause_collection'>): boolean {
+export type AutoChargeFields = Pick<Subscription, 'status' | 'pause_collection' | 'trial_end_at' | 'cancel_effective_at'>
+
+export function subscriptionWillAutoCharge(sub: AutoChargeFields): boolean {
   if (sub.status !== 'active' && sub.status !== 'trialing') return false
   // A paused-collection subscription won't attempt a charge — no warning.
   if (sub.pause_collection) return false
+  // A trial set to cancel at or before its end never charges: trials are
+  // free and the cancel lands first (ADR-069). cancel_effective_at is the
+  // server's answer for both the at-period-end flag and an explicit date.
+  if (sub.status === 'trialing' && sub.cancel_effective_at && sub.trial_end_at &&
+    Date.parse(sub.cancel_effective_at) <= Date.parse(sub.trial_end_at)) return false
   return true
 }
 
@@ -29,7 +36,7 @@ export function hasUsableCard(paymentMethods: Pick<CustomerPaymentMethod, 'is_de
 
 // customerNeedsPaymentMethod: zero cards on file AND ≥1 auto-charging sub.
 export function customerNeedsPaymentMethod(
-  subscriptions: Pick<Subscription, 'status' | 'pause_collection'>[],
+  subscriptions: AutoChargeFields[],
   paymentMethods: Pick<CustomerPaymentMethod, 'is_default'>[],
 ): boolean {
   if (hasUsableCard(paymentMethods)) return false

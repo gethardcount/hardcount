@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { cancelImmediatelyText, pauseCollectionToast, planChangeToast, scheduleCancelToast } from '@/lib/subscriptionCopy'
+import { cancelImmediatelyText, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText, scheduleCancelToast } from '@/lib/subscriptionCopy'
 import { api, formatCents, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
 import { formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
@@ -360,7 +360,6 @@ export default function SubscriptionDetailPage() {
         return (
           <Callout
             tone="red"
-            className="mb-6"
             title={billingFailureTitle(f)}
             actions={action}
             details={<p>Last failed {formatDateTime(f.failed_at)}.</p>}
@@ -377,7 +376,7 @@ export default function SubscriptionDetailPage() {
           </Button>
         )
         return as === 'box'
-          ? <Callout tone="amber" className="mb-6" title={NO_CARD_TITLE} actions={action}>{NO_CARD_SENTENCE}</Callout>
+          ? <Callout tone="amber" title={NO_CARD_TITLE} actions={action}>{NO_CARD_SENTENCE}</Callout>
           : <NoticeRow tone="amber" title={NO_CARD_TITLE} action={action}>{NO_CARD_SENTENCE}</NoticeRow>
       }
       case 'cancel_scheduled': {
@@ -391,7 +390,7 @@ export default function SubscriptionDetailPage() {
         // period's end (ADR-069).
         const sentence = cancelScheduledSentence(sub, sub.cancel_effective_at ? formatDateTime(sub.cancel_effective_at) : undefined)
         return as === 'box'
-          ? <Callout tone="amber" className="mb-6" title="Cancellation scheduled" actions={action}>{sentence}</Callout>
+          ? <Callout tone="amber" title="Cancellation scheduled" actions={action}>{sentence}</Callout>
           : <NoticeRow tone="amber" title="Cancellation scheduled" action={action}>{sentence}</NoticeRow>
       }
       case 'collection_paused': {
@@ -405,7 +404,7 @@ export default function SubscriptionDetailPage() {
         )
         const sentence = collectionPausedSentence(sub.pause_collection?.resumes_at ? formatDateTime(sub.pause_collection.resumes_at) : undefined)
         return as === 'box'
-          ? <Callout className="mb-6" title="Collection paused" actions={action}>{sentence}</Callout>
+          ? <Callout title="Collection paused" actions={action}>{sentence}</Callout>
           : <NoticeRow title="Collection paused" action={action}>{sentence}</NoticeRow>
       }
     }
@@ -507,13 +506,17 @@ export default function SubscriptionDetailPage() {
       {/* Notices: at most one box, the most urgent present (billing failure,
           then no card, then scheduled cancel, then collection paused; see
           lib/subscriptionNotices). Any other that applies is a one-line row
-          that keeps its own button. */}
-      {noticeLayout.rows.length > 0 && (
-        <div className="mb-4 space-y-1.5">
-          {noticeLayout.rows.map(kind => <div key={kind}>{renderNotice(kind, 'row')}</div>)}
+          under the box, so the most urgent reads first, keeping its button. */}
+      {noticeLayout.box && (
+        <div className="mb-6 space-y-3">
+          {renderNotice(noticeLayout.box, 'box')}
+          {noticeLayout.rows.length > 0 && (
+            <div className="space-y-1.5">
+              {noticeLayout.rows.map(kind => <div key={kind}>{renderNotice(kind, 'row')}</div>)}
+            </div>
+          )}
         </div>
       )}
-      {noticeLayout.box && renderNotice(noticeLayout.box, 'box')}
 
       {/* Subscription Timeline */}
       {(() => {
@@ -1255,7 +1258,7 @@ export default function SubscriptionDetailPage() {
           <DialogHeader>
             <DialogTitle>Pause collection</DialogTitle>
             <DialogDescription>
-              New invoices stay as drafts and aren't charged until you resume; paused days are still billed then.
+              {PAUSE_DIALOG_SENTENCE}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
@@ -1719,7 +1722,7 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
               <span className="font-medium text-foreground">Change now</span>
               {immediate ? (
                 <p className="text-xs text-muted-foreground mt-1">
-                  The price difference for the rest of the period is charged or credited now.
+                  {changePlanNowHelper((plans.find(p => p.id === selectedPlan) ?? currentPlan)?.base_bill_timing)}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">
@@ -1789,7 +1792,7 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
         <DialogHeader>
           <DialogTitle>Change Quantity</DialogTitle>
           <DialogDescription>
-            Takes effect now. An increase is charged for the rest of the period; a decrease is credited.
+            {changeQuantityText(plan?.base_bill_timing)}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
@@ -1855,7 +1858,7 @@ function RemoveItemConfirm({ subscriptionID, item, plan, onClose, onRemoved, onF
         <AlertDialogHeader>
           <AlertDialogTitle>Remove item from subscription?</AlertDialogTitle>
           <AlertDialogDescription>
-            Removes <strong>{plan?.name || 'this item'}</strong> (quantity {item.quantity}). Removed mid-period, the unused part of the period is credited.
+            Removes <strong>{plan?.name || 'this item'}</strong> (quantity {item.quantity}).{removeItemText(plan?.base_bill_timing) ? ` ${removeItemText(plan?.base_bill_timing)}` : ''}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

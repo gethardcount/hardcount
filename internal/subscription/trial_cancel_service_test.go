@@ -156,6 +156,9 @@ func TestEndTrial_And_ExtendTrial_ScheduleGuards(t *testing.T) {
 
 	if _, err := svc.EndTrial(context.Background(), "t1", sub.ID); !errors.Is(err, errs.ErrInvalidState) {
 		t.Fatalf("EndTrial with flag schedule: err = %v, want 409", err)
+	} else if want := "This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial."; !strings.Contains(err.Error(), want) {
+		// MANUAL_TEST quotes this text; the operator reads it as the 409 message.
+		t.Fatalf("EndTrial refusal text = %q, want it to contain %q", err.Error(), want)
 	}
 	// ExtendTrial with flag-only schedule: allowed.
 	if _, err := svc.ExtendTrial(context.Background(), "t1", sub.ID, future.Add(7*24*time.Hour)); err != nil {
@@ -170,5 +173,7 @@ func TestEndTrial_And_ExtendTrial_ScheduleGuards(t *testing.T) {
 	mem.subs[sub.ID] = s
 	if _, err := svc.ExtendTrial(context.Background(), "t1", sub.ID, explicit.Add(7*24*time.Hour)); !errors.Is(err, errs.ErrInvalidState) {
 		t.Fatalf("ExtendTrial with explicit cancel_at: err = %v, want 409", err)
+	} else if want := "This subscription is scheduled to cancel on a set date. Undo the scheduled cancellation first, then extend the trial."; !strings.Contains(err.Error(), want) {
+		t.Fatalf("ExtendTrial refusal text = %q, want it to contain %q", err.Error(), want)
 	}
 }

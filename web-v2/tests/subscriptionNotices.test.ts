@@ -97,9 +97,9 @@ test('scheduled cancel: trial end is free, otherwise period end or the explicit 
 })
 
 test('collection paused: names the auto-resume date only when there is one', () => {
-  assert.equal(collectionPausedSentence(), 'Invoices will generate as drafts and skip charge until resumed.')
+  assert.equal(collectionPausedSentence(), 'New invoices are saved as drafts and not charged.')
   assert.equal(
     collectionPausedSentence('Nov 1'),
-    'Invoices will generate as drafts and skip charge until resumed (auto-resumes Nov 1).',
+    'New invoices are saved as drafts and not charged. Collection resumes Nov 1.',
   )
 })
