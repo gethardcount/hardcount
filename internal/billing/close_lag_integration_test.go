@@ -479,6 +479,41 @@ func TestTrialFlipAfterResume_FirstInvoiceReadsPauseAtTrialEnd(t *testing.T) {
 		"the period began at trial end, while collection was paused (resumes_at trial end+30m)")
 }
 
+// TestTrialFlipAfterResume_ResumerRunsFirst: the trial flip is late (its scan
+// is batched and can fail), so the pause resumer reaches the subscription
+// first, past resumes_at. It must hold the pause while the trial that ended
+// before resumes_at is unflipped; otherwise the flip reads no pause and
+// finalizes, and the sweep charges, a period that began while paused.
+//
+// Mutation seam: drop the trialing arm from resumeNotWaitingOnCloseSQL → the
+// resumer clears the pause and the invoice is finalized.
+func TestTrialFlipAfterResume_ResumerRunsFirst(t *testing.T) {
+	r := newCancelRig(t, "trial flip after the resumer")
+	trialEnd := r.f.cycleStart.Add(48 * time.Hour)
+	r.trialFlipRig(t, trialEnd, trialEnd.Add(30*time.Minute))
+
+	if _, errs := r.f.subSvc.ProcessExpiredPauseCollections(r.at(trialEnd.Add(45*time.Minute)), 100); len(errs) != 0 {
+		t.Fatalf("pause resumer: %v", errs)
+	}
+	if sub := r.sub(t); sub.PauseCollection == nil {
+		t.Fatalf("the resumer cleared the pause while the trial that ended before resumes_at was unflipped")
+	}
+	if n, errs := r.f.subSvc.ProcessExpiredTrials(r.at(trialEnd.Add(50*time.Minute)), 100); n != 1 || len(errs) != 0 {
+		t.Fatalf("trial expiry: flipped=%d errs=%v, want 1 and none", n, errs)
+	}
+	invs, _ := r.liveInvoices(t)
+	wantStatus(t, invoiceFor(t, invs, trialEnd, trialEnd.AddDate(0, 1, 0)), domain.InvoiceDraft,
+		"the period began at trial end, while collection was paused (resumes_at trial end+30m)")
+
+	// Flipped: the hold is gone and the next pass clears the pause.
+	if _, errs := r.f.subSvc.ProcessExpiredPauseCollections(r.at(trialEnd.Add(55*time.Minute)), 100); len(errs) != 0 {
+		t.Fatalf("pause resumer after the flip: %v", errs)
+	}
+	if sub := r.sub(t); sub.PauseCollection != nil {
+		t.Fatalf("pause still held after the trial flipped, want it cleared")
+	}
+}
+
 // TestTrialFlipAfterResume_TestClock: the same on a test clock, one advance
 // from before the trial end to past resumes_at (Phase 0.5).
 func TestTrialFlipAfterResume_TestClock(t *testing.T) {

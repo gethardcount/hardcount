@@ -1373,11 +1373,15 @@ func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clo
 // instant equal to resumes_at bills as resumed. The status and cancel
 // arms mirror the due scans (GetDueBilling), so a subscription the billing
 // run will never close again (canceled) is not held. A parked billing
-// failure holds the pause until the period is billed.
+// failure holds the pause until the period is billed. A trial that ended
+// before resumes_at but has not been flipped yet (the trial scan is batched
+// and can fail) holds it too: the flip's first invoice reads the pause at
+// trial end, and next_billing_at alone lies past the trial.
 func resumeNotWaitingOnCloseSQL(a string) string {
 	return `NOT (` + a + `.status IN ('active', 'trialing') AND (
 			(` + a + `.next_billing_at IS NOT NULL AND ` + a + `.next_billing_at < ` + a + `.pause_collection_resumes_at)
-			OR (` + a + `.status = 'active' AND ` + a + `.cancel_at IS NOT NULL AND ` + a + `.cancel_at < ` + a + `.pause_collection_resumes_at)))`
+			OR (` + a + `.status = 'active' AND ` + a + `.cancel_at IS NOT NULL AND ` + a + `.cancel_at < ` + a + `.pause_collection_resumes_at)
+			OR (` + a + `.status = 'trialing' AND ` + a + `.trial_end_at IS NOT NULL AND ` + a + `.trial_end_at < ` + a + `.pause_collection_resumes_at)))`
 }
 
 // ListExpiredPauseCollections returns wall-clock subs whose
