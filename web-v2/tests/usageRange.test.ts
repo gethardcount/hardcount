@@ -80,3 +80,25 @@ test('the caption names the window, and never reads back the word "custom"', () 
     assert.doesNotMatch(rangeCaption(k, noCustom), /custom/i, `caption for ${k} leaks the mode name`)
   }
 })
+
+// An empty page under the default 30-day window said "No usage events yet"
+// to operators whose events were older; and an export over 50,000 rows
+// stopped silently.
+import { usageEmptyKind, exportCapNotice } from '../src/lib/usageRange.ts'
+
+test('empty Usage page: none yet only for all time with no filters', () => {
+  assert.equal(usageEmptyKind('all', {}), 'none-yet')
+  assert.equal(usageEmptyKind('30d', {}), 'no-match')
+  assert.equal(usageEmptyKind('all', { meter: 'mtr_1' }), 'no-match')
+  assert.equal(usageEmptyKind('all', { dim: 'model=gpt-4' }), 'no-match')
+  assert.equal(usageEmptyKind('custom', {}), 'no-match')
+})
+
+test('export cap: a notice only when more events match than the file holds', () => {
+  assert.equal(exportCapNotice(50_000), null)
+  assert.equal(exportCapNotice(12), null)
+  assert.deepEqual(exportCapNotice(73_210), {
+    title: 'Exported the newest 50,000 events',
+    description: '73,210 events match. Export a shorter date range to get the rest.',
+  })
+})

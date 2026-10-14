@@ -9,6 +9,7 @@ import { showApiError } from '@/lib/formErrors'
 import { money, priceRate, unitScale } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
 import { Layout } from '@/components/Layout'
+import { LoadError } from '@/components/LoadError'
 import { statusBadgeVariant } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
@@ -101,18 +102,14 @@ export default function MeterDetailPage() {
     enabled: !!id,
   })
 
-  // Multi-dimensional pricing rules. Falls back to an empty list when the
-  // backend endpoint isn't deployed yet — keeps the page usable on tenants
-  // running pre-multi-dim builds.
-  const { data: rules } = useQuery({
+  // Multi-dimensional pricing rules. A failed load shows as a load error,
+  // never as an empty list: "No dimension-matched rules" on a failure told
+  // the operator every event used the default price when that was unknown.
+  const { data: rules, error: rulesError, refetch: refetchRules } = useQuery({
     queryKey: ['meter-pricing-rules', id],
-    queryFn: async () => {
-      try {
-        const res = await api.listMeterPricingRules(id!)
-        return res.data ?? []
-      } catch {
-        return [] as MeterPricingRule[]
-      }
+    queryFn: async (): Promise<MeterPricingRule[]> => {
+      const res = await api.listMeterPricingRules(id!)
+      return res.data ?? []
     },
     enabled: !!id,
   })
@@ -123,7 +120,6 @@ export default function MeterDetailPage() {
   })
 
   const loading = meterLoading
-  const error = meterError instanceof Error ? meterError.message : meterError ? String(meterError) : null
 
   const graduatedTierLabel = (tier: { up_to: number }, index: number, tiers: { up_to: number }[]) => {
     const prev = index > 0 ? tiers[index - 1].up_to : 0
@@ -156,13 +152,10 @@ export default function MeterDetailPage() {
     )
   }
 
-  if (error) {
+  if (meterError) {
     return (
       <Layout>
-        <div className="py-16 text-center">
-          <p className="text-sm text-destructive mb-3">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
-        </div>
+        <LoadError what="this meter" error={meterError} onRetry={() => refetch()} className="py-16" />
       </Layout>
     )
   }
@@ -326,7 +319,13 @@ export default function MeterDetailPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {rules && rules.length > 0 ? (
+          {rulesError ? (
+            <LoadError what="this meter's prices" error={rulesError} onRetry={() => refetchRules()} />
+          ) : !rules ? (
+            <div className="flex justify-center px-6 py-8">
+              <Loader2 size={16} className="animate-spin text-muted-foreground" aria-label="Loading" />
+            </div>
+          ) : rules.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>

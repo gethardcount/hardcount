@@ -11,6 +11,7 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { priceRate } from '@/lib/priceDisplay'
 import { meterAggregationLabel } from '@/lib/meterLabels'
 import { Layout } from '@/components/Layout'
+import { LoadError } from '@/components/LoadError'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { statusBadgeVariant } from '@/lib/status'
 
@@ -177,7 +178,6 @@ export default function PlanDetailPage() {
   }
 
   const loading = isLoading
-  const error = loadError instanceof Error ? loadError.message : loadError ? String(loadError) : null
 
   usePageTitle(plan?.name)
 
@@ -189,13 +189,10 @@ export default function PlanDetailPage() {
     )
   }
 
-  if (error) {
+  if (loadError) {
     return (
       <Layout>
-        <div className="py-16 text-center">
-          <p className="text-sm text-destructive mb-3">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
-        </div>
+        <LoadError what="this plan" error={loadError} onRetry={() => refetch()} className="py-16" />
       </Layout>
     )
   }

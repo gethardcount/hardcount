@@ -9,13 +9,13 @@ import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
 import { Layout } from '@/components/Layout'
+import { LoadError } from '@/components/LoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Info } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -88,7 +88,6 @@ export default function DashboardPage() {
   const resolveNow = useEffectiveNowResolver()
 
   const chartData = useMemo(() => chartRes?.data ?? [], [chartRes])
-  const error = errorObj instanceof Error ? errorObj.message : errorObj ? String(errorObj) : null
 
   const sparklineRevenue = useMemo(
     () => chartData.map(d => d.revenue_cents).slice(-12),
@@ -98,7 +97,10 @@ export default function DashboardPage() {
   // Attention items surface things the operator should act on. Empty list = quiet state.
   const alerts = useMemo(() => {
     if (!overview) return []
-    const items: { severity: 'warning' | 'danger'; text: string; to?: string }[] = []
+    // Tone follows urgency: failed payments and stuck refunds are money at
+    // risk (red); invoices in payment retry need watching (amber, the same
+    // colour as the sidebar count); open invoices are normal (neutral).
+    const items: { severity: AlertSeverity; text: string; to?: string }[] = []
     if (overview.failed_payments > 0) {
       items.push({
         severity: 'danger',
@@ -129,7 +131,7 @@ export default function DashboardPage() {
     const outstanding = overview.outstanding_by_currency ?? []
     if (overview.open_invoices > 0 && outstanding.some(a => a.amount_cents > 0)) {
       items.push({
-        severity: 'warning',
+        severity: 'info',
         text: outstandingText(overview.open_invoices, outstanding),
         to: '/invoices?status=finalized',
       })
@@ -155,11 +157,10 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {error ? (
+      {errorObj ? (
         <Card className="mt-6">
-          <CardContent className="p-8 text-center">
-            <p className="text-sm text-destructive mb-3">{error}</p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+          <CardContent className="p-0">
+            <LoadError what="the dashboard" error={errorObj} onRetry={() => refetch()} />
           </CardContent>
         </Card>
       ) : overviewLoading || !overview ? (
@@ -352,12 +353,21 @@ export default function DashboardPage() {
   )
 }
 
-function AlertRow({ severity, text, to }: { severity: 'warning' | 'danger'; text: string; to?: string }) {
-  const bg = severity === 'danger' ? 'bg-destructive/5 border-destructive/20' : 'bg-amber-500/5 border-amber-500/20'
-  const iconColor = severity === 'danger' ? 'text-destructive' : 'text-amber-600 dark:text-amber-400'
+type AlertSeverity = 'info' | 'warning' | 'danger'
+
+function AlertRow({ severity, text, to }: { severity: AlertSeverity; text: string; to?: string }) {
+  const bg =
+    severity === 'danger' ? 'bg-destructive/5 border-destructive/20'
+    : severity === 'warning' ? 'bg-amber-500/5 border-amber-500/20'
+    : 'bg-muted/40 border-border'
+  const iconColor =
+    severity === 'danger' ? 'text-destructive'
+    : severity === 'warning' ? 'text-amber-600 dark:text-amber-400'
+    : 'text-muted-foreground'
+  const Icon = severity === 'info' ? Info : AlertTriangle
   const content = (
     <div className={cn('flex items-center gap-2 px-4 py-2 rounded-md border text-sm', bg)}>
-      <AlertTriangle size={14} className={iconColor} aria-hidden />
+      <Icon size={14} className={iconColor} aria-hidden />
       <span className="text-foreground flex-1">{text}</span>
       {to && <span className="text-xs text-muted-foreground">Open →</span>}
     </div>

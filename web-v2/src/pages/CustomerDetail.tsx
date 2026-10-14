@@ -21,6 +21,7 @@ import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
 import { PriceOverridesCard } from '@/components/PriceOverridesCard'
 import { CostDashboard } from '@/components/CostDashboard'
 import { TestClockBanner } from '@/components/TestClockBanner'
+import { Callout } from '@/components/Callout'
 import { CreateSubscriptionDialog } from '@/components/CreateSubscriptionDialog'
 import { cn } from '@/lib/utils'
 import { customerNeedsPaymentMethod } from '@/lib/paymentReadiness'
@@ -46,7 +47,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 
-import { Loader2, Pencil, CreditCard, Archive, Wand2, FilePlus2, Plus, Trash2, ChevronDown, ChevronRight, History, AlertTriangle } from 'lucide-react'
+import { Loader2, Pencil, CreditCard, Archive, Wand2, FilePlus2, Plus, Trash2, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
@@ -955,17 +956,9 @@ export default function CustomerDetailPage() {
         <CardContent className="p-0">
           {paymentMethods.length === 0 ? (
             needsCard ? (
-              <div className="mx-6 my-4 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3">
-                <div className="flex items-start gap-2.5">
-                  <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-800 dark:text-amber-400">No payment method on file</p>
-                    <p className="text-xs text-amber-700/90 dark:text-amber-500/90 mt-0.5">
-                      This customer has an active subscription that bills automatically. Add a card so renewal charges can be collected — without one, the next invoice will need manual follow-up.
-                    </p>
-                  </div>
-                </div>
-              </div>
+              <Callout tone="amber" className="mx-6 my-4" title="No payment method on file">
+                This customer has an active subscription that bills automatically. Add a card so renewal charges can be collected — without one, the next invoice will need manual follow-up.
+              </Callout>
             ) : (
               <div className="px-6 py-8 text-center">
                 <CreditCard size={28} className="text-muted-foreground mx-auto mb-2" />

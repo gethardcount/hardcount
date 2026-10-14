@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 
 import { api, formatDateTime, getTenantTimezone, type TestClock, type AdvanceSummary } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
+import { cn } from '@/lib/utils'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { Layout } from '@/components/Layout'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
@@ -53,10 +54,12 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
       : `Advanced ${formatDateTime(summary.advanced_from)} → ${formatDateTime(summary.advanced_to)}`
 
   return (
-    <Card className="mt-4 border-amber-300/60 bg-amber-50/60 dark:bg-amber-500/5">
+    // A finished advance is information: neutral card. Amber only when the
+    // advance ended with an error, and then only on the line that says so.
+    <Card className={cn('mt-4', summary.had_errors && 'border-amber-300 dark:border-amber-500/30')}>
       <CardContent className="px-6 py-5">
         <div className="flex items-center gap-2">
-          <FastForward size={16} className="text-amber-600" />
+          <FastForward size={16} className="text-muted-foreground" />
           <p className="text-sm font-semibold text-foreground">Last advance results</p>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{span}</p>
@@ -75,7 +78,8 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
           </dl>
         )}
         {summary.had_errors && (
-          <p className="mt-3 text-xs text-amber-700 dark:text-amber-500">
+          <p className="mt-3 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
             This advance ended with an error — the counts above reflect only the work that
             completed before it failed.
           </p>

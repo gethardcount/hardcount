@@ -6,21 +6,20 @@ import { api, formatCents, type Invoice } from '@/lib/api'
 import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
 import type {
   AttentionAction,
-  AttentionSeverity,
 } from '@/lib/api'
 import { formatDate, formatDateTime } from '@/lib/api'
 import { timeAgo, isOlderThan, type EffectiveNow } from '@/lib/effectiveNow'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { Callout } from '@/components/Callout'
+import { toneForSeverity } from '@/lib/calloutTone'
+import { attentionReasonLabel, supportCodeLine } from '@/lib/attentionLabels'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
 
 // InvoiceAttention is the unified "this invoice needs operator
-// attention" banner. Reads server-derived invoice.attention and
-// renders nothing when absent (healthy or terminal-state). Mirrors
-// Stripe's invoice banner pattern — severity-tinted card, reason
-// badge, headline message, prescribed actions, optional doc-link and
-// raw-detail disclosure.
+// attention" notice, drawn with the shared Callout. Reads server-derived
+// invoice.attention and renders nothing when absent (healthy or
+// terminal-state): reason label as the title, the server's message,
+// prescribed actions, and a collapsed Details holding the explanation and
+// the support code.
 //
 // Stays purely presentational: the typed reason / action / severity
 // codes come from the server via ADR-009. Adding a new code on the
@@ -60,125 +59,104 @@ export function InvoiceAttention({
   const att = invoice.attention
   if (!att) return null
 
-  const styles = severityStyles(att.severity)
+  const tone = toneForSeverity(att.severity)
   const Icon = severityIcons[att.severity] ?? Info
+  const supportCode = supportCodeLine(att.code)
 
   return (
-    <Card className={cn('mb-6', styles.card)}>
-      <CardContent className="p-5 space-y-4">
-        <div className="flex items-start gap-3">
-          <Icon size={18} className={cn('mt-0.5 shrink-0', styles.icon)} />
-          <div className="flex-1 space-y-1.5 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Badge variant="outline" className={cn('text-xs', styles.badge)}>
-                {humanReason(att.reason, att.code)}
-              </Badge>
-              {/* `since` reads as duration but is sourced from
-                  inv.UpdatedAt — for fresh invoices that's the
-                  finalize moment. Hide for the first 24h to avoid the
-                  misleading "since 5m ago" copy on a just-finalized
-                  invoice; surface only when the state has actually
-                  persisted long enough to matter. */}
-              {att.since && isOlderThan(att.since, 24 * 60 * 60 * 1000, now) && (
-                <span className="text-[10px] text-muted-foreground">
-                  · since {timeAgo(att.since, now)}
-                </span>
-              )}
-            </div>
-            {/* Tech code — useful for support tickets but visually
-                noisy at the headline. Demoted to a small disclosure
-                under the actions row (line ~110) so the human-readable
-                badge + message dominate the banner. */}
-            <p className="text-sm text-foreground">{att.message}</p>
-            {att.next_attempt_at && (
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Calendar size={11} className="shrink-0" />
-                Engine will retry: <span className="text-foreground">{formatDateTime(att.next_attempt_at)}</span>
-              </p>
-            )}
-            {att.due_by && (
-              // Date-only on purpose. due_at is computed as
-              // finalize_at + net_payment_term_days; that arithmetic
-              // carries finalize-time hour precision (e.g. "8:16 PM
-              // GMT+5:30") which is meaningless to operators or
-              // customers — the deadline is "this calendar date".
-              // Stripe's banner uses date-only too.
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Calendar size={11} className="shrink-0" />
-                Due by: <span className="text-foreground">{formatDate(att.due_by)}</span>
-              </p>
-            )}
-          </div>
-        </div>
-
-        {(att.actions?.length ?? 0) > 0 && (
-          <div className="flex items-center gap-2 flex-wrap pl-7">
-            {att.actions!.map((action, idx) => (
-              <ActionButton
-                key={action.code}
-                action={action.code}
-                label={action.label}
-                primary={idx === 0}
-                invoice={invoice}
-                onRetryTax={onRetryTax}
-                onChargeNow={onChargeNow}
-                onSendReminder={onSendReminder}
-                onVoidInvoice={onVoidInvoice}
-                retrying={retrying}
-                charging={charging}
-                sending={sending}
-              />
-            ))}
-            {/* att.doc_url is not rendered: the pages it points at are not
-                published yet, so a "Learn more" button would open a dead
-                link. Restore the button when they exist. */}
-          </div>
-        )}
-
-        {/* The auto-collect ("attaching a card auto-charges…") reassurance
-            is SERVER-OWNED — it lives inside att.message, where it is
-            clock-aware (wall tick vs next test-clock advance). A second
-            hardcoded copy here drifted from that truth and repeated the
-            promise twice in one banner (2026-07-22 audit, P1-1/P2-1). */}
-
-        {/* Tech code — useful for support tickets, demoted from the
-            headline. Shown inline-mono next to the doc anchor so a
-            screenshot sent to support carries the routing hint. */}
-        {att.code && (
-          <p className="text-[10px] text-muted-foreground/60 font-mono pl-7">
-            {att.code}
-          </p>
-        )}
-
-        {/* Two distinct disclosures (ADR-025):
-            - "Detail" carries Velox's own framing (operator-safe).
-            - "Provider response" carries the literal upstream payload
-              from a third-party (Stripe etc.). Populated only when we
-              actually called the provider — pre-flight classification
-              errors render no disclosure at all. Honest labeling so an
-              operator never wonders "is this Velox talking or Stripe?" */}
-        {att.detail && (
-          <details className="pl-7 text-xs text-muted-foreground">
-            <summary className="cursor-pointer hover:text-foreground">
-              Detail
-            </summary>
-            <pre className="mt-2 p-2 bg-muted/50 rounded text-[10px] font-mono overflow-x-auto whitespace-pre-wrap break-all max-w-xl">
-              {att.detail}
-            </pre>
-          </details>
-        )}
-        {att.provider_response && (
-          <details className="pl-7 text-xs text-muted-foreground">
-            <summary className="cursor-pointer hover:text-foreground">
-              Provider response
-            </summary>
-            <pre className="mt-2 p-2 bg-muted/50 rounded text-[10px] font-mono overflow-x-auto whitespace-pre-wrap break-all max-w-xl">
-              {att.provider_response}
-            </pre>
-          </details>
-        )}
-      </CardContent>
-    </Card>
+    <Callout
+      tone={tone}
+      icon={Icon}
+      className="mb-6"
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          {attentionReasonLabel(att.reason, att.code)}
+          {/* `since` reads as duration but is sourced from
+              inv.UpdatedAt — for fresh invoices that's the
+              finalize moment. Hide for the first 24h to avoid the
+              misleading "since 5m ago" copy on a just-finalized
+              invoice; surface only when the state has actually
+              persisted long enough to matter. */}
+          {att.since && isOlderThan(att.since, 24 * 60 * 60 * 1000, now) && (
+            <span className="text-xs font-normal text-muted-foreground">
+              · since {timeAgo(att.since, now)}
+            </span>
+          )}
+        </span>
+      }
+      actions={(att.actions?.length ?? 0) > 0 ? (
+        <>
+          {att.actions!.map((action, idx) => (
+            <ActionButton
+              key={action.code}
+              action={action.code}
+              label={action.label}
+              primary={idx === 0}
+              invoice={invoice}
+              onRetryTax={onRetryTax}
+              onChargeNow={onChargeNow}
+              onSendReminder={onSendReminder}
+              onVoidInvoice={onVoidInvoice}
+              retrying={retrying}
+              charging={charging}
+              sending={sending}
+            />
+          ))}
+          {/* att.doc_url is not rendered: the pages it points at are not
+              published yet, so a "Learn more" button would open a dead
+              link. Restore the button when they exist. */}
+        </>
+      ) : undefined}
+      // Details (ADR-025): Velox's own framing (att.detail) as plain text,
+      // then the support code. The code used to sit on screen in grey mono
+      // under the buttons; it only helps support, so it lives here, where a
+      // screenshot of the opened notice still carries it.
+      details={att.detail || supportCode ? (
+        <>
+          {att.detail && <p className="whitespace-pre-wrap break-words">{att.detail}</p>}
+          {supportCode && <p>{supportCode}</p>}
+        </>
+      ) : undefined}
+      // "Provider response" is the literal upstream payload from a third
+      // party (Stripe etc.), kept in its own disclosure so an operator never
+      // wonders "is this Velox talking or Stripe?". Populated only when we
+      // actually called the provider.
+      footer={att.provider_response ? (
+        <details className="pt-1 text-xs text-muted-foreground">
+          <summary className="cursor-pointer hover:text-foreground">
+            Provider response
+          </summary>
+          <pre className="mt-2 p-2 bg-muted/50 rounded text-[10px] font-mono overflow-x-auto whitespace-pre-wrap break-all max-w-xl">
+            {att.provider_response}
+          </pre>
+        </details>
+      ) : undefined}
+    >
+      {/* The auto-collect ("attaching a card auto-charges…") reassurance
+          is SERVER-OWNED — it lives inside att.message, where it is
+          clock-aware (wall tick vs next test-clock advance). A second
+          hardcoded copy here drifted from that truth and repeated the
+          promise twice in one banner (2026-07-22 audit, P1-1/P2-1). */}
+      <p className="text-foreground">{att.message}</p>
+      {att.next_attempt_at && (
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <Calendar size={11} className="shrink-0" />
+          Engine will retry: <span className="text-foreground">{formatDateTime(att.next_attempt_at)}</span>
+        </p>
+      )}
+      {att.due_by && (
+        // Date-only on purpose. due_at is computed as
+        // finalize_at + net_payment_term_days; that arithmetic
+        // carries finalize-time hour precision (e.g. "8:16 PM
+        // GMT+5:30") which is meaningless to operators or
+        // customers — the deadline is "this calendar date".
+        // Stripe's banner uses date-only too.
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <Calendar size={11} className="shrink-0" />
+          Due by: <span className="text-foreground">{formatDate(att.due_by)}</span>
+        </p>
+      )}
+    </Callout>
   )
 }
 
@@ -357,30 +335,6 @@ function UpdatePaymentMethodButton({ variant, display, invoice }: { variant: 'de
   )
 }
 
-function severityStyles(s: AttentionSeverity) {
-  switch (s) {
-    case 'critical':
-      return {
-        card: 'border-destructive/40 bg-destructive/5',
-        icon: 'text-destructive',
-        badge: 'border-destructive/40 text-destructive',
-      }
-    case 'warning':
-      return {
-        card: 'border-amber-300/60 bg-amber-50/40 dark:bg-amber-950/20',
-        icon: 'text-amber-600 dark:text-amber-400',
-        badge: 'border-amber-300 text-amber-700 dark:text-amber-400',
-      }
-    case 'info':
-    default:
-      return {
-        card: 'border-border bg-muted/30',
-        icon: 'text-muted-foreground',
-        badge: 'border-border text-muted-foreground',
-      }
-  }
-}
-
 // Module-scope lookup (not a function called during render): these are
 // references to existing icon components, and a plain index makes that
 // visible to both readers and the react-hooks/static-components rule —
@@ -390,36 +344,6 @@ const severityIcons: Record<string, typeof Info> = {
   critical: AlertCircle,
   warning: AlertTriangle,
   info: Info,
-}
-
-// humanReason maps a typed reason code to dashboard-display copy.
-// Server sends the typed code; the UI owns its own label so wording
-// changes don't require a server roll.
-function humanReason(reason: string, code?: string): string {
-  // A PARKED invoice shares the payment_unconfirmed REASON with a charge that is
-  // genuinely still being confirmed, but they are opposite situations — one
-  // resolves itself, the other never will. The server distinguishes them by
-  // CODE, so the chip does too: labelling a permanently stuck invoice
-  // "Payment unconfirmed" reads as "hang on a moment" (found walking the page
-  // as an operator, 2026-07-31).
-  if (code === 'payment.unidentifiable') return 'Payment unidentifiable'
-  const map: Record<string, string> = {
-    tax_calculation_failed: 'Tax calculation failed',
-    tax_location_required: 'Customer address required',
-    payment_failed: 'Payment failed',
-    payment_unconfirmed: 'Payment unconfirmed',
-    payment_processing: 'Payment processing',
-    payment_scheduled: 'Auto-charge scheduled',
-    awaiting_payment: 'Awaiting first charge',
-    no_payment_method: 'No payment method',
-    dunning_exhausted: 'Payment recovery ended',
-    collection_paused: 'Collection paused',
-    // Operator language, not ledger language. "Commit exposure" is the term the
-    // ADR and the schema use; a finance operator reading a chip needs the plain
-    // fact — an invoice went unpaid and the credit it bought is already live.
-    commit_exposure: 'Unpaid prepaid credit',
-  }
-  return map[reason] ?? reason
 }
 
 function defaultLabel(action: AttentionAction): string {

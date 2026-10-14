@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { authApi, type SessionInfo } from '@/lib/auth'
 import { ApiError } from '@/lib/api'
 import { confirmSessionKept } from '@/lib/sessionKept'
+import { createSessionEndWatcher, installSessionEndWatcher } from '@/lib/sessionEnd'
 
 // AuthContext exposes the resolved session context to the rest of the
 // dashboard. Per ADR-011, the dashboard signs in via email + password;
@@ -21,6 +22,9 @@ export interface UserContext {
 interface AuthState {
   user: UserContext | null
   loading: boolean
+  // True after a session ended while the dashboard was open (not after a
+  // deliberate sign-out). The sign-in page says so; cleared on sign-in.
+  sessionEnded: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
@@ -65,11 +69,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // router; the check is per page load, which is what the probe is too.
   const skipProbe = isCustomerTokenRoute(window.location.pathname)
   const [loading, setLoading] = useState(!skipProbe)
+  const [sessionEnded, setSessionEnded] = useState(false)
+
+  // The api client reports every 401; the watcher confirms with whoami and,
+  // when the session really is gone, clears the user. ProtectedRoute then
+  // sends the operator to sign-in, remembering the page for after.
+  const userRef = useRef<UserContext | null>(null)
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
+  useEffect(() => {
+    installSessionEndWatcher(createSessionEndWatcher({
+      isSignedIn: () => userRef.current !== null,
+      confirm: authApi.whoami,
+      isUnauthorized: err => err instanceof ApiError && err.status === 401,
+      onEnded: () => {
+        setSessionEnded(true)
+        setUser(null)
+      },
+    }))
+    return () => installSessionEndWatcher(null)
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
       const info = await authApi.whoami()
-      setUser(toUserContext(info))
+      const next = toUserContext(info)
+      if (next) setSessionEnded(false)
+      setUser(next)
     } catch (err) {
       // 401 means no session — the user will be sent to /login by
       // ProtectedRoute. Anything else is logged but treated the same
@@ -98,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // login just set (a Secure cookie over plain HTTP); the sign-in page
     // explains it instead of bouncing back to itself.
     await confirmSessionKept(authApi.whoami, err => err instanceof ApiError && err.status === 401)
+    setSessionEnded(false)
     setUser({
       user_id: res.user_id,
       tenant_id: res.tenant_id,
@@ -200,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh, setMode }}>
+    <AuthContext.Provider value={{ user, loading, sessionEnded, login, logout, refresh, setMode }}>
       {children}
     </AuthContext.Provider>
   )

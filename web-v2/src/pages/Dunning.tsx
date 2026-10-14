@@ -16,6 +16,7 @@ import { effectiveNow, sinceMs, untilMs, type EffectiveNow } from '@/lib/effecti
 import { Layout } from '@/components/Layout'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { showApiError } from '@/lib/formErrors'
+import { dunningReasonLabel } from '@/lib/dunningReasons'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { atRiskText, dunningAmountDue } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -401,11 +402,13 @@ function RunsTab() {
                               <div className="px-12 py-4 border-t border-border">
                                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Recovery timeline</p>
                                 <RunTimeline events={runEvents[run.id]} run={run} />
+                                {/* run.reason is why recovery started (a failed
+                                    charge or no card on file), not a failure in
+                                    itself: a neutral row, in words. */}
                                 {run.reason && (
-                                  <div className="mt-3 bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
-                                    <p className="text-xs font-medium text-destructive">Last failure reason</p>
-                                    <p className="text-xs text-destructive/80 mt-0.5">{run.reason}</p>
-                                  </div>
+                                  <p className="mt-3 text-xs text-muted-foreground">
+                                    Why recovery started: <span className="text-foreground">{dunningReasonLabel(run.reason)}</span>
+                                  </p>
                                 )}
                               </div>
                             </TableCell>
@@ -531,7 +534,7 @@ function RunTimeline({ events }: { events?: DunningEvent[]; run: DunningRun }) {
                   <span className="text-xs text-muted-foreground">Attempt {ev.attempt_count}</span>
                 )}
               </div>
-              {ev.reason && <p className="text-xs text-muted-foreground mt-0.5">{ev.reason}</p>}
+              {ev.reason && <p className="text-xs text-muted-foreground mt-0.5">{dunningReasonLabel(ev.reason)}</p>}
               <p className="text-xs text-muted-foreground mt-0.5">{formatDateTime(ev.created_at)}</p>
             </div>
           </div>

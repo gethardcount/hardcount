@@ -11,6 +11,7 @@ import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
 import { TestClockBanner } from '@/components/TestClockBanner'
+import { Callout } from '@/components/Callout'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { cn } from '@/lib/utils'
@@ -36,7 +37,7 @@ import { TypedConfirmDialog } from '@/components/TypedConfirmDialog'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Loader2, Plus, HelpCircle, History, AlertTriangle } from 'lucide-react'
+import { Loader2, Plus, HelpCircle, History } from 'lucide-react'
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
@@ -427,107 +428,99 @@ export default function SubscriptionDetailPage() {
       {/* Billing is failing for this subscription: no invoice is being
           written. Says why, what happens next, and offers the retry. */}
       {sub.billing_failure && (
-        <div className="mb-6 rounded-md border border-red-300 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle size={16} className="text-red-500 mt-0.5 shrink-0" />
-              <div className="text-sm text-red-900 dark:text-red-300">
-                <span className="font-medium">
-                  {sub.billing_failure.parked ? 'Billing has stopped for this subscription' : 'Billing is failing for this subscription'}
-                </span>
-                <p className="text-xs text-red-800/90 dark:text-red-400/90 mt-0.5">
-                  {sub.billing_failure.last_error}
-                </p>
-                <p className="text-xs text-red-800/90 dark:text-red-400/90 mt-1">
-                  {sub.billing_failure.parked
-                    ? <>It failed {sub.billing_failure.attempts} times, last on {formatDateTime(sub.billing_failure.failed_at)}. No invoice will be created until you retry.</>
-                    : <>Attempt {sub.billing_failure.attempts} of {sub.billing_failure.max_attempts} failed on {formatDateTime(sub.billing_failure.failed_at)}.{sub.billing_failure.next_attempt_at && <> The next automatic attempt is after {formatDateTime(sub.billing_failure.next_attempt_at)}.</>}</>}
-                </p>
-              </div>
-            </div>
-            <Button size="sm" variant="outline" className="shrink-0" disabled={retryBillingMutation.isPending} onClick={() => retryBillingMutation.mutate()}>
+        <Callout
+          tone="red"
+          className="mb-6"
+          title={sub.billing_failure.parked ? 'Billing has stopped for this subscription' : 'Billing is failing for this subscription'}
+          actions={
+            <Button size="sm" variant="outline" disabled={retryBillingMutation.isPending} onClick={() => retryBillingMutation.mutate()}>
               {retryBillingMutation.isPending && <Loader2 size={14} className="mr-2 animate-spin" />}
               Retry billing
             </Button>
-          </div>
-        </div>
+          }
+        >
+          <p>{sub.billing_failure.last_error}</p>
+          <p className="text-xs">
+            {sub.billing_failure.parked
+              ? <>It failed {sub.billing_failure.attempts} times, last on {formatDateTime(sub.billing_failure.failed_at)}. No invoice will be created until you retry.</>
+              : <>Attempt {sub.billing_failure.attempts} of {sub.billing_failure.max_attempts} failed on {formatDateTime(sub.billing_failure.failed_at)}.{sub.billing_failure.next_attempt_at && <> The next automatic attempt is after {formatDateTime(sub.billing_failure.next_attempt_at)}.</>}</>}
+          </p>
+        </Callout>
       )}
 
       {/* No card on file — this subscription bills automatically. Fires
           before the first invoice (the reactive no-payment-method invoice
           banner takes over after finalize). */}
       {subNeedsCard && (
-        <div className="mb-6 rounded-md border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
-              <div className="text-sm text-amber-900 dark:text-amber-300">
-                <span className="font-medium">No card on file</span>
-                <p className="text-xs text-amber-800/90 dark:text-amber-400/90 mt-0.5">
-                  This subscription bills automatically, but the customer has no payment method saved. Add one before the next renewal so the charge goes through.
-                </p>
-              </div>
-            </div>
-            {sub.customer_id && (
-              <Button size="sm" variant="outline" className="shrink-0" onClick={() => navigate(`/customers/${sub.customer_id}`)}>
-                Add payment method
-              </Button>
-            )}
-          </div>
-        </div>
+        <Callout
+          tone="amber"
+          className="mb-6"
+          title="No card on file"
+          actions={sub.customer_id ? (
+            <Button size="sm" variant="outline" onClick={() => navigate(`/customers/${sub.customer_id}`)}>
+              Add payment method
+            </Button>
+          ) : undefined}
+        >
+          This subscription bills automatically, but the customer has no payment method saved. Add one before the next renewal so the charge goes through.
+        </Callout>
       )}
 
-      {/* Scheduled cancellation banner. Surfaces both modes (at_period_end
+      {/* Scheduled cancellation. Surfaces both modes (at_period_end
           and explicit cancel_at) with an obvious Undo so an operator who
           set this in error can clear it without guessing the API surface. */}
       {(sub.cancel_at_period_end || sub.cancel_at) && (
-        <div className="mb-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between">
-          <div className="text-sm text-amber-900">
-            <span className="font-medium">Cancellation scheduled</span>
-            {/* cancel_effective_at is the backend's authoritative answer —
-                on a TRIALING sub the flag means trial end (free), NOT the
-                first paid period's end, so deriving the date client-side
-                showed the wrong day (ADR-069). */}
-            {sub.cancel_effective_at ? (
-              sub.status === 'trialing' && sub.cancel_at_period_end
-                ? <> — at trial end ({formatDateTime(sub.cancel_effective_at)}); the customer won't be charged</>
-                : <> — {sub.cancel_at_period_end ? 'at end of current period' : 'on'} {formatDateTime(sub.cancel_effective_at)}</>
-            ) : null}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-amber-400 text-amber-900 hover:bg-amber-100"
-            onClick={() => clearScheduledCancelMutation.mutate()}
-            disabled={acting}
-          >
-            {clearScheduledCancelMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Undoing…</> : 'Undo'}
-          </Button>
-        </div>
+        <Callout
+          tone="amber"
+          className="mb-6"
+          title="Cancellation scheduled"
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => clearScheduledCancelMutation.mutate()}
+              disabled={acting}
+            >
+              {clearScheduledCancelMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Undoing…</> : 'Undo'}
+            </Button>
+          }
+        >
+          {/* cancel_effective_at is the backend's authoritative answer —
+              on a TRIALING sub the flag means trial end (free), NOT the
+              first paid period's end, so deriving the date client-side
+              showed the wrong day (ADR-069). */}
+          {sub.cancel_effective_at ? (
+            sub.status === 'trialing' && sub.cancel_at_period_end
+              ? <>At trial end ({formatDateTime(sub.cancel_effective_at)}); the customer won't be charged.</>
+              : <>{sub.cancel_at_period_end ? 'At end of current period' : 'On'} {formatDateTime(sub.cancel_effective_at)}.</>
+          ) : null}
+        </Callout>
       )}
 
-      {/* Collection-paused banner. Distinct from the hard pause (status=paused)
+      {/* Collection paused. Distinct from the hard pause (status=paused)
           — sub stays active but invoices generate as drafts and skip
-          finalize/charge/dunning until resumed. */}
+          finalize/charge/dunning until resumed. A deliberate state, so a
+          neutral notice; it had no dark-mode colours as a hand-made box. */}
       {sub.pause_collection && (
-        <div className="mb-6 rounded-md border border-blue-300 bg-blue-50 px-4 py-3 flex items-center justify-between">
-          <div className="text-sm text-blue-900">
-            <span className="font-medium">Collection paused</span>
-            {' — invoices will generate as drafts and skip charge until resumed'}
-            {sub.pause_collection.resumes_at && (
-              <> (auto-resumes {formatDateTime(sub.pause_collection.resumes_at)})</>
-            )}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-blue-400 text-blue-900 hover:bg-blue-100"
-            onClick={() => resumeCollectionMutation.mutate()}
-            disabled={acting}
-          >
-            {resumeCollectionMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Resuming…</> : 'Resume collection'}
-          </Button>
-        </div>
+        <Callout
+          className="mb-6"
+          title="Collection paused"
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => resumeCollectionMutation.mutate()}
+              disabled={acting}
+            >
+              {resumeCollectionMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Resuming…</> : 'Resume collection'}
+            </Button>
+          }
+        >
+          Invoices will generate as drafts and skip charge until resumed
+          {sub.pause_collection.resumes_at && (
+            <> (auto-resumes {formatDateTime(sub.pause_collection.resumes_at)})</>
+          )}.
+        </Callout>
       )}
 
       {/* Subscription Timeline */}

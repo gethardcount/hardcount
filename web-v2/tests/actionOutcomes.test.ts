@@ -7,7 +7,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   collectOutcome,
-  emailNotConfiguredOutcome,
   isEmailNotConfigured,
   marginCardView,
   newInvoiceOutcome,
@@ -111,15 +110,11 @@ test('new invoice: Save & send on a server without email says the invoice was fi
   assert.doesNotMatch(o.description ?? '', /Send it from the invoice page/)
 })
 
-test('email not configured: recognised by its code, shown without a success tone', () => {
+test('email not configured: recognised by its code', () => {
   assert.equal(isEmailNotConfigured({ code: 'email_not_configured', status: 409 }), true)
   assert.equal(isEmailNotConfigured({ code: 'no_email_on_file' }), false)
   assert.equal(isEmailNotConfigured(new Error('x')), false)
   assert.equal(isEmailNotConfigured(null), false)
-  const o = emailNotConfiguredOutcome()
-  assert.equal(o.tone, 'error')
-  assert.equal(o.title, 'Email not sent')
-  assert.equal(o.description, "Email isn't set up on this server, so nothing was sent.")
 })
 
 test('new invoice: a finalized invoice is never called a draft', () => {

@@ -11,6 +11,7 @@ import type { RecipePreviewResult } from '@/lib/gen/schemas/recipePreviewResult'
 import { money, priceRate } from '@/lib/priceDisplay'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
+import { LoadError } from '@/components/LoadError'
 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -35,15 +36,11 @@ export default function RecipesPage() {
   usePageTitle('Recipes')
   const [selected, setSelected] = useState<RecipeListItem | null>(null)
 
+  // Recipes are built into the server, so an empty list only ever meant the
+  // request failed. A failure now shows as one, with Retry.
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['recipes'],
-    queryFn: async () => {
-      try {
-        return await api.listRecipes()
-      } catch {
-        return { data: [] }
-      }
-    },
+    queryFn: () => api.listRecipes(),
   })
 
   const recipes = data?.data ?? []
@@ -62,9 +59,8 @@ export default function RecipesPage() {
 
       {error ? (
         <Card className="mt-6">
-          <CardContent className="p-8 text-center">
-            <p className="text-sm text-destructive mb-3">{(error as Error).message}</p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+          <CardContent className="p-0">
+            <LoadError what="recipes" error={error} onRetry={() => refetch()} />
           </CardContent>
         </Card>
       ) : isLoading ? (

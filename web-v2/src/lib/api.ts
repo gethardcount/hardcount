@@ -1,4 +1,5 @@
 import { setLastRequestId } from './lastRequestId'
+import { reportUnauthorized } from './sessionEnd'
 import { getCurrencySymbol } from './money'
 // Recipe wire types are GENERATED from api/openapi.yaml (single source of
 // truth) — the hand-written versions drifted from the server (`key` vs
@@ -117,6 +118,9 @@ export async function apiRequest<T>(method: string, path: string, body?: unknown
     const raw = typeof err.error === 'string' ? err.error : (detail?.message || `HTTP ${res.status}`)
     const requestId = detail?.request_id || headerRequestId || undefined
     if (requestId) setLastRequestId(requestId)
+    // A 401 may mean the session ended; the auth provider checks and, if
+    // so, sends the operator to sign-in (lib/sessionEnd).
+    if (res.status === 401) reportUnauthorized(path)
     throw new ApiError(humanizeError(raw), res.status, {
       field: detail?.param || undefined,
       code: detail?.code || undefined,

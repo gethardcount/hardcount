@@ -55,3 +55,18 @@ export function creditNoteReasonLabel(reason: string): string {
 export function paymentIsUnresolved(paymentStatus: string): boolean {
   return paymentStatus === 'processing' || paymentStatus === 'unknown'
 }
+
+// paymentStatusLabel names an invoice's payment_status in words, for the
+// invoice list's filter chip ("payment: unknown" showed the raw value). An
+// unrecognised value is shown as itself rather than hidden.
+export function paymentStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending': return 'Payment pending'
+    case 'processing': return 'Payment processing'
+    case 'succeeded': return 'Paid'
+    case 'failed': return 'Payment failed'
+    // Velox can't tell whether the charge went through (a parked invoice).
+    case 'unknown': return 'Payment status unknown'
+    default: return `Payment ${status.replace(/_/g, ' ')}`
+  }
+}

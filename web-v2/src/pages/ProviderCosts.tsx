@@ -4,6 +4,8 @@ import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Layout } from '@/components/Layout'
+import { LoadError } from '@/components/LoadError'
+import { showApiError } from '@/lib/formErrors'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -27,7 +29,7 @@ export default function ProviderCostsPage() {
   usePageTitle('Provider costs')
   const queryClient = useQueryClient()
 
-  const { data, isLoading } = useGetV1ProviderCosts()
+  const { data, isLoading, error: loadError, refetch } = useGetV1ProviderCosts()
   const rates = data?.data ?? []
 
   const [provider, setProvider] = useState('')
@@ -45,8 +47,7 @@ export default function ProviderCostsPage() {
         setCostPerToken('')
         toast.success('Rate saved — new usage events pick it up automatically')
       },
-      onError: (err) =>
-        toast.error(err instanceof Error ? err.message : 'Failed to save rate'),
+      onError: (err) => showApiError(err, 'Failed to save rate'),
     },
   })
   const remove = useDeleteV1ProviderCostsId({
@@ -55,8 +56,7 @@ export default function ProviderCostsPage() {
         invalidate()
         toast.success('Rate deleted — already-recorded event costs are unchanged')
       },
-      onError: (err) =>
-        toast.error(err instanceof Error ? err.message : 'Failed to delete rate'),
+      onError: (err) => showApiError(err, 'Failed to delete rate'),
     },
   })
 
@@ -140,7 +140,10 @@ export default function ProviderCostsPage() {
           <CardTitle>Current rates</CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {loadError ? (
+            // Not "No rates yet": a failed load must not look like an empty table.
+            <LoadError what="rates" error={loadError} onRetry={() => refetch()} />
+          ) : isLoading ? (
             <div className="flex justify-center p-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>

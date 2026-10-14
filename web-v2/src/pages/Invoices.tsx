@@ -2,7 +2,6 @@ import { useMemo } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, downloadPDF, formatCents } from '@/lib/api'
 import { startOfDayInTZ, endOfDayInTZ } from '@/lib/dates'
 import type { Customer, Invoice } from '@/lib/api'
@@ -13,7 +12,8 @@ import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
+import { paymentStatusLabel, statusBadgeVariant, statusBorderColor } from '@/lib/status'
+import { attentionReasonLabel } from '@/lib/attentionLabels'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { DueBadge } from '@/components/DueBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
@@ -213,8 +213,7 @@ export default function InvoicesPage() {
     try {
       await downloadServerCSV('/v1/exports/invoices.csv', 'invoices.csv')
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Export failed'
-      toast.error(msg)
+      showApiError(err, 'Export failed')
     }
   }
 
@@ -231,7 +230,7 @@ export default function InvoicesPage() {
             </span>
             {paymentStatusFilter && (
               <Badge variant="secondary" className="gap-1">
-                payment: {paymentStatusFilter}
+                {paymentStatusLabel(paymentStatusFilter)}
                 <button
                   type="button"
                   onClick={() => setUrlState({ payment_status: '', page: '1' })}
@@ -351,11 +350,11 @@ export default function InvoicesPage() {
                     : overdueFilter
                     ? 'No past-due invoices'
                     : statusFilter && paymentStatusFilter
-                    ? `No ${statusFilter} invoices with payment ${paymentStatusFilter}`
+                    ? `No ${statusFilter} invoices match “${paymentStatusLabel(paymentStatusFilter)}”`
                     : statusFilter
                     ? `No ${statusFilter} invoices`
                     : paymentStatusFilter
-                    ? `No invoices with payment ${paymentStatusFilter}`
+                    ? `No invoices match “${paymentStatusLabel(paymentStatusFilter)}”`
                     : 'No invoices match the current filters'
                 }
                 description="Try a different filter to see more results."
@@ -577,9 +576,10 @@ export default function InvoicesPage() {
 }
 
 // AttentionDot is the list-row signal that an invoice needs operator
-// attention. Severity-tinted disc, title attribute carries the typed
-// reason + message — hover surfaces the diagnosis without leaving the
-// list. The accessible name stays SHORT: the full remediation paragraph
+// attention. Severity-tinted disc; hover shows the plain reason label
+// (the same words as the invoice page notice). It used to show the raw
+// code plus the whole notice paragraph; the full message lives on the
+// invoice page. The accessible name stays SHORT: the full remediation paragraph
 // in aria-label made every row's accessible name a ~400-char read
 // (screen readers announce it per row; the full diagnosis lives on the
 // invoice page banner). Renders nothing when invoice.attention is absent.
@@ -594,8 +594,8 @@ function AttentionDot({ attention }: { attention: Invoice['attention'] }) {
   return (
     <span
       className={cn('inline-block w-1.5 h-1.5 rounded-full shrink-0', color)}
-      title={`${attention.reason} — ${attention.message}`}
-      aria-label={`Needs attention: ${attention.reason.replace(/_/g, ' ')}`}
+      title={attentionReasonLabel(attention.reason, attention.code)}
+      aria-label={`Needs attention: ${attentionReasonLabel(attention.reason, attention.code)}`}
     />
   )
 }

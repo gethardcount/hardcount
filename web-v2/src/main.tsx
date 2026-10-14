@@ -29,20 +29,40 @@ class ErrorBoundary extends Component<
 
   render() {
     if (this.state.hasError) {
+      // The raw error ("Cannot read properties of undefined") means nothing
+      // to an operator, so it sits in Details for support. A failed page
+      // download after an upgrade lands here too, and a reload fixes it.
+      const raw = this.state.error?.message
       return (
-        <div className="min-h-screen flex items-center justify-center p-8">
+        <div className="min-h-screen flex items-center justify-center p-8 bg-background">
           <div className="text-center max-w-md">
-            <h1 className="text-lg font-semibold mb-2 text-foreground">Something went wrong</h1>
-            <p className="text-sm text-muted-foreground mb-4">{this.state.error?.message}</p>
-            <button
-              onClick={() => {
-                this.setState({ hasError: false })
-                window.location.href = '/'
-              }}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm"
-            >
-              Return to Dashboard
-            </button>
+            <h1 className="text-lg font-semibold mb-2 text-foreground">This page hit an error</h1>
+            <p className="text-sm text-muted-foreground mb-4">
+              Reload to try again. If it keeps happening, send the details below to support.
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm"
+              >
+                Reload page
+              </button>
+              <button
+                onClick={() => {
+                  this.setState({ hasError: false })
+                  window.location.href = '/'
+                }}
+                className="px-4 py-2 border border-border text-foreground rounded-lg text-sm"
+              >
+                Go to Dashboard
+              </button>
+            </div>
+            {raw && (
+              <details className="mt-4 text-left text-xs text-muted-foreground">
+                <summary className="cursor-pointer text-center hover:text-foreground">Details</summary>
+                <pre className="mt-2 whitespace-pre-wrap break-words rounded bg-muted p-2 font-mono text-[11px]">{raw}</pre>
+              </details>
+            )}
           </div>
         </div>
       )
@@ -125,6 +145,7 @@ const PlanDetailPage = lazy(() => import('@/pages/PlanDetail'))
 const MeterDetailPage = lazy(() => import('@/pages/MeterDetail'))
 const OnboardingPage = lazy(() => import('@/pages/Onboarding'))
 const RecipesPage = lazy(() => import('@/pages/Recipes'))
+const NotFoundPage = lazy(() => import('@/pages/NotFound'))
 
 const App = () => (
   <ErrorBoundary>
@@ -184,6 +205,9 @@ const App = () => (
                   operator dashboard chrome. /portal/login + /portal/magic
                   are unauthenticated; /portal reads the session token from
                   localStorage and redirects to /portal/login on miss. */}
+              {/* Any other address: a mistyped or old link. Signed-out
+                  visitors sign in first, then see this page. */}
+              <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
             </Routes>
           </Suspense>
         </BrowserRouter>

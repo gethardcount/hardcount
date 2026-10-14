@@ -109,17 +109,14 @@ export function newInvoiceOutcome(invoiceNumber: string, result: NewInvoiceResul
 // Every operator email action (send invoice, resend or send a setup link, send
 // a credit note, invite a teammate) answers 409 with this code when the server
 // has no SMTP. Emails are queued, so before the refusal existed the action said
-// "sent" and the queued email then failed out of sight. Retrying cannot help,
-// so the toast carries no request ID to copy.
+// "sent" and the queued email then failed out of sight. Error toasts show the
+// server's sentence for it (lib/errorCopy, a 4xx refusal: no Copy ID); Save &
+// send reads the code to report a finalized invoice that was not emailed.
 export const EMAIL_NOT_CONFIGURED = 'email_not_configured'
 export const EMAIL_NOT_CONFIGURED_MESSAGE = "Email isn't set up on this server, so nothing was sent."
 
 export function isEmailNotConfigured(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === EMAIL_NOT_CONFIGURED
-}
-
-export function emailNotConfiguredOutcome(): Outcome {
-  return { tone: 'error', title: 'Email not sent', description: EMAIL_NOT_CONFIGURED_MESSAGE }
 }
 
 // marginCardView picks what the Margin card body shows. Without the error

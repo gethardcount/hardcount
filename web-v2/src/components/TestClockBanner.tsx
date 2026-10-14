@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FlaskConical } from 'lucide-react'
 import { api, formatDateTime, ApiError } from '@/lib/api'
+import { Callout } from '@/components/Callout'
 
 // TestClockBanner sits at the top of any detail page whose entity is
 // pinned (directly or via its subscription) to a test clock. Test
@@ -46,48 +47,47 @@ export function TestClockBanner({ testClockId }: { testClockId: string }) {
   // shouldn't be invited into a dead route.
   const clockDeleted = error instanceof ApiError && error.status === 404
 
+  // Drawn with the shared Callout. The copy is unchanged here; ADR-099
+  // decides what this banner says, and shortening it waits for that ADR's
+  // amendment.
   return (
-    <div className="mb-6 flex items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-      <FlaskConical size={16} className="shrink-0" />
-      <div className="flex-1">
-        {clockDeleted ? (
-          <>
-            <span className="font-medium">Test clock deleted.</span>{' '}
-            This record was attached to a test clock that has since been
-            deleted. Some dates below carry simulated timestamps from when
-            the clock was active — they follow the clock's calendar, not
-            today's date.
-          </>
-        ) : (
-          <>
-            <span className="font-medium">Test clock simulation.</span>{' '}
-            {clock ? (
-              <>
-                Currently at <span className="font-mono font-medium">{formatDateTime(clock.frozen_time)}</span>.
-                Dates on this page follow the clock's calendar — rows produced
-                during a clock advance (finalize, dunning runs, retries) carry
-                the simulated timestamp, with any real-world moment shown as a
-                "Recorded" line beneath.
-              </>
-            ) : (
-              <>
-                Dates on this page follow the clock's calendar — rows produced
-                during a clock advance (finalize, dunning runs, retries) carry
-                the simulated timestamp, with any real-world moment shown as a
-                "Recorded" line beneath.
-              </>
-            )}
-          </>
-        )}
-      </div>
-      {!clockDeleted && (
+    <Callout
+      tone="amber"
+      icon={FlaskConical}
+      className="mb-6"
+      title={clockDeleted ? 'Test clock deleted.' : 'Test clock simulation.'}
+      actions={!clockDeleted ? (
         <Link
           to={`/test-clocks/${testClockId}`}
-          className="shrink-0 text-xs underline-offset-2 hover:underline"
+          className="text-xs underline-offset-2 hover:underline"
         >
           View clock
         </Link>
+      ) : undefined}
+    >
+      {clockDeleted ? (
+        <>
+          This record was attached to a test clock that has since been
+          deleted. Some dates below carry simulated timestamps from when
+          the clock was active — they follow the clock's calendar, not
+          today's date.
+        </>
+      ) : clock ? (
+        <>
+          Currently at <span className="font-mono font-medium">{formatDateTime(clock.frozen_time)}</span>.
+          Dates on this page follow the clock's calendar — rows produced
+          during a clock advance (finalize, dunning runs, retries) carry
+          the simulated timestamp, with any real-world moment shown as a
+          "Recorded" line beneath.
+        </>
+      ) : (
+        <>
+          Dates on this page follow the clock's calendar — rows produced
+          during a clock advance (finalize, dunning runs, retries) carry
+          the simulated timestamp, with any real-world moment shown as a
+          "Recorded" line beneath.
+        </>
       )}
-    </div>
+    </Callout>
   )
 }

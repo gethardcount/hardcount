@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { returnPath } from '@/lib/returnPath'
+import { SESSION_ENDED_MESSAGE } from '@/lib/errorCopy'
+import { Callout } from '@/components/Callout'
 import { useAuth } from '@/contexts/AuthContext'
 import { ApiError } from '@/lib/api'
 import { SessionNotKeptError, sessionNotKeptMessage, signInRefusedMessage } from '@/lib/sessionKept'
@@ -21,7 +23,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
-  const { login } = useAuth()
+  const { login, sessionEnded } = useAuth()
   // ?reset=success is set by ResetPassword on a clean update so the
   // operator sees confirmation that the new password took effect.
   // Cleared as soon as they start typing to avoid a stale banner.
@@ -81,6 +83,12 @@ export default function LoginPage() {
                 Password updated. Sign in with your new password.
               </p>
             </div>
+          )}
+          {/* The session ended while a page was open (lib/sessionEnd). After
+              sign-in the operator returns to that page. Hidden once an error
+              shows, so only one message is on screen. */}
+          {sessionEnded && !error && !showResetSuccess && (
+            <Callout className="mb-4">{SESSION_ENDED_MESSAGE}</Callout>
           )}
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
             <div className="space-y-1.5">

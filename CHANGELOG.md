@@ -30,6 +30,14 @@ Older entries keep their original text.
 - **The customer and subscription pages show amounts in their own currency (2026-10-15).** After the default currency changed, USD invoices read "CA$". Outstanding now lists each currency, and invoices, plan prices and proration messages use their own currency. Credit balance and credit grants show in the customer's billing currency (or their invoices' currency), because credits are spent against those invoices. The API adds `outstanding_balance.by_currency` to the customer overview.
 - **The payment-method link error names the action (2026-10-15).** A failed "Email a payment-method link" was titled "Failed to resend setup link"; it now reads "Couldn't email the payment-method link".
 - **The Margin card no longer spins forever (2026-10-14).** A failed load shows a retry, and a custom range asks for both dates.
+- **A session that ends while you work sends you to sign in (2026-10-14).** Pages showed "missing credentials … Authorization: Bearer …". The dashboard now says "Your session ended. Sign in to continue." and returns you to the page after sign-in.
+- **Error messages name what failed (2026-10-14).** An error toast keeps its title ("Failed to attach meter") with one sentence below. Copy ID shows only for server errors.
+- **A failed load no longer looks like an empty page (2026-10-14).** Recipes, Provider costs and a meter's prices said "none yet" when the request failed. Every page now shows "Couldn't load …" with Retry.
+- **Usage events say when filters hide events (2026-10-14).** "No usage events yet" showed on an empty 30-day window. It now reads "No events match these filters" with Clear filters. An export over 50,000 events says the file holds the newest 50,000.
+- **Settings Save explains an invalid field on another tab (2026-10-14).** It did nothing. It now opens that tab and says what to fix.
+- **Unknown addresses show "Page not found" (2026-10-14).** The screen was blank. The crash screen keeps the raw error inside Details.
+- **No raw codes on screen (2026-10-14).** The invoice notice's support code moved into Details. "payment_anomaly", the invoice list hover, the "payment: unknown" filter and Dunning reasons now read as words, for example "Why recovery started: No payment method on file".
+- **Amber is kept for problems (2026-10-14).** The test-mode strip, the Dashboard open-invoices row, an unlinked price, the tax example and a finished clock advance are no longer amber. The sidebar Dunning count is amber, as on the Dashboard. Notices share one shape, with dark-mode colours.
 
 ## [0.7.0] - 2026-10-14
 

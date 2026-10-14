@@ -67,7 +67,7 @@ const testOnlyNav: NavItem[] = [
 function NavLink({
   to, icon: Icon, label, pathname, onClick, count, badgeTone = 'info',
 }: {
-  to: string; icon: LucideIcon; label: string; pathname: string; onClick?: () => void; count?: number; badgeTone?: 'info' | 'critical'
+  to: string; icon: LucideIcon; label: string; pathname: string; onClick?: () => void; count?: number; badgeTone?: 'info' | 'warning'
 }) {
   // Prefix match keeps the section highlighted on detail pages
   // (/customers/:id highlights Customers). Pricing also owns the
@@ -104,8 +104,10 @@ function NavLink({
             {count != null && count > 0 && (
               <span className={cn(
                 'text-[10px] font-medium rounded-full px-1.5 py-0.5 min-w-[18px] text-center',
-                badgeTone === 'critical'
-                  ? 'bg-destructive text-destructive-foreground'
+                // Invoices in payment retry need watching, not alarm: amber,
+                // the same colour as the Dashboard's row for the same count.
+                badgeTone === 'warning'
+                  ? 'bg-amber-500 text-amber-950'
                   : 'bg-muted text-muted-foreground border border-border',
               )}>
                 {count}
@@ -372,14 +374,14 @@ export function Layout({ children }: { children: ReactNode }) {
           Billing
         </p>
         {billingNav.map(item => (
-          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'critical' : 'info'} />
+          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'warning' : 'info'} />
         ))}
 
         <p className="text-xs uppercase text-muted-foreground tracking-wider px-3 pt-4 pb-1">
           Configuration
         </p>
         {configNav.map(item => (
-          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'critical' : 'info'} />
+          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'warning' : 'info'} />
         ))}
 
         <Separator className="my-2" />
@@ -388,7 +390,7 @@ export function Layout({ children }: { children: ReactNode }) {
           System
         </p>
         {systemNav.map(item => (
-          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'critical' : 'info'} />
+          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'warning' : 'info'} />
         ))}
 
         {user && !user.livemode && (
@@ -550,15 +552,18 @@ export function Layout({ children }: { children: ReactNode }) {
               </Link>
             </div>
           )}
+          {/* Test mode is a normal state, so the strip is quiet: the flask
+              icon the sidebar uses for test mode, no warning triangle and no
+              amber, which stays for real problems. */}
           {user && !user.livemode && (
             <div
               role="status"
               aria-live="polite"
-              className="flex items-center justify-center gap-2 bg-amber-500 px-4 py-1.5 text-xs font-medium text-amber-950"
+              className="flex items-center justify-center gap-2 border-b border-border bg-muted px-4 py-1.5 text-xs font-medium text-foreground"
             >
-              <AlertTriangle size={14} aria-hidden="true" />
+              <FlaskConical size={14} aria-hidden="true" className="text-muted-foreground" />
               <span>
-                You're viewing <strong className="font-semibold">TEST</strong> data. No real money is moving.
+                <strong className="font-semibold">Test mode.</strong> You're viewing test data. No real money moves.
               </span>
             </div>
           )}

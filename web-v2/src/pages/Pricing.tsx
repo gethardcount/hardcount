@@ -15,6 +15,7 @@ import {
 } from '@/lib/api'
 import { dollarsToRateCents } from '@/lib/priceInput'
 import { Layout } from '@/components/Layout'
+import { LoadError } from '@/components/LoadError'
 import { priceRate, shiftDecimal } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
 import { meterAggregationLabel } from '@/lib/meterLabels'
@@ -200,20 +201,17 @@ export default function PricingPage() {
         <Card className="mt-4">
           <CardContent className="p-0">
             {error ? (
-              <div className="p-8 text-center">
-                <p className="text-sm text-destructive mb-3">
-                  {error instanceof Error ? error.message : 'Failed to load pricing data'}
-                </p>
-                <Button variant="outline" size="sm" onClick={() => {
+              <LoadError
+                what="pricing"
+                error={error}
+                onRetry={() => {
                   // A failure may have come from any of the tab queries —
                   // retrying only one leaves the button dead for the rest.
                   for (const key of ['plans', 'meters', 'rating-rules', 'meter-pricing-rules']) {
                     queryClient.invalidateQueries({ queryKey: [key] })
                   }
-                }}>
-                  Retry
-                </Button>
-              </div>
+                }}
+              />
             ) : loading ? (
               <TableSkeleton columns={6} />
             ) : (
@@ -401,7 +399,9 @@ export default function PricingPage() {
                                 <TableCell className="text-muted-foreground text-sm">
                                   {metersUsingRule(r.rule_key) > 0
                                     ? `${metersUsingRule(r.rule_key)} meter${metersUsingRule(r.rule_key) !== 1 ? 's' : ''}`
-                                    : <span className="text-amber-500">unused</span>}
+                                    // Not a problem: a price no meter uses yet.
+                                    // Amber stays for "Not priced", which is one.
+                                    : <span className="text-muted-foreground">Not linked</span>}
                                 </TableCell>
                                 <TableCell className="text-right font-medium">
                                   <span>{priceRate(r, unitForRule(r.id))}</span>

@@ -1,8 +1,7 @@
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form'
 import { toast } from 'sonner'
 import { ApiError } from './api'
-import { emailNotConfiguredOutcome, isEmailNotConfigured } from './actionOutcomes'
-import { showOutcome } from './outcomeToast'
+import { errorToast, type ErrorToast } from './errorCopy'
 
 /**
  * Routes a server error onto a react-hook-form instance.
@@ -12,10 +11,8 @@ import { showOutcome } from './outcomeToast'
  *   sees an inline highlight under the offending field. The input is also
  *   focused so keyboard users land on the problem immediately.
  * - If the error is field-less (InvalidState, NotFound, 500s, unexpected
- *   errors) or the field isn't rendered in this form, the message shows as a
- *   toast instead of silently disappearing. When a Request ID is available,
- *   it's attached as the toast description with a Copy action — operators can
- *   paste it straight into a support email and we can trace it in logs.
+ *   errors) or the field isn't rendered in this form, it shows as a toast
+ *   (see showApiError) instead of silently disappearing.
  *
  * Pass `fields` as either:
  *   - `string[]` of form field names when server and form names match, or
@@ -39,7 +36,7 @@ export function applyApiError<T extends FieldValues>(
   opts?: { toastTitle?: string },
 ): void {
   if (!(err instanceof ApiError)) {
-    toast.error(opts?.toastTitle ?? (err instanceof Error ? err.message : 'Something went wrong'))
+    showErrorToast(errorToast(err, opts?.toastTitle))
     return
   }
 
@@ -53,43 +50,38 @@ export function applyApiError<T extends FieldValues>(
     return
   }
 
-  toastApiError(err)
+  showErrorToast(errorToast(err, opts?.toastTitle))
 }
 
 /**
- * Show a user-facing error toast. When the server returned a Request ID, it is
- * included as the toast description with a Copy action — operators can paste
- * it into a support email and the server-side trace is discoverable in logs.
+ * Show an error toast for a failed action. The caller's title names what
+ * failed ("Couldn't attach meter"); the body is one sentence from
+ * lib/errorCopy: the server's own explanation for a request it refused, or
+ * plain words for a network failure, a rate limit or a server fault. A
+ * server fault also offers [Copy ID] so the operator can hand the request
+ * id to support; a validation error does not, the sentence says what to fix.
+ * A 401 shows nothing: the session handler sends the operator to sign-in.
  *
  * Prefer this helper over raw `toast.error(err.message)` for every mutation
  * catch/onError path, even when you don't need form-field routing.
  */
-export function showApiError(err: unknown, fallback: string): void {
-  if (err instanceof ApiError) {
-    toastApiError(err)
-    return
-  }
-  toast.error(err instanceof Error ? err.message : fallback)
+export function showApiError(err: unknown, title: string): void {
+  showErrorToast(errorToast(err, title))
 }
 
-function toastApiError(err: ApiError): void {
-  if (isEmailNotConfigured(err)) {
-    showOutcome(emailNotConfiguredOutcome())
-    return
-  }
-  if (!err.requestId) {
-    toast.error(err.message)
-    return
-  }
-  const requestId = err.requestId
-  toast.error(err.message, {
-    description: `Request ID: ${requestId}`,
-    action: {
-      label: 'Copy ID',
-      onClick: () => {
-        void navigator.clipboard.writeText(requestId)
-      },
-    },
+function showErrorToast(t: ErrorToast): void {
+  if (!t.show) return
+  const copyId = t.copyId
+  toast.error(t.title, {
+    description: t.description,
+    action: copyId
+      ? {
+          label: 'Copy ID',
+          onClick: () => {
+            void navigator.clipboard.writeText(copyId)
+          },
+        }
+      : undefined,
   })
 }
 
