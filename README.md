@@ -4,7 +4,7 @@
 
 **The open-source billing engine for AI and usage-heavy SaaS — runs in your own VPC.**
 
-Velox owns the billing layer above the card charge: pricing, subscriptions, usage metering, invoicing, credits, and dunning (the automatic retry-and-escalate process that runs when a payment fails). Stripe still executes the card charge underneath, as a plain PaymentIntent. So Stripe Billing's percentage fee does not apply, and your usage and invoice records stay in your own Postgres. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid.
+Velox owns the billing layer above the card charge: pricing, subscriptions, usage metering, invoicing, credits, and dunning (the automatic retry-and-escalate process that runs when a payment fails). Stripe still executes the card charge underneath, as a plain PaymentIntent. So Stripe Billing's percentage fee does not apply. Your usage and invoice records live in your own Postgres. Stripe sees each charge, and also the invoice lines if you use Stripe Tax. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid.
 
 [![CI](https://github.com/getvelox/velox/actions/workflows/ci.yml/badge.svg)](https://github.com/getvelox/velox/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev)
@@ -17,7 +17,7 @@ Velox owns the billing layer above the card charge: pricing, subscriptions, usag
 
 ## What it looks like
 
-One meter with model and token type on each event, and the invoice it produced a month later. [`scripts/demo.sh`](scripts/demo.sh) generates it against a running Velox:
+One meter with model and token type on each event, and the invoice it produced a month later. The invoice below is what [`scripts/demo.sh`](scripts/demo.sh) produces against a running Velox, laid out for reading. The script prints the same numbers in plain lines.
 
 ```text
 ACME Corp — VLX-000001                                    $3.88
@@ -37,7 +37,7 @@ One meter carried every token type, prices are stored exactly ($3.00 per 1M toke
 
 ## Quick start
 
-You need Docker and nothing else. It runs the published release images, so nothing is built.
+You need git and Docker 24 or newer with the Compose plugin. It pulls the latest published release, so nothing is built. Changes merged after that release are not in it until the next release.
 
 ```bash
 git clone https://github.com/getvelox/velox.git
@@ -62,11 +62,11 @@ To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/se
 ## Why use it
 
 - **Price AI usage the way it is sold.** Model × token type on one meter, prepaid commits that usage draws down, and a base fee plus usage on one invoice. [AI pricing in code](docs/ai-pricing.md)
-- **Know your margin.** Provider cost is stamped on every event, so "which customers lose us money?" is one API call. [What's in the box](docs/features.md)
-- **Run it yourself, simply.** One Go binary, Postgres, and Redis for rate limiting. No queue, no warehouse, no workflow engine. [Self-host](docs/self-host.md) · [Will it take our volume?](docs/scale.md)
+- **Know your margin.** Set what your model provider charges you, and Velox stamps that cost on each token event that matches a rate. One API call then shows what a customer was billed against what they cost you. [What's in the box](docs/features.md)
+- **Run it yourself, simply.** One Go binary, Postgres, and Redis for rate limiting, plus a static dashboard. Background jobs run inside the binary and queue in Postgres, so there is no queue broker, warehouse or workflow engine to run. [Self-host](docs/self-host.md) · [Will it take our volume?](docs/scale.md)
 - **MIT, and nothing is gated.** No licence key, no paid tier, no telemetry. Dunning, credit notes, refunds and the audit log are all in the one edition. [What's in the box](docs/features.md#self-host-first)
-- **Test a billing change before it bills anyone.** Test clocks move one test customer through months of billing in seconds. [What's in the box](docs/features.md#billing-building-blocks)
-- **Built so the invoice is right.** A billing period cannot be invoiced twice, because the database refuses it. [How Velox is engineered](docs/ENGINEERING.md)
+- **Test a billing change before it bills anyone.** In test mode, a test clock moves a test customer through months of billing without waiting for real time, up to a year per call. [What's in the box](docs/features.md#billing-building-blocks)
+- **Built so the invoice is right.** Every period close locks the subscription and checks its period, and Postgres refuses a second invoice for the same subscription and period. A voided invoice does not count. [How Velox is engineered](docs/ENGINEERING.md)
 
 ---
 
