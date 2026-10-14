@@ -15,6 +15,10 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Added
+
+- **Try Velox with only Docker: `deploy/compose/quickstart.sh` (2026-10-14, #959).** One command starts Velox from the published release images, writes the four secrets, creates the first login and prints it with a test API key. `./quickstart.sh demo` then runs the demo flow to a finalized invoice, in a container, so Go, Node and `jq` are not needed. It uses its own Compose project name and port 8080, so it does not touch another Velox stack on the same machine. The README quick start now uses it; the from-source setup moved to CONTRIBUTING.
+
 ### Fixed
 
 - **Asking for a card-setup page with no Stripe account connected answers 409, not 500 (2026-10-13).** `POST /v1/customers/{id}/payment-methods/setup-session` answered `internal_error`. It now answers 409 with code `stripe_not_connected` and says to connect Stripe under Settings.

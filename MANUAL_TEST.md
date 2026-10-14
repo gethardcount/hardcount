@@ -2121,6 +2121,14 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run ./cmd/velox
 
 ## FLOW X14: Self-host (Compose)
 
+### Quickstart (Docker only)
+
+- [~] From a fresh copy with only Docker, `deploy/compose/quickstart.sh` prints a dashboard address, a login and a test key, and exits 0. *(walked 2026-10-14 with VELOX_PORT=8090: 13 s with the images already pulled; 210 s on a first pull)*
+- [~] `./quickstart.sh demo` ends with a finalized invoice of $3.88 and a margin line, with no Go, Node or jq on the host. *(walked 2026-10-14: 13 s)*
+- [~] The printed login signs in to the dashboard, and the demo's invoice and customer are listed. *(walked 2026-10-14 in a browser)*
+- [~] Running `./quickstart.sh` again keeps the data and does not create a second login. *(walked 2026-10-14)*
+- [~] It does not touch another Velox stack on the machine: a development `velox-postgres-1` and its volume are unchanged after `up` and `destroy`. *(walked 2026-10-14; the first version used the project name `velox` and replaced that container, which is why the name is now `velox-quickstart`)*
+
 - [~] `docker compose up -d postgres redis mailpit` → 3 sidecars healthy. *(all three report **healthy** in `docker compose ps`, not merely "Up" — postgres, redis and mailpit each have a working healthcheck.)*
 - [~] `make bootstrap` + `make dev` + `cd web-v2 && npm run dev`. `/health` and `/health/ready` 200. *(both endpoints 200 against the running stack, and the vite dashboard serves `/login` at :5173. `make bootstrap` was exercised for real this session — it minted REC Probe Co on a database that already held ~40 tenants.)*
 - [~] `RUN_MIGRATIONS_ON_BOOT=true` applies all migrations idempotently (default is `false` — set it explicitly for local dev). *(default confirmed **false** in code — `internal/config/config.go:59` — with a production warning at `cmd/velox/main.go:125` recommending a dedicated migration Job instead. With it set true, booting against an already-migrated database logs `migrations up to date` then `schema ready version=170 binary_expects=170`, so a re-run is a no-op rather than an error. The from-scratch half was exercised too: an empty throwaway Postgres went to fully-migrated on first boot during the X2 walk.)*

@@ -2,6 +2,8 @@
 
 This guide takes you from a fresh VM to a working Velox with a dashboard login and API keys.
 
+Just trying Velox on your own machine? Run `./quickstart.sh` in this directory instead. It does steps 1 to 4 for you, on port 8080, with the published images. This guide explains each of those steps, for a server you will keep.
+
 You get five containers: Postgres, Redis, the Velox API, the dashboard, and nginx in front of them on port 80.
 
 ## Before you start

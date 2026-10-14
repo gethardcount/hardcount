@@ -25,7 +25,16 @@ DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" go ru
 # Run tests
 go test ./... -race -short -count=1    # unit tests (CI runs -race too)
 go test -p 1 ./... -count=1 -short=false  # unit + integration tests
+
+# Run the API and the dashboard from source
+cp .env.example .env
+make bootstrap                            # prints the operator login and the API keys
+make dev                                  # API on :8080
+cd web-v2 && npm install && npm run dev   # dashboard on :5173, in a second terminal
+./scripts/demo.sh <vlx_secret_test_... from make bootstrap>
 ```
+
+To try a release without Go or Node, use `deploy/compose/quickstart.sh` instead (see the README).
 
 ## Project Structure
 

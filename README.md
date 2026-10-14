@@ -37,29 +37,23 @@ One meter carried every token type, prices are stored exactly ($3.00 per 1M toke
 
 ## Quick start
 
-Prereqs: Docker, Go 1.26+, Node 22+ (dashboard), `jq` (demo script).
+You need Docker and nothing else. It runs the published release images, so nothing is built.
 
 ```bash
-git clone https://github.com/getvelox/velox.git && cd velox
-
-# Backend: Postgres, a demo tenant, an operator user, API keys
-cp .env.example .env
-docker compose up -d postgres
-make bootstrap       # prints the operator login and the API keys
-make dev             # API on :8080
-
-# Operator dashboard (separate terminal)
-cd web-v2 && npm install && npm run dev
-# → http://localhost:5173, sign in with the login from bootstrap
+git clone https://github.com/getvelox/velox.git
+cd velox/deploy/compose
+./quickstart.sh
 ```
 
-Then run the whole flow, from token usage to a finalized invoice with a PDF and a margin report:
+It prints the dashboard address (`http://localhost:8080`), a login and a test API key. Then see the whole flow, from token usage to a finalized invoice with a PDF and a margin report:
 
 ```bash
-./scripts/demo.sh <vlx_secret_test_... from make bootstrap>
+./quickstart.sh demo
 ```
 
-The script checks every call and stops at the first mismatch. Each run creates a fresh demo customer on its own test clock, so you can rerun it.
+The demo checks every call and stops at the first mismatch. Each run creates a fresh demo customer on its own test clock, so you can rerun it. `./quickstart.sh stop` stops Velox and keeps its data; `./quickstart.sh destroy` deletes it.
+
+To change Velox itself, with Go and Node on your machine, see [Development setup](CONTRIBUTING.md#development-setup).
 
 To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/self-host.md).
 

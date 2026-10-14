@@ -358,6 +358,17 @@ jobs:
       - name: lint-tz (ADR-076)
         run: make lint-tz
 
+      # The quickstart pulls a pinned release. It must name the same release
+      # as the Compose template, so a release bump cannot update one and
+      # leave the other pointing at an older version.
+      - name: Quickstart release matches the Compose template
+        run: |
+          set -euo pipefail
+          QS=$(sed -n 's/^VELOX_VERSION="\(.*\)"$/\1/p' deploy/compose/quickstart.sh)
+          ENV=$(sed -n 's|^# VELOX_IMAGE=ghcr.io/getvelox/velox:\(v[0-9.]*\)$|\1|p' deploy/compose/.env.example)
+          echo "quickstart.sh: $QS   .env.example: $ENV"
+          [ -n "$QS" ] && [ "$QS" = "$ENV" ] || { echo "::error::deploy/compose/quickstart.sh VELOX_VERSION ($QS) must equal the image tag in deploy/compose/.env.example ($ENV)"; exit 1; }
+
       # Last, so a newly published advisory (the usual reason this fails, with
       # no change in this repo) does not hide the results of the steps above.
       # The matcher is removed so govulncheck's call traces stay plain text
