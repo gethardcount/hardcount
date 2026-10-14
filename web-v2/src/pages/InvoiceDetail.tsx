@@ -18,7 +18,8 @@ import { showOutcome } from '@/lib/outcomeToast'
 import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { Callout } from '@/components/Callout'
-import { pickInvoiceNotice, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
+import { pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
+import { authApi } from '@/lib/auth'
 import { classifyError } from '@/lib/errorCopy'
 import { useGetInvoice } from '@/lib/gen/queries.gen'
 import type { Invoice } from '@/lib/gen/schemas/invoice'
@@ -453,6 +454,15 @@ export default function InvoiceDetailPage() {
   const { data: settings } = useQuery({
     queryKey: ['settings'],
     queryFn: () => api.getSettings(),
+  })
+
+  // Server config (SMTP + PAYMENT_UPDATE_URL): whether "Email a payment-method
+  // link" on a written-off invoice can really send. Read only for that case.
+  const { data: whoami } = useQuery({
+    queryKey: ['whoami'],
+    queryFn: () => authApi.whoami(),
+    enabled: invoice?.status === 'uncollectible',
+    staleTime: Infinity,
   })
 
   const invalidateAll = () => {
@@ -936,6 +946,7 @@ export default function InvoiceDetailPage() {
         // A card serves new invoices only (ADR-113: a written-off invoice is
         // never charged), so this line exists to set up future collection.
         const showCardLine = invoice.amount_due_cents > 0 && !hasPaymentMethod
+        const cardLine = writtenOffCardLine(customer?.email, whoami?.can_email_setup_links)
         return (
           <Callout
             tone="neutral"
@@ -973,11 +984,14 @@ export default function InvoiceDetailPage() {
             )}
             {showCardLine && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-1">
-                <span>No card on file. A card the customer adds is used for new invoices, never this one.</span>
-                {/* The email goes to the customer's address, so it is offered
-                    only when there is one; otherwise the customer page can
-                    copy the link or add an address. */}
-                {customer?.email ? (
+                <span>
+                  No card on file. A card the customer adds is used for new invoices, never this one.
+                  {cardLine.note && <> {cardLine.note}</>}
+                </span>
+                {/* Emailed only when it can really go out (writtenOffCardLine
+                    says when); otherwise the customer page can copy the link
+                    or add an address. */}
+                {cardLine.action === 'email_link' ? (
                   <Button
                     size="sm"
                     variant="outline"

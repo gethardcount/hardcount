@@ -4018,7 +4018,8 @@ export interface paths {
          *     request carries — `velox_session` cookie (dashboard) or
          *     `Authorization: Bearer` (SDK / curl). Cookie path returns
          *     `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
-         *     Both always return `tenant_id` + `livemode`.
+         *     Both always return `tenant_id`, `livemode` and
+         *     `can_email_setup_links`.
          */
         get: {
             parameters: {
@@ -4038,6 +4039,13 @@ export interface paths {
                         "application/json": {
                             tenant_id: string;
                             livemode: boolean;
+                            /**
+                             * @description Whether this server can email a customer a link to add
+                             *     a payment method. False when email sending (SMTP) or
+                             *     PAYMENT_UPDATE_URL is not set up; resending a setup
+                             *     link then fails.
+                             */
+                            can_email_setup_links: boolean;
                             user_id?: string;
                             email?: string;
                             key_id?: string;
@@ -6229,12 +6237,14 @@ export interface components {
             reason: components["schemas"]["AttentionReason"];
             /**
              * @description Human-readable copy, safe to render verbatim: one plain
-             *     sentence saying what happens and what to do. When a second
-             *     fact must show up front (the setup-link email on an invoice
-             *     with no payment method, prepaid credit at risk), it follows
-             *     on a second line after a newline (`\n`). Wording may change
-             *     between releases; switch on `reason` and `code`, not on this
-             *     text.
+             *     sentence saying what happens and what to do. Facts that must
+             *     show up front follow on more lines, separated by a newline
+             *     (`\n`), one sentence each and up to three lines in all: the
+             *     setup-link email on `no_payment_method` (and on
+             *     `dunning_exhausted` when no link can be emailed), and the
+             *     prepaid credit at risk on an unpaid commit invoice. A no-card
+             *     commit invoice carries all three. Wording may change between
+             *     releases; switch on `reason` and `code`, not on this text.
              */
             message: string;
             /**

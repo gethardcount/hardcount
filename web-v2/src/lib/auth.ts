@@ -21,6 +21,9 @@ export interface SessionInfo {
   key_type?: string
   email?: string
   livemode: boolean
+  // Whether this server can email a customer a setup link (SMTP and
+  // PAYMENT_UPDATE_URL both set). Server config, not per user.
+  can_email_setup_links?: boolean
 }
 
 export interface LoginResponse {

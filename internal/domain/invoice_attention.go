@@ -272,10 +272,12 @@ type Attention struct {
 	Severity AttentionSeverity `json:"severity"`
 	Reason   AttentionReason   `json:"reason"`
 	// Message is what the operator reads first: one plain sentence of 25
-	// words or fewer saying what happens and what to do. A notice that must
-	// show a second fact up front (the setup-link email on a no-card invoice,
-	// prepaid credit at risk) adds it as a second line after a "\n". How
-	// the engine works and longer instructions go in Detail.
+	// words or fewer saying what happens and what to do. Facts that must show
+	// up front follow as more lines after "\n", one sentence each, up to
+	// three lines in all: the setup-link email on a no-payment-method or
+	// recovery-ended notice, and the prepaid credit at risk on a commit
+	// invoice. A no-card commit invoice carries all three. How the engine
+	// works and longer instructions go in Detail.
 	Message string                `json:"message"`
 	Actions []AttentionActionItem `json:"actions,omitempty"`
 
@@ -410,12 +412,14 @@ type AttentionContext struct {
 	// where nothing is paused.
 	CollectionPaused bool
 
-	// EmailOff is true when this server cannot send email (SMTP not set up).
-	// Read only by the no-payment-method notice: with it set, no setup link
-	// can have been emailed and Resend would be refused, so the notice says
-	// so and offers the customer page instead. Zero value (false) means
-	// sending works — what every production boot wires explicitly.
-	EmailOff bool
+	// SetupLinkEmailOff is true when this server cannot email a setup link:
+	// SMTP is not set up, or PAYMENT_UPDATE_URL (the page the link opens) is
+	// unset, in which case the sender refuses. Read only by the
+	// no-payment-method and recovery-ended notices: with it set, no setup
+	// link can have been emailed and Resend would fail, so the notice says so
+	// and offers the customer page instead. Zero value (false) means sending
+	// works — what every production boot wires explicitly.
+	SetupLinkEmailOff bool
 
 	// CommitGrantDrawableCents and CommitGrantConsumedCents describe the
 	// prepaid-commit grant this invoice funded (ADR-078). Drawable is what the
@@ -1216,7 +1220,8 @@ func classifyAwaitingPayment(inv Invoice) *Attention {
 // customer has an email and whether this server can send email at all.
 //
 // Once dunning has escalated, the notice becomes "Payment recovery ended"
-// and line 1 branches on pause the same way.
+// and line 1 branches on pause the same way; line 2 appears only when no
+// setup link can be emailed, to say why Resend is missing.
 //
 // Severity = warning (operator action required, not financially
 // broken). Promoting to critical would make a perfectly normal "send-
@@ -1224,7 +1229,7 @@ func classifyAwaitingPayment(inv Invoice) *Attention {
 func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 	since := attentionSince(inv)
 	// Resend can only send to an address, from a server that can send.
-	canEmail := atc.CustomerHasEmail && !atc.EmailOff
+	canEmail := atc.CustomerHasEmail && !atc.SetupLinkEmailOff
 
 	// What adding a card does. The charge-on-attach promise is the server's
 	// own (post-ADR-013 the scheduler picks the invoice up the moment a
@@ -1256,9 +1261,9 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 		// and the customer page shows the real address.
 		emailLine = "Setup links are emailed only to customers with an email address, so copy one from the customer page and send it."
 		emailDetail = "Adding an email address on the customer page lets Velox send the link."
-	case atc.EmailOff:
-		emailLine = "Email sending isn't set up, so no setup link was emailed; copy one from the customer page instead."
-		emailDetail = "Set up email sending (SMTP) to let Velox email setup links, receipts and reminders."
+	case atc.SetupLinkEmailOff:
+		emailLine = "This server can't email setup links, so none was sent; copy one from the customer page instead."
+		emailDetail = "To let Velox email setup links, set up email sending (SMTP) and the payment-update page address (PAYMENT_UPDATE_URL)."
 	default:
 		emailLine = "A setup link is emailed to the customer once; use Resend setup link to send it again."
 		emailDetail = "The invoice's activity shows whether the email was sent. The customer page can also copy the link to share directly."
@@ -1288,17 +1293,26 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 		default:
 			msg = "Retries stopped; this invoice is charged automatically once the customer adds a card."
 		}
+		// When no setup link can be emailed, the Resend button is missing and
+		// the reason must show up front, not only in Details. When one can,
+		// the Resend button is there and the email line stays in Details.
+		const ended = "Automatic payment recovery ended without collecting, and the recovery policy's final step ran. " +
+			"Check the subscription to see what that step did."
+		detail := joinDetail(ended, emailLine+" "+emailDetail)
+		if !canEmail {
+			msg += "\n" + emailLine
+			detail = joinDetail(ended, emailDetail)
+		}
 		return &Attention{
 			Severity: AttentionSeverityWarning,
 			Reason:   AttentionReasonDunningExhausted,
 			Code:     "payment.dunning_exhausted",
 			Message:  msg,
-			Detail: joinDetail("Automatic payment recovery ended without collecting, and the recovery policy's final step ran. "+
-				"Check the subscription to see what that step did.", emailLine+" "+emailDetail),
-			DocURL:  docURL("dunning-exhausted"),
-			Actions: actions,
-			Since:   &since,
-			DueBy:   inv.DueAt,
+			Detail:   detail,
+			DocURL:   docURL("dunning-exhausted"),
+			Actions:  actions,
+			Since:    &since,
+			DueBy:    inv.DueAt,
 		}
 	}
 

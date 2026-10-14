@@ -7,6 +7,7 @@ import {
   messageLines,
   pickInvoiceNotice,
   stripePaymentUrl,
+  writtenOffCardLine,
   writtenOffSubscriptionLine,
 } from '../src/lib/invoiceNotice.ts'
 
@@ -79,4 +80,24 @@ test('message lines: one sentence, or a sentence and a second line', () => {
 test('Open in Stripe goes to the payment, under /test/ in test mode', () => {
   assert.equal(stripePaymentUrl('pi_123', true), 'https://dashboard.stripe.com/payments/pi_123')
   assert.equal(stripePaymentUrl('pi_123', false), 'https://dashboard.stripe.com/test/payments/pi_123')
+})
+
+test('written off, no card: the email button needs an address AND a server that can send setup links', () => {
+  assert.deepEqual(writtenOffCardLine('ap@acme.test', true), { action: 'email_link', note: null })
+  // SMTP or PAYMENT_UPDATE_URL missing: the resend would fail, so no button.
+  const off = writtenOffCardLine('ap@acme.test', false)
+  assert.equal(off.action, 'open_customer')
+  assert.match(off.note ?? '', /can't email setup links/)
+  // Unknown (whoami still loading or failed) is not "yes".
+  assert.equal(writtenOffCardLine('ap@acme.test', undefined).action, 'open_customer')
+  // No address: the address is the first thing to fix, whatever the server can do.
+  const noEmail = writtenOffCardLine('', true)
+  assert.equal(noEmail.action, 'open_customer')
+  assert.match(noEmail.note ?? '', /no email address/)
+  assert.equal(writtenOffCardLine(null, false).note, noEmail.note)
+})
+
+test('messageLines keeps all three lines of a no-card commit invoice', () => {
+  const msg = 'Card line.\nEmail line.\nUnpaid prepaid credit: amount line.'
+  assert.deepEqual(messageLines(msg), ['Card line.', 'Email line.', 'Unpaid prepaid credit: amount line.'])
 })

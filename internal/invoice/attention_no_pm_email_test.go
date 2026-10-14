@@ -118,10 +118,10 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		spy := &spyCustomerReader{cust: domain.Customer{Email: "ops@acme.test"}}
 		svc := NewService(newMemStore(), nil, newMemNumberer())
 		svc.SetCustomerReader(spy)
-		svc.SetEmailConfigured(false)
+		svc.SetSetupLinkEmailConfigured(false)
 
 		att := svc.attachAttention(ctx, finalizedUnpaidNoPM()).Attention
-		if att == nil || !strings.Contains(att.Message, "\nEmail sending isn't set up, so no setup link was emailed") {
+		if att == nil || !strings.Contains(att.Message, "\nThis server can't email setup links, so none was sent") {
 			t.Fatalf("email-off variant missing, got %+v", att)
 		}
 		for _, a := range att.Actions {
@@ -131,7 +131,7 @@ func TestAttachAttention_NoPaymentMethod_EmailVariant(t *testing.T) {
 		}
 
 		// Control: the same service with email configured says the link is sent.
-		svc.SetEmailConfigured(true)
+		svc.SetSetupLinkEmailConfigured(true)
 		att = svc.attachAttention(ctx, finalizedUnpaidNoPM()).Attention
 		if att == nil || !strings.Contains(att.Message, "\nA setup link is emailed to the customer once") {
 			t.Fatalf("configured control lost the sent variant, got %+v", att)

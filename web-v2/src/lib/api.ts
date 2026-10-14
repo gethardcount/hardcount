@@ -852,8 +852,8 @@ export interface AttentionActionItem {
 export interface InvoiceAttention {
   severity: AttentionSeverity
   reason: AttentionReason
-  // One sentence; a second line after "\n" when a second fact must show up
-  // front (the setup-link email, prepaid credit at risk).
+  // One sentence per line, up to three lines split on "\n": the cause, then
+  // the setup-link email and prepaid credit at risk when they apply.
   message: string
   actions?: AttentionActionItem[]
   // Open dotted code (e.g. "tax.customer_data_invalid"). Stable but

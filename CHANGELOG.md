@@ -17,8 +17,8 @@ Older entries keep their original text.
 
 ### Changed
 
-- **Invoice notices are one short sentence (2026-10-15).** API: `attention.message` was reworded for every reason. It is now one sentence, plus a second line after a newline when a fact must show up front (the setup-link email, prepaid credit at risk). The explanation and payment ids moved to `attention.detail`. Match on `reason` and `code`, not on the text.
-- **Notices say what will really happen (2026-10-15).** The no-payment-method and recovery-ended notices now say when collection is paused, so adding a card charges nothing until it resumes. They also say when email isn't set up and when the invoice follows a test clock. The written-off notice says whether the subscription is still billing, paused or canceled.
+- **Invoice notices are one short sentence (2026-10-15).** API: `attention.message` was reworded for every reason. It is now one sentence per line, up to three lines split by newlines: the cause, then the setup-link email and the prepaid credit at risk when they apply. The explanation and payment ids moved to `attention.detail`. Match on `reason` and `code`, not on the text.
+- **Notices say what will really happen (2026-10-15).** The no-payment-method and recovery-ended notices now say when collection is paused, so adding a card charges nothing until it resumes. They also say when no setup link can be emailed (no customer email, or `SMTP_HOST` or `PAYMENT_UPDATE_URL` unset) and when the invoice follows a test clock. `GET /v1/whoami` gains `can_email_setup_links`. The written-off notice says whether the subscription is still billing, paused or canceled.
 - **One notice above the invoice (2026-10-15).** The invoice page shows only the most urgent notice. "Diagnostic detail" is now a collapsed "Payment details" section below the invoice. The test-clock banner is one line: "Simulated time: … Dates on this page follow the test clock." (ADR-099 amended).
 - **A parked invoice offers Mark uncollectible, and a payment anomaly offers Open in Stripe (2026-10-15).** API: new action code `mark_uncollectible`; `reconcile_payment` is now offered on `payment_anomaly`.
 

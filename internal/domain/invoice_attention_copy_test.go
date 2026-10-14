@@ -82,7 +82,7 @@ func TestNoPaymentMethodCopy_EveryBranch(t *testing.T) {
 
 		sent    = "A setup link is emailed to the customer once; use Resend setup link to send it again."
 		noEmail = "Setup links are emailed only to customers with an email address, so copy one from the customer page and send it."
-		off     = "Email sending isn't set up, so no setup link was emailed; copy one from the customer page instead."
+		off     = "This server can't email setup links, so none was sent; copy one from the customer page instead."
 	)
 	cases := []struct {
 		name               string
@@ -106,7 +106,7 @@ func TestNoPaymentMethodCopy_EveryBranch(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			att := ClassifyInvoiceAttention(noPMInvoice(tc.simulated), AttentionContext{
-				CustomerHasEmail: tc.hasEmail, EmailOff: tc.emailOff, CollectionPaused: tc.pause,
+				CustomerHasEmail: tc.hasEmail, SetupLinkEmailOff: tc.emailOff, CollectionPaused: tc.pause,
 			})
 			if att == nil || att.Reason != AttentionReasonNoPaymentMethod {
 				t.Fatalf("got %+v, want no_payment_method", att)
@@ -133,8 +133,14 @@ func TestNoPaymentMethodCopy_EveryBranch(t *testing.T) {
 }
 
 // TestRecoveryEndedCopy_EveryBranch: once dunning has escalated, the fix
-// depends on whether the final step paused collection.
+// depends on whether the final step paused collection. When no setup link can
+// be emailed, the reason Resend is missing shows as a second line, not only
+// in Details.
 func TestRecoveryEndedCopy_EveryBranch(t *testing.T) {
+	const (
+		noEmailLine  = "Setup links are emailed only to customers with an email address, so copy one from the customer page and send it."
+		emailOffLine = "This server can't email setup links, so none was sent; copy one from the customer page instead."
+	)
 	cases := []struct {
 		name               string
 		simulated, pause   bool
@@ -144,20 +150,20 @@ func TestRecoveryEndedCopy_EveryBranch(t *testing.T) {
 	}{
 		{"paused", false, true, true, false,
 			"Retries stopped and collection is paused; ask the customer to add a card, then resume collection.", true},
-		{"paused sim", true, true, false, false,
-			"Retries stopped and collection is paused; ask the customer to add a card, then resume collection.", false},
+		{"paused sim, no email", true, true, false, false,
+			"Retries stopped and collection is paused; ask the customer to add a card, then resume collection.\n" + noEmailLine, false},
 		{"not paused", false, false, true, false,
 			"Retries stopped; this invoice is charged automatically once the customer adds a card.", true},
 		{"not paused sim", true, false, true, false,
 			"Retries stopped; this invoice is charged on the next clock advance once the customer adds a card.", true},
 		{"not paused, email off", false, false, true, true,
-			"Retries stopped; this invoice is charged automatically once the customer adds a card.", false},
+			"Retries stopped; this invoice is charged automatically once the customer adds a card.\n" + emailOffLine, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			att := ClassifyInvoiceAttention(noPMInvoice(tc.simulated), AttentionContext{
 				DunningEscalated: true, CollectionPaused: tc.pause,
-				CustomerHasEmail: tc.hasEmail, EmailOff: tc.emailOff,
+				CustomerHasEmail: tc.hasEmail, SetupLinkEmailOff: tc.emailOff,
 			})
 			if att == nil || att.Reason != AttentionReasonDunningExhausted {
 				t.Fatalf("got %+v, want dunning_exhausted", att)
@@ -393,4 +399,52 @@ func TestCommitExposureCopy(t *testing.T) {
 			checkShape(t, folded.Message)
 		})
 	}
+}
+
+// TestCommitExposureCopy_ThreeLinesOnNoPaymentMethod: the longest message the
+// API returns. A no-card commit invoice carries the card line, the setup-link
+// email line and the prepaid-credit line, each one sentence, in that order.
+// The public docs promise "up to three lines"; this pins that bound.
+func TestCommitExposureCopy_ThreeLinesOnNoPaymentMethod(t *testing.T) {
+	inv := noPMInvoice(false)
+	inv.Currency = "USD"
+	atc := liveGrant(10000000, 0)
+	atc.CustomerHasEmail = true
+
+	att := ClassifyInvoiceAttention(inv, atc)
+	if att == nil || att.Reason != AttentionReasonNoPaymentMethod {
+		t.Fatalf("got %+v, want no_payment_method (the cause keeps its reason)", att)
+	}
+	want := []string{
+		"This invoice is charged automatically once the customer adds a card.",
+		"A setup link is emailed to the customer once; use Resend setup link to send it again.",
+		"Unpaid prepaid credit: the customer can already spend 100,000.00 USD from this invoice, and voiding it cancels that credit.",
+	}
+	got := strings.Split(att.Message, "\n")
+	if len(got) != len(want) {
+		t.Fatalf("message has %d lines, want %d:\n%q", len(got), len(want), att.Message)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %q, want %q", i+1, got[i], want[i])
+		}
+	}
+	checkShape(t, att.Message)
+	if codes := actionCodes(att); !sameActions(codes,
+		AttentionActionSendReminder, AttentionActionAddPaymentMethod, AttentionActionVoidInvoice) {
+		t.Errorf("actions = %v, want Resend, Open customer page, Void", codes)
+	}
+
+	// Recovery ended with no email: also three lines, the last one still money.
+	atc.CustomerHasEmail = false
+	atc.DunningEscalated = true
+	att = ClassifyInvoiceAttention(inv, atc)
+	if att == nil || att.Reason != AttentionReasonDunningExhausted {
+		t.Fatalf("got %+v, want dunning_exhausted", att)
+	}
+	lines := strings.Split(att.Message, "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[2], "Unpaid prepaid credit: ") {
+		t.Errorf("escalated message = %q, want three lines ending with the prepaid credit", att.Message)
+	}
+	checkShape(t, att.Message)
 }

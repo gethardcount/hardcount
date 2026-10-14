@@ -655,9 +655,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// SMTP is not set up — the queued email would otherwise fail unseen
 	// after the action reported "sent".
 	invoiceH.SetEmailConfigured(emailSender.IsConfigured())
-	// The no-payment-method notice says a setup link is emailed only when
-	// this server can send one.
-	invoiceSvc.SetEmailConfigured(emailSender.IsConfigured())
 	customerEmailAdapter := &customerEmailFetcherAdapter{store: customerStore}
 	dunningSvc.SetEmailNotifier(dunningEmail)
 	dunningSvc.SetCustomerEmailFetcher(customerEmailAdapter)
@@ -666,6 +663,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if paymentUpdateURL == "" {
 		slog.Warn("PAYMENT_UPDATE_URL NOT SET — payment-setup-request emails (no-PM-at-finalize) will fail at send time. Set this to your customer-portal payment-update page URL.")
 	}
+	// The no-payment-method notice says a setup link is emailed, and offers
+	// Resend, only when this server can send one: the setup-link sender
+	// refuses without PAYMENT_UPDATE_URL even when SMTP works.
+	setupLinksEmailable := canEmailSetupLinks(emailSender.IsConfigured(), paymentUpdateURL)
+	invoiceSvc.SetSetupLinkEmailConfigured(setupLinksEmailable)
 	stripeAdapter.SetEmailPaymentFailed(paymentFailedEmail, customerEmailAdapter)
 
 	// Audit logging for financial operations
@@ -1643,12 +1645,17 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// key_id + key_type (SDK / curl). Both always return tenant_id
 		// + livemode. The dashboard's AuthContext relies on user_id
 		// being present on the cookie path — without it, refresh()
-		// silently logs the operator out.
+		// silently logs the operator out. can_email_setup_links is the
+		// server's own setting (SMTP and PAYMENT_UPDATE_URL): the invoice
+		// page offers "Email a payment-method link" on a written-off invoice
+		// only when it is true, since that invoice carries no attention
+		// notice to decide it server-side.
 		r.Get("/whoami", func(w http.ResponseWriter, req *http.Request) {
 			ctx := req.Context()
 			out := map[string]any{
-				"tenant_id": auth.TenantID(ctx),
-				"livemode":  auth.Livemode(ctx),
+				"tenant_id":             auth.TenantID(ctx),
+				"livemode":              auth.Livemode(ctx),
+				"can_email_setup_links": setupLinksEmailable,
 			}
 			if uid := auth.UserID(ctx); uid != "" {
 				out["user_id"] = uid

@@ -12,6 +12,13 @@ import type { GetV1Whoami200KeyType } from './getV1Whoami200KeyType';
 export type GetV1Whoami200 = {
   tenant_id: string;
   livemode: boolean;
+  /**
+     * Whether this server can email a customer a link to add
+     * a payment method. False when email sending (SMTP) or
+     * PAYMENT_UPDATE_URL is not set up; resending a setup
+     * link then fails.
+     */
+  can_email_setup_links: boolean;
   user_id?: string;
   email?: string;
   key_id?: string;

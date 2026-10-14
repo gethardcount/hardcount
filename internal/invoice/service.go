@@ -174,17 +174,19 @@ type Service struct {
 	settings       TenantSettingsReader
 	audit          AuditLogger
 	events         domain.EventDispatcher
-	// emailOff is true when this server cannot send email (SMTP_HOST unset).
-	// Read only by the no-payment-method notice, which must not say a setup
-	// link is emailed when nothing can be sent. Zero value: sending works,
-	// which is what every production boot wires explicitly.
-	emailOff bool
+	// setupLinkEmailOff is true when this server cannot email a setup link
+	// (SMTP_HOST or PAYMENT_UPDATE_URL unset). Read only by the
+	// no-payment-method and recovery-ended notices, which must not say a
+	// setup link is emailed when nothing can be sent. Zero value: sending
+	// works, which is what every production boot wires explicitly.
+	setupLinkEmailOff bool
 }
 
-// SetEmailConfigured records whether this server can send email, so the
-// no-payment-method notice says "a setup link is emailed" only when one can
-// be. Wired at boot from the same flag the email actions refuse on.
-func (s *Service) SetEmailConfigured(configured bool) { s.emailOff = !configured }
+// SetSetupLinkEmailConfigured records whether this server can email a setup
+// link, so the no-payment-method notice says "a setup link is emailed" only
+// when one can be. Wired at boot from both things the sender needs: SMTP and
+// PAYMENT_UPDATE_URL.
+func (s *Service) SetSetupLinkEmailConfigured(configured bool) { s.setupLinkEmailOff = !configured }
 
 // AuditLogger is the narrow audit-write interface the service uses to
 // record state-changing operations that are reachable from multiple
@@ -930,7 +932,7 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 		// so the ctx value matches the row's stored mode under RLS.
 		atc.StripeConnected = s.stripeChecker.HasFor(ctx, inv.TenantID, postgres.Livemode(ctx))
 	}
-	atc.EmailOff = s.emailOff
+	atc.SetupLinkEmailOff = s.setupLinkEmailOff
 	inv.Attention = domain.ClassifyInvoiceAttention(inv, atc)
 
 	// What an operator must know BEFORE recording a wire against a

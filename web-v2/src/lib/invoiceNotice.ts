@@ -51,8 +51,37 @@ export function writtenOffSubscriptionLine(
   return { state: 'billing', text: 'The subscription is still billing.', openSubscription: true }
 }
 
-// The message is one sentence, with an optional second line after "\n" for a
-// fact that must show up front (the setup-link email, prepaid credit at risk).
+// The written-off notice's "No card on file" line offers to email the
+// customer a link to add a card only when that email can really go out: the
+// customer has an address AND this server can send setup links (SMTP and
+// PAYMENT_UPDATE_URL, reported by whoami). A written-off invoice carries no
+// server attention notice to decide this, so the page decides it here.
+// Otherwise the line says why and offers the customer page, whose "Add
+// payment method" dialog copies the link to share directly. Unknown server
+// support (whoami still loading or failed) is treated as "can't": offering a
+// button that may fail is the lie this exists to remove.
+export interface WrittenOffCardLine {
+  action: 'email_link' | 'open_customer'
+  // Why the email button is missing, or null when it is offered.
+  note: string | null
+}
+
+export function writtenOffCardLine(
+  customerEmail: string | null | undefined,
+  canEmailSetupLinks: boolean | undefined,
+): WrittenOffCardLine {
+  if (!customerEmail) {
+    return { action: 'open_customer', note: 'The customer has no email address, so share a link from the customer page.' }
+  }
+  if (canEmailSetupLinks !== true) {
+    return { action: 'open_customer', note: "This server can't email setup links, so copy one from the customer page." }
+  }
+  return { action: 'email_link', note: null }
+}
+
+// The message is one sentence per line, up to three lines split on "\n": the
+// cause, then facts that must show up front (the setup-link email, prepaid
+// credit at risk).
 export function messageLines(message: string | undefined | null): string[] {
   return (message ?? '').split('\n').map(l => l.trim()).filter(Boolean)
 }

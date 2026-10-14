@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button'
 // attention" notice, drawn with the shared Callout. Reads server-derived
 // invoice.attention and renders nothing when absent (healthy or
 // terminal-state): reason label as the title, the server's sentence (plus
-// its optional second line), prescribed actions, and a collapsed Details
+// up to two more lines), prescribed actions, and a collapsed Details
 // holding the server's explanation and the support code.
 //
 // Stays purely presentational: the typed reason / action / severity
@@ -144,9 +144,10 @@ export function InvoiceAttention({
       {/* The sentence is SERVER-OWNED, including the clock-aware "charged
           on the next clock advance" wording; a second hardcoded copy here
           once drifted from it and repeated the promise twice in one notice
-          (2026-07-22 audit, P1-1/P2-1). A second line (setup-link email,
-          prepaid credit at risk) comes after a newline and is shown, never
-          folded into Details: it carries money or the next step. */}
+          (2026-07-22 audit, P1-1/P2-1). Further lines (setup-link email,
+          prepaid credit at risk; up to three in all) come after newlines and
+          are shown, never folded into Details: they carry money or the next
+          step. */}
       {messageLines(att.message).map((line, i) => (
         <p key={i} className={i === 0 ? 'text-foreground' : undefined}>{line}</p>
       ))}

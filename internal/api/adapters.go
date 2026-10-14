@@ -766,6 +766,14 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 // email link the customer clicks days after issuance: the operator can
 // invalidate tokens at any time, and the SPA shows "for invoice X, $Y"
 // before sending the customer to Stripe.
+// canEmailSetupLinks reports whether a setup-link email can be sent at all:
+// it needs SMTP, and the link needs the payment-update page to point at
+// (NotifyNoPaymentMethod refuses without it). The invoice notices read this to
+// decide whether to say a link is emailed and whether to offer Resend.
+func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL string) bool {
+	return smtpConfigured && paymentUpdateURL != ""
+}
+
 type noPaymentMethodNotifierAdapter struct {
 	email            paymentSetupEmailSender
 	customerEmail    *customerEmailFetcherAdapter
