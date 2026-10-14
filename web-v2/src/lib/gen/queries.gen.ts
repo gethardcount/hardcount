@@ -2251,7 +2251,7 @@ export const postV1UsageEvents = async (postV1UsageEventsBody: PostV1UsageEvents
 
 
 
-export const getPostV1UsageEventsMutationOptions = <TError = unknown,
+export const getPostV1UsageEventsMutationOptions = <TError = void,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEvents>>, TError,{data: PostV1UsageEventsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEvents>>, TError,{data: PostV1UsageEventsBody}, TContext> => {
 
@@ -2280,12 +2280,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1UsageEventsMutationResult = NonNullable<Awaited<ReturnType<typeof postV1UsageEvents>>>
     export type PostV1UsageEventsMutationBody = PostV1UsageEventsBody
-    export type PostV1UsageEventsMutationError = unknown
+    export type PostV1UsageEventsMutationError = void
 
     /**
  * @summary Ingest usage event
  */
-export const usePostV1UsageEvents = <TError = unknown,
+export const usePostV1UsageEvents = <TError = void,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEvents>>, TError,{data: PostV1UsageEventsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1UsageEvents>>,
@@ -2414,10 +2414,15 @@ export const getPostV1UsageEventsBatchUrl = () => {
 
 /**
  * The batch is atomic: every event validates, then all of them
- * commit in one transaction. On any validation failure NOTHING is
- * ingested, so retrying the whole batch is always safe — including
- * for events without idempotency keys. Replays of already-ingested
- * keys are counted in `deduplicated` and are NOT errors.
+ * commit in one transaction. On any validation failure nothing is
+ * ingested. Every event must carry its own `idempotency_key`; an
+ * event without one fails validation, so the whole batch is refused.
+ * Retrying the whole batch is safe because of those keys: events
+ * already stored are counted in `deduplicated`, not stored again,
+ * and are not errors. A `deduplicated` count above zero on a batch
+ * you never sent before means some keys were already used, by an
+ * earlier event or by another event in the batch. Those events
+ * were not stored.
  * @summary Batch ingest usage events (max 1000, all-or-nothing)
  */
 export const postV1UsageEventsBatch = async (postV1UsageEventsBatchBodyItem: PostV1UsageEventsBatchBodyItem[], options?: RequestInit): Promise<PostV1UsageEventsBatch201> => {

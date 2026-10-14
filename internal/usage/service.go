@@ -353,9 +353,9 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 // transaction — all-or-nothing. Pre-fix each event committed in its own
 // tx: a mid-batch abort (client timeout, dropped connection) left a
 // committed prefix, and the standard retry-the-batch response re-ingested
-// that prefix — double-billed usage for every event without an
-// idempotency key. Now either the whole batch lands or none of it does,
-// so a keyless retry is always a clean first write.
+// that prefix. Now either the whole batch lands or none of it does. A
+// retry of a batch that did commit is deduped only by the events' keys,
+// which the HTTP door requires (#980).
 //
 // Returns (inserted, deduped, errs). Validation failures are collected
 // for EVERY failing index (a bare "quantity too large" across a 500-event

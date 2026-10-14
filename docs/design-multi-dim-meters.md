@@ -147,7 +147,7 @@ Authorization: Bearer <secret_key>
     "operation": "input",
     "cached": false
   },
-  "idempotency_key": "evt-1",          // optional; alternative to the header form
+  "idempotency_key": "evt-1",          // required; one unique key per event, reused only on its retries
   "timestamp": "2026-04-25T12:34:56Z"  // optional, defaults to now
 }
 ```

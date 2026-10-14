@@ -1283,7 +1283,20 @@ export interface paths {
                         properties?: {
                             [key: string]: unknown;
                         };
-                        idempotency_key?: string;
+                        /**
+                         * @description Your unique ID for this event. Pick it once, before the
+                         *     first send, and send the same key on every retry of the
+                         *     event. Keys are unique per tenant and mode (live or
+                         *     test), forever. An event whose key was already used is
+                         *     not stored again: the first event wins and the new body
+                         *     is discarded. So never reuse a key for a different
+                         *     event, such as a batch index or a timestamp that can
+                         *     repeat, or that usage is lost. Empty or whitespace-only
+                         *     keys are refused with 422. The `Idempotency-Key` header
+                         *     does not count as this key: it caches one HTTP response
+                         *     for 24 hours.
+                         */
+                        idempotency_key: string;
                         /** Format: date-time */
                         timestamp?: string;
                     };
@@ -1293,7 +1306,7 @@ export interface paths {
                 /**
                  * @description Idempotency replay — the original event is returned unchanged
                  *     with an `Idempotent-Replayed: true` header. No duplicate row
-                 *     is written.
+                 *     is written. The new body is not compared with the original.
                  */
                 200: {
                     headers: {
@@ -1303,6 +1316,18 @@ export interface paths {
                 };
                 /** @description Event ingested */
                 201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /**
+                 * @description Validation failed and nothing was stored. A missing, empty or
+                 *     whitespace-only `idempotency_key` is refused with
+                 *     `param: idempotency_key`; so are an unknown customer or meter
+                 *     and a malformed timestamp.
+                 */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1328,10 +1353,15 @@ export interface paths {
         /**
          * Batch ingest usage events (max 1000, all-or-nothing)
          * @description The batch is atomic: every event validates, then all of them
-         *     commit in one transaction. On any validation failure NOTHING is
-         *     ingested, so retrying the whole batch is always safe — including
-         *     for events without idempotency keys. Replays of already-ingested
-         *     keys are counted in `deduplicated` and are NOT errors.
+         *     commit in one transaction. On any validation failure nothing is
+         *     ingested. Every event must carry its own `idempotency_key`; an
+         *     event without one fails validation, so the whole batch is refused.
+         *     Retrying the whole batch is safe because of those keys: events
+         *     already stored are counted in `deduplicated`, not stored again,
+         *     and are not errors. A `deduplicated` count above zero on a batch
+         *     you never sent before means some keys were already used, by an
+         *     earlier event or by another event in the batch. Those events
+         *     were not stored.
          */
         post: {
             parameters: {
@@ -1352,7 +1382,20 @@ export interface paths {
                         dimensions?: {
                             [key: string]: unknown;
                         };
-                        idempotency_key?: string;
+                        /**
+                         * @description Your unique ID for this event. Pick it once, before the
+                         *     first send, and send the same key on every retry of the
+                         *     event. Keys are unique per tenant and mode (live or
+                         *     test), forever. An event whose key was already used is
+                         *     not stored again: the first event wins and the new body
+                         *     is discarded. So never reuse a key for a different
+                         *     event, such as a batch index or a timestamp that can
+                         *     repeat, or that usage is lost. Empty or whitespace-only
+                         *     keys are refused with 422. The `Idempotency-Key` header
+                         *     does not count as this key: it caches one HTTP response
+                         *     for 24 hours.
+                         */
+                        idempotency_key: string;
                         /** Format: date-time */
                         timestamp?: string;
                     }[];

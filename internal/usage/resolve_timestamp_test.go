@@ -39,7 +39,7 @@ func TestResolve_MalformedTimestampRejected(t *testing.T) {
 	h := NewHandler(NewService(newMemStore()), stubCustomer{}, stubMeter{})
 	ctx := context.Background()
 
-	base := apiEvent{ExternalCustomerID: "cus_ext", EventName: "api_call", Quantity: decimal.NewFromInt(1)}
+	base := apiEvent{ExternalCustomerID: "cus_ext", EventName: "api_call", Quantity: decimal.NewFromInt(1), IdempotencyKey: "evt_ts"}
 
 	t.Run("valid RFC3339 honored", func(t *testing.T) {
 		evt := base

@@ -65,10 +65,10 @@ func (s *PostgresStore) IngestAudited(ctx context.Context, tenantID string, even
 // Pre-fix, BatchIngest looped one tx per event: a mid-batch abort (client
 // timeout, connection drop, crash) left a COMMITTED PREFIX, and the
 // standard client response — retry the whole batch — re-ingested that
-// prefix. Events without idempotency keys have no dedup line of defense,
-// so the retry double-billed every prefix event. Atomic batches make the
-// keyless retry safe: either the response arrived (don't retry) or
-// nothing committed (retry is a clean first write).
+// prefix. Atomic batches rule out the committed prefix. They do not make a
+// retry safe by themselves: a batch that committed and lost its response is
+// written again unless its events carry keys, which is why the HTTP door
+// requires one on every event (#980).
 //
 // Keyed duplicates (replay of a fully-committed batch, or the same key
 // twice within one batch) are counted in deduped, not errors — matching

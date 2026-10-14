@@ -137,6 +137,11 @@ func (c *resolveCache) putMeter(key, id string) {
 	}
 }
 
+// missingKeyMessage is the 422 text for an event with no idempotency_key. It
+// names the fix, since a client that answers the 422 with a fresh key on every
+// attempt still double-counts.
+const missingKeyMessage = "idempotency_key is required — give each event its own key and send the same key when you retry that event"
+
 // resolve converts public API identifiers to internal IDs. cache may be nil
 // (single-event doors), in which case every lookup goes to the store.
 func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, cache *resolveCache) (IngestInput, error) {
@@ -148,6 +153,15 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, ca
 	}
 	if eventName == "" {
 		return IngestInput{}, errs.Required("event_name")
+	}
+	// Without a key Velox cannot tell a retry from new usage, so a client
+	// that missed the response and sent the event again was billed twice
+	// (#980). Checked before the lookups so a keyless event never costs a
+	// store round trip or turns into a 503. The key is stored as sent, not
+	// trimmed, so existing keys keep their meaning. LiteLLM does not come
+	// through here: it builds its own keys (litellm/mapper.go).
+	if strings.TrimSpace(evt.IdempotencyKey) == "" {
+		return IngestInput{}, errs.Invalid("idempotency_key", missingKeyMessage)
 	}
 
 	// A miss is cached only on success: caching the "not found" verdict would
@@ -451,8 +465,10 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 // batchIngest is ALL-OR-NOTHING: every event validates, then the whole
 // batch commits in one transaction. Pre-fix each event committed in its
 // own tx and a mid-batch abort (client timeout, dropped connection) left
-// a committed prefix — the standard retry-the-batch response re-ingested
-// it, double-billing every event without an idempotency key. Replays of
+// a committed prefix. Atomicity rules out that prefix; it does not make a
+// retry safe on its own, because a batch that committed and lost its
+// response is written again unless its events carry keys. That is why
+// resolve requires a key on every event (#980). Replays of
 // already-ingested keys are SUCCESS (counted in "deduplicated"), not
 // error rows — an at-least-once delivery pipeline retrying a committed
 // batch must not trip its alerting on HTTP 206 + 1000 'duplicate key'

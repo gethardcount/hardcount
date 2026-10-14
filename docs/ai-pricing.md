@@ -25,14 +25,16 @@ curl -X PUT http://localhost:8080/v1/provider-costs \
        "cost_per_token": "0.00003"}'
 
 # 3. Ingest events that carry the dimensions inline
-#    (cost is stamped only when the event has provider, model and token_type)
+#    (cost is stamped only when the event has provider, model and token_type).
+#    idempotency_key is required: one unique key per event, sent again
+#    unchanged when you retry that event. Never reuse it for another event.
 curl -X POST http://localhost:8080/v1/usage-events \
   -H "Authorization: Bearer $VELOX_SECRET" \
-  -H "Idempotency-Key: req_8f2c..." \
   -d '{
     "event_name": "tokens",
     "external_customer_id": "cust_acme",
     "quantity": "12450",
+    "idempotency_key": "req_8f2c:input",
     "dimensions": {"provider": "openai", "model": "gpt-4", "token_type": "input"}
   }'
 

@@ -22,6 +22,7 @@ Older entries keep their original text.
   - A cancel or plan change scheduled for a date: the subscription stays `active`, and `subscription.canceled` is sent, up to the grace after `cancel_at`. `canceled_at` is still the scheduled date, so give access by `cancel_at` rather than `status` if that matters to you.
   - An expired credit grant leaves the balance up to the grace after `expires_at`.
 - **Removing a meter's last price can be refused with 409 `invalid_state` (#981).** This applies to `DELETE /v1/meters/{meter_id}/pricing-rules/{id}` and to `PATCH /v1/meters/{id}` with `"rating_rule_version_id": ""`. They are refused when the meter would have no pricing rule and no default price while a plan with a draft, trialing or active subscription uses it. The message names the plans. Add another price first, or move those subscriptions to a plan without the meter.
+- **Usage events without `idempotency_key` are refused with 422 (#980).** This applies to `POST /v1/usage-events`, `/batch` and `/backfill`. Send one unique key per event and the same key when you retry it. The `Idempotency-Key` header does not count as the key.
 
 ### Added
 
@@ -30,6 +31,8 @@ Older entries keep their original text.
 - **Try Velox with only Docker: `deploy/compose/quickstart.sh` (2026-10-14, #959).** One command starts Velox from the published release images, writes the four secrets, creates the first login and prints it with a test API key. `./quickstart.sh demo` then runs the demo flow to a finalized invoice, in a container, so Go, Node and `jq` are not needed. It uses its own Compose project name and port 8080, so it does not touch another Velox stack on the same machine. The README quick start now uses it; the from-source setup moved to CONTRIBUTING.
 
 ### Changed
+
+- **Every usage event now needs its own `idempotency_key` (2026-10-14, #980).** Without one, a retry after a lost response was billed twice. Now the event gets 422 and nothing is stored. Keys are kept forever per tenant and mode, and an event with a used key is not stored, so never reuse a key for another event. LiteLLM is not affected.
 
 - **Usage with no price is now counted and its quantity shown (2026-10-14, #981).** Usage that matches no pricing rule, on a meter with no default price, is still left off the invoice, as in Lago, Metronome and Orb. Each period-end, cancel or spend-threshold invoice built without it adds the quantity to `velox_usage_unpriced_quantity_total{meter_id, mode}` (`mode` is `live` or `test`; test-clock simulations are not counted), and the invoice preview warning now gives the quantity. To bill it, add a price for later invoices and bill past usage with a one-off invoice. [ADR-096](docs/adr/096-unpriced-meter-plan-attach-guard.md).
 

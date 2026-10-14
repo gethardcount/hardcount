@@ -376,16 +376,16 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"payment method set default [path customer]", "POST", at("/v1/customers/%s/payment-methods/vlx_pm_any/default", cus), none, 404, "", 0},
 		{"payment method detach [path customer]", "DELETE", at("/v1/customers/%s/payment-methods/vlx_pm_any", cus), none, 404, "", 0},
 		{"usage ingest [external_customer_id]", "POST", fixed("/v1/usage-events"), func(o, f scopeRefs) any {
-			return map[string]any{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1}
+			return map[string]any{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1, "idempotency_key": "scope-ingest-ext-" + f.ext}
 		}, 422, "", 201},
 		{"usage ingest [customer id as external id]", "POST", fixed("/v1/usage-events"), func(o, f scopeRefs) any {
-			return map[string]any{"external_customer_id": f.cus, "event_name": o.meterKey, "quantity": 1}
+			return map[string]any{"external_customer_id": f.cus, "event_name": o.meterKey, "quantity": 1, "idempotency_key": "scope-ingest-cus-" + f.cus}
 		}, 422, "", 0},
 		{"usage batch [external_customer_id]", "POST", fixed("/v1/usage-events/batch"), func(o, f scopeRefs) any {
-			return []map[string]any{{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1}}
+			return []map[string]any{{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1, "idempotency_key": "scope-batch-ext-" + f.ext}}
 		}, 422, "", 201},
 		{"usage backfill [external_customer_id]", "POST", fixed("/v1/usage-events/backfill"), func(o, f scopeRefs) any {
-			return map[string]any{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1, "timestamp": "2026-02-01T00:00:00Z"}
+			return map[string]any{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1, "timestamp": "2026-02-01T00:00:00Z", "idempotency_key": "scope-backfill-ext-" + f.ext}
 		}, 422, "", 201},
 		// LiteLLM reports an unmapped customer per row inside a 200.
 		{"litellm spend [user]", "POST", fixed("/v1/integrations/litellm/spend"), func(_, f scopeRefs) any {
@@ -435,7 +435,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		}, 422, "", 201},
 		{"price override delete [path override]", "DELETE", at("/v1/price-overrides/%s", func(f scopeRefs) string { return f.override }), none, 404, "", 200},
 		{"usage ingest [event_name]", "POST", fixed("/v1/usage-events"), func(o, f scopeRefs) any {
-			return map[string]any{"external_customer_id": o.ext, "event_name": f.meterKey, "quantity": 1}
+			return map[string]any{"external_customer_id": o.ext, "event_name": f.meterKey, "quantity": 1, "idempotency_key": "scope-ingest-meter-" + f.meterKey}
 		}, 422, "", 201},
 		{"provider cost delete [path rate]", "DELETE", at("/v1/provider-costs/%s", func(f scopeRefs) string { return f.rate }), none, 404, "", 204},
 

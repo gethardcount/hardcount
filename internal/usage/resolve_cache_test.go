@@ -32,6 +32,7 @@ func evt(extCust, eventName string) apiEvent {
 		ExternalCustomerID: extCust,
 		EventName:          eventName,
 		Quantity:           decimal.NewFromInt(1),
+		IdempotencyKey:     "evt_" + extCust + "_" + eventName,
 	}
 }
 

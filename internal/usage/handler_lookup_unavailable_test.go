@@ -37,7 +37,7 @@ func (s *stubMeters) GetMeterByKey(_ context.Context, _, key string) (domain.Met
 	return domain.Meter{ID: "mtr_" + key}, nil
 }
 
-const lookupEvent = `{"external_customer_id":"acme","event_name":"api_call","quantity":1}`
+const lookupEvent = `{"external_customer_id":"acme","event_name":"api_call","quantity":1,"idempotency_key":"evt_lookup"}`
 
 // ingestDoors lists the three public ingest doors with a body each accepts.
 // All three resolve the customer and meter before they write anything.
@@ -130,7 +130,7 @@ func TestUsageBatch_LookupStoreFailureRefusesWholeBatch(t *testing.T) {
 	h := NewHandler(NewService(newMemStore()), cust, &stubMeters{})
 
 	// event[0] fails validation before any lookup; events 1 and 2 reach the store.
-	body := `[{"event_name":"api_call","quantity":1},` + lookupEvent + `,` + lookupEvent + `]`
+	body := `[{"event_name":"api_call","quantity":1,"idempotency_key":"evt_0"},` + lookupEvent + `,` + lookupEvent + `]`
 	rr := usageReq(t, h.batchIngest, body)
 
 	if rr.Code != http.StatusServiceUnavailable {

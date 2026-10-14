@@ -17,20 +17,35 @@ the delivery contract.
 ```
 POST   /v1/usage-events                 — ingest with dimensions + decimal value
 POST   /v1/usage-events/batch           — batch ingest, up to 1000 per call
+POST   /v1/usage-events/backfill        — ingest one past event (timestamp required)
 ```
 
 ### Ingest retry contract
 
 A non-2xx response means *nothing was recorded*. Retry the same request.
 
-- **Replays are dedup-safe.** A batch commits all-or-nothing. Every event's
-  `idempotency_key` lands in the database as `ON CONFLICT DO NOTHING`.
-  Together, these mean that sending twice can never double-count.
-- **Per-event key.** For at-least-once pipelines, an `idempotency_key` per
-  event is strongly recommended. See *idempotency key* in the
+- **Every event needs an `idempotency_key`.** An event without one, or with
+  an empty or whitespace-only one, is refused with 422 and
+  `param: idempotency_key`. In a batch, `errors[]` names each such event and
+  nothing is stored. Without a key, Velox cannot tell a retry from new
+  usage.
+- **Pick the key once per event and reuse it on every retry.** A new key on
+  each attempt makes each attempt a new event, so the usage is counted
+  again.
+- **Keys are unique per tenant and mode, forever.** An event whose key was
+  already used is not stored again. The first event wins and the new body
+  is discarded without comparison: a single event gets `200` with the first
+  event and `Idempotent-Replayed: true`, and a batch counts it in
+  `deduplicated`. So never reuse a key for a different event, such as a
+  batch index or a timestamp that can repeat, or that usage is lost.
+- **Replays are dedup-safe.** A batch commits all-or-nothing, and each key
+  is stored once. Together, these mean that resending events with the same
+  keys never double-counts. See *idempotency key* in the
   [glossary](glossary.md#pricing-and-usage).
-- **`Idempotency-Key` HTTP header.** On ingest routes, a 5xx never pins the
-  header's key. That is, Velox does not keep the 5xx to replay for later
+- **`Idempotency-Key` HTTP header.** This is separate from the event key
+  and does not replace it. It caches one HTTP response for 24 hours, while
+  the event key dedups each event forever. On ingest routes, a 5xx never
+  pins the header's key. That is, Velox does not keep the 5xx to replay for later
   requests with that key. Retry with the same key and the write re-executes.
   On other routes, a 5xx response is replayed on purpose.
 - **Late events.** An event counts toward the billing period its

@@ -32,7 +32,7 @@ func TestIngestLookup_RealStoreContract(t *testing.T) {
 	post := func(t *testing.T, ctx context.Context) (int, string) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/",
-			strings.NewReader(`{"external_customer_id":"cus_never_created","event_name":"api_call","quantity":1}`))
+			strings.NewReader(`{"external_customer_id":"cus_never_created","event_name":"api_call","quantity":1,"idempotency_key":"evt_lookup"}`))
 		req = req.WithContext(auth.WithTenantID(ctx, tenantID))
 		rec := httptest.NewRecorder()
 		h.Routes().ServeHTTP(rec, req)
