@@ -21,6 +21,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **A Stripe rate limit during a charge no longer parks the invoice (2026-10-14, #978).** When Stripe answered "too many requests" (HTTP 429), the charge had not run, but Velox recorded the outcome as unknown and parked the invoice until someone checked it. It is now treated like any request that never reached Stripe: the invoice is left as it was, no retry attempt is used, no email is sent, and the next billing run tries again. Most likely during a large billing run.
+
 - **Asking for a card-setup page with no Stripe account connected answers 409, not 500 (2026-10-13).** `POST /v1/customers/{id}/payment-methods/setup-session` answered `internal_error`. It now answers 409 with code `stripe_not_connected` and says to connect Stripe under Settings.
 - **Velox warns at start-up when `CUSTOMER_PORTAL_URL` is not set (2026-10-13).** Without it, a customer who saves a card on Stripe's page is sent to `http://localhost:5173`, which exists only in local development. The card is still saved. Set it to your dashboard's address. The Compose example value was wrong (it had a path) and is corrected.
 

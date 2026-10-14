@@ -765,6 +765,7 @@ whole cents — only the RATE gains precision.
 - [ ] **$0 settles**: issue a credit note that brings an unpaid invoice to $0 → the next tick marks it **paid** with no charge. *(auto: `TestCollect_ZeroDueSettles`)*
 
 - [ ] **No-card dunning starts only when money is really owed (ADR-116)**: customer with **no card** and a credit balance that covers a new invoice → finalize → the invoice is **paid** by credits, and there is **no** dunning run and no `dunning.started` webhook. Same customer, invoice larger than the balance → one `no_payment_method` run, one "Payment recovery started" timeline row, one `dunning.started` delivery. *(auto: `TestCollector_NoDunningUnlessOwedAndCardless`, `TestCollector_StartsNoPaymentDunning_RealStore`, `TestStartRun_RunEventAndWebhookAreAllOrNone`)*
+- [x] A Stripe rate-limit reply (HTTP 429, type `rate_limit_error`, code `rate_limit`) to a charge is "try again next tick": no state write, no attempt used, no email. The reply shape was captured from Stripe test mode on 2026-10-14. *(auto: `TestCreatePaymentIntent_RateLimitIsTransient`, control `TestCreatePaymentIntent_DeclineStaysDefinite`)*
 
 ## FLOW B5: Idempotency-Key header
 

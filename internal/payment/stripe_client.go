@@ -85,7 +85,17 @@ func humanizeDeclineCode(code string) string {
 // — the Stripe API was not invoked, so the invoice state is unchanged. The
 // scheduler/dunning path should treat this as "skip this tick" and not
 // tick the dunning attempt count, unlike a real payment failure.
-var ErrPaymentTransient = errors.New("payment attempt skipped; upstream breaker open or timeout before Stripe")
+var ErrPaymentTransient = errors.New("payment attempt skipped; upstream breaker open, timeout before Stripe, or Stripe rate limit")
+
+// isRateLimited reports whether Stripe refused the request with HTTP 429. A
+// real test-mode reply (2026-10-14) is status 429, type "rate_limit_error",
+// code "rate_limit", with no PaymentIntent. Stripe sends 429 only before it
+// processes a request, so nothing was charged. A 429 lock_timeout is retried
+// by stripe-go itself and reaches here only once its retries are spent.
+func isRateLimited(err error) bool {
+	var se *stripe.Error
+	return errors.As(err, &se) && se.HTTPStatusCode == http.StatusTooManyRequests
+}
 
 // isIdempotencyConflict reports whether err is Stripe refusing a key that was
 // already used with different parameters. Distinguished from the other
@@ -232,6 +242,14 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		Description: stripe.String(params.Description),
 	})
 	if err != nil {
+		if isRateLimited(err) {
+			// Stripe refused the request before processing it, so no charge
+			// happened. Treat it like the breaker short-circuit: no state
+			// write, and the next tick tries again. Classified as an error it
+			// would park the invoice at 'unknown' (an unrecognised type) for
+			// a person to resolve, though there is nothing to resolve.
+			return PaymentIntentResult{}, fmt.Errorf("%w: stripe rate limit: %v", ErrPaymentTransient, errs.Scrub(err.Error()))
+		}
 		return PaymentIntentResult{}, classifyStripeError(err)
 	}
 
