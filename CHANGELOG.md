@@ -21,7 +21,7 @@ Older entries keep their original text.
 
 ### Fixed
 
-- **Subscription changes made just after a period ends apply to the new period (2026-10-14, #961).** Until the billing run invoiced the ended period (up to an hour, longer after an outage), a change acted on that period instead. A cancel scheduled "at period end" cancelled at the end just passed, and the new period went unbilled. A pause or resume decided the ended period's invoice. A plan or quantity change was not prorated. The change now bills the ended period first, or answers 409 `unbilled_period` if it cannot.
+- **Subscription changes made just after a period ends apply to the new period (2026-10-14, #961).** Until the billing run invoiced the ended period (up to an hour, longer after an outage), a change acted on that period instead. A cancel scheduled "at period end" cancelled at the end just passed, and the new period went unbilled. A pause or resume decided the ended period's invoice. A plan or quantity change was not prorated. The change now bills the ended period first, or answers 409 `unbilled_period` if it cannot. A subscription whose billing fails because it has no items still accepts an item, which is how that failure is fixed. The dashboard reloads the subscription after a refused change, since the period may have been billed before the refusal.
 
 - **A plan swap to another billing interval no longer drops an ended period's usage (2026-10-14, #961).** On a plan billed in advance, a swap made after a period ended and before the billing run invoiced it skipped that period: its usage was never billed. The swap now bills the period first.
 

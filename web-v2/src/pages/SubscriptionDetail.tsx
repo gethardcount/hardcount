@@ -158,6 +158,10 @@ export default function SubscriptionDetailPage() {
   // render identically to "no history", so the error keeps the card visible
   // with an explicit failure state instead of hiding it.
 
+  // Also called on a refused subscription write: the server bills a period
+  // that ended before it decides on the write, so a 409 (unbilled_period, or
+  // "already took effect") can come back after the subscription changed, and
+  // the page must show that state and any billing failure it saved.
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['subscription', id] })
     queryClient.invalidateQueries({ queryKey: ['subscription-invoices', id] })
@@ -220,13 +224,13 @@ export default function SubscriptionDetailPage() {
       )
       setShowCancelChoice(false)
     },
-    onError: (err) => showApiError(err, 'Failed to schedule cancellation'),
+    onError: (err) => { invalidateAll(); showApiError(err, 'Failed to schedule cancellation') },
   })
 
   const clearScheduledCancelMutation = useMutation({
     mutationFn: () => api.clearScheduledSubscriptionCancel(id!),
     onSuccess: () => { invalidateAll(); toast.success('Scheduled cancellation cleared') },
-    onError: (err) => showApiError(err, 'Failed to clear scheduled cancellation'),
+    onError: (err) => { invalidateAll(); showApiError(err, 'Failed to clear scheduled cancellation') },
   })
 
   const pauseCollectionMutation = useMutation({
@@ -248,13 +252,13 @@ export default function SubscriptionDetailPage() {
       setShowPauseConfirm(false)
       setPauseResumesAt('')
     },
-    onError: (err) => showApiError(err, 'Failed to pause collection'),
+    onError: (err) => { invalidateAll(); showApiError(err, 'Failed to pause collection') },
   })
 
   const resumeCollectionMutation = useMutation({
     mutationFn: () => api.resumeSubscriptionCollection(id!),
     onSuccess: () => { invalidateAll(); toast.success('Collection resumed') },
-    onError: (err) => showApiError(err, 'Failed to resume collection'),
+    onError: (err) => { invalidateAll(); showApiError(err, 'Failed to resume collection') },
   })
 
   const endTrialMutation = useMutation({
@@ -278,7 +282,7 @@ export default function SubscriptionDetailPage() {
   const cancelPendingMutation = useMutation({
     mutationFn: (itemID: string) => api.cancelPendingItemChange(id!, itemID),
     onSuccess: () => { invalidateAll(); toast.success('Pending plan change canceled') },
-    onError: (err) => showApiError(err, 'Failed to cancel pending change'),
+    onError: (err) => { invalidateAll(); showApiError(err, 'Failed to cancel pending change') },
   })
 
   const acting =
@@ -1425,6 +1429,7 @@ export default function SubscriptionDetailPage() {
           existingPlanIDs={items.map(i => i.plan_id)}
           onClose={() => setItemDialog(null)}
           onAdded={() => { setItemDialog(null); invalidateAll(); toast.success('Item added') }}
+          onFailed={invalidateAll}
         />
       )}
 
@@ -1436,6 +1441,7 @@ export default function SubscriptionDetailPage() {
           plans={plansData}
           existingPlanIDs={items.map(i => i.plan_id)}
           onClose={() => setItemDialog(null)}
+          onFailed={invalidateAll}
           onChanged={(res) => {
             setItemDialog(null)
             invalidateAll()
@@ -1461,6 +1467,7 @@ export default function SubscriptionDetailPage() {
           item={itemDialog.item}
           plan={planById(itemDialog.item.plan_id)}
           onClose={() => setItemDialog(null)}
+          onFailed={invalidateAll}
           onChanged={(res) => {
             setItemDialog(null)
             invalidateAll()
@@ -1487,6 +1494,7 @@ export default function SubscriptionDetailPage() {
           plan={planById(itemDialog.item.plan_id)}
           onClose={() => setItemDialog(null)}
           onRemoved={() => { setItemDialog(null); invalidateAll(); toast.success('Item removed') }}
+          onFailed={invalidateAll}
         />
       )}
 
@@ -1524,12 +1532,13 @@ function planComboboxOptions(plans: Plan[]): ComboboxOption[] {
 // AddItemDialog picks a plan + quantity and POSTs to /subscriptions/:id/items.
 // The backend rejects duplicates on (subscription, plan); we pre-filter to
 // keep the dropdown clean.
-function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded }: {
+function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded, onFailed }: {
   subscription: Subscription
   plans: Plan[]
   existingPlanIDs: string[]
   onClose: () => void
   onAdded: () => void
+  onFailed: () => void
 }) {
   const [selectedPlan, setSelectedPlan] = useState('')
   const [quantity, setQuantity] = useState('1')
@@ -1563,6 +1572,7 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded 
       await api.addSubscriptionItem(subscription.id, { plan_id: selectedPlan, quantity: qty }, idemKey)
       onAdded()
     } catch (err) {
+      onFailed()
       showApiError(err, 'Failed to add item')
     } finally {
       setSubmitting(false)
@@ -1624,13 +1634,14 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded 
 
 // ChangeItemPlanDialog swaps an item's plan. Immediate swaps prorate; deferred
 // swaps stamp pending_plan_id and apply at the next cycle boundary.
-function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, onClose, onChanged }: {
+function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, onClose, onChanged, onFailed }: {
   subscriptionID: string
   item: SubscriptionItem
   plans: Plan[]
   existingPlanIDs: string[]
   onClose: () => void
   onChanged: (res: ItemChangeResult) => void
+  onFailed: () => void
 }) {
   const [selectedPlan, setSelectedPlan] = useState('')
   const [immediate, setImmediate] = useState(false)
@@ -1667,6 +1678,7 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
       }, idemKey)
       onChanged(res)
     } catch (err) {
+      onFailed()
       showApiError(err, 'Failed to change plan')
     } finally {
       setSubmitting(false)
@@ -1744,12 +1756,13 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
 // ChangeItemQuantityDialog updates a single item's quantity. The backend
 // rejects no-ops (new qty == current qty) with a 422 — we pre-check to keep
 // the UX tight.
-function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChanged }: {
+function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChanged, onFailed }: {
   subscriptionID: string
   item: SubscriptionItem
   plan: Plan | undefined
   onClose: () => void
   onChanged: (res: ItemChangeResult) => void
+  onFailed: () => void
 }) {
   const [quantity, setQuantity] = useState(String(item.quantity))
   const [submitting, setSubmitting] = useState(false)
@@ -1773,6 +1786,7 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
       const res = await api.updateSubscriptionItem(subscriptionID, item.id, { quantity: qty }, idemKey)
       onChanged(res)
     } catch (err) {
+      onFailed()
       showApiError(err, 'Failed to change quantity')
     } finally {
       setSubmitting(false)
@@ -1823,12 +1837,13 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
 // RemoveItemConfirm deletes an item. Removing mid-period generates a credit
 // for the unused portion of the just-paid period on the backend — surface
 // that explicitly so the operator isn't surprised.
-function RemoveItemConfirm({ subscriptionID, item, plan, onClose, onRemoved }: {
+function RemoveItemConfirm({ subscriptionID, item, plan, onClose, onRemoved, onFailed }: {
   subscriptionID: string
   item: SubscriptionItem
   plan: Plan | undefined
   onClose: () => void
   onRemoved: () => void
+  onFailed: () => void
 }) {
   const [submitting, setSubmitting] = useState(false)
 
@@ -1838,6 +1853,7 @@ function RemoveItemConfirm({ subscriptionID, item, plan, onClose, onRemoved }: {
       await api.removeSubscriptionItem(subscriptionID, item.id)
       onRemoved()
     } catch (err) {
+      onFailed()
       showApiError(err, 'Failed to remove item')
       setSubmitting(false)
     }

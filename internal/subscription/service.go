@@ -2016,13 +2016,18 @@ func errUnbilledPeriod(sub domain.Subscription) error {
 // unbilled_period rather than acting on the ended period; retry-billing is the
 // operator's way out. The item handlers call it before their proration
 // snapshot, so the snapshot is the new period's.
+//
+// A subscription with no items is not refused: its close fails for that very
+// reason (refusalNoItems: "Add an item, then retry billing"), so refusing the
+// add would leave it unbillable for good, and with nothing to bill there is
+// nothing on the ended period a write could change.
 func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	sub, _, err := s.closeEndedPeriods(ctx, tenantID, id)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
-	if sub.Status == domain.SubscriptionActive && domain.BillingDueAt(sub, s.clock.Now(ctx)) {
+	if sub.Status == domain.SubscriptionActive && len(sub.Items) > 0 && domain.BillingDueAt(sub, s.clock.Now(ctx)) {
 		return domain.Subscription{}, errUnbilledPeriod(sub)
 	}
 	return sub, nil

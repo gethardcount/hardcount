@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -260,6 +261,39 @@ func (r *lagRig) creditBalance() int64 {
 	return int64(n)
 }
 
+// wantAPIError checks an error answer: its status, its error code and a part
+// of its message.
+func wantAPIError(t *testing.T, code int, raw []byte, wantStatus int, wantCode, wantMsg string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &body)
+	if code != wantStatus || body.Error.Code != wantCode || !strings.Contains(body.Error.Message, wantMsg) {
+		t.Fatalf("answer = %d %s, want %d with code %s and a message containing %q", code, raw, wantStatus, wantCode, wantMsg)
+	}
+}
+
+// exec runs one fixture statement outside tenant scope.
+func (r *lagRig) exec(query string, args ...any) {
+	r.t.Helper()
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		r.t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		r.t.Fatalf("fixture %q: %v", query, err)
+	}
+	if err := tx.Commit(); err != nil {
+		r.t.Fatalf("commit fixture: %v", err)
+	}
+}
+
 func skipShort(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
@@ -309,7 +343,9 @@ func TestCloseLag_ClearScheduledCancel_InGap(t *testing.T) {
 	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), map[string]any{"at_period_end": true}, http.StatusOK)
 
 	code, raw := r.do(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/scheduled-cancel", lagB.Add(2*time.Hour), nil)
-	t.Logf("DELETE scheduled-cancel in the gap: %d %s", code, raw)
+	// The answer must say the clear did not happen: a 200 would show the
+	// operator "Scheduled cancellation cleared" for a cancel already in force.
+	wantAPIError(t, code, raw, http.StatusConflict, "invalid_state", "already took effect")
 	r.run(lagB.Add(3 * time.Hour))
 
 	s := r.sub()
@@ -397,7 +433,7 @@ func TestCloseLag_CancelPendingPlanChange_InGap(t *testing.T) {
 	r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, lagP0.AddDate(0, 0, 9),
 		map[string]any{"new_plan_id": r.planB, "immediate": false}, http.StatusOK)
 	code, raw := r.do(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA+"/pending-change", lagB.Add(2*time.Hour), nil)
-	t.Logf("DELETE pending-change in the gap: %d %s", code, raw)
+	wantAPIError(t, code, raw, http.StatusConflict, "invalid_state", "already took effect")
 	r.run(lagB.Add(3 * time.Hour))
 
 	invs := r.invoices()
@@ -437,16 +473,20 @@ func TestCloseLag_ItemWrites_InGap(t *testing.T) {
 		// wantCycleBase is May's prepaid base on P0's close: the items as
 		// they stood at B.
 		wantCycleBase int64
+		// wantProration is the base the write invoices for the rest of May
+		// (30 of May's 31 days, from B+36h); wantCredit the credit a
+		// removal grants for it.
+		wantProration, wantCredit int64
 	}{
 		{"quantity 1 to 3", false, func(r *lagRig) (string, string, any) {
 			return http.MethodPatch, "/v1/subscriptions/" + r.subID + "/items/" + r.itemA, map[string]any{"quantity": 3}
-		}, 3000},
+		}, 3000, 5806, 0}, // 2 more units x 3000c x 30/31
 		{"immediate plan change A to B", false, func(r *lagRig) (string, string, any) {
 			return http.MethodPatch, "/v1/subscriptions/" + r.subID + "/items/" + r.itemA, map[string]any{"new_plan_id": r.planB, "immediate": true}
-		}, 3000},
+		}, 3000, 2903, 0}, // (6000c - 3000c) x 30/31
 		{"add item C", false, func(r *lagRig) (string, string, any) {
 			return http.MethodPost, "/v1/subscriptions/" + r.subID + "/items", map[string]any{"plan_id": r.planC, "quantity": 1}
-		}, 3000},
+		}, 3000, 968, 0}, // 1000c x 30/31
 		{"remove item C", true, func(r *lagRig) (string, string, any) {
 			s := r.sub()
 			var c string
@@ -456,7 +496,7 @@ func TestCloseLag_ItemWrites_InGap(t *testing.T) {
 				}
 			}
 			return http.MethodDelete, "/v1/subscriptions/" + r.subID + "/items/" + c, nil
-		}, 4000},
+		}, 4000, 0, 968}, // 1000c x 30/31 back as credit
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -481,7 +521,113 @@ func TestCloseLag_ItemWrites_InGap(t *testing.T) {
 			if may.sum("base_fee") != c.wantCycleBase {
 				t.Errorf("May's prepaid base on P0's close = %dc, want %dc (the items as they stood at B; the change prorates from B+36h)", may.sum("base_fee"), c.wantCycleBase)
 			}
+			// The proration is the rest of May, from the write's instant.
+			var prorated int64
+			for _, i := range invs {
+				if i.reason == string(domain.BillingReasonSubscriptionUpdate) {
+					if !i.start.Equal(at) || !i.end.Equal(lagP2) {
+						t.Errorf("proration invoice headed [%v, %v), want [%v, %v)", i.start, i.end, at, lagP2)
+					}
+					prorated += i.sum("base_fee")
+				}
+			}
+			if prorated != c.wantProration {
+				t.Errorf("proration invoiced = %dc, want %dc for the rest of May", prorated, c.wantProration)
+			}
+			// May's cycle invoice is paid from the 20000c grant; a removal
+			// credits the rest of May back.
+			if bal, want := r.creditBalance(), 20000-c.wantCycleBase+c.wantCredit; bal != want {
+				t.Errorf("credit balance = %dc, want %dc (20000c - May's %dc + %dc removal credit)", bal, want, c.wantCycleBase, c.wantCredit)
+			}
 		})
+	}
+}
+
+// TestCloseLag_ItemWritesWhileBillingFails_Refused: P0 ended and its close
+// fails (the tenant's net terms are negative). An item add, a quantity
+// change and an item removal in the gap are each refused with 409
+// unbilled_period, and none of them is written: acting on the ended period
+// would decide what its close bills.
+func TestCloseLag_ItemWritesWhileBillingFails_Refused(t *testing.T) {
+	skipShort(t)
+	r := newLagRig(t, "in_advance", true)
+	// A second add-on with no meter, so the add is valid on its own merits.
+	planD := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
+		"code": "plan_d", "name": "plan_d", "currency": "USD", "billing_interval": "monthly",
+		"base_amount_cents": 500, "base_bill_timing": "in_advance", "meter_ids": []string{},
+	}, http.StatusCreated)["id"].(string)
+	r.exec(`UPDATE tenant_settings SET net_payment_terms = -1 WHERE tenant_id = (SELECT tenant_id FROM subscriptions WHERE id = $1)`, r.subID)
+	var addOn string
+	for _, it := range r.sub().Items {
+		if it.PlanID == r.planC {
+			addOn = it.ID
+		}
+	}
+	at := lagB.Add(time.Hour)
+	writes := []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/v1/subscriptions/" + r.subID + "/items", map[string]any{"plan_id": planD, "quantity": 1}},
+		{http.MethodPatch, "/v1/subscriptions/" + r.subID + "/items/" + r.itemA, map[string]any{"quantity": 3}},
+		{http.MethodDelete, "/v1/subscriptions/" + r.subID + "/items/" + addOn, nil},
+	}
+	for _, w := range writes {
+		code, raw := r.do(w.method, w.path, at, w.body)
+		wantAPIError(t, code, raw, http.StatusConflict, "unbilled_period", "not invoiced yet")
+	}
+	s := r.sub()
+	if !s.CurrentBillingPeriodStart.Equal(lagP0) || len(s.Items) != 2 {
+		t.Fatalf("after the refusals: period start=%v items=%d, want [Apr 1, May 1) with its 2 items", s.CurrentBillingPeriodStart, len(s.Items))
+	}
+	for _, it := range s.Items {
+		if it.Quantity != 1 {
+			t.Errorf("item %s quantity = %d, want 1: the refused write changed it", it.PlanID, it.Quantity)
+		}
+	}
+	if s.BillingFailure == nil {
+		t.Errorf("billing failure not saved; want the first refused write's attempt recorded")
+	}
+	for _, i := range r.invoices() {
+		if i.reason != string(domain.BillingReasonSubscriptionCreate) {
+			t.Errorf("invoice %s [%v, %v) written by a refused write", i.reason, i.start, i.end)
+		}
+	}
+}
+
+// TestCloseLag_NoItemsFailure_AddItemRecovers: the close of P0 fails because
+// the subscription has no items, and the saved failure tells the operator to
+// add an item, then retry billing. That way out must work in the gap: the
+// add is not refused (there is nothing on the ended period to protect), and
+// the retry then bills April.
+//
+// Mutation seam: drop the no-items exemption from CloseEndedPeriodFirst → the
+// add answers 409 unbilled_period and the subscription can never be billed.
+func TestCloseLag_NoItemsFailure_AddItemRecovers(t *testing.T) {
+	skipShort(t)
+	r := newLagRig(t, "in_arrears", false)
+	r.ingest(lagP0.AddDate(0, 0, 19), 100)
+	r.exec(`UPDATE subscription_items SET deleted_at = $1 WHERE id = $2`, lagP0.AddDate(0, 0, 1), r.itemA)
+
+	if code, raw := r.do(http.MethodPost, "/v1/billing/run", lagB.Add(time.Hour), nil); code != http.StatusPartialContent {
+		t.Fatalf("billing run with no items: %d %s, want 206 with the failure", code, raw)
+	}
+	if f := r.sub().BillingFailure; f == nil || !strings.Contains(f.LastError, "Add an item") {
+		t.Fatalf("billing failure = %+v, want the no-items failure", f)
+	}
+
+	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/items", lagB.Add(2*time.Hour), map[string]any{"plan_id": r.planA, "quantity": 1}, http.StatusCreated)
+	out := r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/retry-billing", lagB.Add(3*time.Hour), nil, http.StatusOK)
+	if n, _ := out["invoices_generated"].(float64); n != 1 {
+		t.Fatalf("retry billing generated %v invoices, want 1: %v", out["invoices_generated"], out)
+	}
+	s := r.sub()
+	if s.BillingFailure != nil || !s.CurrentBillingPeriodStart.Equal(lagB) {
+		t.Errorf("after the retry: failure=%+v period start=%v, want no failure and the period [May 1, Jun 1)", s.BillingFailure, s.CurrentBillingPeriodStart)
+	}
+	apr := r.cycleInvoice(r.invoices(), lagP0)
+	if apr.sum("usage") != 100 {
+		t.Errorf("April usage billed = %dc, want 100c", apr.sum("usage"))
 	}
 }
 

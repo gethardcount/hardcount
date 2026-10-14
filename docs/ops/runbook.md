@@ -553,7 +553,9 @@ failure on the subscription and now waits before each new attempt (ADR-119).
     immediate cancel, a scheduled cancel or its removal, a collection pause or
     resume, and any item or plan change answer 409 `unbilled_period`
     (ADR-119), because each one would otherwise act on the period that ended
-    instead of the one that is running.
+    instead of the one that is running. The one exception is a subscription
+    with no items: adding an item is how that failure is fixed, so it is
+    allowed.
 
   Retry promptly once the cause is fixed.
 - A cancel scheduled for the end of a trial still fires on a failing or parked
@@ -591,7 +593,8 @@ out the ladder.
 
 1. Fix the cause. Until the period is billed, every change to the
    subscription (items, plan, a scheduled cancel, a collection pause) is
-   refused with 409 `unbilled_period`.
+   refused with 409 `unbilled_period`, except on a subscription with no
+   items: there, add an item (`POST /v1/subscriptions/{id}/items`) and retry.
 2. Retry the subscription. This clears the saved failure, writes an audit log
    entry, and bills at once:
 
