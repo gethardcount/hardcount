@@ -43,6 +43,14 @@ type Config struct {
 	// (cmd/velox/main.go).
 	ShutdownDrainDelay time.Duration
 
+	// InvoiceGracePeriod is how long after a billing period ends (or after a
+	// mid-period scheduled cancel) the billing runs wait before they build its
+	// invoice, so usage that arrives late but is stamped inside the period is
+	// billed (ADR-120). It delays every subscription's period-end invoice,
+	// flat-fee ones included. Env INVOICE_GRACE_PERIOD (Go duration), default
+	// 1h, 0 to 72h; 0 closes a period as soon as it is due.
+	InvoiceGracePeriod time.Duration
+
 	// Bootstrap
 	BootstrapToken string
 }
@@ -91,6 +99,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.ShutdownDrainDelay = drain
+	grace, err := loadInvoiceGracePeriod()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.InvoiceGracePeriod = grace
 
 	if warnings := cfg.Validate(); len(warnings) > 0 {
 		for _, w := range warnings {
@@ -372,6 +385,29 @@ func boolEnv(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+// DefaultInvoiceGracePeriod and MaxInvoiceGracePeriod bound
+// INVOICE_GRACE_PERIOD. 1h is Stripe's default finalization grace; 72h is
+// Stripe's maximum (ADR-120).
+const (
+	DefaultInvoiceGracePeriod = time.Hour
+	MaxInvoiceGracePeriod     = 72 * time.Hour
+)
+
+// loadInvoiceGracePeriod parses INVOICE_GRACE_PERIOD: unset → 1h; a Go
+// duration from 0 to 72h. Anything else fails the boot: a typo must not
+// silently bill on a timing the operator did not choose.
+func loadInvoiceGracePeriod() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("INVOICE_GRACE_PERIOD"))
+	if raw == "" {
+		return DefaultInvoiceGracePeriod, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 || d > MaxInvoiceGracePeriod {
+		return 0, fmt.Errorf("INVOICE_GRACE_PERIOD=%q must be a duration from 0 to 72h (e.g. 1h, 30m, 0)", raw)
+	}
+	return d, nil
 }
 
 // loadShutdownDrainDelay parses SHUTDOWN_DRAIN_DELAY: unset → 5s outside

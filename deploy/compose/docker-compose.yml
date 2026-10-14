@@ -86,6 +86,9 @@ services:
       PORT: "8080"
       RUN_MIGRATIONS_ON_BOOT: "true"
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # How long after a billing period ends its invoice is built (0 to 72h).
+      # Delays every period-end invoice; see docs/self-host.md.
+      INVOICE_GRACE_PERIOD: ${INVOICE_GRACE_PERIOD:-1h}
       # Database — admin/migration role
       DATABASE_URL: postgres://${POSTGRES_USER:-velox}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-velox}?sslmode=disable
       # Database — least-privilege runtime role (RLS enforced). Production

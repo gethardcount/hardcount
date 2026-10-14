@@ -1285,7 +1285,11 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 // frozen_time. Without this filter the wall-clock cron would expire
 // a clock-pinned customer's grants based on wall-clock time, not the
 // simulated time the customer's other consequences run on.
-func (s *PostgresStore) ListExpiredGrants(ctx context.Context) ([]domain.CreditLedgerEntry, error) {
+//
+// grace is the invoice grace (ADR-120; see Service.SetExpiryGrace): a grant
+// is listed once grace has passed after its expires_at, so the period close
+// that may still draw on it runs first.
+func (s *PostgresStore) ListExpiredGrants(ctx context.Context, grace time.Duration) ([]domain.CreditLedgerEntry, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -1306,7 +1310,7 @@ func (s *PostgresStore) ListExpiredGrants(ctx context.Context) ([]domain.CreditL
 		FROM customer_credit_ledger g
 		WHERE g.entry_type = 'grant'
 		  AND g.expires_at IS NOT NULL
-		  AND g.expires_at < NOW()
+		  AND g.expires_at < NOW() - ($2::bigint * interval '1 microsecond')
 		  AND g.livemode = $1
 		  AND g.consumed_cents < g.amount_cents
 		  AND NOT EXISTS (
@@ -1314,7 +1318,7 @@ func (s *PostgresStore) ListExpiredGrants(ctx context.Context) ([]domain.CreditL
 		    WHERE c.id = g.customer_id
 		      AND c.test_clock_id IS NOT NULL
 		  )
-	`, postgres.Livemode(ctx))
+	`, postgres.Livemode(ctx), grace.Microseconds())
 	if err != nil {
 		return nil, err
 	}

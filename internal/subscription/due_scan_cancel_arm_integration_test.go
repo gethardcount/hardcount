@@ -92,7 +92,7 @@ func TestDueScans_CancelArm_Scoping(t *testing.T) {
 	}
 
 	t.Run("GetDueBilling wall", func(t *testing.T) {
-		got, err := store.GetDueBilling(ctx, wallNow, nil, 50)
+		got, err := store.GetDueBilling(ctx, wallNow, wallNow, nil, 50)
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}
@@ -136,7 +136,7 @@ func TestDueScans_CancelArm_Scoping(t *testing.T) {
 		// (ADR-097 names all three); it carried the arm untested — the
 		// header's "three queries" claim was only two-thirds true until
 		// this leg existed (2026-07-19 truth audit).
-		got, err := store.GetDueBillingForTenant(ctx, tenantID, wallNow, nil, 50)
+		got, err := store.GetDueBillingForTenant(ctx, tenantID, wallNow, wallNow, nil, 50)
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}

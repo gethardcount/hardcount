@@ -503,7 +503,7 @@ func RecordSchedulerTick() {
 // Gauges resolve at SCRAPE time via one COUNT each (cheap: partial/status
 // indexes; 3s cap). A query failure reports -1 — visibly wrong rather than
 // a healthy-looking 0.
-func RegisterQueueDepthGauges(count func(query string) (float64, error)) {
+func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query string) (float64, error)) {
 	gauge := func(name, help, query string) {
 		promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: name, Help: help}, func() float64 {
 			n, err := count(query)
@@ -548,6 +548,12 @@ func RegisterQueueDepthGauges(count func(query string) (float64, error)) {
 	// a sub whose attempts fail without being saved (an interrupted run, a
 	// lost connection); its id is in the "bill subscription failed" log.
 	//
+	// "Due" is the billing runs' own rule, invoice grace included (ADR-120):
+	// a sub inside its grace is not counted, and the age is counted from when
+	// the grace ran out. Otherwise every period end would show as backlog for
+	// the length of the grace, and the age alert (2x the billing interval)
+	// would fire on a healthy install with a long grace.
+	//
 	// billingFailing is a hand copy of domain.SubscriptionBillingFailingSQL,
 	// as duePredicate is of the scan's: this package imports no domain
 	// package. TestBillingGauges_DueAndFailingPartition pins the two copies
@@ -555,10 +561,13 @@ func RegisterQueueDepthGauges(count func(query string) (float64, error)) {
 	const billingFailing = `status IN ('active','trialing') AND test_clock_id IS NULL
 		AND billing_failed_for IS NOT NULL
 		AND billing_failed_for IS NOT DISTINCT FROM LEAST(next_billing_at, CASE WHEN status = 'active' THEN cancel_at END)`
-	dueHelp := "Subscriptions due for billing now whose billing is not failing (wall-clock subs; test-clock subs bill on Advance). Spikes on busy billing days and falls as the scheduler drains it. Subscriptions with a saved billing failure are in velox_billing_failing_subscriptions. -1 = metric query failed."
-	ageHelp := "Seconds since the oldest due subscription whose billing is not failing became due; 0 when there is none. Alert when it exceeds 2x the billing interval: billing is behind, or a subscription's attempts are interrupted or hit connection errors on every tick. -1 = metric query failed."
-	const duePredicate = `status IN ('active', 'trialing') AND test_clock_id IS NULL AND livemode = %t
-		AND (next_billing_at <= now() OR (status = 'active' AND cancel_at IS NOT NULL AND cancel_at <= now()))
+	dueHelp := "Subscriptions due for billing now whose billing is not failing (wall-clock subs; test-clock subs bill on Advance). A subscription is due once INVOICE_GRACE_PERIOD has passed after its period end or mid-period cancel. Spikes on busy billing days and falls as the scheduler drains it. Subscriptions with a saved billing failure are in velox_billing_failing_subscriptions. -1 = metric query failed."
+	ageHelp := "Seconds since the oldest due subscription whose billing is not failing became due (its period end or mid-period cancel plus INVOICE_GRACE_PERIOD); 0 when there is none. Alert when it exceeds 2x the billing interval: billing is behind, or a subscription's attempts are interrupted or hit connection errors on every tick. -1 = metric query failed."
+	// dueBy is now() less the grace, in whole microseconds (Postgres's
+	// timestamp resolution).
+	dueBy := fmt.Sprintf("(now() - interval '%d microseconds')", invoiceGrace.Microseconds())
+	duePredicate := `status IN ('active', 'trialing') AND test_clock_id IS NULL AND livemode = %t
+		AND (next_billing_at <= ` + dueBy + ` OR (status = 'active' AND cancel_at IS NOT NULL AND cancel_at <= ` + dueBy + `))
 		AND NOT (` + billingFailing + `)`
 	for _, m := range []struct {
 		label string
@@ -569,9 +578,9 @@ func RegisterQueueDepthGauges(count func(query string) (float64, error)) {
 			{"velox_billing_due_subscriptions", dueHelp, `SELECT COUNT(*) FROM subscriptions WHERE ` + pred},
 			// The due instant is the earlier of the arms that admit the row
 			// (LEAST skips the NULL of an arm that doesn't).
-			{"velox_billing_oldest_due_age_seconds", ageHelp, `SELECT COALESCE(EXTRACT(EPOCH FROM now() - MIN(LEAST(
-				CASE WHEN next_billing_at <= now() THEN next_billing_at END,
-				CASE WHEN status = 'active' AND cancel_at <= now() THEN cancel_at END))), 0)
+			{"velox_billing_oldest_due_age_seconds", ageHelp, `SELECT COALESCE(EXTRACT(EPOCH FROM ` + dueBy + ` - MIN(LEAST(
+				CASE WHEN next_billing_at <= ` + dueBy + ` THEN next_billing_at END,
+				CASE WHEN status = 'active' AND cancel_at <= ` + dueBy + ` THEN cancel_at END))), 0)
 				FROM subscriptions WHERE ` + pred},
 		} {
 			q := g.query

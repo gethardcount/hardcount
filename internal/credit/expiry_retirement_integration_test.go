@@ -150,7 +150,7 @@ func TestExpireGrantAtomic_RecomputesUnderLock(t *testing.T) {
 	grantID := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 10000, expiresAt)
 
 	// Candidate snapshot BEFORE the backdated apply — remaining $100.
-	candidates, err := store.ListExpiredGrants(ctx)
+	candidates, err := store.ListExpiredGrants(ctx, 0)
 	if err != nil {
 		t.Fatalf("list expired grants: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestMigration0127_RetiresLegacyExpiredGrants(t *testing.T) {
 
 	// The sweep must not double-expire retired legacy grants now that
 	// the description-LIKE dedup is gone: neither grant re-lists.
-	candidates, err := store.ListExpiredGrants(ctx)
+	candidates, err := store.ListExpiredGrants(ctx, 0)
 	if err != nil {
 		t.Fatalf("list expired grants: %v", err)
 	}

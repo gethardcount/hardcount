@@ -26,11 +26,11 @@ var (
 )
 
 // registerGauges wires the gauges the way router.go does: a BYPASS tx per
-// scrape.
+// scrape, and a 1h invoice grace (the INVOICE_GRACE_PERIOD default).
 func registerGauges(db *postgres.DB) {
 	gaugeDB, gaugeFailed = db, nil
 	gaugeOnce.Do(func() {
-		mw.RegisterQueueDepthGauges(func(query string) (float64, error) {
+		mw.RegisterQueueDepthGauges(time.Hour, func(query string) (float64, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			tx, err := gaugeDB.BeginTx(ctx, postgres.TxBypass, "")
@@ -173,6 +173,12 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 	seed("sub_g_clock", "active", due, nil, clockID, &due, nil)  // clock-pinned: neither
 	seed("sub_g_canceled", "canceled", due, nil, nil, &due, nil) // evidence on a canceled row: neither
 	seed("sub_g_notdue", "active", notDue, nil, nil, nil, nil)
+	// Inside the invoice grace (ADR-120; the gauges are registered with 1h):
+	// the billing runs do not close these yet, so they are not due. One per
+	// arm of the due instant.
+	inGrace := now.Add(-30 * time.Minute)
+	seed("sub_g_ingrace", "active", inGrace, nil, nil, nil, nil)
+	seed("sub_g_cancel_ingrace", "active", notDue, &inGrace, nil, nil, nil)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -185,7 +191,7 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 		return l
 	}
 	if got := gaugeValue(t, "velox_billing_due_subscriptions", test()); got != 3 {
-		t.Errorf("due = %v, want 3 (healthy, unrecorded, and the row with a stale record)", got)
+		t.Errorf("due = %v, want 3 (healthy, unrecorded, and the row with a stale record; the two rows inside their grace are not due)", got)
 	}
 	retrying := gaugeValue(t, "velox_billing_failing_subscriptions", test("state", "retrying"))
 	parked := gaugeValue(t, "velox_billing_failing_subscriptions", test("state", "parked"))
@@ -195,9 +201,11 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 	if got := gaugeValue(t, "velox_billing_failing_subscriptions", map[string]string{"mode": "live", "state": "parked"}); got != 0 {
 		t.Errorf("live-mode parked = %v, want 0: the test-mode rows leaked across the livemode partition", got)
 	}
-	// The oldest due age is the healthy/stale row's 48h, not hidden by them.
-	if age := gaugeValue(t, "velox_billing_oldest_due_age_seconds", test()); age < 47*3600 || age > 49*3600 {
-		t.Errorf("oldest due age = %vs, want about 48h", age)
+	// The oldest due age is the healthy/stale row's, counted from when it
+	// became due for the billing run: 48h after its due instant less the 1h
+	// grace is 47h.
+	if age := gaugeValue(t, "velox_billing_oldest_due_age_seconds", test()); age < 47*3600-300 || age > 47*3600+300 {
+		t.Errorf("oldest due age = %vs, want about 47h (48h since the due instant, less the 1h grace)", age)
 	}
 
 	// The hand copy agrees with the domain predicate.

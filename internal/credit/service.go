@@ -41,6 +41,8 @@ type Service struct {
 	auditLogger AuditEmitter
 	customers   CustomerReader
 	live        LiveBalanceReader
+	// expiryGrace delays the wall-clock expiry sweep; see SetExpiryGrace.
+	expiryGrace time.Duration
 }
 
 func NewService(store Store) *Service {
@@ -68,6 +70,21 @@ func (s *Service) SetResolver(r clock.Resolver) {
 // SetCustomerReader wires the customer read that Grant and Adjust run before
 // writing. When unwired (narrow unit tests) the read is skipped.
 func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
+
+// SetExpiryGrace makes the wall-clock expiry sweep retire a grant only once
+// INVOICE_GRACE_PERIOD has passed after its expires_at (ADR-120).
+//
+// The close of a period draws on the grants that were live at the period end
+// (drainPositiveBlocks filters on expires_at > the boundary), and a retired
+// grant can no longer be drawn. With the grace the close runs up to that long
+// after the boundary, while the sweep runs on every scheduler tick. Without
+// this delay a grant expiring just after the boundary would be retired before
+// the close, and the customer would lose credit that was live when the period
+// ended. With it, the tick that sweeps the grant has already run the close
+// (RunCycle runs before ExpireCredits in a tick). An expired grant stays in
+// the ledger balance for up to the grace longer; no invoice issued after its
+// expiry draws from it. The test-clock sweep is unchanged.
+func (s *Service) SetExpiryGrace(d time.Duration) { s.expiryGrace = d }
 
 // requireCustomer confirms the customer exists in the caller's tenant and
 // mode. The ledger's foreign key to customers is on the id alone and
@@ -567,7 +584,7 @@ func (s *Service) reverseForInvoice(ctx context.Context, tenantID, customerID, i
 // negative (expiry) entries to zero them out. Returns the count of expired grants
 // and any errors encountered during processing.
 func (s *Service) ExpireCredits(ctx context.Context) (int, []error) {
-	grants, err := s.store.ListExpiredGrants(ctx)
+	grants, err := s.store.ListExpiredGrants(ctx, s.expiryGrace)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired grants: %w", err)}
 	}

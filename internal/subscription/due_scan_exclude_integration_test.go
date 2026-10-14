@@ -71,11 +71,11 @@ func TestDueScans_ExcludeAppliesBeforeLimit(t *testing.T) {
 		scan                 func(exclude []string) ([]string, error)
 	}{
 		{"GetDueBilling", "sub_de_oldest", "sub_de_second", func(ex []string) ([]string, error) {
-			subs, err := store.GetDueBilling(ctx, wallNow, ex, 1)
+			subs, err := store.GetDueBilling(ctx, wallNow, wallNow, ex, 1)
 			return ids(subs), err
 		}},
 		{"GetDueBillingForTenant", "sub_de_oldest", "sub_de_second", func(ex []string) ([]string, error) {
-			subs, err := store.GetDueBillingForTenant(ctx, tenantID, wallNow, ex, 1)
+			subs, err := store.GetDueBillingForTenant(ctx, tenantID, wallNow, wallNow, ex, 1)
 			return ids(subs), err
 		}},
 		{"GetDueBillingForClock", "sub_de_clk_oldest", "sub_de_clk_second", func(ex []string) ([]string, error) {

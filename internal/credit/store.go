@@ -77,7 +77,7 @@ type Store interface {
 	// consumed_cents flip is the exactly-once gate: replayed and
 	// concurrent sweeps converge on one expiry entry per grant.
 	ExpireGrantAtomic(ctx context.Context, tenantID, customerID, grantID string) (int64, error)
-	ListExpiredGrants(ctx context.Context) ([]domain.CreditLedgerEntry, error)
+	ListExpiredGrants(ctx context.Context, grace time.Duration) ([]domain.CreditLedgerEntry, error)
 
 	// ListExpiredGrantsForClock is the catchup-path counterpart to
 	// ListExpiredGrants. ADR-029 Phase 4: clock-pinned customer grants

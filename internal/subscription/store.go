@@ -92,7 +92,7 @@ type Store interface {
 	// not a valid state and indicates a hydration bug.
 	Get(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.Subscription, int, error)
-	GetDueBilling(ctx context.Context, before time.Time, exclude []string, limit int) ([]domain.Subscription, error)
+	GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error)
 
 	// ClosePeriodTx is THE period writer (ADR-115): one UPDATE that row-locks
 	// the subscription and proves `expected` (status, period start, watermark)

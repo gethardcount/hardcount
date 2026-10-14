@@ -159,7 +159,7 @@ func (m *memStore) Update(ctx context.Context, tenantID string, s domain.Subscri
 	return s, nil
 }
 
-func (m *memStore) GetDueBilling(ctx context.Context, _ time.Time, _ []string, _ int) ([]domain.Subscription, error) {
+func (m *memStore) GetDueBilling(ctx context.Context, _, _ time.Time, _ []string, _ int) ([]domain.Subscription, error) {
 	return nil, nil
 }
 

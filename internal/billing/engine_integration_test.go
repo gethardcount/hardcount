@@ -32,16 +32,16 @@ type subStoreAdapter struct {
 	store *subscription.PostgresStore
 }
 
-func (a *subStoreAdapter) GetDueBilling(ctx context.Context, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
-	return a.store.GetDueBilling(ctx, before, exclude, limit)
+func (a *subStoreAdapter) GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+	return a.store.GetDueBilling(ctx, now, dueBy, exclude, limit)
 }
 
 func (a *subStoreAdapter) GetDueBillingForClock(ctx context.Context, tenantID, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
 	return a.store.GetDueBillingForClock(ctx, tenantID, clockID, exclude, limit)
 }
 
-func (a *subStoreAdapter) GetDueBillingForTenant(ctx context.Context, tenantID string, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
-	return a.store.GetDueBillingForTenant(ctx, tenantID, before, exclude, limit)
+func (a *subStoreAdapter) GetDueBillingForTenant(ctx context.Context, tenantID string, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+	return a.store.GetDueBillingForTenant(ctx, tenantID, now, dueBy, exclude, limit)
 }
 
 func (a *subStoreAdapter) Get(ctx context.Context, tenantID, id string) (domain.Subscription, error) {

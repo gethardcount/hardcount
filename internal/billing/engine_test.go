@@ -465,7 +465,7 @@ func (m *mockSubs) ClosePeriod(ctx context.Context, tenantID, id string, expecte
 	})
 }
 
-func (m *mockSubs) GetDueBilling(_ context.Context, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+func (m *mockSubs) GetDueBilling(_ context.Context, _, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
 	var result []domain.Subscription
 	for _, s := range m.subs {
 		// ADR-028 disjoint flows: wall-clock GetDueBilling only
@@ -474,10 +474,10 @@ func (m *mockSubs) GetDueBilling(_ context.Context, before time.Time, exclude []
 			continue
 		}
 		eligible := s.Status == domain.SubscriptionActive || s.Status == domain.SubscriptionTrialing
-		due := s.NextBillingAt != nil && !s.NextBillingAt.After(before)
+		due := s.NextBillingAt != nil && !s.NextBillingAt.After(dueBy)
 		// Mirror the real query's ADR-097 cancel arm: active subs with a
 		// due cancel_at are admitted even when next_billing_at is future.
-		cancelDue := s.Status == domain.SubscriptionActive && s.CancelAt != nil && !s.CancelAt.After(before)
+		cancelDue := s.Status == domain.SubscriptionActive && s.CancelAt != nil && !s.CancelAt.After(dueBy)
 		if eligible && (due || cancelDue) {
 			result = append(result, s)
 		}
@@ -493,8 +493,8 @@ func (m *mockSubs) GetDueBilling(_ context.Context, before time.Time, exclude []
 // The mock doesn't model RLS, so it returns the same non-clock-pinned due subs
 // as GetDueBilling (all mock subs are one tenant); tenantID is accepted for
 // signature parity.
-func (m *mockSubs) GetDueBillingForTenant(ctx context.Context, _ string, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
-	return m.GetDueBilling(ctx, before, exclude, limit)
+func (m *mockSubs) GetDueBillingForTenant(ctx context.Context, _ string, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+	return m.GetDueBilling(ctx, now, dueBy, exclude, limit)
 }
 
 // GetDueBillingForClock — mirror of GetDueBilling for the disjoint
@@ -4301,7 +4301,7 @@ func TestBillSubscription_PeriodMoved_RetriesOnce(t *testing.T) {
 			s.NextBillingAt = &truncated
 			m.subs["sub_1"] = s
 		}
-		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"], nil)
+		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"], 0, nil)
 		if err != nil {
 			t.Fatalf("billSubscription: %v", err)
 		}
@@ -4325,7 +4325,7 @@ func TestBillSubscription_PeriodMoved_RetriesOnce(t *testing.T) {
 			s.CurrentBillingPeriodEnd = &moved
 			m.subs["sub_1"] = s
 		}
-		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"], nil)
+		n, err := engine.billSubscription(context.Background(), subs.subs["sub_1"], 0, nil)
 		if err != nil || n != 0 {
 			t.Fatalf("billSubscription = (%d, %v), want (0, nil): a lost race is not an error", n, err)
 		}

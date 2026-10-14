@@ -27,6 +27,7 @@ confirm the fix.
 | `velox_audit_write_errors_total` rising | [12. Audit write errors](#12-audit-write-errors) |
 | `velox_audit_uncovered_mutation_total` rising | [13. Mutation without an audit row](#13-mutation-without-an-audit-row) |
 | `velox_billing_failing_subscriptions` above zero, or a subscription is not being invoiced | [14. Subscriptions whose billing is failing](#14-subscriptions-whose-billing-is-failing) |
+| A period ended but its invoice is not built yet, or usage is missing from an invoice | [15. Invoice timing and late usage](#15-invoice-timing-and-late-usage) |
 | Write I/O high for minutes after a bulk load | [After a large backfill](#after-a-large-backfill-expect-a-few-minutes-of-elevated-write-io) |
 | p99 jumps, p50 flat, after a quiet spell (RDS) | [Size the WAL segment pool](#on-rds-size-the-wal-segment-pool--the-defaults-let-commits-stall-after-a-quiet-spell) |
 | p50 lifts for everyone for seconds on a large table | [Autovacuum stall](#autovacuum-on-a-large-insert-only-table-can-stall-every-commit-for-seconds) |
@@ -75,7 +76,7 @@ alerting tier: what should page someone, and what is only informational.
 |---|---|---|
 | `velox_payment_charges_total{result="failed"}` | rate spikes 5× baseline | Stripe issue or systematic decline |
 | `velox_auto_charge_queued_invoices{mode}` | > 5000 sustained | The charge retry visits every queued invoice each tick, so a large queue makes the sweep slow. Card-less invoices stay queued on purpose (adding a card charges them on the next visit), so a steady baseline is normal. Above 5,000 is the ADR-116 amendment's trigger to stop re-visiting card-less invoices every tick |
-| `velox_billing_oldest_due_age_seconds{mode}` | > 2× billing interval | A subscription has been due for billing that long, and its billing is not saved as failing. There are two causes. Billing is behind: `velox_billing_due_subscriptions` is large and falling on a busy day, and it catches up. Or one subscription's attempts are interrupted or hit connection errors on every tick: the count is small and flat. Its id is in the `bill subscription failed` ERROR log, with `class` `interrupted` or `transient`. A subscription that fails to bill for any other reason is not here; it is in the next row |
+| `velox_billing_oldest_due_age_seconds{mode}` | > 2× billing interval | A subscription has been due for billing that long, and its billing is not saved as failing. "Due" starts when `INVOICE_GRACE_PERIOD` has passed after the period end, so a subscription inside its grace is not counted ([15](#15-invoice-timing-and-late-usage)). There are two causes. Billing is behind: `velox_billing_due_subscriptions` is large and falling on a busy day, and it catches up. Or one subscription's attempts are interrupted or hit connection errors on every tick: the count is small and flat. Its id is in the `bill subscription failed` ERROR log, with `class` `interrupted` or `transient`. A subscription that fails to bill for any other reason is not here; it is in the next row |
 | `velox_billing_failing_subscriptions{state="parked",mode="live"}` | > 0 | A subscription has not been invoiced and nothing will retry it. Eight billing attempts failed. See [14](#14-subscriptions-whose-billing-is-failing) |
 | `velox_dunning_runs_processed_total{outcome="failed"}` | rate > 0.5/s | Dunning machinery struggling |
 | `velox_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down or signature wrong |
@@ -157,6 +158,8 @@ curl -s http://localhost:8080/health/ready
    - A drain skips a subscription whose billing is failing and is waiting
      for its next attempt or parked. See
      [14](#14-subscriptions-whose-billing-is-failing).
+   - A drain does not close a period that is still inside its
+     `INVOICE_GRACE_PERIOD`. See [15](#15-invoice-timing-and-late-usage).
 
 ### 2. Email outbox backed up
 
@@ -405,9 +408,13 @@ spend view will be short against LiteLLM's spend page for the period.
 - Every row is idempotency-keyed
   (`<litellm_call_id>:input|output|cache_read`). So a replay of a window
   that was partly recorded is a pure gap-fill.
-- Hard deadline: the period must not be finalized yet. A replay landing
-  in a finalized period increments `velox_usage_late_event_total` and
-  needs a manual credit/debit.
+- Deadline: the replay must reach Velox before the period's invoice is
+  built, which is `INVOICE_GRACE_PERIOD` (default 1 hour) after the period
+  ends, plus up to one billing tick. A replay after that is stored but not
+  billed; bill it with a one-off invoice
+  ([15](#15-invoice-timing-and-late-usage)).
+  `velox_usage_late_event_total` counts only events more than 24 hours old
+  on arrival, so it does not show which rows missed an invoice.
 
 **Verify**: rows already held come back as `deduplicated`, never
 double-counted.
@@ -652,6 +659,67 @@ next billing run bills the subscription.
 gauge or list. Its failure stops the clock; see
 [6. Test-clock advance hung](#6-test-clock-advance-hung).
 
+### 15. Invoice timing and late usage
+
+**Symptom**: a billing period has ended and its invoice is not built yet.
+Or a customer or a usage pipeline reports usage missing from an invoice.
+
+**Why**: Velox builds a period's invoice only once `INVOICE_GRACE_PERIOD`
+(default 1 hour, 0 to 72 hours) has passed after the period ends (ADR-120).
+Usage that is stamped inside the period but arrives late is then still
+billed.
+The hourly billing run then picks it up, so the invoice is built 1 to 2 hours
+after the period end with the default. The same wait applies to the final
+invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
+
+- The invoice is still dated at the period end. Its webhook, tax record,
+  credits, charge and first payment retry come when it is built.
+- An immediate cancel, `POST /v1/subscriptions/{id}/retry-billing`, any other
+  change to a subscription whose period has ended, and a test-clock advance
+  build the invoice at once, with no grace.
+- Once the invoice is built it does not change. Usage stamped inside its
+  period that arrives later is stored but billed on no invoice, now or
+  later. Velox does not alert on it, and there is no list of such events
+  yet (deferred; see ADR-120).
+- During the grace the subscription still shows the ended period. Spend
+  thresholds and the live credit balance do not count the new period's
+  usage until the invoice is built.
+- A credit grant that expires during the grace is retired only after the
+  grace, so it still pays the invoice of the period it was live in. Until
+  then it stays in the ledger balance; no later invoice draws from it.
+
+**Check**:
+
+```bash
+# When is this subscription's period due, and is it failing?
+curl -sS "$API/v1/subscriptions/$SUB" -H "Authorization: Bearer $KEY" \
+  | jq '{status, current_billing_period_end, next_billing_at, cancel_at, billing_failure}'
+# The setting in force is logged at boot:
+#   msg="invoice grace period" invoice_grace_period=1h0m0s
+```
+
+Due means `next_billing_at` (or a `cancel_at` inside the period) is at
+least `INVOICE_GRACE_PERIOD` in the past. If it is, and `billing_failure`
+is set, go to [14](#14-subscriptions-whose-billing-is-failing).
+
+**Fix**:
+
+- Usage that missed a built invoice: compare the customer's usage for the
+  period (`GET /v1/customers/{id}/usage`) with the invoice's usage lines.
+  Bill the difference with a one-off invoice: `POST /v1/invoices`, then
+  `POST /v1/invoices/{id}/line-items`, then `POST /v1/invoices/{id}/finalize`.
+  For a max or last meter, the late events may change nothing; check the
+  events before you bill.
+- A pipeline that often delivers later than the grace: raise
+  `INVOICE_GRACE_PERIOD` above its worst delay (at most `72h`) and restart.
+  Every period-end invoice then comes that much later.
+- A walk or script that needs a period closed right after it ends: run with
+  `INVOICE_GRACE_PERIOD=0`, or close one subscription with retry-billing.
+
+**Verify**: after the grace and the next billing tick,
+`velox_billing_due_subscriptions` falls back and the invoice exists, dated
+at the period end.
+
 ## After a large backfill, expect a few minutes of elevated write I/O
 
 **Symptom**: after a bulk load, write I/O stays high for a few minutes
@@ -808,7 +876,9 @@ The tick interval and batch size are compiled-in, not env-configurable:
 
 A tenant with a backlog is drained on demand via `POST /v1/billing/run`
 (loops until that tenant has nothing left that it will attempt), not by
-tuning these knobs. It skips subscriptions whose billing is failing while
+tuning these knobs. Like the tick, it closes a period only once
+`INVOICE_GRACE_PERIOD` has passed after its end
+([15](#15-invoice-timing-and-late-usage)). It skips subscriptions whose billing is failing while
 they wait for their next attempt or are parked; see
 [14](#14-subscriptions-whose-billing-is-failing). A drain
 running under the leader's tick may report 0 for a subscription the

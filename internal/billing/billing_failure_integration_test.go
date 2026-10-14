@@ -206,11 +206,11 @@ type observedSubs struct {
 	writes atomic.Int32
 }
 
-func (a *observedSubs) GetDueBilling(ctx context.Context, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+func (a *observedSubs) GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
 	if n := int(a.fetches.Add(1)); a.beforeFetch != nil {
 		a.beforeFetch(n)
 	}
-	subs, err := a.subStoreAdapter.GetDueBilling(ctx, before, exclude, limit)
+	subs, err := a.subStoreAdapter.GetDueBilling(ctx, now, dueBy, exclude, limit)
 	a.mu.Lock()
 	for _, sub := range subs {
 		a.scanned = append(a.scanned, sub.ID)

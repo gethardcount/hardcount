@@ -195,12 +195,15 @@ func serve() {
 		slog.Info("redis connected for rate limiting")
 	}
 
-	server := api.NewServer(db, nil, rdb)
+	server := api.NewServer(db, nil, rdb, api.WithInvoiceGrace(cfg.InvoiceGracePeriod))
 
 	billingInterval := 1 * time.Hour
 	if cfg.Env == "local" {
 		billingInterval = 5 * time.Minute
 	}
+	// A period is closed on the first billing tick after its end plus the
+	// grace, so the operator sees when invoices will actually be built.
+	slog.Info("invoice grace period", "invoice_grace_period", cfg.InvoiceGracePeriod, "billing_interval", billingInterval)
 	scheduler := billing.NewScheduler(server.BillingEngine, billingInterval, 50, server.DunningSvc, server.SettingsStore, nil, server.CreditSvc)
 	// Every service below is constructed unconditionally by api.NewServer —
 	// a nil can only mean a broken refactor. Wire unconditionally: the

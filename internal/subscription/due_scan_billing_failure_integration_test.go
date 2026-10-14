@@ -202,10 +202,10 @@ func TestDueScans_WaitingAndParkedAreSkippedBeforeLimit(t *testing.T) {
 		scan func(at time.Time, limit int) ([]domain.Subscription, error)
 	}{
 		{"GetDueBilling", func(at time.Time, limit int) ([]domain.Subscription, error) {
-			return s.store.GetDueBilling(s.ctx, at, nil, limit)
+			return s.store.GetDueBilling(s.ctx, at, at, nil, limit)
 		}},
 		{"GetDueBillingForTenant", func(at time.Time, limit int) ([]domain.Subscription, error) {
-			return s.store.GetDueBillingForTenant(s.ctx, s.tenantID, at, nil, limit)
+			return s.store.GetDueBillingForTenant(s.ctx, s.tenantID, at, at, nil, limit)
 		}},
 	}
 	for _, c := range scans {
@@ -298,7 +298,7 @@ func TestDueScans_RecordForAnotherDueInstantDoesNotGate(t *testing.T) {
 
 	want := []string{"sub_bf_moved", "sub_bf_uncancel", "sub_bf_trial_moved"}
 	t.Run("GetDueBilling", func(t *testing.T) {
-		got, err := s.store.GetDueBilling(s.ctx, s.now, nil, 50)
+		got, err := s.store.GetDueBilling(s.ctx, s.now, s.now, nil, 50)
 		if err != nil {
 			t.Fatalf("scan: %v", err)
 		}
@@ -307,7 +307,7 @@ func TestDueScans_RecordForAnotherDueInstantDoesNotGate(t *testing.T) {
 		}
 	})
 	t.Run("GetDueBillingForTenant", func(t *testing.T) {
-		got, err := s.store.GetDueBillingForTenant(s.ctx, s.tenantID, s.now, nil, 50)
+		got, err := s.store.GetDueBillingForTenant(s.ctx, s.tenantID, s.now, s.now, nil, 50)
 		if err != nil {
 			t.Fatalf("scan: %v", err)
 		}

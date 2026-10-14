@@ -87,6 +87,9 @@ type Engine struct {
 	dunningResolver DunningResolver
 	cancelExecutor  ScheduledCancelExecutor
 	auditLogger     AuditWriter
+	// invoiceGrace is INVOICE_GRACE_PERIOD (ADR-120): how long after a period
+	// ends the billing runs wait before they close it. See SetInvoiceGrace.
+	invoiceGrace time.Duration
 	// deferredThresholdNotes dedups the crossed-but-deferred loudness
 	// artifact to once per (sub, period) — see noteThresholdDeferred.
 	deferredThresholdNotes sync.Map
@@ -461,7 +464,9 @@ type SubscriptionReader interface {
 	// are NOT pinned to a test clock (ADR-028 disjoint flows). The
 	// scheduler tick fans this out per livemode. Every due scan takes
 	// exclude: ids the caller already attempted this run (drainDue).
-	GetDueBilling(ctx context.Context, before time.Time, exclude []string, limit int) ([]domain.Subscription, error)
+	// now gates billing failures (ADR-119); dueBy = now less the invoice
+	// grace admits due instants (ADR-120).
+	GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error)
 	// GetDueBillingForClock: operator-driven catchup path. Returns
 	// ONLY subs pinned to the given clock whose next_billing_at is
 	// on-or-before that clock's frozen time. Called by RunCatchup
@@ -470,7 +475,8 @@ type SubscriptionReader interface {
 	// GetDueBillingForTenant: operator-triggered (POST /v1/billing/run)
 	// path, scoped to ONE tenant under RLS. Wall-clock-due, non-clock-
 	// pinned subs for the caller's tenant only — never cross-tenant.
-	GetDueBillingForTenant(ctx context.Context, tenantID string, before time.Time, exclude []string, limit int) ([]domain.Subscription, error)
+	// now and dueBy as for GetDueBilling.
+	GetDueBillingForTenant(ctx context.Context, tenantID string, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error)
 	Get(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 	// RecordBillingFailure saves one counted billing failure on a wall-clock
 	// subscription (ADR-119) and reports whether a row was written. Zero rows
@@ -972,6 +978,22 @@ func (e *Engine) SetDunningResolver(d DunningResolver) {
 // executor. See the ScheduledCancelExecutor doc-comment.
 func (e *Engine) SetScheduledCancelExecutor(x ScheduledCancelExecutor) {
 	e.cancelExecutor = x
+}
+
+// SetInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). Usage reaches Velox
+// some time after it happens, so the two wall-clock billing runs (the
+// scheduler's RunCycle and the operator's POST /v1/billing/run) close a
+// period only once the grace has passed after its end, or after a
+// mid-period cancel_at. Usage stamped inside the period that arrives within
+// the grace is then on the invoice.
+//
+// The other closers do not wait. An operator acting on one subscription
+// (immediate cancel, retry-billing, the pre-close of every other
+// subscription write) closes the ended period now, and a test clock closes at
+// the instant it is advanced to: there the operator decides when usage
+// arrives. Unset (0) closes as soon as the period is due.
+func (e *Engine) SetInvoiceGrace(d time.Duration) {
+	e.invoiceGrace = d
 }
 
 // resolveDunningRecovered best-effort resolves an active dunning run for an
@@ -1835,7 +1857,11 @@ type dueFetch func(ctx context.Context, exclude []string, limit int) ([]domain.S
 //
 // onPage, if set, runs after every page. The scheduler stamps its liveness
 // there, because one tick can now run for hours.
-func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, onPage func(), logArgs ...any) (int, []SubBillError) {
+//
+// grace is the invoice grace this run honours (ADR-120): the wall-clock runs
+// pass the engine's, the test-clock run passes 0. It goes to
+// billSubscription, whose checks must use the same instant as fetch's scan.
+func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, onPage func(), grace time.Duration, logArgs ...any) (int, []SubBillError) {
 	if batchSize <= 0 {
 		batchSize = 50
 	}
@@ -1872,7 +1898,7 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 				continue
 			}
 			attempted[sub.ID] = true
-			n, err := e.attemptSub(ctx, sub, logArgs...)
+			n, err := e.attemptSub(ctx, sub, grace, logArgs...)
 			generated += n
 			if errors.Is(err, errBillingGated) {
 				// Not attempted, so not a failure and never "still due" in
@@ -1926,7 +1952,9 @@ func (e *Engine) RunCycleForClock(ctx context.Context, tenantID, clockID string,
 	fetch := func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error) {
 		return e.subs.GetDueBillingForClock(ctx, tenantID, clockID, exclude, limit)
 	}
-	generated, failures := e.drainDue(ctx, batchSize, fetch, nil, "run", "clock_catchup", "clock_id", clockID)
+	// No invoice grace on a test clock (ADR-120): advancing to a period end
+	// produces its invoice, and the operator decides when usage arrives.
+	generated, failures := e.drainDue(ctx, batchSize, fetch, nil, 0, "run", "clock_catchup", "clock_id", clockID)
 
 	span.SetAttributes(attribute.Int("generated", generated))
 	slog.Info("clock catchup cycle complete",
@@ -1965,6 +1993,10 @@ func (e SubBillError) Unwrap() error { return e.Err }
 // failed attempt is saved and counted. So a scripted run cannot burn a sub's
 // attempts, and it is not the way to retry one sub: that is
 // POST /v1/subscriptions/{id}/retry-billing.
+//
+// It also waits for the invoice grace like the scheduler's run (ADR-120). It
+// is a due scan; if it did not wait, one call would close every period
+// inside its grace and the usage still arriving would miss its invoice.
 func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSize int) (int, []SubBillError) {
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.RunCycleForTenant",
 		trace.WithAttributes(
@@ -1977,10 +2009,11 @@ func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSi
 	// Anchor the whole run at one instant so a sub billed early can't re-qualify
 	// under a later "now" within the same call.
 	now := e.clock.Now(ctx)
+	dueBy := now.Add(-e.invoiceGrace)
 	fetch := func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error) {
-		return e.subs.GetDueBillingForTenant(ctx, tenantID, now, exclude, limit)
+		return e.subs.GetDueBillingForTenant(ctx, tenantID, now, dueBy, exclude, limit)
 	}
-	generated, failures := e.drainDue(ctx, batchSize, fetch, nil, "run", "manual")
+	generated, failures := e.drainDue(ctx, batchSize, fetch, nil, e.invoiceGrace, "run", "manual")
 
 	span.SetAttributes(attribute.Int("generated", generated))
 	return generated, failures
@@ -1995,6 +2028,11 @@ func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSi
 // its next attempt or parked (ADR-119). Those are counted by
 // velox_billing_failing_subscriptions, not attempted here.
 //
+// "Due" also waits for the invoice grace (ADR-120): a period is closed once
+// INVOICE_GRACE_PERIOD has passed after its end (or after a mid-period
+// cancel_at), so usage that arrives in that time is on its invoice. The
+// billing-failure wait above keeps the real now.
+//
 // onPage runs after each page; the scheduler passes its liveness stamp.
 // Returns the invoices generated and the per-sub errors.
 func (e *Engine) RunCycle(ctx context.Context, batchSize int, onPage func()) (int, []error) {
@@ -2006,10 +2044,11 @@ func (e *Engine) RunCycle(ctx context.Context, batchSize int, onPage func()) (in
 	// Same one-instant anchor as RunCycleForTenant: a sub due a few minutes
 	// into a long drain waits for the next tick instead of extending this one.
 	now := e.clock.Now(ctx)
+	dueBy := now.Add(-e.invoiceGrace)
 	fetch := func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error) {
-		return e.subs.GetDueBilling(ctx, now, exclude, limit)
+		return e.subs.GetDueBilling(ctx, now, dueBy, exclude, limit)
 	}
-	generated, failures := e.drainDue(ctx, batchSize, fetch, onPage, "run", "scheduled")
+	generated, failures := e.drainDue(ctx, batchSize, fetch, onPage, e.invoiceGrace, "run", "scheduled")
 
 	span.SetAttributes(attribute.Int("generated", generated))
 	if len(failures) > 0 {
@@ -2055,8 +2094,14 @@ const maxPeriodsPerSubPerCall = 10000
 // then knows which row a failing step planned from, and how much was already
 // billed, even when this returns an error or panics.
 //
+// grace is the invoice grace of the run (ADR-120; 0 for the operator's
+// one-subscription close and for test clocks). A due instant (next_billing_at,
+// or a mid-period cancel_at) counts only once grace has passed after it, so a
+// catch-up after downtime bills the older periods at once and the newest
+// after its grace. The due scans admit with the same rule, both arms.
+//
 // ADR-028.
-func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, progress *billProgress) (int, error) {
+func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, grace time.Duration, progress *billProgress) (int, error) {
 	count := 0
 	movedRetry := false
 	for i := 0; i < maxPeriodsPerSubPerCall; i++ {
@@ -2092,8 +2137,12 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 
 		// Caught-up check. The clock the sub lives on (test or wall)
 		// determines "now"; sub.NextBillingAt strictly after that
-		// means there's nothing more to bill in this call.
-		now := e.effectiveNow(ctx, sub)
+		// means there's nothing more to bill in this call. dueBy is that
+		// now less the run's invoice grace (ADR-120). It decides only
+		// whether a due instant has come; the close itself still runs at
+		// the due instant (billOnePeriod anchors on next_billing_at, the
+		// cancel on cancel_at), so no invoice date moves.
+		dueBy := e.effectiveNow(ctx, sub).Add(-grace)
 
 		// ADR-097: a cancel_at strictly INSIDE the current period fires
 		// here, BEFORE the caught-up early-return — the motivating bug's
@@ -2107,7 +2156,7 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 		// every admitted row makes progress and the fetch loop can't
 		// livelock on a clean decline).
 		if sub.Status == domain.SubscriptionActive &&
-			sub.CancelAt != nil && !sub.CancelAt.After(now) &&
+			sub.CancelAt != nil && !sub.CancelAt.After(dueBy) &&
 			(sub.NextBillingAt == nil || sub.CancelAt.Before(*sub.NextBillingAt)) {
 			if e.cancelExecutor == nil {
 				// Fail loud: an unexecutable due cancel would re-fetch on
@@ -2123,7 +2172,7 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 			return count, nil
 		}
 
-		if sub.NextBillingAt == nil || sub.NextBillingAt.After(now) {
+		if sub.NextBillingAt == nil || sub.NextBillingAt.After(dueBy) {
 			return count, nil
 		}
 

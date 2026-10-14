@@ -62,9 +62,16 @@ type lagRig struct {
 
 func newLagRig(t *testing.T, timing string, withAddOn bool) *lagRig {
 	t.Helper()
+	return newLagRigWith(t, timing, withAddOn)
+}
+
+// newLagRigWith is newLagRig on a server built with opts (for example an
+// invoice grace).
+func newLagRigWith(t *testing.T, timing string, withAddOn bool, opts ...ServerOption) *lagRig {
+	t.Helper()
 	db := testutil.SetupTestDB(t)
 	clk := clock.NewFake(lagP0)
-	r := &lagRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil), timing: timing, custExt: "lag_cust"}
+	r := &lagRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil, opts...), timing: timing, custExt: "lag_cust"}
 	tenantID := testutil.CreateTestTenant(t, db, "close lag "+timing)
 	r.auth = "Bearer " + createTestAPIKey(t, db, tenantID)
 

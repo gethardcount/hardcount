@@ -1153,7 +1153,14 @@ func (s *PostgresStore) transitionInTx(ctx context.Context, tx *sql.Tx, id strin
 	return sub, nil
 }
 
-func (s *PostgresStore) GetDueBilling(ctx context.Context, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+// GetDueBilling takes two instants. now is the run's anchored wall-clock
+// instant, and the billing-failure gate compares against it, so a failing
+// sub's wait (ADR-119) is not stretched. dueBy is now less the invoice grace
+// (ADR-120): a due instant (a period end, or a mid-period cancel_at) is
+// admitted once it is at or before dueBy. Both arms take dueBy, the same
+// instant billSubscription's own checks use: an arm that admitted a row the
+// engine then declined would be saved as errStillDue on a healthy sub.
+func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
 	// Leader-only funnel (ADR-114): the claim proves the caller's lease token
 	// in its own snapshot. Outside a led tick this fails loud — never an
 	// unfenced fallback.
@@ -1204,14 +1211,14 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, before time.Time, exc
 		WHERE s.status IN ('active', 'trialing')
 		  AND s.livemode = $1
 		  AND s.test_clock_id IS NULL
-		  AND (s.next_billing_at <= $2
-		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $2))
+		  AND (s.next_billing_at <= $7
+		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $7))
 		  AND `+domain.SubscriptionBillingGateSQL("s", "$2")+`
 		  AND leader_fence($4, $5)
 		  AND NOT (s.id = ANY(COALESCE($6::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
-	`, postgres.Livemode(ctx), before, limit, string(leader.RoleBilling), token, postgres.StringArray(exclude))
+	`, postgres.Livemode(ctx), now, limit, string(leader.RoleBilling), token, postgres.StringArray(exclude), dueBy)
 	if err != nil {
 		return nil, err
 	}
@@ -1251,7 +1258,10 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, before time.Time, exc
 // Exactly-once is guaranteed downstream by idx_invoices_billing_idempotency (a
 // loser's 23505 → graceful ErrAlreadyExists skip), a mechanism this path reuses
 // unchanged.
-func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID string, before time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+//
+// now and dueBy: see GetDueBilling. The manual run waits for the invoice
+// grace too, or one call would close every period inside its grace.
+func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID string, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -1272,13 +1282,13 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.status IN ('active', 'trialing')
 		  AND s.test_clock_id IS NULL
-		  AND (s.next_billing_at <= $1
-		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $1))
+		  AND (s.next_billing_at <= $4
+		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $4))
 		  AND `+domain.SubscriptionBillingGateSQL("s", "$1")+`
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
 		FOR UPDATE OF s SKIP LOCKED
-	`, before, limit, postgres.StringArray(exclude))
+	`, now, limit, postgres.StringArray(exclude), dueBy)
 	if err != nil {
 		return nil, err
 	}

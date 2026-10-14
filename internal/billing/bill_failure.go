@@ -295,7 +295,9 @@ func (e *Engine) reportBillFailure(ctx context.Context, seen domain.Subscription
 // the head of every tick. Whether to record is a property of the subscription
 // (its test clock), not of the caller: for a clock-pinned subscription
 // nothing is written and the panic reaches the catch-up's own recover.
-func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, logArgs ...any) (n int, err error) {
+//
+// grace is the invoice grace the caller's run honours (see billSubscription).
+func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, grace time.Duration, logArgs ...any) (n int, err error) {
 	progress := billProgress{seen: sub}
 	defer func() {
 		if r := recover(); r != nil {
@@ -307,7 +309,7 @@ func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, logArg
 			panic(r)
 		}
 	}()
-	n, err = e.billSubscription(ctx, sub, &progress)
+	n, err = e.billSubscription(ctx, sub, grace, &progress)
 	if err != nil && !errors.Is(err, errBillingGated) {
 		e.reportBillFailure(ctx, progress.seen, n, err, logArgs...)
 	}
@@ -334,6 +336,11 @@ func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, logArg
 //
 // Every error is logged before it is returned, so the caller may answer the
 // operator without it: a failed attempt by attemptSub, the two reads here.
+//
+// No invoice grace (ADR-120): the operator is acting on this subscription
+// now, so its ended period is closed now. Its callers (retry-billing, and the
+// pre-close of an immediate cancel and of every other subscription write)
+// compare with domain.BillingDueAt, which has no grace either.
 func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string) (int, error) {
 	logArgs := []any{"run", "operator_retry"}
 	sub, err := e.subs.Get(ctx, tenantID, subscriptionID)
@@ -344,7 +351,7 @@ func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string
 		}, logArgs...)...)
 		return 0, fmt.Errorf("read subscription %s: %w", subscriptionID, err)
 	}
-	n, err := e.attemptSub(ctx, sub, logArgs...)
+	n, err := e.attemptSub(ctx, sub, 0, logArgs...)
 	if errors.Is(err, errBillingGated) {
 		// A billing run saved a failure between the caller's clear and this
 		// attempt. The response shows that record.

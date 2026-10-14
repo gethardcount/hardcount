@@ -314,6 +314,56 @@ func TestLoad_ShutdownDrainDelay(t *testing.T) {
 	}
 }
 
+// INVOICE_GRACE_PERIOD (ADR-120): unset is 1h in every environment, a value is
+// a Go duration from 0 to 72h, and anything else stops the boot rather than
+// falling back to a default the operator did not choose.
+func TestLoad_InvoiceGracePeriod(t *testing.T) {
+	cases := []struct {
+		raw     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"", time.Hour, false},
+		{"0", 0, false},
+		{"0s", 0, false},
+		{"30m", 30 * time.Minute, false},
+		{"72h", 72 * time.Hour, false},
+		{"72h0m1s", 0, true},
+		{"73h", 0, true},
+		{"-1s", 0, true},
+		{"1", 0, true}, // a bare number has no unit: not a duration
+		{"junk", 0, true},
+	}
+	for _, c := range cases {
+		t.Setenv("INVOICE_GRACE_PERIOD", c.raw)
+		got, err := loadInvoiceGracePeriod()
+		if (err != nil) != c.wantErr {
+			t.Errorf("raw=%q: err=%v wantErr=%v", c.raw, err, c.wantErr)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("raw=%q: got %v want %v", c.raw, got, c.want)
+		}
+	}
+
+	// Through Load: the value lands on Config, and an out-of-range value
+	// fails the load.
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_ENV", "local")
+	t.Setenv("INVOICE_GRACE_PERIOD", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load with the default: %v", err)
+	}
+	if cfg.InvoiceGracePeriod != time.Hour {
+		t.Errorf("Config.InvoiceGracePeriod = %v, want the 1h default", cfg.InvoiceGracePeriod)
+	}
+	t.Setenv("INVOICE_GRACE_PERIOD", "100h")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "INVOICE_GRACE_PERIOD") {
+		t.Errorf("Load with 100h: err=%v, want an error naming INVOICE_GRACE_PERIOD", err)
+	}
+}
+
 // TestLoad_ProductionRequiresTrustProxy: sweep-2026-08-30 S3. Behind a
 // balancer with TRUST_PROXY unset, every per-IP bucket is one bucket for the
 // whole install; production refuses to boot. "none" is the explicit "no

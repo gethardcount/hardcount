@@ -33,9 +33,19 @@ A non-2xx response means *nothing was recorded*. Retry the same request.
   header's key. That is, Velox does not keep the 5xx to replay for later
   requests with that key. Retry with the same key and the write re-executes.
   On other routes, a 5xx response is replayed on purpose.
-- **Late events.** Events that arrive more than 24 h late may land in an
-  already-finalized period. They are stored, never silently billed, and
-  counted on `velox_usage_late_event_total`. Runbook: manual credit/debit.
+- **Late events.** An event counts toward the billing period its
+  `timestamp` falls in. Velox builds a period's invoice once
+  `INVOICE_GRACE_PERIOD` (default 1 hour) has passed after the period ends,
+  so an event that arrives within that time is counted on it. After the
+  invoice is built it does not change. A later event for that period is
+  accepted and stored, but it is not added to that invoice or to any later
+  one, and Velox does not alert you. To bill it, create a one-off invoice:
+  `POST /v1/invoices`, then `POST /v1/invoices/{id}/line-items`, then
+  `POST /v1/invoices/{id}/finalize`. An immediate cancel, `retry-billing`,
+  a spend-threshold invoice and a test-clock advance build their invoice at
+  once, with no grace. `velox_usage_late_event_total` counts events not sent
+  through the backfill route whose `timestamp` is more than 24 hours older
+  than their arrival. It does not say whether an event missed an invoice.
 
 ## Other core routes
 
@@ -54,7 +64,8 @@ POST   /v1/subscriptions/{id}/cancel             — cancel now; bills any ended
 POST   /v1/subscriptions/{id}/retry-billing      — clear a billing failure and bill now
 GET    /v1/subscriptions?billing=failing         — subscriptions whose billing is failing
 
-POST   /v1/billing/run                  — bill the tenant's due subscriptions (skips ones waiting after a failed attempt, or parked)
+POST   /v1/billing/run                  — bill the tenant's due subscriptions; a period is due INVOICE_GRACE_PERIOD after it ends
+                                          (skips ones waiting after a failed attempt, or parked)
 GET    /v1/billing/preview/{sub_id}     — invoice preview (dry run)
 
 POST   /v1/credit-notes                 — issue credit note (credit or refund)

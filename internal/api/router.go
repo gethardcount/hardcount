@@ -124,9 +124,29 @@ type Server struct {
 	TestClockSvc *testclock.Service
 }
 
-func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
+// ServerOption sets a boot-time value NewServer threads into the services it
+// builds. cmd/velox passes the ones read from config; tests pass what they
+// exercise and get the zero value otherwise.
+type ServerOption func(*serverOptions)
+
+type serverOptions struct {
+	invoiceGrace time.Duration
+}
+
+// WithInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). One value feeds the
+// three places that must agree on when a period is due: the billing runs'
+// due scans, the billing backlog gauges, and the credit-expiry sweep.
+func WithInvoiceGrace(d time.Duration) ServerOption {
+	return func(o *serverOptions) { o.invoiceGrace = d }
+}
+
+func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOption) *Server {
 	if clk == nil {
 		clk = clock.Real()
+	}
+	var o serverOptions
+	for _, opt := range opts {
+		opt(&o)
 	}
 
 	// Stores
@@ -250,6 +270,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	creditStore := credit.NewPostgresStore(db)
 	creditSvc := credit.NewService(creditStore)
 	creditSvc.SetCustomerReader(customerStore)
+	creditSvc.SetExpiryGrace(o.invoiceGrace)
 	creditH := credit.NewHandler(creditSvc)
 	creditNoteStore := creditnote.NewPostgresStore(db)
 
@@ -286,7 +307,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// duplicate promauto registration when NewServer runs twice in-process
 	// (integration tests).
 	registerQueueGaugesOnce.Do(func() {
-		mw.RegisterQueueDepthGauges(func(query string) (float64, error) {
+		mw.RegisterQueueDepthGauges(o.invoiceGrace, func(query string) (float64, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
@@ -760,6 +781,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 		slog.Warn("VELOX_BILLING_INTERVALS_READER is set but the flag was removed at ADR-101 Phase 4 — billing_intervals always bill; the legacy reader no longer exists", "value", v)
 	}
 	engine.SetIntervalReader(subStore)
+	engine.SetInvoiceGrace(o.invoiceGrace)
 	engine.SetTestClockReader(testClockStore)
 	engine.SetEventDispatcher(eventDispatcher)
 	// Engine writes audit_log on background-fired lifecycle events

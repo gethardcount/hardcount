@@ -115,13 +115,13 @@ func (s *Service) Ingest(ctx context.Context, tenantID string, input IngestInput
 // operators can't accidentally double-post a live event through the audit
 // path. The row is tagged origin='backfill'.
 //
-// Billing semantics: backfilled events participate in aggregation for any
-// period whose [start, end) contains the event's timestamp, and only while
-// that period is still open. A finalized invoice keeps the quantities and
-// amounts it copied into its line items at close, and nothing re-aggregates
-// a closed period — so a backfill into one is recorded but never billed
-// (the same stored-but-unbilled outcome as a late live event; see
-// lateUsageEvents). History is not rewritten; revenue is not recovered.
+// Billing semantics: backfilled events count toward any period whose
+// [start, end) contains the event's timestamp, but only until that period's
+// invoice is built (INVOICE_GRACE_PERIOD after its end, ADR-120). A built
+// invoice keeps the quantities it copied into its line items, and nothing
+// re-aggregates a closed period, so a backfill into one is stored but not
+// billed, the same outcome as a late live event (see KNOWN BEHAVIOR in
+// prepare). The operator bills it with a one-off invoice.
 func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInput) (domain.UsageEvent, error) {
 	if input.Timestamp == nil {
 		return domain.UsageEvent{}, errs.Required("timestamp")
@@ -235,15 +235,15 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 // composes the domain row, WITHOUT writing it. Split from ingest so
 // BatchIngest can validate every event up front and then hand the whole
 // slice to one store transaction (all-or-nothing).
-// lateUsageEvents surfaces the "silent half" of late ingestion (2026-07-10
-// design review): a live event stamped >24h in the past MAY fall inside an
-// already-finalized period, where it is stored but never billed (see the
-// KNOWN BEHAVIOR note below). Classifying precisely needs a per-event
-// subscription lookup this hot path deliberately avoids, and the true-up
-// policy itself is a deferred DP decision — but the OPERATOR VISIBILITY is
-// not deferred: this counter + a WARN make the late stream observable.
-// Backfill-origin events are excluded: an operator posting history on
-// purpose is not the silent leak this counter exists to surface.
+// lateUsageEvents counts events, other than backfills, whose timestamp is
+// more than 24h before the customer's effective now when they arrive, and
+// logs a WARN for each. That is all it measures. It is a proxy for "missed
+// its invoice": an event one minute after its invoice was built is not
+// counted, and a 25h-old event in a period that is still open is. The exact
+// per-customer report of events that arrived after their period's invoice is
+// deferred (ADR-120, velox-ops register). Backfill-origin events are
+// excluded: an operator posting history on purpose is not the silent leak
+// this counter exists to surface.
 var lateUsageEvents *prometheus.CounterVec
 
 func init() {
@@ -313,22 +313,18 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 		ts = input.Timestamp.UTC()
 	}
 
-	// KNOWN BEHAVIOR (no lower bound on live timestamps): an event whose
-	// timestamp falls inside an ALREADY-FINALIZED billing period is
-	// accepted and stored, but the cycle that closed that period won't be
-	// re-billed (a finalized invoice keeps the amounts it copied into its
-	// line items at close; nothing re-aggregates) — so it is effectively
-	// unbilled. This is deliberate: late-arriving events are
-	// industry-standard (Stripe Meter Events, Lago, Orb all accept
-	// out-of-order events), so a hard reject would break legitimate
-	// retries / stream pipelines. Intentional historical posting into
-	// closed periods goes through Backfill (origin='backfill'), which is
-	// recorded and equally unbilled — but deliberate, not silent. Deferred
-	// decision (no design partner yet): whether to true-up closed periods
-	// or reject past a window — both need a billing-policy call, not a
-	// silent per-event subscription lookup on this hot path. The late-event COUNTER half shipped 2026-07-10 (see
-	// lateUsageEvents above): >24h-late live events are counted + WARNed
-	// so the stream is observable while the policy stays deferred.
+	// KNOWN BEHAVIOR, the late-usage policy (ADR-120). Velox accepts an
+	// event with any past timestamp; there is no lower bound. The event
+	// counts toward the period its timestamp falls in, and the billing run
+	// builds that period's invoice INVOICE_GRACE_PERIOD (default 1h) after
+	// the period ends, so an event that arrives within the grace is billed.
+	// Once the invoice is built it does not change and nothing
+	// re-aggregates the period: a later event for it is stored but billed
+	// on no invoice, now or later. The operator bills it with a one-off
+	// invoice. Velox does not refuse late events (refusing would break
+	// retries and stream pipelines) and does not move them onto a later
+	// invoice. The counter below
+	// is a proxy (see lateUsageEvents), not a report of missed events.
 	if origin != domain.UsageOriginBackfill && ts.Before(now.Add(-24*time.Hour)) {
 		lateUsageEvents.WithLabelValues(string(origin)).Inc()
 		slog.WarnContext(ctx, "late usage event (>24h past) — may fall in an already-finalized period and go unbilled",

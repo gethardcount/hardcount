@@ -264,7 +264,7 @@ func (m *memStore) ExpireGrantAtomic(ctx context.Context, tenantID, customerID, 
 	return 0, errs.ErrNotFound
 }
 
-func (m *memStore) ListExpiredGrants(_ context.Context) ([]domain.CreditLedgerEntry, error) {
+func (m *memStore) ListExpiredGrants(_ context.Context, _ time.Duration) ([]domain.CreditLedgerEntry, error) {
 	// Stub: no test exercises ExpireCredits against memStore; integration
 	// coverage of expiry lives against PostgresStore. Present only to
 	// satisfy the Store interface.

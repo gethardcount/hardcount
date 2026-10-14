@@ -165,8 +165,15 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 | `SMTP_HOST`, `SMTP_PORT` | unset | Your email server. If unset, Velox sends no email. The local `.env.example` points these at Mailpit; the Compose stack leaves them unset. See [email setup](ops/email-setup.md). |
 | `VELOX_BOOTSTRAP_TOKEN` | unset | Allows the `POST /v1/bootstrap` call that creates the first tenant. At least 16 characters outside `local`. |
 | `METRICS_TOKEN` | unset | The bearer token a scraper must send to read `/metrics`. If unset, `/metrics` answers 401 in `production` and is open elsewhere. |
+| `INVOICE_GRACE_PERIOD` | `1h` | How long Velox waits after a billing period ends before it builds the invoice, so usage that arrives late but belongs to the period is billed. See below. A duration from `0` to `72h`, such as `30m` or `24h`. Any other value stops start-up. `0` builds the invoice as soon as the period ends. |
 
 Stripe is not set here. Each tenant connects its own Stripe account in the dashboard, under Settings.
+
+**`INVOICE_GRACE_PERIOD` delays every period-end invoice**, not only invoices with usage. A subscription's period-end invoice, and the final invoice of a cancel scheduled for a date, is built on the first billing run after the period end plus the grace. The billing run is hourly, so with the default the invoice is built 1 to 2 hours after the period ends. Everything that follows the invoice moves with it: the `invoice.finalized` webhook, the tax record, credits applied, the charge, and the first payment-failure retry. The invoice's dates and amounts do not move: it is issued and dated at the period end.
+
+Raise it if your usage pipeline can deliver an event more than an hour late. Usage stamped inside a period that arrives after its invoice is built is stored but not billed (see [late events](api-surface.md)). Other billing products use 1 hour (Stripe), 12 hours (Orb) and 24 hours (Metronome).
+
+These close a period at once, with no grace: an immediate cancel, `POST /v1/subscriptions/{id}/retry-billing`, any other change to a subscription whose period has ended, and advancing a test clock. `POST /v1/billing/run` waits for the grace, like the hourly run.
 
 ## How much load it takes
 
