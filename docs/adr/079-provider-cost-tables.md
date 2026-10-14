@@ -33,7 +33,12 @@ ledger, and report per-customer margin in-app:
    it was never persisted anyway (the "metadata column" was doc-code
    drift, now corrected in payload.go). Named fast-follow rule:
    per-half CostBreakdown only; cache_read and ResponseCost-only
-   payloads fall to table inference.
+   payloads fall to table inference. *[Amended 2026-10-14] LiteLLM's
+   `input_cost` includes cache reads, so the input event taking all of it
+   while cache_read was costed from the table counted cache reads twice.
+   Now the cache_read event takes `cache_read_cost` and the input event
+   takes `input_cost − cache_read_cost`; with cache reads and no
+   `cache_read_cost`, both fall to the table. See `observedCostMicros`.*
 5. **Honest margin, one surface.** `GET /v1/customers/{id}/margin`:
    headline = total rated USAGE revenue vs total stamped cost (labeled a
    unit-economics view — base fees/credits/taxes excluded); per-model

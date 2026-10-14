@@ -21,11 +21,10 @@ import (
 const MeterKeyTokens = "tokens"
 
 // Canonical token-role values for the `token_type` dimension (ADR-044). The
-// vocabulary is shared by the recipes and every provider mapper. LiteLLM
-// currently exposes only input/output; the cache roles (cache_read,
-// cache_write_5m, cache_write_1h) are a fast-follow once the payload parser
-// reads prompt_tokens_details / cache_creation and normalizes them to
-// additive-disjoint quantities.
+// vocabulary is shared by the recipes and every provider mapper. The LiteLLM
+// mapper emits input, cache_read and output; cache_write_5m / cache_write_1h
+// wait on LiteLLM exposing the TTL split (see the cache-write note in
+// MapPayload).
 const (
 	TokenTypeInput     = "input"
 	TokenTypeOutput    = "output"
@@ -266,7 +265,7 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 			IdempotencyKey:     p.ID + ":" + TokenTypeInput,
 			Timestamp:          ts,
 			Metadata:           buildEventMetadata(p, TokenTypeInput),
-			ObservedCostMicros: observedCostMicros(p, TokenTypeInput),
+			ObservedCostMicros: observedCostMicros(p, TokenTypeInput, cacheRead),
 		})
 	}
 	if cacheRead > 0 {
@@ -277,10 +276,8 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 			Dimensions:         dimsWithTokenType(dims, TokenTypeCacheRead),
 			IdempotencyKey:     p.ID + ":" + TokenTypeCacheRead,
 			Timestamp:          ts,
-			// Deliberately no observed cost: D4 sends cache_read to table
-			// inference. CostBreakdown.InputCost is the whole input side, so
-			// attaching it here would double-count against the input half.
-			Metadata: buildEventMetadata(p, TokenTypeCacheRead),
+			Metadata:           buildEventMetadata(p, TokenTypeCacheRead),
+			ObservedCostMicros: observedCostMicros(p, TokenTypeCacheRead, cacheRead),
 		})
 	}
 	if usage.CompletionTokens > 0 {
@@ -292,18 +289,19 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 			IdempotencyKey:     p.ID + ":" + TokenTypeOutput,
 			Timestamp:          ts,
 			Metadata:           buildEventMetadata(p, TokenTypeOutput),
-			ObservedCostMicros: observedCostMicros(p, TokenTypeOutput),
+			ObservedCostMicros: observedCostMicros(p, TokenTypeOutput, cacheRead),
 		})
 	}
 
-	// Cache-WRITE tokens (cache_creation) are billable usage LiteLLM exposes,
-	// but it does NOT expose the 5m-vs-1h TTL split the recipes price at
-	// different rates (BerriAI/litellm#15056). Assigning a cache_write_* role
-	// would risk mis-pricing a money path, so cache-write billing is deferred
-	// (ADR-044 follow-up). Log loudly rather than silently drop or guess
-	// (no-silent-fallbacks) so the unbilled usage is visible.
+	// Cache-WRITE tokens (cache_creation) get no event of their own: LiteLLM
+	// does not expose the 5m-vs-1h TTL split the recipes price at different
+	// rates (BerriAI/litellm#15056), so a cache_write_* role could mis-price.
+	// Where they end up depends on prompt_tokens. LiteLLM 1.83.9 adds them to
+	// prompt_tokens for Anthropic and Bedrock, so they are inside the input
+	// event above and billed at the input price. A payload whose prompt_tokens
+	// leaves them out bills them nowhere. Log so the split is visible.
 	if usage.CacheCreationInputTokens > 0 {
-		slog.Warn("litellm: cache-write tokens seen but not billed — LiteLLM does not expose the 5m/1h cache-write TTL split (BerriAI/litellm#15056); cache-write billing deferred (ADR-044)",
+		slog.Warn("litellm: cache-write tokens have no token_type of their own — billed as input when LiteLLM counts them in prompt_tokens (it does for Anthropic and Bedrock), otherwise not billed (BerriAI/litellm#15056, ADR-044)",
 			"cache_creation_tokens", usage.CacheCreationInputTokens,
 			"model", modelDim, "litellm_id", p.ID)
 	}
@@ -394,21 +392,28 @@ func unixSecondsToTime(secs float64) time.Time {
 // usage.IngestInput (resolved form) downstream.
 var _ = usage.IngestInput{}
 
-// observedCostMicros returns LiteLLM's own cost for ONE token half, in
-// micro-dollars, or nil to fall back to rate-table inference.
+// observedCostMicros returns LiteLLM's own cost for the tokens of ONE event,
+// in micro-dollars, or nil to fall back to rate-table inference. cacheRead is
+// the cache-read quantity the mapper split off the prompt.
 //
-// It encodes ADR-079 D4 verbatim, and every clause is load-bearing:
+// It encodes ADR-079 D4, and every clause is load-bearing:
 //
-//   - Only per-half CostBreakdown is eligible — input_cost onto the input
-//     event, output_cost onto the output event. A single call fans out to up
-//     to three events, so stamping any whole-call figure on each half would
-//     multi-count COGS by up to 3×. That risk is the reason phase 1 stamped
-//     nothing at all.
+//   - Only CostBreakdown is eligible, and each event gets the cost of its own
+//     tokens. A single call fans out to up to three events, so stamping any
+//     whole-call figure on each would multi-count COGS by up to 3x.
 //   - ResponseCost is a whole-call figure and is therefore NEVER used here,
 //     however tempting it is as a fallback when CostBreakdown is absent.
-//   - cache_read gets nil: InputCost covers the whole input side, so
-//     attaching it to the cache-read half as well would double-count it
-//     against the uncached-input half.
+//   - input_cost covers the whole prompt, cache reads included (LiteLLM's
+//     logging spec: cache_read_cost is "reported as a subset of input_cost").
+//     So the cache_read event gets cache_read_cost, and the input event gets
+//     input_cost minus it. Before 2026-10-14 the input event took all of
+//     input_cost while the cache_read event was costed again from the rate
+//     table, which counted cache reads twice.
+//   - When cache reads happened but cache_read_cost is absent, input_cost
+//     cannot be split, so both input-side events fall to the rate table.
+//   - Cache-write tokens need no term of their own: LiteLLM adds them to
+//     prompt_tokens, so they are in the input event's quantity, and their
+//     cost is in input_cost.
 //   - Non-finite or negative values are rejected rather than clamped. A NaN
 //     would otherwise become a garbage int64 and silently corrupt margin;
 //     falling back to the rate table is the honest answer.
@@ -418,20 +423,43 @@ var _ = usage.IngestInput{}
 //
 // Dollars-float to micro-dollars uses ROUND HALF UP, matching the rate-table
 // path's ROUND() in internal/usage/postgres.go so the two sources agree at
-// the boundary.
-func observedCostMicros(p StandardLoggingPayload, half string) *int64 {
-	if p.CostBreakdown == nil {
+// the boundary. The input share is the difference of the two rounded
+// figures, so the events of one call add up to the rounded input_cost.
+func observedCostMicros(p StandardLoggingPayload, half string, cacheRead int64) *int64 {
+	b := p.CostBreakdown
+	if b == nil {
 		return nil
 	}
-	var dollars float64
 	switch half {
-	case TokenTypeInput:
-		dollars = p.CostBreakdown.InputCost
 	case TokenTypeOutput:
-		dollars = p.CostBreakdown.OutputCost
+		return dollarsToMicros(b.OutputCost)
+	case TokenTypeCacheRead:
+		if b.CacheReadCost == nil {
+			return nil
+		}
+		return dollarsToMicros(*b.CacheReadCost)
+	case TokenTypeInput:
+		in := dollarsToMicros(b.InputCost)
+		if in == nil || cacheRead <= 0 {
+			return in
+		}
+		if b.CacheReadCost == nil {
+			return nil
+		}
+		cr := dollarsToMicros(*b.CacheReadCost)
+		if cr == nil || *cr > *in {
+			return nil
+		}
+		own := *in - *cr
+		return &own
 	default:
 		return nil
 	}
+}
+
+// dollarsToMicros converts LiteLLM's dollars-as-float to micro-dollars,
+// rounding half up, or returns nil for a value that is not a real cost.
+func dollarsToMicros(dollars float64) *int64 {
 	if math.IsNaN(dollars) || math.IsInf(dollars, 0) || dollars < 0 {
 		return nil
 	}

@@ -81,7 +81,9 @@ semantics + the house no-speculative-backfill rule).
 per-half CostBreakdown only — a call's input and output are separate
 events, each stamped with its own cost half (input_cost→input event,
 output_cost→output event). cache_read halves and ResponseCost-only
-payloads fall to table inference. Whole-call ResponseCost is NEVER
+payloads fall to table inference. *[Amended 2026-10-14: input_cost includes
+cache reads, so this rule counted them twice. The cache_read event now takes
+cache_read_cost and the input event input_cost − cache_read_cost; ADR-079 §4.]* Whole-call ResponseCost is NEVER
 stamped on a per-half event (3× COGS). Plumbing now exists: typed `ObservedCostMicros *int64` on
 `litellm.ExternalIngest` → `usage.IngestInput` → `domain.UsageEvent` →
 the `ingestOneTx` INSERT, where a non-NULL value wins over the rate

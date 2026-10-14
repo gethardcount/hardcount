@@ -104,7 +104,7 @@ Every event also carries these dimensions:
 
 Each event's metadata carries the LiteLLM call ID, the response cost (audit-only), and the call's original metadata under `litellm_metadata.*`.
 
-Cache-**write** tokens (`cache_creation`) are seen but **not yet billed**. LiteLLM doesn't expose the 5m-vs-1h cache-write TTL split (BerriAI/litellm#15056). So the mapper logs a warning for them and defers billing them, as a follow-up to ADR-044.
+Cache-**write** tokens (`cache_creation`) have no `token_type` of their own, because LiteLLM doesn't expose the 5m-vs-1h cache-write TTL split (BerriAI/litellm#15056). LiteLLM 1.83.9 counts them in `prompt_tokens` for Anthropic and Bedrock, so they are in the `input` event and billed at your input price. The mapper logs a warning when it sees them.
 
 ## 5. Verify
 
@@ -158,7 +158,8 @@ On a retry, rows that did commit before the abort replay as `deduplicated`. Conf
 - **Cost figures**: LiteLLM's `response_cost` does not drive Velox billing.
   - The billable amount comes from your pricing rules.
   - Per-event COGS (cost of goods sold: what the provider charged you) comes from your provider [cost table](../glossary.md). See ADR-079: `PUT /v1/provider-costs`, stamped on each event at ingest as `provider_cost_micros`.
-  - When LiteLLM sends `cost_breakdown`, Velox stores its `input_cost` on the `input` event and its `output_cost` on the `output` event, and uses those in place of your cost table. It never uses `response_cost`, the total for the whole call. Events without `cost_breakdown`, and `cache_read` events, take their cost from your cost table.
+  - LiteLLM's own `response_cost` is whole-call: one total that spans up to three per-role events. So Velox never stamps it on an event.
+  - When the record carries `cost_breakdown`, each event gets LiteLLM's cost for its own tokens instead of the table's: `output_cost` on `output`, `cache_read_cost` on `cache_read`, and `input_cost` minus `cache_read_cost` on `input` (LiteLLM's `input_cost` includes cache reads and cache writes). If there were cache reads but no `cache_read_cost`, `input` and `cache_read` use your cost table.
 - **Provider for Claude on Bedrock or Vertex**: the `provider` dimension comes from LiteLLM's `custom_llm_provider`. Claude called through AWS Bedrock arrives with provider `bedrock`, and through Google Vertex with provider `vertex_ai`, not `anthropic`. Cost rates match on provider, so add rates for `bedrock` or `vertex_ai` too. Without them, those events get no cost and the margin report counts them as unresolved.
 - **`tokens` meter must exist**: a missing meter lands as a per-row `errors[]` entry in the 200 response. This is the same path as a missing `user`.
 - **Single tenant per API key**: each Velox API key pins to one [tenant](../glossary.md) (one isolated billing account). Multi-tenant LiteLLM proxies route through a separate API key per tenant, not through a metadata field on the call.

@@ -119,12 +119,12 @@ type StandardLoggingPayload struct {
 // mapper relies on, confirmed against LiteLLM's usage object:
 //   - prompt_tokens INCLUDES cached (read) tokens, so the uncached input is
 //     prompt_tokens − prompt_tokens_details.cached_tokens (additive-disjoint).
-//   - cache_creation (write) tokens are NOT in prompt_tokens — they're a
-//     separate quantity. LiteLLM does not yet expose the 5m-vs-1h cache-write
-//     TTL split (BerriAI/litellm#15056), so the mapper cannot tell
-//     cache_write_5m from cache_write_1h and defers cache-write billing (it
-//     logs loudly when cache_creation tokens appear). cache_read is billable
-//     now; cache_write is the documented follow-up.
+//   - cache_creation (write) tokens are ALSO in prompt_tokens for Anthropic
+//     and Bedrock in LiteLLM 1.83.9 (llms/anthropic/chat/transformation.py
+//     adds them), so they land in the input quantity. LiteLLM does not yet
+//     expose the 5m-vs-1h cache-write TTL split (BerriAI/litellm#15056), so
+//     the mapper has no cache_write role (it logs when cache_creation tokens
+//     appear).
 type Usage struct {
 	PromptTokens     int64 `json:"prompt_tokens"`
 	CompletionTokens int64 `json:"completion_tokens"`
@@ -138,7 +138,7 @@ type Usage struct {
 	// CacheReadInputTokens / CacheCreationInputTokens are Anthropic's top-level
 	// cache fields, surfaced verbatim by LiteLLM. CacheReadInputTokens mirrors
 	// PromptTokensDetails.CachedTokens (we take the max defensively).
-	// CacheCreationInputTokens is the cache-WRITE count (deferred — see above).
+	// CacheCreationInputTokens is the cache-WRITE count (no role of its own — see above).
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
 }
@@ -210,10 +210,17 @@ func (u *Usage) cachedReadTokens() int64 {
 // math runs through the operator's configured rating rules, not
 // these floats.
 type CostBreakdown struct {
-	InputCost     float64 `json:"input_cost"`
-	OutputCost    float64 `json:"output_cost"`
-	ToolUsageCost float64 `json:"tool_usage_cost,omitempty"`
-	TotalCost     float64 `json:"total_cost"`
+	// InputCost is the cost of the whole prompt: fresh input, cache reads
+	// and cache writes. LiteLLM's logging spec reports cache_read_cost and
+	// cache_creation_cost "as a subset of input_cost".
+	InputCost  float64 `json:"input_cost"`
+	OutputCost float64 `json:"output_cost"`
+	// CacheReadCost is the part of InputCost spent on cache reads. LiteLLM
+	// leaves it out when it is zero or when it could not price cache reads,
+	// so nil means "unknown", not "free".
+	CacheReadCost *float64 `json:"cache_read_cost,omitempty"`
+	ToolUsageCost float64  `json:"tool_usage_cost,omitempty"`
+	TotalCost     float64  `json:"total_cost"`
 }
 
 // SpendRequest is the wire shape POSTed to /v1/integrations/litellm/spend.
