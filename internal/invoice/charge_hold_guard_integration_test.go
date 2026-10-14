@@ -3,6 +3,7 @@ package invoice_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +68,17 @@ func requireChargeInProgressRefusal(t *testing.T, store *invoice.PostgresStore, 
 	}
 }
 
+// requireHoldRefusal is requireChargeInProgressRefusal for a refusal caused by
+// the charge hold, whose message must tell the operator to wait briefly.
+func requireHoldRefusal(t *testing.T, store *invoice.PostgresStore, ctx context.Context, tenantID, id string, got domain.Invoice, err error) {
+	t.Helper()
+	requireChargeInProgressRefusal(t, store, ctx, tenantID, id, got, err)
+	var de *errs.DomainError
+	if errors.As(err, &de) && !strings.Contains(de.Message, "try again in a few minutes") {
+		t.Fatalf("the refusal must tell the operator to try again shortly, got %q", de.Message)
+	}
+}
+
 func claimAuto(t *testing.T, store *invoice.PostgresStore, ctx context.Context, tenantID, id string) {
 	t.Helper()
 	if ok, err := store.ClaimAutoCharge(ctx, tenantID, id); err != nil || !ok {
@@ -88,7 +100,7 @@ func TestChargeHold_RefusesVoidWriteOffAndOfflinePayment(t *testing.T) {
 			inv := seedClaimableInvoice(t, db, ctx, tenantID, num("PEND"))
 			claimAuto(t, store, ctx, tenantID, inv.ID)
 			got, err := a.run(ctx, svc, tenantID, inv.ID)
-			requireChargeInProgressRefusal(t, store, ctx, tenantID, inv.ID, got, err)
+			requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
 		})
 
 		t.Run(a.name+"/retry of a declined charge claimed (failed)", func(t *testing.T) {
@@ -98,7 +110,7 @@ func TestChargeHold_RefusesVoidWriteOffAndOfflinePayment(t *testing.T) {
 				t.Fatalf("ClaimChargeForManualCollect: ok=%v err=%v", ok, err)
 			}
 			got, err := a.run(ctx, svc, tenantID, inv.ID)
-			requireChargeInProgressRefusal(t, store, ctx, tenantID, inv.ID, got, err)
+			requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
 		})
 
 		// Controls: the guard must not refuse what it has no reason to.
@@ -193,7 +205,7 @@ func TestChargeHold_StaleReadIsRefusedUnderTheLock(t *testing.T) {
 			if !racer.done {
 				t.Fatal("the race never ran")
 			}
-			requireChargeInProgressRefusal(t, store, ctx, tenantID, inv.ID, got, err)
+			requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
 		})
 
 		// The same race on payment_status: the charge reports 'processing'
@@ -231,5 +243,93 @@ func TestChargeHold_ChargeStillSettlesItself(t *testing.T) {
 	}
 	if !transitioned || paid.Status != domain.InvoicePaid {
 		t.Fatalf("transitioned=%v status=%s, want a paid transition", transitioned, paid.Status)
+	}
+}
+
+// TestChargeHold_ReliefVoidRefused: the engine's relief void (VoidUnchangedTx,
+// run inside a cancel or plan swap) voids a prepaid invoice on its period's
+// first day — when the first automatic charge fires. It must refuse while a
+// charge holds the invoice, or the charge succeeds on a voided invoice.
+func TestChargeHold_ReliefVoidRefused(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Charge Hold Relief Void")
+	store := invoice.NewPostgresStore(db)
+	svc := invoice.NewService(store, nil, nil)
+
+	reliefVoid := func(t *testing.T, id string) (domain.Invoice, error) {
+		t.Helper()
+		snap, err := store.Get(ctx, tenantID, id)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		got, verr := svc.VoidUnchangedTx(ctx, tx, tenantID, snap)
+		if verr != nil {
+			return got, verr
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		return got, nil
+	}
+
+	t.Run("live hold: refused", func(t *testing.T) {
+		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-RELIEF-LIVE")
+		claimAuto(t, store, ctx, tenantID, inv.ID)
+		got, err := reliefVoid(t, inv.ID)
+		requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
+	})
+
+	t.Run("expired hold: voided", func(t *testing.T) {
+		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-RELIEF-EXP")
+		claimAuto(t, store, ctx, tenantID, inv.ID)
+		expireLease(t, db, inv.ID)
+		got, err := reliefVoid(t, inv.ID)
+		if err != nil {
+			t.Fatalf("hold expired, yet refused: %v", err)
+		}
+		if got.Status != domain.InvoiceVoided {
+			t.Fatalf("status %s, want voided", got.Status)
+		}
+	})
+}
+
+// TestRecordOfflinePayment_CardSettledAfterReadIsRefused: a card charge that
+// settles between the service's read and the row lock leaves the row paid. The
+// paid transition is then a no-op, so without a refusal under the lock the
+// service would still write the payment_recorded audit row and send
+// invoice.payment_recorded for a payment that never happened.
+func TestRecordOfflinePayment_CardSettledAfterReadIsRefused(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Offline After Card Settle")
+	store := invoice.NewPostgresStore(db)
+
+	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-OFFLINE-AFTER-CARD")
+	racer := &raceAfterGet{PostgresStore: store, race: func() {
+		if _, ok, err := store.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_card_won", time.Now().UTC(), nil); err != nil || !ok {
+			t.Fatalf("card settle: ok=%v err=%v", ok, err)
+		}
+	}}
+	svc := invoice.NewService(racer, nil, nil)
+
+	_, err := svc.RecordOfflinePayment(ctx, tenantID, inv.ID, "wire")
+	if !racer.done {
+		t.Fatal("the race never ran")
+	}
+	if !errors.Is(err, errs.ErrInvalidState) {
+		t.Fatalf("an offline payment on an invoice the card already paid must be refused, got %v", err)
+	}
+	cur, gerr := store.Get(ctx, tenantID, inv.ID)
+	if gerr != nil {
+		t.Fatalf("re-read: %v", gerr)
+	}
+	if cur.StripePaymentIntentID != "pi_card_won" {
+		t.Fatalf("payment intent %q, want the card's pi_card_won", cur.StripePaymentIntentID)
 	}
 }

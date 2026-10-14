@@ -87,6 +87,10 @@ charge made the customer pay twice.
 **What changed.** `Void`, `MarkUncollectible` and `RecordOfflinePayment`
 now run the refusal again on the row read under the row lock. That second
 check also refuses while the hold is live (`domain.PaymentBlocksActionHeld`).
+`RecordOfflinePayment` also refuses there when the locked row is already
+paid: a charge that settled after the service's read would otherwise turn
+the paid transition into a quiet no-op, and the audit row and
+`invoice.payment_recorded` would record a payment that never happened.
 The answer is 409 `payment_in_flight`: "a charge on this invoice is in
 progress — try again in a few minutes".
 
@@ -108,11 +112,16 @@ releasing the hold, so an operator can be refused for up to five minutes
 when no charge was sent. Dunning's final write-off treats the refusal as a
 failed terminal action and retries it 24 hours later.
 
-**Not covered.** The engine's relief void (`VoidUnchangedTx`, during a
-cancel or plan swap) re-checks the locked row but not the hold. An
-amount-reducing credit note does not read the hold either; that one is
-deferred under its own trigger in velox-ops dp-readiness. Pinned by the
-`TestChargeHold_*` tests in `internal/invoice`.
+**The engine's relief void too.** A cancel or plan swap voids a prepaid
+invoice whose period is wholly unused (`VoidUnchangedTx`), which happens on
+the period's first day, exactly when the first automatic charge fires. It
+refuses on the hold the same way. The error rolls the cancel or swap back:
+an operator sees the 409, and dunning and the scheduled-cancel scan retry
+on their own.
+
+**Not covered.** An amount-reducing credit note does not read the hold;
+that one is deferred under its own trigger in velox-ops dp-readiness.
+Pinned by the `TestChargeHold_*` tests in `internal/invoice`.
 
 ## Deferred / follow-ups
 

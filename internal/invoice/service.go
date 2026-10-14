@@ -1369,6 +1369,12 @@ func (s *Service) VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID stri
 		if err := voidRefusal(locked); err != nil {
 			return err
 		}
+		// A fully-unused prebill is voided on its period's first day, which is
+		// when the first automatic charge fires: refuse while a charge holds
+		// it (#975), so the cancel or plan swap rolls back and is retried.
+		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionVoid); err != nil {
+			return err
+		}
 		if locked.Status != snapshot.Status || locked.PaymentStatus != snapshot.PaymentStatus ||
 			locked.AmountDueCents != snapshot.AmountDueCents || locked.AmountPaidCents != snapshot.AmountPaidCents ||
 			locked.TotalAmountCents != snapshot.TotalAmountCents {
@@ -1652,6 +1658,13 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 	// collect the same invoice a second time (#975).
 	updated, err := s.store.MarkPaidOffline(ctx, tenantID, id, "out_of_band:"+now.UTC().Format(time.RFC3339), now,
 		func(tx *sql.Tx, locked domain.Invoice) error {
+			// A charge that settled after the read above leaves the row paid;
+			// the paid transition would then be a quiet no-op, and the audit
+			// row and invoice.payment_recorded below would record a payment
+			// that never happened.
+			if locked.Status == domain.InvoicePaid {
+				return errs.InvalidState("invoice is already paid")
+			}
 			return s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionRecordOfflinePayment)
 		})
 	if err != nil {
