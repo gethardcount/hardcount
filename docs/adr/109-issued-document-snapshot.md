@@ -1,11 +1,20 @@
 # ADR-109: Snapshot the bill-to and supplier blocks onto issued documents
 
 **Date:** 2026-08-05
-**Status:** Proposed (amended 2026-08-05 — writer site-set corrected after enumeration)
+**Status:** Accepted (amended 2026-10-14)
 
 ## Summary
 
-Proposed, not yet built. Today a finalized invoice re-renders its bill-to and supplier blocks from live customer and tenant rows, so a later address or VAT number edit changes an issued document. The decision is to copy those fields into new nullable columns on `invoices` in the same transaction that makes the invoice `finalized`, and to render issued documents from that copy; credit notes inherit it. Amended 2026-08-05: five of the six finalize writers skip `invoice.Service.Finalize`, so the copy is written at three SQL sites (`createWithLineItemsInTx`, `FinalizeWithDates`, `updateStatusInTx`). Drafts and invoices with a NULL copy keep rendering from live data, with no backfill.
+An issued invoice or credit note must not change when the customer or the
+company edits its details later. When an invoice is finalized, or a credit
+note is issued, Velox copies what the document prints about the buyer
+(bill-to) and the seller (supplier) into two nullable JSONB columns on that
+row: `bill_to_snapshot` and `supplier_snapshot`. The copy is written in the
+same transaction as the status change, at the store layer, so no finalize or
+issue path can skip it. Issued documents render from the copy. Drafts, and
+documents issued before the copy existed (NULL columns), render from live
+data; old rows are not backfilled. See the 2026-10-14 amendment for the
+exact fields, the writer sites and the readers.
 
 ## Context
 
@@ -304,8 +313,99 @@ reused).
 
 ## Status note
 
-Proposed, not built. Found mid-walk during FLOW CU1. The site-set has
-now been enumerated and adversarially reviewed (see the amendment
-above), so the remaining work is the build itself: one migration, three
-SQL-layer stamp sites, the reader fallback, and the render sites —
-including the hosted HTML, not just the PDF.
+Built 2026-10-14 (#964). See the amendment below.
+
+## Amendment 2026-10-14 — accepted and built
+
+The maintainer settled the open questions on 2026-10-14. This section is
+the current rule. Where it differs from the text above, this section wins.
+
+### Shape
+
+- Two nullable JSONB columns per document, on `invoices` and on
+  `credit_notes`: `bill_to_snapshot` and `supplier_snapshot`. This replaces
+  the per-field columns in the original decision.
+- Two typed Go structs define the content: `domain.DocumentBillTo` and
+  `domain.DocumentSupplier` (`internal/domain/document_snapshot.go`). They
+  marshal into the columns and unmarshal out of them.
+- NULL means "issued before this change" (or still a draft). The column is
+  read as true NULL, never through `COALESCE`, so the live fallback can fire.
+- No backfill. A row issued before migration 0177 keeps rendering live,
+  because there is no truthful issue-time value to write.
+- Migration number: **0177** (`0177_issued_document_snapshot`). The 0171
+  claimed above was taken by another change before this was built.
+
+### Content
+
+What the document prints, and what decides printed wording.
+
+| Block | Fields | Source at issue time |
+|---|---|---|
+| Bill-to | display name, legal name, email, address lines 1 and 2, city, state, postal code, country, tax ID, tax ID type | `customers` + `customer_billing_profiles` |
+| Supplier | company name, email, phone, address lines 1 and 2, city, state, postal code, country, tax ID | `tenant_settings` |
+
+- **Buyer tax ID on an invoice.** The invoice's own `tax_id` (the ID tax was
+  calculated with) wins when it is set; otherwise the profile's tax ID. This
+  folds the existing `inv.TaxID` preference from `pdf.go` into the snapshot,
+  so an issued invoice prints one ID from one place. Old rows keep the old
+  rule: `inv.TaxID`, then the live profile.
+- **Reverse-charge legend wording.** It is decided by the buyer country and
+  the supplier country (the supplier tax-ID type is derived from the
+  supplier country). Both come from the snapshot, so the wording is fixed at
+  issue.
+- **Not copied:**
+  - where emails are sent: always the customer's current address;
+  - branding: logo, brand color and support URL stay live, because the
+    original decision is silent on them and they are not legal content;
+  - the billing-profile phone, which no document prints;
+  - email message wording: the greeting name and the sender name on an
+    email are the message, sent now, and stay live.
+
+### When
+
+At the moment the document is issued. Drafts render live.
+
+- **Invoices:** every write that takes an invoice out of `draft` stamps it.
+  An invoice that waited on missing customer data (tax pending) takes the
+  details as of its finalization. This is by design. It includes the
+  auto-finalize that runs when an operator saves a corrected billing profile
+  (`RetryCustomerDataErrors`): that invoice is issued with the corrected
+  details.
+- **Credit notes:** the copy is taken when the credit note is issued, from
+  the customer and company details at that moment. A credit note does not
+  copy its invoice's snapshot. This replaces "credit notes inherit the
+  snapshot" above.
+
+### Writer site-set (verified 2026-10-14)
+
+Every SQL statement that can produce a non-draft invoice or an issued
+credit note calls one helper in the same transaction, after the status
+write and before commit. The helper re-reads the row (`RETURNING invCols`),
+so the value handed back to callers carries the snapshot.
+
+| SQL site | Go paths that reach it | Stamps |
+|---|---|---|
+| `invoice/postgres.go` `createWithLineItemsInTx` | cycle close, day-1 / trial-end / activation (BillOnCreate), final invoice on cancel, usage threshold, proration and plan swap, operator create-with-lines | yes, when status is not `draft` |
+| `invoice/postgres.go` `CreateAudited` | operator create (always draft today) | yes, when status is not `draft` |
+| `invoice/postgres.go` `updateStatusInTx` (target `finalized`) | `Service.Finalize` for engine drafts, tax-retry auto-finalize (scheduler, test clock, operator retry, `RetryCustomerDataErrors`, `RetryProviderConfigErrors`) | yes |
+| `invoice/postgres.go` `FinalizeWithDates` | `Service.Finalize` for operator-composed invoices | yes |
+| `creditnote/postgres.go` `TransitionStatusTx` (target `issued`) | `Service.Issue`, commit relief, every auto-issue | yes |
+| `cmd/velox-migrate-safety/seed.go` | synthetic rows for migration timing, not a product path | no: they stand for pre-0177 rows |
+
+A missing customer row fails the issue instead of writing an empty copy.
+
+**Blast radius.** A stamp error now fails the transaction that issues the
+document, including a subscription create or cancel that bills in the same
+transaction. The stamp is three indexed reads and one UPDATE, so the new
+failure modes are the same as the status write's own.
+
+### Readers
+
+| Reader | Snapshot present | Snapshot NULL |
+|---|---|---|
+| Invoice PDF (`invoice.BuildPDFContext`): email attachment, API download, hosted PDF | bill-to, supplier, buyer tax ID, legend wording | live, as before |
+| Hosted invoice page (`hostedinvoice` view) | bill-to and company block | live |
+| Credit-note PDF (`creditnote` `assemblePDFContext`) | bill-to and supplier | live |
+| Dashboard `InvoiceDetail` From and Bill To | snapshot | live (drafts, old rows) |
+| API `GET /v1/invoices/{id}`, `GET /v1/credit_notes/{id}` | `bill_to_snapshot`, `supplier_snapshot` | fields omitted |
+| Email greeting name and sender name | live by decision: message, not document | live |

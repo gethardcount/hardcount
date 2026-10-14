@@ -148,7 +148,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [106](106-charge-intent-ledger.md) | 2026-07-30 | Parked | Payments | Record each charge before calling Stripe, so an unnamed charge can be replayed safely |
 | [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted | Payments | A charge Stripe cannot name stays unknown until a webhook or a human resolves it |
 | [108](108-parked-invoices-search-and-adopt.md) | 2026-08-02 | Accepted | Payments | Resolve unknown charges by searching Stripe, and act only on a payment actually found |
-| [109](109-issued-document-snapshot.md) | 2026-08-05 | Proposed (amended) | Invoices | Copy bill-to and supplier details onto the invoice when it leaves draft; render from the copy |
+| [109](109-issued-document-snapshot.md) | 2026-08-05 | Accepted (amended 2026-10-14) | Invoices | Copy bill-to and supplier details onto the invoice when it leaves draft; render from the copy |
 | [110](110-written-off-invoices-close-self-service-payment.md) | 2026-08-05 | Accepted | Invoices | A written-off invoice can no longer be paid online by the customer; its pages point to support |
 | [111](111-a-write-off-has-no-tax-leg.md) | 2026-08-05 | Accepted | Tax | Writing off an invoice does not reverse its tax; voids and credit notes still do |
 | [112](112-dunning-exhaustion-settles-two-questions.md) | 2026-08-05 | Accepted | Dunning | When dunning ends, decide the subscription's outcome and the invoice's outcome separately |
