@@ -220,7 +220,7 @@ func TestSendEmail_StatesAmountDueNotTotal(t *testing.T) {
 	}
 
 	sender := &capturingEmailSender{}
-	h := &Handler{svc: NewService(store, nil, nil)}
+	h := &Handler{svc: NewService(store, nil, nil), emailConfigured: true}
 	h.emailSender = sender
 
 	body := bytes.NewBufferString(`{"email":"ap@acme.test"}`)

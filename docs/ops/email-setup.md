@@ -52,7 +52,7 @@ misconfiguration is therefore easy to see, and it does not stop startup:
 
 | Env var unset | Boot warning | Customer-visible failure |
 |---|---|---|
-| `SMTP_HOST` | `SMTP NOT CONFIGURED — …` | Every send returns `ErrSMTPNotConfigured`, dispatcher retries → DLQ. No stdout fallback. |
+| `SMTP_HOST` | `SMTP NOT CONFIGURED — …` | Every send returns `ErrSMTPNotConfigured`, dispatcher retries → DLQ. No stdout fallback. Actions you take (send an invoice or credit note, send or resend a setup link, invite a teammate) refuse with 409 `email_not_configured` and send nothing. |
 | `HOSTED_INVOICE_BASE_URL` | `HOSTED_INVOICE_BASE_URL NOT SET — …` | Invoice / receipt / dunning / payment-failed emails render with **no link** in the CTA button. |
 | `CUSTOMER_PORTAL_URL` | `CUSTOMER_PORTAL_URL NOT SET — …` | Not a customer email variable. It is the dashboard address Stripe returns a customer to after they save a card. Unset → the return address is `http://localhost:5173`; the card is still saved. |
 | `DASHBOARD_BASE_URL` | `DASHBOARD_BASE_URL NOT SET — …` | Password-reset emails are not sent. Team invites fail because the accept link cannot be built. |

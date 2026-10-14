@@ -58,8 +58,8 @@ export function writeOffOutcome(
     case 'failed':
       return {
         tone: 'warning',
-        title: `${n} marked uncollectible, collection not paused`,
-        description: 'The subscription is still billing. Pause it from the subscription page.',
+        title: 'Collection not paused',
+        description: `${n} was written off, but the subscription is still billing. Pause it from the subscription page.`,
         openSubscription: true,
       }
     case 'paused':
@@ -77,6 +77,7 @@ export type NewInvoiceResult =
   | { kind: 'sent' }
   | { kind: 'email_failed'; recipient: string }
   | { kind: 'no_email' }
+  | { kind: 'email_not_configured' }
 
 export function newInvoiceOutcome(invoiceNumber: string, result: NewInvoiceResult): Outcome {
   switch (result.kind) {
@@ -88,6 +89,12 @@ export function newInvoiceOutcome(invoiceNumber: string, result: NewInvoiceResul
         title: `Invoice ${invoiceNumber} finalized, email not sent`,
         description: `Couldn't email ${result.recipient}. Send it from the invoice page.`,
       }
+    case 'email_not_configured':
+      return {
+        tone: 'warning',
+        title: `Invoice ${invoiceNumber} finalized, email not sent`,
+        description: EMAIL_NOT_CONFIGURED_MESSAGE,
+      }
     case 'no_email':
       return {
         tone: 'warning',
@@ -97,6 +104,22 @@ export function newInvoiceOutcome(invoiceNumber: string, result: NewInvoiceResul
     default:
       return { tone: 'success', title: `Draft ${invoiceNumber} saved` }
   }
+}
+
+// Every operator email action (send invoice, resend or send a setup link, send
+// a credit note, invite a teammate) answers 409 with this code when the server
+// has no SMTP. Emails are queued, so before the refusal existed the action said
+// "sent" and the queued email then failed out of sight. Retrying cannot help,
+// so the toast carries no request ID to copy.
+export const EMAIL_NOT_CONFIGURED = 'email_not_configured'
+export const EMAIL_NOT_CONFIGURED_MESSAGE = "Email isn't set up on this server, so nothing was sent."
+
+export function isEmailNotConfigured(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === EMAIL_NOT_CONFIGURED
+}
+
+export function emailNotConfiguredOutcome(): Outcome {
+  return { tone: 'error', title: 'Email not sent', description: EMAIL_NOT_CONFIGURED_MESSAGE }
 }
 
 // marginCardView picks what the Margin card body shows. Without the error

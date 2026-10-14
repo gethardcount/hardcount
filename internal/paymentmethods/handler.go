@@ -32,6 +32,8 @@ type Handler struct {
 	emailer        SetupLinkEmailer
 	auditLogger    AuditWriter
 	cooldown       CooldownGate
+	// emailConfigured: whether this server can send email (SMTP_HOST set).
+	emailConfigured bool
 }
 
 // CustomerLookup resolves the recipient's email + display name for
@@ -69,6 +71,12 @@ func (h *Handler) SetCustomerLookup(c CustomerLookup) { h.customerLookup = c }
 // SetEmailer wires the email sender. Required for operator
 // send-setup-email; nil = endpoint refuses with 503.
 func (h *Handler) SetEmailer(e SetupLinkEmailer) { h.emailer = e }
+
+// SetEmailConfigured records whether this server can send email
+// (email.Sender.IsConfigured at boot). Zero value refuses send-setup-email
+// with 409 email_not_configured — the email is queued, so on a server with
+// no SMTP it used to answer 202 and then fail unseen.
+func (h *Handler) SetEmailConfigured(configured bool) { h.emailConfigured = configured }
 
 // SetAuditLogger wires audit on operator-initiated actions.
 func (h *Handler) SetAuditLogger(a AuditWriter) { h.auditLogger = a }
@@ -323,6 +331,12 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 	}
 	if displayName == "" {
 		displayName = "there" // "Hi there," — fallback that reads naturally.
+	}
+	// After the customer lookup (an unknown customer stays a 404) and
+	// before the Stripe setup session is created.
+	if !h.emailConfigured {
+		respond.FromError(w, r, errs.EmailNotConfigured(), "payment_method")
+		return
 	}
 
 	url, sessionID, err := h.svc.CreateSetupSession(r.Context(), tenantID, customerID, "")

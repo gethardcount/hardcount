@@ -177,6 +177,19 @@ func NotFound(resource string) *DomainError {
 	}
 }
 
+// CodeEmailNotConfigured is the stable code an operator-initiated email action
+// answers with when this server has no SMTP_HOST. Sends are queued and
+// delivered later, so without this refusal the action reported "sent" while
+// the queued row failed with "SMTP not configured" behind the operator's back.
+const CodeEmailNotConfigured = "email_not_configured"
+
+// EmailNotConfigured is the 409 every operator email action returns when the
+// server cannot send email. Callers return it before doing anything that
+// cannot be undone (minting a link, creating an invitation).
+func EmailNotConfigured() *DomainError {
+	return InvalidState("Email isn't set up on this server, so nothing was sent.").WithCode(CodeEmailNotConfigured)
+}
+
 // Sentinel errors for store and service layers.
 var (
 	ErrNotFound           = errors.New("not found")

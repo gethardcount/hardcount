@@ -10,7 +10,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { api, ApiError, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type DunningPolicyWithCount, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
 import { applyApiError, showApiError } from '@/lib/formErrors'
-import { newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
+import { isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
 import { endOfDayInTZ, startOfDayInTZ } from '@/lib/dates'
@@ -1964,8 +1964,8 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
           try {
             await api.sendInvoiceEmail(invoice.id, recipient)
             result = { kind: 'sent' }
-          } catch {
-            result = { kind: 'email_failed', recipient }
+          } catch (err) {
+            result = isEmailNotConfigured(err) ? { kind: 'email_not_configured' } : { kind: 'email_failed', recipient }
           }
         } else {
           result = { kind: 'no_email' }

@@ -1,6 +1,8 @@
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form'
 import { toast } from 'sonner'
 import { ApiError } from './api'
+import { emailNotConfiguredOutcome, isEmailNotConfigured } from './actionOutcomes'
+import { showOutcome } from './outcomeToast'
 
 /**
  * Routes a server error onto a react-hook-form instance.
@@ -71,6 +73,10 @@ export function showApiError(err: unknown, fallback: string): void {
 }
 
 function toastApiError(err: ApiError): void {
+  if (isEmailNotConfigured(err)) {
+    showOutcome(emailNotConfiguredOutcome())
+    return
+  }
   if (!err.requestId) {
     toast.error(err.message)
     return

@@ -26,6 +26,9 @@ func TestE2E_MemberInviteAcceptRemove(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("VELOX_BOOTSTRAP_TOKEN", "invite-e2e-bootstrap-token")
 	t.Setenv("DASHBOARD_BASE_URL", "http://dash.e2e.test")
+	// Invites are refused on a server with no SMTP (email_not_configured).
+	// No dispatcher runs in this test, so nothing connects to this host.
+	t.Setenv("SMTP_HOST", "smtp.e2e.invalid")
 
 	srv := NewServer(db, clock.NewFake(time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)), nil)
 	ts := httptest.NewServer(srv)

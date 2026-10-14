@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -90,6 +91,7 @@ func TestCreditNoteSendEmail(t *testing.T) {
 			Invoices: cnStaticInvoices{inv: domain.Invoice{InvoiceNumber: "INV-9", Currency: "USD"}},
 		})
 		h.SetEmailSender(sender)
+		h.SetEmailConfigured(true)
 		return h, sender
 	}
 
@@ -144,5 +146,17 @@ func TestCreditNoteSendEmail(t *testing.T) {
 	bare := NewHandler(NewService(store, nil, nil))
 	if rr := cnSendReq(t, bare, issued.ID, `{"email":"a@b.co"}`); rr.Code != http.StatusConflict {
 		t.Fatalf("no sender wired: status %d, want 409", rr.Code)
+	}
+
+	// Server without SMTP → 409 email_not_configured, nothing queued. The
+	// send is queued, so it used to answer 200 and fail out of sight.
+	h, sender = newH()
+	h.SetEmailConfigured(false)
+	rr := cnSendReq(t, h, issued.ID, `{"email":"ap@acme.test"}`)
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `"code":"email_not_configured"`) {
+		t.Fatalf("no SMTP: status %d body=%s, want 409 email_not_configured", rr.Code, rr.Body.String())
+	}
+	if sender.called {
+		t.Error("an email was queued on a server that cannot send it")
 	}
 }

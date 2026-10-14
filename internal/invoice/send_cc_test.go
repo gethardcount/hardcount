@@ -77,6 +77,7 @@ func TestSendEmail_CCTriState(t *testing.T) {
 			AdditionalEmails: []string{"finance@acme.test", "eng@acme.test"},
 		}}
 		h.emailSender = sender
+		h.emailConfigured = true
 		return h, sender
 	}
 
@@ -123,5 +124,37 @@ func TestSendEmail_CCTriState(t *testing.T) {
 	}
 	if sender.called {
 		t.Error("nothing may be sent on a validation failure")
+	}
+}
+
+// TestSendEmail_RefusesWhenEmailNotConfigured: the send is queued, so on a
+// server with no SMTP it used to answer 200 {"status":"sent"} — the dashboard
+// toasted "Invoice sent" while the queued row failed with "SMTP not
+// configured". The handler now refuses with a stable code and queues nothing.
+func TestSendEmail_RefusesWhenEmailNotConfigured(t *testing.T) {
+	store := newMemStore()
+	inv, err := store.Create(context.Background(), "t1", domain.Invoice{
+		InvoiceNumber: "INV-NOSMTP", Status: domain.InvoiceFinalized,
+		PaymentStatus: domain.PaymentPending, CustomerID: "cus_cc", Currency: "USD",
+		TotalAmountCents: 10000, AmountDueCents: 10000,
+	})
+	if err != nil {
+		t.Fatalf("seed invoice: %v", err)
+	}
+	sender := &ccCapturingSender{}
+	h := &Handler{svc: NewService(store, nil, nil), emailSender: sender} // emailConfigured: false
+
+	rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test"}`)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte(`"code":"email_not_configured"`)) {
+		t.Errorf("want code email_not_configured, got %s", rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("Email isn't set up on this server, so nothing was sent.")) {
+		t.Errorf("want the operator message, got %s", rr.Body.String())
+	}
+	if sender.called {
+		t.Error("an email was queued on a server that cannot send it")
 	}
 }

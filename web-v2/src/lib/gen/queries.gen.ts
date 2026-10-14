@@ -7938,7 +7938,7 @@ export const postV1InvoicesIdSend = async (id: string,
 
 
 
-export const getPostV1InvoicesIdSendMutationOptions = <TError = void,
+export const getPostV1InvoicesIdSendMutationOptions = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1InvoicesIdSend>>, TError,{id: string;data: PostV1InvoicesIdSendBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1InvoicesIdSend>>, TError,{id: string;data: PostV1InvoicesIdSendBody}, TContext> => {
 
@@ -7967,12 +7967,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1InvoicesIdSendMutationResult = NonNullable<Awaited<ReturnType<typeof postV1InvoicesIdSend>>>
     export type PostV1InvoicesIdSendMutationBody = PostV1InvoicesIdSendBody
-    export type PostV1InvoicesIdSendMutationError = void
+    export type PostV1InvoicesIdSendMutationError = void | Error
 
     /**
  * @summary Email the invoice (PDF attached) to a recipient
  */
-export const usePostV1InvoicesIdSend = <TError = void,
+export const usePostV1InvoicesIdSend = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1InvoicesIdSend>>, TError,{id: string;data: PostV1InvoicesIdSendBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1InvoicesIdSend>>,
@@ -8761,7 +8761,7 @@ export const postV1CreditNotesIdSend = async (id: string,
 
 
 
-export const getPostV1CreditNotesIdSendMutationOptions = <TError = void,
+export const getPostV1CreditNotesIdSendMutationOptions = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1CreditNotesIdSend>>, TError,{id: string;data: PostV1CreditNotesIdSendBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1CreditNotesIdSend>>, TError,{id: string;data: PostV1CreditNotesIdSendBody}, TContext> => {
 
@@ -8790,12 +8790,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1CreditNotesIdSendMutationResult = NonNullable<Awaited<ReturnType<typeof postV1CreditNotesIdSend>>>
     export type PostV1CreditNotesIdSendMutationBody = PostV1CreditNotesIdSendBody
-    export type PostV1CreditNotesIdSendMutationError = void
+    export type PostV1CreditNotesIdSendMutationError = void | Error
 
     /**
  * @summary Email the credit-note document (PDF attached)
  */
-export const usePostV1CreditNotesIdSend = <TError = void,
+export const usePostV1CreditNotesIdSend = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1CreditNotesIdSend>>, TError,{id: string;data: PostV1CreditNotesIdSendBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1CreditNotesIdSend>>,

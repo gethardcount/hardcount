@@ -122,7 +122,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		store := newMemStore()
 		inv := seed(t, store)
 		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySent}
-		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier}
+		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier, emailConfigured: true}
 		req, rr := newReq(t, inv.ID)
 		h.resendSetupLink(rr, req)
 		if rr.Code != http.StatusOK {
@@ -137,7 +137,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		store := newMemStore()
 		inv := seed(t, store)
 		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySkippedNoEmail}
-		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier}
+		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier, emailConfigured: true}
 		req, rr := newReq(t, inv.ID)
 		h.resendSetupLink(rr, req)
 		if rr.Code != http.StatusConflict {
@@ -149,6 +149,24 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		}
 		if strings.Contains(body, `"status":"sent"`) {
 			t.Errorf("must never claim sent on a skip, got %s", body)
+		}
+	})
+	t.Run("email not configured -> 409 email_not_configured, notifier never runs", func(t *testing.T) {
+		store := newMemStore()
+		inv := seed(t, store)
+		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySent}
+		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier} // emailConfigured: false
+		req, rr := newReq(t, inv.ID)
+		h.resendSetupLink(rr, req)
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("status: got %d, want 409. body=%s", rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		if !strings.Contains(body, `"code":"email_not_configured"`) {
+			t.Errorf("want code email_not_configured, got %s", body)
+		}
+		if notifier.calls != 0 {
+			t.Errorf("notifier ran %d times; it mints a payment-update token for an email that cannot be delivered", notifier.calls)
 		}
 	})
 }

@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Loader2, Mail, UserPlus, Users } from 'lucide-react'
 import { membersApi, type InvitationView, type MemberView } from '@/lib/members'
 import { ApiError, formatDate } from '@/lib/api'
+import { showApiError } from '@/lib/formErrors'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -66,7 +67,7 @@ export function TeamTab() {
       setInviteEmail('')
       invalidate()
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to send invitation')
+      showApiError(err, 'Failed to send invitation')
     } finally {
       setInviting(false)
     }

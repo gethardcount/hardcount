@@ -236,6 +236,12 @@ type Handler struct {
 	noPMNotifier    NoPaymentMethodNotifier
 	auditStamps     AuditStampFetcher
 	collector       Collector
+	// emailConfigured is whether this server can send email (SMTP_HOST set).
+	// Sends are queued, so a queued email on a server with no SMTP fails
+	// later, out of the operator's sight. The send and resend actions refuse
+	// up front instead. Zero value refuses: a missing wire-up never claims
+	// "sent".
+	emailConfigured bool
 }
 
 // auditWriter is the narrow audit-write interface the invoice handler uses.
@@ -280,6 +286,11 @@ func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter,
 func (h *Handler) SetEmailSender(sender EmailSender) {
 	h.emailSender = sender
 }
+
+// SetEmailConfigured records whether this server can send email
+// (email.Sender.IsConfigured at boot). Without it, send and resend-setup-link
+// answer 409 email_not_configured.
+func (h *Handler) SetEmailConfigured(configured bool) { h.emailConfigured = configured }
 
 // SetAuditStamps wires the timeline's audit enrichment (ADR-104).
 func (h *Handler) SetAuditStamps(f AuditStampFetcher) { h.auditStamps = f }
@@ -694,6 +705,12 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
+	// Refuse before the notifier mints a single-use payment-update token
+	// for an email that cannot be delivered.
+	if !h.emailConfigured {
+		respond.FromError(w, r, errs.EmailNotConfigured(), "invoice")
+		return
+	}
 	// The TRUE cause: an operator clicked Resend. The row used to say
 	// "finalize_no_pm" — a finalize that never ran.
 	// Operator entry point on a clock-pinned entity — bind so the resent
@@ -904,6 +921,10 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		respond.InternalError(w, r)
+		return
+	}
+	if !h.emailConfigured {
+		respond.FromError(w, r, errs.EmailNotConfigured(), "invoice_email")
 		return
 	}
 	// Operator entry point on a clock-pinned entity (ADR-030): bind once

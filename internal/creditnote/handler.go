@@ -60,6 +60,9 @@ type Handler struct {
 	invoices    InvoiceGetter
 	emailSender EmailSender
 	auditLogger *audit.Logger
+	// emailConfigured is whether this server can send email (SMTP_HOST
+	// set). Zero value refuses the send with 409 email_not_configured.
+	emailConfigured bool
 }
 
 func NewHandler(svc *Service, deps ...HandlerDeps) *Handler {
@@ -79,6 +82,11 @@ func (h *Handler) SetAuditLogger(l *audit.Logger) { h.auditLogger = l }
 // send endpoint returns 503 email-not-configured semantics (loud, not
 // silent).
 func (h *Handler) SetEmailSender(s EmailSender) { h.emailSender = s }
+
+// SetEmailConfigured records whether this server can send email
+// (email.Sender.IsConfigured at boot). Sends are queued, so without this
+// gate a server with no SMTP answered "sent" for an email that then failed.
+func (h *Handler) SetEmailConfigured(configured bool) { h.emailConfigured = configured }
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
@@ -442,6 +450,10 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	default:
 		respond.Validation(w, r, "a voided credit note cannot be sent")
+		return
+	}
+	if !h.emailConfigured {
+		respond.FromError(w, r, errs.EmailNotConfigured(), "credit_note_email")
 		return
 	}
 

@@ -23,8 +23,10 @@ Older entries keep their original text.
 - **Amounts show in the invoice's own currency (2026-10-14).** Record offline payment, the invoice page's credit-note and line-item dialogs, and dunning runs showed a non-default-currency invoice with the workspace currency symbol. The credit grant confirm no longer hard-codes "$".
 - **The Dashboard's outstanding total names every currency (2026-10-14).** It summed only the default currency next to a count of all open invoices. It now lists each currency, for example "$200.00 + €300.00 outstanding". The API adds `outstanding_by_currency` to the analytics overview.
 - **Charge now says what happened (2026-10-14).** "Payment initiated" showed even when credit paid the invoice with no charge. The message now reads paid, payment started, or failed, from the returned invoice.
-- **A write-off whose pause fails no longer says collection was paused (2026-10-14).** One warning now says the invoice was marked uncollectible and collection was not paused.
+- **A write-off whose pause fails no longer says collection was paused (2026-10-14).** One warning, "Collection not paused", now says the invoice was written off and the subscription is still billing.
 - **Save & send on a new invoice shows one message (2026-10-14).** When the email could not be sent, it showed a warning and then "Draft saved" for an invoice that was finalized.
+- **Email actions no longer say "sent" when email isn't set up (2026-10-15).** Emails are queued and sent later, so with no `SMTP_HOST` the dashboard showed "Invoice sent" while the queued email failed. Sending an invoice or credit note, sending or resending a payment-method setup link, and inviting a teammate now answer 409 `email_not_configured` ("Email isn't set up on this server, so nothing was sent.") before anything is created. Save & send still finalizes the invoice and says it was not emailed. Password reset is unchanged.
+- **The Dunning "At risk" card names its currency (2026-10-15).** It sums only invoices in the default currency; the label now reads, for example, "At risk (USD)".
 - **The Margin card no longer spins forever (2026-10-14).** A failed load shows a retry, and a custom range asks for both dates.
 
 ## [0.7.0] - 2026-10-14

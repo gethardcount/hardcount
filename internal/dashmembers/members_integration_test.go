@@ -115,6 +115,7 @@ func newHarness(t *testing.T, tenantName string) *harness {
 		clk,
 		"http://dash.test",
 	)
+	svc.SetEmailConfigured(true)
 
 	// Every workspace starts with a bootstrap owner (mirrors production:
 	// tenants are created via the bootstrap flow which mints the first user).
@@ -420,6 +421,36 @@ func TestInviteEmailEnqueueFailure(t *testing.T) {
 	h.email.fail = false
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "ghost@example.com"); err != nil {
 		t.Fatalf("retry after enqueue failure must succeed: %v", err)
+	}
+}
+
+// TestInviteRefusedWhenEmailNotConfigured: the accept link exists only in
+// the email, so on a server with no SMTP an invite is a dead end. Invite
+// refuses with email_not_configured before any invitation row exists — a
+// later invite of the same address, once email works, is not blocked.
+func TestInviteRefusedWhenEmailNotConfigured(t *testing.T) {
+	h := newHarness(t, "Team NoSMTP")
+	ctx := context.Background()
+
+	h.svc.SetEmailConfigured(false)
+	_, err := h.svc.Invite(ctx, h.tenantID, h.owner, "ghost@example.com")
+	if errs.Code(err) != errs.CodeEmailNotConfigured || !errors.Is(err, errs.ErrInvalidState) {
+		t.Fatalf("err = %v (code %q), want 409-class email_not_configured", err, errs.Code(err))
+	}
+	if len(h.email.sent) != 0 {
+		t.Fatal("an invite email was queued on a server that cannot send it")
+	}
+	_, invs, err := h.svc.List(ctx, h.tenantID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(invs) != 0 {
+		t.Fatalf("refused invite left %d invitation rows", len(invs))
+	}
+
+	h.svc.SetEmailConfigured(true)
+	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "ghost@example.com"); err != nil {
+		t.Fatalf("invite once email works: %v", err)
 	}
 }
 

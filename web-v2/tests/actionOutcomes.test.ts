@@ -7,6 +7,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   collectOutcome,
+  emailNotConfiguredOutcome,
+  isEmailNotConfigured,
   marginCardView,
   newInvoiceOutcome,
   writeOffOutcome,
@@ -68,8 +70,8 @@ test('charge now: nothing ever reads "Payment initiated"', () => {
 test('write-off: a failed pause is one warning that says collection was NOT paused', () => {
   const o = writeOffOutcome('INV-1', 'failed')
   assert.equal(o.tone, 'warning')
-  assert.equal(o.title, 'INV-1 marked uncollectible, collection not paused')
-  assert.match(o.description ?? '', /still billing/)
+  assert.equal(o.title, 'Collection not paused')
+  assert.equal(o.description, 'INV-1 was written off, but the subscription is still billing. Pause it from the subscription page.')
   assert.equal(o.openSubscription, true)
 })
 
@@ -101,8 +103,27 @@ test('new invoice: each result gets its own single message', () => {
   assert.match(noEmail.description ?? '', /no email address/)
 })
 
+test('new invoice: Save & send on a server without email says the invoice was finalized and not emailed', () => {
+  const o = newInvoiceOutcome('INV-9', { kind: 'email_not_configured' })
+  assert.equal(o.tone, 'warning')
+  assert.equal(o.title, 'Invoice INV-9 finalized, email not sent')
+  assert.equal(o.description, "Email isn't set up on this server, so nothing was sent.")
+  assert.doesNotMatch(o.description ?? '', /Send it from the invoice page/)
+})
+
+test('email not configured: recognised by its code, shown without a success tone', () => {
+  assert.equal(isEmailNotConfigured({ code: 'email_not_configured', status: 409 }), true)
+  assert.equal(isEmailNotConfigured({ code: 'no_email_on_file' }), false)
+  assert.equal(isEmailNotConfigured(new Error('x')), false)
+  assert.equal(isEmailNotConfigured(null), false)
+  const o = emailNotConfiguredOutcome()
+  assert.equal(o.tone, 'error')
+  assert.equal(o.title, 'Email not sent')
+  assert.equal(o.description, "Email isn't set up on this server, so nothing was sent.")
+})
+
 test('new invoice: a finalized invoice is never called a draft', () => {
-  for (const r of [{ kind: 'email_failed', recipient: 'x@y.z' }, { kind: 'no_email' }] as const) {
+  for (const r of [{ kind: 'email_failed', recipient: 'x@y.z' }, { kind: 'no_email' }, { kind: 'email_not_configured' }] as const) {
     assert.doesNotMatch(newInvoiceOutcome('INV-9', r).title, /Draft/)
   }
 })

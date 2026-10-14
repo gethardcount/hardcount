@@ -4249,6 +4249,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            `email_not_configured`: this server has no SMTP set up. Nothing
+            was sent and no setup link was created. Like any other call, it
+            starts the one-minute cooldown.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: |
             `note_too_long` (more than 2000 bytes) or
@@ -7477,6 +7486,15 @@ paths:
           description: Email enqueued
         "404":
           description: Invoice not found
+        "409":
+          description: |
+            Nothing was sent. Codes: `email_not_configured` (this server
+            has no SMTP set up), or `payment_in_flight` /
+            `payment_unidentifiable` (a charge on the invoice is unresolved).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: Invalid recipient or CC entry
 
@@ -7618,7 +7636,8 @@ paths:
           description: |
             Nothing was sent. Codes: `invoice_not_collectible` (the invoice
             is draft, voided or paid), `payment_in_flight` or
-            `payment_unidentifiable` (a charge is unresolved), or
+            `payment_unidentifiable` (a charge is unresolved),
+            `email_not_configured` (this server has no SMTP set up), or
             `no_email_on_file` (the customer has no email address).
           content:
             application/json:
@@ -7979,6 +7998,14 @@ paths:
           description: Email enqueued
         "404":
           description: Credit note not found
+        "409":
+          description: |
+            Nothing was sent. `email_not_configured`: this server has no
+            SMTP set up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: Not issued (draft/voided), or invalid recipient
 
@@ -8650,7 +8677,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/MemberInvitation"
         "409":
-          description: Already a member, or a pending invitation exists
+          description: |
+            No invitation was created when the code is
+            `email_not_configured` (this server has no SMTP set up, so the
+            accept link could not be delivered) or `invalid_state`
+            (`DASHBOARD_BASE_URL` is not set). Also returned when the email
+            is already a member or already has a pending invitation.
           content:
             application/json:
               schema:

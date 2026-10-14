@@ -651,6 +651,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		setupLinkEmail paymentmethods.SetupLinkEmailer = outboxSender
 	)
 	invoiceH.SetEmailSender(invoiceEmail)
+	// Operator email actions refuse with 409 email_not_configured when
+	// SMTP is not set up — the queued email would otherwise fail unseen
+	// after the action reported "sent".
+	invoiceH.SetEmailConfigured(emailSender.IsConfigured())
 	customerEmailAdapter := &customerEmailFetcherAdapter{store: customerStore}
 	dunningSvc.SetEmailNotifier(dunningEmail)
 	dunningSvc.SetCustomerEmailFetcher(customerEmailAdapter)
@@ -689,6 +693,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// CN document email (ADR-082 rider) rides the transactional outbox
 	// like every other customer email.
 	creditNoteH.SetEmailSender(outboxSender)
+	creditNoteH.SetEmailConfigured(emailSender.IsConfigured())
 	// Wire audit on paymentmethods.Service so attach/setDefault/detach
 	// surface in the operator Activity feed + AuditLog page. Without
 	// this, customer-driven card mutations are invisible to operators.
@@ -1158,6 +1163,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// rdb is constructed (line ~960).
 	paymentMethodsH.SetCustomerLookup(&pmCustomerLookupAdapter{store: customerStore})
 	paymentMethodsH.SetEmailer(setupLinkEmail)
+	paymentMethodsH.SetEmailConfigured(emailSender.IsConfigured())
 	paymentMethodsH.SetAuditLogger(auditLogger)
 
 	// setup_intent.succeeded webhooks write payment_methods rows via the
@@ -1233,6 +1239,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		nil, // real clock
 		dashboardBaseURL,
 	)
+	membersSvc.SetEmailConfigured(emailSender.IsConfigured())
 	membersH := dashmembers.NewHandler(membersSvc, sessionSvc, session.DefaultCookieConfig())
 	membersH.SetAuditLogger(auditLogger)
 

@@ -2881,6 +2881,19 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /**
+                 * @description Nothing was sent. Codes: `email_not_configured` (this server
+                 *     has no SMTP set up), or `payment_in_flight` /
+                 *     `payment_unidentifiable` (a charge on the invoice is unresolved).
+                 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Invalid recipient or CC entry */
                 422: {
                     headers: {
@@ -3190,6 +3203,18 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /**
+                 * @description Nothing was sent. `email_not_configured`: this server has no
+                 *     SMTP set up.
+                 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
                 /** @description Not issued (draft/voided), or invalid recipient */
                 422: {
@@ -8491,6 +8516,19 @@ export interface operations {
                 };
             };
             /**
+             * @description `email_not_configured`: this server has no SMTP set up. Nothing
+             *     was sent and no setup link was created. Like any other call, it
+             *     starts the one-minute cooldown.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
              * @description `note_too_long` (more than 2000 bytes) or
              *     `missing_email` (the customer has no email).
              */
@@ -10722,7 +10760,8 @@ export interface operations {
             /**
              * @description Nothing was sent. Codes: `invoice_not_collectible` (the invoice
              *     is draft, voided or paid), `payment_in_flight` or
-             *     `payment_unidentifiable` (a charge is unresolved), or
+             *     `payment_unidentifiable` (a charge is unresolved),
+             *     `email_not_configured` (this server has no SMTP set up), or
              *     `no_email_on_file` (the customer has no email address).
              */
             409: {
@@ -11374,7 +11413,13 @@ export interface operations {
                     "application/json": components["schemas"]["MemberInvitation"];
                 };
             };
-            /** @description Already a member, or a pending invitation exists */
+            /**
+             * @description No invitation was created when the code is
+             *     `email_not_configured` (this server has no SMTP set up, so the
+             *     accept link could not be delivered) or `invalid_state`
+             *     (`DASHBOARD_BASE_URL` is not set). Also returned when the email
+             *     is already a member or already has a pending invitation.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -70,7 +70,16 @@ type Service struct {
 	// poisoning steals tokens). Empty = invites are created but no email
 	// goes out (loud in the response is wrong — loud at CREATE: see Invite).
 	dashboardBaseURL string
+	// emailConfigured is whether this server can send email (SMTP_HOST
+	// set). The accept link exists only in the email, so an invite on a
+	// server with no SMTP is a dead end; Invite refuses it up front. Zero
+	// value refuses.
+	emailConfigured bool
 }
+
+// SetEmailConfigured records whether this server can send email
+// (email.Sender.IsConfigured at boot).
+func (s *Service) SetEmailConfigured(configured bool) { s.emailConfigured = configured }
 
 func NewService(store *PostgresStore, users UserDirectory, sessions SessionRevoker, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
 	if clk == nil {
@@ -136,6 +145,12 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 		// (deriving it from request headers invites host-header token
 		// theft). Refuse rather than mint an invite nobody can accept.
 		return Invitation{}, errs.InvalidState("DASHBOARD_BASE_URL is not configured — the accept link cannot be built safely; set it and retry")
+	}
+
+	// The accept link is delivered only by email; without email there is
+	// nothing the invitee can act on. Refuse before the invitation row exists.
+	if !s.emailConfigured {
+		return Invitation{}, errs.EmailNotConfigured()
 	}
 
 	// Already a member? The unique index can't see this (memberships live
