@@ -35,6 +35,12 @@ type OverviewResponse struct {
 	AvgInvoiceValue int64 `json:"avg_invoice_value"`
 	CreditBalance   int64 `json:"credit_balance_total"`
 
+	// OutstandingByCurrency is the amount still due on the same open invoices
+	// OpenInvoices counts, one row per currency. OutstandingAR covers the
+	// default currency only, so on its own it under-reports a tenant that
+	// bills in more than one currency. Default currency first, then largest.
+	OutstandingByCurrency []CurrencyAmount `json:"outstanding_by_currency"`
+
 	// Counts
 	ActiveCustomers  int   `json:"active_customers"`
 	NewCustomers     int   `json:"new_customers"`
@@ -56,6 +62,12 @@ type OverviewResponse struct {
 	// MRR movement within the period (cents; churned/contraction are positive
 	// magnitudes — the UI subtracts them visually).
 	MRRMovement MRRMovementTotals `json:"mrr_movement"`
+}
+
+// CurrencyAmount is an amount in one currency's minor units.
+type CurrencyAmount struct {
+	Currency    string `json:"currency"`
+	AmountCents int64  `json:"amount_cents"`
 }
 
 // MRRMovementTotals breaks MRR change into its standard SaaS components.
@@ -178,6 +190,13 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 			respond.InternalError(w, r)
 			return
 		}
+	}
+
+	resp.OutstandingByCurrency, err = outstandingByCurrency(ctx, tx, defaultCurrency)
+	if err != nil {
+		slog.Error("analytics overview: outstanding by currency", "error", err)
+		respond.InternalError(w, r)
+		return
 	}
 
 	// Credit balance: authoritative SUM(amount_cents) over the whole ledger,
@@ -307,6 +326,34 @@ func mrrAtPointInTime(ctx context.Context, tx *sql.Tx, t any, currency string) (
 		  AND s.test_clock_id IS NULL
 	`, t, currency).Scan(&v)
 	return v, err
+}
+
+// outstandingByCurrency sums amount_due over the open invoices (the
+// open_invoices predicate) per currency, so the dashboard can name every
+// currency it is owed in instead of showing the default-currency figure next to
+// a count that includes other currencies. Never nil: an empty result encodes
+// as [], not null.
+func outstandingByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency string) ([]CurrencyAmount, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT currency, SUM(amount_due_cents)
+		FROM invoices
+		WHERE status = 'finalized' AND payment_status != 'succeeded' AND amount_due_cents > 0`+notSimInvoice+`
+		GROUP BY currency
+		ORDER BY (currency = $1) DESC, SUM(amount_due_cents) DESC, currency
+	`, defaultCurrency)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []CurrencyAmount{}
+	for rows.Next() {
+		var a CurrencyAmount
+		if err := rows.Scan(&a.Currency, &a.AmountCents); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // defaultCurrencyFor returns the tenant's configured default currency, or

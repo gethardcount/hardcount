@@ -7133,7 +7133,7 @@ export interface components {
          */
         AnalyticsOverview: {
             period: components["schemas"]["AnalyticsPeriod"];
-            /** @description The tenant's default currency. Every money field uses it. */
+            /** @description The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`. */
             currency: string;
             /**
              * Format: int64
@@ -7167,9 +7167,19 @@ export interface components {
             revenue_prev: number;
             /**
              * Format: int64
-             * @description Amount due on finalized invoices whose payment has not succeeded.
+             * @description Amount due on finalized invoices whose payment has not succeeded, in `currency` only.
              */
             outstanding_ar: number;
+            /**
+             * @description Amount due on the invoices `open_invoices` counts, one entry per
+             *     currency. `currency` comes first, then the largest amount. Empty
+             *     when nothing is owed.
+             */
+            outstanding_by_currency: {
+                currency: string;
+                /** Format: int64 */
+                amount_cents: number;
+            }[];
             /**
              * Format: int64
              * @description Average total of invoices paid in the window.

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { formatInTimeZone } from 'date-fns-tz'
 import { api, formatCents, getTenantTimezone } from '@/lib/api'
+import { outstandingText } from '@/lib/money'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
@@ -122,10 +123,14 @@ export default function DashboardPage() {
         to: '/credit-notes?refund_status=needs_attention',
       })
     }
-    if (overview.open_invoices > 0 && overview.outstanding_ar > 0) {
+    // The count covers every currency, so the amount names every currency
+    // too (outstanding_ar alone is the default currency only: a tenant owed
+    // only in EUR lost this row, and a mixed one saw a USD-only sum).
+    const outstanding = overview.outstanding_by_currency ?? []
+    if (overview.open_invoices > 0 && outstanding.some(a => a.amount_cents > 0)) {
       items.push({
         severity: 'warning',
-        text: `${overview.open_invoices} open ${overview.open_invoices === 1 ? 'invoice' : 'invoices'} · ${formatCents(overview.outstanding_ar)} outstanding`,
+        text: outstandingText(overview.open_invoices, outstanding),
         to: '/invoices?status=finalized',
       })
     }
@@ -176,15 +181,15 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
             <TrendCard
               label="MRR"
-              value={formatCents(overview.mrr)}
+              value={formatCents(overview.mrr, overview.currency)}
               current={overview.mrr}
               previous={overview.mrr_prev}
               sparkline={sparklineRevenue}
-              hint={`ARR ${formatCents(overview.arr)}`}
+              hint={`ARR ${formatCents(overview.arr, overview.currency)}`}
             />
             <TrendCard
               label="Revenue"
-              value={formatCents(overview.revenue)}
+              value={formatCents(overview.revenue, overview.currency)}
               current={overview.revenue}
               previous={overview.revenue_prev}
               hint={`${overview.paid_invoices} ${overview.paid_invoices === 1 ? 'invoice' : 'invoices'} paid`}

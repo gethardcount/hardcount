@@ -8,6 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { AnalyticsMrrMovementTotals } from './analyticsMrrMovementTotals';
+import type { AnalyticsOverviewOutstandingByCurrencyItem } from './analyticsOverviewOutstandingByCurrencyItem';
 import type { AnalyticsPeriod } from './analyticsPeriod';
 
 /**
@@ -17,7 +18,7 @@ import type { AnalyticsPeriod } from './analyticsPeriod';
  */
 export interface AnalyticsOverview {
   period: AnalyticsPeriod;
-  /** The tenant's default currency. Every money field uses it. */
+  /** The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`. */
   currency: string;
   /** MRR of active subscriptions now. */
   mrr: number;
@@ -31,8 +32,14 @@ export interface AnalyticsOverview {
   revenue: number;
   /** Total of invoices paid in the previous window. */
   revenue_prev: number;
-  /** Amount due on finalized invoices whose payment has not succeeded. */
+  /** Amount due on finalized invoices whose payment has not succeeded, in `currency` only. */
   outstanding_ar: number;
+  /**
+     * Amount due on the invoices `open_invoices` counts, one entry per
+     * currency. `currency` comes first, then the largest amount. Empty
+     * when nothing is owed.
+     */
+  outstanding_by_currency: AnalyticsOverviewOutstandingByCurrencyItem[];
   /** Average total of invoices paid in the window. */
   avg_invoice_value: number;
   /** Sum of all customers' credit balances. Not limited to `currency`. */

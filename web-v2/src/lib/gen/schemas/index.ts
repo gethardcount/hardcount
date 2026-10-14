@@ -14,6 +14,7 @@ export * from './aggregateUsageEventsParams';
 export * from './analyticsMrrMovementPoint';
 export * from './analyticsMrrMovementTotals';
 export * from './analyticsOverview';
+export * from './analyticsOverviewOutstandingByCurrencyItem';
 export * from './analyticsPeriod';
 export * from './analyticsRevenuePoint';
 export * from './analyticsTopMeter';

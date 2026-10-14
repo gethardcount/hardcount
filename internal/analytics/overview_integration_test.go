@@ -142,3 +142,58 @@ func execBypass(t *testing.T, db *postgres.DB, q string, args ...any) {
 		t.Fatalf("commit: %v", err)
 	}
 }
+
+// TestOverview_OutstandingByCurrency: the dashboard's "N open invoices · X
+// outstanding" row put a count over every currency next to a default-currency
+// sum, so a tenant owed €300 and $200 read "2 open invoices · $200.00
+// outstanding". outstanding_by_currency names every currency the open
+// invoices are owed in, default currency first; outstanding_ar keeps its
+// default-currency-only meaning for API callers.
+func TestOverview_OutstandingByCurrency(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+
+	tenantID := testutil.CreateTestTenant(t, db, "Analytics Outstanding")
+	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
+		ExternalID: "cus_out", DisplayName: "Outstanding",
+	})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	store := invoice.NewPostgresStore(db)
+
+	open := func(currency string, due int64) {
+		t.Helper()
+		inv := makePaidInvoice(t, ctx, store, tenantID, cust.ID, currency, due)
+		execBypass(t, db, `UPDATE invoices SET status = 'finalized', payment_status = 'pending',
+			paid_at = NULL, amount_paid_cents = 0, amount_due_cents = $2 WHERE id = $1`, inv.ID, due)
+	}
+	open("EUR", 300_00) // larger than the USD total: ordering must still put USD first
+	open("USD", 150_00)
+	open("USD", 50_00)
+	open("GBP", 10_00)
+	// Paid invoices owe nothing and must not appear.
+	_ = makePaidInvoice(t, ctx, store, tenantID, cust.ID, "JPY", 999_00)
+
+	resp := getOverview(t, db, tenantID)
+
+	if resp.OpenInvoices != 4 {
+		t.Errorf("open_invoices: got %d, want 4", resp.OpenInvoices)
+	}
+	if resp.OutstandingAR != 200_00 {
+		t.Errorf("outstanding_ar: got %d, want 20000 (default currency only)", resp.OutstandingAR)
+	}
+	want := []CurrencyAmount{
+		{Currency: "USD", AmountCents: 200_00},
+		{Currency: "EUR", AmountCents: 300_00},
+		{Currency: "GBP", AmountCents: 10_00},
+	}
+	if len(resp.OutstandingByCurrency) != len(want) {
+		t.Fatalf("outstanding_by_currency: got %+v, want %+v", resp.OutstandingByCurrency, want)
+	}
+	for i := range want {
+		if resp.OutstandingByCurrency[i] != want[i] {
+			t.Errorf("outstanding_by_currency[%d]: got %+v, want %+v", i, resp.OutstandingByCurrency[i], want[i])
+		}
+	}
+}

@@ -12,6 +12,9 @@ import { api, downloadPDF, formatCents, formatRate, formatDate, formatDateTime, 
 import { formatCivilPeriod, formatYMDInTZ, inclusiveEndCivilYMD } from '@/lib/dates'
 import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
+import { amountInputToCents } from '@/lib/money'
+import { collectOutcome, writeOffOutcome } from '@/lib/actionOutcomes'
+import { showOutcome } from '@/lib/outcomeToast'
 import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { useGetInvoice } from '@/lib/gen/queries.gen'
@@ -486,7 +489,9 @@ export default function InvoiceDetailPage() {
 
   const collectMutation = useMutation({
     mutationFn: () => api.collectPayment(id!),
-    onSuccess: () => { invalidateAll(); toast.success('Payment initiated') },
+    // The returned invoice says what happened — paid outright (card or
+    // credit), still confirming, or an outcome recorded during the call.
+    onSuccess: (updated) => { invalidateAll(); showOutcome(collectOutcome(updated)) },
     onError: (err) => showApiError(err, 'Payment failed'),
   })
 
@@ -525,30 +530,31 @@ export default function InvoiceDetailPage() {
   )
   const markUncollectibleMutation = useMutation({
     mutationFn: async () => {
-      const written = await api.markInvoiceUncollectible(id!)
-      if (pauseSubOnWriteOff && canPauseSubOnWriteOff && invoice?.subscription_id) {
-        // Sequential, not parallel: the write-off is the decision being
-        // confirmed, and pausing a subscription whose write-off failed would
-        // stop billing for nothing. Its failure is reported separately below
-        // rather than folded into one message — the write-off HAS happened by
-        // then, and a single "failed" toast would misstate that.
-        try {
-          await api.pauseSubscriptionCollection(invoice.subscription_id, { behavior: 'keep_as_draft' })
-        } catch (err) {
-          showApiError(err, `Invoice ${invoice?.invoice_number} was written off, but pausing collection on the subscription failed — it is still billing. Pause it from the subscription page.`)
-        }
+      await api.markInvoiceUncollectible(id!)
+      if (!(pauseSubOnWriteOff && canPauseSubOnWriteOff && invoice?.subscription_id)) {
+        return 'not_requested' as const
       }
-      return written
+      // Sequential, not parallel: the write-off is the decision being
+      // confirmed, and pausing a subscription whose write-off failed would
+      // stop billing for nothing. A pause failure is not thrown: the
+      // write-off HAS happened by then, so onError's "failed" would misstate
+      // it. writeOffOutcome reports both facts in one warning instead.
+      try {
+        await api.pauseSubscriptionCollection(invoice.subscription_id, { behavior: 'keep_as_draft' })
+        return 'paused' as const
+      } catch {
+        return 'failed' as const
+      }
     },
-    onSuccess: () => {
+    onSuccess: (pause) => {
       invalidateAll()
       setShowMarkUncollectibleConfirm(false)
       setPauseSubOnWriteOff(false)
-      toast.success(
-        pauseSubOnWriteOff && canPauseSubOnWriteOff
-          ? `Invoice ${invoice?.invoice_number} marked uncollectible; collection paused on the subscription`
-          : `Invoice ${invoice?.invoice_number} marked uncollectible`
-      )
+      const outcome = writeOffOutcome(invoice?.invoice_number ?? '', pause)
+      const subId = invoice?.subscription_id
+      showOutcome(outcome, outcome.openSubscription && subId
+        ? { label: 'Open subscription', onClick: () => navigate(`/subscriptions/${subId}`) }
+        : undefined)
     },
     onError: (err) => showApiError(err, 'Failed to mark uncollectible'),
   })
@@ -1622,10 +1628,9 @@ export default function InvoiceDetailPage() {
             </DialogHeader>
             <div className="space-y-3 py-2">
               <p className="text-sm text-muted-foreground">
-                Mark this invoice as paid based on an out-of-band collection
-                (cheque, wire, cash). The full {formatCents(invoice.amount_due_cents)} will be recorded
-                as paid. Use this for payments received outside Velox's
-                Stripe-attached charge flow.
+                Mark this invoice paid for money received outside Stripe
+                (cheque, wire, cash). The full {formatCents(invoice.amount_due_cents, invoice.currency)} is
+                recorded as paid.
               </p>
               {/* The unreconciled consequence, stated BEFORE the operator
                   commits. Deliberately not a block — the money already
@@ -1693,6 +1698,7 @@ export default function InvoiceDetailPage() {
       {showAddLineItem && (
         <AddLineItemDialog
           invoiceId={invoice.id}
+          currency={invoice.currency}
           onClose={() => setShowAddLineItem(false)}
           onAdded={() => { setShowAddLineItem(false); toast.success('Line item added'); invalidateAll() }}
         />
@@ -1899,8 +1905,8 @@ function OperatorContextCard({
   )
 }
 
-function AddLineItemDialog({ invoiceId, onClose, onAdded }: {
-  invoiceId: string; onClose: () => void; onAdded: () => void
+function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
+  invoiceId: string; currency: string; onClose: () => void; onAdded: () => void
 }) {
   const [description, setDescription] = useState('')
   const [lineType, setLineType] = useState('add_on')
@@ -1922,7 +1928,7 @@ function AddLineItemDialog({ invoiceId, onClose, onAdded }: {
         description: description.trim(),
         line_type: lineType,
         quantity: parseInt(quantity) || 1,
-        unit_amount_cents: Math.round(parseFloat(unitAmount) * 100),
+        unit_amount_cents: amountInputToCents(unitAmount),
       })
       onAdded()
     } catch (err) {
@@ -1967,14 +1973,16 @@ function AddLineItemDialog({ invoiceId, onClose, onAdded }: {
               <Input id="quantity" type="number" min={1} value={quantity} onChange={e => setQuantity(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="unitAmount">Unit Price ({getCurrencySymbol()})</Label>
+              <Label htmlFor="unitAmount">Unit Price ({getCurrencySymbol(currency)})</Label>
               <Input id="unitAmount" type="number" step="0.01" min={0.01} value={unitAmount} onChange={e => { setUnitAmount(e.target.value); setAmountError('') }} placeholder="10.00" />
               {amountError && <p className="text-xs text-destructive">{amountError}</p>}
             </div>
           </div>
           {unitAmount && quantity && (
             <p className="text-sm text-muted-foreground">
-              Total: {getCurrencySymbol()}{((parseInt(quantity) || 1) * parseFloat(unitAmount || '0')).toFixed(2)}
+              {/* The same integer cents the submit sends, so the preview never
+                  drifts from the line the invoice gets. */}
+              Total: {formatCents((parseInt(quantity) || 1) * amountInputToCents(unitAmount), currency)}
             </p>
           )}
           <DialogFooter>
@@ -2165,7 +2173,9 @@ function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCreated }:
     }
   })
 
-  const fmt = (cents: number) => `${getCurrencySymbol()}${(cents / 100).toFixed(2)}`
+  // Every figure in this dialog is an amount of THIS invoice — its currency,
+  // not the workspace default.
+  const fmt = (cents: number) => formatCents(cents, invoice.currency)
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -2190,7 +2200,7 @@ function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCreated }:
           </div>
           <div className="space-y-2">
             <Label htmlFor="cn-amount" className="flex items-center justify-between">
-              <span>Amount ({getCurrencySymbol()})</span>
+              <span>Amount ({getCurrencySymbol(invoice.currency)})</span>
               <span className="text-xs text-muted-foreground font-normal">
                 max {fmt(creditableRemainingCents)}
               </span>

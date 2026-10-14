@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { api, formatCents, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
+import { amountInputToCents } from '@/lib/money'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { endOfDayInTZ } from '@/lib/dates'
 import type { Customer, CreditBalance } from '@/lib/api'
@@ -665,7 +666,7 @@ function CreditDialog({ mode, customerId, customerName, customers, open, onOpenC
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const amountCents = Math.round(parseFloat(form.getValues('amount')) * 100)
+      const amountCents = amountInputToCents(form.getValues('amount'))
       const description = form.getValues('description')
       const expiresAt = form.getValues('expiresAt')
       if (isDeduct) {
@@ -708,7 +709,9 @@ function CreditDialog({ mode, customerId, customerName, customers, open, onOpenC
     saveMutation.mutate()
   }
 
-  const confirmAmount = parseFloat(form.watch('amount') || '0')
+  // The confirm restates exactly the cents the submit sends, in the same
+  // currency the Amount field is labeled with.
+  const confirmCents = amountInputToCents(form.watch('amount'))
 
   return (
     <>
@@ -842,7 +845,7 @@ function CreditDialog({ mode, customerId, customerName, customers, open, onOpenC
           <AlertDialogHeader>
             <AlertDialogTitle>{isDeduct ? 'Confirm Deduction' : 'Confirm Credit Grant'}</AlertDialogTitle>
             <AlertDialogDescription>
-              {isDeduct ? 'Deduct' : 'Grant'} ${confirmAmount.toFixed(2)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
+              {isDeduct ? 'Deduct' : 'Grant'} {formatCents(confirmCents)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

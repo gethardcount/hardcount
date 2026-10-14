@@ -2448,7 +2448,7 @@ type AnalyticsOverview struct {
 	// CreditBalanceTotal Sum of all customers' credit balances. Not limited to `currency`.
 	CreditBalanceTotal int64 `json:"credit_balance_total"`
 
-	// Currency The tenant's default currency. Every money field uses it.
+	// Currency The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`.
 	Currency string `json:"currency"`
 
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
@@ -2484,8 +2484,16 @@ type AnalyticsOverview struct {
 	// OpenInvoices Finalized invoices whose payment has not succeeded. All currencies.
 	OpenInvoices int `json:"open_invoices"`
 
-	// OutstandingAr Amount due on finalized invoices whose payment has not succeeded.
+	// OutstandingAr Amount due on finalized invoices whose payment has not succeeded, in `currency` only.
 	OutstandingAr int64 `json:"outstanding_ar"`
+
+	// OutstandingByCurrency Amount due on the invoices `open_invoices` counts, one entry per
+	// currency. `currency` comes first, then the largest amount. Empty
+	// when nothing is owed.
+	OutstandingByCurrency []struct {
+		AmountCents int64  `json:"amount_cents"`
+		Currency    string `json:"currency"`
+	} `json:"outstanding_by_currency"`
 
 	// PaidInvoices Invoices paid in the window.
 	PaidInvoices int             `json:"paid_invoices"`

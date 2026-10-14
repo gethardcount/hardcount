@@ -2228,6 +2228,7 @@ components:
         - revenue
         - revenue_prev
         - outstanding_ar
+        - outstanding_by_currency
         - avg_invoice_value
         - credit_balance_total
         - active_customers
@@ -2254,7 +2255,7 @@ components:
           $ref: "#/components/schemas/AnalyticsPeriod"
         currency:
           type: string
-          description: The tenant's default currency. Every money field uses it.
+          description: The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`.
         mrr:
           type: integer
           format: int64
@@ -2282,7 +2283,24 @@ components:
         outstanding_ar:
           type: integer
           format: int64
-          description: Amount due on finalized invoices whose payment has not succeeded.
+          description: Amount due on finalized invoices whose payment has not succeeded, in `currency` only.
+        outstanding_by_currency:
+          type: array
+          description: |
+            Amount due on the invoices `open_invoices` counts, one entry per
+            currency. `currency` comes first, then the largest amount. Empty
+            when nothing is owed.
+          items:
+            type: object
+            required:
+              - currency
+              - amount_cents
+            properties:
+              currency:
+                type: string
+              amount_cents:
+                type: integer
+                format: int64
         avg_invoice_value:
           type: integer
           format: int64

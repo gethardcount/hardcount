@@ -10,6 +10,8 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { api, ApiError, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type DunningPolicyWithCount, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
 import { applyApiError, showApiError } from '@/lib/formErrors'
+import { newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
+import { showOutcome } from '@/lib/outcomeToast'
 import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
 import { endOfDayInTZ, startOfDayInTZ } from '@/lib/dates'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -1285,25 +1287,14 @@ export default function CustomerDetailPage() {
           customer={customer}
           billingProfile={billingProfile ?? null}
           onClose={() => setShowNewInvoice(false)}
-          onCreated={({ invoice, sent }) => {
+          onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
             queryClient.invalidateQueries({ queryKey: ['customer-overview', id] })
             queryClient.invalidateQueries({ queryKey: ['invoices'] })
-            if (sent) {
-              toast.success(`Invoice ${invoice.invoice_number} sent`, {
-                action: {
-                  label: 'View invoice',
-                  onClick: () => navigate(`/invoices/${invoice.id}`),
-                },
-              })
-            } else {
-              toast.success(`Draft ${invoice.invoice_number} saved`, {
-                action: {
-                  label: 'View invoice',
-                  onClick: () => navigate(`/invoices/${invoice.id}`),
-                },
-              })
-            }
+            showOutcome(newInvoiceOutcome(invoice.invoice_number, result), {
+              label: 'View invoice',
+              onClick: () => navigate(`/invoices/${invoice.id}`),
+            })
           }}
         />
       )}
@@ -1788,7 +1779,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
   customer: Customer
   billingProfile: BillingProfile | null
   onClose: () => void
-  onCreated: (result: { invoice: Invoice; sent: boolean }) => void
+  onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
 }) {
   // Default currency: prefer the customer's billing profile currency, else
   // tenant default (USD here is a placeholder until the tenant settings query
@@ -1962,28 +1953,26 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
         line_items: cleaned,
       })
 
-      let sent = false
+      // One outcome, one toast (shown by onCreated). The email step is
+      // best-effort: a failed send must not unwind a finalized invoice, and
+      // it must not be reported as a saved draft either.
+      let result: NewInvoiceResult = { kind: 'draft' }
       if (action === 'send') {
         invoice = await api.finalizeInvoice(invoice.id)
         const recipient = customer.email
         if (recipient) {
-          // Best-effort send: a transient SMTP failure shouldn't unwind a
-          // successfully finalized invoice. Operators can resend from the
-          // invoice detail page if the email never lands.
           try {
             await api.sendInvoiceEmail(invoice.id, recipient)
-            sent = true
+            result = { kind: 'sent' }
           } catch {
-            toast.warning(
-              `Invoice finalized, but email to ${recipient} failed. Resend from the invoice detail page.`,
-            )
+            result = { kind: 'email_failed', recipient }
           }
         } else {
-          toast.warning('Invoice finalized, but no email is on file. Add one to send.')
+          result = { kind: 'no_email' }
         }
       }
 
-      onCreated({ invoice, sent })
+      onCreated({ invoice, result })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create invoice'
       // Partial-success messaging: if we got an invoice ID but failed mid-flight

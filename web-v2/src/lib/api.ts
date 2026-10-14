@@ -1,4 +1,5 @@
 import { setLastRequestId } from './lastRequestId'
+import { getCurrencySymbol } from './money'
 // Recipe wire types are GENERATED from api/openapi.yaml (single source of
 // truth) — the hand-written versions drifted from the server (`key` vs
 // `recipe_key`, a phantom `products` role) until the 2026-07-26 recipe
@@ -1496,6 +1497,8 @@ export interface DunningStats {
   escalated_count: number
   resolved_count: number
   at_risk_cents: number
+  // The currency at_risk_cents is in (the tenant default).
+  currency?: string
 }
 
 export interface CreditNote {
@@ -1675,6 +1678,8 @@ export interface ApiKeyInfo {
 // in cents; rates are in [0, 1].
 export interface AnalyticsOverview {
   period: string
+  // The tenant's default currency; mrr/arr/revenue/outstanding_ar are in it.
+  currency: string
   mrr: number
   mrr_prev: number
   arr: number
@@ -1682,6 +1687,9 @@ export interface AnalyticsOverview {
   revenue: number
   revenue_prev: number
   outstanding_ar: number
+  // Amount due on the open invoices, one row per currency (default first).
+  // outstanding_ar alone is the default currency only.
+  outstanding_by_currency: { currency: string; amount_cents: number }[]
   avg_invoice_value: number
   credit_balance_total: number
   active_customers: number
@@ -1790,36 +1798,9 @@ export async function downloadCreditNotePDF(creditNoteId: string, creditNoteNumb
   URL.revokeObjectURL(url)
 }
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$', EUR: '€', GBP: '£', JPY: '¥', CNY: '¥',
-  INR: '₹', BRL: 'R$', CAD: 'CA$', AUD: 'A$', CHF: 'CHF ',
-  SGD: 'S$', HKD: 'HK$', NZD: 'NZ$', SEK: 'kr ', NOK: 'kr ',
-  DKK: 'kr ', ZAR: 'R', KRW: '₩', MXN: 'MX$', PLN: 'zł',
-  CZK: 'Kč ', HUF: 'Ft ', ILS: '₪', AED: 'AED ', SAR: 'SAR ',
-  THB: '฿', MYR: 'RM ', IDR: 'Rp ', PHP: '₱', VND: '₫',
-  CLP: 'CL$', COP: 'CO$', PEN: 'S/', ARS: 'AR$', TWD: 'NT$',
-}
-
-let _activeCurrency = 'USD'
-
-export function setActiveCurrency(code: string) {
-  _activeCurrency = code.toUpperCase()
-}
-
-export function getActiveCurrency(): string {
-  return _activeCurrency
-}
-
-export function getCurrencySymbol(code?: string): string {
-  return CURRENCY_SYMBOLS[(code || _activeCurrency).toUpperCase()] || (code || _activeCurrency) + ' '
-}
-
-export function formatCents(cents: number, currency?: string): string {
-  const sign = cents < 0 ? '-' : ''
-  const abs = Math.abs(cents)
-  const symbol = getCurrencySymbol(currency)
-  return `${sign}${symbol}${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')}`
-}
+// Money formatting lives in lib/money (dependency-free, so node --test can
+// import it); re-exported here so every existing call site keeps working.
+export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents } from './money'
 
 // formatTaxRate renders a tax-rate percent (without the % sign) at up to 4
 // decimal places, trailing zeros trimmed: 8.875 → "8.875", 18 → "18",

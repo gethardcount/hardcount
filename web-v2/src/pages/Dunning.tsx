@@ -17,6 +17,7 @@ import { Layout } from '@/components/Layout'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { showApiError } from '@/lib/formErrors'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
+import { dunningAmountDue } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -231,7 +232,7 @@ function RunsTab() {
             <div key={stat.label} className={cn(stat.bg, 'rounded-xl px-4 py-3 ring-1', stat.ring)}>
               <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
               <p className={cn('text-xl font-semibold mt-1 tabular-nums', stat.color)}>
-                {stat.isCurrency ? formatCents(stat.value) : stat.value}
+                {stat.isCurrency ? formatCents(stat.value, stats?.currency) : stat.value}
               </p>
             </div>
           ))}
@@ -358,9 +359,7 @@ function RunsTab() {
                                 amount (server-side JOIN). Falls back to
                                 the invoiceMap lookup for rows where the
                                 join failed (rare RLS gap). */}
-                            {run.invoice_amount_due_cents !== undefined && run.invoice_amount_due_cents !== 0
-                              ? formatCents(run.invoice_amount_due_cents)
-                              : inv ? formatCents(inv.amount_due_cents) : '\u2014'}
+                            {dunningAmountDue(run, inv) ?? '\u2014'}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
@@ -586,7 +585,7 @@ function ResolveDialog({ run, invoiceMap, onClose, onResolved }: {
             </div>
             <div className="text-right">
               <p className="text-xs text-muted-foreground">Amount due</p>
-              <p className="text-sm font-semibold text-foreground tabular-nums">{inv ? formatCents(inv.amount_due_cents) : '\u2014'}</p>
+              <p className="text-sm font-semibold text-foreground tabular-nums">{dunningAmountDue(run, inv) ?? '\u2014'}</p>
             </div>
           </div>
 

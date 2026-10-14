@@ -20,6 +20,12 @@ Older entries keep their original text.
 - **Charge now on an invoice paid entirely from credit now ends its dunning run (2026-10-15).** The invoice was marked paid, but its run stayed active at $0.00 until the next retry date, often days away, and kept counting in the Dashboard and the sidebar badge. The run now closes as payment recovered, as it does for a card payment.
 - **After logging in, the dashboard opens the page you were trying to reach (2026-10-14).** Opening a link to an invoice or customer while logged out went to login, then to the home page. It now returns to the linked page. Only paths inside the dashboard are followed.
 - **The "No payment method" notice no longer promises an email that cannot be sent (2026-10-14).** It said Velox emails the customer a setup link; without email set up (as in the quickstart) nothing is sent. It now says the link is emailed if email sending is set up.
+- **Amounts show in the invoice's own currency (2026-10-14).** Record offline payment, the invoice page's credit-note and line-item dialogs, and dunning runs showed a non-default-currency invoice with the workspace currency symbol. The credit grant confirm no longer hard-codes "$".
+- **The Dashboard's outstanding total names every currency (2026-10-14).** It summed only the default currency next to a count of all open invoices. It now lists each currency, for example "$200.00 + €300.00 outstanding". The API adds `outstanding_by_currency` to the analytics overview.
+- **Charge now says what happened (2026-10-14).** "Payment initiated" showed even when credit paid the invoice with no charge. The message now reads paid, payment started, or failed, from the returned invoice.
+- **A write-off whose pause fails no longer says collection was paused (2026-10-14).** One warning now says the invoice was marked uncollectible and collection was not paused.
+- **Save & send on a new invoice shows one message (2026-10-14).** When the email could not be sent, it showed a warning and then "Draft saved" for an invoice that was finalized.
+- **The Margin card no longer spins forever (2026-10-14).** A failed load shows a retry, and a custom range asks for both dates.
 
 ## [0.7.0] - 2026-10-14
 

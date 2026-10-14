@@ -80,15 +80,18 @@ func TestRoutes_MethodNotAllowed(t *testing.T) {
 
 func TestOverviewResponse_JSONShape(t *testing.T) {
 	resp := OverviewResponse{
-		Period:              "30d",
-		Currency:            "USD",
-		MRR:                 1200_00,
-		MRRPrev:             1100_00,
-		ARR:                 14400_00,
-		ARRPrev:             13200_00,
-		Revenue:             500_000_00,
-		RevenuePrev:         450_000_00,
-		OutstandingAR:       15_000_00,
+		Period:        "30d",
+		Currency:      "USD",
+		MRR:           1200_00,
+		MRRPrev:       1100_00,
+		ARR:           14400_00,
+		ARRPrev:       13200_00,
+		Revenue:       500_000_00,
+		RevenuePrev:   450_000_00,
+		OutstandingAR: 15_000_00,
+		OutstandingByCurrency: []CurrencyAmount{
+			{Currency: "USD", AmountCents: 15_000_00},
+		},
 		AvgInvoiceValue:     320_00,
 		CreditBalance:       8_500_00,
 		ActiveCustomers:     42,
@@ -121,7 +124,7 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 
 	expected := []string{
 		"period", "currency", "mrr", "mrr_prev", "arr", "arr_prev",
-		"revenue", "revenue_prev", "outstanding_ar", "avg_invoice_value", "credit_balance_total",
+		"revenue", "revenue_prev", "outstanding_ar", "outstanding_by_currency", "avg_invoice_value", "credit_balance_total",
 		"active_customers", "new_customers", "active_subscriptions", "trialing_subscriptions",
 		"paid_invoices", "failed_payments", "open_invoices",
 		"dunning_active", "refunds_needing_attention", "usage_events",

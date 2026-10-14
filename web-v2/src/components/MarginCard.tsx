@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { DatePicker } from '@/components/ui/date-picker'
 import {
@@ -10,6 +11,7 @@ import {
 import { formatCents, getCurrencySymbol } from '@/lib/api'
 import { endOfDayInTZ, startOfDayInTZ } from '@/lib/dates'
 import { rollingWindow } from '@/lib/effectiveNow'
+import { marginCardView } from '@/lib/actionOutcomes'
 import { useGetV1CustomersIdMargin } from '@/lib/gen/queries.gen'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
 
@@ -47,9 +49,10 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
     return rollingWindow(days, now)
   }, [preset, customFrom, customTo, now])
 
-  const { data: rep, isLoading } = useGetV1CustomersIdMargin(customerId, params, {
+  const { data: rep, isError, refetch } = useGetV1CustomersIdMargin(customerId, params, {
     query: { enabled: params !== undefined },
   })
+  const view = marginCardView({ hasWindow: params !== undefined, isError, hasData: !!rep })
 
   // Revenue is in the currency of the customer's prices; provider cost is in
   // the report's cost currency (USD). The API gives no margin when they
@@ -96,7 +99,16 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
         </div>
       </CardHeader>
       <CardContent>
-        {isLoading || !rep ? (
+        {view === 'pick-dates' ? (
+          <p className="text-sm text-muted-foreground p-6 text-center">
+            Pick a start and end date to see margin for that range.
+          </p>
+        ) : view === 'error' ? (
+          <div className="flex flex-col items-center gap-3 p-6 text-center">
+            <p className="text-sm text-foreground">Couldn&apos;t load margin. Try again.</p>
+            <Button variant="outline" size="sm" onClick={() => { void refetch() }}>Retry</Button>
+          </div>
+        ) : view === 'loading' || !rep ? (
           <div className="flex justify-center p-6">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
