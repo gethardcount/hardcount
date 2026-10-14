@@ -135,3 +135,33 @@ func TestUsageIngest_KeyedEventAccepted(t *testing.T) {
 		t.Errorf("%d events stored, want 2", len(store.events))
 	}
 }
+
+// A key past the limit would fail the UNIQUE index with a 5xx, which tells an
+// ingest client to retry forever. It is a 422 instead; the limit itself, and a
+// multi-byte key at the limit, are accepted.
+func TestUsageIngest_IdempotencyKeyLengthLimit(t *testing.T) {
+	keyed := func(k string) string {
+		return strings.Replace(keyedEvent, `"evt_1"`, `"`+k+`"`, 1)
+	}
+	for name, tc := range map[string]struct {
+		key  string
+		want int
+	}{
+		"255 ascii":     {strings.Repeat("k", MaxIdempotencyKeyLen), http.StatusCreated},
+		"255 multibyte": {strings.Repeat("é", MaxIdempotencyKeyLen), http.StatusCreated},
+		"256":           {strings.Repeat("k", MaxIdempotencyKeyLen+1), http.StatusUnprocessableEntity},
+		"3000":          {strings.Repeat("k", 3000), http.StatusUnprocessableEntity},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := newMemStore()
+			h := NewHandler(NewService(store), &stubCustomers{}, &stubMeters{})
+			rr := usageReq(t, h.ingest, keyed(tc.key))
+			if rr.Code != tc.want {
+				t.Fatalf("status %d, want %d; body %s", rr.Code, tc.want, rr.Body.String())
+			}
+			if tc.want == http.StatusUnprocessableEntity && !strings.Contains(rr.Body.String(), `"param":"idempotency_key"`) {
+				t.Errorf("422 does not name idempotency_key: %s", rr.Body.String())
+			}
+		})
+	}
+}

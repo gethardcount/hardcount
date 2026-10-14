@@ -22,7 +22,7 @@ Older entries keep their original text.
   - A cancel or plan change scheduled for a date: the subscription stays `active`, and `subscription.canceled` is sent, up to the grace after `cancel_at`. `canceled_at` is still the scheduled date, so give access by `cancel_at` rather than `status` if that matters to you.
   - An expired credit grant leaves the balance up to the grace after `expires_at`.
 - **Removing a meter's last price can be refused with 409 `invalid_state` (#981).** This applies to `DELETE /v1/meters/{meter_id}/pricing-rules/{id}` and to `PATCH /v1/meters/{id}` with `"rating_rule_version_id": ""`. They are refused when the meter would have no pricing rule and no default price while a plan with a draft, trialing or active subscription uses it. The message names the plans. Add another price first, or move those subscriptions to a plan without the meter.
-- **Usage events without `idempotency_key` are refused with 422 (#980).** This applies to `POST /v1/usage-events`, `/batch` and `/backfill`. Send one unique key per event and the same key when you retry it. The `Idempotency-Key` header does not count as the key.
+- **Usage events without `idempotency_key`, or with one longer than 255 characters, are refused with 422 (#980).** This applies to `POST /v1/usage-events`, `/batch` and `/backfill`. Send one unique key per event and the same key when you retry it. The `Idempotency-Key` header does not count as the key.
 
 ### Added
 
@@ -39,6 +39,8 @@ Older entries keep their original text.
 ### Fixed
 
 - **The Compose stack no longer shows healthy containers as unhealthy, and nginx follows a recreated API container (2026-10-14).** The dashboard's healthcheck called `http://localhost/`, which resolves to IPv6 `::1` inside the container while nginx listens on IPv4, so `docker ps` showed it as unhealthy on every install although the page served fine. The checks now use `127.0.0.1`. The front nginx also kept sending to the old address after `velox-api` was recreated (a new image or an upgrade) and answered 502 until it was restarted. It now looks the containers up again (nginx `resolve`, Docker's DNS).
+
+- **A LiteLLM record with no call `id` is refused, not silently dropped (2026-10-14, #980).** Each event's dedup key is built from the call id, so every record without one shared the same keys and all but the first were dropped as duplicates. It is now reported in `errors[]`. Real LiteLLM proxies always send an id.
 
 - **Dashboard login works in Safari at `http://localhost` (2026-10-14).** The quickstart runs in production mode, which marks the login cookie `Secure`. Safari drops a `Secure` cookie set over plain http, even on localhost, so login failed with "this browser did not keep you signed in". Chrome and Firefox were not affected. The cookie is now `Secure` unless the browser itself is on plain http at a localhost address, judged from the request's `Origin` (or `Referer`) header. A site served over https keeps `Secure`.
 

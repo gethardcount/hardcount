@@ -32,6 +32,7 @@ A non-2xx response means *nothing was recorded*. Retry the same request.
 - **Pick the key once per event and reuse it on every retry.** A new key on
   each attempt makes each attempt a new event, so the usage is counted
   again.
+- **A key is at most 255 characters.** A longer one is refused with 422.
 - **Keys are unique per tenant and mode, forever.** An event whose key was
   already used is not stored again. The first event wins and the new body
   is discarded without comparison: a single event gets `200` with the first

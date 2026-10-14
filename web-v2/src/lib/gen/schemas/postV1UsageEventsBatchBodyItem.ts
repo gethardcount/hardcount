@@ -26,9 +26,11 @@ export type PostV1UsageEventsBatchBodyItem = {
      * is discarded. So never reuse a key for a different
      * event, such as a batch index or a timestamp that can
      * repeat, or that usage is lost. Empty or whitespace-only
-     * keys are refused with 422. The `Idempotency-Key` header
-     * does not count as this key: it caches one HTTP response
-     * for 24 hours.
+     * keys are refused with 422, and so are keys longer than
+     * 255 characters. The `Idempotency-Key` header does not
+     * count as this key: it caches one HTTP response for 24
+     * hours.
+     * @maxLength 255
      */
   idempotency_key: string;
   timestamp?: string;

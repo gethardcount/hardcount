@@ -408,3 +408,16 @@ func TestMapPayload_TimestampSourcing(t *testing.T) {
 		}
 	})
 }
+
+// Every event key is built from the call id. Without one, all id-less calls
+// in a tenant would share ":input"/":output" and all but the first would be
+// dropped as duplicates.
+func TestMapPayload_MissingID(t *testing.T) {
+	p := StandardLoggingPayload{
+		ID: "", CallType: "completion", User: "acme",
+		Usage: &Usage{PromptTokens: 100, CompletionTokens: 10},
+	}
+	if _, err := MapPayload(p); !errors.Is(err, ErrMissingID) {
+		t.Fatalf("expected ErrMissingID, got %v", err)
+	}
+}

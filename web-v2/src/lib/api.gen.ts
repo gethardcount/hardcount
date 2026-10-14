@@ -1292,9 +1292,10 @@ export interface paths {
                          *     is discarded. So never reuse a key for a different
                          *     event, such as a batch index or a timestamp that can
                          *     repeat, or that usage is lost. Empty or whitespace-only
-                         *     keys are refused with 422. The `Idempotency-Key` header
-                         *     does not count as this key: it caches one HTTP response
-                         *     for 24 hours.
+                         *     keys are refused with 422, and so are keys longer than
+                         *     255 characters. The `Idempotency-Key` header does not
+                         *     count as this key: it caches one HTTP response for 24
+                         *     hours.
                          */
                         idempotency_key: string;
                         /** Format: date-time */
@@ -1322,10 +1323,10 @@ export interface paths {
                     content?: never;
                 };
                 /**
-                 * @description Validation failed and nothing was stored. A missing, empty or
-                 *     whitespace-only `idempotency_key` is refused with
-                 *     `param: idempotency_key`; so are an unknown customer or meter
-                 *     and a malformed timestamp.
+                 * @description Validation failed and nothing was stored. `param` names the
+                 *     field: `idempotency_key` when it is missing, blank or longer
+                 *     than 255 characters, `external_customer_id` or `event_name` for
+                 *     an unknown customer or meter, `timestamp` for a malformed one.
                  */
                 422: {
                     headers: {
@@ -1391,9 +1392,10 @@ export interface paths {
                          *     is discarded. So never reuse a key for a different
                          *     event, such as a batch index or a timestamp that can
                          *     repeat, or that usage is lost. Empty or whitespace-only
-                         *     keys are refused with 422. The `Idempotency-Key` header
-                         *     does not count as this key: it caches one HTTP response
-                         *     for 24 hours.
+                         *     keys are refused with 422, and so are keys longer than
+                         *     255 characters. The `Idempotency-Key` header does not
+                         *     count as this key: it caches one HTTP response for 24
+                         *     hours.
                          */
                         idempotency_key: string;
                         /** Format: date-time */

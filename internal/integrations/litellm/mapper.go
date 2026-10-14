@@ -171,6 +171,12 @@ func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
 	if usage == nil {
 		return nil, nil
 	}
+	// Every event key is built from the call id. Without one, every id-less
+	// call in a tenant would share the keys ":input", ":output" and
+	// ":cache_read", and all but the first would be dropped as duplicates.
+	if p.ID == "" {
+		return nil, ErrMissingID
+	}
 
 	// Event timestamp: prefer EndTime (when the call actually completed), fall
 	// back to StartTime. LiteLLM emits floats in unix-seconds; convert to
@@ -324,6 +330,10 @@ func dimsWithTokenType(base map[string]any, tokenType string) map[string]any {
 // has no `user` field set. Operators must configure their LiteLLM
 // callers to pass user=<external_customer_id>; without it the
 // adapter has no customer to attribute the spend to.
+// ErrMissingID is returned by MapPayload when the payload has no call id,
+// which every event key is built from. Real LiteLLM proxies always send one.
+var ErrMissingID = fmt.Errorf("litellm: payload.id is required (each event's dedup key is built from it)")
+
 var ErrMissingUser = fmt.Errorf("litellm: payload.user is required (set user=<external_customer_id> on the litellm call)")
 
 // ExternalIngest is the adapter's intermediate shape — uses the

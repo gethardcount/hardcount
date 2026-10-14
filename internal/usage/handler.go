@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -140,6 +141,11 @@ func (c *resolveCache) putMeter(key, id string) {
 // missingKeyMessage is the 422 text for an event with no idempotency_key. It
 // names the fix, since a client that answers the 422 with a fresh key on every
 // attempt still double-counts.
+// MaxIdempotencyKeyLen is the longest idempotency_key accepted, in characters.
+const MaxIdempotencyKeyLen = 255
+
+const longKeyMessage = "idempotency_key is longer than 255 characters"
+
 const missingKeyMessage = "idempotency_key is required — give each event its own key and send the same key when you retry that event"
 
 // resolve converts public API identifiers to internal IDs. cache may be nil
@@ -162,6 +168,12 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, ca
 	// through here: it builds its own keys (litellm/mapper.go).
 	if strings.TrimSpace(evt.IdempotencyKey) == "" {
 		return IngestInput{}, errs.Invalid("idempotency_key", missingKeyMessage)
+	}
+	// A longer key would pass validation and then fail the UNIQUE index
+	// (Postgres caps a btree row near 2.7 KB) with a 5xx, which tells an
+	// ingest client to retry: forever. 255 characters is at most 1,020 bytes.
+	if utf8.RuneCountInString(evt.IdempotencyKey) > MaxIdempotencyKeyLen {
+		return IngestInput{}, errs.Invalid("idempotency_key", longKeyMessage)
 	}
 
 	// A miss is cached only on success: caching the "not found" verdict would
