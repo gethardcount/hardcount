@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Loader2 } from 'lucide-react'
 import { VeloxLogo } from '@/components/VeloxLogo'
 import { Callout } from '@/components/Callout'
+import { resetSentNotice } from '@/lib/emailOffNotices'
 
 // ForgotPasswordPage is the dashboard's password-reset request flow.
 // Always renders the same "if your email is on file, a reset link
@@ -25,9 +26,11 @@ export default function ForgotPasswordPage() {
   usePageTitle('Reset password')
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
-  const [emailNotConfigured, setEmailNotConfigured] = useState(false)
+  const [emailDelivery, setEmailDelivery] = useState<string | undefined>(undefined)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const notice = resetSentNotice(emailDelivery, email)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -39,7 +42,7 @@ export default function ForgotPasswordPage() {
     setLoading(true)
     try {
       const res = await authApi.requestPasswordReset(email.trim())
-      setEmailNotConfigured(res?.email_delivery === 'not_configured')
+      setEmailDelivery(res?.email_delivery)
       setSubmitted(true)
     } catch (err) {
       setError(authFormError(err))
@@ -59,32 +62,18 @@ export default function ForgotPasswordPage() {
         <CardContent className="p-6">
           {submitted ? (
             <div className="space-y-4 text-sm">
-              {emailNotConfigured ? (
-                <Callout
-                  tone="amber"
-                  title="Password reset email is off"
-                  details={
-                    <p>
-                      For whoever runs Velox: set <code className="font-mono">SMTP_HOST</code> and{' '}
-                      <code className="font-mono">DASHBOARD_BASE_URL</code> (docs/ops/email-setup.md).
-                    </p>
-                  }
-                >
-                  {/* not_configured: SMTP or the dashboard address is missing, so "can't send email" would be untrue when only the address is. */}
-                  <p>This server isn&rsquo;t set up to send reset links, so none was sent. Ask whoever runs Velox to set up email.</p>
-                </Callout>
-              ) : (
-                // Stays conditional on purpose: the reply is the same whether
-                // or not the address has an account, and whether or not the
-                // 3-per-hour cap skipped the send (internal/user/handler.go),
-                // so it can't be used to find out who has an account.
-                <Callout title="Check your email">
+              <Callout
+                tone={notice.tone}
+                title={notice.title}
+                details={notice.operatorDetails ? (
                   <p>
-                    If an account exists for <strong>{email}</strong>, a reset link is on its way. It works for
-                    1 hour, and we send at most 3 an hour.
+                    For whoever runs Velox: set <code className="font-mono">SMTP_HOST</code> and{' '}
+                    <code className="font-mono">DASHBOARD_BASE_URL</code> (docs/ops/email-setup.md).
                   </p>
-                </Callout>
-              )}
+                ) : undefined}
+              >
+                <p>{notice.body}</p>
+              </Callout>
               <Link to="/login">
                 <Button variant="outline" className="w-full">
                   Back to sign in

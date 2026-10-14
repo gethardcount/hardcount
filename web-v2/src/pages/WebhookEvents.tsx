@@ -15,6 +15,7 @@ import {
 // log and email outbox (ADR-030 forensic layer).
 import { timeAgo, wallClockNow, timeUntil } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
+import { replayToast } from '@/lib/webhookNotices'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { useNavigate } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
@@ -156,15 +157,8 @@ export default function WebhookEventsPage() {
       const res = await api.replayWebhookEventV2(id)
       // The server copies the event and queues it for every active endpoint
       // in this mode that listens for its type; status says when none does.
-      if (res.status === 'no_matching_endpoints') {
-        toast.warning('Event copied, not sent', {
-          description: 'No active endpoint listens for this event. Add or resume one, then resend.',
-        })
-      } else {
-        toast.success('Event resent', {
-          description: 'A copy is queued for every active endpoint that listens for it. Its deliveries show below.',
-        })
-      }
+      const t = replayToast(res.status)
+      toast[t.level](t.title, { description: t.description })
       // Expand the replayed row AND refetch its timeline. A timeline
       // that was already open holds a mounted query nothing else
       // invalidates \u2014 pre-fix it silently kept showing the pre-replay

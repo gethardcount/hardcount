@@ -7,6 +7,7 @@ import { formatDate } from '@/lib/api'
 import { authApi } from '@/lib/auth'
 import { Callout } from '@/components/Callout'
 import { showApiError } from '@/lib/formErrors'
+import { inviteFormState } from '@/lib/emailOffNotices'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -53,7 +54,7 @@ export function TeamTab() {
     queryKey: ['whoami'],
     queryFn: () => authApi.whoami(),
   })
-  const invitesOff = whoami?.can_send_invites === false
+  const { off: invitesOff, notice: invitesNotice } = inviteFormState(whoami?.can_send_invites)
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['members'],
@@ -128,10 +129,10 @@ export function TeamTab() {
             They&apos;ll get an email with a link to join this workspace, valid for 7 days. Every
             member has full access.
           </p>
-          {invitesOff && (
+          {invitesNotice && (
             <Callout
-              tone="amber"
-              title="Invites are off"
+              tone={invitesNotice.tone}
+              title={invitesNotice.title}
               className="mb-4"
               details={
                 <p>
@@ -140,7 +141,7 @@ export function TeamTab() {
                 </p>
               }
             >
-              <p>This server isn&apos;t set up to email invite links. Ask whoever runs Velox to set up email.</p>
+              <p>{invitesNotice.body}</p>
             </Callout>
           )}
           <form onSubmit={handleInvite} className="flex gap-2 max-w-md">

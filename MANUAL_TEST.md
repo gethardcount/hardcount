@@ -181,8 +181,9 @@ Brings the stack up, runs the full money path, signs out. Pre-merge canary.
 - [~] Settings shows "Connected". *(walked 2026-08-03: `GET /v1/settings/stripe` returns the credential row with its `stripe_account_id` (acct_1TOxdK…), livemode=false and the verified stamp.)*
 - [ ] Paste a made-up `sk_test_` key → toast "Keys saved, but Stripe didn't accept them" / "See the message above the form."
 - [ ] Same state → red notice above the key form: **Stripe didn't accept these keys** · "Copy the current secret and publishable keys from your Stripe dashboard and paste them below."
-- [ ] Same state → **Details** holds only Stripe's sentence ("Stripe said: Invalid API Key provided: sk_test_****…"), no JSON.
-- [ ] With the server unable to reach api.stripe.com (e.g. offline) → notice **Couldn't check keys with Stripe** · "Stripe didn't answer the check, so these keys weren't tested. Paste them again in a minute to retry."; toast "Keys saved, not checked yet".
+- [ ] Same state → the disclosure is labelled **Stripe's response** and holds only Stripe's sentence ("Invalid API Key provided: sk_test_****…"), no JSON.
+- [ ] With the server unable to reach api.stripe.com (e.g. offline) → amber notice **Couldn't check keys with Stripe** · "Stripe couldn't check these keys just now, so they weren't tested. Paste them again in a minute to retry."; amber warning toast "Keys saved, not checked yet".
+- [ ] Same offline state → the disclosure is labelled **Details** (not "Stripe's response") and holds the network error (e.g. "dial tcp: lookup api.stripe.com: no such host"), no "Stripe said".
 - [ ] Manage → step 2 shows Status **Saved** (not "Verified") and "Velox checks each event Stripe sends against this secret…"; the step summary reads "Signing secret whsec_••••… saved".
 - [ ] Manage → Rotate API keys → paste keys → confirm reads "Velox charges with the new keys from now on. Your old keys keep working at Stripe until you roll them there. Use keys from the same Stripe account, because your customers' saved cards belong to it."
 - [ ] Manage → Replace webhook secret → confirm **Replace signing secret?** reads "Velox will accept only Stripe events signed with the new secret. Roll the secret in Stripe first, then paste it here; Stripe retries any event refused meanwhile."

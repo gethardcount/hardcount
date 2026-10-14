@@ -11,6 +11,7 @@ import { api, type EndpointDelivery } from '@/lib/api'
 // and the events live tail (ADR-030 forensic layer).
 import { timeAgo, timeUntil, wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
+import { pausedEndpointNotice } from '@/lib/webhookNotices'
 import { Layout } from '@/components/Layout'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -80,6 +81,7 @@ export default function WebhookEndpointDetailPage() {
   })
 
   const endpoint = data?.endpoint
+  const pausedNotice = pausedEndpointNotice(endpoint?.active)
   const deliveries = data?.data ?? []
   const stats = statsData?.data.find(s => s.endpoint_id === id)
   const completed = stats ? stats.succeeded + stats.failed : 0
@@ -165,17 +167,17 @@ export default function WebhookEndpointDetailPage() {
           {endpoint?.description && (
             <p className="text-sm text-muted-foreground mt-1">{endpoint.description}</p>
           )}
-          {endpoint && !endpoint.active && (
+          {pausedNotice && (
             <Callout
               className="mt-3"
-              title="Endpoint paused"
+              title={pausedNotice.title}
               actions={
                 <Button size="sm" variant="outline" onClick={() => setConfirmResume(true)} disabled={resuming}>
                   {resuming ? 'Resuming…' : 'Resume'}
                 </Button>
               }
             >
-              <p>No events are sent here, and Replay is off, until you resume it.</p>
+              <p>{pausedNotice.body}</p>
             </Callout>
           )}
           {endpoint && (

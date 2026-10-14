@@ -6,9 +6,10 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { api, ApiError, formatDate, formatDateTime, type WebhookEndpoint } from '@/lib/api'
+import { api, formatDate, formatDateTime, type WebhookEndpoint } from '@/lib/api'
 import { untilMs, wallClockNow } from '@/lib/effectiveNow'
 import { applyApiError, showApiError } from '@/lib/formErrors'
+import { endpointSaveErrorTarget } from '@/lib/webhookNotices'
 import { cn } from '@/lib/utils'
 import { Layout } from '@/components/Layout'
 
@@ -558,8 +559,8 @@ function EndpointEditDialog({ endpoint, onClose, onSaved }: {
     } catch (err) {
       // A refused URL shows under the URL field, like the create dialog,
       // instead of as a toast with no subject.
-      if (err instanceof ApiError && err.field === 'url') {
-        setUrlError(err.message)
+      if (endpointSaveErrorTarget(err) === 'url') {
+        setUrlError((err as Error).message)
       } else {
         showApiError(err, 'Failed to update endpoint')
       }

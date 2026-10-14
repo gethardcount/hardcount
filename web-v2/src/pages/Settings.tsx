@@ -1119,10 +1119,11 @@ function StripeCard({ livemode, current, onChanged }: {
           const notice = stripeVerifyNotice(current.last_verified_error_kind)
           return (
             <Callout
-              tone="red"
+              tone={notice.tone}
               role="alert"
               title={notice.title}
-              details={<p className="break-words">Stripe said: {current.last_verified_error}</p>}
+              detailsLabel={notice.detailsLabel}
+              details={<p className="break-words">{current.last_verified_error}</p>}
             >
               <p>{notice.body}</p>
             </Callout>
@@ -1388,9 +1389,8 @@ function ApiKeysForm({ livemode, connected, onSuccess }: {
     mutationFn: (data: StripeConnectForm) => api.connectStripe({ ...data, livemode }),
     onSuccess: (row) => {
       if (row.last_verified_error) {
-        toast.error(stripeVerifyNotice(row.last_verified_error_kind).toastTitle, {
-          description: STRIPE_VERIFY_TOAST_BODY,
-        })
+        const notice = stripeVerifyNotice(row.last_verified_error_kind)
+        toast[notice.toastLevel](notice.toastTitle, { description: STRIPE_VERIFY_TOAST_BODY })
       } else {
         const base = `${connected ? 'Rotated' : 'Connected'} ${livemode ? 'live' : 'test'} mode${
           row.stripe_account_name ? ` as ${row.stripe_account_name}` : ''
