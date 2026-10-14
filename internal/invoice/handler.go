@@ -1093,6 +1093,15 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 			respond.FromError(w, r, serr, "invoice")
 			return
 		}
+		// A credit-paid invoice is recovered exactly as a card-paid one is, so
+		// its dunning run closes the same way. Without this the run stayed
+		// active at $0: a no-card run's next retry is a grace period away and
+		// the dunning tick only touches due runs. SettleZeroDue can return the
+		// invoice unsettled (not finalized, or no longer pending); a run on an
+		// unpaid invoice stays open.
+		if settled.Status == domain.InvoicePaid {
+			h.resolveDunningRecovered(r.Context(), tenantID, id)
+		}
 		respond.JSON(w, r, http.StatusOK, settled)
 		return
 	}
@@ -1125,11 +1134,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve any active dunning run — manual collect payment bypasses dunning retry
-	if h.dunning != nil {
-		if err := h.dunning.ResolveByInvoice(r.Context(), tenantID, id, domain.ResolutionPaymentRecovered); err != nil {
-			slog.WarnContext(r.Context(), "failed to resolve dunning after collect payment", "invoice_id", id, "error", err)
-		}
-	}
+	h.resolveDunningRecovered(r.Context(), tenantID, id)
 
 	// Explicit audit row for the money-movement action — "Collected payment on
 	// INV-NNN", the row an auditor looks for when money left the customer's card
@@ -1143,6 +1148,19 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusOK, charged)
+}
+
+// resolveDunningRecovered closes the invoice's active dunning run, if any, as
+// payment_recovered after collect settled it, whether by card or from credit.
+// Best-effort: the payment has already committed, so a failure logs and the
+// dunning tick's paid check resolves the run when it next comes due.
+func (h *Handler) resolveDunningRecovered(ctx context.Context, tenantID, invoiceID string) {
+	if h.dunning == nil {
+		return
+	}
+	if err := h.dunning.ResolveByInvoice(ctx, tenantID, invoiceID, domain.ResolutionPaymentRecovered); err != nil {
+		slog.WarnContext(ctx, "failed to resolve dunning after collect payment", "invoice_id", invoiceID, "error", err)
+	}
 }
 
 // refund issues a direct refund on a paid invoice. Convenience wrapper around
