@@ -2495,7 +2495,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			// tax; if Stripe Tax returned customer_data_invalid the
 			// invoice finalized with TaxAmountCents=0, lying about
 			// authoritative amounts.
-			Status:        domain.InvoiceFinalizationStatus(taxResult.TaxStatus, sub.PauseCollection),
+			Status:        domain.InvoiceFinalizationStatus(taxResult.TaxStatus, sub.PauseCollection, changeAt),
 			PaymentStatus: domain.PaymentPending,
 			Currency:      effectivePlan.Currency,
 			SubtotalCents: taxResult.SubtotalCents,

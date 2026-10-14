@@ -749,7 +749,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	// today — but a hand-rolled tax-only gate here was wrong-by-
 	// construction: any relaxation of that skip would have finalized and
 	// auto-charged a paused subscription.
-	invStatus := domain.InvoiceFinalizationStatus(taxApp.TaxStatus, sub.PauseCollection)
+	invStatus := domain.InvoiceFinalizationStatus(taxApp.TaxStatus, sub.PauseCollection, now)
 
 	// Emit the threshold invoice. The partial unique index on
 	// (tenant, sub, billing_period_start) WHERE billing_reason='threshold'

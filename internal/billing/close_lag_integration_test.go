@@ -12,6 +12,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
+	"github.com/sagarsuperuser/velox/internal/testclock"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
@@ -166,38 +167,195 @@ func TestThresholdScan_DueMidPeriodCancel_DoesNotBillPastCancelAt(t *testing.T) 
 	assertUsageBilledOnce(t, r.base)
 }
 
-// TestLateClose_ScheduledResumeAfterBoundary_EndedPeriodStaysDraft: collection
-// is paused with resumes_at 30 minutes after P1. The scheduler's tick at
-// P1+45m runs the pause resumer before the billing run. The period that ended
-// at P1 was paused at its end, so its invoice must be a draft.
-//
-// KNOWN DEFECT, not fixed here: the resumer clears the pause first and the
-// late close finalizes (and collects) the paused period's invoice. The
-// operator's resume in the same gap is fixed (it closes the ended period
-// first). The scheduled resumers (wall-clock, and test-clock Phase 0.7, which
-// runs before the advance's closes) need the close to read the pause as of
-// each boundary, which is a separate change. Remove the skip to reproduce.
-func TestLateClose_ScheduledResumeAfterBoundary_EndedPeriodStaysDraft(t *testing.T) {
-	t.Skip("known defect: the scheduled pause resumer runs before a late close (see comment)")
-	r := newCancelRig(t, "close lag scheduled resume")
-	p0, p1 := r.f.cycleStart, r.f.cycleEnd
-	resumesAt := p1.Add(30 * time.Minute)
-	if _, err := r.f.subSvc.PauseCollection(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.PauseCollectionInput{
-		Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &resumesAt,
+// pauseUntil pauses the rig's subscription's collection a day into [P0, P1),
+// until resumesAt (nil: until an operator resumes it).
+func (r *cancelRig) pauseUntil(t *testing.T, resumesAt *time.Time) {
+	t.Helper()
+	if _, err := r.f.subSvc.PauseCollection(r.at(r.f.cycleStart.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.PauseCollectionInput{
+		Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: resumesAt,
 	}); err != nil {
 		t.Fatalf("pause collection: %v", err)
 	}
+}
+
+// resumeExpired runs the wall-clock pause resumer at the given instant.
+func (r *cancelRig) resumeExpired(t *testing.T, at time.Time) {
+	t.Helper()
+	if _, errs := r.f.subSvc.ProcessExpiredPauseCollections(r.at(at), 100); len(errs) != 0 {
+		t.Fatalf("pause resumer: %v", errs)
+	}
+}
+
+func wantStatus(t *testing.T, inv domain.Invoice, want domain.InvoiceStatus, why string) {
+	t.Helper()
+	if inv.Status != want {
+		t.Errorf("[%v, %v) invoice status = %s, want %s: %s", inv.BillingPeriodStart, inv.BillingPeriodEnd, inv.Status, want, why)
+	}
+}
+
+// TestLateClose_ScheduledResumeAfterBoundary_EndedPeriodStaysDraft: collection
+// is paused with resumes_at 30 minutes after P1, and the billing run closes
+// [P0, P1) late, at P1+45m. The period was paused at its end, so its invoice
+// must be a draft. The resumer runs first here, the order the tick used to
+// have and the state a failed or unfinished run leaves: it must leave the
+// pause on the row while that close is owed. Once the period is closed, the
+// next pass clears the pause.
+//
+// Mutation seams: drop resumeNotWaitingOnCloseSQL from
+// ListExpiredPauseCollections → the resumer clears the pause and the close
+// finalizes; make InvoiceFinalizationStatus read `pause != nil` → the catch-up
+// test below drafts the period that ended after resumes_at.
+func TestLateClose_ScheduledResumeAfterBoundary_EndedPeriodStaysDraft(t *testing.T) {
+	r := newCancelRig(t, "close lag scheduled resume")
+	p0, p1 := r.f.cycleStart, r.f.cycleEnd
+	resumesAt := p1.Add(30 * time.Minute)
+	r.pauseUntil(t, &resumesAt)
+
 	tick := p1.Add(45 * time.Minute)
-	if n, errs := r.f.subSvc.ProcessExpiredPauseCollections(r.at(tick), 100); len(errs) != 0 {
-		t.Fatalf("pause resumer: %d %v", n, errs)
+	r.resumeExpired(t, tick)
+	if sub := r.sub(t); sub.PauseCollection == nil {
+		t.Fatal("the resumer cleared the pause while [P0, P1), which ended before resumes_at, was still unclosed")
 	}
 	if gen, failures := r.f.engine.RunCycleForTenant(r.at(tick), r.f.tenantID, 50); gen != 1 || len(failures) != 0 {
 		t.Fatalf("billing run: generated=%d failures=%v", gen, failures)
 	}
 	invs, _ := r.liveInvoices(t)
-	inv := invoiceFor(t, invs, p0, p1)
-	if inv.Status != domain.InvoiceDraft {
-		t.Errorf("[P0, P1) invoice status = %s, want draft: collection was paused at P1 (resumes_at %v)", inv.Status, resumesAt)
+	wantStatus(t, invoiceFor(t, invs, p0, p1), domain.InvoiceDraft, "collection was paused at P1 (resumes_at P1+30m)")
+
+	r.resumeExpired(t, tick)
+	if sub := r.sub(t); sub.PauseCollection != nil {
+		t.Errorf("after the close, pause = %+v, want cleared: no period ending before resumes_at is left to close", sub.PauseCollection)
+	}
+}
+
+// TestLateClose_ScheduledResume_CatchUp_EachPeriodReadsPauseAtItsEnd: the
+// billing run is two periods behind and resumes_at falls between the two
+// boundaries. [P0, P1) ended while paused and is a draft; [P1, P2) ended after
+// the resume and is finalized, although both close in one run with the pause
+// still on the row.
+func TestLateClose_ScheduledResume_CatchUp_EachPeriodReadsPauseAtItsEnd(t *testing.T) {
+	r := newCancelRig(t, "close lag scheduled resume catch-up")
+	p0, p1 := r.f.cycleStart, r.f.cycleEnd
+	resumesAt := p1.AddDate(0, 0, 3)
+	r.pauseUntil(t, &resumesAt)
+
+	tick := p1.AddDate(0, 1, 0).Add(45 * time.Minute)
+	r.resumeExpired(t, tick)
+	if gen, failures := r.f.engine.RunCycleForTenant(r.at(tick), r.f.tenantID, 50); gen != 2 || len(failures) != 0 {
+		t.Fatalf("billing run: generated=%d failures=%v, want 2 and none", gen, failures)
+	}
+	invs, _ := r.liveInvoices(t)
+	sub := r.sub(t)
+	wantStatus(t, invoiceFor(t, invs, p0, p1), domain.InvoiceDraft, "collection was paused at P1")
+	wantStatus(t, invoiceFor(t, invs, p1, *sub.CurrentBillingPeriodStart), domain.InvoiceFinalized, "collection resumed at P1+3d, before P2")
+
+	r.resumeExpired(t, tick)
+	if sub := r.sub(t); sub.PauseCollection != nil {
+		t.Errorf("after the catch-up, pause = %+v, want cleared", sub.PauseCollection)
+	}
+}
+
+// TestLateClose_ScheduledResumeAfterCancelAt_FinalInvoiceStaysDraft: the same
+// window at a mid-period cancel_at. Collection resumes 30 minutes after
+// cancel_at, and the run that fires the cancel comes 45 minutes after it. The
+// final invoice bills [P1, cancel_at), which ended while paused: a draft.
+//
+// Mutation seams: drop the cancel_at arm of resumeNotWaitingOnCloseSQL → the
+// resumer clears the pause first and the final invoice is finalized; pass the
+// cancel's `now` instead of canceledAt to InvoiceFinalizationStatus → the same.
+func TestLateClose_ScheduledResumeAfterCancelAt_FinalInvoiceStaysDraft(t *testing.T) {
+	r := newCancelRig(t, "close lag scheduled resume at cancel_at")
+	p0, p1 := r.f.cycleStart, r.f.cycleEnd
+	cancelAt := p1.AddDate(0, 0, 10)
+	if _, err := r.f.subSvc.ScheduleCancel(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.ScheduleCancelInput{CancelAt: &cancelAt}); err != nil {
+		t.Fatalf("schedule cancel: %v", err)
+	}
+	resumesAt := cancelAt.Add(30 * time.Minute)
+	r.pauseUntil(t, &resumesAt)
+	if gen, failures := r.f.engine.RunCycleForTenant(r.at(p1.Add(time.Hour)), r.f.tenantID, 50); gen != 1 || len(failures) != 0 {
+		t.Fatalf("close [P0, P1): generated=%d failures=%v", gen, failures)
+	}
+	r.ingestOne(t, p1.AddDate(0, 0, 1), 500)
+
+	tick := cancelAt.Add(45 * time.Minute)
+	r.resumeExpired(t, tick)
+	if _, failures := r.f.engine.RunCycleForTenant(r.at(tick), r.f.tenantID, 50); len(failures) != 0 {
+		t.Fatalf("billing run: failures=%v", failures)
+	}
+	sub := r.sub(t)
+	if sub.Status != domain.SubscriptionCanceled || sub.CanceledAt == nil || !sub.CanceledAt.Equal(cancelAt) {
+		t.Fatalf("status=%s canceled_at=%v, want canceled at %v", sub.Status, sub.CanceledAt, cancelAt)
+	}
+	invs, _ := r.liveInvoices(t)
+	wantStatus(t, invoiceFor(t, invs, p1, cancelAt), domain.InvoiceDraft, "collection was paused at cancel_at (resumes_at cancel_at+30m)")
+}
+
+// TestLateClose_PauseWithoutResumesAt_CatchUp_AllDraft (control): a pause with
+// no resumes_at holds every period, and no scheduled resume clears it.
+func TestLateClose_PauseWithoutResumesAt_CatchUp_AllDraft(t *testing.T) {
+	r := newCancelRig(t, "close lag indefinite pause")
+	p0, p1 := r.f.cycleStart, r.f.cycleEnd
+	r.pauseUntil(t, nil)
+
+	tick := p1.AddDate(0, 1, 0).Add(45 * time.Minute)
+	if gen, failures := r.f.engine.RunCycleForTenant(r.at(tick), r.f.tenantID, 50); gen != 2 || len(failures) != 0 {
+		t.Fatalf("billing run: generated=%d failures=%v, want 2 and none", gen, failures)
+	}
+	r.resumeExpired(t, tick)
+	invs, _ := r.liveInvoices(t)
+	sub := r.sub(t)
+	wantStatus(t, invoiceFor(t, invs, p0, p1), domain.InvoiceDraft, "collection is paused with no resume date")
+	wantStatus(t, invoiceFor(t, invs, p1, *sub.CurrentBillingPeriodStart), domain.InvoiceDraft, "collection is paused with no resume date")
+	if sub.PauseCollection == nil {
+		t.Error("the scheduled resumer cleared a pause that has no resumes_at")
+	}
+}
+
+// TestLateClose_ScheduledResume_TestClock_AdvancePastResume: the same window
+// on a test clock. One advance lands at P1+45m, past a resumes_at of P1+30m;
+// the catchup bills [P0, P1) as a draft, and the pause is cleared by the end
+// of the same advance (not left for the next one).
+//
+// Mutation seams: drop resumeNotWaitingOnCloseSQL from
+// ListExpiredPauseCollectionsForClock → the early resumer clears the pause;
+// run the catchup's resume phase before Phase 1 → the pause is cleared before
+// the close and [P0, P1) is finalized.
+func TestLateClose_ScheduledResume_TestClock_AdvancePastResume(t *testing.T) {
+	r := newCancelRig(t, "close lag scheduled resume on a test clock")
+	p0, p1 := r.f.cycleStart, r.f.cycleEnd
+	resumesAt := p1.Add(30 * time.Minute)
+	r.pauseUntil(t, &resumesAt)
+
+	frozen := p1.Add(45 * time.Minute)
+	clockID := postgres.NewID("vlx_tclk")
+	execTx(t, r.f.db, r.base, r.f.tenantID,
+		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'resume lag clock', $3, 'advancing')`,
+		clockID, r.f.tenantID, frozen)
+	r.exec(t, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.customerID)
+	r.exec(t, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.subID)
+	clocks := testclock.NewPostgresStore(r.f.db)
+	r.f.engine.SetTestClockReader(clocks)
+	r.f.subSvc.SetResolver(r.f.engine)
+
+	// A failed Phase 1 leaves the resume phase to run with [P0, P1) still
+	// unclosed: it must keep the pause.
+	if _, errs := r.f.subSvc.ProcessExpiredPauseCollectionsForClock(r.base, r.f.tenantID, clockID, frozen); len(errs) != 0 {
+		t.Fatalf("clock pause resumer: %v", errs)
+	}
+	if sub := r.sub(t); sub.PauseCollection == nil {
+		t.Fatal("the clock resumer cleared the pause while [P0, P1), which ended before resumes_at, was still unclosed")
+	}
+
+	orchestrator := testclock.NewService(clocks)
+	orchestrator.SetBillingRunner(r.f.engine)
+	orchestrator.SetPauseResumer(r.f.subSvc)
+	if err := orchestrator.RunCatchup(r.base, testclock.CatchupJob{TenantID: r.f.tenantID, ClockID: clockID, PrevFrozenTime: p0}); err != nil {
+		t.Fatalf("catchup: %v", err)
+	}
+	invs, _ := r.liveInvoices(t)
+	wantStatus(t, invoiceFor(t, invs, p0, p1), domain.InvoiceDraft, "collection was paused at P1 (resumes_at P1+30m)")
+	if sub := r.sub(t); sub.PauseCollection != nil {
+		t.Errorf("after the advance, pause = %+v, want cleared in the same advance", sub.PauseCollection)
 	}
 }
 

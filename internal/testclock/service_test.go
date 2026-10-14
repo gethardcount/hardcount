@@ -864,3 +864,43 @@ func TestRunCatchup_BindsClockOntoCtx(t *testing.T) {
 		}
 	}
 }
+
+// orderRecorder records the order in which the catchup calls the cycle
+// billing phase and the pause-resume phase.
+type orderRecorder struct{ calls []string }
+
+func (r *orderRecorder) RunCycleForClock(_ context.Context, _, _ string, _ int) (int, []error) {
+	r.calls = append(r.calls, "cycle")
+	return 0, nil
+}
+func (r *orderRecorder) ScanThresholdsForClock(_ context.Context, _, _ string, _ int) (int, []error) {
+	r.calls = append(r.calls, "threshold")
+	return 0, nil
+}
+func (r *orderRecorder) RetryPendingChargesForClock(_ context.Context, _, _ string, _ int) (int, []error) {
+	return 0, nil
+}
+func (r *orderRecorder) ProcessExpiredPauseCollectionsForClock(_ context.Context, _, _ string, _ time.Time) (int, []error) {
+	r.calls = append(r.calls, "resume")
+	return 0, nil
+}
+
+// TestRunCatchup_ResumesPausesAfterCycleBilling: a period that ended before
+// resumes_at must close while the pause is still on the row (it closes as a
+// draft), so the pause-resume phase runs after cycle billing, and before the
+// threshold scan so that scan sees the resumed subscription.
+func TestRunCatchup_ResumesPausesAfterCycleBilling(t *testing.T) {
+	to := time.Date(2026, 2, 1, 0, 45, 0, 0, time.UTC)
+	store := newMockStore()
+	store.clocks["c1"] = domain.TestClock{ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: to}
+	s := NewService(store)
+	rec := &orderRecorder{}
+	s.SetBillingRunner(rec)
+	s.SetPauseResumer(rec)
+	if err := s.RunCatchup(context.Background(), CatchupJob{TenantID: "t1", ClockID: "c1", PrevFrozenTime: to.AddDate(0, -1, 0)}); err != nil {
+		t.Fatalf("RunCatchup: %v", err)
+	}
+	if got, want := strings.Join(rec.calls, ","), "cycle,resume,threshold"; got != want {
+		t.Errorf("phase order = %s, want %s", got, want)
+	}
+}

@@ -2865,10 +2865,10 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 // entry point that scans clock-pinned subs whose
 // pause_collection_resumes_at has passed in simulated time, clears the
 // pause, writes audit (triggered_by=schedule), and dispatches
-// `subscription.collection_resumed`. Runs as a dedicated catchup phase
-// BEFORE cycle billing — so when the cycle scan evaluates the sub, the
-// pause has already been cleared and the invoice generates as
-// finalized rather than draft.
+// `subscription.collection_resumed`. Runs as a catchup phase AFTER
+// cycle billing, and the store query skips a sub that still owes a close
+// before resumes_at: that close bills the pause as it stood at the
+// period's end, so the pause must still be on the row when it runs.
 //
 // Stripe-parity rationale: Stripe resumes collection AT resumes_at,
 // not at the next cycle close. The pre-fix gate inside billOnePeriod

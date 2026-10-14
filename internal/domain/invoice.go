@@ -191,12 +191,15 @@ const (
 //     finalize/charge/dunn flow is skipped until pause is cleared.
 //
 // pauseCollection is the *PauseCollection pointer from the
-// subscription (nil = collection running normally).
-func InvoiceFinalizationStatus(taxStatus InvoiceTaxStatus, pauseCollection *PauseCollection) InvoiceStatus {
+// subscription (nil = collection running normally). at is the instant
+// the invoice bills to: a period's end, a cancel's canceled_at, or now.
+// The pause is read as it stood then, because a close can run after
+// resumes_at has passed for a period that ended while still paused.
+func InvoiceFinalizationStatus(taxStatus InvoiceTaxStatus, pauseCollection *PauseCollection, at time.Time) InvoiceStatus {
 	if taxStatus == InvoiceTaxPending {
 		return InvoiceDraft
 	}
-	if pauseCollection != nil {
+	if pauseCollection.InForceAt(at) {
 		return InvoiceDraft
 	}
 	return InvoiceFinalized

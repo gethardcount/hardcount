@@ -104,12 +104,11 @@ type TrialExpirer interface {
 // PauseResumer is the narrow hook the catchup orchestrator uses to
 // auto-resume subs whose pause_collection_resumes_at has elapsed.
 // Implemented by *subscription.Service via
-// ProcessExpiredPauseCollectionsForClock. Runs as Phase 0.7 (after
-// trial expiry, before cycle billing) so a sub whose pause expires
-// inside this Advance window unpauses BEFORE the cycle scan evaluates
-// it — giving Stripe-parity "resume at resumes_at" semantics. Without
-// this phase, the auto-resume only fires inside billOnePeriod, which
-// is silent on subs whose next_billing_at is still in the future.
+// ProcessExpiredPauseCollectionsForClock. Runs as Phase 1.2, after cycle
+// billing: a period that ended before resumes_at closes as a draft
+// first, then the pause clears in the same advance. Without this phase a
+// sub whose next_billing_at is still in the future stays paused past
+// resumes_at.
 type PauseResumer interface {
 	ProcessExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time) (int, []error)
 }
@@ -251,7 +250,7 @@ func (s *Service) SetTrialExpirer(t TrialExpirer) {
 	s.trialExpirer = t
 }
 
-// SetPauseResumer wires the per-clock pause-resume phase (Phase 0.7).
+// SetPauseResumer wires the per-clock pause-resume phase (Phase 1.2).
 // Optional — without it, clock-pinned subs whose
 // pause_collection_resumes_at has elapsed stay paused until a cycle
 // happens to be due (the engine's defensive in-cycle gate). Production
@@ -601,25 +600,24 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 			runErrs = append(runErrs, trialErrs...)
 		}
 
-		// Phase 0.7: auto-resume any sub whose
-		// pause_collection_resumes_at has elapsed in simulated time —
-		// BEFORE Phase 1 reads the due list, so the cycle scan sees
-		// the sub as un-paused and bills its now-finalized invoice
-		// instead of leaving a draft. Stripe-parity (resume AT
-		// resumes_at, not at next cycle close). frozen_time was
-		// already read above for Phase 0.5; reuse it. Skips silently
-		// if the wiring is absent.
-		if s.pauseResumer != nil && !trialExpiryFrozen.IsZero() {
-			pauseCount, pauseErrs := s.pauseResumer.ProcessExpiredPauseCollectionsForClock(ctx, job.TenantID, job.ClockID, trialExpiryFrozen)
-			sum.PausesResumed = pauseCount
-			runErrs = append(runErrs, pauseErrs...)
-		}
-
 		// Phase 1 (ADR-028): generate any newly-due periods. Multi-period
 		// catchup happens inside billSubscription's per-sub loop.
 		periodCount, periodErrs := s.billing.RunCycleForClock(ctx, job.TenantID, job.ClockID, 100)
 		sum.InvoicesGenerated = periodCount
 		runErrs = append(runErrs, periodErrs...)
+
+		// Phase 1.2: auto-resume any sub whose pause_collection_resumes_at
+		// has elapsed in simulated time. It runs AFTER Phase 1: a period
+		// that ended before resumes_at was paused at its end and closes as
+		// a draft, and the close reads the pause off the row. The store
+		// query also skips a sub that still owes such a close (a failed
+		// Phase 1), so a later advance resumes it once that period is
+		// billed. Before Phase 1.5 so the threshold scan sees a resumed sub.
+		if s.pauseResumer != nil && !trialExpiryFrozen.IsZero() {
+			pauseCount, pauseErrs := s.pauseResumer.ProcessExpiredPauseCollectionsForClock(ctx, job.TenantID, job.ClockID, trialExpiryFrozen)
+			sum.PausesResumed = pauseCount
+			runErrs = append(runErrs, pauseErrs...)
+		}
 
 		// Phase 1.5 (ADR-029 Phase 3): threshold scan for early-invoice
 		// invoices. Runs after period generation (so the latest

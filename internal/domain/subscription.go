@@ -328,6 +328,16 @@ type PauseCollection struct {
 	ResumesAt *time.Time              `json:"resumes_at,omitempty"`
 }
 
+// InForceAt reports whether collection was paused at instant t. A pause
+// with no resumes_at holds until an operator resumes it; a timed pause
+// holds strictly before resumes_at, so a period ending exactly at
+// resumes_at bills as resumed. The scheduled resumers leave the pause
+// set until every period ending before resumes_at is closed, so this
+// stays answerable from the row.
+func (p *PauseCollection) InForceAt(t time.Time) bool {
+	return p != nil && (p.ResumesAt == nil || p.ResumesAt.After(t))
+}
+
 // SubscriptionItemThreshold is one configured per-item usage cap on a
 // subscription. UsageGTE is decimal because meter quantities can be
 // fractional (cached-token ratios, GPU-hours) and we want round-trip

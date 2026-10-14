@@ -250,8 +250,8 @@ func (s *Scheduler) Start(ctx context.Context) {
 }
 
 // runBillingHalf runs the leader-gated half that generates money — recovery
-// reconcilers, auto-charge retries, invoice issuance, and the state flips the
-// cycle scan depends on (trial expiry, pause auto-resume). Splitting from
+// reconcilers, auto-charge retries, invoice issuance, the trial flip the cycle
+// scan depends on, and the pause auto-resume that follows it. Splitting from
 // dunning lets two replicas divvy up roles instead of one replica monopolising
 // every periodic job.
 //
@@ -283,7 +283,7 @@ func (s *Scheduler) runBillingHalf(ctx context.Context) {
 
 // runBillingCycleForMode runs a single mode's half-cycle, in the step order
 // below: reconcile → auto-charge retry (which also starts no-payment dunning
-// for a card-less invoice) → threshold scan → trial expiry → pause auto-resume → bill → expire credits.
+// for a card-less invoice) → threshold scan → trial expiry → bill → pause auto-resume → expire credits.
 // Called twice per tick — once with ctx livemode=true, once with
 // livemode=false. Logs are tagged with the mode so operators can distinguish
 // partitions.
@@ -360,21 +360,6 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 		}
 	}
 
-	// 0.95 Pause auto-resume — clear pause_collection on any sub
-	// whose resumes_at has elapsed, BEFORE the cycle scan reads the
-	// due list. Stripe-parity (resume AT resumes_at, not next cycle
-	// close). Wall-clock counterpart to the catchup orchestrator's
-	// Phase 0.7. Clock-pinned subs are excluded per ADR-028.
-	if s.pauseResumer != nil {
-		resumed, pErrs := s.pauseResumer.ProcessExpiredPauseCollections(ctx, s.batch)
-		if resumed > 0 || len(pErrs) > 0 {
-			slog.Info("pause auto-resume", "mode", mode, "resumed", resumed, "errors", len(pErrs))
-		}
-		for _, err := range pErrs {
-			slog.Error("pause auto-resume error", "mode", mode, "error", err)
-		}
-	}
-
 	// 1. Billing cycle — bill every due sub before moving on (P27). The drain
 	// can outlast the interval (thousands of subs due on the 1st, each charged
 	// inline), so it stamps this replica's liveness after every page: the
@@ -400,6 +385,24 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 		}
 	} else if generated > 0 {
 		slog.Info("billing cycle completed", "mode", mode, "generated", generated)
+	}
+
+	// 2. Pause auto-resume — clear pause_collection on any sub whose
+	// resumes_at has elapsed. It runs AFTER the billing run: a period that
+	// ended before resumes_at was paused at its end and must close as a
+	// draft, and the close reads the pause off the row. The store query
+	// also skips a sub that still owes such a close (a failed or
+	// unfinished run), so the order is the fast path, not the guard.
+	// Wall-clock counterpart to the test-clock catchup's resume phase.
+	// Clock-pinned subs are excluded per ADR-028.
+	if s.pauseResumer != nil {
+		resumed, pErrs := s.pauseResumer.ProcessExpiredPauseCollections(ctx, s.batch)
+		if resumed > 0 || len(pErrs) > 0 {
+			slog.Info("pause auto-resume", "mode", mode, "resumed", resumed, "errors", len(pErrs))
+		}
+		for _, err := range pErrs {
+			slog.Error("pause auto-resume error", "mode", mode, "error", err)
+		}
 	}
 
 	// 3. Credit expiry sweep

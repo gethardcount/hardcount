@@ -904,11 +904,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client) *Server {
 	// for up to ~30 days (calendar billing's stub close) past the
 	// actual trial-end instant.
 	testClockSvc.SetTrialExpirer(subSvc)
-	// Catchup Phase 0.7 — pause_collection auto-resume. Subs whose
-	// resumes_at has elapsed are unpaused BEFORE the cycle scan reads
-	// the due list, so an Advance that crosses resumes_at produces a
-	// finalized invoice for the next-due period instead of a draft.
-	// Stripe-parity (resume AT resumes_at, not next cycle close).
+	// Catchup Phase 1.2 — pause_collection auto-resume, after cycle
+	// billing: each period closes with the pause as it stood at its end,
+	// then a pause whose resumes_at has elapsed clears in the same Advance.
 	testClockSvc.SetPauseResumer(subSvc)
 	// ADR-029 Phase 2: catchup orchestrator drives tax retry on
 	// clock-pinned invoices. Without this, the cron-side filter

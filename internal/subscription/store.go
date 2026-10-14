@@ -230,15 +230,16 @@ type Store interface {
 	// ListExpiredPauseCollections returns wall-clock subs whose
 	// pause_collection_resumes_at has passed. The scheduler tick walks
 	// these and clears the pause + writes audit (triggered_by=schedule).
-	// Stripe-parity: resume happens AT resumes_at, not at the next cycle
-	// close. Excludes clock-pinned rows (ADR-028 — those flow through
-	// ListExpiredPauseCollectionsForClock at catchup time).
+	// Skips a sub that still owes a close before resumes_at (see
+	// resumeNotWaitingOnCloseSQL). Excludes clock-pinned rows (ADR-028 —
+	// those flow through ListExpiredPauseCollectionsForClock at catchup
+	// time).
 	ListExpiredPauseCollections(ctx context.Context, before time.Time, limit int) ([]domain.Subscription, error)
 
 	// ListExpiredPauseCollectionsForClock is the clock-scoped counterpart
-	// invoked from the catchup orchestrator (new phase that pairs with
-	// trial-expiry — runs before cycle billing so an Advance that crosses
-	// resumes_at unpauses the sub in the same window).
+	// invoked from the catchup orchestrator after cycle billing, with the
+	// same skip, so an Advance that crosses resumes_at unpauses the sub in
+	// the same window once its paused periods are closed.
 	ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error)
 
 	// ActivateAfterTrial atomically transitions a subscription from

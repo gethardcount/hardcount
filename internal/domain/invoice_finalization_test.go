@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestInvoiceFinalizationStatus locks in the single-source-of-truth
 // rule shared across all four invoice-emitting paths
@@ -12,6 +15,10 @@ import "testing"
 // customer_data_invalid — lying about authoritative amounts.
 func TestInvoiceFinalizationStatus(t *testing.T) {
 	pause := &PauseCollection{Behavior: PauseCollectionKeepAsDraft}
+	at := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	timed := func(resumesAt time.Time) *PauseCollection {
+		return &PauseCollection{Behavior: PauseCollectionKeepAsDraft, ResumesAt: &resumesAt}
+	}
 
 	cases := []struct {
 		name      string
@@ -24,10 +31,15 @@ func TestInvoiceFinalizationStatus(t *testing.T) {
 		{"tax failed → finalized (worker exhausted, operator-resolved)", InvoiceTaxFailed, nil, InvoiceFinalized},
 		{"pause set + tax ok → draft", InvoiceTaxOK, pause, InvoiceDraft},
 		{"pause set + tax pending → draft (both gates fire)", InvoiceTaxPending, pause, InvoiceDraft},
+		// A close can run after resumes_at; it reads the pause as it stood
+		// at the instant it bills to.
+		{"resumes after the instant → draft", InvoiceTaxOK, timed(at.Add(30 * time.Minute)), InvoiceDraft},
+		{"resumed exactly at the instant → finalized", InvoiceTaxOK, timed(at), InvoiceFinalized},
+		{"resumed before the instant → finalized", InvoiceTaxOK, timed(at.Add(-time.Hour)), InvoiceFinalized},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := InvoiceFinalizationStatus(tc.taxStatus, tc.pause)
+			got := InvoiceFinalizationStatus(tc.taxStatus, tc.pause, at)
 			if got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}

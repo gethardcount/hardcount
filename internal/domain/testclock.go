@@ -67,7 +67,7 @@ type AdvanceSummary struct {
 	// simulated span and flipped trialing → active (Phase 0.5).
 	TrialsActivated int `json:"trials_activated"`
 	// PausesResumed is the number of paused subscriptions whose scheduled
-	// resume time elapsed and auto-resumed (Phase 0.7).
+	// resume time elapsed and auto-resumed (Phase 1.2).
 	PausesResumed int `json:"pauses_resumed"`
 	// ThresholdsFired is the number of billing-threshold invoices
 	// issued this advance (Phase 1.5).

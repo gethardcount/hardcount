@@ -1362,6 +1362,24 @@ func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clo
 	return subs, nil
 }
 
+// resumeNotWaitingOnCloseSQL keeps a scheduled resume from clearing a pause
+// while the subscription still owes a close at an instant before
+// resumes_at: a period end (next_billing_at) or a mid-period cancel_at.
+// That close bills the pause as it stood at that instant
+// (PauseCollection.InForceAt), so the row must still carry it. The close
+// runs late when the billing run falls behind or a billing attempt
+// failed; once it has run, next_billing_at has moved past resumes_at and
+// the next resumer pass clears the pause. Strict < matches InForceAt: an
+// instant equal to resumes_at bills as resumed. The status and cancel
+// arms mirror the due scans (GetDueBilling), so a subscription the billing
+// run will never close again (canceled) is not held. A parked billing
+// failure holds the pause until the period is billed.
+func resumeNotWaitingOnCloseSQL(a string) string {
+	return `NOT (` + a + `.status IN ('active', 'trialing') AND (
+			(` + a + `.next_billing_at IS NOT NULL AND ` + a + `.next_billing_at < ` + a + `.pause_collection_resumes_at)
+			OR (` + a + `.status = 'active' AND ` + a + `.cancel_at IS NOT NULL AND ` + a + `.cancel_at < ` + a + `.pause_collection_resumes_at)))`
+}
+
 // ListExpiredPauseCollections returns wall-clock subs whose
 // pause_collection_resumes_at has passed. Used by the scheduler's
 // pause-resume tick (the dedicated scan that pairs with the trial-
@@ -1391,6 +1409,7 @@ func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before 
 		  AND s.test_clock_id IS NULL
 		  AND s.pause_collection_resumes_at IS NOT NULL
 		  AND s.pause_collection_resumes_at <= $2
+		  AND `+resumeNotWaitingOnCloseSQL("s")+`
 		ORDER BY s.pause_collection_resumes_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
 	`, postgres.Livemode(ctx), before, limit)
@@ -1438,6 +1457,7 @@ func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context,
 		WHERE s.test_clock_id = $1
 		  AND s.pause_collection_resumes_at IS NOT NULL
 		  AND s.pause_collection_resumes_at <= $2
+		  AND `+resumeNotWaitingOnCloseSQL("s")+`
 		ORDER BY s.pause_collection_resumes_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
 	`, clockID, frozen, limit)
