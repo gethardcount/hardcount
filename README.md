@@ -4,7 +4,7 @@
 
 **The open-source billing engine for AI and usage-heavy SaaS — runs in your own VPC.**
 
-Velox owns the billing layer above the card charge: pricing, subscriptions, usage metering, invoicing, credits, and dunning (the automatic retry-and-escalate process that runs when a payment fails). Stripe still executes the card charge underneath, as a plain PaymentIntent. So Stripe Billing's percentage fee does not apply, and your usage and invoice records stay in your own Postgres.
+Velox owns the billing layer above the card charge: pricing, subscriptions, usage metering, invoicing, credits, and dunning (the automatic retry-and-escalate process that runs when a payment fails). Stripe still executes the card charge underneath, as a plain PaymentIntent. So Stripe Billing's percentage fee does not apply, and your usage and invoice records stay in your own Postgres. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid.
 
 [![CI](https://github.com/getvelox/velox/actions/workflows/ci.yml/badge.svg)](https://github.com/getvelox/velox/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev)
@@ -75,12 +75,10 @@ To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/se
 Velox is the wrong choice if you need:
 
 - **Simple per-seat pricing paid by card.** Stripe Billing already does that well.
-- **A payment processor other than Stripe.** Stripe is the only one today.
+- **Automatic charging through a processor other than Stripe.** Stripe is the only one built in today. If you need another, [open an issue](https://github.com/getvelox/velox/issues) and tell us which one.
 - **A marketplace that splits payouts** between sellers (Stripe Connect). Velox bills your own customers.
 - **Revenue recognition or accounting reports.** Export the data to your own warehouse.
 - **Quotes or multi-phase contracts** for sales-led deals.
-- **Many payment methods.** Today it is cards through Stripe, or an invoice the customer pays outside Velox.
-- **Something that stops a customer at zero credit.** Velox records usage and never refuses it. It gives you a live balance to check, and your own code does the stopping. [Stop usage when credit runs out](docs/stop-usage-when-credit-runs-out.md)
 
 ---
 
