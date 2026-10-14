@@ -154,7 +154,17 @@ export default function WebhookEventsPage() {
   const handleReplay = useSingleFlight(async (id: string) => {
     try {
       const res = await api.replayWebhookEventV2(id)
-      toast.success(`Replayed event \u2014 clone ${res.event_id.slice(0, 12)}\u2026 queued`)
+      // The server copies the event and queues it for every active endpoint
+      // in this mode that listens for its type; status says when none does.
+      if (res.status === 'no_matching_endpoints') {
+        toast.warning('Event copied, not sent', {
+          description: 'No active endpoint listens for this event. Add or resume one, then resend.',
+        })
+      } else {
+        toast.success('Event resent', {
+          description: 'A copy is queued for every active endpoint that listens for it. Its deliveries show below.',
+        })
+      }
       // Expand the replayed row AND refetch its timeline. A timeline
       // that was already open holds a mounted query nothing else
       // invalidates \u2014 pre-fix it silently kept showing the pre-replay

@@ -322,7 +322,7 @@ func validateWebhookURL(rawURL string, allowLoopback bool) error {
 
 	if loopback {
 		if !allowLoopback {
-			return errs.Invalid("url", "loopback addresses are not deliverable in production — use a publicly reachable HTTPS URL")
+			return errs.Invalid("url", "can't be localhost on this server. Use a public https:// address")
 		}
 		if parsed.Scheme != "https" && parsed.Scheme != "http" {
 			return errs.Invalid("url", "must be an http(s) URL")
@@ -330,13 +330,13 @@ func validateWebhookURL(rawURL string, allowLoopback bool) error {
 		return nil
 	}
 	if parsed.Scheme != "https" {
-		return errs.Invalid("url", "must use HTTPS (loopback is exempt in development)")
+		return errs.Invalid("url", "must start with https://")
 	}
 
 	// Resolve hostname and check all IPs against blocked ranges.
 	ips, err := net.LookupHost(host)
 	if err != nil {
-		return errs.Invalid("url", fmt.Sprintf("cannot resolve host %q", host))
+		return errs.Invalid("url", fmt.Sprintf("can't be reached: no address was found for %s", host))
 	}
 	for _, ipStr := range ips {
 		ip := net.ParseIP(ipStr)
@@ -344,7 +344,7 @@ func validateWebhookURL(rawURL string, allowLoopback bool) error {
 			continue
 		}
 		if isPrivateIP(ip) {
-			return errs.Invalid("url", fmt.Sprintf("must not resolve to a private/internal IP address (got %s)", ipStr))
+			return errs.Invalid("url", fmt.Sprintf("points to a private network address (%s). Use a public address", ipStr))
 		}
 	}
 

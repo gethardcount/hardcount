@@ -346,6 +346,7 @@ export * from './setStripeWebhookSecretBody';
 export * from './setSubscriptionBillingThresholdsBody';
 export * from './setSubscriptionBillingThresholdsBodyItemThresholdsItem';
 export * from './stripeConnection';
+export * from './stripeConnectionLastVerifiedErrorKind';
 export * from './subscription';
 export * from './subscriptionBillingThresholds';
 export * from './subscriptionBillingTime';

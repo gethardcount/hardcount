@@ -81,6 +81,20 @@ type Service struct {
 // (email.Sender.IsConfigured at boot).
 func (s *Service) SetEmailConfigured(configured bool) { s.emailConfigured = configured }
 
+// InvitesOffNoDashboardURL is the refusal when DASHBOARD_BASE_URL is unset.
+// It names no setting: the dashboard shows it to whoever clicked Send invite,
+// who usually can't change server settings. The setting's name is in
+// docs/ops/email-setup.md and in the Team tab's Details.
+const InvitesOffNoDashboardURL = "Invites are off: this server has no dashboard address set, so it can't build the invite link. Ask whoever runs Velox to set it."
+
+// CanInvite reports whether Invite can succeed on this server's settings:
+// an accept link can be built (DASHBOARD_BASE_URL) and emailed (SMTP). It is
+// the same two checks Invite makes first, so the Team tab can say invites are
+// off before anyone types an address (served on /v1/whoami).
+func (s *Service) CanInvite() bool {
+	return s.dashboardBaseURL != "" && s.emailConfigured
+}
+
 func NewService(store *PostgresStore, users UserDirectory, sessions SessionRevoker, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
 	if clk == nil {
 		clk = clock.Real()
@@ -144,7 +158,7 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 		// dashboard origin there is no safe way to build the accept link
 		// (deriving it from request headers invites host-header token
 		// theft). Refuse rather than mint an invite nobody can accept.
-		return Invitation{}, errs.InvalidState("DASHBOARD_BASE_URL is not configured — the accept link cannot be built safely; set it and retry")
+		return Invitation{}, errs.InvalidState(InvitesOffNoDashboardURL)
 	}
 
 	// The accept link is delivered only by email; without email there is

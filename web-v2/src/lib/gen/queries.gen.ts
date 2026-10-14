@@ -10425,8 +10425,8 @@ export const getGetV1WhoamiUrl = () => {
  * request carries — `velox_session` cookie (dashboard) or
  * `Authorization: Bearer` (SDK / curl). Cookie path returns
  * `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
- * Both always return `tenant_id`, `livemode` and
- * `can_email_setup_links`.
+ * All callers get `tenant_id`, `livemode`,
+ * `can_email_setup_links` and `can_send_invites`.
  * @summary Resolve the current credential to its tenant context
  */
 export const getV1Whoami = async ( options?: RequestInit): Promise<GetV1Whoami200> => {

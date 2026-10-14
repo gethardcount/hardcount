@@ -3,6 +3,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { returnPath } from '@/lib/returnPath'
 import { SESSION_ENDED_MESSAGE } from '@/lib/errorCopy'
+import { authFormError } from '@/lib/authFormError'
 import { Callout } from '@/components/Callout'
 import { useAuth } from '@/contexts/AuthContext'
 import { ApiError } from '@/lib/api'
@@ -58,10 +59,10 @@ export default function LoginPage() {
         } else if (err.status === 403) {
           setError(signInRefusedMessage(window.isSecureContext, err.message))
         } else {
-          setError(err.message)
+          setError(authFormError(err))
         }
       } else {
-        setError('Cannot connect to Velox API')
+        setError(authFormError(err))
       }
     } finally {
       setLoading(false)

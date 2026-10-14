@@ -6,9 +6,10 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { api, formatDate, formatDateTime, type WebhookEndpoint } from '@/lib/api'
+import { api, ApiError, formatDate, formatDateTime, type WebhookEndpoint } from '@/lib/api'
 import { untilMs, wallClockNow } from '@/lib/effectiveNow'
 import { applyApiError, showApiError } from '@/lib/formErrors'
+import { cn } from '@/lib/utils'
 import { Layout } from '@/components/Layout'
 
 import { Button } from '@/components/ui/button'
@@ -535,9 +536,11 @@ function EndpointEditDialog({ endpoint, onClose, onSaved }: {
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [urlError, setUrlError] = useState('')
 
   const save = async () => {
     setError('')
+    setUrlError('')
     if (!url.trim()) { setError('URL is required'); return }
     if (listenMode === 'specific' && selectedEvents.size === 0) {
       setError('Select at least one event')
@@ -553,7 +556,13 @@ function EndpointEditDialog({ endpoint, onClose, onSaved }: {
       })
       onSaved()
     } catch (err) {
-      showApiError(err, 'Failed to update endpoint')
+      // A refused URL shows under the URL field, like the create dialog,
+      // instead of as a toast with no subject.
+      if (err instanceof ApiError && err.field === 'url') {
+        setUrlError(err.message)
+      } else {
+        showApiError(err, 'Failed to update endpoint')
+      }
     } finally {
       setSaving(false)
     }
@@ -572,7 +581,10 @@ function EndpointEditDialog({ endpoint, onClose, onSaved }: {
           <div className="space-y-1.5">
             <Label htmlFor="edit-ep-url">URL</Label>
             <Input id="edit-ep-url" type="url" maxLength={2048}
-              value={url} onChange={e => setUrl(e.target.value)} />
+              value={url} onChange={e => setUrl(e.target.value)}
+              aria-invalid={!!urlError}
+              className={cn(urlError && 'border-destructive')} />
+            {urlError && <p className="text-xs text-destructive">{urlError}</p>}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="edit-ep-desc">Description</Label>

@@ -83,7 +83,7 @@ export async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') {
       throw new ApiError(
-        `Request timed out after ${Math.round(timeoutMs / 1000)}s — the server didn't respond. Check the API is running and reachable, then retry.`,
+        `No response from the server within ${Math.round(timeoutMs / 1000)} seconds.`,
         0,
         { code: 'timeout', method },
       )
@@ -1399,6 +1399,10 @@ export interface StripeProviderCredentials {
   has_webhook_secret: boolean
   verified_at?: string | null
   last_verified_error?: string
+  // What kind of failure last_verified_error is: Stripe refused the key, or
+  // Stripe was not reached so the key wasn't checked. Absent on rows that
+  // failed before the server started recording it (treated as rejected).
+  last_verified_error_kind?: 'rejected' | 'unavailable'
   created_at: string
   updated_at: string
   // retries_queued is set ONLY on the POST /settings/stripe

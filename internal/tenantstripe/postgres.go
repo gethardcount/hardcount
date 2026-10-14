@@ -115,11 +115,12 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput) (domain.StripeProvid
 			webhook_secret_last4     = COALESCE(EXCLUDED.webhook_secret_last4, stripe_provider_credentials.webhook_secret_last4),
 			verified_at              = NULL,
 			last_verified_error      = NULL,
+			last_verified_error_kind = NULL,
 			updated_at               = NOW()
 		RETURNING id, tenant_id, livemode, stripe_account_id, stripe_account_name,
 			secret_key_prefix, secret_key_last4, publishable_key, webhook_secret_last4,
 			(webhook_secret_encrypted IS NOT NULL),
-			verified_at, last_verified_error, created_at, updated_at
+			verified_at, last_verified_error, last_verified_error_kind, created_at, updated_at
 	`
 
 	row := tx.QueryRowContext(ctx, q,
@@ -154,6 +155,7 @@ func (s *Store) MarkVerified(ctx context.Context, tenantID string, livemode bool
 		    stripe_account_name  = $4,
 		    verified_at          = NOW(),
 		    last_verified_error  = NULL,
+		    last_verified_error_kind = NULL,
 		    updated_at           = NOW()
 		WHERE tenant_id = $1 AND livemode = $2
 	`, tenantID, livemode, accountID, accountName)
@@ -163,10 +165,12 @@ func (s *Store) MarkVerified(ctx context.Context, tenantID string, livemode bool
 	return tx.Commit()
 }
 
-// MarkVerifyFailed records the error from a failed verify attempt. The row
-// remains present — the operator may have a transient Stripe outage, and we
-// don't want to drop credentials they'll still need.
-func (s *Store) MarkVerifyFailed(ctx context.Context, tenantID string, livemode bool, errMsg string) error {
+// MarkVerifyFailed records the error from a failed verify attempt: Stripe's
+// own sentence and the kind of failure (VerifyErrorRejected or
+// VerifyErrorUnavailable). The row remains present — the operator may have a
+// transient Stripe outage, and we don't want to drop credentials they'll
+// still need.
+func (s *Store) MarkVerifyFailed(ctx context.Context, tenantID string, livemode bool, errMsg, kind string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return err
@@ -175,10 +179,11 @@ func (s *Store) MarkVerifyFailed(ctx context.Context, tenantID string, livemode 
 
 	_, err = tx.ExecContext(ctx, `
 		UPDATE stripe_provider_credentials
-		SET last_verified_error = $3,
-		    updated_at          = NOW()
+		SET last_verified_error      = $3,
+		    last_verified_error_kind = $4,
+		    updated_at               = NOW()
 		WHERE tenant_id = $1 AND livemode = $2
-	`, tenantID, livemode, errMsg)
+	`, tenantID, livemode, errMsg, kind)
 	if err != nil {
 		return fmt.Errorf("mark verify failed: %w", err)
 	}
@@ -202,7 +207,7 @@ func (s *Store) ListByTenant(ctx context.Context, tenantID string) ([]domain.Str
 		SELECT id, tenant_id, livemode, stripe_account_id, stripe_account_name,
 		       secret_key_prefix, secret_key_last4, publishable_key, webhook_secret_last4,
 		       (webhook_secret_encrypted IS NOT NULL),
-		       verified_at, last_verified_error, created_at, updated_at
+		       verified_at, last_verified_error, last_verified_error_kind, created_at, updated_at
 		FROM stripe_provider_credentials
 		WHERE tenant_id = $1
 		ORDER BY livemode DESC
@@ -293,7 +298,7 @@ func (s *Store) SetWebhookSecret(ctx context.Context, tenantID string, livemode 
 		RETURNING id, tenant_id, livemode, stripe_account_id, stripe_account_name,
 			secret_key_prefix, secret_key_last4, publishable_key, webhook_secret_last4,
 			(webhook_secret_encrypted IS NOT NULL),
-			verified_at, last_verified_error, created_at, updated_at
+			verified_at, last_verified_error, last_verified_error_kind, created_at, updated_at
 	`
 
 	row := tx.QueryRowContext(ctx, q, tenantID, livemode, enc, lastFour)
@@ -398,13 +403,13 @@ type scanner interface {
 
 func scanPublic(r scanner) (domain.StripeProviderCredentials, error) {
 	var c domain.StripeProviderCredentials
-	var accountID, accountName, webhookLast4, verifyErr sql.NullString
+	var accountID, accountName, webhookLast4, verifyErr, verifyErrKind sql.NullString
 	var verifiedAt sql.NullTime
 	err := r.Scan(
 		&c.ID, &c.TenantID, &c.Livemode,
 		&accountID, &accountName,
 		&c.SecretKeyPrefix, &c.SecretKeyLast4, &c.PublishableKey, &webhookLast4, &c.HasWebhookSecret,
-		&verifiedAt, &verifyErr, &c.CreatedAt, &c.UpdatedAt,
+		&verifiedAt, &verifyErr, &verifyErrKind, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return c, err
@@ -413,6 +418,7 @@ func scanPublic(r scanner) (domain.StripeProviderCredentials, error) {
 	c.StripeAccountName = accountName.String
 	c.WebhookSecretLast4 = webhookLast4.String
 	c.LastVerifiedError = verifyErr.String
+	c.LastVerifiedErrorKind = verifyErrKind.String
 	if verifiedAt.Valid {
 		t := verifiedAt.Time
 		c.VerifiedAt = &t

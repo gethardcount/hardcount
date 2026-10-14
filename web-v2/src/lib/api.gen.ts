@@ -4018,8 +4018,8 @@ export interface paths {
          *     request carries — `velox_session` cookie (dashboard) or
          *     `Authorization: Bearer` (SDK / curl). Cookie path returns
          *     `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
-         *     Both always return `tenant_id`, `livemode` and
-         *     `can_email_setup_links`.
+         *     All callers get `tenant_id`, `livemode`,
+         *     `can_email_setup_links` and `can_send_invites`.
          */
         get: {
             parameters: {
@@ -4046,6 +4046,12 @@ export interface paths {
                              *     link then fails.
                              */
                             can_email_setup_links: boolean;
+                            /**
+                             * @description Whether this server can invite a teammate. False when
+                             *     email sending (SMTP) or DASHBOARD_BASE_URL is not set
+                             *     up; inviting then fails with 409.
+                             */
+                            can_send_invites: boolean;
                             user_id?: string;
                             email?: string;
                             key_id?: string;
@@ -7918,8 +7924,20 @@ export interface components {
              * @description Last time Stripe accepted the key.
              */
             verified_at?: string;
-            /** @description Why the last Stripe check failed. Empty when it passed. */
+            /**
+             * @description Why the last Stripe check failed, in Stripe's own words (or the
+             *     network error when Stripe was not reached). Empty when it passed.
+             */
             last_verified_error?: string;
+            /**
+             * @description What kind of failure `last_verified_error` is. `rejected`: Stripe
+             *     answered and refused the key (invalid, revoked, or without access).
+             *     `unavailable`: Stripe was not reached, or answered 429/5xx, so the
+             *     key was not checked; connecting again may work. Absent when the
+             *     check passed, and on keys that failed before this field existed.
+             * @enum {string}
+             */
+            last_verified_error_kind?: "rejected" | "unavailable";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */

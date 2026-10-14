@@ -1656,6 +1656,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 				"tenant_id":             auth.TenantID(ctx),
 				"livemode":              auth.Livemode(ctx),
 				"can_email_setup_links": setupLinksEmailable,
+				"can_send_invites":      membersSvc.CanInvite(),
 			}
 			if uid := auth.UserID(ctx); uid != "" {
 				out["user_id"] = uid

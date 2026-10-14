@@ -625,7 +625,7 @@ func validateSettings(ts *domain.TenantSettings) error {
 		return errs.Invalid("tax_on_failure", "must be 'block' or 'fallback_manual'")
 	}
 	if ts.TaxRate < 0 || ts.TaxRate > 100 {
-		return errs.Invalid("tax_rate", "must be between 0 and 100 (e.g. 18.50 for 18.5%; up to 4 decimal places). ADR-042/043.")
+		return errs.Invalid("tax_rate", "must be from 0 to 100 (for 18.5% enter 18.5)")
 	}
 	ts.DefaultProductTaxCode = strings.TrimSpace(ts.DefaultProductTaxCode)
 	if err := domain.ValidateStripeTaxCode("default_product_tax_code", ts.DefaultProductTaxCode); err != nil {

@@ -230,7 +230,7 @@ func TestWireShape_WebhookEventsStream_SnakeCase(t *testing.T) {
 // TestWireShape_WebhookEventReplay pins the response shape for
 // POST /v1/webhook_events/{id}/replay. The dashboard's Replay button
 // reads {event_id, replay_of, status} — drift here breaks the toast
-// notification ("Replayed event evt_X — clone evt_Y queued") and the
+// ("Event resent", or "Event copied, not sent" on no_matching_endpoints) and the
 // optimistic-highlight path that the live tail uses to flash the new row.
 func TestWireShape_WebhookEventReplay(t *testing.T) {
 	store := newMemStore()

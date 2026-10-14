@@ -193,8 +193,13 @@ type StripeProviderCredentials struct {
 	HasWebhookSecret   bool       `json:"has_webhook_secret"`
 	VerifiedAt         *time.Time `json:"verified_at,omitempty"`
 	LastVerifiedError  string     `json:"last_verified_error,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	// LastVerifiedErrorKind says what kind of failure LastVerifiedError is:
+	// "rejected" (Stripe refused the key) or "unavailable" (Stripe was not
+	// reached, or answered 429/5xx, so the key was not checked). Empty when
+	// the check passed, and on rows that failed before migration 0178.
+	LastVerifiedErrorKind string    `json:"last_verified_error_kind,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 	// RetriesQueued is set ONLY on the Connect-response path
 	// (ADR-019) — the count of stuck-on-provider-config invoices
 	// the post-connect goroutine is about to retry in the

@@ -108,11 +108,13 @@ func ValidatePassword(plaintext string) error {
 	// rather than getting a deceptively-strong-looking password
 	// that's effectively the same as its 72-byte prefix.
 	if len(plaintext) > 72 {
-		return errs.Invalid("password", "must be at most 72 bytes — accented and non-Latin characters count as more than one byte, so use a shorter password")
+		// Shown after the word "Password" on the sign-in pages. bcrypt counts
+		// bytes: an accented letter is 2 in UTF-8, most other scripts 3.
+		return errs.Invalid("password", "is too long. Use at most 72 characters; accented and non-Latin letters count as two or more")
 	}
 	if _, blocked := commonPasswords[strings.ToLower(plaintext)]; blocked {
 		return errs.Invalid("password",
-			"this password is on the most-common-passwords list — pick a different one")
+			"is one of the most common passwords. Pick a different one")
 	}
 	return nil
 }

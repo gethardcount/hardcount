@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { membersApi, type InvitePreview } from '@/lib/members'
-import { ApiError } from '@/lib/api'
+import { authFormError } from '@/lib/authFormError'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -72,7 +72,7 @@ export default function AcceptInvitePage() {
       }
       setAccepted(true)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Cannot connect to Velox API')
+      setError(authFormError(err))
     } finally {
       setLoading(false)
     }

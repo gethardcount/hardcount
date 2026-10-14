@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { StripeConnectionLastVerifiedErrorKind } from './stripeConnectionLastVerifiedErrorKind';
 
 export interface StripeConnection {
   /** Also the `{id}` in the Stripe webhook URL `/v1/webhooks/stripe/{id}`. */
@@ -24,8 +25,19 @@ export interface StripeConnection {
   has_webhook_secret: boolean;
   /** Last time Stripe accepted the key. */
   verified_at?: string;
-  /** Why the last Stripe check failed. Empty when it passed. */
+  /**
+     * Why the last Stripe check failed, in Stripe's own words (or the
+     * network error when Stripe was not reached). Empty when it passed.
+     */
   last_verified_error?: string;
+  /**
+     * What kind of failure `last_verified_error` is. `rejected`: Stripe
+     * answered and refused the key (invalid, revoked, or without access).
+     * `unavailable`: Stripe was not reached, or answered 429/5xx, so the
+     * key was not checked; connecting again may work. Absent when the
+     * check passed, and on keys that failed before this field existed.
+     */
+  last_verified_error_kind?: StripeConnectionLastVerifiedErrorKind;
   created_at: string;
   updated_at: string;
   /** Connect response only. Number of stuck invoices being retried in the background. */

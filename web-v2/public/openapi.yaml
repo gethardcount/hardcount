@@ -3347,7 +3347,18 @@ components:
           description: Last time Stripe accepted the key.
         last_verified_error:
           type: string
-          description: Why the last Stripe check failed. Empty when it passed.
+          description: |
+            Why the last Stripe check failed, in Stripe's own words (or the
+            network error when Stripe was not reached). Empty when it passed.
+        last_verified_error_kind:
+          type: string
+          enum: [rejected, unavailable]
+          description: |
+            What kind of failure `last_verified_error` is. `rejected`: Stripe
+            answered and refused the key (invalid, revoked, or without access).
+            `unavailable`: Stripe was not reached, or answered 429/5xx, so the
+            key was not checked; connecting again may work. Absent when the
+            check passed, and on keys that failed before this field existed.
         created_at:
           type: string
           format: date-time
@@ -8830,8 +8841,8 @@ paths:
         request carries — `velox_session` cookie (dashboard) or
         `Authorization: Bearer` (SDK / curl). Cookie path returns
         `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
-        Both always return `tenant_id`, `livemode` and
-        `can_email_setup_links`.
+        All callers get `tenant_id`, `livemode`,
+        `can_email_setup_links` and `can_send_invites`.
       responses:
         "200":
           description: Resolved auth context
@@ -8839,7 +8850,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [tenant_id, livemode, can_email_setup_links]
+                required: [tenant_id, livemode, can_email_setup_links, can_send_invites]
                 properties:
                   tenant_id:
                     type: string
@@ -8852,6 +8863,12 @@ paths:
                       a payment method. False when email sending (SMTP) or
                       PAYMENT_UPDATE_URL is not set up; resending a setup
                       link then fails.
+                  can_send_invites:
+                    type: boolean
+                    description: |
+                      Whether this server can invite a teammate. False when
+                      email sending (SMTP) or DASHBOARD_BASE_URL is not set
+                      up; inviting then fails with 409.
                   user_id:
                     type: string
                   email:

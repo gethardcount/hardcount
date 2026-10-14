@@ -24,6 +24,9 @@ export interface SessionInfo {
   // Whether this server can email a customer a setup link (SMTP and
   // PAYMENT_UPDATE_URL both set). Server config, not per user.
   can_email_setup_links?: boolean
+  // Whether this server can invite a teammate (email sending and its
+  // dashboard address are both set up). Server config, not per user.
+  can_send_invites?: boolean
 }
 
 export interface LoginResponse {

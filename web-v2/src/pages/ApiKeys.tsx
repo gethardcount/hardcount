@@ -349,7 +349,7 @@ export default function ApiKeysPage() {
                     <Key size={16} className="text-amber-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-amber-800 dark:text-amber-400">Save this key now -- it will not be shown again</p>
+                    <p className="text-xs font-semibold text-amber-800 dark:text-amber-400">Save this key now. It won&apos;t be shown again.</p>
                     <div className="flex items-start gap-2 mt-2">
                       <code className="font-mono text-sm text-amber-900 dark:text-amber-300 break-all select-all flex-1 bg-amber-100/50 dark:bg-amber-500/10 rounded px-2 py-1">
                         {createdKey}
@@ -377,17 +377,20 @@ export default function ApiKeysPage() {
       <AlertDialog open={!!revokeTarget} onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke API Key</AlertDialogTitle>
+            <AlertDialogTitle>Revoke API key?</AlertDialogTitle>
+            {/* Key lookup reads only rows with revoked_at IS NULL and
+                nothing caches keys (internal/auth), so the next request
+                with this key is refused. */}
             <AlertDialogDescription>
               {revokeTarget
-                ? `Are you sure you want to revoke "${revokeTarget.name}" (${revokeTarget.key_prefix}...)? This action cannot be undone.`
+                ? `Anything using "${revokeTarget.name}" (${revokeTarget.key_prefix}…) is refused from its next request. This can't be undone.`
                 : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setRevokeTarget(null)}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleRevoke} disabled={revoking} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {revoking ? 'Revoking…' : 'Revoke Key'}
+              {revoking ? 'Revoking…' : 'Revoke key'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

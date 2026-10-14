@@ -275,14 +275,28 @@ func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 				other.StripeAccountID, other.VerifiedAt != nil, other.LastVerifiedError)
 		}
 	}
-	if err := store.MarkVerifyFailed(ctx, tenantA, false, "fake verify failure"); err != nil {
+	if err := store.MarkVerifyFailed(ctx, tenantA, false, "fake verify failure", VerifyErrorRejected); err != nil {
 		t.Fatalf("mark A test verify failed: %v", err)
 	}
 	wantVerify("verify failed", "", false, "fake verify failure")
+	wantKind := func(step, want string) {
+		t.Helper()
+		rows, err := store.ListByTenant(ctx, tenantA)
+		if err != nil {
+			t.Fatalf("%s: list A: %v", step, err)
+		}
+		for _, r := range rows {
+			if !r.Livemode && r.LastVerifiedErrorKind != want {
+				t.Errorf("%s: A test error kind = %q, want %q", step, r.LastVerifiedErrorKind, want)
+			}
+		}
+	}
+	wantKind("verify failed", VerifyErrorRejected)
 	if err := store.MarkVerified(ctx, tenantA, false, "acct_FAKE_a_test", "Tenant A Test"); err != nil {
 		t.Fatalf("mark A test verified: %v", err)
 	}
 	wantVerify("verified", "acct_FAKE_a_test", true, "")
+	wantKind("verified", "")
 
 	// --- delete removes only its own row ---
 

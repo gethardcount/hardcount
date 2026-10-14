@@ -511,7 +511,7 @@ func TestCreateEndpoint(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for private IP URL")
 		}
-		if !strings.Contains(err.Error(), "private/internal IP") {
+		if err.Error() != "points to a private network address (10.0.0.1). Use a public address" {
 			t.Errorf("expected private IP error, got: %v", err)
 		}
 	})
@@ -527,6 +527,9 @@ func TestCreateEndpoint(t *testing.T) {
 		_, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: "http://api.acme.com/webhooks"})
 		if err == nil {
 			t.Fatal("expected error for non-HTTPS URL")
+		}
+		if err.Error() != "must start with https://" {
+			t.Errorf("non-HTTPS reason = %q", err.Error())
 		}
 	})
 
@@ -1559,6 +1562,8 @@ func TestLoopbackException_SameFlagAtBothLayers(t *testing.T) {
 	for _, u := range loopbacks {
 		if err := validateWebhookURL(u, false); err == nil {
 			t.Errorf("prod validate(%q) = nil, want refused — create must not promise what delivery refuses", u)
+		} else if err.Error() != "can't be localhost on this server. Use a public https:// address" {
+			t.Errorf("prod validate(%q) reason = %q", u, err.Error())
 		}
 	}
 

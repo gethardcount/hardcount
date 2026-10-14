@@ -19,6 +19,12 @@ export type GetV1Whoami200 = {
      * link then fails.
      */
   can_email_setup_links: boolean;
+  /**
+     * Whether this server can invite a teammate. False when
+     * email sending (SMTP) or DASHBOARD_BASE_URL is not set
+     * up; inviting then fails with 409.
+     */
+  can_send_invites: boolean;
   user_id?: string;
   email?: string;
   key_id?: string;

@@ -2,8 +2,10 @@ package tenantstripe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -107,11 +109,12 @@ func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput)
 	sc := s.newCli(in.SecretKey)
 	acct, verifyErr := sc.V1Accounts.Retrieve(ctx, nil)
 	if verifyErr != nil {
-		msg := errs.Scrub(verifyErr.Error())
-		if err := s.store.MarkVerifyFailed(ctx, tenantID, in.Livemode, msg); err != nil {
+		kind, msg := describeVerifyError(verifyErr)
+		if err := s.store.MarkVerifyFailed(ctx, tenantID, in.Livemode, msg, kind); err != nil {
 			s.logger.ErrorContext(ctx, "mark stripe verify failed", "error", err)
 		}
 		creds.LastVerifiedError = msg
+		creds.LastVerifiedErrorKind = kind
 		return creds, nil // return creds with error surfaced on the row, not as a 5xx
 	}
 
@@ -226,6 +229,38 @@ func (s *Service) GetPlaintext(ctx context.Context, tenantID string, livemode bo
 // verifying the signature on an incoming Stripe event.
 func (s *Service) LookupEndpoint(ctx context.Context, endpointID string) (EndpointLookup, error) {
 	return s.store.GetByID(ctx, endpointID)
+}
+
+// Kinds of a failed key check, stored in last_verified_error_kind.
+const (
+	// VerifyErrorRejected: Stripe answered and refused the key (a 4xx:
+	// invalid, revoked, or a restricted key without access to the account).
+	VerifyErrorRejected = "rejected"
+	// VerifyErrorUnavailable: no answer from Stripe (network failure,
+	// timeout) or a 429/5xx, so the key was not checked at all.
+	VerifyErrorUnavailable = "unavailable"
+)
+
+// describeVerifyError turns a failed GET /v1/account into the kind of failure
+// and one sentence for the operator. stripe-go's Error() is the whole error
+// marshalled as JSON (stripe-go error.go), which the dashboard used to show
+// verbatim; Stripe's own sentence is the Msg field. A failure with no Stripe
+// error (dial, DNS, timeout) never reached Stripe, so its text is the
+// transport error. Both pass through errs.Scrub like before.
+func describeVerifyError(err error) (kind, msg string) {
+	var se *stripe.Error
+	if errors.As(err, &se) {
+		msg = strings.TrimSpace(se.Msg)
+		if msg == "" {
+			msg = fmt.Sprintf("Stripe answered with HTTP %d.", se.HTTPStatusCode)
+		}
+		kind = VerifyErrorUnavailable
+		if se.HTTPStatusCode >= 400 && se.HTTPStatusCode < 500 && se.HTTPStatusCode != http.StatusTooManyRequests {
+			kind = VerifyErrorRejected
+		}
+		return kind, errs.Scrub(msg)
+	}
+	return VerifyErrorUnavailable, errs.Scrub(err.Error())
 }
 
 // validateKeyShape rejects obviously-wrong keys before touching the DB. The

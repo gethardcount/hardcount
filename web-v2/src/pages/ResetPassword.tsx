@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { authApi } from '@/lib/auth'
-import { ApiError } from '@/lib/api'
+import { authFormError } from '@/lib/authFormError'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -49,7 +49,7 @@ export default function ResetPasswordPage() {
     e.preventDefault()
     setError('')
     if (!token) {
-      setError('Reset link is missing the token. Request a new one from the forgot-password page.')
+      setError('This reset link is incomplete. Request a new one from the Forgot password page.')
       return
     }
     if (password.length < 12) {
@@ -65,15 +65,7 @@ export default function ResetPasswordPage() {
       await authApi.confirmPasswordReset(token, password)
       navigate('/login?reset=success', { replace: true })
     } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.status === 422) {
-          setError(err.message)
-        } else {
-          setError(err.message)
-        }
-      } else {
-        setError('Cannot connect to Velox API')
-      }
+      setError(authFormError(err))
     } finally {
       setLoading(false)
     }

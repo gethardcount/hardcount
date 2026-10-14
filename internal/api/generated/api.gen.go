@@ -1326,6 +1326,24 @@ func (e SentEmailStatus) Valid() bool {
 	}
 }
 
+// Defines values for StripeConnectionLastVerifiedErrorKind.
+const (
+	Rejected    StripeConnectionLastVerifiedErrorKind = "rejected"
+	Unavailable StripeConnectionLastVerifiedErrorKind = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the StripeConnectionLastVerifiedErrorKind enum.
+func (e StripeConnectionLastVerifiedErrorKind) Valid() bool {
+	switch e {
+	case Rejected:
+		return true
+	case Unavailable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SubscriptionBillingTime.
 const (
 	SubscriptionBillingTimeAnniversary SubscriptionBillingTime = "anniversary"
@@ -4374,10 +4392,18 @@ type StripeConnection struct {
 	// Id Also the `{id}` in the Stripe webhook URL `/v1/webhooks/stripe/{id}`.
 	Id string `json:"id"`
 
-	// LastVerifiedError Why the last Stripe check failed. Empty when it passed.
+	// LastVerifiedError Why the last Stripe check failed, in Stripe's own words (or the
+	// network error when Stripe was not reached). Empty when it passed.
 	LastVerifiedError string `json:"last_verified_error,omitempty"`
-	Livemode          bool   `json:"livemode"`
-	PublishableKey    string `json:"publishable_key"`
+
+	// LastVerifiedErrorKind What kind of failure `last_verified_error` is. `rejected`: Stripe
+	// answered and refused the key (invalid, revoked, or without access).
+	// `unavailable`: Stripe was not reached, or answered 429/5xx, so the
+	// key was not checked; connecting again may work. Absent when the
+	// check passed, and on keys that failed before this field existed.
+	LastVerifiedErrorKind StripeConnectionLastVerifiedErrorKind `json:"last_verified_error_kind,omitempty"`
+	Livemode              bool                                  `json:"livemode"`
+	PublishableKey        string                                `json:"publishable_key"`
 
 	// RetriesQueued Connect response only. Number of stuck invoices being retried in the background.
 	RetriesQueued  int    `json:"retries_queued,omitempty"`
@@ -4396,6 +4422,13 @@ type StripeConnection struct {
 	VerifiedAt         time.Time `json:"verified_at,omitempty"`
 	WebhookSecretLast4 string    `json:"webhook_secret_last4,omitempty"`
 }
+
+// StripeConnectionLastVerifiedErrorKind What kind of failure `last_verified_error` is. `rejected`: Stripe
+// answered and refused the key (invalid, revoked, or without access).
+// `unavailable`: Stripe was not reached, or answered 429/5xx, so the
+// key was not checked; connecting again may work. Absent when the
+// check passed, and on keys that failed before this field existed.
+type StripeConnectionLastVerifiedErrorKind string
 
 // Subscription defines model for Subscription.
 type Subscription struct {

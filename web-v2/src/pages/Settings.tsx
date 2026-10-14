@@ -52,6 +52,8 @@ import {
 
 import { Building2, CreditCard, FileText, Receipt, Check, AlertCircle, Info, Loader2, Trash2, Copy, ExternalLink, X, Users } from 'lucide-react'
 import { TeamTab } from '@/components/TeamTab'
+import { Callout } from '@/components/Callout'
+import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
 import { useStickyActionBar } from '@/hooks/useStickyActionBar'
 
@@ -768,7 +770,8 @@ export default function SettingsPage() {
                         <div className="relative mt-1">
                           <Input type="number" step="0.0001" min={0} max={100}
                             value={form.tax_rate}
-                            onChange={e => setValue('tax_rate', parseFloat(e.target.value || '0'), { shouldDirty: true })}
+                            // shouldValidate: say "0 to 100" while typing, not only after Save.
+                            onChange={e => setValue('tax_rate', parseFloat(e.target.value || '0'), { shouldDirty: true, shouldValidate: true })}
                             className={cn('pr-8', formErrors.tax_rate && 'border-destructive')} placeholder="0" />
                           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">%</span>
                         </div>
@@ -786,7 +789,7 @@ export default function SettingsPage() {
                             </button>
                           </p>
                         ) : (
-                          <p className="text-xs text-muted-foreground mt-1">Set to 0 to disable tax. Accepts up to 4 decimal places (e.g. 8.8750).</p>
+                          <p className="text-xs text-muted-foreground mt-1">From 0 to 100, up to 4 decimal places (e.g. 8.8750). 0 turns tax off.</p>
                         )}
                       </div>
                     </div>
@@ -965,9 +968,9 @@ function PaymentsSection() {
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold text-foreground">Payments</h2>
           <p className="text-xs text-muted-foreground">
-            Connect your own Stripe account — Velox charges invoices through your keys, money flows straight to you.
-            Showing <span className="font-medium text-foreground">{livemode ? 'live' : 'test'}</span> credentials;
-            switch via the Test/Live toggle in the header.
+            Velox charges invoices through your own Stripe account, so money goes straight to you.
+            Showing <span className="font-medium text-foreground">{livemode ? 'live' : 'test'}</span> keys;
+            switch with the Test/Live toggle in the sidebar.
           </p>
         </div>
       </div>
@@ -1112,18 +1115,19 @@ function StripeCard({ livemode, current, onChanged }: {
           )}
         </div>
 
-        {failing && current && (
-          <div className="p-3 rounded-lg bg-destructive/5 border border-destructive/20">
-            <p className="text-xs text-destructive flex items-start gap-2">
-              <AlertCircle size={12} className="shrink-0 mt-0.5" />
-              <span>
-                <strong>Stripe verification failed: </strong>
-                {current.last_verified_error}. Re-paste your API keys below with
-                the current values from your Stripe Dashboard.
-              </span>
-            </p>
-          </div>
-        )}
+        {failing && current && (() => {
+          const notice = stripeVerifyNotice(current.last_verified_error_kind)
+          return (
+            <Callout
+              tone="red"
+              role="alert"
+              title={notice.title}
+              details={<p className="break-words">Stripe said: {current.last_verified_error}</p>}
+            >
+              <p>{notice.body}</p>
+            </Callout>
+          )
+        })()}
 
         <StepRow
           number={1}
@@ -1185,7 +1189,7 @@ function StripeCard({ livemode, current, onChanged }: {
           locked={step2Mode === 'locked'}
           summary={
             fullyConnected && current
-              ? <>Signing secret <span className="font-mono text-foreground">whsec_••••{current.webhook_secret_last4 ?? ''}</span> active</>
+              ? <>Signing secret <span className="font-mono text-foreground">whsec_••••{current.webhook_secret_last4 ?? ''}</span> saved</>
               : step2Mode === 'locked'
                 ? 'Unlocks after step 1'
                 : undefined
@@ -1219,8 +1223,15 @@ function StripeCard({ livemode, current, onChanged }: {
                   value={`whsec_••••••••${current.webhook_secret_last4 ?? ''}`}
                   mono
                 />
-                <ReadOnlyRow label="Status" value="Verified" />
+                {/* Not "Verified": saving checks only the whsec_ prefix
+                    (tenantstripe/service.go SetWebhookSecret). The secret is
+                    tested against each event Stripe sends. */}
+                <ReadOnlyRow label="Status" value="Saved" />
               </div>
+              <p className="text-xs text-muted-foreground">
+                Velox checks each event Stripe sends against this secret. If Stripe shows failed deliveries to
+                this URL, check that the secret matches the one in Stripe.
+              </p>
               <WebhookUrlRow endpointId={current.id} />
               <Button variant="outline" size="sm" onClick={() => setReplacingWebhook(true)}>
                 Replace webhook secret
@@ -1359,8 +1370,8 @@ function StepRow({ number, title, done, locked, summary, children }: {
 
 // Secret-key + publishable-key form. Used both for first-time connect and
 // for key rotation (mode switches based on `connected`). Rotations go through
-// a confirmation dialog because pasting new keys invalidates the old ones
-// the instant Stripe accepts them.
+// a confirmation dialog: Velox switches to the new keys at once, and nothing
+// checks that they belong to the same Stripe account as the old ones.
 function ApiKeysForm({ livemode, connected, onSuccess }: {
   livemode: boolean
   connected: boolean
@@ -1377,7 +1388,9 @@ function ApiKeysForm({ livemode, connected, onSuccess }: {
     mutationFn: (data: StripeConnectForm) => api.connectStripe({ ...data, livemode }),
     onSuccess: (row) => {
       if (row.last_verified_error) {
-        toast.error('Saved, but Stripe could not verify these keys — see the details below the form.')
+        toast.error(stripeVerifyNotice(row.last_verified_error_kind).toastTitle, {
+          description: STRIPE_VERIFY_TOAST_BODY,
+        })
       } else {
         const base = `${connected ? 'Rotated' : 'Connected'} ${livemode ? 'live' : 'test'} mode${
           row.stripe_account_name ? ` as ${row.stripe_account_name}` : ''
@@ -1470,10 +1483,13 @@ function ApiKeysForm({ livemode, connected, onSuccess }: {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Rotate {livemode ? 'live' : 'test'} mode API keys?</AlertDialogTitle>
+            {/* Velox only saves and checks the new keys (tenantstripe
+                Connect); it never rolls or revokes a key at Stripe. Saved
+                cards belong to one Stripe account, and Connect does not
+                compare account ids, so the warning is ours to give. */}
             <AlertDialogDescription>
-              The current secret and publishable keys will stop working as soon as the new ones are accepted.
-              Any in-flight charges or checkout scripts still using the old publishable key will fail until they reload.
-              Stripe best practice is to roll the key in your Stripe Dashboard and paste the new one here in the same session.
+              Velox charges with the new keys from now on. Your old keys keep working at Stripe until you roll them there.
+              Use keys from the same Stripe account, because your customers&rsquo; saved cards belong to it.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1496,7 +1512,8 @@ function ApiKeysForm({ livemode, connected, onSuccess }: {
 // Step 2 body: shows the Velox webhook URL + event checklist, and a field
 // to paste the resulting whsec_ after the tenant registers the endpoint in
 // Stripe. Same component handles rotation from Manage mode (guarded by the
-// confirmation dialog because Stripe signs with the new secret immediately).
+// confirmation dialog because Velox keeps one secret: once saved, events
+// signed only with the old one are refused).
 function WebhookSetup({ current, onSuccess }: {
   current: StripeProviderCredentials
   onSuccess: () => void
@@ -1589,11 +1606,13 @@ function WebhookSetup({ current, onSuccess }: {
       <AlertDialog open={!!pending} onOpenChange={(v) => { if (!v) setPending(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Replace webhook signing secret?</AlertDialogTitle>
+            <AlertDialogTitle>Replace signing secret?</AlertDialogTitle>
+            {/* Saving changes nothing at Stripe. Velox stores one secret
+                (tenantstripe SetWebhookSecret overwrites it) and checks each
+                event with it (payment/handler.go ValidatePayload). */}
             <AlertDialogDescription>
-              Stripe will sign webhook deliveries with the new secret immediately. Events still in
-              flight under the old secret will fail signature verification and retry on Stripe's schedule.
-              Roll the secret in Stripe Dashboard first, then paste the new one here.
+              Velox will accept only Stripe events signed with the new secret. Roll the secret in Stripe first, then
+              paste it here; Stripe retries any event refused meanwhile.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1633,9 +1652,12 @@ function DisconnectAction({ mode, onDone }: { mode: 'test' | 'live'; onDone: () 
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Disconnect {mode} mode?</AlertDialogTitle>
+          {/* Delete drops the row; a reconnect inserts a new row with a new
+              id, and the webhook URL is /v1/webhooks/stripe/{id}, so the
+              URL registered in Stripe stops working. */}
           <AlertDialogDescription>
-            Velox will stop charging new invoices through this Stripe account.
-            Existing Stripe charges and refunds are unaffected. You can reconnect with new keys anytime.
+            Velox stops charging through this Stripe account and stops accepting its events. Reconnecting gives
+            a new webhook URL, so you&rsquo;ll redo step 2.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
