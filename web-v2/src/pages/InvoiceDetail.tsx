@@ -953,12 +953,6 @@ export default function InvoiceDetailPage() {
             icon={FileX}
             className="mb-6"
             title="Written off"
-            actions={
-              <Button size="sm" variant="outline" onClick={() => setShowRecordPaymentDialog(true)} disabled={acting}>
-                <Receipt size={14} className="mr-1.5" />
-                Record payment
-              </Button>
-            }
             details={
               <>
                 <p>
@@ -969,9 +963,17 @@ export default function InvoiceDetailPage() {
               </>
             }
           >
-            <p className="text-foreground">
-              Recorded as bad debt, so Velox won&apos;t collect it; if the customer pays later, record the payment.
-            </p>
+            {/* The main action sits with the main sentence; the subscription
+                and card lines below are secondary. */}
+            <div className="space-y-2">
+              <p className="text-foreground">
+                Recorded as bad debt, so Velox won&apos;t collect it; if the customer pays later, record the payment.
+              </p>
+              <Button size="sm" variant="outline" onClick={() => setShowRecordPaymentDialog(true)} disabled={acting}>
+                <Receipt size={14} className="mr-1.5" />
+                Record payment
+              </Button>
+            </div>
             {subLine && (
               <p className="flex flex-wrap items-center gap-x-2">
                 {subLine.text}
