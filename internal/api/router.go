@@ -273,6 +273,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	creditSvc.SetExpiryGrace(o.invoiceGrace)
 	creditH := credit.NewHandler(creditSvc)
 	creditNoteStore := creditnote.NewPostgresStore(db)
+	// The credit-note issue stamp copies customer PII, so it needs the
+	// customer store's key (ADR-109).
+	if sharedEnc != nil {
+		creditNoteStore.SetEncryptor(sharedEnc)
+	}
 
 	// Wire proration dependencies for plan change invoicing
 	subH.SetProrationDeps(pricingSvc, &prorationInvoiceCreatorAdapter{store: invoiceStore, numberer: settingsStore}, &prorationCreditGranterAdapter{svc: creditSvc})

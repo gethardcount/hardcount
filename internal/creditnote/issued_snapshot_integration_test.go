@@ -2,12 +2,14 @@ package creditnote
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/sagarsuperuser/velox/internal/platform/crypto"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenant"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -26,6 +28,15 @@ func TestCreditNotePDF_IssuedKeepsIssueTimeParties(t *testing.T) {
 	settings := tenant.NewSettingsStore(db)
 	invoices := invoice.NewPostgresStore(db)
 	store := NewPostgresStore(db)
+	// Encryption on, as in production (router.go): the customer PII the
+	// issue stamp copies is stored encrypted.
+	enc, err := crypto.NewEncryptor(strings.Repeat("cd", 32))
+	if err != nil {
+		t.Fatalf("encryptor: %v", err)
+	}
+	customers.SetEncryptor(enc)
+	invoices.SetEncryptor(enc)
+	store.SetEncryptor(enc)
 
 	cust, err := customers.Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_cn_snap", DisplayName: "CN Buyer", Email: "ap@cn.test",
@@ -123,6 +134,25 @@ func TestCreditNotePDF_IssuedKeepsIssueTimeParties(t *testing.T) {
 		got := want{bt.Name, bt.AddressLine1, bt.Country, bt.TaxID, ci.Name, ci.AddressLine1, ci.TaxID}
 		if got != c.want {
 			t.Errorf("%s: credit-note PDF prints %+v, want %+v", c.label, got, c.want)
+		}
+	}
+
+	// The stored copy keeps the buyer PII encrypted; the read decrypts it.
+	cn, err := store.Get(ctx, tenantID, viaStore.ID)
+	if err != nil {
+		t.Fatalf("get credit note: %v", err)
+	}
+	if b := cn.BillToSnapshot; b == nil || b.DisplayName != "CN Buyer" || b.Email != "ap@cn.test" {
+		t.Errorf("API bill_to_snapshot = %+v, want plaintext display name and email", b)
+	}
+	var raw string
+	if err := testutil.AdminPool(t).QueryRowContext(ctx,
+		`SELECT bill_to_snapshot::text FROM credit_notes WHERE id = $1`, viaStore.ID).Scan(&raw); err != nil {
+		t.Fatalf("read raw copy: %v", err)
+	}
+	for _, pii := range []string{"CN Buyer", "ap@cn.test", before.legal, before.taxID} {
+		if strings.Contains(raw, pii) {
+			t.Errorf("stored bill_to_snapshot holds plaintext %q: %s", pii, raw)
 		}
 	}
 }

@@ -93,7 +93,9 @@ func NewDocumentSupplier(ts TenantSettings) DocumentSupplier {
 // RLS-scoped transaction, so it sees the same tenant and mode as the document
 // row being issued. A missing billing profile or settings row reads as empty
 // strings; a missing customer returns no row, and the stamp fails instead of
-// writing an empty copy. Scan with DocumentPartiesScanDest.
+// writing an empty copy. Scan with DocumentPartiesScanDest. The bill-to PII
+// columns come back as stored (encrypted when a key is set): call
+// DocumentBillTo.Open before using them.
 const DocumentPartiesSQL = `
 	SELECT c.display_name, COALESCE(c.email,''),
 		COALESCE(bp.legal_name,''),
@@ -129,8 +131,12 @@ func DocumentPartiesScanDest(b *DocumentBillTo, s *DocumentSupplier) []any {
 // leaves the destination nil, which is what tells a renderer to fall back to
 // live data. The column must be selected bare: a COALESCE would turn NULL
 // into a value and the fallback could never fire (ADR-109 trap).
+//
+// Open, when set, runs on the decoded value before it is stored, so a store
+// can decrypt the bill-to PII fields on the way out (DocumentBillTo.Open).
 type SnapshotScanner[T any] struct {
-	Dst **T
+	Dst  **T
+	Open func(T) (T, error)
 }
 
 // Scan implements sql.Scanner.
@@ -151,6 +157,54 @@ func (s SnapshotScanner[T]) Scan(src any) error {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return fmt.Errorf("document snapshot: %w", err)
 	}
+	if s.Open != nil {
+		opened, err := s.Open(out)
+		if err != nil {
+			return fmt.Errorf("document snapshot: %w", err)
+		}
+		out = opened
+	}
 	*s.Dst = &out
 	return nil
+}
+
+// FieldCipher encrypts and decrypts one stored string. *crypto.Encryptor
+// satisfies it; with no key it passes plaintext through.
+type FieldCipher interface {
+	Encrypt(plaintext string) (string, error)
+	Decrypt(stored string) (string, error)
+}
+
+// Seal encrypts the bill-to fields the customer store encrypts at rest
+// (display name, email, legal name, tax ID), so the issued copy holds no
+// more plaintext PII than the rows it was copied from. Address fields stay
+// plaintext, as they are on the billing profile.
+func (b DocumentBillTo) Seal(c FieldCipher) (DocumentBillTo, error) {
+	return b.mapPII(c.Encrypt)
+}
+
+// Open is the inverse of Seal. It also decrypts the raw customer and
+// billing-profile columns DocumentPartiesSQL reads, which hold the same
+// fields encrypted. A plaintext value passes through unchanged.
+func (b DocumentBillTo) Open(c FieldCipher) (DocumentBillTo, error) {
+	return b.mapPII(c.Decrypt)
+}
+
+func (b DocumentBillTo) mapPII(f func(string) (string, error)) (DocumentBillTo, error) {
+	for _, field := range []struct {
+		name string
+		v    *string
+	}{
+		{"display_name", &b.DisplayName},
+		{"email", &b.Email},
+		{"legal_name", &b.LegalName},
+		{"tax_id", &b.TaxID},
+	} {
+		out, err := f(*field.v)
+		if err != nil {
+			return DocumentBillTo{}, fmt.Errorf("bill-to %s: %w", field.name, err)
+		}
+		*field.v = out
+	}
+	return b, nil
 }

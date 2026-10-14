@@ -361,6 +361,31 @@ What the document prints, and what decides printed wording.
   - email message wording: the greeting name and the sender name on an
     email are the message, sent now, and stay live.
 
+### PII: encrypted at rest, kept with the document
+
+With `VELOX_ENCRYPTION_KEY` set (production refuses to boot without it),
+the customer store encrypts the buyer's display name, email, legal name and
+tax ID. The bill-to copy holds the same four fields, so it encrypts them
+too, with the same key:
+
+- The stamp decrypts the customer and billing-profile values it reads,
+  applies the invoice's own tax ID, then encrypts those four fields again
+  before it writes the copy (`DocumentBillTo.Open`, then `Seal`). The
+  invoice and credit-note stores hold the shared key (`router.go`).
+- Every read of the copy decrypts them (`SnapshotScanner.Open`), so the PDF,
+  the hosted page, the dashboard and the API get plaintext.
+- Address fields stay plaintext in the copy, as they are on the billing
+  profile. The supplier block is the tenant's own company details, stored
+  plaintext in `tenant_settings`, and stays plaintext.
+- If the key cannot decrypt a source value, issuing fails. It never writes
+  ciphertext into a document.
+
+The copy is PII and is kept as part of the issued tax document, which the
+law usually requires a seller to retain. Velox has no erasure path today
+(removed 2026-05-29). A future erasure path must decide, for
+`invoices.bill_to_snapshot` and `credit_notes.bill_to_snapshot`, whether to
+redact the copy or keep it on purpose as a retained tax record.
+
 ### When
 
 At the moment the document is issued. Drafts render live.
@@ -409,6 +434,6 @@ modes are the same as the status write's own.
 | Invoice PDF (`invoice.BuildPDFContext`): email attachment, API download, hosted PDF | bill-to, supplier, buyer tax ID, legend wording | live, as before |
 | Hosted invoice page (`hostedinvoice` view) | bill-to and company block | live |
 | Credit-note PDF, download and email (`creditnote` `assemblePDFContext`) | bill-to and supplier | live |
-| Dashboard `InvoiceDetail` From and Bill To | snapshot | live (drafts, old rows) |
+| Dashboard `InvoiceDetail` From and Bill To (Bill To prints the display name either way, so finalizing does not change it) | snapshot | live (drafts, old rows) |
 | API `GET /v1/invoices/{id}`, `GET /v1/credit-notes/{id}` | `bill_to_snapshot`, `supplier_snapshot` | fields omitted |
 | Email greeting name and sender name | live by decision: message, not document | live |

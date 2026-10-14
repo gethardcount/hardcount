@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/sagarsuperuser/velox/internal/platform/crypto"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenant"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -29,6 +31,13 @@ func TestHostedView_IssuedInvoiceKeepsIssueTimeParties(t *testing.T) {
 	customers := customer.NewPostgresStore(db)
 	settings := tenant.NewSettingsStore(db)
 	invoices := invoice.NewPostgresStore(db)
+	// Encryption on, as in production (router.go).
+	enc, err := crypto.NewEncryptor(strings.Repeat("ef", 32))
+	if err != nil {
+		t.Fatalf("encryptor: %v", err)
+	}
+	customers.SetEncryptor(enc)
+	invoices.SetEncryptor(enc)
 
 	cust, err := customers.Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_hosted_snap", DisplayName: "Hosted Buyer", Email: "ap@hosted.test",

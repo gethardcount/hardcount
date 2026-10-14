@@ -10,6 +10,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/crypto"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenant"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -53,11 +54,22 @@ type snapRig struct {
 
 func newSnapRig(t *testing.T, name string) *snapRig {
 	t.Helper()
+	return newSnapRigWith(t, name, nil)
+}
+
+// newSnapRigWith wires enc into the customer store and the invoice store,
+// the way router.go does when VELOX_ENCRYPTION_KEY is set (always, in
+// production). nil leaves both stores without a key.
+func newSnapRigWith(t *testing.T, name string, enc *crypto.Encryptor) *snapRig {
+	t.Helper()
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, name)
 	customers := customer.NewPostgresStore(db)
 	settings := tenant.NewSettingsStore(db)
+	if enc != nil {
+		customers.SetEncryptor(enc)
+	}
 	cust, err := customers.Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_snap", DisplayName: "Buyer Display", Email: "ap@buyer.test",
 	})
@@ -65,6 +77,9 @@ func newSnapRig(t *testing.T, name string) *snapRig {
 		t.Fatalf("create customer: %v", err)
 	}
 	store := NewPostgresStore(db)
+	if enc != nil {
+		store.SetEncryptor(enc)
+	}
 	r := &snapRig{
 		db: db, ctx: ctx, tenantID: tenantID, custID: cust.ID,
 		store: store, svc: NewService(store, clock.Real(), settings),
@@ -422,5 +437,77 @@ func TestIssuedInvoice_BuyerTaxIDIsTheInvoicesOwn(t *testing.T) {
 	inv, bt, _ := r.pdfParties(t, issued.ID)
 	if got := buyerTaxID(inv, bt); got != "DE999000111" {
 		t.Errorf("printed buyer tax ID = %q, want DE999000111", got)
+	}
+}
+
+// TestIssuedInvoice_EncryptedPIIPrintsPlaintextAndStaysEncrypted: production
+// encrypts the customer's display name and email and the billing profile's
+// legal name and tax ID at rest. The issue stamp must decrypt them before it
+// copies them, so every render prints plaintext, and must encrypt them again
+// in the copy, so the invoice row holds no more plaintext PII than the
+// customer rows do.
+func TestIssuedInvoice_EncryptedPIIPrintsPlaintextAndStaysEncrypted(t *testing.T) {
+	enc, err := crypto.NewEncryptor(strings.Repeat("ab", 32))
+	if err != nil {
+		t.Fatalf("encryptor: %v", err)
+	}
+	r := newSnapRigWith(t, "Snapshot Encrypted Corp", enc)
+	issued := r.createFinalized(t, "SNAP-ENC-1")
+	r.applyEra(t, eraAfter)
+
+	inv, bt, ci := r.pdfParties(t, issued.ID)
+	assertPrints(t, "issued invoice, encryption on", inv, bt, ci, eraBefore)
+	if b := inv.BillToSnapshot; b == nil || b.DisplayName != "Buyer Display" || b.Email != "ap@buyer.test" {
+		t.Errorf("API bill_to_snapshot = %+v, want plaintext display name and email", b)
+	}
+
+	var raw string
+	if err := testutil.AdminPool(t).QueryRowContext(r.ctx,
+		`SELECT bill_to_snapshot::text FROM invoices WHERE id = $1`, issued.ID).Scan(&raw); err != nil {
+		t.Fatalf("read raw copy: %v", err)
+	}
+	for _, pii := range []string{"Buyer Display", "ap@buyer.test", eraBefore.legalName, eraBefore.taxID} {
+		if strings.Contains(raw, pii) {
+			t.Errorf("stored bill_to_snapshot holds plaintext %q: %s", pii, raw)
+		}
+	}
+	if !strings.Contains(raw, "enc:") {
+		t.Errorf("stored bill_to_snapshot has no encrypted field: %s", raw)
+	}
+}
+
+// TestIssuedInvoice_LaterTransitionsKeepIssueCopy: only taking an invoice
+// out of draft stamps the copy. Voiding it, writing it off or recording its
+// payment after a profile edit must leave the issue-time details in place.
+func TestIssuedInvoice_LaterTransitionsKeepIssueCopy(t *testing.T) {
+	cases := []struct {
+		name string
+		move func(t *testing.T, r *snapRig, id string) (domain.Invoice, error)
+	}{
+		{"void", func(t *testing.T, r *snapRig, id string) (domain.Invoice, error) {
+			return r.store.UpdateStatus(r.ctx, r.tenantID, id, domain.InvoiceVoided)
+		}},
+		{"mark uncollectible", func(t *testing.T, r *snapRig, id string) (domain.Invoice, error) {
+			return r.store.UpdateStatus(r.ctx, r.tenantID, id, domain.InvoiceUncollectible)
+		}},
+		{"mark paid", func(t *testing.T, r *snapRig, id string) (domain.Invoice, error) {
+			return r.store.MarkPaid(r.ctx, r.tenantID, id, "", time.Now().UTC())
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newSnapRig(t, "Snapshot Transition Corp")
+			issued := r.createFinalized(t, "SNAP-MOVE-1")
+			r.applyEra(t, eraAfter)
+			moved, err := c.move(t, r, issued.ID)
+			if err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			if moved.Status == domain.InvoiceFinalized {
+				t.Fatalf("%s left the invoice finalized; the transition under test did not run", c.name)
+			}
+			inv, bt, ci := r.pdfParties(t, issued.ID)
+			assertPrints(t, "after "+c.name, inv, bt, ci, eraBefore)
+		})
 	}
 }

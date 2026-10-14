@@ -3380,6 +3380,10 @@ func (s *PostgresStore) scanInvoiceRows(rows *sql.Rows, queryErr error) ([]domai
 // calculated with), otherwise the profile's. That keeps one buyer tax ID on
 // an issued document, from one place.
 //
+// The buyer's display name, email, legal name and tax ID are encrypted in the
+// copy, as they are on the customer and billing-profile rows; the scan
+// decrypts them (openBillTo).
+//
 // The UPDATE returns the row, so inv (and every caller that renders from the
 // returned value instead of re-reading) carries the copy. A customer the
 // transaction cannot see fails the issue instead of writing an empty copy.
@@ -3394,8 +3398,14 @@ func (s *PostgresStore) stampIssuedPartiesTx(ctx context.Context, tx *sql.Tx, in
 	if err != nil {
 		return fmt.Errorf("issue invoice %s: read parties for the issued-document copy: %w", inv.ID, err)
 	}
+	if billTo, err = billTo.Open(s.enc); err != nil {
+		return fmt.Errorf("issue invoice %s: decrypt parties for the issued-document copy: %w", inv.ID, err)
+	}
 	if id := strings.TrimSpace(inv.TaxID); id != "" {
 		billTo.TaxID = id
+	}
+	if billTo, err = billTo.Seal(s.enc); err != nil {
+		return fmt.Errorf("issue invoice %s: encrypt bill-to copy: %w", inv.ID, err)
 	}
 	billJSON, err := json.Marshal(billTo)
 	if err != nil {
@@ -3414,6 +3424,12 @@ func (s *PostgresStore) stampIssuedPartiesTx(ctx context.Context, tx *sql.Tx, in
 		return fmt.Errorf("issue invoice %s: write issued-document copy: %w", inv.ID, err)
 	}
 	return nil
+}
+
+// openBillTo decrypts the PII fields of a scanned bill-to copy, so readers
+// and the API get plaintext (stampIssuedPartiesTx seals them).
+func (s *PostgresStore) openBillTo(b domain.DocumentBillTo) (domain.DocumentBillTo, error) {
+	return b.Open(s.enc)
 }
 
 func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
@@ -3440,7 +3456,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.PaymentAnomalyKind, &inv.PaymentAnomalyPaymentIntentID, &inv.PaymentAnomalyCapturedCents,
 		&inv.BillingTimezone, &inv.NoPMNotifiedAt, &inv.ChargeAttemptSeq,
 		&inv.ProviderPaymentStatus, &inv.ProviderSyncedAt,
-		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &inv.BillToSnapshot},
+		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &inv.BillToSnapshot, Open: s.openBillTo},
 		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &inv.SupplierSnapshot},
 	}
 }

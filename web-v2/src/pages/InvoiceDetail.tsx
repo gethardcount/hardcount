@@ -1057,11 +1057,13 @@ export default function InvoiceDetailPage() {
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Bill To</p>
               {/* An issued invoice shows the buyer it was issued to (ADR-109);
-                  a draft or a pre-copy invoice shows the current customer. */}
+                  a draft or a pre-copy invoice shows the current customer.
+                  Both print the display name, so finalizing does not change
+                  the name shown here. */}
               {invoice.bill_to_snapshot ? (
                 <>
                   <Link to={`/customers/${invoice.customer_id}`} className="text-sm font-medium text-primary hover:underline">
-                    {invoice.bill_to_snapshot.legal_name || invoice.bill_to_snapshot.display_name}
+                    {invoice.bill_to_snapshot.display_name}
                   </Link>
                   {invoice.bill_to_snapshot.email && (
                     <p className="text-sm text-muted-foreground mt-0.5">{invoice.bill_to_snapshot.email}</p>
