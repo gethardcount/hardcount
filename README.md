@@ -51,7 +51,7 @@ It prints the dashboard address (`http://localhost:8080`), a login and a test AP
 ./quickstart.sh demo
 ```
 
-The demo checks every call and stops at the first mismatch. Each run creates a fresh demo customer on its own test clock, so you can rerun it. `./quickstart.sh stop` stops Velox and keeps its data; `./quickstart.sh destroy` deletes it.
+The demo checks each step and stops if anything goes wrong, so a finished run means it all worked. Each run creates a fresh demo customer on its own test clock, so you can rerun it. `./quickstart.sh stop` stops Velox and keeps its data; `./quickstart.sh destroy` deletes it.
 
 To change Velox itself, with Go and Node on your machine, see [Development setup](CONTRIBUTING.md#development-setup).
 
