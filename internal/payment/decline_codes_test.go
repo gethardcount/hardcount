@@ -1,6 +1,9 @@
 package payment
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestDeclineCodeToOperatorMessage_CuratedCodes asserts the high-traffic
 // codes resolve to their curated phrasings rather than the awkward
@@ -72,5 +75,22 @@ func TestPaymentError_OperatorSafeMessage_UnknownPaymentReturnsGeneric(t *testin
 	got := pe.OperatorSafeMessage()
 	if got != "Payment provider rejected the request. Please retry; if the problem persists, contact support." {
 		t.Errorf("expected generic message, got %q", got)
+	}
+}
+
+// An unknown outcome carries its own code and never reads as a refusal; a
+// decline or a refusal keeps provider_error.
+func TestPaymentError_UnknownOutcomeHasOwnCode(t *testing.T) {
+	unknown := &PaymentError{Message: "stripe: 503", Unknown: true}
+	if got := unknown.OperatorErrorCode(); got != "payment_outcome_unknown" {
+		t.Errorf("unknown code: got %q", got)
+	}
+	if got := unknown.OperatorSafeMessage(); !strings.Contains(got, "didn't confirm whether the charge went through") {
+		t.Errorf("unknown message: got %q", got)
+	}
+	for _, pe := range []*PaymentError{{Message: "x", DeclineCode: "card_declined"}, {Message: "x"}} {
+		if got := pe.OperatorErrorCode(); got != "" {
+			t.Errorf("decline/refusal must keep provider_error, got %q", got)
+		}
 	}
 }

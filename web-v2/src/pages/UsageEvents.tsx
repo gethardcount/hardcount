@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, formatDateTime } from '@/lib/api'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { startOfDayInTZ, endOfDayInTZ, civilDateAgo } from '@/lib/dates'
-import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_ROWS, exportCapNotice, parseRange, rangeCaption, resolveWindow, usageEmptyKind } from '@/lib/usageRange'
+import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_ROWS, exportCapNotice, parseRange, rangeCaption, resolveWindow, usageEmptyKind, needsAnyEventCheck } from '@/lib/usageRange'
 import type { Customer, Meter, UsageEvent, UsageEventsAggregate } from '@/lib/api'
 import { downloadCSV } from '@/lib/csv'
 import { showApiError } from '@/lib/formErrors'
@@ -155,6 +155,22 @@ export default function UsageEventsPage() {
     queryKey: ['usage-events-aggregate', filterQs],
     queryFn: () => api.aggregateUsageEvents(filterQs || undefined),
   })
+
+  // Empty page under a time window: does the workspace have any event at
+  // all? Decides "No usage events yet" (set up a meter) against "No events
+  // match these filters". Sent only once the windowed list came back empty,
+  // with no filters, so a busy workspace never pays for it; the list's
+  // total makes this one request count the workspace's events, which on
+  // this path are all older than the window.
+  const filtersForEmpty = { customer: filterCustomer, meter: filterMeter, dim: filterDim }
+  const checkAnyEver = !loading && !error && events.length === 0 && needsAnyEventCheck(range, filtersForEmpty)
+  const { data: anyEver = null, isPending: anyEverPending } = useQuery({
+    queryKey: ['usage-events-any-ever'],
+    queryFn: async () => ((await api.listUsageEvents('limit=1')).data ?? []).length > 0,
+    enabled: checkAnyEver,
+    retry: false,
+  })
+  const emptyKind = usageEmptyKind(range, filtersForEmpty, anyEver)
 
   // `quantity` is wire-encoded as a string (NUMERIC(38, 12)) for decimal
   // precision; coerce to number for display math only. Authoritative
@@ -360,7 +376,7 @@ export default function UsageEventsPage() {
             <LoadError what="usage events" error={error} onRetry={loadEvents} />
           </CardContent>
         </Card>
-      ) : loading ? (
+      ) : loading || (checkAnyEver && anyEverPending) ? (
         <Card className="mt-6">
           <CardContent className="p-0">
             <TableSkeleton columns={4} />
@@ -369,7 +385,7 @@ export default function UsageEventsPage() {
       ) : events.length === 0 ? (
         <Card className="mt-6">
           <CardContent className="p-0">
-            {usageEmptyKind(range, { customer: filterCustomer, meter: filterMeter, dim: filterDim }) === 'none-yet' ? (
+            {emptyKind === 'none-yet' ? (
               <EmptyState
                 icon={Activity}
                 title="No usage events yet"

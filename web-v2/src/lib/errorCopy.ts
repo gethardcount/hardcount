@@ -25,13 +25,14 @@ interface ApiErrorLike {
   status: number
   code?: string
   requestId?: string
+  method?: string
 }
 
 function asApiError(err: unknown): ApiErrorLike | null {
   if (!(err instanceof Error)) return null
   const e = err as Error & Partial<ApiErrorLike>
   if (typeof e.status !== 'number') return null
-  return { message: e.message, status: e.status, code: e.code, requestId: e.requestId }
+  return { message: e.message, status: e.status, code: e.code, requestId: e.requestId, method: e.method }
 }
 
 // fetch() rejects with a TypeError when no response arrives. The wording is
@@ -114,6 +115,23 @@ export function errorRequestId(err: unknown): string | undefined {
   return api.requestId || undefined
 }
 
+// outcomeUnknown is true when the action may have taken effect but no answer
+// says so: a change sent with no response back (timeout or dropped
+// connection), or a charge Stripe never answered (payment_outcome_unknown).
+// A caller title like "Failed to void" or "Couldn't charge" would then be a
+// guess, so the toast says the result is unknown instead.
+export function outcomeUnknown(err: unknown): boolean {
+  const api = asApiError(err)
+  if (!api) return false
+  if (api.code === 'payment_outcome_unknown') return true
+  if (api.status !== 0 || !api.method) return false
+  return api.method !== 'GET' && api.method !== 'HEAD'
+}
+
+export const NO_ANSWER_TITLE = 'Result unknown'
+export const NO_ANSWER_MESSAGE =
+  "The server didn't answer, so this may have gone through. Refresh to check before trying again."
+
 export interface ErrorToast {
   // false: show nothing. A 401 is handled once for the whole dashboard
   // (sign-in redirect), so each failed request must not also toast.
@@ -129,6 +147,14 @@ export function errorToast(err: unknown, title?: string): ErrorToast {
   const body = errorSentence(err)
   const copyId = errorRequestId(err)
   const show = classifyError(err) !== 'session'
+  if (outcomeUnknown(err)) {
+    // Stripe's own sentence says what happens next; a request with no
+    // response has nothing to add beyond "check before retrying".
+    if (asApiError(err)?.code === 'payment_outcome_unknown') {
+      return { show, title: 'Payment result unknown', description: body, copyId }
+    }
+    return { show, title: NO_ANSWER_TITLE, description: NO_ANSWER_MESSAGE, copyId }
+  }
   if (!title) return { show, title: body, copyId }
   return { show, title, description: body, copyId }
 }

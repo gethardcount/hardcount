@@ -9,6 +9,9 @@ import {
   errorRequestId,
   errorSentence,
   errorToast,
+  NO_ANSWER_MESSAGE,
+  NO_ANSWER_TITLE,
+  outcomeUnknown,
   rawErrorDetail,
   SESSION_ENDED_MESSAGE,
 } from '../src/lib/errorCopy.ts'
@@ -18,20 +21,22 @@ class FakeApiError extends Error {
   status: number
   code?: string
   requestId?: string
-  constructor(message: string, status: number, opts: { code?: string; requestId?: string } = {}) {
+  method?: string
+  constructor(message: string, status: number, opts: { code?: string; requestId?: string; method?: string } = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = opts.code
     this.requestId = opts.requestId
+    this.method = opts.method
   }
 }
 
 test('a refused request keeps the caller title and shows the server sentence, without an ID', () => {
   const err = new FakeApiError('a payment for this invoice is already in progress', 409, { code: 'invalid_state', requestId: 'req_1' })
-  assert.deepEqual(errorToast(err, 'Payment failed'), {
+  assert.deepEqual(errorToast(err, "Couldn't charge"), {
     show: true,
-    title: 'Payment failed',
+    title: "Couldn't charge",
     description: 'A payment for this invoice is already in progress.',
     copyId: undefined,
   })
@@ -98,4 +103,44 @@ test('without a caller title the sentence is the title', () => {
 test('a non-API error keeps the message the page threw', () => {
   assert.equal(errorSentence(new Error('Pick a customer first')), 'Pick a customer first.')
   assert.equal(errorSentence('weird'), 'Something unexpected went wrong. Try again.')
+})
+
+// Charge now: a title that claims an outcome is a lie when no answer came
+// back. The card may have been charged, so the toast must not say it failed.
+test('a change with no response says the result is unknown, not that it failed', () => {
+  for (const code of ['timeout', 'network']) {
+    const err = new FakeApiError('Request timed out after 40s', 0, { code, method: 'POST' })
+    assert.equal(outcomeUnknown(err), true)
+    assert.deepEqual(errorToast(err, "Couldn't charge"), {
+      show: true,
+      title: NO_ANSWER_TITLE,
+      description: NO_ANSWER_MESSAGE,
+      copyId: undefined,
+    })
+  }
+})
+
+test('a load with no response stays a connection problem (nothing could have changed)', () => {
+  const err = new FakeApiError('Failed to fetch', 0, { code: 'network', method: 'GET' })
+  assert.equal(outcomeUnknown(err), false)
+  assert.equal(errorToast(err, 'Export failed').title, 'Export failed')
+  assert.match(errorToast(err, 'Export failed').description!, /Couldn't reach the server/)
+})
+
+test('Stripe never answering a charge reads as unknown, with its own sentence and Copy ID', () => {
+  const err = new FakeApiError(
+    "Stripe didn't confirm whether the charge went through. Velox will check with Stripe and update the invoice; don't charge again until it does.",
+    502,
+    { code: 'payment_outcome_unknown', requestId: 'req_7' },
+  )
+  const t = errorToast(err, "Couldn't charge")
+  assert.equal(t.title, 'Payment result unknown')
+  assert.match(t.description!, /didn't confirm whether the charge went through/)
+  assert.equal(t.copyId, 'req_7')
+})
+
+test('a Stripe refusal keeps the caller title: nothing was charged', () => {
+  const err = new FakeApiError('Card was declined: insufficient funds.', 502, { code: 'provider_error', requestId: 'req_8' })
+  assert.equal(outcomeUnknown(err), false)
+  assert.equal(errorToast(err, "Couldn't charge").title, "Couldn't charge")
 })

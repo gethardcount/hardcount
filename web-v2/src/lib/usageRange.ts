@@ -74,15 +74,35 @@ export function rangeCaption(range: RangeKey, window: Window): string {
 }
 
 // usageEmptyKind tells an empty Usage Events page apart: nothing has ever
-// arrived ("none-yet"), or the filters hide what did ("no-match"). The page
-// opens on Last 30 days, so "No usage events yet" on an empty window told
-// operators with older events that they had none.
+// arrived ("none-yet"), or the window or filters hide what did ("no-match").
+// The page opens on Last 30 days, so the empty window alone proves nothing:
+// a new workspace and one whose events are all older look the same.
+//
+// `anyEver` answers "does this workspace have any event at all?" (a one-row
+// unfiltered request); null while unknown. "No events match" is true of any
+// empty page, so it is the answer whenever "none yet" is not proven, including
+// when that check failed.
 export function usageEmptyKind(
   range: RangeKey,
   filters: { customer?: string; meter?: string; dim?: string },
+  anyEver: boolean | null,
 ): 'none-yet' | 'no-match' {
   const filtered = !!(filters.customer || filters.meter || filters.dim)
-  return range === 'all' && !filtered ? 'none-yet' : 'no-match'
+  if (filtered) return 'no-match'
+  // All time with no filters: the empty list is itself the proof.
+  if (range === 'all') return 'none-yet'
+  return anyEver === false ? 'none-yet' : 'no-match'
+}
+
+// needsAnyEventCheck: the one-row "any events ever?" request is only worth
+// sending when its answer can change the empty state: a time window with no
+// other filters. With a customer, meter or dimension filter the page says
+// "No events match" either way, and Clear filters leads to All time.
+export function needsAnyEventCheck(
+  range: RangeKey,
+  filters: { customer?: string; meter?: string; dim?: string },
+): boolean {
+  return range !== 'all' && !(filters.customer || filters.meter || filters.dim)
 }
 
 export const EXPORT_MAX_ROWS = 50_000

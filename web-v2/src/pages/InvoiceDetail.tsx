@@ -493,7 +493,10 @@ export default function InvoiceDetailPage() {
     // The returned invoice says what happened — paid outright (card or
     // credit), still confirming, or an outcome recorded during the call.
     onSuccess: (updated) => { invalidateAll(); showOutcome(collectOutcome(updated)) },
-    onError: (err) => showApiError(err, 'Payment failed'),
+    // A refusal means nothing was charged; "Couldn't charge" says that and
+    // no more. No answer (or Stripe never answering) gets "result unknown"
+    // from errorToast, since the card may have been charged.
+    onError: (err) => showApiError(err, "Couldn't charge"),
   })
 
   // No-payment-method nudge: re-send the SAME setup-link email the engine sent

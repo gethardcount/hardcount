@@ -10990,8 +10990,11 @@ export interface operations {
                 };
             };
             /**
-             * @description Stripe declined or refused the charge (code `provider_error`).
-             *     The message gives the reason in plain words.
+             * @description Stripe declined or refused the charge (code `provider_error`),
+             *     so nothing was charged. The message gives the reason in plain
+             *     words. Code `payment_outcome_unknown`: Stripe never answered,
+             *     so the card may have been charged; Velox checks with Stripe and
+             *     updates the invoice. Do not retry until it does.
              */
             502: {
                 headers: {

@@ -59,9 +59,20 @@ func (e *PaymentError) OperatorSafeMessage() string {
 		return "Card was declined: " + declineCodeToOperatorMessage(string(e.DeclineCode))
 	}
 	if e.Unknown {
-		return "Payment outcome could not be determined. Velox will reconcile shortly; refresh in a few seconds."
+		return "Stripe didn't confirm whether the charge went through. Velox will check with Stripe and update the invoice; don't charge again until it does."
 	}
 	return "Payment provider rejected the request. Please retry; if the problem persists, contact support."
+}
+
+// OperatorErrorCode gives an unknown outcome its own wire code. Under the
+// shared provider_error a caller could not tell "Stripe refused" (nothing
+// was charged) from "no answer" (the card may have been charged), and the
+// dashboard titled both "Couldn't charge".
+func (e *PaymentError) OperatorErrorCode() string {
+	if e.Unknown {
+		return "payment_outcome_unknown"
+	}
+	return ""
 }
 
 // humanizeDeclineCode converts Stripe's snake_case decline codes

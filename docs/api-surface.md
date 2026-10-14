@@ -138,7 +138,7 @@ Most API errors return one JSON envelope with the same fields. Every response th
 | 422 | `invalid_request_error` | A field or business rule failed (`validation_error`, or a specific code). |
 | 429 | `rate_limit_error` | Too many requests (`rate_limited`, or `cooldown_active` for a repeated setup-link email). Wait for the number of seconds in `Retry-After`. |
 | 500 | `api_error` | Unexpected server error (`internal_error`). The details are logged on the server, not returned. A few operations return a specific code with instructions instead, for example `proration_failed`. |
-| 502 | `api_error` | An upstream call failed: the payment provider rejected the request (`provider_error`, `stripe_error`), or an email could not be queued (`email_enqueue_failed`). |
+| 502 | `api_error` | An upstream call failed: the payment provider rejected the request (`provider_error`, `stripe_error`) or never answered (`payment_outcome_unknown`: the charge may have gone through, so check before retrying), or an email could not be queued (`email_enqueue_failed`). |
 | 503 | `api_error` | A dependency is down for a short time (`authentication_unavailable`, `ingest_unavailable`), so you can retry. `stripe_unavailable` and `email_unavailable` mean the feature is not configured on this deployment, and retrying will not help. |
 
 Request bodies are limited to 1 MB; Stripe webhook bodies are limited to 64 KB. Only the two routes listed in the 413 row return 413. Other routes do not promise a specific status for a body that is too large. If an oversized usage batch is sent with an `Idempotency-Key` header, it gets 400 with `type` `bad_request` in the smaller idempotency body (see Exceptions), not 413.

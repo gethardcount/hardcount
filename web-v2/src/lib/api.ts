@@ -23,13 +23,17 @@ export class ApiError extends Error {
   field?: string
   code?: string
   requestId?: string
-  constructor(message: string, status: number, opts?: { field?: string; code?: string; requestId?: string }) {
+  // method is set only when no response arrived (status 0): a POST that got
+  // no answer may still have taken effect, a GET did nothing.
+  method?: string
+  constructor(message: string, status: number, opts?: { field?: string; code?: string; requestId?: string; method?: string }) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.field = opts?.field
     this.code = opts?.code
     this.requestId = opts?.requestId
+    this.method = opts?.method
   }
 }
 
@@ -73,6 +77,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 40_000
 export async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const method = (init.method || 'GET').toUpperCase()
   try {
     return await fetch(url, { ...init, signal: controller.signal })
   } catch (e) {
@@ -80,8 +85,14 @@ export async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs
       throw new ApiError(
         `Request timed out after ${Math.round(timeoutMs / 1000)}s — the server didn't respond. Check the API is running and reachable, then retry.`,
         0,
-        { code: 'timeout' },
+        { code: 'timeout', method },
       )
+    }
+    // fetch rejects with a TypeError when no response arrives ("Failed to
+    // fetch"). Carrying the method lets the error toast tell an action that
+    // may have gone through from a load that did nothing.
+    if (e instanceof TypeError) {
+      throw new ApiError(e.message, 0, { code: 'network', method })
     }
     throw e
   } finally {

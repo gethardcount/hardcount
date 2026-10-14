@@ -21,6 +21,14 @@ import (
 // ADR-026.
 type SafeMessageError = errs.SafeMessageError
 
+// OperatorCodeError lets a SafeMessageError name a more specific code than
+// provider_error, so a caller can branch on it (payment_outcome_unknown:
+// the provider never answered, the charge may have gone through).
+// Returning "" keeps provider_error.
+type OperatorCodeError interface {
+	OperatorErrorCode() string
+}
+
 // FromError translates a service/store error into the appropriate HTTP response.
 // This is the single place where domain errors become API responses.
 //
@@ -110,7 +118,12 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 				"error", err,
 				"resource", resource,
 			)
-			Error(w, r, http.StatusBadGateway, "api_error", "provider_error", sme.OperatorSafeMessage())
+			code := "provider_error"
+			var oc OperatorCodeError
+			if errors.As(err, &oc) && oc.OperatorErrorCode() != "" {
+				code = oc.OperatorErrorCode()
+			}
+			Error(w, r, http.StatusBadGateway, "api_error", code, sme.OperatorSafeMessage())
 			return
 		}
 

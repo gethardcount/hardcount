@@ -234,6 +234,38 @@ func TestFromError_SafeMessageWrapped_DetectedViaErrorsAs(t *testing.T) {
 	}
 }
 
+// codedSafeMessageError opts into a specific wire code as well.
+type codedSafeMessageError struct {
+	fakeSafeMessageError
+	code string
+}
+
+func (e *codedSafeMessageError) OperatorErrorCode() string { return e.code }
+
+// An unknown payment outcome must not share provider_error with a refusal:
+// the dashboard says "Couldn't charge" for provider_error, which is false
+// when the card may have been charged.
+func TestFromError_SafeMessageError_OwnCodeWinsOverProviderError(t *testing.T) {
+	for _, tc := range []struct{ code, want string }{
+		{"payment_outcome_unknown", `"code":"payment_outcome_unknown"`},
+		{"", `"code":"provider_error"`},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/", nil)
+		err := fmt.Errorf("payment failed: %w", &codedSafeMessageError{
+			fakeSafeMessageError: fakeSafeMessageError{raw: "raw", safe: "safe"},
+			code:                 tc.code,
+		})
+		FromError(rec, req, err, "payment")
+		if rec.Code != http.StatusBadGateway {
+			t.Errorf("code %q: status got %d, want 502", tc.code, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("code %q: body %s, want %s", tc.code, rec.Body.String(), tc.want)
+		}
+	}
+}
+
 func TestFromError_Nil(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/", nil)
