@@ -24,6 +24,7 @@ import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -223,7 +224,6 @@ function RunsTab() {
   ]
 
   const totalPages = Math.ceil(total / RUNS_PAGE_SIZE)
-  const errorMsg = loadError instanceof Error ? loadError.message : loadError ? String(loadError) : null
 
   return (
     <>
@@ -271,11 +271,8 @@ function RunsTab() {
       {/* Runs list */}
       <Card className="mt-4">
         <CardContent className="p-0">
-          {errorMsg ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">{errorMsg}</p>
-              <Button variant="outline" size="sm" onClick={() => loadRuns()}>Retry</Button>
-            </div>
+          {loadError ? (
+            <LoadError what="dunning runs" error={loadError} onRetry={() => loadRuns()} />
           ) : loading ? (
             <TableSkeleton columns={8} />
           ) : runs.length === 0 ? (

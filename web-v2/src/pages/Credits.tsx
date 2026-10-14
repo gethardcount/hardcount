@@ -26,6 +26,7 @@ import { DatePicker } from '@/components/ui/date-picker'
 import { Checkbox } from '@/components/ui/checkbox'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -518,12 +519,7 @@ export default function CreditsPage() {
       <Card className="mt-6">
         <CardContent className="p-0">
           {error ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">{error}</p>
-              <Button variant="outline" size="sm" onClick={loadData}>
-                Retry
-              </Button>
-            </div>
+            <LoadError what="credits" error={firstErr} onRetry={loadData} />
           ) : loading ? (
             <TableSkeleton columns={3} widths={['60%', '30%', '20%']} />
           ) : customersWithCredits.length === 0 ? (

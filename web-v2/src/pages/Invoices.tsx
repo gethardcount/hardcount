@@ -21,6 +21,7 @@ import { useClockFrozenMap } from '@/hooks/useClockFrozenMap'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Badge } from '@/components/ui/badge'
@@ -171,7 +172,6 @@ export default function InvoicesPage() {
 
   const invoices = invoicesData?.data ?? []
   const total = invoicesData?.total ?? 0
-  const loadError = loadErrorObj instanceof Error ? loadErrorObj.message : loadErrorObj ? String(loadErrorObj) : null
 
   const customerMap = useMemo(() => {
     const cMap: Record<string, Customer> = {}
@@ -332,13 +332,8 @@ export default function InvoicesPage() {
       {/* Table */}
       <Card className="mt-4">
         <CardContent className="p-0">
-          {loadError ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">{loadError}</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                Retry
-              </Button>
-            </div>
+          {loadErrorObj ? (
+            <LoadError what="invoices" error={loadErrorObj} onRetry={() => refetch()} />
           ) : loading ? (
             <TableSkeleton columns={7} />
           ) : total === 0 ? (

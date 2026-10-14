@@ -15,6 +15,7 @@ import { Layout } from '@/components/Layout'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Card, CardContent } from '@/components/ui/card'
 import { EmptyState } from '@/components/EmptyState'
 import { ScrollPane } from '@/components/ui/scroll-pane'
@@ -47,7 +48,7 @@ export default function WebhookEndpointDetailPage() {
   // the tick. Firing twice matters: each fire is a real outbound webhook.
   const replayInFlight = useRef(false)
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['webhook-endpoint-deliveries', id],
     queryFn: () => api.listWebhookEndpointDeliveries(id!),
     enabled: !!id,
@@ -115,10 +116,8 @@ export default function WebhookEndpointDetailPage() {
 
       {error ? (
         <Card className="mt-3">
-          <CardContent className="p-8 text-center">
-            <p className="text-sm text-destructive">
-              {error instanceof Error ? error.message : 'Failed to load endpoint'}
-            </p>
+          <CardContent className="p-0">
+            <LoadError what="this endpoint" error={error} onRetry={() => refetch()} />
           </CardContent>
         </Card>
       ) : (

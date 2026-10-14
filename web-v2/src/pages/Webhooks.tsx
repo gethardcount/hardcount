@@ -12,6 +12,7 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -128,7 +129,6 @@ function EndpointsTab() {
 
   const endpoints = data?.endpoints ?? []
   const stats = data?.stats ?? {}
-  const errorMsg = loadError instanceof Error ? loadError.message : loadError ? String(loadError) : null
 
   const handleDelete = async () => {
     if (!deleteTarget) return
@@ -153,11 +153,8 @@ function EndpointsTab() {
 
       <Card className="mt-4">
         <CardContent className="p-0">
-          {errorMsg ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">{errorMsg}</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
-            </div>
+          {loadError ? (
+            <LoadError what="webhook endpoints" error={loadError} onRetry={() => refetch()} />
           ) : loading ? (
             <TableSkeleton columns={7} />
           ) : endpoints.length === 0 ? (

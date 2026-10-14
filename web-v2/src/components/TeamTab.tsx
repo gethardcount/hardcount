@@ -8,6 +8,7 @@ import { showApiError } from '@/lib/formErrors'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { CardListSkeleton } from '@/components/ui/TableSkeleton'
@@ -129,11 +130,8 @@ export function TeamTab() {
 
       {error ? (
         <Card>
-          <CardContent className="p-8 text-center">
-            <p className="text-sm text-destructive mb-3">
-              {error instanceof Error ? error.message : 'Failed to load members'}
-            </p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+          <CardContent className="p-0">
+            <LoadError what="team members" error={error} onRetry={() => refetch()} />
           </CardContent>
         </Card>
       ) : isLoading ? (

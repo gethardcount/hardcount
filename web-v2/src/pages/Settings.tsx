@@ -53,6 +53,7 @@ import {
 import { Building2, CreditCard, FileText, Receipt, Check, AlertCircle, Info, Loader2, Trash2, Copy, ExternalLink, X, Users } from 'lucide-react'
 import { TeamTab } from '@/components/TeamTab'
 import { CONTENT_BAND } from '@/lib/contentBand'
+import { useStickyActionBar } from '@/hooks/useStickyActionBar'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -176,6 +177,7 @@ export default function SettingsPage() {
 
   const form = watch()
   const hasChanges = isDirty
+  useStickyActionBar(hasChanges)
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -892,15 +894,12 @@ export default function SettingsPage() {
         </div>
       </Tabs>
 
-      {/* Sticky save bar. pr-44 reserves the right edge so the Save button
-          doesn't sit under the OnboardingLauncher pill (also fixed
-          bottom-right, z-30), keeping both accessible side-by-side. The
-          geometry is self-evident; a previous version of this comment also
-          claimed "Stripe/Linear use the same right-edge-reserve pattern",
-          which an anchoring pass could find no citable documentation for —
-          removed rather than left as an unsourced parity assertion. */}
+      {/* Sticky save bar. The onboarding pill (also fixed bottom-right,
+          z-30) hides while it shows (useStickyActionBar); a reserved right
+          edge left the bar too narrow at phone width and the pill still
+          covered Save Changes. */}
       {hasChanges && (
-        <div className="fixed bottom-0 left-0 right-0 z-30 md:left-60 pr-44">
+        <div className="fixed bottom-0 left-0 right-0 z-30 md:left-60">
           <div className={cn(CONTENT_BAND, 'px-4 md:px-8')}>
             <div className="bg-card border-t border-border shadow-[0_-4px_12px_rgba(0,0,0,0.05)] rounded-t-xl px-6 py-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -949,7 +948,7 @@ function PaymentsSection() {
   const queryClient = useQueryClient()
   const { user } = useAuth()
   const livemode = user?.livemode ?? false
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['stripe-credentials'],
     queryFn: () => api.listStripeCredentials(),
   })
@@ -976,7 +975,7 @@ function PaymentsSection() {
       {isLoading ? (
         <Card><CardContent className="p-6 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></CardContent></Card>
       ) : error ? (
-        <Card><CardContent className="p-6"><p className="text-sm text-destructive">{error instanceof Error ? error.message : 'Failed to load Stripe credentials'}</p></CardContent></Card>
+        <Card><CardContent className="p-0"><LoadError what="Stripe credentials" error={error} onRetry={() => refetch()} /></CardContent></Card>
       ) : (
         <StripeCard
           key={livemode ? 'live' : 'test'}

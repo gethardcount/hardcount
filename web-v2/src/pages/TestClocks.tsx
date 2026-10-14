@@ -15,6 +15,7 @@ import { statusBadgeVariant } from '@/lib/status'
 import { EmptyState } from '@/components/EmptyState'
 import { CardListSkeleton } from '@/components/ui/TableSkeleton'
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -70,7 +71,6 @@ export default function TestClocksPage() {
     enabled: !!user && !user.livemode,
   })
   const clocks = data?.data ?? []
-  const errMsg = error instanceof Error ? error.message : null
 
   return (
     <Layout>
@@ -88,11 +88,10 @@ export default function TestClocksPage() {
         </Button>
       </div>
 
-      {errMsg ? (
+      {error ? (
         <Card className="mt-6">
-          <CardContent className="p-8 text-center">
-            <p className="text-sm text-destructive mb-3">{errMsg}</p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+          <CardContent className="p-0">
+            <LoadError what="test clocks" error={error} onRetry={() => refetch()} />
           </CardContent>
         </Card>
       ) : isLoading ? (

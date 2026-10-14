@@ -28,6 +28,7 @@ import { customerNeedsPaymentMethod } from '@/lib/paymentReadiness'
 import { statusBadgeVariant } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -430,10 +431,7 @@ export default function CustomerDetailPage() {
   if (error) {
     return (
       <Layout>
-        <div className="py-16 text-center">
-          <p className="text-sm text-destructive mb-3">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
-        </div>
+        <LoadError what="this customer" error={loadError} onRetry={() => refetch()} className="py-16" />
       </Layout>
     )
   }

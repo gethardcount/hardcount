@@ -11,6 +11,7 @@ import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { Layout } from '@/components/Layout'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -212,14 +213,18 @@ export default function TestClockDetailPage() {
     return (
       <Layout>
         <Card className="mt-6">
-          <CardContent className="p-8 text-center">
-            <p className="text-sm text-destructive mb-3">
-              {clockQ.error instanceof Error ? clockQ.error.message : 'Test clock not found'}
-            </p>
-            <Link to="/test-clocks">
-              <Button variant="outline" size="sm">Back to Test Clocks</Button>
-            </Link>
-          </CardContent>
+          {clockQ.error ? (
+            <CardContent className="p-0">
+              <LoadError what="this test clock" error={clockQ.error} onRetry={() => clockQ.refetch()} />
+            </CardContent>
+          ) : (
+            <CardContent className="p-8 text-center">
+              <p className="text-sm text-destructive mb-3">Test clock not found</p>
+              <Link to="/test-clocks">
+                <Button variant="outline" size="sm">Back to Test Clocks</Button>
+              </Link>
+            </CardContent>
+          )}
         </Card>
       </Layout>
     )
@@ -233,15 +238,17 @@ export default function TestClockDetailPage() {
         </Link>
       </div>
 
-      <div className="mt-2 flex items-start justify-between gap-4">
+      {/* Wraps the actions under the title at narrow widths (like the other
+          detail pages) instead of truncating the clock name to fit them. */}
+      <div className="mt-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-foreground truncate">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="text-2xl font-semibold text-foreground break-words min-w-0">
               {clock.name || 'Unnamed clock'}
             </h1>
             <StatusBadge status={clock.status} />
           </div>
-          <p className="text-xs text-muted-foreground font-mono mt-1">{clock.id}</p>
+          <p className="text-xs text-muted-foreground font-mono mt-1 break-all">{clock.id}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button

@@ -81,7 +81,7 @@ export function errorSentence(err: unknown): string {
       if (api?.code && api.code !== 'not_found' && api.message) return sentence(api.message)
       return 'It may have been deleted, or it belongs to the other mode (test or live).'
     case 'rate':
-      return 'Too many requests. Wait a minute, then try again.'
+      return 'Too many requests. Wait a moment, then try again.'
     case 'server':
       // A 5xx with its own code ("stripe_unavailable", "provider_error")
       // carries a sentence worth reading; the bare internal error does not.

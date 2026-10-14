@@ -93,7 +93,7 @@ test('a generic 404 says why it can be missing; a coded one keeps its words', ()
 })
 
 test('rate limit reads as a wait, not as server text', () => {
-  assert.equal(errorSentence(new FakeApiError('too many requests — please retry after the rate limit resets', 429)), 'Too many requests. Wait a minute, then try again.')
+  assert.equal(errorSentence(new FakeApiError('too many requests — please retry after the rate limit resets', 429)), 'Too many requests. Wait a moment, then try again.')
 })
 
 test('without a caller title the sentence is the title', () => {

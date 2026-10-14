@@ -22,6 +22,7 @@ import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -162,7 +163,6 @@ export default function CustomersPage() {
 
   const customers = customersData?.data ?? []
   const total = customersData?.total ?? 0
-  const loadError = loadErrorObj instanceof Error ? loadErrorObj.message : loadErrorObj ? String(loadErrorObj) : null
 
   const createMutation = useMutation({
     mutationFn: (data: CreateCustomerData) => api.createCustomer(data),
@@ -271,13 +271,8 @@ export default function CustomersPage() {
       {/* Table */}
       <Card className="mt-4">
         <CardContent className="p-0">
-          {loadError ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">{loadError}</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                Retry
-              </Button>
-            </div>
+          {loadErrorObj ? (
+            <LoadError what="customers" error={loadErrorObj} onRetry={() => refetch()} />
           ) : loading ? (
             <TableSkeleton columns={6} />
           ) : total === 0 ? (

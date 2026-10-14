@@ -19,6 +19,7 @@ import { statusBadgeVariant } from '@/lib/status'
 import { subscriptionWillAutoCharge, hasUsableCard } from '@/lib/paymentReadiness'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -312,10 +313,7 @@ export default function SubscriptionDetailPage() {
   if (error) {
     return (
       <Layout>
-        <div className="py-16 text-center">
-          <p className="text-sm text-destructive mb-3">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
-        </div>
+        <LoadError what="this subscription" error={loadError} onRetry={() => refetch()} className="py-16" />
       </Layout>
     )
   }

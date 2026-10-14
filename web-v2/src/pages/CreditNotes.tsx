@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { statusBadgeVariant, statusBorderColor, creditNoteReasonLabel } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -187,7 +188,6 @@ export default function CreditNotesPage() {
 
   const notes = notesData?.data ?? []
   const loading = notesLoading
-  const loadError = notesErrorObj instanceof Error ? notesErrorObj.message : notesErrorObj ? String(notesErrorObj) : null
 
   const invoiceMap = useMemo(() => {
     const iMap: Record<string, Invoice> = {}
@@ -391,13 +391,8 @@ export default function CreditNotesPage() {
       {/* Table */}
       <Card className="mt-4">
         <CardContent className="p-0">
-          {loadError ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">{loadError}</p>
-              <Button variant="outline" size="sm" onClick={() => refetchNotes()}>
-                Retry
-              </Button>
-            </div>
+          {notesErrorObj ? (
+            <LoadError what="credit notes" error={notesErrorObj} onRetry={() => refetchNotes()} />
           ) : loading ? (
             <TableSkeleton columns={7} />
           ) : notes.length === 0 ? (

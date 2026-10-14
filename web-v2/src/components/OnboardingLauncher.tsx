@@ -3,16 +3,21 @@ import { Link } from 'react-router-dom'
 import { Check, X, ChevronUp, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useOnboardingSteps, type OnboardingStep } from '@/hooks/useOnboardingSteps'
+import { useStickyActionBarShown } from '@/hooks/useStickyActionBar'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
 // OnboardingLauncher — floating bottom-right pill that expands into a
 // 360px side panel. Mirrors the dominant 2026 dev-tool pattern (Intercom,
 // Appcues, Chameleon defaults) rather than an in-page card. Self-hides when
 // the user completes the checklist or dismisses it; state lives in the
-// shared useOnboardingSteps hook.
+// shared useOnboardingSteps hook. Hidden while a page shows a sticky action
+// bar (useStickyActionBar), which occupies the same corner.
 export function OnboardingLauncher() {
   const [open, setOpen] = useState(false)
   const { steps, complete, total, show, setDismissed } = useOnboardingSteps()
+  // A sticky action bar (Settings' Save Changes) sits in the same corner; at
+  // phone width the pill covered its Save button. Step aside while one shows.
+  const barShown = useStickyActionBarShown()
 
   // Close on Escape while the panel is open. No focus-trap because the panel
   // is non-modal — it doesn't block page interaction.
@@ -25,7 +30,7 @@ export function OnboardingLauncher() {
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
-  if (!show) return null
+  if (!show || barShown) return null
 
   const next = steps.find(s => !s.done)
 

@@ -17,6 +17,7 @@ import { TestClockBadge } from '@/components/TestClockBadge'
 import { CreateSubscriptionDialog } from '@/components/CreateSubscriptionDialog'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -148,7 +149,6 @@ export default function SubscriptionsPage() {
 
   const subs = subsData?.data ?? []
   const total = subsData?.total ?? 0
-  const loadError = loadErrorObj instanceof Error ? loadErrorObj.message : loadErrorObj ? String(loadErrorObj) : null
   const customers = customersData?.data ?? []
   const customerMap = useMemo(() => {
     const cMap: Record<string, Customer> = {}
@@ -253,13 +253,8 @@ export default function SubscriptionsPage() {
       {/* Table */}
       <Card className="mt-4">
         <CardContent className="p-0">
-          {loadError ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">{loadError}</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                Retry
-              </Button>
-            </div>
+          {loadErrorObj ? (
+            <LoadError what="subscriptions" error={loadErrorObj} onRetry={() => refetch()} />
           ) : loading ? (
             <TableSkeleton columns={6} />
           ) : total === 0 ? (

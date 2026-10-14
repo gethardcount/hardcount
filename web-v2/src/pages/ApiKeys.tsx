@@ -15,6 +15,7 @@ import { statusBadgeVariant } from '@/lib/status'
 import { cn } from '@/lib/utils'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DatePicker } from '@/components/ui/date-picker'
@@ -117,7 +118,6 @@ export default function ApiKeysPage() {
   })
 
   const keys = keysData?.data ?? []
-  const errorMsg = loadError instanceof Error ? loadError.message : loadError ? String(loadError) : null
 
   const handleRevoke = async () => {
     if (!revokeTarget || revoking) return
@@ -151,11 +151,10 @@ export default function ApiKeysPage() {
         </Button>
       </div>
 
-      {errorMsg ? (
+      {loadError ? (
         <Card className="mt-6">
-          <CardContent className="p-8 text-center">
-            <p className="text-sm text-destructive mb-3">{errorMsg}</p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+          <CardContent className="p-0">
+            <LoadError what="API keys" error={loadError} onRetry={() => refetch()} />
           </CardContent>
         </Card>
       ) : loading ? (

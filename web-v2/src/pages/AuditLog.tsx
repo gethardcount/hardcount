@@ -22,6 +22,7 @@ import { useUrlState } from '@/hooks/useUrlState'
 import { cn } from '@/lib/utils'
 
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Badge } from '@/components/ui/badge'
@@ -471,12 +472,7 @@ export default function AuditLogPage() {
       <Card className="mt-4">
         <CardContent className="p-0">
           {error ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-destructive mb-3">{error}</p>
-              <Button variant="outline" size="sm" onClick={loadEntries}>
-                Retry
-              </Button>
-            </div>
+            <LoadError what="the audit log" error={entriesQuery.error} onRetry={loadEntries} />
           ) : loading ? (
             <FeedSkeleton rows={10} />
           ) : entries.length === 0 ? (
