@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { api, formatCents, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
+import { api, formatCents, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
 import { formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
@@ -732,7 +732,7 @@ export default function SubscriptionDetailPage() {
                   </Link>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {items[0].quantity > 1 ? `${items[0].quantity} × ` : ''}
-                    {formatCents(firstItemPlan.base_amount_cents)}/{firstItemPlan.billing_interval === 'yearly' ? 'yr' : 'mo'}
+                    {formatCents(firstItemPlan.base_amount_cents, firstItemPlan.currency)}/{firstItemPlan.billing_interval === 'yearly' ? 'yr' : 'mo'}
                   </p>
                 </>
               ) : (
@@ -844,7 +844,7 @@ export default function SubscriptionDetailPage() {
                               {itemPlan.name}
                             </Link>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                              {formatCents(itemPlan.base_amount_cents)}/{itemPlan.billing_interval === 'yearly' ? 'yr' : 'mo'}
+                              {formatCents(itemPlan.base_amount_cents, itemPlan.currency)}/{itemPlan.billing_interval === 'yearly' ? 'yr' : 'mo'}
                             </p>
                           </div>
                         ) : (
@@ -1168,7 +1168,7 @@ export default function SubscriptionDetailPage() {
                         <Badge variant={statusVariant(inv.payment_status)}>{inv.payment_status}</Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-right font-medium">{formatCents(inv.total_amount_cents)}</TableCell>
+                    <TableCell className="text-right font-medium">{formatCents(inv.total_amount_cents, inv.currency)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{formatDate(inv.created_at)}</TableCell>
                   </TableRow>
                 ))}
@@ -1446,13 +1446,7 @@ export default function SubscriptionDetailPage() {
             setItemDialog(null)
             invalidateAll()
             if (res.proration) {
-              if (res.proration.type === 'invoice') {
-                toast.success(`Proration invoice created for ${formatCents(res.proration.amount_cents)}`)
-              } else if (res.proration.type === 'adjustment') {
-                toast.success(`Open invoice reduced by ${formatCents(Math.abs(res.proration.amount_cents))}`)
-              } else {
-                toast.success(`${formatCents(Math.abs(res.proration.amount_cents))} credited to customer balance`)
-              }
+              toast.success(prorationText(res.proration, planById(res.proration.new_plan_id)?.currency))
             } else {
               toast.success('Plan change saved')
             }
@@ -1472,13 +1466,7 @@ export default function SubscriptionDetailPage() {
             setItemDialog(null)
             invalidateAll()
             if (res.proration) {
-              if (res.proration.type === 'invoice') {
-                toast.success(`Proration invoice created for ${formatCents(res.proration.amount_cents)}`)
-              } else if (res.proration.type === 'adjustment') {
-                toast.success(`Open invoice reduced by ${formatCents(Math.abs(res.proration.amount_cents))}`)
-              } else {
-                toast.success(`${formatCents(Math.abs(res.proration.amount_cents))} credited to customer balance`)
-              }
+              toast.success(prorationText(res.proration, planById(res.proration.new_plan_id)?.currency))
             } else {
               toast.success('Quantity updated')
             }
@@ -1518,7 +1506,7 @@ export default function SubscriptionDetailPage() {
 // predicts whether a swap is even allowed, so both earn a place in the row.
 function planOptionLabel(p: Plan): string {
   const timing = p.base_bill_timing === 'in_advance' ? 'billed in advance' : 'billed in arrears'
-  return `${p.name} (${p.code}) — ${formatCents(p.base_amount_cents)}/${p.billing_interval} · ${timing}`
+  return `${p.name} (${p.code}) — ${formatCents(p.base_amount_cents, p.currency)}/${p.billing_interval} · ${timing}`
 }
 
 // planComboboxOptions sorts by display name (code as tiebreak, so duplicate

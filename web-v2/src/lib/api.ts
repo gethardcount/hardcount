@@ -1117,8 +1117,11 @@ export interface CustomerOverview {
   // (Stripe / Lago / Chargebee / Recurly) so operators see total
   // outstanding at a glance instead of summing per-invoice.
   outstanding_balance?: {
+    // Adds every currency together; display by_currency instead.
     total_cents: number
     unpaid_count: number
+    // One amount per currency, largest first.
+    by_currency?: { currency: string; amount_cents: number }[]
   }
 }
 
@@ -1499,6 +1502,9 @@ export interface DunningStats {
   at_risk_cents: number
   // The currency at_risk_cents is in (the tenant default).
   currency?: string
+  // The at-risk amount in every currency with active or escalated runs,
+  // default first. What the card shows.
+  at_risk_by_currency?: { currency: string; amount_cents: number }[]
 }
 
 export interface CreditNote {
@@ -1800,7 +1806,7 @@ export async function downloadCreditNotePDF(creditNoteId: string, creditNoteNumb
 
 // Money formatting lives in lib/money (dependency-free, so node --test can
 // import it); re-exported here so every existing call site keeps working.
-export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents } from './money'
+export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, amountsByCurrencyText, atRiskText, prorationText } from './money'
 
 // formatTaxRate renders a tax-rate percent (without the % sign) at up to 4
 // decimal places, trailing zeros trimmed: 8.875 → "8.875", 18 → "18",

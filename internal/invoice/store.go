@@ -260,9 +260,20 @@ type Store interface {
 // across all unpaid (pending / failed / unknown) finalized invoices,
 // excluding voided + uncollectible. UnpaidCount is the cardinality
 // of those invoices so the UI can show "$X across N unpaid invoices."
+//
+// TotalCents adds every currency together, so it is a meaningful amount only
+// when ByCurrency has a single entry; it is kept for existing API callers.
+// ByCurrency is what a display uses: one amount per currency, largest first.
 type OutstandingBalance struct {
-	TotalCents  int64 `json:"total_cents"`
-	UnpaidCount int   `json:"unpaid_count"`
+	TotalCents  int64            `json:"total_cents"`
+	UnpaidCount int              `json:"unpaid_count"`
+	ByCurrency  []CurrencyAmount `json:"by_currency"`
+}
+
+// CurrencyAmount is an amount in one currency's minor units.
+type CurrencyAmount struct {
+	Currency    string `json:"currency"`
+	AmountCents int64  `json:"amount_cents"`
 }
 
 type ListFilter struct {

@@ -6918,10 +6918,16 @@ export interface components {
             outstanding_balance: {
                 /**
                  * Format: int64
-                 * @description Sum of `amount_due_cents`. Amounts in different currencies are added together.
+                 * @description Sum of `amount_due_cents`. Amounts in different currencies are added together, so use `by_currency` to show an amount.
                  */
                 total_cents: number;
                 unpaid_count: number;
+                /** @description Amount due on the same invoices, one entry per currency, largest first. Empty when nothing is owed. */
+                by_currency: {
+                    currency: string;
+                    /** Format: int64 */
+                    amount_cents: number;
+                }[];
             };
         };
         PaymentMethod: {
@@ -7492,6 +7498,16 @@ export interface components {
             at_risk_cents: number;
             /** @description The tenant's default currency. */
             currency: string;
+            /**
+             * @description Amount due on active and escalated runs, one entry per currency.
+             *     `currency` comes first, then the largest amount. Empty when no run
+             *     is at risk.
+             */
+            at_risk_by_currency: {
+                currency: string;
+                /** Format: int64 */
+                amount_cents: number;
+            }[];
         };
         MeterPricingRule: {
             id: string;

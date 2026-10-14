@@ -1014,6 +1014,31 @@ func (s *PostgresStore) GetStats(ctx context.Context, tenantID string) (Stats, e
 	if err != nil {
 		return Stats{}, err
 	}
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT i.currency, SUM(i.amount_due_cents)
+		FROM invoice_dunning_runs r
+		JOIN invoices i ON i.id = r.invoice_id
+		WHERE r.state IN ('active','escalated')
+		GROUP BY i.currency
+		HAVING SUM(i.amount_due_cents) > 0
+		ORDER BY (i.currency = $1) DESC, SUM(i.amount_due_cents) DESC, i.currency
+	`, defaultCurrency)
+	if err != nil {
+		return Stats{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	stats.AtRiskByCurrency = []CurrencyAmount{}
+	for rows.Next() {
+		var a CurrencyAmount
+		if err := rows.Scan(&a.Currency, &a.AmountCents); err != nil {
+			return Stats{}, err
+		}
+		stats.AtRiskByCurrency = append(stats.AtRiskByCurrency, a)
+	}
+	if err := rows.Err(); err != nil {
+		return Stats{}, err
+	}
 	return stats, nil
 }
 

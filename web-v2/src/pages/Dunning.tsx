@@ -17,7 +17,7 @@ import { Layout } from '@/components/Layout'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { showApiError } from '@/lib/formErrors'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { dunningAmountDue } from '@/lib/money'
+import { atRiskText, dunningAmountDue } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -215,10 +215,10 @@ function RunsTab() {
     { label: 'Active', value: stats?.active_count ?? 0, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-500/10', ring: 'ring-blue-200 dark:ring-blue-500/20' },
     { label: 'Escalated', value: stats?.escalated_count ?? 0, color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-500/10', ring: 'ring-violet-200 dark:ring-violet-500/20' },
     { label: 'Recovered', value: stats?.resolved_count ?? 0, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-500/10', ring: 'ring-emerald-200 dark:ring-emerald-500/20' },
-    // The server sums only invoices in the tenant's default currency (mixed
-    // currencies cannot be added), so the label names that currency — an
-    // unlabeled figure read as the total across every run.
-    { label: stats?.currency ? `At risk (${stats.currency.toUpperCase()})` : 'At risk', value: stats?.at_risk_cents ?? 0, color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-500/10', ring: 'ring-red-200 dark:ring-red-500/20', isCurrency: true },
+    // One figure per currency (mixed currencies cannot be added). A
+    // default-only figure read "At risk (CAD) CA$0.00" while USD runs were
+    // active once the workspace default changed.
+    { label: 'At risk', value: stats ? atRiskText(stats) : formatCents(0), color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-500/10', ring: 'ring-red-200 dark:ring-red-500/20' },
   ]
 
   const totalPages = Math.ceil(total / RUNS_PAGE_SIZE)
@@ -235,7 +235,7 @@ function RunsTab() {
             <div key={stat.label} className={cn(stat.bg, 'rounded-xl px-4 py-3 ring-1', stat.ring)}>
               <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
               <p className={cn('text-xl font-semibold mt-1 tabular-nums', stat.color)}>
-                {stat.isCurrency ? formatCents(stat.value, stats?.currency) : stat.value}
+                {stat.value}
               </p>
             </div>
           ))}

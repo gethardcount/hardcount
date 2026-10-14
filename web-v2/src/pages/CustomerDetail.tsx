@@ -8,7 +8,7 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { api, ApiError, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type DunningPolicyWithCount, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
+import { api, ApiError, amountsByCurrencyText, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type DunningPolicyWithCount, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
@@ -236,6 +236,7 @@ export default function CustomerDetailPage() {
     enabled: !!id,
   })
   const balance = balanceData?.balance_cents
+  const outstandingAmounts = amountsByCurrencyText(overview?.outstanding_balance?.by_currency ?? [])
 
   // Only a 404 means "no profile". Any other failure must not offer Set Up:
   // saving that blank form would replace a profile that exists.
@@ -595,12 +596,13 @@ export default function CustomerDetailPage() {
                 invoices filtered to their unpaid list so the operator
                 can drill into resolution. Hidden when there's no
                 exposure — keeps the row uncluttered on healthy
-                customers. */}
-            {(overview?.outstanding_balance?.total_cents ?? 0) > 0 && (
+                customers. One figure per currency: total_cents adds
+                currencies together. */}
+            {outstandingAmounts && (
               <Link to={`/invoices?customer=${id}`} className="flex-1 px-6 py-4 hover:bg-accent/50 transition-colors">
                 <p className="text-sm text-muted-foreground">Outstanding</p>
                 <p className="text-sm font-medium mt-1 text-red-600">
-                  {formatCents(overview?.outstanding_balance?.total_cents ?? 0)}
+                  {outstandingAmounts}
                   <span className="text-xs text-muted-foreground ml-1.5 font-normal">
                     · {overview?.outstanding_balance?.unpaid_count} invoice{overview?.outstanding_balance?.unpaid_count === 1 ? '' : 's'}
                   </span>
@@ -1130,7 +1132,7 @@ export default function CustomerDetailPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <Badge variant={statusVariant(inv.status)}>{inv.status}</Badge>
-                      <span className="text-sm font-medium">{formatCents(inv.total_amount_cents)}</span>
+                      <span className="text-sm font-medium">{formatCents(inv.total_amount_cents, inv.currency)}</span>
                     </div>
                   </Link>
                 )

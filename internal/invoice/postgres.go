@@ -1677,11 +1677,12 @@ func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, invoiceID s
 	return items, rows.Err()
 }
 
-// GetOutstandingBalance computes the customer's AR exposure: sum of
-// amount_due_cents + count across all finalized invoices in
-// payment_status pending/failed/unknown, excluding voided +
-// uncollectible. Single tenant-scoped aggregate query; powers the
-// "Outstanding balance" card on customer detail.
+// GetOutstandingBalance computes the customer's AR exposure: amount_due_cents
+// + count across all finalized invoices in payment_status
+// pending/failed/unknown, excluding voided + uncollectible, grouped by
+// currency (cents in different currencies cannot be added into one figure).
+// Single tenant-scoped aggregate query; powers the "Outstanding" cell on
+// customer detail.
 func (s *PostgresStore) GetOutstandingBalance(ctx context.Context, tenantID, customerID string) (OutstandingBalance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1689,15 +1690,34 @@ func (s *PostgresStore) GetOutstandingBalance(ctx context.Context, tenantID, cus
 	}
 	defer postgres.Rollback(tx)
 
-	var out OutstandingBalance
-	err = tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(amount_due_cents), 0), COUNT(*)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT currency, SUM(amount_due_cents), COUNT(*)
 		FROM invoices
 		WHERE customer_id = $1
 		  AND payment_status IN ('pending', 'failed', 'unknown')
 		  AND status NOT IN ('voided', 'uncollectible', 'draft')
-	`, customerID).Scan(&out.TotalCents, &out.UnpaidCount)
+		GROUP BY currency
+		ORDER BY SUM(amount_due_cents) DESC, currency
+	`, customerID)
 	if err != nil {
+		return OutstandingBalance{}, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := OutstandingBalance{ByCurrency: []CurrencyAmount{}}
+	for rows.Next() {
+		var a CurrencyAmount
+		var n int
+		if err := rows.Scan(&a.Currency, &a.AmountCents, &n); err != nil {
+			return OutstandingBalance{}, err
+		}
+		out.TotalCents += a.AmountCents
+		out.UnpaidCount += n
+		if a.AmountCents > 0 {
+			out.ByCurrency = append(out.ByCurrency, a)
+		}
+	}
+	if err := rows.Err(); err != nil {
 		return OutstandingBalance{}, err
 	}
 	return out, nil

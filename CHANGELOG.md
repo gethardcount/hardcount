@@ -26,7 +26,9 @@ Older entries keep their original text.
 - **A write-off whose pause fails no longer says collection was paused (2026-10-14).** One warning, "Collection not paused", now says the invoice was written off and the subscription is still billing.
 - **Save & send on a new invoice shows one message (2026-10-14).** When the email could not be sent, it showed a warning and then "Draft saved" for an invoice that was finalized.
 - **Email actions no longer say "sent" when email isn't set up (2026-10-15).** Emails are queued and sent later, so with no `SMTP_HOST` the dashboard showed "Invoice sent" while the queued email failed. Sending an invoice or credit note, sending or resending a payment-method setup link, and inviting a teammate now answer 409 `email_not_configured` ("Email isn't set up on this server, so nothing was sent.") before anything is created. Save & send still finalizes the invoice and says it was not emailed. Password reset is unchanged.
-- **The Dunning "At risk" card names its currency (2026-10-15).** It sums only invoices in the default currency; the label now reads, for example, "At risk (USD)".
+- **The Dunning "At risk" card shows every currency (2026-10-15).** It summed only the default currency, so after the default changed to CAD it read "CA$0.00" while USD runs were active. It now reads, for example, "$739.00 + €5.00". The API adds `at_risk_by_currency` to dunning stats.
+- **The customer and subscription pages show amounts in their own currency (2026-10-15).** After the default currency changed, USD invoices read "CA$". Outstanding now lists each currency, and invoices, plan prices and proration messages use their own currency. The API adds `outstanding_balance.by_currency` to the customer overview.
+- **The payment-method link error names the action (2026-10-15).** A failed "Email a payment-method link" was titled "Failed to resend setup link"; it now reads "Couldn't email the payment-method link".
 - **The Margin card no longer spins forever (2026-10-14).** A failed load shows a retry, and a custom range asks for both dates.
 
 ## [0.7.0] - 2026-10-14

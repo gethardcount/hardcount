@@ -1880,7 +1880,7 @@ components:
             $ref: "#/components/schemas/Invoice"
         outstanding_balance:
           type: object
-          required: [total_cents, unpaid_count]
+          required: [total_cents, unpaid_count, by_currency]
           description: |
             Invoices that are not draft, voided or uncollectible and
             whose payment is pending, failed or unknown.
@@ -1888,9 +1888,21 @@ components:
             total_cents:
               type: integer
               format: int64
-              description: Sum of `amount_due_cents`. Amounts in different currencies are added together.
+              description: Sum of `amount_due_cents`. Amounts in different currencies are added together, so use `by_currency` to show an amount.
             unpaid_count:
               type: integer
+            by_currency:
+              type: array
+              description: Amount due on the same invoices, one entry per currency, largest first. Empty when nothing is owed.
+              items:
+                type: object
+                required: [currency, amount_cents]
+                properties:
+                  currency:
+                    type: string
+                  amount_cents:
+                    type: integer
+                    format: int64
 
     PaymentMethod:
       type: object
@@ -2725,7 +2737,7 @@ components:
 
     DunningStats:
       type: object
-      required: [active_count, escalated_count, resolved_count, at_risk_cents, currency]
+      required: [active_count, escalated_count, resolved_count, at_risk_cents, currency, at_risk_by_currency]
       properties:
         active_count:
           type: integer
@@ -2740,6 +2752,21 @@ components:
         currency:
           type: string
           description: The tenant's default currency.
+        at_risk_by_currency:
+          type: array
+          description: |
+            Amount due on active and escalated runs, one entry per currency.
+            `currency` comes first, then the largest amount. Empty when no run
+            is at risk.
+          items:
+            type: object
+            required: [currency, amount_cents]
+            properties:
+              currency:
+                type: string
+              amount_cents:
+                type: integer
+                format: int64
 
     MeterPricingRule:
       type: object

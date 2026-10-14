@@ -3042,7 +3042,13 @@ type CustomerOverview struct {
 	// OutstandingBalance Invoices that are not draft, voided or uncollectible and
 	// whose payment is pending, failed or unknown.
 	OutstandingBalance struct {
-		// TotalCents Sum of `amount_due_cents`. Amounts in different currencies are added together.
+		// ByCurrency Amount due on the same invoices, one entry per currency, largest first. Empty when nothing is owed.
+		ByCurrency []struct {
+			AmountCents int64  `json:"amount_cents"`
+			Currency    string `json:"currency"`
+		} `json:"by_currency"`
+
+		// TotalCents Sum of `amount_due_cents`. Amounts in different currencies are added together, so use `by_currency` to show an amount.
 		TotalCents  int64 `json:"total_cents"`
 		UnpaidCount int   `json:"unpaid_count"`
 	} `json:"outstanding_balance"`
@@ -3351,6 +3357,14 @@ type DunningRunEventState string
 // DunningStats defines model for DunningStats.
 type DunningStats struct {
 	ActiveCount int `json:"active_count"`
+
+	// AtRiskByCurrency Amount due on active and escalated runs, one entry per currency.
+	// `currency` comes first, then the largest amount. Empty when no run
+	// is at risk.
+	AtRiskByCurrency []struct {
+		AmountCents int64  `json:"amount_cents"`
+		Currency    string `json:"currency"`
+	} `json:"at_risk_by_currency"`
 
 	// AtRiskCents Amount due on active and escalated runs, in `currency` only.
 	AtRiskCents int64 `json:"at_risk_cents"`

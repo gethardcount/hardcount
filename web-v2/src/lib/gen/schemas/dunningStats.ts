@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { DunningStatsAtRiskByCurrencyItem } from './dunningStatsAtRiskByCurrencyItem';
 
 export interface DunningStats {
   active_count: number;
@@ -16,4 +17,10 @@ export interface DunningStats {
   at_risk_cents: number;
   /** The tenant's default currency. */
   currency: string;
+  /**
+     * Amount due on active and escalated runs, one entry per currency.
+     * `currency` comes first, then the largest amount. Empty when no run
+     * is at risk.
+     */
+  at_risk_by_currency: DunningStatsAtRiskByCurrencyItem[];
 }

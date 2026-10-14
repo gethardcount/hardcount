@@ -143,6 +143,9 @@ func (h *customerDetailHandler) overview(w http.ResponseWriter, r *http.Request)
 	// summing it manually. Read failure surfaces as zero (best-effort);
 	// the rest of the overview still renders.
 	outstanding, _ := h.invoices.GetOutstandingBalance(r.Context(), tenantID, customerID)
+	if outstanding.ByCurrency == nil {
+		outstanding.ByCurrency = []invoice.CurrencyAmount{}
+	}
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{
 		"customer_id":          customerID,

@@ -501,8 +501,8 @@ export default function InvoiceDetailPage() {
   // unlike the hosted-invoice "pay" email behind setShowEmailModal.
   const resendSetupLinkMutation = useMutation({
     mutationFn: () => api.resendSetupLink(id!),
-    onSuccess: () => toast.success('Setup link resent to the customer'),
-    onError: (err) => showApiError(err, 'Failed to resend setup link'),
+    onSuccess: () => toast.success('Payment-method link emailed to the customer'),
+    onError: (err) => showApiError(err, "Couldn't email the payment-method link"),
   })
 
   // Stripe-parity operator actions on finalized / uncollectible invoices.

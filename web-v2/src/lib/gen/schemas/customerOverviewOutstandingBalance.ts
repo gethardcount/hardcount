@@ -7,13 +7,16 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { CustomerOverviewOutstandingBalanceByCurrencyItem } from './customerOverviewOutstandingBalanceByCurrencyItem';
 
 /**
  * Invoices that are not draft, voided or uncollectible and
  * whose payment is pending, failed or unknown.
  */
 export type CustomerOverviewOutstandingBalance = {
-  /** Sum of `amount_due_cents`. Amounts in different currencies are added together. */
+  /** Sum of `amount_due_cents`. Amounts in different currencies are added together, so use `by_currency` to show an amount. */
   total_cents: number;
   unpaid_count: number;
+  /** Amount due on the same invoices, one entry per currency, largest first. Empty when nothing is owed. */
+  by_currency: CustomerOverviewOutstandingBalanceByCurrencyItem[];
 };

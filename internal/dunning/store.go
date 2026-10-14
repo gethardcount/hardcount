@@ -97,10 +97,21 @@ type Stats struct {
 	EscalatedCount int   `json:"escalated_count"`
 	ResolvedCount  int   `json:"resolved_count"`
 	AtRiskCents    int64 `json:"at_risk_cents"`
-	// Currency scopes AtRiskCents to the tenant's default currency — the
-	// dashboard shows one coherent at-risk figure instead of a meaningless
-	// sum across mixed-currency invoices.
+	// Currency scopes AtRiskCents to the tenant's default currency — one
+	// coherent figure instead of a meaningless sum across mixed-currency
+	// invoices. Kept for existing API callers.
 	Currency string `json:"currency"`
+	// AtRiskByCurrency is the same at-risk amount for every currency with
+	// active or escalated runs: the default currency first, then the largest
+	// amount. A default-only figure read CA$0.00 while USD runs were active
+	// once the default changed, so the dashboard shows this instead.
+	AtRiskByCurrency []CurrencyAmount `json:"at_risk_by_currency"`
+}
+
+// CurrencyAmount is an amount in one currency's minor units.
+type CurrencyAmount struct {
+	Currency    string `json:"currency"`
+	AmountCents int64  `json:"amount_cents"`
 }
 
 type RunListFilter struct {
