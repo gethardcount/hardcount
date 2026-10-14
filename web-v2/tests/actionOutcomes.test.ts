@@ -12,12 +12,12 @@ import {
   writeOffOutcome,
 } from '../src/lib/actionOutcomes.ts'
 
-const inv = (status: string, payment_status: string, amount_paid_cents = 0) => ({
-  invoice_number: 'INV-1', status, payment_status, amount_paid_cents,
+const inv = (status: string, payment_status: string, amount_paid_cents = 0, stripe_payment_intent_id?: string) => ({
+  invoice_number: 'INV-1', status, payment_status, amount_paid_cents, stripe_payment_intent_id,
 })
 
 test('charge now: a card charge Stripe confirmed in the request reads as paid', () => {
-  const o = collectOutcome(inv('paid', 'succeeded', 1200))
+  const o = collectOutcome(inv('paid', 'succeeded', 1200, 'pi_1'))
   assert.equal(o.tone, 'success')
   assert.equal(o.title, 'INV-1 paid')
   assert.equal(o.description, undefined)
@@ -28,6 +28,15 @@ test('charge now: a credit-covered invoice says no card was charged', () => {
   assert.equal(o.title, 'INV-1 paid')
   assert.match(o.description ?? '', /credit balance/)
   assert.match(o.description ?? '', /No card was charged/)
+})
+
+test('charge now: a card charge returned before amount_paid was re-read never claims credit covered it', () => {
+  // Stripe confirmed the charge, the re-read failed, and the API returned the
+  // pre-charge copy: paid, amount_paid still 0, PaymentIntent set.
+  const o = collectOutcome(inv('paid', 'succeeded', 0, 'pi_1'))
+  assert.equal(o.tone, 'success')
+  assert.equal(o.title, 'INV-1 paid')
+  assert.equal(o.description, undefined)
 })
 
 test('charge now: a charge still confirming is "started", not paid', () => {
@@ -59,17 +68,23 @@ test('charge now: nothing ever reads "Payment initiated"', () => {
 test('write-off: a failed pause is one warning that says collection was NOT paused', () => {
   const o = writeOffOutcome('INV-1', 'failed')
   assert.equal(o.tone, 'warning')
-  assert.match(o.title, /marked uncollectible/)
-  assert.match(o.title, /collection not paused/)
+  assert.equal(o.title, 'INV-1 marked uncollectible, collection not paused')
   assert.match(o.description ?? '', /still billing/)
   assert.equal(o.openSubscription, true)
 })
 
 test('write-off: "collection paused" appears only when the pause succeeded', () => {
-  assert.match(writeOffOutcome('INV-1', 'paused').title, /collection paused on the subscription/)
+  assert.equal(writeOffOutcome('INV-1', 'paused').title, 'INV-1 marked uncollectible, collection paused')
   assert.equal(writeOffOutcome('INV-1', 'paused').tone, 'success')
   assert.doesNotMatch(writeOffOutcome('INV-1', 'not_requested').title, /paused/)
   assert.doesNotMatch(writeOffOutcome('INV-1', 'failed').title, /collection paused/)
+})
+
+test('write-off: every title fits the six-word notice shape', () => {
+  for (const p of ['not_requested', 'paused', 'failed'] as const) {
+    const words = writeOffOutcome('INV-1', p).title.split(/\s+/).length
+    assert.ok(words <= 6, `${p}: ${words} words`)
+  }
 })
 
 test('new invoice: each result gets its own single message', () => {

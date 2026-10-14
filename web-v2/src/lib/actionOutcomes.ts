@@ -20,12 +20,16 @@ export function collectOutcome(inv: {
   status: string
   payment_status: string
   amount_paid_cents: number
+  stripe_payment_intent_id?: string | null
 }): Outcome {
   const n = inv.invoice_number
   if (inv.status === 'paid' || inv.payment_status === 'succeeded') {
-    // Card and offline payments both raise amount_paid; only a credit-covered
-    // settle leaves it at zero.
-    return inv.amount_paid_cents === 0
+    // Only a credit-covered settle records no payment at all: it pays with no
+    // PaymentIntent and leaves amount_paid at zero. amount_paid alone is not
+    // enough — when Stripe confirms a card charge but re-reading the invoice
+    // fails, the API returns the pre-charge copy (amount_paid still zero) with
+    // the PaymentIntent set (internal/payment/stripe.go chargeInvoice).
+    return inv.amount_paid_cents === 0 && !inv.stripe_payment_intent_id
       ? { tone: 'success', title: `${n} paid`, description: "Covered by the customer's credit balance. No card was charged." }
       : { tone: 'success', title: `${n} paid` }
   }
@@ -49,7 +53,7 @@ export function writeOffOutcome(
   invoiceNumber: string,
   pause: 'not_requested' | 'paused' | 'failed',
 ): Outcome & { openSubscription: boolean } {
-  const n = `Invoice ${invoiceNumber}`
+  const n = invoiceNumber
   switch (pause) {
     case 'failed':
       return {
@@ -59,7 +63,7 @@ export function writeOffOutcome(
         openSubscription: true,
       }
     case 'paused':
-      return { tone: 'success', title: `${n} marked uncollectible; collection paused on the subscription`, openSubscription: false }
+      return { tone: 'success', title: `${n} marked uncollectible, collection paused`, openSubscription: false }
     default:
       return { tone: 'success', title: `${n} marked uncollectible`, openSubscription: false }
   }
