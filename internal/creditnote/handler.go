@@ -289,46 +289,58 @@ func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
 // so the emailed document can never diverge from the downloaded one,
 // the exact drift the invoice send path once had.
 func (h *Handler) assemblePDFContext(ctx context.Context, tenantID string, cn domain.CreditNote) (BillToInfo, CompanyInfo, OriginalInvoiceInfo) {
-	// Bill-To: prefer billing profile (legal name + full address for tax
-	// compliance) and fall back to the customer record.
-	bt := BillToInfo{Name: cn.CustomerID}
-	if h.customers != nil {
-		if cust, err := h.customers.Get(ctx, tenantID, cn.CustomerID); err == nil {
-			bt.Name = cust.DisplayName
-			bt.Email = cust.Email
-		}
-		if bp, err := h.customers.GetBillingProfile(ctx, tenantID, cn.CustomerID); err == nil {
-			if bp.LegalName != "" {
-				bt.Name = bp.LegalName
+	// Bill-To and company blocks: an issued credit note prints the details it
+	// was issued with (cn.BillToSnapshot / cn.SupplierSnapshot, ADR-109). A
+	// draft, or a credit note issued before migration 0177, reads live rows:
+	// billing profile first (legal name and full address for tax compliance),
+	// then the customer record.
+	billTo := cn.BillToSnapshot
+	if billTo == nil {
+		cust := domain.Customer{DisplayName: cn.CustomerID}
+		var profile *domain.CustomerBillingProfile
+		if h.customers != nil {
+			if c, err := h.customers.Get(ctx, tenantID, cn.CustomerID); err == nil {
+				cust = c
 			}
-			// bp.Email removed in migration 0100 — bill-to email tracks
-			// customers.email (set above).
-			bt.AddressLine1 = bp.AddressLine1
-			bt.AddressLine2 = bp.AddressLine2
-			bt.City = bp.City
-			bt.State = bp.State
-			bt.PostalCode = bp.PostalCode
-			bt.Country = bp.Country
-			bt.TaxID = bp.TaxID
+			if bp, err := h.customers.GetBillingProfile(ctx, tenantID, cn.CustomerID); err == nil {
+				profile = &bp
+			}
 		}
+		live := domain.NewDocumentBillTo(cust, profile)
+		billTo = &live
+	}
+	bt := BillToInfo{
+		Name:         billTo.Name(),
+		Email:        billTo.Email,
+		AddressLine1: billTo.AddressLine1,
+		AddressLine2: billTo.AddressLine2,
+		City:         billTo.City,
+		State:        billTo.State,
+		PostalCode:   billTo.PostalCode,
+		Country:      billTo.Country,
+		TaxID:        billTo.TaxID,
 	}
 
-	// Company header from tenant settings.
-	var ci CompanyInfo
-	if h.settings != nil {
+	supplier := cn.SupplierSnapshot
+	if supplier == nil && h.settings != nil {
 		if ts, err := h.settings.Get(ctx, tenantID); err == nil {
-			ci = CompanyInfo{
-				Name:         ts.CompanyName,
-				Email:        ts.CompanyEmail,
-				Phone:        ts.CompanyPhone,
-				AddressLine1: ts.CompanyAddressLine1,
-				AddressLine2: ts.CompanyAddressLine2,
-				City:         ts.CompanyCity,
-				State:        ts.CompanyState,
-				PostalCode:   ts.CompanyPostalCode,
-				Country:      ts.CompanyCountry,
-				TaxID:        ts.TaxID,
-			}
+			live := domain.NewDocumentSupplier(ts)
+			supplier = &live
+		}
+	}
+	var ci CompanyInfo
+	if supplier != nil {
+		ci = CompanyInfo{
+			Name:         supplier.Name,
+			Email:        supplier.Email,
+			Phone:        supplier.Phone,
+			AddressLine1: supplier.AddressLine1,
+			AddressLine2: supplier.AddressLine2,
+			City:         supplier.City,
+			State:        supplier.State,
+			PostalCode:   supplier.PostalCode,
+			Country:      supplier.Country,
+			TaxID:        supplier.TaxID,
 		}
 	}
 

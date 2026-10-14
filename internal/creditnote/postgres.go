@@ -33,7 +33,8 @@ const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	currency, issued_at, voided_at, refund_status, COALESCE(stripe_refund_id,''),
 	COALESCE(tax_transaction_id,''), is_simulated, issue_pending,
 	tax_reversal_pending, commit_retired_cents,
-	metadata, created_at, updated_at, recorded_at`
+	metadata, created_at, updated_at, recorded_at,
+	bill_to_snapshot, supplier_snapshot`
 
 // cnScanDest returns Scan destinations in cnReadCols order. metaJSON is the
 // raw metadata bytes the caller unmarshals into cn.Metadata after Scan.
@@ -46,6 +47,8 @@ func cnScanDest(cn *domain.CreditNote, metaJSON *[]byte) []any {
 		&cn.TaxTransactionID, &cn.IsSimulated, &cn.IssuePending,
 		&cn.TaxReversalPending, &cn.CommitRetiredCents,
 		metaJSON, &cn.CreatedAt, &cn.UpdatedAt, &cn.RecordedAt,
+		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &cn.BillToSnapshot},
+		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &cn.SupplierSnapshot},
 	}
 }
 
@@ -586,19 +589,58 @@ func (s *PostgresStore) TransitionStatusTx(ctx context.Context, tx *sql.Tx, tena
 	// from draft, but nothing cleared it — every reader gates on
 	// status='draft' so behavior was unaffected, yet the API served
 	// issue_pending=true on issued CNs forever (FLOW B17 walk, 2026-07-21).
-	res, err := tx.ExecContext(ctx, `
+	var customerID string
+	err := tx.QueryRowContext(ctx, `
 		UPDATE credit_notes SET status=$1, issued_at=COALESCE($2, issued_at),
 			voided_at=COALESCE($3, voided_at), issue_pending=false, updated_at=$4
-		WHERE id=$5 AND status=$6`,
-		to, postgres.NullableTime(issuedAt), postgres.NullableTime(voidedAt), now, id, from)
+		WHERE id=$5 AND status=$6
+		RETURNING customer_id`,
+		to, postgres.NullableTime(issuedAt), postgres.NullableTime(voidedAt), now, id, from).Scan(&customerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
+	if to == domain.CreditNoteIssued {
+		if err := stampIssuedPartiesTx(ctx, tx, id, customerID); err != nil {
+			return false, err
+		}
 	}
-	return n == 1, nil
+	return true, nil
+}
+
+// stampIssuedPartiesTx copies what the credit note prints about its buyer
+// and its seller onto the row, on the transaction that issues it (ADR-109).
+// TransitionStatusTx is the only writer of status='issued' (TransitionStatus
+// wraps it), so every issue path stamps. The copy is taken from the live
+// customer and company rows at issue, not from the invoice's copy. A customer
+// the transaction cannot see fails the issue instead of writing an empty copy.
+func stampIssuedPartiesTx(ctx context.Context, tx *sql.Tx, id, customerID string) error {
+	var billTo domain.DocumentBillTo
+	var supplier domain.DocumentSupplier
+	err := tx.QueryRowContext(ctx, domain.DocumentPartiesSQL, customerID).
+		Scan(domain.DocumentPartiesScanDest(&billTo, &supplier)...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("issue credit note %s: customer %s not found for the issued-document copy", id, customerID)
+	}
+	if err != nil {
+		return fmt.Errorf("issue credit note %s: read parties for the issued-document copy: %w", id, err)
+	}
+	billJSON, err := json.Marshal(billTo)
+	if err != nil {
+		return fmt.Errorf("issue credit note %s: encode bill-to copy: %w", id, err)
+	}
+	supJSON, err := json.Marshal(supplier)
+	if err != nil {
+		return fmt.Errorf("issue credit note %s: encode supplier copy: %w", id, err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE credit_notes SET bill_to_snapshot = $1::jsonb, supplier_snapshot = $2::jsonb
+		WHERE id = $3`, billJSON, supJSON, id); err != nil {
+		return fmt.Errorf("issue credit note %s: write issued-document copy: %w", id, err)
+	}
+	return nil
 }
 
 // UpdateStatus (an UNGUARDED status write: `UPDATE … WHERE id=$1`, no

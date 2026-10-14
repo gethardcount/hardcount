@@ -47,6 +47,13 @@ type CreditNote struct {
 	VoidedAt           *time.Time   `json:"voided_at,omitempty"`
 	RefundStatus       RefundStatus `json:"refund_status"`
 	StripeRefundID     string       `json:"stripe_refund_id,omitempty"`
+	// BillToSnapshot and SupplierSnapshot are the buyer and seller details
+	// this credit note was issued with (ADR-109), taken from the live
+	// customer and company rows in the transaction that issued it. Nil on
+	// drafts and on credit notes issued before migration 0177; both render
+	// live.
+	BillToSnapshot   *DocumentBillTo   `json:"bill_to_snapshot,omitempty"`
+	SupplierSnapshot *DocumentSupplier `json:"supplier_snapshot,omitempty"`
 	// TaxTransactionID is the upstream reversal transaction id returned
 	// by the tax provider (Stripe: tx_xxx for the negative tax_transaction)
 	// when Issue succeeds. Empty while the credit note is draft, or when

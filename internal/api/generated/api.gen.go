@@ -1147,6 +1147,41 @@ type Customer struct {
 // CustomerStatus defines model for Customer.Status.
 type CustomerStatus string
 
+// DocumentBillTo What an issued invoice or credit note prints about its buyer, copied
+// when the document was issued (ADR-109). The printed name is
+// `legal_name` when set, otherwise `display_name`.
+type DocumentBillTo struct {
+	AddressLine1 string `json:"address_line1,omitempty"`
+	AddressLine2 string `json:"address_line2,omitempty"`
+	City         string `json:"city,omitempty"`
+	Country      string `json:"country,omitempty"`
+	DisplayName  string `json:"display_name"`
+	Email        string `json:"email,omitempty"`
+	LegalName    string `json:"legal_name,omitempty"`
+	PostalCode   string `json:"postal_code,omitempty"`
+	State        string `json:"state,omitempty"`
+
+	// TaxId On an invoice, the tax ID its tax was calculated with when set,
+	// otherwise the billing profile's tax ID at issue.
+	TaxId     string `json:"tax_id,omitempty"`
+	TaxIdType string `json:"tax_id_type,omitempty"`
+}
+
+// DocumentSupplier What an issued invoice or credit note prints about its seller (the
+// tenant's company), copied when the document was issued (ADR-109).
+type DocumentSupplier struct {
+	AddressLine1 string `json:"address_line1,omitempty"`
+	AddressLine2 string `json:"address_line2,omitempty"`
+	City         string `json:"city,omitempty"`
+	Country      string `json:"country,omitempty"`
+	Email        string `json:"email,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Phone        string `json:"phone,omitempty"`
+	PostalCode   string `json:"postal_code,omitempty"`
+	State        string `json:"state,omitempty"`
+	TaxId        string `json:"tax_id,omitempty"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Error struct {
@@ -1175,6 +1210,14 @@ type Invoice struct {
 	// See ADR-009.
 	Attention         Attention `json:"attention,omitempty"`
 	AutoChargePending bool      `json:"auto_charge_pending,omitempty"`
+
+	// BillToSnapshot The buyer details this invoice was issued with (ADR-109), copied
+	// when it left draft. The PDF, the hosted page and the dashboard
+	// render an issued invoice from this copy, so a later edit to the
+	// customer or billing profile does not change it. Absent on drafts
+	// and on invoices issued before this field existed; those render
+	// from the current customer details.
+	BillToSnapshot DocumentBillTo `json:"bill_to_snapshot,omitempty"`
 
 	// BillingPeriodDisplay Human period string with the inclusive last covered day ("Jun 1, 2028 – Jun 30, 2028"), date-only in the invoice's billing timezone (ADR-058 / ADR-077). Computed on read; the raw billing_period_start/end stay half-open. Empty/omitted for one-off invoices with no period.
 	BillingPeriodDisplay string    `json:"billing_period_display,omitempty"`
@@ -1256,7 +1299,13 @@ type Invoice struct {
 	// SubscriptionId Empty for one-off invoices not tied to a subscription.
 	SubscriptionId string `json:"subscription_id"`
 	SubtotalCents  int64  `json:"subtotal_cents"`
-	TaxAmountCents int64  `json:"tax_amount_cents"`
+
+	// SupplierSnapshot The seller (company) details this invoice was issued with
+	// (ADR-109), copied when it left draft. Absent on drafts and on
+	// invoices issued before this field existed. Branding (logo, brand
+	// color) is not part of it.
+	SupplierSnapshot DocumentSupplier `json:"supplier_snapshot,omitempty"`
+	TaxAmountCents   int64            `json:"tax_amount_cents"`
 
 	// TaxCalculationId Provider-side calculation reference captured at build time.
 	// For Stripe Tax this expires after 24 h; persisted so finalized

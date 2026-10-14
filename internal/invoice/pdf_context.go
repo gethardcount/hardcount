@@ -16,6 +16,13 @@ import (
 // invoice surface carried the buyer's tax ID at all (the credit-note
 // PDF did — EU VAT/GST compliance needs it on invoices too).
 //
+// An issued invoice renders its bill-to and supplier blocks from the copy
+// taken when it was issued (inv.BillToSnapshot / inv.SupplierSnapshot,
+// ADR-109), so a later profile or company edit does not change it. A draft,
+// or an invoice issued before migration 0177 (nil copy), renders from live
+// rows. Brand color and the period timezone are read live either way: they
+// are not part of the issued document's content.
+//
 // Every dependency is optional (nil-tolerant) and every lookup is
 // best-effort: a missing profile or settings row degrades that block,
 // never the render. inv is a pointer so the builder can stamp
@@ -30,45 +37,35 @@ func BuildPDFContext(
 	tenantID string,
 	inv *domain.Invoice,
 ) (BillToInfo, CompanyInfo, []CreditNoteInfo) {
-	bt := BillToInfo{Name: inv.CustomerID}
-	if customers != nil {
-		if cust, err := customers.Get(ctx, tenantID, inv.CustomerID); err == nil {
-			bt.Name = cust.DisplayName
-			bt.Email = cust.Email
-		}
-		if bp, err := customers.GetBillingProfile(ctx, tenantID, inv.CustomerID); err == nil {
-			if bp.LegalName != "" {
-				bt.Name = bp.LegalName
+	var bt BillToInfo
+	if inv.BillToSnapshot != nil {
+		bt = billToInfo(*inv.BillToSnapshot)
+	} else {
+		// The customer id stands in for the name when the customer read
+		// fails; the profile still applies.
+		cust := domain.Customer{DisplayName: inv.CustomerID}
+		var profile *domain.CustomerBillingProfile
+		if customers != nil {
+			if c, err := customers.Get(ctx, tenantID, inv.CustomerID); err == nil {
+				cust = c
 			}
-			// bp.Email removed in migration 0100 — bill-to email tracks
-			// customers.email (set above).
-			bt.AddressLine1 = bp.AddressLine1
-			bt.AddressLine2 = bp.AddressLine2
-			bt.City = bp.City
-			bt.State = bp.State
-			bt.PostalCode = bp.PostalCode
-			bt.Country = bp.Country
-			bt.TaxID = bp.TaxID
+			if bp, err := customers.GetBillingProfile(ctx, tenantID, inv.CustomerID); err == nil {
+				profile = &bp
+			}
 		}
+		bt = billToInfo(domain.NewDocumentBillTo(cust, profile))
 	}
 
 	var ci CompanyInfo
+	if inv.SupplierSnapshot != nil {
+		ci = companyInfo(*inv.SupplierSnapshot)
+	}
 	if settings != nil {
 		if ts, err := settings.Get(ctx, tenantID); err == nil {
-			ci = CompanyInfo{
-				Name:         ts.CompanyName,
-				Email:        ts.CompanyEmail,
-				Phone:        ts.CompanyPhone,
-				AddressLine1: ts.CompanyAddressLine1,
-				AddressLine2: ts.CompanyAddressLine2,
-				City:         ts.CompanyCity,
-				State:        ts.CompanyState,
-				PostalCode:   ts.CompanyPostalCode,
-				Country:      ts.CompanyCountry,
-				BrandColor:   ts.BrandColor,
-				TaxID:        ts.TaxID,
-				TaxIDType:    SupplierTaxIDTypeFromCountry(ts.CompanyCountry),
+			if inv.SupplierSnapshot == nil {
+				ci = companyInfo(domain.NewDocumentSupplier(ts))
 			}
+			ci.BrandColor = ts.BrandColor
 			// Inclusive-last-day period string (ADR-058): fetch paths that
 			// bypass the service read decorator (hosted GetByPublicToken)
 			// arrive without it — author it here from the same domain helper.
@@ -108,4 +105,39 @@ func BuildPDFContext(
 	}
 
 	return bt, ci, cnInfos
+}
+
+// billToInfo maps the bill-to block, issued copy or live, onto what the PDF
+// prints.
+func billToInfo(b domain.DocumentBillTo) BillToInfo {
+	return BillToInfo{
+		Name:         b.Name(),
+		Email:        b.Email,
+		AddressLine1: b.AddressLine1,
+		AddressLine2: b.AddressLine2,
+		City:         b.City,
+		State:        b.State,
+		PostalCode:   b.PostalCode,
+		Country:      b.Country,
+		TaxID:        b.TaxID,
+	}
+}
+
+// companyInfo maps the supplier block onto the PDF header. The tax-ID type is
+// derived from the supplier country, which is itself part of the block, so
+// the label and the reverse-charge wording are fixed on an issued invoice.
+func companyInfo(s domain.DocumentSupplier) CompanyInfo {
+	return CompanyInfo{
+		Name:         s.Name,
+		Email:        s.Email,
+		Phone:        s.Phone,
+		AddressLine1: s.AddressLine1,
+		AddressLine2: s.AddressLine2,
+		City:         s.City,
+		State:        s.State,
+		PostalCode:   s.PostalCode,
+		Country:      s.Country,
+		TaxID:        s.TaxID,
+		TaxIDType:    SupplierTaxIDTypeFromCountry(s.Country),
+	}
 }

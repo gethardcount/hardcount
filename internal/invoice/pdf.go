@@ -245,10 +245,11 @@ type BillToInfo struct {
 }
 
 // buyerTaxID is the buyer's tax registration to print in the bill-to block.
-// The invoice's own snapshot wins: it is the id tax was calculated with when
-// the invoice was built, and an issued invoice must not change because the
-// customer later edited their billing profile. Invoices built without a
-// snapshot fall back to the profile.
+// The invoice's own tax_id wins: it is the ID tax was calculated with, and it
+// is frozen once the invoice leaves draft. Otherwise billTo.TaxID, which
+// BuildPDFContext fills from the issued copy (ADR-109) on an issued invoice,
+// or from the live profile on a draft or a pre-copy invoice. The copy took
+// the same tax_id at issue, so the two sources cannot disagree.
 func buyerTaxID(inv domain.Invoice, billTo BillToInfo) string {
 	if id := strings.TrimSpace(inv.TaxID); id != "" {
 		return id

@@ -3594,6 +3594,44 @@ export interface components {
             timestamp?: string;
         };
         /**
+         * @description What an issued invoice or credit note prints about its buyer, copied
+         *     when the document was issued (ADR-109). The printed name is
+         *     `legal_name` when set, otherwise `display_name`.
+         */
+        DocumentBillTo: {
+            display_name: string;
+            legal_name?: string;
+            email?: string;
+            address_line1?: string;
+            address_line2?: string;
+            city?: string;
+            state?: string;
+            postal_code?: string;
+            country?: string;
+            /**
+             * @description On an invoice, the tax ID its tax was calculated with when set,
+             *     otherwise the billing profile's tax ID at issue.
+             */
+            tax_id?: string;
+            tax_id_type?: string;
+        };
+        /**
+         * @description What an issued invoice or credit note prints about its seller (the
+         *     tenant's company), copied when the document was issued (ADR-109).
+         */
+        DocumentSupplier: {
+            name?: string;
+            email?: string;
+            phone?: string;
+            address_line1?: string;
+            address_line2?: string;
+            city?: string;
+            state?: string;
+            postal_code?: string;
+            country?: string;
+            tax_id?: string;
+        };
+        /**
          * @description Lifecycle state of the invoice. `uncollectible` marks an invoice
          *     a dunning policy has given up collecting (no further retries) while
          *     keeping it on the books — distinct from `voided` (cancelled, owes
@@ -3858,6 +3896,22 @@ export interface components {
             billing_period_display?: string;
             /** @description IANA timezone the period boundaries are anchored in — the org billing timezone resolved and denormalized onto the invoice at issue (ADR-077). billing_period_display is rendered in this zone, so an issued invoice's dates stay fixed even if the org later changes its timezone. Empty for ad-hoc/legacy invoices. */
             billing_timezone?: string;
+            /**
+             * @description The buyer details this invoice was issued with (ADR-109), copied
+             *     when it left draft. The PDF, the hosted page and the dashboard
+             *     render an issued invoice from this copy, so a later edit to the
+             *     customer or billing profile does not change it. Absent on drafts
+             *     and on invoices issued before this field existed; those render
+             *     from the current customer details.
+             */
+            bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
+            /**
+             * @description The seller (company) details this invoice was issued with
+             *     (ADR-109), copied when it left draft. Absent on drafts and on
+             *     invoices issued before this field existed. Branding (logo, brand
+             *     color) is not part of it.
+             */
+            supplier_snapshot?: components["schemas"]["DocumentSupplier"];
             /**
              * Format: date-time
              * @description Set when the invoice transitions out of draft.

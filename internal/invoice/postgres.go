@@ -202,7 +202,8 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	is_simulated, tax_reversed_at,
 	COALESCE(payment_anomaly_kind,''), COALESCE(payment_anomaly_payment_intent_id,''), COALESCE(payment_anomaly_captured_cents,0),
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
-	COALESCE(provider_payment_status,''), provider_synced_at`
+	COALESCE(provider_payment_status,''), provider_synced_at,
+	bill_to_snapshot, supplier_snapshot`
 
 // qualifiedInvCols returns invCols with every column reference prefixed
 // by the given table alias. Used by ADR-029's per-clock queries that
@@ -348,6 +349,11 @@ func (s *PostgresStore) CreateAudited(
 			return domain.Invoice{}, mapped
 		}
 		return domain.Invoice{}, err
+	}
+	if inv.Status != domain.InvoiceDraft {
+		if err := s.stampIssuedPartiesTx(ctx, tx, &inv); err != nil {
+			return domain.Invoice{}, err
+		}
 	}
 	// Emit only after the INSERT actually landed a row (the Scan above
 	// succeeded) — never on a failed/duplicate create.
@@ -718,6 +724,11 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 	if err != nil {
 		return domain.Invoice{}, err
 	}
+	if status == domain.InvoiceFinalized {
+		if err := s.stampIssuedPartiesTx(ctx, tx, &inv); err != nil {
+			return domain.Invoice{}, err
+		}
+	}
 	// Void / uncollectible exit the payable state: close open checkout claims
 	// in the SAME tx (ADR-068 choke-point rule — see markPaidReportingTransition).
 	if status == domain.InvoiceVoided || status == domain.InvoiceUncollectible {
@@ -781,6 +792,9 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 			"can only finalize draft invoices, current status: %s", cur))
 	}
 	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if err := s.stampIssuedPartiesTx(ctx, tx, &inv); err != nil {
 		return domain.Invoice{}, err
 	}
 
@@ -2099,6 +2113,13 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 		}
 		return domain.Invoice{}, err
 	}
+	// Born issued (cycle close, threshold, cancel final, day-1, proration):
+	// copy the parties in this same transaction (ADR-109).
+	if inv.Status != domain.InvoiceDraft {
+		if err := s.stampIssuedPartiesTx(ctx, tx, &inv); err != nil {
+			return domain.Invoice{}, err
+		}
+	}
 
 	// Invoice-level commit rules (ADR-078): commit lines live only on
 	// manual invoices, at most one per invoice. Enforced here so the
@@ -3348,6 +3369,53 @@ func (s *PostgresStore) scanInvoiceRows(rows *sql.Rows, queryErr error) ([]domai
 	return out, rows.Err()
 }
 
+// stampIssuedPartiesTx copies what the invoice prints about its buyer and
+// its seller onto the row, on the transaction that takes it out of draft
+// (ADR-109). Every SQL statement that issues an invoice calls it before
+// commit: createWithLineItemsInTx and CreateAudited for invoices born issued,
+// updateStatusInTx and FinalizeWithDates for drafts being finalized. So the
+// copy and the status change commit together or not at all.
+//
+// The buyer tax ID is the invoice's own tax_id when set (the ID tax was
+// calculated with), otherwise the profile's. That keeps one buyer tax ID on
+// an issued document, from one place.
+//
+// The UPDATE returns the row, so inv (and every caller that renders from the
+// returned value instead of re-reading) carries the copy. A customer the
+// transaction cannot see fails the issue instead of writing an empty copy.
+func (s *PostgresStore) stampIssuedPartiesTx(ctx context.Context, tx *sql.Tx, inv *domain.Invoice) error {
+	var billTo domain.DocumentBillTo
+	var supplier domain.DocumentSupplier
+	err := tx.QueryRowContext(ctx, domain.DocumentPartiesSQL, inv.CustomerID).
+		Scan(domain.DocumentPartiesScanDest(&billTo, &supplier)...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("issue invoice %s: customer %s not found for the issued-document copy", inv.ID, inv.CustomerID)
+	}
+	if err != nil {
+		return fmt.Errorf("issue invoice %s: read parties for the issued-document copy: %w", inv.ID, err)
+	}
+	if id := strings.TrimSpace(inv.TaxID); id != "" {
+		billTo.TaxID = id
+	}
+	billJSON, err := json.Marshal(billTo)
+	if err != nil {
+		return fmt.Errorf("issue invoice %s: encode bill-to copy: %w", inv.ID, err)
+	}
+	supJSON, err := json.Marshal(supplier)
+	if err != nil {
+		return fmt.Errorf("issue invoice %s: encode supplier copy: %w", inv.ID, err)
+	}
+	if err := tx.QueryRowContext(ctx, `
+		UPDATE invoices SET bill_to_snapshot = $1::jsonb, supplier_snapshot = $2::jsonb
+		WHERE id = $3
+		RETURNING `+invCols,
+		billJSON, supJSON, inv.ID,
+	).Scan(s.scanInvDest(inv)...); err != nil {
+		return fmt.Errorf("issue invoice %s: write issued-document copy: %w", inv.ID, err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 	var metaJSON []byte
 	return []any{
@@ -3372,6 +3440,8 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.PaymentAnomalyKind, &inv.PaymentAnomalyPaymentIntentID, &inv.PaymentAnomalyCapturedCents,
 		&inv.BillingTimezone, &inv.NoPMNotifiedAt, &inv.ChargeAttemptSeq,
 		&inv.ProviderPaymentStatus, &inv.ProviderSyncedAt,
+		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &inv.BillToSnapshot},
+		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &inv.SupplierSnapshot},
 	}
 }
 

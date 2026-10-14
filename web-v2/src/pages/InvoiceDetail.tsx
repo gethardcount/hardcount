@@ -84,16 +84,49 @@ const LINE_TYPE_LABELS: Record<string, string> = {
   tax: 'Tax',
 }
 
-function formatCompanyAddressLines(s?: TenantSettings | null): string[] {
-  if (!s) return []
+interface SellerBlock {
+  name?: string
+  email?: string
+  phone?: string
+  addressLines: string[]
+}
+
+function formatAddressLines(a: {
+  line1?: string; line2?: string; city?: string; state?: string; postal?: string; country?: string
+}): string[] {
   const lines: string[] = []
-  if (s.company_address_line1) lines.push(s.company_address_line1)
-  if (s.company_address_line2) lines.push(s.company_address_line2)
-  const cityStatePostal = [s.company_city, s.company_state].filter(Boolean).join(', ')
-    + (s.company_postal_code ? ` ${s.company_postal_code}` : '')
+  if (a.line1) lines.push(a.line1)
+  if (a.line2) lines.push(a.line2)
+  const cityStatePostal = [a.city, a.state].filter(Boolean).join(', ')
+    + (a.postal ? ` ${a.postal}` : '')
   if (cityStatePostal.trim()) lines.push(cityStatePostal.trim())
-  if (s.company_country) lines.push(s.company_country)
+  if (a.country) lines.push(a.country)
   return lines
+}
+
+// sellerBlock is the "From" content. An issued invoice shows the company
+// details it was issued with (ADR-109), so a later settings edit does not
+// change it. A draft, or an invoice issued before the copy existed, shows the
+// current settings.
+function sellerBlock(invoice: Invoice, s?: TenantSettings | null): SellerBlock {
+  const snap = invoice.supplier_snapshot
+  if (snap) {
+    return {
+      name: snap.name, email: snap.email, phone: snap.phone,
+      addressLines: formatAddressLines({
+        line1: snap.address_line1, line2: snap.address_line2, city: snap.city,
+        state: snap.state, postal: snap.postal_code, country: snap.country,
+      }),
+    }
+  }
+  if (!s) return { addressLines: [] }
+  return {
+    name: s.company_name, email: s.company_email, phone: s.company_phone,
+    addressLines: formatAddressLines({
+      line1: s.company_address_line1, line2: s.company_address_line2, city: s.company_city,
+      state: s.company_state, postal: s.company_postal_code, country: s.company_country,
+    }),
+  }
 }
 
 function formatLineType(raw: string): string {
@@ -605,6 +638,8 @@ export default function InvoiceDetailPage() {
     )
   }
 
+  const seller = sellerBlock(invoice, settings)
+
   return (
     <Layout>
       <DetailBreadcrumb to="/invoices" parentLabel="Invoices" currentLabel={invoice.invoice_number} />
@@ -971,9 +1006,9 @@ export default function InvoiceDetailPage() {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-2xl font-bold tracking-tight text-foreground">
-                {settings?.company_name || 'VELOX'}
+                {seller.name || 'VELOX'}
               </p>
-              {formatCompanyAddressLines(settings).map((line, i) => (
+              {seller.addressLines.map((line, i) => (
                 <p key={i} className="text-sm text-muted-foreground mt-1">{line}</p>
               ))}
             </div>
@@ -1008,20 +1043,31 @@ export default function InvoiceDetailPage() {
           <div className="grid grid-cols-2 gap-8">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">From</p>
-              <p className="text-sm font-medium text-foreground">{settings?.company_name || 'Your Company'}</p>
-              {formatCompanyAddressLines(settings).map((line, i) => (
+              <p className="text-sm font-medium text-foreground">{seller.name || 'Your Company'}</p>
+              {seller.addressLines.map((line, i) => (
                 <p key={i} className="text-sm text-muted-foreground mt-0.5">{line}</p>
               ))}
-              {settings?.company_email && (
-                <p className="text-sm text-muted-foreground mt-0.5">{settings.company_email}</p>
+              {seller.email && (
+                <p className="text-sm text-muted-foreground mt-0.5">{seller.email}</p>
               )}
-              {settings?.company_phone && (
-                <p className="text-sm text-muted-foreground mt-0.5">{settings.company_phone}</p>
+              {seller.phone && (
+                <p className="text-sm text-muted-foreground mt-0.5">{seller.phone}</p>
               )}
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Bill To</p>
-              {customer ? (
+              {/* An issued invoice shows the buyer it was issued to (ADR-109);
+                  a draft or a pre-copy invoice shows the current customer. */}
+              {invoice.bill_to_snapshot ? (
+                <>
+                  <Link to={`/customers/${invoice.customer_id}`} className="text-sm font-medium text-primary hover:underline">
+                    {invoice.bill_to_snapshot.legal_name || invoice.bill_to_snapshot.display_name}
+                  </Link>
+                  {invoice.bill_to_snapshot.email && (
+                    <p className="text-sm text-muted-foreground mt-0.5">{invoice.bill_to_snapshot.email}</p>
+                  )}
+                </>
+              ) : customer ? (
                 <>
                   <Link to={`/customers/${customer.id}`} className="text-sm font-medium text-primary hover:underline">
                     {customer.display_name}

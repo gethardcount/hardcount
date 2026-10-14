@@ -379,9 +379,11 @@ At the moment the document is issued. Drafts render live.
 ### Writer site-set (verified 2026-10-14)
 
 Every SQL statement that can produce a non-draft invoice or an issued
-credit note calls one helper in the same transaction, after the status
-write and before commit. The helper re-reads the row (`RETURNING invCols`),
-so the value handed back to callers carries the snapshot.
+credit note calls a stamp helper in the same transaction, after the status
+write and before commit. The invoice helper returns the stamped row
+(`RETURNING invCols`), so the invoice handed back to callers carries the
+snapshot. The credit-note writer returns only whether it won the status
+change; its callers re-read the row.
 
 | SQL site | Go paths that reach it | Stamps |
 |---|---|---|
@@ -396,8 +398,9 @@ A missing customer row fails the issue instead of writing an empty copy.
 
 **Blast radius.** A stamp error now fails the transaction that issues the
 document, including a subscription create or cancel that bills in the same
-transaction. The stamp is three indexed reads and one UPDATE, so the new
-failure modes are the same as the status write's own.
+transaction. The stamp is one read (customer, billing profile and settings,
+joined by key) and one UPDATE of the row just written, so its failure
+modes are the same as the status write's own.
 
 ### Readers
 
@@ -405,7 +408,7 @@ failure modes are the same as the status write's own.
 |---|---|---|
 | Invoice PDF (`invoice.BuildPDFContext`): email attachment, API download, hosted PDF | bill-to, supplier, buyer tax ID, legend wording | live, as before |
 | Hosted invoice page (`hostedinvoice` view) | bill-to and company block | live |
-| Credit-note PDF (`creditnote` `assemblePDFContext`) | bill-to and supplier | live |
+| Credit-note PDF, download and email (`creditnote` `assemblePDFContext`) | bill-to and supplier | live |
 | Dashboard `InvoiceDetail` From and Bill To | snapshot | live (drafts, old rows) |
-| API `GET /v1/invoices/{id}`, `GET /v1/credit_notes/{id}` | `bill_to_snapshot`, `supplier_snapshot` | fields omitted |
+| API `GET /v1/invoices/{id}`, `GET /v1/credit-notes/{id}` | `bill_to_snapshot`, `supplier_snapshot` | fields omitted |
 | Email greeting name and sender name | live by decision: message, not document | live |

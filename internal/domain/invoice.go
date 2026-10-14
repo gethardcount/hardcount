@@ -293,6 +293,13 @@ type Invoice struct {
 	// ad-hoc/manual invoices with no owning subscription (and legacy rows); the
 	// read path then falls back to the live tenant TZ, preserving prior behavior.
 	BillingTimezone string `json:"billing_timezone,omitempty"`
+	// BillToSnapshot and SupplierSnapshot are the buyer and seller details
+	// this invoice was issued with (ADR-109), written in the transaction that
+	// took it out of draft. Nil on drafts, which render live, and on invoices
+	// issued before migration 0177, which keep rendering live because nothing
+	// records what they showed.
+	BillToSnapshot   *DocumentBillTo   `json:"bill_to_snapshot,omitempty"`
+	SupplierSnapshot *DocumentSupplier `json:"supplier_snapshot,omitempty"`
 	// BillingPeriodDisplay is the human period string with the INCLUSIVE last
 	// covered day ("Jun 1, 2028 – Jun 30, 2028"), rendered date-only in the
 	// tenant TZ — the industry-standard period display (ADR-058 follow-up).

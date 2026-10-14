@@ -290,46 +290,39 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bill-to projection for the PDF (no tenant_id leak). Billing profile
-	// falls back to customer display_name + email when legal_name is unset.
-	billTo := viewBillTo{}
-	if h.customers != nil {
-		if cust, err := h.customers.Get(r.Context(), inv.TenantID, inv.CustomerID); err == nil {
-			billTo.Name = cust.DisplayName
-			billTo.Email = cust.Email
-		}
-		if bp, err := h.customers.GetBillingProfile(r.Context(), inv.TenantID, inv.CustomerID); err == nil {
-			if bp.LegalName != "" {
-				billTo.Name = bp.LegalName
-			}
-			// bp.Email removed in migration 0100 — bill-to email tracks
-			// customers.email (set above).
-			billTo.AddressLine1 = bp.AddressLine1
-			billTo.AddressLine2 = bp.AddressLine2
-			billTo.City = bp.City
-			billTo.State = bp.State
-			billTo.PostalCode = bp.PostalCode
-			billTo.Country = bp.Country
-		}
+	// Bill-to and company blocks come from the same resolver as the PDF
+	// (invoice.BuildPDFContext): an issued invoice shows the details it was
+	// issued with (ADR-109), and one issued before migration 0177 falls back
+	// to live rows. Only the projection below leaves the server, so no
+	// tenant_id leaks.
+	bt, ci, _ := invoice.BuildPDFContext(r.Context(), h.customers, h.settings, nil, inv.TenantID, &inv)
+	billTo := viewBillTo{
+		Name:         bt.Name,
+		Email:        bt.Email,
+		AddressLine1: bt.AddressLine1,
+		AddressLine2: bt.AddressLine2,
+		City:         bt.City,
+		State:        bt.State,
+		PostalCode:   bt.PostalCode,
+		Country:      bt.Country,
 	}
-
-	branding := viewBranding{}
+	branding := viewBranding{
+		CompanyName:         ci.Name,
+		CompanyEmail:        ci.Email,
+		CompanyPhone:        ci.Phone,
+		CompanyAddressLine1: ci.AddressLine1,
+		CompanyAddressLine2: ci.AddressLine2,
+		CompanyCity:         ci.City,
+		CompanyState:        ci.State,
+		CompanyPostalCode:   ci.PostalCode,
+		CompanyCountry:      ci.Country,
+		BrandColor:          ci.BrandColor,
+	}
+	// Logo and support link are branding, not issued content: always live.
 	if h.settings != nil {
 		if ts, err := h.settings.Get(r.Context(), inv.TenantID); err == nil {
-			branding = viewBranding{
-				CompanyName:         ts.CompanyName,
-				CompanyEmail:        ts.CompanyEmail,
-				CompanyPhone:        ts.CompanyPhone,
-				CompanyAddressLine1: ts.CompanyAddressLine1,
-				CompanyAddressLine2: ts.CompanyAddressLine2,
-				CompanyCity:         ts.CompanyCity,
-				CompanyState:        ts.CompanyState,
-				CompanyPostalCode:   ts.CompanyPostalCode,
-				CompanyCountry:      ts.CompanyCountry,
-				LogoURL:             ts.LogoURL,
-				BrandColor:          ts.BrandColor,
-				SupportURL:          ts.SupportURL,
-			}
+			branding.LogoURL = ts.LogoURL
+			branding.SupportURL = ts.SupportURL
 		}
 	}
 

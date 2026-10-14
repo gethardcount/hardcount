@@ -8,6 +8,8 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { Attention } from './attention';
+import type { DocumentBillTo } from './documentBillTo';
+import type { DocumentSupplier } from './documentSupplier';
 import type { InvoiceBillingReason } from './invoiceBillingReason';
 import type { InvoiceMetadata } from './invoiceMetadata';
 import type { InvoicePaymentStatus } from './invoicePaymentStatus';
@@ -94,6 +96,22 @@ export interface Invoice {
   billing_period_display?: string;
   /** IANA timezone the period boundaries are anchored in — the org billing timezone resolved and denormalized onto the invoice at issue (ADR-077). billing_period_display is rendered in this zone, so an issued invoice's dates stay fixed even if the org later changes its timezone. Empty for ad-hoc/legacy invoices. */
   billing_timezone?: string;
+  /**
+     * The buyer details this invoice was issued with (ADR-109), copied
+     * when it left draft. The PDF, the hosted page and the dashboard
+     * render an issued invoice from this copy, so a later edit to the
+     * customer or billing profile does not change it. Absent on drafts
+     * and on invoices issued before this field existed; those render
+     * from the current customer details.
+     */
+  bill_to_snapshot?: DocumentBillTo;
+  /**
+     * The seller (company) details this invoice was issued with
+     * (ADR-109), copied when it left draft. Absent on drafts and on
+     * invoices issued before this field existed. Branding (logo, brand
+     * color) is not part of it.
+     */
+  supplier_snapshot?: DocumentSupplier;
   /**
      * Set when the invoice transitions out of draft.
      * @nullable

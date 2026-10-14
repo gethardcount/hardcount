@@ -18,6 +18,8 @@ export * from './creditBalance';
 export * from './creditLiveBalance';
 export * from './customer';
 export * from './customerStatus';
+export * from './documentBillTo';
+export * from './documentSupplier';
 export * from './error';
 export * from './errorError';
 export * from './errorErrorType';
