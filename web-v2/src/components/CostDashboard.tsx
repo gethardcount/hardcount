@@ -29,7 +29,7 @@ import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/
 import { useEffectiveNow, useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
 
 import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ChevronDown, ChevronRight, Activity, AlertTriangle, Loader2, Receipt } from 'lucide-react'
@@ -413,11 +413,8 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
 
       {error ? (
         <Card>
-          <CardContent className="p-6 text-center">
-            <p className="text-sm text-destructive mb-3">{(error as Error).message}</p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              Retry
-            </Button>
+          <CardContent className="p-0">
+            <LoadError what="activity" error={error} onRetry={() => refetch()} />
           </CardContent>
         </Card>
       ) : isLoading ? (

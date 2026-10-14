@@ -31,6 +31,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { EmptyState } from '@/components/EmptyState'
+import { LoadError } from '@/components/LoadError'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
 // Live-tail buffer cap. The dashboard's table re-renders on every frame
@@ -325,7 +326,7 @@ function FrameRows({
 // replays don't mutate the payload, so this collapses to "identical" in
 // the common case.
 function DeliveryTimeline({ eventID, highlightEventId }: { eventID: string; highlightEventId: string | null }) {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['webhook-deliveries', eventID],
     queryFn: () => api.listWebhookDeliveries(eventID),
     // The family keeps moving while the row is open: replay attempts
@@ -357,11 +358,7 @@ function DeliveryTimeline({ eventID, highlightEventId }: { eventID: string; high
     )
   }
   if (error) {
-    return (
-      <div className="px-6 py-4 text-sm text-destructive">
-        Failed to load delivery history.
-      </div>
-    )
+    return <LoadError what="delivery history" error={error} onRetry={() => refetch()} className="py-6" />
   }
   if (deliveries.length === 0) {
     return (

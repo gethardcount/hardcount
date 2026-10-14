@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-import { api, formatDateTime, getTenantTimezone, type TestClock, type AdvanceSummary } from '@/lib/api'
+import { api, ApiError, formatDateTime, getTenantTimezone, type TestClock, type AdvanceSummary } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
 import { cn } from '@/lib/utils'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
@@ -210,10 +210,13 @@ export default function TestClockDetailPage() {
     )
   }
   if (clockQ.error || !clock) {
+    // A 404 is "not found", not a load failure: Retry can't bring a deleted
+    // clock back, so it gets the Back link instead.
+    const notFound = !clockQ.error || (clockQ.error instanceof ApiError && clockQ.error.status === 404)
     return (
       <Layout>
         <Card className="mt-6">
-          {clockQ.error ? (
+          {!notFound ? (
             <CardContent className="p-0">
               <LoadError what="this test clock" error={clockQ.error} onRetry={() => clockQ.refetch()} />
             </CardContent>

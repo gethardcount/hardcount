@@ -7,6 +7,7 @@ import { Pencil, Trash2, Plus, Star, AlertTriangle } from 'lucide-react'
 import { api, type DunningPolicy, type DunningPolicyWithCount } from '@/lib/api'
 import { Layout } from '@/components/Layout'
 import { EmptyState } from '@/components/EmptyState'
+import { LoadError } from '@/components/LoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
 import { showApiError } from '@/lib/formErrors'
 
@@ -84,7 +85,7 @@ export default function DunningPoliciesPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DunningPolicyWithCount | null>(null)
 
-  const { data: policiesData, isLoading } = useQuery({
+  const { data: policiesData, isLoading, error: policiesError, refetch: refetchPolicies } = useQuery({
     queryKey: ['dunning-policies'],
     queryFn: () => api.listDunningPolicies(),
   })
@@ -148,7 +149,10 @@ export default function DunningPoliciesPage() {
           </CardHeader>
           <CardContent className="p-0">
             {isLoading && <FeedSkeleton rows={3} />}
-            {!isLoading && policies.length === 0 && (
+            {!isLoading && policiesError && (
+              <LoadError what="dunning policies" error={policiesError} onRetry={() => refetchPolicies()} />
+            )}
+            {!isLoading && !policiesError && policies.length === 0 && (
               <EmptyState
                 icon={AlertTriangle}
                 title="No dunning policies yet"
