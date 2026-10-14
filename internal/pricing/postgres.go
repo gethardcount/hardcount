@@ -942,6 +942,33 @@ func (s *PostgresStore) PlanCurrenciesWiringMeters(ctx context.Context, tenantID
 	return out, rows.Err()
 }
 
+func (s *PostgresStore) PlansWiringMeter(ctx context.Context, tenantID, meterID string) ([]planRef, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT p.id, p.code
+		FROM plans p
+		WHERE p.tenant_id = $1 AND p.meter_ids @> to_jsonb(ARRAY[$2::text])
+		ORDER BY p.code
+	`, tenantID, meterID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []planRef
+	for rows.Next() {
+		var p planRef
+		if err := rows.Scan(&p.ID, &p.Code); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (s *PostgresStore) MeterBoundKeyCurrencies(ctx context.Context, tenantID string, meterIDs []string) ([]keyCurrency, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

@@ -1,0 +1,45 @@
+package billing
+
+import (
+	"github.com/shopspring/decimal"
+
+	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
+	"github.com/sagarsuperuser/velox/internal/domain"
+)
+
+// Unpriced usage (#981, ADR-096 amendment): usage that matches no pricing
+// rule on a meter with no default binding has no price, so an invoice is
+// built and sent without it. That is the peer norm (Lago bills it at a $0
+// default, Metronome and Orb leave it off). It is never silent: each place
+// that builds an invoice without it logs a WARN and adds the quantity to
+// velox_usage_unpriced_quantity_total{meter_id}. The invoice builders are
+// the period close and the cancel final invoice (buildLineItems,
+// buildCancelLineItems) and the spend-threshold invoice (fireThreshold).
+
+// unpricedUsage is the quantity per meter id that one invoice decision left
+// unpriced. A builder fills it; the caller records it once the decision is
+// final, so a close that rolls back and is retried does not count twice.
+type unpricedUsage map[string]decimal.Decimal
+
+func (u unpricedUsage) add(meterID string, qty decimal.Decimal) {
+	u[meterID] = u[meterID].Add(qty)
+}
+
+// record adds each meter's quantity to the counter. The counter is an
+// operator signal (float, reset on restart), never a billing record.
+func (u unpricedUsage) record() {
+	for meterID, qty := range u {
+		mw.RecordUsageUnpriced(meterID, qty.InexactFloat64())
+	}
+}
+
+// unpricedBucket is one meter's unpriced bucket as rateMeterWindow saw it.
+// Mode is the bucket's aggregation mode: the threshold fire needs it to
+// decide whether the bucket is its to report or the period close's (see
+// evaluateThresholds).
+type unpricedBucket struct {
+	MeterID  string
+	MeterKey string
+	Mode     domain.AggregationMode
+	Quantity decimal.Decimal
+}

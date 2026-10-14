@@ -1345,6 +1345,19 @@ func (m *memStore) PlanCurrenciesBoundToRuleKey(_ context.Context, _ string, rul
 	return out, nil
 }
 
+func (m *memStore) PlansWiringMeter(_ context.Context, _ string, meterID string) ([]planRef, error) {
+	var out []planRef
+	for _, p := range m.plans {
+		for _, mid := range p.MeterIDs {
+			if mid == meterID {
+				out = append(out, planRef{ID: p.ID, Code: p.Code})
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (m *memStore) PlanCurrenciesWiringMeters(_ context.Context, _ string, meterIDs []string) ([]planCurrency, error) {
 	want := map[string]bool{}
 	for _, id := range meterIDs {

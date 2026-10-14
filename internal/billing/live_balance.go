@@ -249,7 +249,7 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 		// pass only those. Rules are pinned at the period start (ADR-070).
 		sum := func(windows []usageInterval, deferred bool) error {
 			for _, iv := range mergeUsageIntervals(windows) {
-				lines, _, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
+				lines, _, _, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
 				if err != nil {
 					return fmt.Errorf("rate meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
 				}

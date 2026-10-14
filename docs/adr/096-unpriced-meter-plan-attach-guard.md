@@ -1,7 +1,9 @@
 # ADR-096: Unpriced meter on a plan — guard at authoring, loud at finalize
 
 Date: 2026-07-18
-Status: Accepted. The **guard + loud-log** below is IMPLEMENTED in this PR. The fuller "durable marker + critical banner + metering-only flag" design (from the design panel) is **deferred** — see *Deferred* — because live-doc verification showed it has no industry precedent and the guard already fixes the real defect.
+Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-981-refuse-removing-the-last-price-and-count-unpriced-usage)). Current rule: an invoice is still built without usage that has no price. Removing a meter's last price is refused while a live subscription's plan uses the meter, and every invoice built without priceless usage logs it and counts its quantity.
+
+Original status: Accepted. The **guard + loud-log** below is IMPLEMENTED in this PR. The fuller "durable marker + critical banner + metering-only flag" design (from the design panel) is **deferred** — see *Deferred* — because live-doc verification showed it has no industry precedent and the guard already fixes the real defect.
 Relates: ADR-070 (no-silent-fallbacks in billing — this extends its fail-LOUD mandate to the finalize path), ADR-044 (multi-dim `{model,token_type}` rating — the meters this most affects), ADR-034 (plan immutability — the guard runs after it).
 
 ## Context
@@ -73,3 +75,78 @@ The panel's fuller design — a durable `invoices.unrated_usage` JSONB marker, a
 ## Test coverage
 
 `TestPlanAttachGuard_UnpricedMeter_ADR096`: CreatePlan rejects an unpriced meter; accepts a meter priced via a default binding; accepts a meter priced via a `meter_pricing_rules` row; UpdatePlan rejects adding an unpriced meter. The existing ADR-034 immutability tests keep passing (their meters are seeded priced). The engine loud-log sites are exercised by the existing billing suite (behavior-preserving — the money outcome is unchanged, only the log).
+
+## Amendment 2026-10-14 (#981): refuse removing the last price, and count unpriced usage
+
+Issue #981 named the drift this ADR deferred: a live plan's meter can lose
+its price after the plan-attach guard ran. Two writes do it. One deletes
+the meter's last pricing rule. The other clears its default binding (the
+meter's default price). New model names are also routine in AI pricing: a
+meter with rules for some models and no default leaves every new model
+unpriced. And one invoice path was silent. A spend-threshold invoice
+dropped unpriced usage with no log, and the period's last invoice bills
+only from the threshold invoice on.
+
+**What other products do** (checked 2026-10-14; full notes in the velox-ops
+research file `wrong-invoice-holes-981-980-design-2026-10-14.json`):
+
+- All the peers checked build the invoice without the unmatched usage. None
+  holds the invoice, refuses the event, or alerts. Lago bills it at a
+  default price that is $0 unless set
+  ([charges with filters](https://getlago.com/docs/guide/plans/charges/charges-with-filters)).
+  Metronome shows it under Events with no charge
+  ([quickstart](https://docs.metronome.com/guides/get-started/metronome-dashboard-quickstart)).
+  Orb's dimensional pricing has no default and says to price every
+  combination.
+- Stripe refuses removing a price in use: "You can only delete prices that
+  you've never used"
+  ([manage prices](https://docs.stripe.com/products-prices/manage-prices)).
+- Correction to the Context above: the Orb sentence "tracked but not
+  billed" is no longer on the page this ADR cites.
+
+**Decision.** Keep the peer norm: the invoice is built and sent without
+the unpriced usage, and Velox does not bill it again later (the shape of
+ADR-120). Close the two gaps:
+
+1. **Guard.** Two writes are refused: `DeleteMeterPricingRule`, and
+   `UpdateMeter` clearing the default binding. They are refused when the
+   meter would have no pricing rule and no default binding while a plan
+   wiring it has a live subscription. The answer is 409 `invalid_state`,
+   the code the ADR-100 meter-binding guards use.
+   "Live" is the set `CountLiveSubsByPlan` already uses for plan
+   immutability: draft, trialing and active. This reverses the rejection
+   above of a "rule-deletion drift guard". The named pressure is #981.
+   It is a plain check, then the write, with no lock. A subscription created
+   in between does not touch the meter row, so a meter lock would not order
+   the two. Losing that race ends as an unguarded write would, and the
+   signals below still report it. The guard covers the last price only.
+   Deleting one of several rules can still leave one model unmatched; the
+   signals report that too.
+2. **Signals.** Each place that builds an invoice without unpriced usage
+   logs a WARN with meter and quantity, and adds the quantity to
+   `velox_usage_unpriced_quantity_total{meter_id}`. That covers the period
+   close (with or without an invoice), the cancel final invoice (with or
+   without one) and the spend-threshold invoice, which now logs too. Usage
+   is counted once. A period close after a threshold invoice reports only
+   on the pass that would have billed the bucket. Its full-window pass is
+   for max and last buckets the threshold invoice left to it, so a sum
+   bucket is not reported twice. The invoice preview warning now carries
+   the quantity.
+
+**Where the operator sees it:** the unmatched row of the customer usage
+view (`GET /v1/customers/{id}/usage`, the "unmatched usage — not billed"
+row on the customer page), the preview warning, the counter and the server
+log. **How to bill it:** add a price (a pricing rule or a default price),
+which later invoices use; bill past periods with a one-off invoice.
+
+**Deferred** (in the velox-ops register, each with its trigger):
+
+- A durable record of unbilled usage per closed period (meter, quantity,
+  invoice). Rules are matched when usage is read, so after a price is
+  added, the usage view shows a past period's usage as priced although its
+  invoice did not bill it. Trigger: an operator needs past unbilled
+  quantities after adding the price, or reports the usage view as wrong.
+- A customer page card or attention banner for unbilled usage, and a $0
+  invoice line for it. Trigger: an operator misses unpriced usage with the
+  signals above.
+

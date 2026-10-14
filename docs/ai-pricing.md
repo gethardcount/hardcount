@@ -58,4 +58,13 @@ Each event is claimed by at most one pricing rule: the highest-priority match (t
 - Token roles are disjoint, so each `{model, token_type}` maps to exactly one rule at equal priority.
 - You can also mix a coarse catch-all rule (`{"model": "gpt-4"}`) with finer per-role rules. Priority decides which one claims each event.
 
+**Usage that no rule claims has no price.** A new model name with no rule is the common case. If the meter has a default price (`PATCH /v1/meters/{id}` with `rating_rule_version_id`), that price bills it. If not, Velox builds and sends the invoice without that usage, as Lago, Metronome and Orb do. You see it in four places:
+
+- the "unmatched usage — not billed" row of the customer's usage (`GET /v1/customers/{id}/usage`, and the customer page);
+- the invoice preview warning, which gives the quantity;
+- the `velox_usage_unpriced_quantity_total{meter_id}` counter;
+- a server log line when the invoice is built.
+
+To bill it, add a rule or a default price; invoices not built yet then include it. Bill periods already invoiced with a one-off invoice ([runbook §16](ops/runbook.md#16-usage-with-no-price)). Velox refuses (409) to remove a meter's last price while a plan with a live subscription uses the meter.
+
 The full design lives in [`docs/design-multi-dim-meters.md`](design-multi-dim-meters.md): schema, aggregation semantics, decimal quantities, and all five aggregation modes.

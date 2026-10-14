@@ -135,7 +135,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [093](093-csrf-origin-verification.md) | 2026-07-16 | Accepted | Auth & security | State-changing cookie requests must come from the same site, checked by origin headers |
 | [094](094-login-brute-force-throttle.md) | 2026-07-17 | Accepted (amended) | Auth & security | v1 has no login lockout; a throttle, MFA and breached-password check are designed, deferred |
 | [095](095-login-security-roadmap-and-mfa.md) | 2026-07-17 | Accepted (amended) | Auth & security | Ship TOTP MFA and an offline breached-password check before first deployment |
-| [096](096-unpriced-meter-plan-attach-guard.md) | 2026-07-18 | Accepted | Pricing & usage | Refuse to attach an unpriced meter to a plan; log loudly if one still reaches finalize |
+| [096](096-unpriced-meter-plan-attach-guard.md) | 2026-07-18 | Accepted (amended) | Pricing & usage | Refuse to attach an unpriced meter to a plan, or to remove a live plan's last price; log and count usage left unpriced |
 | [097](097-mid-period-scheduled-cancel-fires-as-immediate-cancel.md) | 2026-07-18 | Accepted | Subscriptions | A scheduled cancel that falls mid-period fires as an immediate cancel at that time |
 | [098](098-postmark-delivery-webhook-ingestion.md) | 2026-07-19 | Accepted | Integrations | Ingest Postmark delivery, bounce and spam-complaint webhooks; ignore opens and clicks |
 | [099](099-simulated-time-disclosure-policy.md) | 2026-07-21 | Accepted | Test clocks & simulated time | Mark simulated data once per scope with the word "Simulated": a page banner or a list chip |

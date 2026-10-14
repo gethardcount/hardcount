@@ -176,7 +176,29 @@ var (
 		},
 		[]string{"role", "reason"},
 	)
+
+	// usageUnpricedQuantity is the operator's signal for usage that matched
+	// no price and was left off an invoice (#981). It is a signal, not a
+	// record: it resets on restart and is not per customer. The per-customer
+	// view is the unmatched row of GET /v1/customers/{id}/usage. meter_id
+	// is bounded by the meters a tenant creates.
+	usageUnpricedQuantity = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_usage_unpriced_quantity_total",
+			Help: "Usage quantity that matched no pricing rule on a meter with no default price, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by meter. Bill it with a one-off invoice; add a price so later invoices include it.",
+		},
+		[]string{"meter_id"},
+	)
 )
+
+// RecordUsageUnpriced adds the quantity of one meter's usage that an invoice
+// was built without because no price matched it.
+func RecordUsageUnpriced(meterID string, quantity float64) {
+	if quantity <= 0 {
+		return
+	}
+	usageUnpricedQuantity.WithLabelValues(meterID).Add(quantity)
+}
 
 // RecordLeaderLeaseLost counts a lost lease (leader.LostFunc adapter).
 func RecordLeaderLeaseLost(role, reason string) {

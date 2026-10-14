@@ -28,6 +28,7 @@ confirm the fix.
 | `velox_audit_uncovered_mutation_total` rising | [13. Mutation without an audit row](#13-mutation-without-an-audit-row) |
 | `velox_billing_failing_subscriptions` above zero, or a subscription is not being invoiced | [14. Subscriptions whose billing is failing](#14-subscriptions-whose-billing-is-failing) |
 | A period ended but its invoice is not built yet, or usage is missing from an invoice | [15. Invoice timing and late usage](#15-invoice-timing-and-late-usage) |
+| `velox_usage_unpriced_quantity_total` rising, or a "matched no rating rule" WARN | [16. Usage with no price](#16-usage-with-no-price) |
 | Write I/O high for minutes after a bulk load | [After a large backfill](#after-a-large-backfill-expect-a-few-minutes-of-elevated-write-io) |
 | p99 jumps, p50 flat, after a quiet spell (RDS) | [Size the WAL segment pool](#on-rds-size-the-wal-segment-pool--the-defaults-let-commits-stall-after-a-quiet-spell) |
 | p50 lifts for everyone for seconds on a large table | [Autovacuum stall](#autovacuum-on-a-large-insert-only-table-can-stall-every-commit-for-seconds) |
@@ -92,6 +93,7 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_audit_write_errors_total{outcome="row_lost"}` | rate > 0/s | **Audit evidence permanently lost.** Treat as a compliance incident. See [§12](#12-audit-write-errors) |
 | `velox_audit_write_errors_total{outcome="mutation_refused"}` | rate > 0/s | **Nothing is missing.** An availability problem, not an evidence problem. See [§12](#12-audit-write-errors) |
 | `velox_audit_uncovered_mutation_total{route}` | any increase | A route mutated state and wrote no audit row. Should be **flat zero**. See [§13](#13-mutation-without-an-audit-row) |
+| `increase(velox_usage_unpriced_quantity_total[1d])` by `meter_id` | > 0 | An invoice was built without usage that matched no price. That usage is not billed unless you bill it. See [§16](#16-usage-with-no-price) |
 
 ### Info (dashboards, no alert)
 
@@ -727,6 +729,52 @@ is set, go to [14](#14-subscriptions-whose-billing-is-failing).
 **Verify**: after the grace and the next billing tick,
 `velox_billing_due_subscriptions` falls back and the invoice exists, dated
 at the period end.
+
+### 16. Usage with no price
+
+**Symptom**: `velox_usage_unpriced_quantity_total{meter_id}` rises. Or the
+server logs a WARN such as `cycle: usage matched no rating rule and meter
+has no default binding — not billed` (the prefix is `cycle`, `cancel` or
+`threshold`), with `meter`, `quantity` and `subscription_id`.
+
+**Why**: the usage matched no pricing rule on its meter, and the meter has
+no default price. A common cause is a new model name on an AI meter that
+has rules for the older models only. Velox builds and sends the invoice
+without that usage, as Lago, Metronome and Orb do, and does not bill it
+later on its own (ADR-096 amendment). The counter adds the quantity once
+per invoice built without it: period close, cancel final invoice or
+spend-threshold invoice. It resets when the process restarts.
+
+**Check**:
+
+```bash
+# Which meter is it, and which customers have it this period?
+curl -sS "$API/v1/meters/$METER" -H "Authorization: Bearer $KEY" | jq '{key, rating_rule_version_id}'
+curl -sS "$API/v1/customers/$CUSTOMER/usage" -H "Authorization: Bearer $KEY" \
+  | jq '.meters[] | {meter_key, unmatched: [.rules[] | select(.unmatched == true) | .quantity]}'
+# Which dimension values are unpriced (e.g. the model name):
+curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER" -H "Authorization: Bearer $KEY"
+```
+
+The customer page shows the same "unmatched usage — not billed" row. The
+`subscription_id` and `quantity` in the WARN tell you which invoice left
+it out.
+
+**Fix**:
+
+1. Add a price so later invoices bill it: a pricing rule for the new value
+   (`POST /v1/meters/{id}/pricing-rules`), or a default price for the
+   meter (`PATCH /v1/meters/{id}` with `rating_rule_version_id`). Usage in
+   a period whose invoice is not built yet is then billed on it.
+2. Bill usage from periods already invoiced with a one-off invoice:
+   `POST /v1/invoices`, then `POST /v1/invoices/{id}/line-items`, then
+   `POST /v1/invoices/{id}/finalize`. Take the quantity from the WARN, not
+   from the usage view after step 1. Rules are matched when usage is read.
+   Once the price exists, the view shows past usage as priced, although
+   its invoice did not bill it.
+
+**Verify**: the next invoice for the customer carries a line for the
+usage, and the counter stops rising for that meter.
 
 ## After a large backfill, expect a few minutes of elevated write I/O
 

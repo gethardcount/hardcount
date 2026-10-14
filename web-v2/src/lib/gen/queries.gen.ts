@@ -766,7 +766,11 @@ export const getPatchV1MetersIdUrl = (id: string,) => {
  * the meter's DEFAULT rating rule — the rate applied to usage no
  * dimension pricing rule claims (the remedy for silently-unbilled
  * unmatched usage); pass an empty string to clear it. The rule must
- * exist on the tenant.
+ * exist on the tenant. Clearing it is refused with 409 when the meter
+ * has no pricing rule either and a plan with a live (draft, trialing
+ * or active) subscription uses the meter: that usage would be left off
+ * every invoice. Add a pricing rule first, or move the subscriptions
+ * to a plan without this meter.
  * @summary Update meter (incl. the default rating-rule binding)
  */
 export const patchV1MetersId = async (id: string,

@@ -39,6 +39,12 @@ type thresholdEval struct {
 	BilledSubtotal  int64
 	LineItems       []domain.InvoiceLineItem
 	InvoiceCurrency string
+	// Unpriced is the usage this threshold invoice is built without because
+	// no price matched it, and that no later invoice reports. It follows
+	// the line rules below: a non-additive bucket under reset=false belongs
+	// to the period close (its full-window pass reports it), so it is left
+	// out here; everything else is this invoice's to report (#981).
+	Unpriced []unpricedBucket
 }
 
 // nonAdditiveMode reports whether a rule bucket's aggregation cannot be split
@@ -306,7 +312,25 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 		return false, nil
 	}
 
-	return e.fireThreshold(ctx, sub, eval, periodStart, now)
+	fired, err := e.fireThreshold(ctx, sub, eval, periodStart, now)
+	if err != nil || !fired {
+		return fired, err
+	}
+	// The threshold invoice committed without this usage. Before #981 the
+	// preview's warnings were dropped here, so nothing said so; the period
+	// close then bills only from this invoice's end, so this usage is billed
+	// nowhere. Same WARN as the cycle path, and counted once, after the
+	// commit (a losing concurrent fire returns fired=false and counts
+	// nothing).
+	unpriced := unpricedUsage{}
+	for _, u := range eval.Unpriced {
+		slog.Warn("threshold: usage matched no rating rule and meter has no default binding — not billed",
+			"meter", u.MeterKey, "quantity", u.Quantity.String(),
+			"subscription_id", sub.ID)
+		unpriced.add(u.MeterID, u.Quantity)
+	}
+	unpriced.record()
+	return true, nil
 }
 
 // thresholdWatermark is one close window's threshold-fire ground truth
@@ -608,6 +632,12 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		BilledSubtotal:  billedSubtotal,
 		LineItems:       lineItems,
 		InvoiceCurrency: currency,
+	}
+	for _, u := range preview.unpriced {
+		if nonAdditiveMode(u.Mode) && !reset {
+			continue
+		}
+		eval.Unpriced = append(eval.Unpriced, u)
 	}
 
 	// Amount cap: committed running spend vs the configured cap.

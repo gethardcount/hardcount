@@ -402,6 +402,19 @@ func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input Up
 			if err := s.guardMeterBinding(ctx, tenantID, m.ID, rid); err != nil {
 				return domain.Meter{}, err
 			}
+		} else if m.RatingRuleVersionID != "" {
+			// Clearing the default: refused (409) when it is the meter's
+			// last price and a live subscription's plan wires the meter
+			// (#981; see guardMeterStaysPriced).
+			rules, err := s.store.ListMeterPricingRulesByMeter(ctx, tenantID, m.ID)
+			if err != nil {
+				return domain.Meter{}, fmt.Errorf("list pricing rules for meter %s: %w", m.ID, err)
+			}
+			if len(rules) == 0 {
+				if err := s.guardMeterStaysPriced(ctx, tenantID, m.ID, m.Key); err != nil {
+					return domain.Meter{}, err
+				}
+			}
 		}
 		m.RatingRuleVersionID = rid
 	}
@@ -819,6 +832,10 @@ func (s *Service) ListMeterPricingRulesByMeter(ctx context.Context, tenantID, me
 // not retroactively re-scored; deletion only affects future billing
 // finalize cycles.
 //
+// Deleting the meter's last price is refused (409) while a plan wiring the
+// meter has a live subscription: see guardMeterStaysPriced (#981). The last
+// price means no other rule remains and the meter has no default binding.
+//
 // The audit row rides the DELETE's own tx (ADR-090). Before this, the route
 // was covered only by the HTTP catch-all, which recorded it as
 // "delete meter {meter_id}" — a permanent, un-editable claim that the
@@ -827,6 +844,32 @@ func (s *Service) ListMeterPricingRulesByMeter(ctx context.Context, tenantID, me
 // filter vocabulary already use it), so a rule's create/update and its
 // delete land on one resource timeline.
 func (s *Service) DeleteMeterPricingRule(ctx context.Context, tenantID, id string) error {
+	rule, err := s.store.GetMeterPricingRule(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	meter, err := s.store.GetMeter(ctx, tenantID, rule.MeterID)
+	if err != nil {
+		return err
+	}
+	if meter.RatingRuleVersionID == "" {
+		rules, err := s.store.ListMeterPricingRulesByMeter(ctx, tenantID, meter.ID)
+		if err != nil {
+			return fmt.Errorf("list pricing rules for meter %s: %w", meter.ID, err)
+		}
+		othersRemain := false
+		for _, r := range rules {
+			if r.ID != id {
+				othersRemain = true
+				break
+			}
+		}
+		if !othersRemain {
+			if err := s.guardMeterStaysPriced(ctx, tenantID, meter.ID, meter.Key); err != nil {
+				return err
+			}
+		}
+	}
 	return s.store.DeleteMeterPricingRuleAudited(ctx, tenantID, id, s.pricingRuleDeleteEmission(ctx))
 }
 

@@ -85,6 +85,12 @@ type Store interface {
 	PlanCurrenciesWiringMeters(ctx context.Context, tenantID string, meterIDs []string) ([]planCurrency, error)
 	MeterBoundKeyCurrencies(ctx context.Context, tenantID string, meterIDs []string) ([]keyCurrency, error)
 	RuleKeyResolvedCurrency(ctx context.Context, tenantID, ruleVersionID string) (keyCurrency, error)
+
+	// PlansWiringMeter lists every plan, of any status, whose meter_ids
+	// holds meterID. The unpriced-meter guard (#981) counts live
+	// subscriptions on each, so the status filter is the live-sub count,
+	// not this list.
+	PlansWiringMeter(ctx context.Context, tenantID, meterID string) ([]planRef, error)
 }
 
 type RatingRuleFilter struct {

@@ -82,6 +82,10 @@ type PreviewResult struct {
 	Totals             []PreviewTotal `json:"totals"`
 	Warnings           []string       `json:"warnings"`
 	GeneratedAt        time.Time      `json:"generated_at"`
+
+	// unpriced is each meter bucket that matched no price, for the
+	// threshold fire (not part of the API response).
+	unpriced []unpricedBucket
 }
 
 // Preview generates a dry-run invoice for a subscription without persisting
@@ -208,12 +212,13 @@ func (e *Engine) previewWithWindow(ctx context.Context, sub domain.Subscription,
 	// fail-loud contract for exactly the money path it matters on.
 	usageLineCount := 0
 	for _, meterID := range allMeterIDs {
-		meterLines, warnings, err := e.previewMeter(ctx, sub.TenantID, sub.CustomerID, meterID, periodStart, periodEnd)
+		meterLines, warnings, unpriced, err := e.previewMeter(ctx, sub.TenantID, sub.CustomerID, meterID, periodStart, periodEnd)
 		if err != nil {
 			return PreviewResult{}, fmt.Errorf("preview meter %q: %w", meterID, err)
 		}
 		result.Lines = append(result.Lines, meterLines...)
 		result.Warnings = append(result.Warnings, warnings...)
+		result.unpriced = append(result.unpriced, unpriced...)
 		usageLineCount += len(meterLines)
 	}
 
@@ -276,7 +281,7 @@ func (e *Engine) previewWithWindow(ctx context.Context, sub domain.Subscription,
 // AggregateByPricingRules + ComputeAmountCents path, so each line
 // produced here matches the invoice_line_item the cycle scan would
 // persist.
-func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID string, from, to time.Time) ([]PreviewLine, []string, error) {
+func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID string, from, to time.Time) ([]PreviewLine, []string, []unpricedBucket, error) {
 	return e.rateMeterWindow(ctx, tenantID, customerID, meterID, from, to, from, nil)
 }
 
@@ -292,21 +297,23 @@ type bucketPricer func(rule domain.RatingRuleVersion, bucketKey string, mode dom
 // the fire's watermark), and price, which lets the caller continue a tier
 // ladder across the fire the way the period close does. A nil price rates the
 // bucket on its own, which is the preview and threshold-fire behavior.
-func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, meterID string, from, to, pinAt time.Time, price bucketPricer) ([]PreviewLine, []string, error) {
+// The unpriced buckets come back both as a warning (for people) and as data
+// (for the threshold fire, which reports them).
+func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, meterID string, from, to, pinAt time.Time, price bucketPricer) ([]PreviewLine, []string, []unpricedBucket, error) {
 	meter, err := e.pricing.GetMeter(ctx, tenantID, meterID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get meter: %w", err)
+		return nil, nil, nil, fmt.Errorf("get meter: %w", err)
 	}
 
 	defaultMode := mapMeterAggregation(meter.Aggregation)
 	aggs, err := e.usage.AggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
 	if err != nil {
-		return nil, nil, fmt.Errorf("aggregate by pricing rules: %w", err)
+		return nil, nil, nil, fmt.Errorf("aggregate by pricing rules: %w", err)
 	}
 
 	rules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list pricing rules: %w", err)
+		return nil, nil, nil, fmt.Errorf("list pricing rules: %w", err)
 	}
 	rulesByID := make(map[string]domain.MeterPricingRule, len(rules))
 	for _, rule := range rules {
@@ -315,6 +322,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 
 	var lines []PreviewLine
 	var warnings []string
+	var unpriced []unpricedBucket
 
 	for _, agg := range aggs {
 		if agg.Quantity.IsZero() {
@@ -336,7 +344,10 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 			ratingRuleID = meter.RatingRuleVersionID
 		}
 		if ratingRuleID == "" {
-			warnings = append(warnings, fmt.Sprintf("meter %q has events with no rating rule binding — skipped", meter.Key))
+			// The quantity is what the operator needs to bill it by hand
+			// (a one-off invoice), so the warning carries it (#981).
+			warnings = append(warnings, fmt.Sprintf("meter %q: %s %s matched no pricing rule and the meter has no default price — not billed", meter.Key, agg.Quantity.String(), meter.Unit))
+			unpriced = append(unpriced, unpricedBucket{MeterID: meterID, MeterKey: meter.Key, Mode: agg.AggregationMode, Quantity: agg.Quantity})
 			continue
 		}
 
@@ -354,7 +365,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 		// usage is bound to it — so it fails like any other error.
 		ratingRule, err := e.resolveRatedRule(ctx, tenantID, customerID, ratingRuleID, pinAt)
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolve pricing for meter %q rule %q: %w", meter.Key, ratingRuleID, err)
+			return nil, nil, nil, fmt.Errorf("resolve pricing for meter %q rule %q: %w", meter.Key, ratingRuleID, err)
 		}
 
 		var amount int64
@@ -364,7 +375,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 			amount, err = domain.ComputeAmountCents(ratingRule, agg.Quantity)
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("compute amount for meter %q rule %q: %w", meter.Key, ratingRule.RuleKey, err)
+			return nil, nil, nil, fmt.Errorf("compute amount for meter %q rule %q: %w", meter.Key, ratingRule.RuleKey, err)
 		}
 
 		// Unit amount is amount / quantity, rounded to nearest cent. The
@@ -402,7 +413,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 		})
 	}
 
-	return lines, warnings, nil
+	return lines, warnings, unpriced, nil
 }
 
 // computePreviewTotals groups each line's amount by currency and emits

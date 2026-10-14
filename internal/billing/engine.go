@@ -2666,8 +2666,10 @@ func nominalRate(rule domain.RatingRuleVersion) *decimal.Decimal {
 // scheduled-cancel terminal-cycle skips. Extracted whole from
 // billOnePeriod (behavior-preserving) to separate the pricing
 // computation from the billing-cycle orchestration; it remains large
-// and is the next candidate for further decomposition.
-func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, now, periodStart, periodEnd time.Time, plans map[string]domain.Plan, invoiceCurrency string, meterAggs map[string]string, usageTotals map[string]decimal.Decimal, billingLoc *time.Location) ([]domain.InvoiceLineItem, int64, *time.Time, error) {
+// and is the next candidate for further decomposition. Usage left
+// unpriced is added to unpriced, which the caller records once the close
+// commits.
+func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, now, periodStart, periodEnd time.Time, plans map[string]domain.Plan, invoiceCurrency string, meterAggs map[string]string, usageTotals map[string]decimal.Decimal, billingLoc *time.Location, unpriced unpricedUsage) ([]domain.InvoiceLineItem, int64, *time.Time, error) {
 	var lineItems []domain.InvoiceLineItem
 	subtotal := int64(0)
 
@@ -3095,15 +3097,6 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 					if ratingRuleID == "" {
 						ratingRuleID = meter.RatingRuleVersionID
 					}
-					if ratingRuleID == "" {
-						// Usage that matched no rule and the meter has no
-						// default binding — bill nothing, but loudly (a
-						// silent skip would hide unbilled revenue).
-						slog.Warn("cycle: usage matched no rating rule and meter has no default binding — not billed",
-							"meter", meter.Key, "quantity", qty.String(),
-							"subscription_id", sub.ID)
-						continue
-					}
 					// ADR-066 §4 pass routing, per RULE BUCKET: a deferred
 					// non-additive bucket (max/last with NO line on the
 					// watermark fire) bills ONLY on the full-window pass —
@@ -3113,7 +3106,22 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 					// fire — the accepted partial-window degradation) bills
 					// ONLY on the clamped pass. No watermark ⇒ deferred is
 					// always false and no full pass exists: unchanged.
+					// It runs before the unpriced check below so an unpriced
+					// bucket is reported on the one pass that would have
+					// billed it: the full pass re-reads the whole period, and
+					// reporting there too counted the pre-fire usage that the
+					// threshold invoice already reported (#981).
 					if wm.deferredBucket(agg.AggregationMode, meterID, ratingRuleID) != w.nonAdditiveOnly {
+						continue
+					}
+					if ratingRuleID == "" {
+						// Usage that matched no rule and the meter has no
+						// default binding — bill nothing, but loudly (a
+						// silent skip would hide unbilled revenue).
+						slog.Warn("cycle: usage matched no rating rule and meter has no default binding — not billed",
+							"meter", meter.Key, "quantity", qty.String(),
+							"subscription_id", sub.ID)
+						unpriced.add(meterID, qty)
 						continue
 					}
 					rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, ratingRuleID, periodStart)
@@ -3188,6 +3196,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 				// multi-dim sibling above.
 				slog.Warn("cycle: usage on a meter with no rating rule — not billed (unpriced meter on plan; ADR-096)",
 					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
+				unpriced.add(meterID, quantity)
 				continue
 			}
 			rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, meter.RatingRuleVersionID, periodStart)
@@ -3339,7 +3348,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// Build the invoice line items (base fees + usage) for this period.
 	// thresholdBilledThrough is the threshold watermark the lines were built
 	// against; commitPeriodClose re-reads it on the closer tx.
-	lineItems, subtotal, thresholdBilledThrough, err := e.buildLineItems(ctx, sub, now, periodStart, periodEnd, plans, invoiceCurrency, meterAggs, usageTotals, billingLoc)
+	unpriced := unpricedUsage{}
+	lineItems, subtotal, thresholdBilledThrough, err := e.buildLineItems(ctx, sub, now, periodStart, periodEnd, plans, invoiceCurrency, meterAggs, usageTotals, billingLoc, unpriced)
 	if err != nil {
 		return false, err
 	}
@@ -3378,6 +3388,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		if err != nil {
 			return false, fmt.Errorf("advance billing cycle (no-op invoice): %w", err)
 		}
+		// The period closed with no invoice; any unpriced usage in it is
+		// now billed nowhere, so it counts here, after the commit.
+		unpriced.record()
 		if out.canceled != nil {
 			e.afterScheduledCancel(ctx, sub, *out.canceled, now)
 		}
@@ -3550,6 +3563,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		return false, fmt.Errorf("create invoice: %w", err)
 	}
 	inv := out.inv
+	// Counted after the commit: a close that lost its CAS or rolled back
+	// counted nothing, and the retry that wins counts once.
+	unpriced.record()
 	// The period is closed (or the sub terminated) — every leg from here is
 	// post-commit and at-least-once.
 	if out.canceled != nil {
@@ -4037,7 +4053,8 @@ func (e *Engine) resolveRatedRule(ctx context.Context, tenantID, customerID, pin
 // billFinalOnImmediateCancelImpl (behavior-preserving) to separate the
 // pricing computation from the cancel-invoice orchestration; it is the
 // cancel-path analog of buildLineItems and shares its segment model.
-func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscription, wm thresholdWatermark, plans map[string]domain.Plan, invoiceCurrency string, periodStart, canceledAt time.Time, billingLoc *time.Location) ([]domain.InvoiceLineItem, int64, error) {
+// Usage left unpriced is added to unpriced, as in buildLineItems.
+func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscription, wm thresholdWatermark, plans map[string]domain.Plan, invoiceCurrency string, periodStart, canceledAt time.Time, billingLoc *time.Location, unpriced unpricedUsage) ([]domain.InvoiceLineItem, int64, error) {
 	// Build base lines: segment-aware in_arrears billing over the
 	// partial period [periodStart, canceledAt]. in_advance items are
 	// explicitly skipped — their base for the just-canceled period
@@ -4318,6 +4335,12 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 					if ratingRuleID == "" {
 						ratingRuleID = meter.RatingRuleVersionID
 					}
+					// ADR-066 §4 pass routing — see billOnePeriod. Before the
+					// unpriced check, as there, so an unpriced bucket is
+					// reported on one pass only.
+					if wm.deferredBucket(agg.AggregationMode, meterID, ratingRuleID) != mw.nonAdditiveOnly {
+						continue
+					}
 					if ratingRuleID == "" {
 						// Usage that matched no rule and the meter has no
 						// default binding — bill nothing, but loudly (a
@@ -4325,10 +4348,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 						slog.Warn("cancel: usage matched no rating rule and meter has no default binding — not billed",
 							"meter", meter.Key, "quantity", qty.String(),
 							"subscription_id", sub.ID)
-						continue
-					}
-					// ADR-066 §4 pass routing — see billOnePeriod.
-					if wm.deferredBucket(agg.AggregationMode, meterID, ratingRuleID) != mw.nonAdditiveOnly {
+						unpriced.add(meterID, qty)
 						continue
 					}
 					rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, ratingRuleID, periodStart)
@@ -4406,6 +4426,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 				// billed.
 				slog.Warn("cancel: usage on a meter with no rating rule — not billed (unpriced meter on plan; ADR-096)",
 					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
+				unpriced.add(meterID, quantity)
 				continue
 			}
 			rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, meter.RatingRuleVersionID, periodStart)
@@ -4558,7 +4579,15 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	lineItems, subtotal, err := e.buildCancelLineItems(ctx, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc)
+	// The cancel's final invoice is the last one for this period, so usage
+	// it leaves unpriced is billed nowhere. It is counted where this
+	// function decides: no invoice, or the invoice written. On the Tx path
+	// the caller's transaction can still roll back after this returns (the
+	// cancel relief or audit fails), and a retried cancel then counts again.
+	// The counter is a signal, so that rare over-count is accepted rather
+	// than widening the subscription Biller interface for a post-commit hook.
+	unpriced := unpricedUsage{}
+	lineItems, subtotal, err := e.buildCancelLineItems(ctx, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc, unpriced)
 	if err != nil {
 		return domain.Invoice{}, err
 	}
@@ -4567,6 +4596,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		// Nothing to bill — no in_arrears base AND no usage. The
 		// customer canceled before they consumed anything billable.
 		// Skip the $0 invoice (matches BillOnCreate's behavior).
+		unpriced.record()
 		return domain.Invoice{}, nil
 	}
 
@@ -4626,6 +4656,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
 			return domain.Invoice{}, fmt.Errorf("finalize audit (cancel tx): %w", err)
 		}
+		unpriced.record()
 		return created, nil
 	}
 
@@ -4641,6 +4672,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		}
 		return domain.Invoice{}, fmt.Errorf("create final-on-cancel invoice: %w", err)
 	}
+	unpriced.record()
 
 	// The finalize AUDIT row already committed inside the create tx above; here
 	// only the post-commit WEBHOOK fires.

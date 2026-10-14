@@ -21,6 +21,7 @@ Older entries keep their original text.
   - `POST /v1/billing/run`: a script that runs it right after a period end sees 0 invoices.
   - A cancel or plan change scheduled for a date: the subscription stays `active`, and `subscription.canceled` is sent, up to the grace after `cancel_at`. `canceled_at` is still the scheduled date, so give access by `cancel_at` rather than `status` if that matters to you.
   - An expired credit grant leaves the balance up to the grace after `expires_at`.
+- **Removing a meter's last price can be refused with 409 `invalid_state` (#981).** This applies to `DELETE /v1/meters/{meter_id}/pricing-rules/{id}` and to `PATCH /v1/meters/{id}` with `"rating_rule_version_id": ""`. They are refused when the meter would have no pricing rule and no default price while a plan with a draft, trialing or active subscription uses it. The message names the plans. Add another price first, or move those subscriptions to a plan without the meter.
 
 ### Added
 
@@ -28,7 +29,13 @@ Older entries keep their original text.
 
 - **Try Velox with only Docker: `deploy/compose/quickstart.sh` (2026-10-14, #959).** One command starts Velox from the published release images, writes the four secrets, creates the first login and prints it with a test API key. `./quickstart.sh demo` then runs the demo flow to a finalized invoice, in a container, so Go, Node and `jq` are not needed. It uses its own Compose project name and port 8080, so it does not touch another Velox stack on the same machine. The README quick start now uses it; the from-source setup moved to CONTRIBUTING.
 
+### Changed
+
+- **Usage with no price is now counted and its quantity shown (2026-10-14, #981).** Usage that matches no pricing rule, on a meter with no default price, is still left off the invoice, as in Lago, Metronome and Orb. Each period-end, cancel or spend-threshold invoice built without it adds the quantity to `velox_usage_unpriced_quantity_total{meter_id}`, and the invoice preview warning now gives the quantity. To bill it, add a price for later invoices and bill past usage with a one-off invoice. [ADR-096](docs/adr/096-unpriced-meter-plan-attach-guard.md).
+
 ### Fixed
+
+- **A spend-threshold invoice that leaves usage without a price now logs it (2026-10-14, #981).** The period-end and cancel invoices logged such usage; the threshold invoice dropped it with no trace. The period's last invoice then bills only from the threshold invoice on, so nothing ever showed it. It now logs the same warning. A period close after a threshold invoice also no longer logs the same usage twice.
 
 - **A period that ended while collection was paused stays a draft when the pause's resume date passes before it is invoiced (2026-10-14, #961).** With a resume date set, the scheduled resume could run before the billing run invoiced the period that had just ended. The resume cleared the pause first, so that period's invoice was finalized and charged although collection was paused when it ended. The same happened to a cancel's final invoice, and on test clocks when one advance passed both the period end and the resume date. Each invoice now follows the pause as it stood at the end of the period it bills, and the first invoice after a trial follows it as it stood when the trial ended. A scheduled resume waits until those periods are invoiced, then clears the pause in the same run. While it waits, the subscription's other invoices are charged again from the resume date.
 

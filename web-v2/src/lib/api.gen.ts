@@ -407,7 +407,11 @@ export interface paths {
          *     the meter's DEFAULT rating rule — the rate applied to usage no
          *     dimension pricing rule claims (the remedy for silently-unbilled
          *     unmatched usage); pass an empty string to clear it. The rule must
-         *     exist on the tenant.
+         *     exist on the tenant. Clearing it is refused with 409 when the meter
+         *     has no pricing rule either and a plan with a live (draft, trialing
+         *     or active) subscription uses the meter: that usage would be left off
+         *     every invoice. Add a pricing rule first, or move the subscriptions
+         *     to a plan without this meter.
          */
         patch: {
             parameters: {
@@ -440,6 +444,18 @@ export interface paths {
                 };
                 /** @description Meter not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /**
+                 * @description `invalid_state`. The new default's currency conflicts with the
+                 *     meter's other prices or with a plan that uses the meter, or
+                 *     clearing the default would leave the meter with no price while a
+                 *     live subscription's plan uses it. The message names the plans.
+                 */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
