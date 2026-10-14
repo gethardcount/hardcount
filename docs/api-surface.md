@@ -41,7 +41,9 @@ A non-2xx response means *nothing was recorded*. Retry the same request.
   accepted and stored, but it is not added to that invoice or to any later
   one, and Velox does not alert you. To bill it, create a one-off invoice:
   `POST /v1/invoices`, then `POST /v1/invoices/{id}/line-items`, then
-  `POST /v1/invoices/{id}/finalize`. An immediate cancel, `retry-billing`,
+  `POST /v1/invoices/{id}/finalize`. After a spend-threshold invoice,
+  usage stamped before it that arrives later is not on the period-end
+  invoice either; bill it the same way. An immediate cancel, `retry-billing`,
   a spend-threshold invoice and a test-clock advance build their invoice at
   once, with no grace. `velox_usage_late_event_total` counts events not sent
   through the backfill route whose `timestamp` is more than 24 hours older

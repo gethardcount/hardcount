@@ -8,7 +8,8 @@
 Velox builds a billing period's invoice once `INVOICE_GRACE_PERIOD` has
 passed after the period ends. The default is 1 hour, the range is 0 to 72
 hours, and 0 builds it as soon as the period ends. Usage stamped inside the
-period that arrives within the grace is on the invoice.
+period that arrives within the grace is on the invoice, unless a
+spend-threshold invoice was built after its timestamp (see Risks).
 
 Once the invoice is built it does not change. Usage for that period that
 arrives later is stored but billed on no invoice, now or later; the operator
@@ -143,7 +144,8 @@ pipeline lags longer raises it.
 ### Positive
 
 - Usage that arrives within the grace is billed, whatever the tick phase,
-  failover or restart.
+  failover or restart. The one exception is in Risks: usage stamped before a
+  spend-threshold invoice.
 - The policy is written down and the same for every peer-shaped question:
   what counts, when the invoice is built, what happens after.
 
@@ -153,6 +155,19 @@ pipeline lags longer raises it.
   `invoice.finalized` webhook, the tax record, credits applied, the charge
   and the start of dunning. With net-0 terms an invoice is past due when it
   is created, as it already was by up to an hour.
+- **Scheduled changes take effect at the close, too.** A cancel or plan
+  change scheduled for a date, and a scheduled resume of paused collection
+  that falls after a period end, wait for that close. Until then the
+  subscription is `active` on its old plan, and `subscription.canceled` is
+  sent at the close. `canceled_at` stays the scheduled date. An integration
+  that gives access while `status` is `active` gives up to the grace (at
+  most 72h) more.
+- **Usage stamped before a spend-threshold invoice and arriving after it is
+  billed on no invoice**, even inside the period. The period-end invoice
+  bills usage only from the threshold invoice's end on
+  (`meterUsageIntervals`). This was already so before the grace. Bill it
+  with a one-off invoice. With `reset_billing_cycle`, the threshold invoice
+  closes the period at once.
 - **The subscription shows the ended period during the grace.** Spend
   thresholds do not fire on the new period's usage, and the live credit
   balance leaves it out, until the invoice is built. A grant created during

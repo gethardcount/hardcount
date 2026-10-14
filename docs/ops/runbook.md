@@ -674,12 +674,19 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
 
 - The invoice is still dated at the period end. Its webhook, tax record,
   credits, charge and first payment retry come when it is built.
-- An immediate cancel, `POST /v1/subscriptions/{id}/retry-billing`, any other
-  change to a subscription whose period has ended, and a test-clock advance
-  build the invoice at once, with no grace.
+- An immediate cancel, `POST /v1/subscriptions/{id}/retry-billing` on a
+  subscription whose billing is failing, any other change to a subscription
+  whose period has ended, and a test-clock advance build the invoice at
+  once, with no grace.
+- A cancel or plan change scheduled for a date takes effect at that close,
+  up to the grace after its date. Until then the subscription is `active` on
+  its old plan; `subscription.canceled` is sent at the close, with
+  `canceled_at` at the scheduled date. A scheduled resume of paused
+  collection that falls after a period end waits for that close too.
 - Once the invoice is built it does not change. Usage stamped inside its
   period that arrives later is stored but billed on no invoice, now or
-  later. Velox does not alert on it, and there is no list of such events
+  later. After a spend-threshold invoice, usage stamped before it that
+  arrives later is not on the period-end invoice either. Velox does not alert on it, and there is no list of such events
   yet (deferred; see ADR-120).
 - During the grace the subscription still shows the ended period. Spend
   thresholds and the live credit balance do not count the new period's
@@ -714,7 +721,8 @@ is set, go to [14](#14-subscriptions-whose-billing-is-failing).
   `INVOICE_GRACE_PERIOD` above its worst delay (at most `72h`) and restart.
   Every period-end invoice then comes that much later.
 - A walk or script that needs a period closed right after it ends: run with
-  `INVOICE_GRACE_PERIOD=0`, or close one subscription with retry-billing.
+  `INVOICE_GRACE_PERIOD=0`. (`retry-billing` refuses a subscription whose
+  billing is not failing, so it cannot close a healthy one early.)
 
 **Verify**: after the grace and the next billing tick,
 `velox_billing_due_subscriptions` falls back and the invoice exists, dated

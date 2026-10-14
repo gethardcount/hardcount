@@ -17,7 +17,7 @@ Older entries keep their original text.
 
 **Before upgrading:**
 
-- Period-end invoices are now built about an hour after the period ends, instead of up to an hour after. Set `INVOICE_GRACE_PERIOD=0` for the old timing. `POST /v1/billing/run` waits the same hour, so scripts that run it right after a period end will see 0 invoices.
+- Period-end invoices are now built 1 to 2 hours after the period ends (was within 1 hour), so late usage is billed. Set `INVOICE_GRACE_PERIOD=0` for the old timing. `POST /v1/billing/run` waits too, so a script that runs it right after a period end sees 0 invoices. A cancel or plan change scheduled for a date also takes effect then: the subscription stays `active` and `subscription.canceled` is sent up to the grace after `cancel_at`, though `canceled_at` is still the scheduled date. Give access by `cancel_at`, not by `status`, if that matters to you. An expired credit grant leaves the balance up to the grace after `expires_at`.
 
 ### Added
 

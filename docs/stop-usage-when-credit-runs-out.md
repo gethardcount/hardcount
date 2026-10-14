@@ -159,7 +159,9 @@ has left, because these are not subtracted:
 - **Unpaid invoices.** An invoice that is issued but not yet settled can
   still draw on the credit.
 - **Usage sent after a period has ended and before Velox has closed it.**
-  The hourly billing run closes periods, so this gap lasts up to an hour.
+  Velox closes a period on the first hourly billing run after
+  `INVOICE_GRACE_PERIOD` has passed, so this gap lasts 1 to 2 hours by
+  default ([ADR-120](adr/120-invoice-grace-period-for-late-usage.md)).
 - **Credit that expires before the period ends.** It counts as spendable
   until its expiry date. If the period's invoice is issued after that date,
   the invoice cannot draw on it.

@@ -6,6 +6,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
 // INVOICE_GRACE_PERIOD (ADR-120) on the engine's own runs, on real Postgres.
@@ -153,5 +154,48 @@ func TestInvoiceGrace_TestClockDoesNotWait(t *testing.T) {
 	}
 	if n := env.invoiceCount(t, a.ID); n != 1 {
 		t.Fatalf("%d invoices, want 1", n)
+	}
+}
+
+// TestInvoiceGrace_SchedulerMidPeriodCancelWaitsForTheGrace: the scheduler's
+// cancel arm. A cancel_at C inside the period is not fired by the scheduler's
+// run until C + grace, and waiting saves no billing failure. When it fires,
+// canceled_at is C, not the run.
+//
+// Mutation check: drop the grace from the cancel_at arm of GetDueBilling →
+// the run at C+30m admits the sub, billSubscription declines it, and the
+// drain saves errStillDue (the billing columns are not blank).
+func TestInvoiceGrace_SchedulerMidPeriodCancelWaitsForTheGrace(t *testing.T) {
+	env := newBillFailureEnv(t, "Invoice Grace Scheduler Cancel")
+	env.engine.SetInvoiceGrace(testGrace)
+	env.engine.SetScheduledCancelExecutor(subscription.NewService(env.subs, env.clock))
+	apr, may := env.periodEnd, env.periodEnd.AddDate(0, 1, 0)
+	a := env.subWith(t, domain.Subscription{Code: "sub-grace-cancel", Status: domain.SubscriptionActive}, env.planOK, apr, may, may)
+	cancelAt := apr.AddDate(0, 0, 5)
+	if _, err := env.subs.ScheduleCancellation(env.ctx, env.tenantID, a.ID, &cancelAt, false, domain.SubscriptionActive); err != nil {
+		t.Fatalf("schedule cancel: %v", err)
+	}
+
+	env.clock.Set(cancelAt.Add(30 * time.Minute))
+	if gen, errs := env.engine.RunCycle(env.ctx, 50, nil); gen != 0 || len(errs) != 0 {
+		t.Fatalf("run at cancel_at+30m: generated=%d errors=%v, want nothing: the cancel is inside its grace", gen, errs)
+	}
+	if cols := env.billingColumns(t, a.ID); cols != blankBillingColumns {
+		t.Fatalf("run at cancel_at+30m saved a billing failure on a healthy subscription inside its grace: %s", cols)
+	}
+	if s := env.get(t, a.ID); s.Status != domain.SubscriptionActive {
+		t.Fatalf("status = %s inside the grace, want active", s.Status)
+	}
+
+	env.clock.Set(cancelAt.Add(testGrace))
+	if _, errs := env.engine.RunCycle(env.ctx, 50, nil); len(errs) != 0 {
+		t.Fatalf("run at cancel_at+grace: errors=%v", errs)
+	}
+	s := env.get(t, a.ID)
+	if s.Status != domain.SubscriptionCanceled || s.CanceledAt == nil || !s.CanceledAt.Equal(cancelAt) {
+		t.Fatalf("after the grace: status=%s canceled_at=%v, want canceled at %v", s.Status, s.CanceledAt, cancelAt)
+	}
+	if cols := env.billingColumns(t, a.ID); cols != blankBillingColumns {
+		t.Errorf("billing columns after the cancel = %s, want blank", cols)
 	}
 }
