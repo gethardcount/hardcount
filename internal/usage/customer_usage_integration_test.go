@@ -73,6 +73,20 @@ func (f *customerUsageFixture) seedCustomerWithSub(
 	cycleStart, cycleEnd time.Time,
 ) (custID, planID, subID string) {
 	t.Helper()
+	return f.seedCustomerWithSubIn(t, ctx, externalCustomerID, planCode, meterID, "USD", cycleStart, cycleEnd)
+}
+
+// seedCustomerWithSubIn is seedCustomerWithSub with the plan in currency.
+func (f *customerUsageFixture) seedCustomerWithSubIn(
+	t *testing.T,
+	ctx context.Context,
+	externalCustomerID string,
+	planCode string,
+	meterID string,
+	currency string,
+	cycleStart, cycleEnd time.Time,
+) (custID, planID, subID string) {
+	t.Helper()
 
 	cust, err := f.customerSvc.Create(ctx, f.tenantID, customer.CreateInput{
 		ExternalID:  externalCustomerID,
@@ -86,7 +100,7 @@ func (f *customerUsageFixture) seedCustomerWithSub(
 	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code:            planCode,
 		Name:            planCode,
-		Currency:        "USD",
+		Currency:        currency,
 		BillingInterval: domain.BillingMonthly,
 		BaseAmountCents: 0,
 		MeterIDs:        []string{meterID},

@@ -15,9 +15,13 @@ export interface MarginReport {
   to: string;
   /** Total rated usage revenue in the window. */
   revenue_cents: number;
+  /** Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter. */
+  revenue_currency?: string;
   /** Total stamped provider cost, micro-dollars. */
   cost_micros: number;
-  /** (revenue − cost) / revenue in basis points. Omitted when revenue is 0. */
+  /** Currency of cost_micros. Always USD. */
+  cost_currency: string;
+  /** (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency. */
   margin_bps?: number;
   by_model: MarginReportByModelItem[];
   unattributed_revenue_cents: number;

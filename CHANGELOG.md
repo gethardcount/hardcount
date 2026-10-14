@@ -37,6 +37,8 @@ Older entries keep their original text.
 
 - **Dashboard login works in Safari at `http://localhost` (2026-10-14).** The quickstart runs in production mode, which marks the login cookie `Secure`. Safari drops a `Secure` cookie set over plain http, even on localhost, so login failed with "this browser did not keep you signed in". Chrome and Firefox were not affected. The cookie is now `Secure` unless the browser itself is on plain http at a localhost address, judged from the request's `Origin` (or `Referer`) header. A site served over https keeps `Secure`.
 
+- **The Margin card shows the customer's own currency, and no margin across two currencies (2026-10-14).** It showed every amount in dollars. Billed amounts now use the currency of the customer's prices, provider cost stays in USD, and when the two differ the card shows both and says margin needs one currency. `GET /v1/customers/{id}/margin` adds `revenue_currency` and `cost_currency`, and leaves out `margin_bps` when they differ.
+
 - **Provider cost no longer counts prompt-cache reads twice for LiteLLM calls that send `cost_breakdown` (2026-10-14).** LiteLLM's `input_cost` already includes cache reads, and the `cache_read` event was costed again from your cost table, so cost was too high and margin too low. Each event now carries the cost of its own tokens. Events already recorded keep their cost.
 
 - **`quickstart.sh` no longer tells you to delete your data when creating the first login fails for another reason (2026-10-14).** Only a 409 means the login exists. A rate limit, a server error or no answer now prints what failed and asks you to run `./quickstart.sh` again. When Docker cannot be reached, it also says that on Linux this is often a permission problem.

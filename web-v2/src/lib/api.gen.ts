@@ -4057,14 +4057,18 @@ export interface components {
              * @description Total rated usage revenue in the window.
              */
             revenue_cents: number;
+            /** @description Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter. */
+            revenue_currency?: string;
             /**
              * Format: int64
              * @description Total stamped provider cost, micro-dollars.
              */
             cost_micros: number;
+            /** @description Currency of cost_micros. Always USD. */
+            cost_currency: string;
             /**
              * Format: int64
-             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0.
+             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency.
              */
             margin_bps?: number;
             by_model: {

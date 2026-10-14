@@ -132,3 +132,67 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 		t.Errorf("margin_bps = %d, want ~9990s (cost 0.4c on $30+)", *rep.MarginBps)
 	}
 }
+
+// TestMargin_CurrencyIsNamedAndNeverMixed: the report names the currency of
+// its revenue (the customer's price rules) and of its cost (always USD), and
+// gives no margin when they differ. Before, a EUR customer's €30 of usage
+// against $0.004 of provider cost read as "$30.00" and a 99.9% margin.
+// Mutation-verify: drop the RevenueCurrency == CostCurrency check → red.
+func TestMargin_CurrencyIsNamedAndNeverMixed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: skipped in -short mode")
+	}
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
+	defer cancel()
+	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
+	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
+
+	for _, tc := range []struct {
+		currency   string
+		wantMargin bool
+	}{
+		{"USD", true},
+		{"EUR", false},
+	} {
+		t.Run(tc.currency, func(t *testing.T) {
+			f := newCustomerUsageFixture(t, "Margin currency "+tc.currency)
+			rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
+				RuleKey: "tokens_flat", Name: "Tokens", Mode: domain.PricingFlat,
+				Currency: tc.currency, FlatAmountCents: decimal.NewFromInt(3),
+			})
+			if err != nil {
+				t.Fatalf("rule: %v", err)
+			}
+			meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
+				Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+			})
+			if err != nil {
+				t.Fatalf("meter: %v", err)
+			}
+			custID, _, _ := f.seedCustomerWithSubIn(t, ctx, "cus_cur", "pln_cur", meter.ID, tc.currency, cycleStart, cycleEnd)
+			seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.000004")
+			ts := cycleStart.Add(time.Hour)
+			if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
+				CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(1000),
+				Dimensions: map[string]any{"model": "claude-3.5-sonnet", "provider": "anthropic", "token_type": "input"},
+				Timestamp:  &ts,
+			}); err != nil {
+				t.Fatalf("ingest: %v", err)
+			}
+
+			rep, err := usage.NewMarginAssembler(usage.NewPostgresStore(f.db), f.custUsage).Get(ctx, f.tenantID, custID, cycleStart, cycleEnd)
+			if err != nil {
+				t.Fatalf("margin: %v", err)
+			}
+			if rep.RevenueCents != 3000 || rep.RevenueCurrency != tc.currency {
+				t.Errorf("revenue = %d %q, want 3000 %q", rep.RevenueCents, rep.RevenueCurrency, tc.currency)
+			}
+			if rep.CostMicros != 4000 || rep.CostCurrency != "USD" {
+				t.Errorf("cost = %d %q, want 4000 USD", rep.CostMicros, rep.CostCurrency)
+			}
+			if got := rep.MarginBps != nil; got != tc.wantMargin {
+				t.Errorf("margin_bps present = %v, want %v (revenue %s, cost USD)", got, tc.wantMargin, tc.currency)
+			}
+		})
+	}
+}

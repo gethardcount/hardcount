@@ -971,7 +971,7 @@ components:
 
     MarginReport:
       type: object
-      required: [customer_id, from, to, revenue_cents, cost_micros, by_model, unattributed_revenue_cents, unresolved_events]
+      required: [customer_id, from, to, revenue_cents, cost_micros, cost_currency, by_model, unattributed_revenue_cents, unresolved_events]
       properties:
         customer_id:
           type: string
@@ -985,14 +985,20 @@ components:
           type: integer
           format: int64
           description: Total rated usage revenue in the window.
+        revenue_currency:
+          type: string
+          description: Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.
         cost_micros:
           type: integer
           format: int64
           description: Total stamped provider cost, micro-dollars.
+        cost_currency:
+          type: string
+          description: Currency of cost_micros. Always USD.
         margin_bps:
           type: integer
           format: int64
-          description: (revenue − cost) / revenue in basis points. Omitted when revenue is 0.
+          description: (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency.
         by_model:
           type: array
           items:

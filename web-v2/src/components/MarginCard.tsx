@@ -7,7 +7,7 @@ import { DatePicker } from '@/components/ui/date-picker'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { formatCents } from '@/lib/api'
+import { formatCents, getCurrencySymbol } from '@/lib/api'
 import { endOfDayInTZ, startOfDayInTZ } from '@/lib/dates'
 import { rollingWindow } from '@/lib/effectiveNow'
 import { useGetV1CustomersIdMargin } from '@/lib/gen/queries.gen'
@@ -51,8 +51,17 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
     query: { enabled: params !== undefined },
   })
 
-  // micros (1e-6 dollars) → display dollars.
-  const costDollars = (micros: number) => `$${(micros / 1_000_000).toFixed(micros >= 100_000 ? 2 : 4)}`
+  // Revenue is in the currency of the customer's prices; provider cost is in
+  // the report's cost currency (USD). The API gives no margin when they
+  // differ, and no revenue currency when the window mixes currencies.
+  const revenueCurrency = rep?.revenue_currency
+  const costCurrency = rep?.cost_currency || 'USD'
+  const mixedRevenue = !!rep && !revenueCurrency && rep.revenue_cents > 0
+  const currencyMismatch = !!rep && !!revenueCurrency && revenueCurrency !== costCurrency && rep.revenue_cents > 0
+  const billed = (cents: number) => (mixedRevenue ? '—' : formatCents(cents, revenueCurrency))
+  // micros (1e-6 of the currency unit) → display amount.
+  const cost = (micros: number) =>
+    `${getCurrencySymbol(costCurrency)}${(micros / 1_000_000).toFixed(micros >= 100_000 ? 2 : 4)}`
 
   return (
     <Card>
@@ -96,11 +105,11 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Usage billed</p>
-                <p className="text-lg font-semibold text-foreground mt-0.5">{formatCents(rep.revenue_cents, 'USD')}</p>
+                <p className="text-lg font-semibold text-foreground mt-0.5">{billed(rep.revenue_cents)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Provider cost</p>
-                <p className="text-lg font-semibold text-foreground mt-0.5">{costDollars(rep.cost_micros)}</p>
+                <p className="text-lg font-semibold text-foreground mt-0.5">{cost(rep.cost_micros)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Margin</p>
@@ -109,6 +118,20 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
                 </p>
               </div>
             </div>
+
+            {currencyMismatch && (
+              <p className="text-xs text-muted-foreground mt-3">
+                Margin needs billing and provider cost in one currency. This customer is
+                billed in {revenueCurrency} and provider cost is in {costCurrency}, so no
+                margin is shown.
+              </p>
+            )}
+            {mixedRevenue && (
+              <p className="text-xs text-muted-foreground mt-3">
+                Usage in this window was billed in more than one currency, so the billed
+                total and the margin are not shown.
+              </p>
+            )}
 
             {rep.by_model.length > 0 && (
               <Table className="mt-4">
@@ -125,16 +148,16 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
                       <TableCell className="text-sm font-mono">{m.model}</TableCell>
                       <TableCell className="text-sm text-right">
                         {m.attributed
-                          ? formatCents(m.revenue_cents ?? 0, 'USD')
+                          ? billed(m.revenue_cents ?? 0)
                           : <Badge variant="outline">not model-priced</Badge>}
                       </TableCell>
-                      <TableCell className="text-sm text-right">{costDollars(m.cost_micros)}</TableCell>
+                      <TableCell className="text-sm text-right">{cost(m.cost_micros)}</TableCell>
                     </TableRow>
                   ))}
                   {rep.unattributed_revenue_cents > 0 && (
                     <TableRow>
                       <TableCell className="text-sm text-muted-foreground">Not model-attributed</TableCell>
-                      <TableCell className="text-sm text-right">{formatCents(rep.unattributed_revenue_cents, 'USD')}</TableCell>
+                      <TableCell className="text-sm text-right">{billed(rep.unattributed_revenue_cents)}</TableCell>
                       <TableCell className="text-sm text-right text-muted-foreground">—</TableCell>
                     </TableRow>
                   )}

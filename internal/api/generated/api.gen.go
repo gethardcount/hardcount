@@ -1464,16 +1464,22 @@ type MarginReport struct {
 	} `json:"by_model"`
 	CacheWriteExcluded bool `json:"cache_write_excluded,omitempty"`
 
+	// CostCurrency Currency of cost_micros. Always USD.
+	CostCurrency string `json:"cost_currency"`
+
 	// CostMicros Total stamped provider cost, micro-dollars.
 	CostMicros int64     `json:"cost_micros"`
 	CustomerId string    `json:"customer_id"`
 	From       time.Time `json:"from"`
 
-	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0.
+	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency.
 	MarginBps int64 `json:"margin_bps,omitempty"`
 
 	// RevenueCents Total rated usage revenue in the window.
-	RevenueCents             int64     `json:"revenue_cents"`
+	RevenueCents int64 `json:"revenue_cents"`
+
+	// RevenueCurrency Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.
+	RevenueCurrency          string    `json:"revenue_currency,omitempty"`
 	To                       time.Time `json:"to"`
 	UnattributedRevenueCents int64     `json:"unattributed_revenue_cents"`
 

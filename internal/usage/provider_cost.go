@@ -250,9 +250,19 @@ type MarginReport struct {
 	// fees, credits, and taxes are not in this number (it is a usage
 	// unit-economics view, not GAAP margin; the UI copy says so).
 	RevenueCents int64 `json:"revenue_cents"`
-	CostMicros   int64 `json:"cost_micros"`
+	// RevenueCurrency is the currency of RevenueCents: the currency of the
+	// price rules that rated it (ADR-100 keeps a customer's prices in one
+	// currency). Empty when the window's revenue spans more than one
+	// currency, or when the customer has no priced meter.
+	RevenueCurrency string `json:"revenue_currency,omitempty"`
+	CostMicros      int64  `json:"cost_micros"`
+	// CostCurrency is the currency of CostMicros. Always USD: the stamp
+	// treats every rate as dollars (provider_cost_micros is micro-dollars)
+	// and LiteLLM reports its cost in dollars.
+	CostCurrency string `json:"cost_currency"`
 	// MarginBps = (revenue − cost) / revenue in basis points; omitted
-	// when revenue is 0.
+	// when revenue is 0, and when revenue is not in CostCurrency (a margin
+	// across two currencies would be a made-up number).
 	MarginBps                *int64           `json:"margin_bps,omitempty"`
 	ByModel                  []MarginModelRow `json:"by_model"`
 	UnattributedRevenueCents int64            `json:"unattributed_revenue_cents"`
@@ -271,7 +281,7 @@ func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *M
 }
 
 func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, from, to time.Time) (MarginReport, error) {
-	rep := MarginReport{CustomerID: customerID, From: from, To: to, CacheWriteExcluded: true, ByModel: []MarginModelRow{}}
+	rep := MarginReport{CustomerID: customerID, From: from, To: to, CostCurrency: "USD", CacheWriteExcluded: true, ByModel: []MarginModelRow{}}
 
 	byModel, unresolved, err := a.store.CustomerProviderCost(ctx, tenantID, customerID, from, to)
 	if err != nil {
@@ -286,7 +296,16 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		return MarginReport{}, fmt.Errorf("rate usage window: %w", err)
 	}
 	revenueByModel := map[string]int64{}
+	// Currencies of the meters that earned revenue; with no revenue, of
+	// every priced meter, so an empty window still names the currency.
+	earned, priced := map[string]bool{}, map[string]bool{}
 	for _, m := range usage.Meters {
+		if m.Currency != "" {
+			priced[m.Currency] = true
+			if m.TotalAmountCents != 0 {
+				earned[m.Currency] = true
+			}
+		}
 		for _, r := range m.Rules {
 			model, ok := r.DimensionMatch["model"].(string)
 			if ok && model != "" {
@@ -295,6 +314,16 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 				rep.UnattributedRevenueCents += r.AmountCents
 			}
 			rep.RevenueCents += r.AmountCents
+		}
+	}
+
+	currencies := earned
+	if len(currencies) == 0 {
+		currencies = priced
+	}
+	if len(currencies) == 1 {
+		for c := range currencies {
+			rep.RevenueCurrency = c
 		}
 	}
 
@@ -315,7 +344,7 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		}
 	}
 
-	if rep.RevenueCents > 0 {
+	if rep.RevenueCents > 0 && rep.RevenueCurrency == rep.CostCurrency {
 		costCents := decimal.NewFromInt(rep.CostMicros).Div(decimal.NewFromInt(10000)) // micros → cents (1e4)
 		revCents := decimal.NewFromInt(rep.RevenueCents)
 		bps := revCents.Sub(costCents).Div(revCents).Mul(decimal.NewFromInt(10000)).Round(0).IntPart()
