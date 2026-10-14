@@ -58,6 +58,30 @@ func TestArchive_BlockedWhileSubsBill(t *testing.T) {
 	}
 }
 
+// TestArchiveBlockedMessage locks the refusal's wording: subscriptions by
+// name (the id only when a subscription has no name), the count, and the
+// pronoun that matches it. The dashboard shows this sentence as the toast
+// body, so an id here is an id on screen.
+func TestArchiveBlockedMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		subs []NonTerminalSubscription
+		want string
+	}{
+		{"one named", []NonTerminalSubscription{{ID: "vlx_sub_1", Name: "Pro monthly"}},
+			"This customer has 1 subscription that still bills (Pro monthly). Cancel it first; archiving doesn't stop billing."},
+		{"two, one unnamed", []NonTerminalSubscription{{ID: "vlx_sub_1", Name: "Pro monthly"}, {ID: "vlx_sub_2"}},
+			"This customer has 2 subscriptions that still bill (Pro monthly, vlx_sub_2). Cancel them first; archiving doesn't stop billing."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := archiveBlockedMessage(tc.subs); got != tc.want {
+				t.Errorf("got  %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestArchive_AllowedWhenOnlyTerminalSubs: canceled-only (checker reports
 // nothing non-terminal) → archive succeeds; unarchive always succeeds.
 func TestArchive_AllowedWhenOnlyTerminalSubs(t *testing.T) {

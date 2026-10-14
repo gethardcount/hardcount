@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -685,9 +686,16 @@ func TestPlanAttachGuard_UnpricedMeter_ADR096(t *testing.T) {
 
 	t.Run("CreatePlan rejects an unpriced meter", func(t *testing.T) {
 		store := newMemStore()
-		store.meters["m1"] = domain.Meter{ID: "m1", TenantID: "t", Key: "api_calls", Aggregation: "sum"}
-		if _, err := NewService(store).CreatePlan(ctx, "t", plan("p", []string{"m1"})); err == nil {
+		store.meters["m1"] = domain.Meter{ID: "m1", TenantID: "t", Key: "api_calls", Name: "API calls", Aggregation: "sum"}
+		_, err := NewService(store).CreatePlan(ctx, "t", plan("p", []string{"m1"}))
+		if err == nil {
 			t.Fatal("expected rejection: unpriced meter attached to plan")
+		}
+		// The dashboard shows this sentence as the toast body: the meter's
+		// name and what to do, no API path or field name.
+		want := `Meter "API calls" has no price, so its usage would bill nothing. Add a price on the meter's page, then add the meter to the plan.`
+		if err.Error() != want {
+			t.Errorf("refusal text:\n got  %q\n want %q", err.Error(), want)
 		}
 	})
 
@@ -784,6 +792,10 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error blocking base_amount_cents mutation")
 		}
+		want := "1 subscription uses this plan, so its price, billing timing and meters are locked. Create a new plan and move them to it with Change plan."
+		if err.Error() != want {
+			t.Errorf("refusal text:\n got  %q\n want %q", err.Error(), want)
+		}
 	})
 
 	t.Run("live subs: base_bill_timing flip rejected", func(t *testing.T) {
@@ -793,6 +805,20 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 		})
 		if err == nil {
 			t.Fatal("expected error blocking base_bill_timing flip")
+		}
+		if !strings.HasPrefix(err.Error(), "2 subscriptions use this plan,") {
+			t.Errorf("refusal must give the count in plain words: %q", err.Error())
+		}
+	})
+
+	t.Run("LiveSubscriptionCount is the count the lock uses", func(t *testing.T) {
+		svc, p := setup(3)
+		n, err := svc.LiveSubscriptionCount(ctx, "tenant1", p.ID)
+		if err != nil || n != 3 {
+			t.Fatalf("LiveSubscriptionCount = %d, %v; want 3", n, err)
+		}
+		if n, err := NewService(newMemStore()).LiveSubscriptionCount(ctx, "tenant1", p.ID); err != nil || n != 0 {
+			t.Fatalf("no reader wired: got %d, %v; want 0 (the lock is off too)", n, err)
 		}
 	})
 

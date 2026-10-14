@@ -7,6 +7,8 @@ import { startOfDayInTZ, endOfDayInTZ, civilDateAgo } from '@/lib/dates'
 import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_ROWS, exportCapNotice, parseRange, rangeCaption, resolveWindow, usageEmptyKind, needsAnyEventCheck } from '@/lib/usageRange'
 import type { Customer, Meter, UsageEvent, UsageEventsAggregate } from '@/lib/api'
 import { downloadCSV } from '@/lib/csv'
+import { formatQuantity, quantityWithUnit } from '@/lib/usageQuantity'
+import { usageNoneYet } from '@/lib/homeNotices'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
@@ -171,6 +173,7 @@ export default function UsageEventsPage() {
     retry: false,
   })
   const emptyKind = usageEmptyKind(range, filtersForEmpty, anyEver)
+  const noneYet = usageNoneYet(metersData ? meters.length : null)
 
   // `quantity` is wire-encoded as a string (NUMERIC(38, 12)) for decimal
   // precision; coerce to number for display math only. Authoritative
@@ -188,15 +191,6 @@ export default function UsageEventsPage() {
     [events, filterDim],
   )
 
-  // Trim trailing zeros off a decimal string so "1.500000000000" surfaces
-  // as "1.5" without losing genuine fractional digits ("1.0001" stays).
-  // Falls back to the original string if it doesn't look numeric.
-  const trimDecimal = (s: string): string => {
-    if (!s.includes('.')) return s
-    const trimmed = s.replace(/0+$/, '').replace(/\.$/, '')
-    return trimmed === '' || trimmed === '-' ? '0' : trimmed
-  }
-
   // Meter breakdown enriched with display name + unit from the customer's
   // meter list (the aggregate endpoint deliberately returns IDs only —
   // joining client-side avoids a JOIN at SQL time and keeps the response
@@ -209,7 +203,7 @@ export default function UsageEventsPage() {
       return {
         id: r.meter_id,
         name: meterMap[r.meter_id]?.name || r.meter_id.slice(0, 12) + '...',
-        unit: meterMap[r.meter_id]?.unit || 'units',
+        unit: meterMap[r.meter_id]?.unit || 'unit',
         total: r.total,
         totalNum,
         pct: grandTotal > 0 ? (totalNum / grandTotal) * 100 : 0,
@@ -277,11 +271,11 @@ export default function UsageEventsPage() {
 
   // Stat-card values come from the server-side aggregate so that they
   // reflect ALL filtered rows, not just the current page. Pagination
-  // must not shift these numbers (issue #7). total_units is rendered
-  // from the decimal string with trailing zeros trimmed; the integer
-  // counts pass through .toLocaleString() for thousands separators.
+  // must not shift these numbers (issue #7). total_units is formatted from
+  // the decimal string (separators, trailing zeros dropped, never through a
+  // float); the integer counts pass through .toLocaleString().
   const totalEvents = aggregate?.total_events ?? total
-  const totalUnitsDisplay = aggregate ? trimDecimal(aggregate.total_units) : '—'
+  const totalUnitsDisplay = aggregate ? formatQuantity(aggregate.total_units) : '—'
   const activeMeters = aggregate?.active_meters ?? 0
   const activeCustomers = aggregate?.active_customers ?? 0
 
@@ -290,8 +284,8 @@ export default function UsageEventsPage() {
   const statCards = [
     { label: 'Total Events', value: totalEvents.toLocaleString(), icon: Activity, color: 'text-primary' },
     { label: 'Total Units', value: totalUnitsDisplay, icon: Hash, color: 'text-blue-600' },
-    { label: 'Active Meters', value: String(activeMeters), icon: Gauge, color: 'text-amber-600' },
-    { label: 'Active Customers', value: String(activeCustomers), icon: Users, color: 'text-emerald-600' },
+    { label: 'Active Meters', value: activeMeters.toLocaleString(), icon: Gauge, color: 'text-amber-600' },
+    { label: 'Active Customers', value: activeCustomers.toLocaleString(), icon: Users, color: 'text-emerald-600' },
   ]
 
   return (
@@ -389,8 +383,8 @@ export default function UsageEventsPage() {
               <EmptyState
                 icon={Activity}
                 title="No usage events yet"
-                description="Usage events are how metered activity reaches Velox — send them from your backend via the API. Each event needs a meter to land against."
-                action={{ label: 'Set up a meter', to: '/pricing?tab=meters' }}
+                description={noneYet.description}
+                action={noneYet.setUpMeter ? { label: 'Set up a meter', to: '/pricing?tab=meters' } : undefined}
               />
             ) : (
               <EmptyState
@@ -445,7 +439,7 @@ export default function UsageEventsPage() {
                     <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                       <div className="h-full bg-primary rounded-full" style={{ width: `${m.pct}%` }} />
                     </div>
-                    <span className="text-sm font-medium text-foreground tabular-nums w-24 text-right">{trimDecimal(m.total)} {m.unit}</span>
+                    <span className="text-sm font-medium text-foreground tabular-nums shrink-0 text-right">{quantityWithUnit(m.total, m.unit)}</span>
                   </div>
                 ))}
               </CardContent>

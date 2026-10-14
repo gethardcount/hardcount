@@ -82,6 +82,9 @@ type TaxFlusher interface {
 type NonTerminalSubscription struct {
 	ID     string
 	Status string
+	// Name is the subscription's display name (its code when it has none):
+	// the archive refusal names subscriptions the way the page lists them.
+	Name string
 	// PlanCurrencies are the distinct currencies of the subscription's
 	// item plans — the currency-mismatch guard compares the billing
 	// profile's currency against them (a profile currency override
@@ -492,13 +495,7 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 				return domain.Customer{}, fmt.Errorf("check subscriptions before archive: %w", err)
 			}
 			if len(blocking) > 0 {
-				ids := make([]string, 0, len(blocking))
-				for _, b := range blocking {
-					ids = append(ids, b.ID)
-				}
-				return domain.Customer{}, errs.InvalidState(fmt.Sprintf(
-					"customer has %d subscription(s) that still bill (%s) — cancel them before archiving; archiving does not stop billing",
-					len(blocking), strings.Join(ids, ", ")))
+				return domain.Customer{}, errs.InvalidState(archiveBlockedMessage(blocking))
 			}
 		}
 		existing.Status = status
@@ -824,4 +821,26 @@ func validateEmail(field, email string) error {
 		return errs.Invalid(field, "invalid email: domain must contain a dot")
 	}
 	return nil
+}
+
+// archiveBlockedMessage is the refusal to archive a customer whose
+// subscriptions still bill (ADR-067). It names them as the customer page
+// lists them, by name, not by id: "Pro monthly" means something to the
+// operator reading it, "vlx_sub_d9o…" does not. A subscription with no name
+// falls back to its id so it can still be found.
+func archiveBlockedMessage(blocking []NonTerminalSubscription) string {
+	names := make([]string, 0, len(blocking))
+	for _, b := range blocking {
+		name := b.Name
+		if name == "" {
+			name = b.ID
+		}
+		names = append(names, name)
+	}
+	what, them := "1 subscription that still bills", "it"
+	if len(blocking) > 1 {
+		what, them = fmt.Sprintf("%d subscriptions that still bill", len(blocking)), "them"
+	}
+	return fmt.Sprintf("This customer has %s (%s). Cancel %s first; archiving doesn't stop billing.",
+		what, strings.Join(names, ", "), them)
 }

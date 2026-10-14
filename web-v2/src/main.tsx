@@ -143,7 +143,6 @@ const InvoiceDetailPage = lazy(() => import('@/pages/InvoiceDetail'))
 const SubscriptionDetailPage = lazy(() => import('@/pages/SubscriptionDetail'))
 const PlanDetailPage = lazy(() => import('@/pages/PlanDetail'))
 const MeterDetailPage = lazy(() => import('@/pages/MeterDetail'))
-const OnboardingPage = lazy(() => import('@/pages/Onboarding'))
 const RecipesPage = lazy(() => import('@/pages/Recipes'))
 const NotFoundPage = lazy(() => import('@/pages/NotFound'))
 
@@ -168,7 +167,6 @@ const App = () => (
               {/* Token-driven: no PublicOnlyRoute — see comment above. */}
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
               <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-              <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
               <Route path="/recipes" element={<ProtectedRoute><RecipesPage /></ProtectedRoute>} />
               <Route path="/customers" element={<ProtectedRoute><CustomersPage /></ProtectedRoute>} />
               <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />

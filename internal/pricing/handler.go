@@ -355,8 +355,21 @@ func (h *Handler) getPlan(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "get plan", "error", err)
 		return
 	}
+	live, err := h.svc.LiveSubscriptionCount(r.Context(), tenantID, plan.ID)
+	if err != nil {
+		respond.InternalError(w, r)
+		slog.ErrorContext(r.Context(), "get plan: live subscriptions", "error", err)
+		return
+	}
 
-	respond.JSON(w, r, http.StatusOK, plan)
+	respond.JSON(w, r, http.StatusOK, planDetail{Plan: plan, LiveSubscriptionCount: live})
+}
+
+// planDetail is GET /v1/plans/{id}: the plan plus the number of
+// subscriptions that lock its price, billing timing and meters.
+type planDetail struct {
+	domain.Plan
+	LiveSubscriptionCount int `json:"live_subscription_count"`
 }
 
 func (h *Handler) updatePlan(w http.ResponseWriter, r *http.Request) {

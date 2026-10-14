@@ -182,12 +182,12 @@ export default function PricingPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Pricing</h1>
-          <p className="text-sm text-muted-foreground mt-1">Configure plans, meters, and rating rules</p>
+          <p className="text-sm text-muted-foreground mt-1">Configure plans, meters, and prices</p>
         </div>
         {showAdd && (
           <Button size="sm" onClick={() => setCreateFor(tab)}>
             <Plus size={16} className="mr-2" />
-            {tab === 'plans' ? 'Add Plan' : tab === 'meters' ? 'Add Meter' : 'Add Rule'}
+            {tab === 'plans' ? 'Add Plan' : tab === 'meters' ? 'Add Meter' : 'Add Price'}
           </Button>
         )}
       </div>
@@ -198,7 +198,8 @@ export default function PricingPage() {
               error or a skeleton claims an empty list nobody has seen. */}
           <TabsTrigger value="plans">Plans{showCounts ? ` (${plans.length})` : ''}</TabsTrigger>
           <TabsTrigger value="meters">Meters{showCounts ? ` (${meters.length})` : ''}</TabsTrigger>
-          <TabsTrigger value="rules">Rules{showCounts ? ` (${currentRules.length})` : ''}</TabsTrigger>
+          {/* The value stays 'rules' so saved ?tab=rules links still open it. */}
+          <TabsTrigger value="rules">Prices{showCounts ? ` (${currentRules.length})` : ''}</TabsTrigger>
         </TabsList>
 
         <Card className="mt-4">
@@ -341,10 +342,10 @@ export default function PricingPage() {
                   {rules.length === 0 ? (
                     <EmptyState
                       icon={Calculator}
-                      title="No rating rules yet"
-                      description="Rating rules turn metered usage into billable amounts using tiers, volumes, or flat prices."
+                      title="No prices yet"
+                      description="A price sets what each unit of usage costs: flat, tiered, or per package. Link it to a meter to bill usage."
                       action={{
-                        label: 'Add Rule',
+                        label: 'Add Price',
                         icon: Plus,
                         onClick: () => setCreateFor('rules'),
                       }}
@@ -364,7 +365,7 @@ export default function PricingPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Name</TableHead>
-                          <TableHead>Rule Key</TableHead>
+                          <TableHead>Key</TableHead>
                           <TableHead>Mode</TableHead>
                           <TableHead>Version</TableHead>
                           <TableHead>Used by</TableHead>
@@ -461,7 +462,7 @@ export default function PricingPage() {
           onCreated={() => {
             setCreateFor(null)
             queryClient.invalidateQueries({ queryKey: ['rating-rules'] })
-            toast.success('Rating rule created')
+            toast.success('Price created')
           }}
         />
       )}
@@ -587,7 +588,7 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
       await api.createRatingRule(payload as Parameters<typeof api.createRatingRule>[0])
       onCreated()
     } catch (err) {
-      showApiError(err, 'Failed to create rating rule')
+      showApiError(err, 'Failed to create price')
     } finally {
       setSaving(false)
     }
@@ -597,7 +598,7 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{prefill ? `Publish New Version — ${prefill.rule_key}` : 'Create Rating Rule'}</DialogTitle>
+          <DialogTitle>{prefill ? `Publish New Version — ${prefill.rule_key}` : 'Create Price'}</DialogTitle>
           <DialogDescription>{prefill ? `Currently v${prefill.version}. The new version takes effect from each customer's next billing period.` : 'Define a price. Link it to a meter to bill usage.'}</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">
@@ -606,11 +607,14 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
             <Input id="rule-name" value={name} onChange={e => setName(e.target.value)} placeholder="API Call Pricing" maxLength={255} className="mt-1" />
           </div>
           <div>
-            <Label htmlFor="rule-key">Rule Key</Label>
+            <Label htmlFor="rule-key">Key</Label>
             <Input id="rule-key" value={ruleKey} onChange={e => setRuleKey(e.target.value)} placeholder="api_calls" maxLength={100} className="mt-1 font-mono" disabled={!!prefill} />
-            {existingLatest ? (
+            {/* Publishing a new version already says when it takes effect, in
+                the dialog's description; this line is for a key typed in the
+                create form that turns out to exist. */}
+            {prefill ? null : existingLatest ? (
               <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
-                Existing price — this publishes v{existingLatest.version + 1} in {existingLatest.currency}, taking effect from each customer's next billing period.
+                This key already exists, so saving publishes v{existingLatest.version + 1} in {existingLatest.currency}, from each customer's next billing period.
               </p>
             ) : (
               <p className="text-xs text-muted-foreground mt-1">Stable identity for this price. Publishing the same key again creates a new version. To bill usage, link the price to a meter.</p>
@@ -707,17 +711,16 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
             </div>
           )}
 
-          <p className="text-xs text-muted-foreground">
-            Re-using an existing rule key republishes its price, taking effect from each customer's
-            next billing period.{hasClocks && (
-              <span className="text-amber-700 dark:text-amber-500"> Test-clock customers get it in their current simulated period.</span>
-            )}
-          </p>
+          {hasClocks && (prefill || existingLatest) && (
+            <p className="text-xs text-muted-foreground">
+              Test-clock customers get the new version in their current simulated period.
+            </p>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
-              {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : (prefill ? `Publish v${prefill.version + 1}` : 'Create Rule')}
+              {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : (prefill ? `Publish v${prefill.version + 1}` : 'Create Price')}
             </Button>
           </DialogFooter>
         </form>
@@ -797,15 +800,15 @@ function CreateMeterDialog({ onClose, onCreated, rules }: { onClose: () => void;
           </div>
           {rules.length === 0 ? (
             <div>
-              <Label>Rating Rule</Label>
+              <Label>Price</Label>
               <p className="text-xs text-muted-foreground mt-1">
-                No prices exist yet — without one, usage on this meter won't be billed.
-                Create one on the <Link to="/pricing?tab=rules" className="text-primary hover:underline">Prices tab</Link>, then link it here or on the meter's page.
+                No prices yet. Usage on this meter isn't billed until you link one.{' '}
+                <Link to="/pricing?tab=rules" className="text-primary hover:underline">Create a price</Link>
               </p>
             </div>
           ) : (
             <div>
-              <Label>Rating Rule</Label>
+              <Label>Price</Label>
               {/* Searchable: the option list is TENANT DATA (every price the
                   tenant defines), so it grows unbounded — a plain Select becomes
                   an unscannable wall. Fixed enums stay plain Selects. */}

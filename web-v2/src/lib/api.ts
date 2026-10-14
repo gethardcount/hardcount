@@ -205,8 +205,10 @@ export const api = {
   },
   listPlans: () =>
     apiRequest<{ data: Plan[] }>('GET', '/plans'),
+  // live_subscription_count: subscriptions that lock the plan's price,
+  // billing timing and meters (only on this endpoint, not the list).
   getPlan: (id: string) =>
-    apiRequest<Plan>('GET', `/plans/${id}`),
+    apiRequest<Plan & { live_subscription_count: number }>('GET', `/plans/${id}`),
   createPlan: (data: { code: string; name: string; currency: string; billing_interval: string; base_amount_cents: number; base_bill_timing?: BillTiming; meter_ids?: string[] }) =>
     apiRequest<Plan>('POST', '/plans', data),
   updatePlan: (id: string, data: Partial<{ name: string; status: string; base_amount_cents: number; base_bill_timing: BillTiming; meter_ids: string[] }>) =>

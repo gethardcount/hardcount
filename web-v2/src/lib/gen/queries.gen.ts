@@ -79,6 +79,7 @@ import type {
   GetAnalyticsUsage200,
   GetAnalyticsUsageParams,
   GetCustomerUsageParams,
+  GetPlan200,
   GetSubscriptionTimeline200,
   GetUsageSummary500,
   GetUsageSummaryParams,
@@ -4790,9 +4791,9 @@ export const getGetPlanUrl = (id: string,) => {
 /**
  * @summary Get plan
  */
-export const getPlan = async (id: string, options?: RequestInit): Promise<Plan> => {
+export const getPlan = async (id: string, options?: RequestInit): Promise<GetPlan200> => {
 
-  return orvalClient<Plan>(getGetPlanUrl(id),
+  return orvalClient<GetPlan200>(getGetPlanUrl(id),
   {
     ...options,
     method: 'GET'
@@ -4896,8 +4897,8 @@ export const getUpdatePlanUrl = (id: string,) => {
  *
  * `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
  * subscriptions are billed. Changing any of them is refused while a
- * draft, trialing or active subscription uses the plan: create a new
- * plan instead. `base_amount_cents` can only be set to a value above 0.
+ * subscription that is not canceled or archived uses the plan
+ * (`live_subscription_count` on Get plan): create a new plan instead. `base_amount_cents` can only be set to a value above 0.
  * Every meter in `meter_ids` must have a price (a default rating rule
  * or a pricing rule) in the plan's currency.
  * @summary Update plan

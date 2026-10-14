@@ -1578,8 +1578,8 @@ export interface paths {
          *
          *     `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
          *     subscriptions are billed. Changing any of them is refused while a
-         *     draft, trialing or active subscription uses the plan: create a new
-         *     plan instead. `base_amount_cents` can only be set to a value above 0.
+         *     subscription that is not canceled or archived uses the plan
+         *     (`live_subscription_count` on Get plan): create a new plan instead. `base_amount_cents` can only be set to a value above 0.
          *     Every meter in `meter_ids` must have a price (a default rating rule
          *     or a pricing rule) in the plan's currency.
          */
@@ -9377,7 +9377,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Plan"];
+                    "application/json": components["schemas"]["Plan"] & {
+                        /**
+                         * @description Subscriptions on this plan that are not canceled or
+                         *     archived. While it is above 0, `base_amount_cents`,
+                         *     `base_bill_timing` and `meter_ids` cannot change
+                         *     (see Update plan).
+                         */
+                        live_subscription_count: number;
+                    };
                 };
             };
             /** @description `not_found`: no plan with this id in this tenant and mode. */

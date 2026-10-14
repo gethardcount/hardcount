@@ -691,7 +691,7 @@ function MeterRow({ meter }: { meter: CustomerUsageMeter }) {
         {expanded && hasMultipleRules && (
           <div className="border-t border-border bg-muted/20">
             <p className="px-5 pt-3 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
-              By pricing rule
+              By price
             </p>
             {visibleRules.map(r => (
               <RuleRow

@@ -62,6 +62,41 @@ func formatDiffs(diffs []fieldDiff) string {
 	return strings.Join(parts, "; ")
 }
 
+// priceConflictMessage is the refusal when a price the recipe would create
+// already exists with different money settings. The exact differences stay
+// in the text: the operator has to see both rates to choose. The next step
+// depends on what differs. The install form can pick the currency, so a
+// currency difference points there; the rates are fixed by the recipe, so a
+// rate difference means publishing a matching version of the existing price
+// (the next install adopts the price's current version, ruleConformanceDiff).
+func priceConflictMessage(priceKey string, diffs []fieldDiff) string {
+	next := "Publish a new version of it with the recipe's rates on the Pricing page, then install again."
+	for _, d := range diffs {
+		if d.Field == "currency" {
+			next = fmt.Sprintf("Install the recipe in %s to use the existing price.", d.Got)
+			break
+		}
+	}
+	return fmt.Sprintf("Price %q already exists with different settings (%s). %s", priceKey, formatDiffs(diffs), next)
+}
+
+// meterConflictMessage is the refusal when a meter the recipe would create
+// already exists and adds up usage another way. Aggregation is the only
+// field compared (meterConformanceDiff).
+func meterConflictMessage(meterKey string, diffs []fieldDiff) string {
+	return fmt.Sprintf("Meter %q already exists and adds up usage another way (%s), so the recipe can't use it. "+
+		"Change the meter to match, then install again.", meterKey, formatDiffs(diffs))
+}
+
+// meterCurrencyConflictMessage is the refusal when an existing meter's
+// prices bill in another currency than this install: a meter's prices share
+// one currency (ADR-100). conflict is AdoptedMeterCurrencyConflict's text and
+// names the price; it keeps its own key so the operator can find it.
+func meterCurrencyConflictMessage(meterKey, conflict, installCurrency string) string {
+	return fmt.Sprintf("Meter %q already has prices in another currency (%s), and this install is in %s. "+
+		"Install the recipe in the meter's currency.", meterKey, conflict, installCurrency)
+}
+
 // ruleConformanceDiff returns money-affecting divergence between an existing
 // rating rule's CURRENT ACTIVE version (what adoption would bind, and what
 // live usage on this key already bills) and the recipe's declared rule.

@@ -8,6 +8,7 @@ import type { MeterPricingRule, MeterAggregationMode, RatingRule } from '@/lib/a
 import { showApiError } from '@/lib/formErrors'
 import { money, priceRate, unitScale } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
+import { deleteMatchedPriceSentence } from '@/lib/pricingCopy'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { statusBadgeVariant } from '@/lib/status'
@@ -135,11 +136,11 @@ export default function MeterDetailPage() {
   const deleteMutation = useMutation({
     mutationFn: (ruleId: string) => api.deleteMeterPricingRule(id!, ruleId),
     onSuccess: () => {
-      toast.success('Pricing rule deleted')
+      toast.success('Price deleted')
       queryClient.invalidateQueries({ queryKey: ['meter-pricing-rules', id] })
       setDeleteTarget(null)
     },
-    onError: (err) => showApiError(err, 'Failed to delete pricing rule'),
+    onError: (err) => showApiError(err, 'Failed to delete price'),
   })
 
   usePageTitle(meter?.name)
@@ -223,9 +224,9 @@ export default function MeterDetailPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-sm">Default pricing rule</CardTitle>
+              <CardTitle className="text-sm">Default price</CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Applies to events not claimed by a dimension-matched rule below.
+                Applies to events that no price below matches.
               </p>
               {ratingRule && (
                 <p className="text-sm text-muted-foreground mt-2">{ratingRule.name}</p>
@@ -236,7 +237,7 @@ export default function MeterDetailPage() {
                 <Badge variant="secondary">v{ratingRule.version}</Badge>
               )}
               <Button variant="outline" size="sm" onClick={() => setDefaultRuleOpen(true)}>
-                {meter.rating_rule_version_id ? 'Change' : 'Link rule'}
+                {meter.rating_rule_version_id ? 'Change' : 'Link a price'}
               </Button>
             </div>
           </div>
@@ -293,11 +294,8 @@ export default function MeterDetailPage() {
           ) : (
             <div className="text-center py-4">
               <p className="text-sm text-muted-foreground">
-                No default pricing rule — usage not matched by a rule below <span className="text-amber-500">will not be billed</span>.
+                No default price. Usage that no price below matches <span className="text-amber-500">won't be billed</span>.
               </p>
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => setDefaultRuleOpen(true)}>
-                Link a price
-              </Button>
             </div>
           )}
         </CardContent>
@@ -308,13 +306,13 @@ export default function MeterDetailPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-sm">Dimension-matched rules</CardTitle>
+              <CardTitle className="text-sm">Prices for specific values</CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Pricing rules that match a subset of event dimensions. Higher priority claims events first.
+                Each prices the events whose values match, such as model = gpt-4. Higher priority matches first.
               </p>
             </div>
             <Button size="sm" onClick={() => setCreateOpen(true)}>
-              <Plus size={14} className="mr-1.5" /> Add rule
+              <Plus size={14} className="mr-1.5" /> Add price
             </Button>
           </div>
         </CardHeader>
@@ -332,7 +330,7 @@ export default function MeterDetailPage() {
                   <TableHead className="text-xs font-medium w-20">Priority</TableHead>
                   <TableHead className="text-xs font-medium">Dimension match</TableHead>
                   <TableHead className="text-xs font-medium w-40">Aggregation</TableHead>
-                  <TableHead className="text-xs font-medium">Rating rule</TableHead>
+                  <TableHead className="text-xs font-medium">Price</TableHead>
                   <TableHead className="text-xs font-medium w-12 text-right" />
                 </TableRow>
               </TableHeader>
@@ -375,7 +373,7 @@ export default function MeterDetailPage() {
                           size="icon"
                           className="h-7 w-7 text-muted-foreground hover:text-destructive"
                           onClick={() => setDeleteTarget(rule)}
-                          aria-label="Delete pricing rule"
+                          aria-label="Delete price"
                         >
                           <Trash2 size={14} />
                         </Button>
@@ -388,10 +386,12 @@ export default function MeterDetailPage() {
           ) : (
             <div className="px-6 py-8 text-center">
               <p className="text-sm text-muted-foreground">
-                No dimension-matched rules. Every event uses the default pricing rule above.
+                {meter.rating_rule_version_id
+                  ? 'No prices for specific values. Every event uses the default price above.'
+                  : 'No prices for specific values, and no default price, so usage on this meter isn\'t billed.'}
               </p>
               <Button variant="outline" size="sm" className="mt-3" onClick={() => setCreateOpen(true)}>
-                <Plus size={14} className="mr-1.5" /> Add a rule
+                <Plus size={14} className="mr-1.5" /> Add a price
               </Button>
             </div>
           )}
@@ -435,7 +435,7 @@ export default function MeterDetailPage() {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground font-mono">{plan.code}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{plan.billing_interval}</TableCell>
-                    <TableCell className="text-sm font-medium text-foreground text-right">{formatCents(plan.base_amount_cents)}</TableCell>
+                    <TableCell className="text-sm font-medium text-foreground text-right">{formatCents(plan.base_amount_cents, plan.currency)}</TableCell>
                     <TableCell><Badge variant={statusVariant(plan.status)}>{plan.status}</Badge></TableCell>
                   </TableRow>
                 ))}
@@ -479,17 +479,18 @@ export default function MeterDetailPage() {
         <TypedConfirmDialog
           open
           onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
-          title="Delete pricing rule?"
+          title={`Delete ${ratingRules?.data.find(r => r.id === deleteTarget?.rating_rule_version_id)?.name ?? 'this price'}?`}
           description={
             <>
-              Deletes the rule matching <span className="font-mono">{Object.entries(deleteTarget?.dimension_match ?? {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'every event'}</span>
-              {' '}(priced by {ratingRules?.data.find(r => r.id === deleteTarget?.rating_rule_version_id)?.name ?? 'its price'}).
-              Its usage stops billing from each customer's next invoice; invoices already finalized are unaffected.
+              {deleteMatchedPriceSentence(
+                Object.entries(deleteTarget?.dimension_match ?? {}).map(([k, v]) => `${k}=${v}`).join(', '),
+                !!meter.rating_rule_version_id,
+              )}{' '}
               Type <span className="font-mono">delete</span> to confirm.
             </>
           }
           confirmWord="delete"
-          confirmLabel="Delete rule"
+          confirmLabel="Delete price"
           onConfirm={() => deleteMutation.mutate(deleteTarget.id)}
           loading={deleteMutation.isPending}
         />
@@ -518,33 +519,33 @@ function SetDefaultRuleDialog({
   const saveMutation = useMutation({
     mutationFn: (ruleId: string) => api.updateMeter(meterId, { rating_rule_version_id: ruleId }),
     onSuccess: (_, ruleId) => {
-      toast.success(ruleId ? 'Default pricing rule linked' : 'Default pricing rule unlinked')
+      toast.success(ruleId ? 'Default price linked' : 'Default price unlinked')
       onSaved()
     },
-    onError: (err) => showApiError(err, 'Failed to update default pricing rule'),
+    onError: (err) => showApiError(err, 'Failed to update default price'),
   })
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Default pricing rule</DialogTitle>
+          <DialogTitle>Default price</DialogTitle>
           <DialogDescription>
-            Prices events that no dimension-matched rule claims. Takes effect at the
-            next invoice close; without it, unmatched usage is not billed.
+            Prices events that no other price on this meter matches, from the next
+            invoice. Without it, that usage isn't billed.
           </DialogDescription>
         </DialogHeader>
 
         <div>
-          <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rating rule</Label>
+          <Label className="text-xs uppercase tracking-wide text-muted-foreground">Price</Label>
           {/* Searchable: rating rules are TENANT DATA and grow unbounded. */}
           <div className="mt-2">
             <Combobox
               value={ratingRuleId}
               onChange={(v) => setRatingRuleId(v ?? '')}
               options={latestPerKey(ratingRules).map(rr => ({ value: rr.id, label: `${rr.name} — ${priceRate(rr, meterUnit)} · v${rr.version}` }))}
-              placeholder="Select rating rule…"
-              emptyMessage={ratingRules.length === 0 ? 'No rating rules — create one first.' : 'No rule matches that search.'}
+              placeholder="Select a price…"
+              emptyMessage={ratingRules.length === 0 ? 'No prices yet. Create one on the Pricing page first.' : 'No price matches that search.'}
               triggerClassName="w-full"
             />
           </div>
@@ -558,7 +559,7 @@ function SetDefaultRuleDialog({
               onClick={() => saveMutation.mutate('')}
               disabled={saveMutation.isPending}
             >
-              Unlink rule
+              Unlink price
             </Button>
           )}
           <div className="flex gap-2">
@@ -616,10 +617,10 @@ function CreatePricingRuleDialog({
       })
     },
     onSuccess: () => {
-      toast.success('Pricing rule created')
+      toast.success('Price added')
       onCreated()
     },
-    onError: (err) => showApiError(err, 'Failed to create pricing rule'),
+    onError: (err) => showApiError(err, 'Failed to add price'),
   })
 
   const updateRow = (i: number, patch: Partial<DimensionRow>) => {
@@ -634,7 +635,7 @@ function CreatePricingRuleDialog({
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add dimension-matched pricing rule</DialogTitle>
+          <DialogTitle>Add a price for specific values</DialogTitle>
           <DialogDescription>
             Applies to events that include all of the values below. Leave empty to match every event.
           </DialogDescription>
@@ -735,15 +736,15 @@ function CreatePricingRuleDialog({
           </div>
 
           <div>
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rating rule</Label>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Price</Label>
             {/* Searchable: rating rules are TENANT DATA and grow unbounded. */}
             <div className="mt-2">
               <Combobox
                 value={ratingRuleId}
                 onChange={(v) => setRatingRuleId(v ?? '')}
                 options={latestPerKey(ratingRules).map(rr => ({ value: rr.id, label: `${rr.name} — ${priceRate(rr, meterUnit)} · v${rr.version}` }))}
-                placeholder="Select rating rule…"
-                emptyMessage={ratingRules.length === 0 ? 'No rating rules — create one first.' : 'No rule matches that search.'}
+                placeholder="Select a price…"
+                emptyMessage={ratingRules.length === 0 ? 'No prices yet. Create one on the Pricing page first.' : 'No price matches that search.'}
                 triggerClassName="w-full"
               />
             </div>
@@ -754,7 +755,7 @@ function CreatePricingRuleDialog({
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={() => createMutation.mutate()} disabled={!canSubmit}>
             {createMutation.isPending ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
-            Create rule
+            Add price
           </Button>
         </DialogFooter>
       </DialogContent>

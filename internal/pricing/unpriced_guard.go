@@ -51,14 +51,32 @@ func (s *Service) guardMeterStaysPriced(ctx context.Context, tenantID, meterID, 
 			return fmt.Errorf("unpriced-meter guard: live subscriptions on plan %s: %w", p.ID, err)
 		}
 		if n > 0 {
-			live = append(live, fmt.Sprintf("%s (%d live subscription(s))", p.Code, n))
+			live = append(live, fmt.Sprintf("%s (%s)", p.Code, subscriptionCount(n)))
 		}
 	}
 	if len(live) == 0 {
 		return nil
 	}
-	return errs.InvalidState(fmt.Sprintf(
-		"meter %q would have no price left, and plan(s) %s use it: that usage would be left off their invoices. "+
-			"Add a default price or another pricing rule to the meter first, or move these subscriptions to a plan without this meter",
-		meterKey, strings.Join(live, ", ")))
+	return errs.InvalidState(lastPriceMessage(meterKey, live))
+}
+
+// lastPriceMessage is the refusal for removing a meter's last price while
+// plans with live subscriptions bill it. live holds "code (N subscriptions)"
+// for each such plan; the plan codes stay in the text so the operator can
+// find them.
+func lastPriceMessage(meterKey string, live []string) string {
+	plans := "plan " + live[0] + " bills"
+	if len(live) > 1 {
+		plans = "plans " + strings.Join(live, ", ") + " bill"
+	}
+	return fmt.Sprintf("This is the last price on meter %q, and %s it, so that usage would go unbilled. "+
+		"Add another price first, or move those subscriptions to a plan without this meter.", meterKey, plans)
+}
+
+// subscriptionCount reads "1 subscription" or "3 subscriptions".
+func subscriptionCount(n int) string {
+	if n == 1 {
+		return "1 subscription"
+	}
+	return fmt.Sprintf("%d subscriptions", n)
 }

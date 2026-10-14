@@ -124,6 +124,7 @@ export * from './getAnalyticsUsage200';
 export * from './getAnalyticsUsage200Totals';
 export * from './getAnalyticsUsageParams';
 export * from './getCustomerUsageParams';
+export * from './getPlan200';
 export * from './getSubscriptionTimeline200';
 export * from './getUsageSummary500';
 export * from './getUsageSummary500Error';

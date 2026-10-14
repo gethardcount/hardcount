@@ -516,11 +516,10 @@ export default function CustomerDetailPage() {
                         invalidateAll()
                       }).catch((err: Error) => {
                         // The backend 409s while any subscription still
-                        // bills (ADR-067) and its message names the
-                        // blocking subscription ids — surface it verbatim
-                        // so the operator knows exactly what to cancel
-                        // (the subscriptions are listed on this page).
-                        showApiError(err, 'Cannot archive')
+                        // bills (ADR-067); its sentence names those
+                        // subscriptions as this page lists them, so it is
+                        // the toast body as sent.
+                        showApiError(err, "Couldn't archive customer")
                       })
                     }}
                   >

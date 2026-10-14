@@ -2081,16 +2081,73 @@ func (e PostV1PlansJSONBodyBaseBillTiming) Valid() bool {
 
 // Defines values for PostV1PlansJSONBodyBillingInterval.
 const (
-	Monthly PostV1PlansJSONBodyBillingInterval = "monthly"
-	Yearly  PostV1PlansJSONBodyBillingInterval = "yearly"
+	PostV1PlansJSONBodyBillingIntervalMonthly PostV1PlansJSONBodyBillingInterval = "monthly"
+	PostV1PlansJSONBodyBillingIntervalYearly  PostV1PlansJSONBodyBillingInterval = "yearly"
 )
 
 // Valid indicates whether the value is a known member of the PostV1PlansJSONBodyBillingInterval enum.
 func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
 	switch e {
-	case Monthly:
+	case PostV1PlansJSONBodyBillingIntervalMonthly:
 		return true
-	case Yearly:
+	case PostV1PlansJSONBodyBillingIntervalYearly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetPlan200JSONResponseBodyBaseBillTiming.
+const (
+	GetPlan200JSONResponseBodyBaseBillTimingInAdvance GetPlan200JSONResponseBodyBaseBillTiming = "in_advance"
+	GetPlan200JSONResponseBodyBaseBillTimingInArrears GetPlan200JSONResponseBodyBaseBillTiming = "in_arrears"
+)
+
+// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyBaseBillTiming enum.
+func (e GetPlan200JSONResponseBodyBaseBillTiming) Valid() bool {
+	switch e {
+	case GetPlan200JSONResponseBodyBaseBillTimingInAdvance:
+		return true
+	case GetPlan200JSONResponseBodyBaseBillTimingInArrears:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetPlan200JSONResponseBodyBillingInterval.
+const (
+	GetPlan200JSONResponseBodyBillingIntervalMonthly GetPlan200JSONResponseBodyBillingInterval = "monthly"
+	GetPlan200JSONResponseBodyBillingIntervalYearly  GetPlan200JSONResponseBodyBillingInterval = "yearly"
+)
+
+// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyBillingInterval enum.
+func (e GetPlan200JSONResponseBodyBillingInterval) Valid() bool {
+	switch e {
+	case GetPlan200JSONResponseBodyBillingIntervalMonthly:
+		return true
+	case GetPlan200JSONResponseBodyBillingIntervalYearly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetPlan200JSONResponseBodyStatus.
+const (
+	GetPlan200JSONResponseBodyStatusActive   GetPlan200JSONResponseBodyStatus = "active"
+	GetPlan200JSONResponseBodyStatusArchived GetPlan200JSONResponseBodyStatus = "archived"
+	GetPlan200JSONResponseBodyStatusDraft    GetPlan200JSONResponseBodyStatus = "draft"
+)
+
+// Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyStatus enum.
+func (e GetPlan200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case GetPlan200JSONResponseBodyStatusActive:
+		return true
+	case GetPlan200JSONResponseBodyStatusArchived:
+		return true
+	case GetPlan200JSONResponseBodyStatusDraft:
 		return true
 	default:
 		return false
@@ -2099,16 +2156,16 @@ func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
 
 // Defines values for UpdatePlanJSONBodyBaseBillTiming.
 const (
-	UpdatePlanJSONBodyBaseBillTimingInAdvance UpdatePlanJSONBodyBaseBillTiming = "in_advance"
-	UpdatePlanJSONBodyBaseBillTimingInArrears UpdatePlanJSONBodyBaseBillTiming = "in_arrears"
+	InAdvance UpdatePlanJSONBodyBaseBillTiming = "in_advance"
+	InArrears UpdatePlanJSONBodyBaseBillTiming = "in_arrears"
 )
 
 // Valid indicates whether the value is a known member of the UpdatePlanJSONBodyBaseBillTiming enum.
 func (e UpdatePlanJSONBodyBaseBillTiming) Valid() bool {
 	switch e {
-	case UpdatePlanJSONBodyBaseBillTimingInAdvance:
+	case InAdvance:
 		return true
-	case UpdatePlanJSONBodyBaseBillTimingInArrears:
+	case InArrears:
 		return true
 	default:
 		return false
@@ -2117,19 +2174,19 @@ func (e UpdatePlanJSONBodyBaseBillTiming) Valid() bool {
 
 // Defines values for UpdatePlanJSONBodyStatus.
 const (
-	UpdatePlanJSONBodyStatusActive   UpdatePlanJSONBodyStatus = "active"
-	UpdatePlanJSONBodyStatusArchived UpdatePlanJSONBodyStatus = "archived"
-	UpdatePlanJSONBodyStatusDraft    UpdatePlanJSONBodyStatus = "draft"
+	Active   UpdatePlanJSONBodyStatus = "active"
+	Archived UpdatePlanJSONBodyStatus = "archived"
+	Draft    UpdatePlanJSONBodyStatus = "draft"
 )
 
 // Valid indicates whether the value is a known member of the UpdatePlanJSONBodyStatus enum.
 func (e UpdatePlanJSONBodyStatus) Valid() bool {
 	switch e {
-	case UpdatePlanJSONBodyStatusActive:
+	case Active:
 		return true
-	case UpdatePlanJSONBodyStatusArchived:
+	case Archived:
 		return true
-	case UpdatePlanJSONBodyStatusDraft:
+	case Draft:
 		return true
 	default:
 		return false
@@ -5491,6 +5548,15 @@ type PostV1PlansJSONBodyBaseBillTiming string
 
 // PostV1PlansJSONBodyBillingInterval defines parameters for PostV1Plans.
 type PostV1PlansJSONBodyBillingInterval string
+
+// GetPlan200JSONResponseBodyBaseBillTiming defines parameters for GetPlan.
+type GetPlan200JSONResponseBodyBaseBillTiming string
+
+// GetPlan200JSONResponseBodyBillingInterval defines parameters for GetPlan.
+type GetPlan200JSONResponseBodyBillingInterval string
+
+// GetPlan200JSONResponseBodyStatus defines parameters for GetPlan.
+type GetPlan200JSONResponseBodyStatus string
 
 // UpdatePlanJSONBody defines parameters for UpdatePlan.
 type UpdatePlanJSONBody struct {

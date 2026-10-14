@@ -7,7 +7,10 @@ import { api, formatCents, getTenantTimezone } from '@/lib/api'
 import { outstandingText } from '@/lib/money'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
-import { useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
+import { useEffectiveNowResolver, useTestClocks } from '@/hooks/useClockFrozenMap'
+import { useAuth } from '@/contexts/AuthContext'
+import { NoticeRow } from '@/components/NoticeRow'
+import { SIMULATED_TOTALS_SENTENCE, SIMULATED_TOTALS_TITLE, showSimulatedTotalsNote } from '@/lib/homeNotices'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
@@ -15,7 +18,7 @@ import { SimulatedBadge } from '@/components/TestClockBadge'
 import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { AlertTriangle, Info } from 'lucide-react'
+import { AlertTriangle, FlaskConical, Info } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -86,6 +89,11 @@ export default function DashboardPage() {
     return m
   }, [recentCustomers])
   const resolveNow = useEffectiveNowResolver()
+  // Totals leave out test-clock customers (analytics/simfilter.go) while
+  // Recent Invoices lists their invoices; the note says so where it matters.
+  const { user } = useAuth()
+  const { data: clocks } = useTestClocks()
+  const simulatedNote = showSimulatedTotalsNote(user?.livemode ?? false, clocks?.data?.length ?? 0)
 
   const chartData = useMemo(() => chartRes?.data ?? [], [chartRes])
 
@@ -169,6 +177,21 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
+          {simulatedNote && (
+            <NoticeRow
+              icon={FlaskConical}
+              title={SIMULATED_TOTALS_TITLE}
+              className="mt-4"
+              action={
+                <Link to="/test-clocks" className="text-sm font-medium text-primary hover:underline">
+                  Test clocks
+                </Link>
+              }
+            >
+              {SIMULATED_TOTALS_SENTENCE}
+            </NoticeRow>
+          )}
+
           {/* Alerts row */}
           {alerts.length > 0 && (
             <div className="mt-6 space-y-2" role="region" aria-label="Attention required">
@@ -277,7 +300,9 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   <div className="h-[220px] flex items-center justify-center text-sm text-muted-foreground">
-                    Revenue data will appear after your first billing cycle.
+                    {/* The chart sums the workspace currency only, like the
+                        Revenue card, so the empty text names it. */}
+                    No paid {overview.currency?.toUpperCase()} invoices in this period.
                   </div>
                 )}
               </CardContent>
@@ -341,7 +366,7 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="px-5 py-8 text-center text-sm text-muted-foreground">
-                  No invoices yet. They appear here as soon as a subscription bills.
+                  No invoices yet. They appear here when a subscription bills or you create one.
                 </div>
               )}
             </CardContent>

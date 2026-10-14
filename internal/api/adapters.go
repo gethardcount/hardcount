@@ -1467,7 +1467,11 @@ func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context,
 			return nil, err
 		}
 		for _, sub := range subs {
-			ref := customer.NonTerminalSubscription{ID: sub.ID, Status: string(sub.Status)}
+			name := sub.DisplayName
+			if name == "" {
+				name = sub.Code
+			}
+			ref := customer.NonTerminalSubscription{ID: sub.ID, Status: string(sub.Status), Name: name}
 			seen := map[string]struct{}{}
 			for _, it := range sub.Items {
 				plan, perr := a.plans.GetPlan(ctx, tenantID, it.PlanID)

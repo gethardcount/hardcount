@@ -387,8 +387,7 @@ func (s *Service) Instantiate(
 	for _, rr := range rendered.RatingRules {
 		if existing, err := s.pricing.GetRuleByKeyAsOf(ctx, tenantID, rr.Key, clock.Now(ctx)); err == nil {
 			if diffs := ruleConformanceDiff(existing, rr); len(diffs) > 0 {
-				return domain.RecipeInstance{}, errs.AlreadyExists("rating_rule",
-					fmt.Sprintf("price %q already exists with rates that don't match recipe %q (%s) — the install would bill the existing rates, not the recipe's; reconcile the existing price before instantiating", rr.Key, recipeKey, formatDiffs(diffs)))
+				return domain.RecipeInstance{}, errs.AlreadyExists("rating_rule", priceConflictMessage(rr.Key, diffs))
 			}
 			ratingRuleIDByKey[rr.Key] = existing.ID
 			objs.RatingRuleIDs = append(objs.RatingRuleIDs, existing.ID)
@@ -421,8 +420,7 @@ func (s *Service) Instantiate(
 	for _, m := range rendered.Meters {
 		if existing, err := s.pricing.GetMeterByKey(ctx, tenantID, m.Key); err == nil {
 			if diffs := meterConformanceDiff(existing, m); len(diffs) > 0 {
-				return domain.RecipeInstance{}, errs.AlreadyExists("meter",
-					fmt.Sprintf("meter %q already exists with settings that don't match recipe %q (%s) — reconcile the existing meter before instantiating", m.Key, recipeKey, formatDiffs(diffs)))
+				return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterConflictMessage(m.Key, diffs))
 			}
 			// ADR-100: adopting a shared meter must not stack this recipe's
 			// rules (in ruleCurrency) onto a meter whose EXISTING rules bill
@@ -434,8 +432,7 @@ func (s *Service) Instantiate(
 					return domain.RecipeInstance{}, fmt.Errorf("meter %q: currency probe: %w", m.Key, err)
 				}
 				if conflict != "" {
-					return domain.RecipeInstance{}, errs.AlreadyExists("meter",
-						fmt.Sprintf("meter %q already bills a different currency than recipe %q (%s — this install is %s): a meter's prices share one currency; install with the matching currency or use a separate meter", m.Key, recipeKey, conflict, ruleCurrency))
+					return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterCurrencyConflictMessage(m.Key, conflict, ruleCurrency))
 				}
 			}
 			meterIDByKey[m.Key] = existing.ID

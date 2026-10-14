@@ -100,7 +100,7 @@ export function PriceOverridesCard({ customerId, customerTestClockId, readOnly =
           <div className="text-center py-4">
             <p className="text-sm text-muted-foreground">No negotiated prices — this customer bills at list price.</p>
             <p className="text-xs text-muted-foreground mt-1">
-              An override replaces one pricing rule's rate for this customer only, and follows the rule across republishes.
+              An override replaces one price's rate for this customer only, and stays when you publish a new version of that price.
             </p>
           </div>
         ) : (
@@ -255,24 +255,24 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
         <DialogHeader>
           <DialogTitle>Add price override</DialogTitle>
           <DialogDescription>
-            A negotiated price for this customer on one pricing rule. It follows the rule across
-            future republishes until you end it.
+            A negotiated rate for this customer on one price. It stays when you publish new
+            versions of that price, until you end it.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">
           <div className="space-y-2">
-            <Label>Pricing rule</Label>
+            <Label>Price</Label>
             <Combobox
               value={versionId}
               onChange={setVersionId}
               options={ruleOptions}
-              placeholder="Select a pricing rule..."
-              emptyMessage="No pricing rules yet — create one on the Pricing page first."
+              placeholder="Select a price..."
+              emptyMessage="No prices yet. Create one on the Pricing page first."
               triggerClassName="w-full"
             />
             {replacing && (
               <p className="text-xs text-amber-600 dark:text-amber-500">
-                This customer already has an override on this rule — saving replaces it from the next billing period.
+                This customer already has an override on this price. Saving replaces it from the next billing period.
               </p>
             )}
           </div>

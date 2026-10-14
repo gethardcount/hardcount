@@ -132,7 +132,7 @@ function RecipeCard({ recipe, onConfigure }: { recipe: RecipeListItem; onConfigu
 
         {recipe.instantiated && (
           <p className="text-xs text-muted-foreground mt-3">
-            Installed {formatDateTime(recipe.instantiated.created_at)} · <span className="font-mono">{recipe.instantiated.id}</span>
+            Installed {formatDateTime(recipe.instantiated.created_at)}
           </p>
         )}
 
@@ -263,7 +263,7 @@ function RecipeDialog({ recipe, onClose }: { recipe: RecipeListItem; onClose: ()
           )}
           {installed && (
             <p className="text-xs text-muted-foreground mt-2">
-              These were set when the recipe was installed and can't be changed here — edit the plan's name on its page and prices on the Pricing page. Re-running a recipe never changes what it already created.
+              Set at install and fixed here. To change them, edit the plan on its page and the prices on the Pricing page.
             </p>
           )}
         </div>

@@ -569,6 +569,18 @@ func (s *Service) GetPlan(ctx context.Context, tenantID, id string) (domain.Plan
 	return s.store.GetPlan(ctx, tenantID, id)
 }
 
+// LiveSubscriptionCount is how many subscriptions UpdatePlan's lock counts
+// on this plan: every status but canceled and archived. The plan page reads
+// it to disable the price, timing and meter controls the server would
+// refuse, so the page and the refusal agree on one number. Zero when no
+// subscription reader is wired (the lock is then off too).
+func (s *Service) LiveSubscriptionCount(ctx context.Context, tenantID, planID string) (int, error) {
+	if s.subPlanUsage == nil {
+		return 0, nil
+	}
+	return s.subPlanUsage.CountLiveSubsByPlan(ctx, tenantID, planID)
+}
+
 func (s *Service) ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error) {
 	return s.store.ListPlans(ctx, tenantID)
 }
@@ -591,29 +603,16 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Cre
 	// Operator escape hatch: create a new plan with the desired
 	// terms and (optionally) schedule existing subs to migrate at
 	// their next cycle close via the pending-plan-change machinery.
-	billingFieldChanged := false
-	changedFields := []string{}
-	if input.BaseAmountCents > 0 && input.BaseAmountCents != existing.BaseAmountCents {
-		billingFieldChanged = true
-		changedFields = append(changedFields, "base_amount_cents")
-	}
-	if input.BaseBillTiming != "" && input.BaseBillTiming != existing.BaseBillTiming {
-		billingFieldChanged = true
-		changedFields = append(changedFields, "base_bill_timing")
-	}
-	if input.MeterIDs != nil && !sameStringSet(input.MeterIDs, existing.MeterIDs) {
-		billingFieldChanged = true
-		changedFields = append(changedFields, "meter_ids")
-	}
+	billingFieldChanged := (input.BaseAmountCents > 0 && input.BaseAmountCents != existing.BaseAmountCents) ||
+		(input.BaseBillTiming != "" && input.BaseBillTiming != existing.BaseBillTiming) ||
+		(input.MeterIDs != nil && !sameStringSet(input.MeterIDs, existing.MeterIDs))
 	if billingFieldChanged && s.subPlanUsage != nil {
 		count, err := s.subPlanUsage.CountLiveSubsByPlan(ctx, tenantID, existing.ID)
 		if err != nil {
 			return domain.Plan{}, fmt.Errorf("check sub usage: %w", err)
 		}
 		if count > 0 {
-			return domain.Plan{}, errs.Invalid("plan",
-				fmt.Sprintf("cannot change billing-affecting field(s) %v: %d live subscription(s) reference this plan. Create a new plan instead and (optionally) migrate subs at their next cycle close.",
-					changedFields, count))
+			return domain.Plan{}, errs.Invalid("plan", planInUseMessage(count))
 		}
 	}
 
@@ -691,11 +690,39 @@ func (s *Service) assertMetersPriced(ctx context.Context, tenantID string, meter
 			return fmt.Errorf("list pricing rules for meter %s: %w", id, err)
 		}
 		if len(rules) == 0 {
-			return errs.Invalid("meter_ids", fmt.Sprintf(
-				"meter %q has no rating rule — bind one (POST /v1/meters/{id}/pricing-rules) before attaching it to a plan, or its usage will bill $0", m.Key))
+			return errs.Invalid("meter_ids", unpricedMeterMessage(m))
 		}
 	}
 	return nil
+}
+
+// planInUseMessage is the refusal for a base price, billing timing or meter
+// change on a plan that live subscriptions use (ADR-034). It names the count,
+// not the fields: the caller knows what it sent, and an operator reads it
+// under the dialog that sent it. "Change plan" is the subscription page's
+// action that moves a subscription to another plan.
+func planInUseMessage(liveSubs int) string {
+	return fmt.Sprintf("%s this plan, so its price, billing timing and meters are locked. "+
+		"Create a new plan and move them to it with Change plan.", subscriptionsUse(liveSubs))
+}
+
+// subscriptionsUse reads "1 subscription uses" or "3 subscriptions use".
+func subscriptionsUse(n int) string {
+	if n == 1 {
+		return subscriptionCount(n) + " uses"
+	}
+	return subscriptionCount(n) + " use"
+}
+
+// unpricedMeterMessage is the refusal for adding a meter with no price to a
+// plan (ADR-096). Its usage would match no price and bill nothing.
+func unpricedMeterMessage(m domain.Meter) string {
+	name := m.Name
+	if name == "" {
+		name = m.Key
+	}
+	return fmt.Sprintf("Meter %q has no price, so its usage would bill nothing. "+
+		"Add a price on the meter's page, then add the meter to the plan.", name)
 }
 
 // sameStringSet returns true when two string slices contain the same

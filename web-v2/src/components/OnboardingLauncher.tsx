@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import { Check, X, ChevronUp, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useOnboardingSteps, type OnboardingStep } from '@/hooks/useOnboardingSteps'
@@ -80,7 +81,12 @@ export function OnboardingLauncher() {
           </button>
           <button
             type="button"
-            onClick={() => { setDismissed(); setOpen(false) }}
+            onClick={() => {
+              setDismissed(true)
+              setOpen(false)
+              // The panel can come back, so say where from.
+              toast('Setup checklist hidden', { description: 'Show it again from the account menu, under your email.' })
+            }}
             aria-label="Hide setup checklist"
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >

@@ -12,6 +12,7 @@ import { priceRate } from '@/lib/priceDisplay'
 import { meterAggregationLabel } from '@/lib/meterLabels'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
+import { Callout } from '@/components/Callout'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { statusBadgeVariant } from '@/lib/status'
 
@@ -34,7 +35,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 
-import { Loader2, Pencil, Plus } from 'lucide-react'
+import { Loader2, Lock, Pencil, Plus } from 'lucide-react'
+import { NoticeRow } from '@/components/NoticeRow'
+import { BASE_PRICE_ZERO_HINT, PLAN_LOCKED_TITLE, basePriceZeroBlocked, planLockedSentence } from '@/lib/pricingCopy'
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
@@ -146,6 +149,12 @@ export default function PlanDetailPage() {
     subscriptions.filter(s => s.status === 'active'),
   [subscriptions])
 
+  // The server's count of subscriptions that lock the price, billing timing
+  // and meters (not this page's own 'active' filter, which misses trialing,
+  // paused and draft subscriptions the lock counts).
+  const liveSubscriptions = plan?.live_subscription_count ?? 0
+  const locked = liveSubscriptions > 0
+
   const unattachedMeters = useMemo(() =>
     allMeters.filter(m => !plan?.meter_ids?.includes(m.id)),
   [allMeters, plan])
@@ -228,6 +237,23 @@ export default function PlanDetailPage() {
         </div>
       </div>
 
+      {/* Why the price, timing and meter controls are off: one line, not a
+          box. The subscriptions it counts are listed further down. */}
+      {locked && (
+        <NoticeRow
+          icon={Lock}
+          title={PLAN_LOCKED_TITLE}
+          className="mb-4"
+          action={
+            <Link to="/pricing?tab=plans" className="text-sm font-medium text-primary hover:underline">
+              Go to plans
+            </Link>
+          }
+        >
+          {planLockedSentence(liveSubscriptions)}
+        </NoticeRow>
+      )}
+
       {/* Key metrics */}
       <Card>
         <CardContent className="p-0">
@@ -302,7 +328,7 @@ export default function PlanDetailPage() {
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm">Meters ({attachedMeters.length})</CardTitle>
             {unattachedMeters.length > 0 && (
-              <Button size="sm" onClick={() => setShowAttachMeter(true)} disabled={updatePlanMutation.isPending}>
+              <Button size="sm" onClick={() => setShowAttachMeter(true)} disabled={locked || updatePlanMutation.isPending}>
                 <Plus size={14} className="mr-1.5" />
                 Attach Meter
               </Button>
@@ -328,14 +354,14 @@ export default function PlanDetailPage() {
                       ) : dimensionRuleCount(meter.id) > 0 ? (
                         <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{dimensionRuleCount(meter.id)} dimension price{dimensionRuleCount(meter.id) !== 1 ? 's' : ''}</span>
                       ) : (
-                        <span className="text-xs text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full">No pricing rule — usage won't be billed</span>
+                        <span className="text-xs text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full">No price — usage won't be billed</span>
                       )}
                       <Button
                         variant="destructive"
                         size="sm"
                         className="ml-2"
                         onClick={() => setDetachTarget(meter)}
-                        disabled={updatePlanMutation.isPending}
+                        disabled={locked || updatePlanMutation.isPending}
                       >
                         Detach
                       </Button>
@@ -455,9 +481,12 @@ export default function PlanDetailPage() {
       <AlertDialog open={!!detachTarget} onOpenChange={(open) => { if (!open) setDetachTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Detach Meter</AlertDialogTitle>
+            <AlertDialogTitle>Detach meter?</AlertDialogTitle>
+            {/* Reachable only while no subscription uses the plan (Detach is
+                off when it is locked), so there is no running subscription
+                for this to stop billing. */}
             <AlertDialogDescription>
-              Are you sure you want to detach "{detachTarget?.name}" from this plan? Usage events for this meter will still be ingested and visible — but subscriptions on this plan will no longer be billed for it.
+              Subscriptions you add to this plan won't be billed for "{detachTarget?.name}". Its usage is still recorded.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -481,6 +510,7 @@ export default function PlanDetailPage() {
       {showEdit && (
         <EditPlanDialog
           plan={plan}
+          liveSubscriptions={liveSubscriptions}
           onClose={() => setShowEdit(false)}
           onSaved={() => {
             setShowEdit(false)
@@ -494,9 +524,10 @@ export default function PlanDetailPage() {
   )
 }
 
-function EditPlanDialog({ plan, onClose, onSaved }: {
-  plan: Plan; onClose: () => void; onSaved: () => void
+function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
+  plan: Plan; liveSubscriptions: number; onClose: () => void; onSaved: () => void
 }) {
+  const locked = liveSubscriptions > 0
   const [basePrice, setBasePrice] = useState((plan.base_amount_cents / 100).toFixed(2))
   const [status, setStatus] = useState(plan.status)
   const [billTiming, setBillTiming] = useState<'in_arrears' | 'in_advance'>(plan.base_bill_timing ?? 'in_arrears')
@@ -508,6 +539,7 @@ function EditPlanDialog({ plan, onClose, onSaved }: {
   const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = form
 
   const name = watch('name')
+  const zeroBlocked = !locked && basePriceZeroBlocked(basePrice, plan.base_amount_cents)
   const hasChanges = name !== plan.name ||
     basePrice !== (plan.base_amount_cents / 100).toFixed(2) ||
     status !== plan.status ||
@@ -551,6 +583,12 @@ function EditPlanDialog({ plan, onClose, onSaved }: {
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
 
+          {locked && (
+            <Callout icon={Lock} title={PLAN_LOCKED_TITLE}>
+              {planLockedSentence(liveSubscriptions)}
+            </Callout>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="basePrice">Base Price ({plan.currency.toUpperCase()})</Label>
             <Input
@@ -562,14 +600,19 @@ function EditPlanDialog({ plan, onClose, onSaved }: {
               value={basePrice}
               onChange={e => setBasePrice(e.target.value)}
               placeholder="49.00"
+              disabled={locked}
+              aria-invalid={zeroBlocked || undefined}
             />
-            <p className="text-xs text-muted-foreground mt-1">Applies to every active subscription at its next invoice — the period in progress keeps the price it started with.</p>
-            <p className="text-xs text-muted-foreground">{plan.billing_interval === 'yearly' ? 'Yearly' : 'Monthly'} recurring charge</p>
+            {zeroBlocked ? (
+              <p className="text-xs text-destructive">{BASE_PRICE_ZERO_HINT}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">{plan.billing_interval === 'yearly' ? 'Yearly' : 'Monthly'} recurring charge</p>
+            )}
           </div>
 
           <div className="space-y-2">
             <Label>Base fee billed</Label>
-            <Select items={BILL_TIMING_OPTIONS} value={billTiming} onValueChange={(v) => setBillTiming((v ?? 'in_arrears') as 'in_arrears' | 'in_advance')}>
+            <Select items={BILL_TIMING_OPTIONS} value={billTiming} disabled={locked} onValueChange={(v) => setBillTiming((v ?? 'in_arrears') as 'in_arrears' | 'in_advance')}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -603,7 +646,7 @@ function EditPlanDialog({ plan, onClose, onSaved }: {
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={isSubmitting || !hasChanges}>
+            <Button type="submit" disabled={isSubmitting || !hasChanges || zeroBlocked}>
               {isSubmitting ? (
                 <><Loader2 size={14} className="animate-spin mr-2" />Saving...</>
               ) : hasChanges ? 'Save' : 'No changes'}

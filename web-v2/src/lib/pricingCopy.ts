@@ -1,0 +1,38 @@
+// Words for the plan, meter and price pages that depend on state. Plain
+// functions so node --test can check each version.
+
+// "1 subscription uses" / "3 subscriptions use".
+function subscriptionsUse(n: number): string {
+  return n === 1 ? '1 subscription uses' : `${n.toLocaleString('en-US')} subscriptions use`
+}
+
+export const PLAN_LOCKED_TITLE = 'Plan in use'
+
+// The plan lock (ADR-034): the server refuses a base price, billing timing
+// or meter change while any subscription that is not canceled or archived
+// uses the plan (pricing.Service.UpdatePlan). `liveSubscriptions` is the
+// server's own count of those (GET /v1/plans/{id} live_subscription_count),
+// so the page and the refusal agree. Same sentence as the refusal.
+export function planLockedSentence(liveSubscriptions: number): string {
+  return `${subscriptionsUse(liveSubscriptions)} this plan, so its price, billing timing and meters are locked. Create a new plan and move them to it with Change plan.`
+}
+
+// A plan's base price can be set to any amount above 0 but never back to 0:
+// the server ignores 0 on update (UpdatePlan only applies a positive amount),
+// so saving 0 would read "Plan updated" and change nothing.
+export function basePriceZeroBlocked(input: string, currentCents: number): boolean {
+  const n = parseFloat(input || '0')
+  return currentCents > 0 && Number.isFinite(n) && Math.round(n * 100) === 0
+}
+
+export const BASE_PRICE_ZERO_HINT = "The base price can't go back to 0. Create a new plan without a base fee."
+
+// The confirm for deleting a price for specific values on a meter. Events it
+// matched go to another matching price, then to the meter's default price;
+// with no default price and no other match they are not billed.
+export function deleteMatchedPriceSentence(match: string, hasDefaultPrice: boolean): string {
+  const what = match ? `Events it matched (${match})` : 'Events it matched'
+  return hasDefaultPrice
+    ? `${what} move to another matching price or the default price from the next invoice. Finalized invoices don't change.`
+    : `${what} go unbilled from the next invoice unless another price below matches them. Finalized invoices don't change.`
+}
