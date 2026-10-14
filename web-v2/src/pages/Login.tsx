@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { returnPath } from '@/lib/returnPath'
 import { useAuth } from '@/contexts/AuthContext'
 import { ApiError } from '@/lib/api'
 import { SessionNotKeptError, sessionNotKeptMessage, signInRefusedMessage } from '@/lib/sessionKept'
@@ -19,6 +20,7 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
   const { login } = useAuth()
   // ?reset=success is set by ResetPassword on a clean update so the
   // operator sees confirmation that the new password took effect.
@@ -38,7 +40,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await login(email.trim(), password)
-      navigate('/', { replace: true })
+      navigate(returnPath(location.state), { replace: true })
     } catch (err) {
       if (err instanceof SessionNotKeptError) {
         setError(sessionNotKeptMessage(window.isSecureContext))

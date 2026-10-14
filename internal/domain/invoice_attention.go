@@ -1270,7 +1270,7 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 		Severity: AttentionSeverityWarning,
 		Reason:   AttentionReasonNoPaymentMethod,
 		Code:     "payment.no_payment_method",
-		Message:  "No payment method on file. Velox emails the customer a setup link when an invoice finalizes — the invoice timeline and Sent emails show whether it was delivered. Resend the link if they haven't acted, or open the customer page to copy it and share it directly. " + autoCharge,
+		Message:  "No payment method on file. Velox emails the customer a setup link when an invoice finalizes, if email sending is set up — the invoice timeline and Sent emails show whether it was delivered. Resend the link if they haven't acted, or open the customer page to copy it and share it directly. " + autoCharge,
 		DocURL:   docURL("no-payment-method"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionSendReminder, Label: "Resend setup link"},

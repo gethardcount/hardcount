@@ -1,7 +1,8 @@
 import { StrictMode, lazy, Suspense, Component } from 'react'
 import type { ReactNode, ErrorInfo } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { returnPath } from '@/lib/returnPath'
 import { Toaster } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
@@ -52,6 +53,7 @@ class ErrorBoundary extends Component<
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
+  const location = useLocation()
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -60,7 +62,9 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
     )
   }
   if (!user) {
-    return <Navigate to="/login" replace />
+    // Remember where they were going so login can return them there (a
+    // shared invoice link should open the invoice, not the home page).
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
   }
   return <>{children}</>
 }
@@ -73,6 +77,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 // different account than the active session.
 function PublicOnlyRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
+  const location = useLocation()
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -81,7 +86,7 @@ function PublicOnlyRoute({ children }: { children: ReactNode }) {
     )
   }
   if (user) {
-    return <Navigate to="/" replace />
+    return <Navigate to={returnPath(location.state)} replace />
   }
   return <>{children}</>
 }

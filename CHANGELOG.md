@@ -15,6 +15,11 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Fixed
+
+- **After logging in, the dashboard opens the page you were trying to reach (2026-10-14).** Opening a link to an invoice or customer while logged out went to login, then to the home page. It now returns to the linked page. Only paths inside the dashboard are followed.
+- **The "No payment method" notice no longer promises an email that cannot be sent (2026-10-14).** It said Velox emails the customer a setup link; without email set up (as in the quickstart) nothing is sent. It now says the link is emailed if email sending is set up.
+
 ## [0.7.0] - 2026-10-14
 
 A one-command Docker install, late usage billed, issued invoices that never change, a complete API reference, and fixes from a pre-launch check. Breaking for usage ingest (`idempotency_key` is required) and for invoice timing (built 1 to 2 hours after the period ends). One database migration (0177).
