@@ -35,6 +35,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **The Compose stack no longer shows healthy containers as unhealthy, and nginx follows a recreated API container (2026-10-14).** The dashboard's healthcheck called `http://localhost/`, which resolves to IPv6 `::1` inside the container while nginx listens on IPv4, so `docker ps` showed it as unhealthy on every install although the page served fine. The checks now use `127.0.0.1`. The front nginx also kept sending to the old address after `velox-api` was recreated (a new image or an upgrade) and answered 502 until it was restarted. It now looks the containers up again (nginx `resolve`, Docker's DNS).
+
 - **Dashboard login works in Safari at `http://localhost` (2026-10-14).** The quickstart runs in production mode, which marks the login cookie `Secure`. Safari drops a `Secure` cookie set over plain http, even on localhost, so login failed with "this browser did not keep you signed in". Chrome and Firefox were not affected. The cookie is now `Secure` unless the browser itself is on plain http at a localhost address, judged from the request's `Origin` (or `Referer`) header. A site served over https keeps `Secure`.
 
 - **The Margin card shows the customer's own currency, and no margin across two currencies (2026-10-14).** It showed every amount in dollars. Billed amounts now use the currency of the customer's prices, provider cost stays in USD, and when the two differ the card shows both and says margin needs one currency. `GET /v1/customers/{id}/margin` adds `revenue_currency` and `cost_currency`, and leaves out `margin_bps` when they differ.
