@@ -429,9 +429,13 @@ export interface paths {
          *     customer's browser to Stripe; Velox does not see them. The card
          *     is saved when Stripe reports the setup succeeded.
          *
-         *     One send per customer per minute. A second call within the
-         *     minute returns 429 `cooldown_active` with a `Retry-After` header.
-         *     The send is written to the audit log.
+         *     At most one call per customer per minute when the server has Redis
+         *     configured. The minute starts at any call, including one that then
+         *     fails, so a second call within it returns 429 `cooldown_active`
+         *     with a `Retry-After` header. Without Redis there is no cooldown.
+         *
+         *     A body that is not valid JSON is ignored and the email is sent
+         *     without a note. The send is written to the audit log.
          */
         post: operations["sendCustomerPaymentSetupEmail"];
         delete?: never;
@@ -2258,8 +2262,11 @@ export interface paths {
         };
         /**
          * Get subscription activity timeline
-         * @description Returns the subscription's history from the audit log, oldest
-         *     first, as display-ready rows. It holds at most the 100 most recent
+         * @description Returns the subscription's history from the audit log as
+         *     display-ready rows, in the order the actions took effect: by
+         *     `sim_effective_at` for actions on a test-clock subscription,
+         *     otherwise by `timestamp`. On a test-clock subscription `timestamp`
+         *     (wall-clock) may therefore not be in ascending order. It holds at most the 100 most recent
          *     entries. `truncated` is true when older entries were left out.
          */
         get: operations["getSubscriptionTimeline"];
@@ -3060,8 +3067,9 @@ export interface paths {
          *     2. Otherwise Velox charges the remaining amount to the customer's
          *        saved payment method with a Stripe PaymentIntent.
          *
-         *     On success, any active dunning run is resolved with
-         *     `payment_recovered`. Check `payment_status` on the returned invoice.
+         *     After a successful card charge, any active dunning run is resolved
+         *     with `payment_recovered`. Check `payment_status` on the returned
+         *     invoice.
          *
          *     A written-off (`uncollectible`) invoice cannot be charged here.
          *     Record an offline payment or issue a new invoice instead.
@@ -3114,8 +3122,10 @@ export interface paths {
         /**
          * Get the invoice activity timeline
          * @description Returns everything that happened to an invoice, oldest first:
-         *     lifecycle steps (created, finalized, paid, voided), charge attempts,
-         *     Stripe webhooks, dunning retries, credit notes and customer emails.
+         *     lifecycle steps (created, finalized, paid, voided, marked
+         *     uncollectible), charge attempts (source `payment`, event_type
+         *     `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
+         *     notes and customer emails.
          *     A draft invoice returns an empty list.
          *
          *     If one source cannot be read, the rest is still returned and the
@@ -3260,10 +3270,10 @@ export interface paths {
         /**
          * Retry a failed credit-note refund
          * @description Sends the refund part of an `issued` credit note to Stripe again,
-         *     when its `refund_status` is `failed`, `pending` or `none`. The retry
-         *     uses the same idempotency key, so the customer is never refunded
-         *     twice. If Stripe already has the refund, Velox records its status
-         *     instead of creating a new one.
+         *     when its `refund_status` is `failed`, `pending` or `none`. Before
+         *     creating a refund, Velox asks Stripe for one already made for this
+         *     note and records it if found, so a retry does not refund the
+         *     customer twice.
          */
         post: operations["retryCreditNoteRefund"];
         delete?: never;
@@ -3891,44 +3901,7 @@ export interface paths {
          *     (pending/accepted/revoked/expired). No RBAC yet: `role` is
          *     recorded but every member holds the full permission set. ADR-081.
          */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Members + invitations */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            members: {
-                                user_id: string;
-                                email: string;
-                                role: string;
-                                /** Format: date-time */
-                                joined_at: string;
-                            }[];
-                            invitations: components["schemas"]["MemberInvitation"][];
-                        };
-                    };
-                };
-                /** @description Caller is not a dashboard session */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        get: operations["listMembers"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3954,51 +3927,7 @@ export interface paths {
          *     derived from request headers. 409 when the email is already a
          *     member or already has a pending invite. ADR-081.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: email */
-                        email: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Invitation created and email enqueued */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["MemberInvitation"];
-                    };
-                };
-                /** @description Already a member, or a pending invitation exists */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Invalid email */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        post: operations["inviteMember"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4021,33 +3950,7 @@ export interface paths {
          *     immediately (revoke racing an accept: exactly one wins). Only
          *     pending invitations can be revoked — accepted/revoked ones 404.
          */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Invitation revoked */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description No pending invitation with this id */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        delete: operations["revokeMemberInvitation"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4071,42 +3974,7 @@ export interface paths {
          *     (another member must remove you) and the last member cannot be
          *     removed. ADR-081.
          */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    userID: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Member removed and sessions revoked */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description User is not a member of this workspace */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Self-removal or last-member removal blocked */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        delete: operations["removeMember"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5148,7 +5016,9 @@ export interface paths {
         };
         /**
          * Export the audit log as CSV
-         * @description Streams the whole audit log, newest first, with no row limit.
+         * @description Streams the audit log for the caller's mode (test or live), newest
+         *     first, with no row limit. Settings changes are recorded in test
+         *     mode, so they appear only in a test-mode export.
          *     Takes the same filters as the audit-log list, so the dashboard's
          *     filters and its export give the same rows. The date filters are
          *     `date_from`/`date_to`; `from`/`to` are ignored here.
@@ -5970,6 +5840,22 @@ export interface components {
              *     banner on the customer and its invoices.
              */
             test_clock_id?: string;
+            tenant_id?: string;
+            /**
+             * @description Deliverability of `email`, learned from bounce and complaint reports.
+             * @enum {string}
+             */
+            email_status?: "unknown" | "ok" | "bounced" | "complained";
+            /** Format: date-time */
+            email_last_bounced_at?: string;
+            email_bounce_reason?: string;
+            /** @description Assigned dunning policy; absent means the tenant default. */
+            dunning_policy_id?: string;
+            /** @description The Stripe customer. Absent until the first payment-method action. */
+            stripe_customer_id?: string;
+            livemode?: boolean;
+            /** Format: date-time */
+            updated_at?: string;
         };
         Meter: {
             id?: string;
@@ -5979,6 +5865,10 @@ export interface components {
             /** @enum {string} */
             aggregation?: "sum" | "count" | "max" | "last";
             rating_rule_version_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
         };
         Plan: {
             id?: string;
@@ -6001,6 +5891,13 @@ export interface components {
              */
             base_bill_timing?: "in_advance" | "in_arrears";
             meter_ids?: string[];
+            description?: string;
+            /** @description Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
+            tax_code?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
         };
         RatingRule: {
             id?: string;
@@ -6017,22 +5914,82 @@ export interface components {
                 /** @description Per-unit rate in cents, as a decimal string (see flat_amount_cents). */
                 unit_amount_cents?: string;
             }[];
+            /** @enum {string} */
+            lifecycle_state?: "draft" | "active" | "archived";
+            /** Format: int64 */
+            package_size?: number;
+            /** Format: int64 */
+            package_amount_cents?: number;
+            /** @description Per-unit overage rate in cents, as a decimal string. */
+            overage_unit_amount_cents?: string;
+            /** Format: date-time */
+            created_at?: string;
         };
         Subscription: {
-            id?: string;
-            code?: string;
-            display_name?: string;
-            customer_id?: string;
-            plan_id?: string;
+            id: string;
+            tenant_id?: string;
+            code: string;
+            display_name: string;
+            customer_id: string;
+            /** @description The subscription's priced lines. Each item names its plan. */
+            items?: components["schemas"]["SubscriptionItem"][];
             /** @enum {string} */
-            status?: "draft" | "trialing" | "active" | "canceled" | "archived";
+            status: "draft" | "trialing" | "active" | "canceled" | "archived";
             /** @enum {string} */
-            billing_time?: "calendar" | "anniversary";
+            billing_time: "calendar" | "anniversary";
             /** Format: date-time */
             trial_start_at?: string;
             /** Format: date-time */
             trial_end_at?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** Format: date-time */
+            activated_at?: string;
+            /**
+             * Format: date-time
+             * @description When the subscription was canceled. Absent until then.
+             */
+            canceled_at?: string;
+            /**
+             * Format: date-time
+             * @description A scheduled cancel time, if one is set.
+             */
+            cancel_at?: string;
+            /** @description True when the subscription cancels at the end of the current period. */
+            cancel_at_period_end: boolean;
+            /**
+             * Format: date-time
+             * @description When a scheduled cancel takes effect. Absent when no cancel is scheduled.
+             */
+            cancel_effective_at?: string;
+            pause_collection?: components["schemas"]["SubscriptionPauseCollection"];
+            billing_thresholds?: components["schemas"]["SubscriptionBillingThresholds"];
+            /** Format: date-time */
+            current_billing_period_start?: string;
+            /**
+             * Format: date-time
+             * @description End of the current period (exclusive).
+             */
+            current_billing_period_end?: string;
+            /** @description The current period as text, with the last day included, in the tenant's billing time zone. */
+            current_billing_period_display?: string;
+            /** Format: date-time */
+            next_billing_at?: string;
+            /** @description Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
+            billing_anchor_day?: number;
+            /**
+             * Format: int64
+             * @description Most usage units per billing period. Absent means no cap.
+             */
+            usage_cap_units?: number;
+            /** @description `block` or `charge` (the default). */
+            overage_action?: string;
+            test_clock_id?: string;
             billing_failure?: components["schemas"]["BillingFailure"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         /**
          * @description Present on a subscription while the billing run is failing on the
@@ -6313,7 +6270,7 @@ export interface components {
             customer_id: string;
             /** @description Empty for one-off invoices not tied to a subscription. */
             subscription_id: string;
-            /** @description Empty until the invoice is finalized. */
+            /** @description Set when the invoice is created, including drafts. */
             invoice_number: string;
             status: components["schemas"]["InvoiceStatus"];
             payment_status: components["schemas"]["InvoicePaymentStatus"];
@@ -6593,13 +6550,18 @@ export interface components {
             line_items: components["schemas"]["InvoiceLineItem"][];
         };
         CreditBalance: {
-            customer_id?: string;
+            customer_id: string;
             /** Format: int64 */
-            balance_cents?: number;
+            balance_cents: number;
             /** Format: int64 */
-            total_granted?: number;
+            total_granted: number;
             /** Format: int64 */
-            total_used?: number;
+            total_used: number;
+            /**
+             * Format: int64
+             * @description Credit written off by expiry.
+             */
+            total_expired: number;
         };
         /** @description A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero. */
         CreditLiveBalance: {
@@ -6857,7 +6819,11 @@ export interface components {
                 /** @enum {string} */
                 source: "current_billing_cycle" | "explicit";
             };
-            /** @description Active and trialing subscriptions. */
+            /**
+             * @description One entry per item of each active or trialing subscription. A
+             *     subscription with several plans appears once per plan, with the
+             *     same `id`.
+             */
             subscriptions: {
                 id: string;
                 plan_id: string;
@@ -7077,7 +7043,7 @@ export interface components {
             source: "audit";
             /** @description The audit action, e.g. `create`, `cancel`, `subscription.item_updated`. */
             event_type: string;
-            /** @description Display tone for the row, e.g. `info`, `succeeded`, `warning`, `canceled`. */
+            /** @description Display tone for the row: `info`, `succeeded`, `success` (scheduled plan change applied), `warning` or `canceled`. */
             status: string;
             /** @description One-line summary, e.g. "Subscription canceled". */
             description: string;
@@ -7122,7 +7088,7 @@ export interface components {
             net: number;
         };
         AnalyticsMrrMovementPoint: {
-            /** @description Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`. */
+            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default). */
             date: string;
             /** Format: int64 */
             new: number;
@@ -7136,7 +7102,7 @@ export interface components {
             net: number;
         };
         AnalyticsRevenuePoint: {
-            /** @description Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`. */
+            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default). */
             date: string;
             /**
              * Format: int64
@@ -7146,7 +7112,7 @@ export interface components {
             invoice_count: number;
         };
         AnalyticsUsagePoint: {
-            /** @description Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`. */
+            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default). */
             date: string;
             /** Format: int64 */
             events: number;
@@ -7383,7 +7349,7 @@ export interface components {
             /** Format: date-time */
             timestamp: string;
             /** @enum {string} */
-            source: "lifecycle" | "stripe" | "dunning" | "email" | "credit_note";
+            source: "lifecycle" | "payment" | "dunning" | "email" | "credit_note";
             /** @example invoice.finalized */
             event_type: string;
             /** @description Display status, for example succeeded, failed, resolved, escalated or info. */
@@ -7430,7 +7396,11 @@ export interface components {
             /** Format: date-time */
             resolved_at?: string;
             /**
-             * @description Set once the run is resolved. `manually_resolved` appears only on older runs.
+             * @description How the run ended, set when it is resolved. Exception:
+             *     `action_failed` is set on a run that is still `active`. The
+             *     final action (pause, cancel or mark uncollectible) failed and
+             *     will be retried at `next_action_at`. `manually_resolved` appears
+             *     only on older runs.
              * @enum {string}
              */
             resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "manually_resolved";
@@ -7449,9 +7419,10 @@ export interface components {
             invoice_currency?: string;
             /**
              * Format: date-time
-             * @description The test clock's current time, when the customer is on a test clock.
+             * @description The test clock's current time, when the customer is on a test clock. Filled in on list responses.
              */
             effective_now?: string;
+            /** @description Filled in on list responses. */
             test_clock_id?: string;
         };
         DunningRunEvent: {
@@ -7686,7 +7657,11 @@ export interface components {
              * @description The provider's own cost, in dollars. When present, each event's
              *     provider cost comes from its part (input, output or cache read)
              *     instead of the provider-costs table. A part that is missing or
-             *     negative falls back to the table.
+             *     negative falls back to the table. `input_cost` includes cache
+             *     reads, so the input event gets `input_cost` minus
+             *     `cache_read_cost`. If there were cache reads but no
+             *     `cache_read_cost`, the input and cache-read events use the
+             *     provider-costs table.
              */
             cost_breakdown?: {
                 input_cost?: number;
@@ -7801,7 +7776,11 @@ export interface components {
              * @enum {string}
              */
             tax_on_failure?: "block" | "fallback_manual";
-            /** @description Stripe product tax code used when a plan has none, such as `txcd_10103001`. */
+            /**
+             * @description Stripe product tax code used when a plan has none, such as
+             *     `txcd_10103001`. Empty is allowed. Surrounding whitespace is
+             *     trimmed before the check.
+             */
             default_product_tax_code?: string;
             /** @description Shown on invoices and as the sender name on emails. No line breaks. */
             company_name?: string;
@@ -7810,7 +7789,11 @@ export interface components {
             company_city?: string;
             company_state?: string;
             company_postal_code?: string;
-            /** @description ISO 3166 alpha-2 code, such as `US`. */
+            /**
+             * @description ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
+             *     Whitespace is trimmed and the code is upper-cased before it is
+             *     checked and stored.
+             */
             company_country?: string;
             company_email?: string;
             /** @description 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`. */
@@ -8468,7 +8451,10 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    /** @description Optional text shown at the top of the email. */
+                    /**
+                     * @description Optional text shown at the top of the email. At most
+                     *     2000 bytes (UTF-8) after trimming whitespace.
+                     */
                     note?: string;
                 };
             };
@@ -8497,7 +8483,7 @@ export interface operations {
                 };
             };
             /**
-             * @description `note_too_long` (more than 2000 characters) or
+             * @description `note_too_long` (more than 2000 bytes) or
              *     `missing_email` (the customer has no email).
              */
             422: {
@@ -8508,7 +8494,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A link was sent to this customer less than a minute ago (`cooldown_active`). */
+            /** @description This endpoint was called for this customer less than a minute ago (`cooldown_active`). */
             429: {
                 headers: {
                     /** @description Seconds to wait. */
@@ -8519,7 +8505,23 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The email could not be queued (`email_enqueue_failed`). Retry. */
+            /**
+             * @description Stripe is not connected for this mode, or the setup session
+             *     could not be created. No email was queued.
+             */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The email could not be queued (`email_enqueue_failed`), or
+             *     Stripe refused to create the setup session with a message it
+             *     is safe to show (`provider_error`). Retry.
+             */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -8891,7 +8893,12 @@ export interface operations {
                 invoice_id?: string;
                 customer_id?: string;
                 status?: "draft" | "issued" | "voided";
-                refund_status?: "none" | "pending" | "succeeded" | "failed";
+                /**
+                 * @description `needs_attention` returns issued, non-test-clock notes whose
+                 *     refund failed, has been pending more than 72 hours, or has a
+                 *     refund amount still at `none` after 1 hour.
+                 */
+                refund_status?: "none" | "pending" | "succeeded" | "failed" | "needs_attention";
                 /** @description One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default). */
                 sort?: string;
                 dir?: "asc" | "desc";
@@ -9302,6 +9309,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Whitespace is trimmed. Empty or omitted keeps the current name. */
                     name?: string;
                     /** @description Omitting it clears the stored description. */
                     description?: string;
@@ -9368,6 +9376,20 @@ export interface operations {
              *     `tax_code`.
              */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `internal_error`. Among other causes, a `status` outside
+             *     `draft`, `active` and `archived` is not checked before it is
+             *     written, so the database refuses it and the call answers 500,
+             *     not 422. Nothing is changed.
+             */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10282,7 +10304,21 @@ export interface operations {
                     properties?: {
                         [key: string]: unknown;
                     };
-                    idempotency_key?: string;
+                    /**
+                     * @description Your unique ID for this event. Pick it once, before the
+                     *     first send, and send the same key on every retry of the
+                     *     event. Keys are unique per tenant and mode (live or
+                     *     test), forever. An event whose key was already used is
+                     *     not stored again: the first event wins and the new body
+                     *     is discarded. So never reuse a key for a different
+                     *     event, such as a batch index or a timestamp that can
+                     *     repeat, or that usage is lost. Empty or whitespace-only
+                     *     keys are refused with 422, and so are keys longer than
+                     *     255 characters. The `Idempotency-Key` header does not
+                     *     count as this key: it caches one HTTP response for 24
+                     *     hours.
+                     */
+                    idempotency_key: string;
                     /**
                      * Format: date-time
                      * @description RFC 3339. Must not be in the future.
@@ -10321,7 +10357,9 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: missing `external_customer_id`, `event_name`
+             * @description `validation_error`: a missing, empty or whitespace-only
+             *     `idempotency_key`, or one longer than 255 characters (param
+             *     `idempotency_key`); missing `external_customer_id`, `event_name`
              *     or `timestamp`; unknown customer or meter; a future or badly
              *     formatted `timestamp`; more than 16 dimensions or a non-scalar
              *     dimension value; a quantity of 10^26 or more.
@@ -11127,6 +11165,19 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /**
+             * @description Stripe refused the refund again (code `provider_error`). The
+             *     note keeps `refund_status` `failed`; retry later. A Stripe error
+             *     without a safe message returns 500 instead.
+             */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     voidCreditNote: {
@@ -11252,6 +11303,156 @@ export interface operations {
             };
         };
     };
+    listMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members + invitations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        members: {
+                            user_id: string;
+                            email: string;
+                            role: string;
+                            /** Format: date-time */
+                            joined_at: string;
+                        }[];
+                        invitations: components["schemas"]["MemberInvitation"][];
+                    };
+                };
+            };
+            /** @description Caller is not a dashboard session */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    inviteMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Invitation created and email enqueued */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberInvitation"];
+                };
+            };
+            /** @description Already a member, or a pending invitation exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid email */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeMemberInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitation revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No pending invitation with this id (code `not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    removeMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Member removed and sessions revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description User is not a member of this workspace (code `not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Self-removal or last-member removal blocked */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listTestClockCustomers: {
         parameters: {
             query?: never;
@@ -11274,7 +11475,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Caller is in live mode */
+            /** @description Caller is in live mode, or the key lacks the `testclock:write` permission (needed even to read test clocks). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11845,7 +12046,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The run and its event history. */
+            /** @description The run and its event history. `events` is empty if the event history could not be read. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -12120,6 +12321,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DunningPolicy"];
+                };
+            };
+            /** @description `not_found`: no policy with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Same validation as create. */

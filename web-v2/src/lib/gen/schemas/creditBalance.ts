@@ -9,8 +9,10 @@
  */
 
 export interface CreditBalance {
-  customer_id?: string;
-  balance_cents?: number;
-  total_granted?: number;
-  total_used?: number;
+  customer_id: string;
+  balance_cents: number;
+  total_granted: number;
+  total_used: number;
+  /** Credit written off by expiry. */
+  total_expired: number;
 }

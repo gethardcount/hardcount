@@ -15,6 +15,11 @@ export type ListCreditNotesParams = {
 invoice_id?: string;
 customer_id?: string;
 status?: ListCreditNotesStatus;
+/**
+ * `needs_attention` returns issued, non-test-clock notes whose
+ * refund failed, has been pending more than 72 hours, or has a
+ * refund amount still at `none` after 1 hour.
+ */
 refund_status?: ListCreditNotesRefundStatus;
 /**
  * One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).

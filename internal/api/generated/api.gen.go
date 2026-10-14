@@ -294,6 +294,30 @@ func (e CreditNoteStatus) Valid() bool {
 	}
 }
 
+// Defines values for CustomerEmailStatus.
+const (
+	CustomerEmailStatusBounced    CustomerEmailStatus = "bounced"
+	CustomerEmailStatusComplained CustomerEmailStatus = "complained"
+	CustomerEmailStatusOk         CustomerEmailStatus = "ok"
+	CustomerEmailStatusUnknown    CustomerEmailStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CustomerEmailStatus enum.
+func (e CustomerEmailStatus) Valid() bool {
+	switch e {
+	case CustomerEmailStatusBounced:
+		return true
+	case CustomerEmailStatusComplained:
+		return true
+	case CustomerEmailStatusOk:
+		return true
+	case CustomerEmailStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CustomerStatus.
 const (
 	CustomerStatusActive   CustomerStatus = "active"
@@ -837,7 +861,7 @@ const (
 	InvoiceTimelineEventSourceDunning    InvoiceTimelineEventSource = "dunning"
 	InvoiceTimelineEventSourceEmail      InvoiceTimelineEventSource = "email"
 	InvoiceTimelineEventSourceLifecycle  InvoiceTimelineEventSource = "lifecycle"
-	InvoiceTimelineEventSourceStripe     InvoiceTimelineEventSource = "stripe"
+	InvoiceTimelineEventSourcePayment    InvoiceTimelineEventSource = "payment"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceTimelineEventSource enum.
@@ -851,7 +875,7 @@ func (e InvoiceTimelineEventSource) Valid() bool {
 		return true
 	case InvoiceTimelineEventSourceLifecycle:
 		return true
-	case InvoiceTimelineEventSourceStripe:
+	case InvoiceTimelineEventSourcePayment:
 		return true
 	default:
 		return false
@@ -1008,6 +1032,27 @@ func (e PlanStatus) Valid() bool {
 	case PlanStatusArchived:
 		return true
 	case PlanStatusDraft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RatingRuleLifecycleState.
+const (
+	RatingRuleLifecycleStateActive   RatingRuleLifecycleState = "active"
+	RatingRuleLifecycleStateArchived RatingRuleLifecycleState = "archived"
+	RatingRuleLifecycleStateDraft    RatingRuleLifecycleState = "draft"
+)
+
+// Valid indicates whether the value is a known member of the RatingRuleLifecycleState enum.
+func (e RatingRuleLifecycleState) Valid() bool {
+	switch e {
+	case RatingRuleLifecycleStateActive:
+		return true
+	case RatingRuleLifecycleStateArchived:
+		return true
+	case RatingRuleLifecycleStateDraft:
 		return true
 	default:
 		return false
@@ -1670,22 +1715,25 @@ func (e ListCreditNotesParamsStatus) Valid() bool {
 
 // Defines values for ListCreditNotesParamsRefundStatus.
 const (
-	Failed    ListCreditNotesParamsRefundStatus = "failed"
-	None      ListCreditNotesParamsRefundStatus = "none"
-	Pending   ListCreditNotesParamsRefundStatus = "pending"
-	Succeeded ListCreditNotesParamsRefundStatus = "succeeded"
+	ListCreditNotesParamsRefundStatusFailed         ListCreditNotesParamsRefundStatus = "failed"
+	ListCreditNotesParamsRefundStatusNeedsAttention ListCreditNotesParamsRefundStatus = "needs_attention"
+	ListCreditNotesParamsRefundStatusNone           ListCreditNotesParamsRefundStatus = "none"
+	ListCreditNotesParamsRefundStatusPending        ListCreditNotesParamsRefundStatus = "pending"
+	ListCreditNotesParamsRefundStatusSucceeded      ListCreditNotesParamsRefundStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the ListCreditNotesParamsRefundStatus enum.
 func (e ListCreditNotesParamsRefundStatus) Valid() bool {
 	switch e {
-	case Failed:
+	case ListCreditNotesParamsRefundStatusFailed:
 		return true
-	case None:
+	case ListCreditNotesParamsRefundStatusNeedsAttention:
 		return true
-	case Pending:
+	case ListCreditNotesParamsRefundStatusNone:
 		return true
-	case Succeeded:
+	case ListCreditNotesParamsRefundStatusPending:
+		return true
+	case ListCreditNotesParamsRefundStatusSucceeded:
 		return true
 	default:
 		return false
@@ -1835,22 +1883,22 @@ func (e SetDefaultDunningPolicy200JSONResponseBodyStatus) Valid() bool {
 
 // Defines values for ListDunningRunsParamsState.
 const (
-	Active    ListDunningRunsParamsState = "active"
-	Escalated ListDunningRunsParamsState = "escalated"
-	Paused    ListDunningRunsParamsState = "paused"
-	Resolved  ListDunningRunsParamsState = "resolved"
+	ListDunningRunsParamsStateActive    ListDunningRunsParamsState = "active"
+	ListDunningRunsParamsStateEscalated ListDunningRunsParamsState = "escalated"
+	ListDunningRunsParamsStatePaused    ListDunningRunsParamsState = "paused"
+	ListDunningRunsParamsStateResolved  ListDunningRunsParamsState = "resolved"
 )
 
 // Valid indicates whether the value is a known member of the ListDunningRunsParamsState enum.
 func (e ListDunningRunsParamsState) Valid() bool {
 	switch e {
-	case Active:
+	case ListDunningRunsParamsStateActive:
 		return true
-	case Escalated:
+	case ListDunningRunsParamsStateEscalated:
 		return true
-	case Paused:
+	case ListDunningRunsParamsStatePaused:
 		return true
-	case Resolved:
+	case ListDunningRunsParamsStateResolved:
 		return true
 	default:
 		return false
@@ -2364,7 +2412,7 @@ type AnalyticsMrrMovementPoint struct {
 	Churned     int64 `json:"churned"`
 	Contraction int64 `json:"contraction"`
 
-	// Date Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
 	Date      string `json:"date"`
 	Expansion int64  `json:"expansion"`
 	Net       int64  `json:"net"`
@@ -2470,7 +2518,7 @@ type AnalyticsPeriod string
 
 // AnalyticsRevenuePoint defines model for AnalyticsRevenuePoint.
 type AnalyticsRevenuePoint struct {
-	// Date Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
 	Date         string `json:"date"`
 	InvoiceCount int    `json:"invoice_count"`
 
@@ -2491,7 +2539,7 @@ type AnalyticsTopMeter struct {
 
 // AnalyticsUsagePoint defines model for AnalyticsUsagePoint.
 type AnalyticsUsagePoint struct {
-	// Date Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
 	Date   string `json:"date"`
 	Events int64  `json:"events"`
 
@@ -2735,10 +2783,13 @@ type BootstrapResult struct {
 
 // CreditBalance defines model for CreditBalance.
 type CreditBalance struct {
-	BalanceCents int64  `json:"balance_cents,omitempty"`
-	CustomerId   string `json:"customer_id,omitempty"`
-	TotalGranted int64  `json:"total_granted,omitempty"`
-	TotalUsed    int64  `json:"total_used,omitempty"`
+	BalanceCents int64  `json:"balance_cents"`
+	CustomerId   string `json:"customer_id"`
+
+	// TotalExpired Credit written off by expiry.
+	TotalExpired int64 `json:"total_expired"`
+	TotalGranted int64 `json:"total_granted"`
+	TotalUsed    int64 `json:"total_used"`
 }
 
 // CreditLedgerEntry defines model for CreditLedgerEntry.
@@ -2856,21 +2907,38 @@ type Customer struct {
 	// credential-bearing emails (setup links, resets, invites).
 	// Normalized to lowercase bare addresses, deduped, capped at 10,
 	// never equal to the primary email. Stored encrypted at rest.
-	AdditionalEmails []string       `json:"additional_emails,omitempty"`
-	CreatedAt        time.Time      `json:"created_at,omitempty"`
-	DisplayName      string         `json:"display_name,omitempty"`
-	Email            string         `json:"email,omitempty"`
-	ExternalId       string         `json:"external_id,omitempty"`
-	Id               string         `json:"id,omitempty"`
-	Status           CustomerStatus `json:"status,omitempty"`
+	AdditionalEmails []string  `json:"additional_emails,omitempty"`
+	CreatedAt        time.Time `json:"created_at,omitempty"`
+	DisplayName      string    `json:"display_name,omitempty"`
+
+	// DunningPolicyId Assigned dunning policy; absent means the tenant default.
+	DunningPolicyId    string    `json:"dunning_policy_id,omitempty"`
+	Email              string    `json:"email,omitempty"`
+	EmailBounceReason  string    `json:"email_bounce_reason,omitempty"`
+	EmailLastBouncedAt time.Time `json:"email_last_bounced_at,omitempty"`
+
+	// EmailStatus Deliverability of `email`, learned from bounce and complaint reports.
+	EmailStatus CustomerEmailStatus `json:"email_status,omitempty"`
+	ExternalId  string              `json:"external_id,omitempty"`
+	Id          string              `json:"id,omitempty"`
+	Livemode    bool                `json:"livemode,omitempty"`
+	Status      CustomerStatus      `json:"status,omitempty"`
+
+	// StripeCustomerId The Stripe customer. Absent until the first payment-method action.
+	StripeCustomerId string `json:"stripe_customer_id,omitempty"`
+	TenantId         string `json:"tenant_id,omitempty"`
 
 	// TestClockId Test clock this customer is pinned to (test mode only). When set,
 	// the customer — and any invoices/subscriptions created for it —
 	// run on the clock's simulated time. Empty for live customers. The
 	// dashboard reads it to show the "test clock" badge + simulated-time
 	// banner on the customer and its invoices.
-	TestClockId string `json:"test_clock_id,omitempty"`
+	TestClockId string    `json:"test_clock_id,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
 }
+
+// CustomerEmailStatus Deliverability of `email`, learned from bounce and complaint reports.
+type CustomerEmailStatus string
 
 // CustomerStatus defines model for Customer.Status.
 type CustomerStatus string
@@ -3027,7 +3095,9 @@ type CustomerUsage struct {
 		To     time.Time                 `json:"to"`
 	} `json:"period"`
 
-	// Subscriptions Active and trialing subscriptions.
+	// Subscriptions One entry per item of each active or trialing subscription. A
+	// subscription with several plans appears once per plan, with the
+	// same `id`.
 	Subscriptions []struct {
 		Currency           string    `json:"currency"`
 		CurrentPeriodEnd   time.Time `json:"current_period_end"`
@@ -3199,7 +3269,7 @@ type DunningRun struct {
 	CreatedAt    time.Time `json:"created_at"`
 	CustomerId   string    `json:"customer_id,omitempty"`
 
-	// EffectiveNow The test clock's current time, when the customer is on a test clock.
+	// EffectiveNow The test clock's current time, when the customer is on a test clock. Filled in on list responses.
 	EffectiveNow time.Time `json:"effective_now,omitempty"`
 	Id           string    `json:"id"`
 
@@ -3218,16 +3288,26 @@ type DunningRun struct {
 	PolicyId      string    `json:"policy_id"`
 	Reason        string    `json:"reason,omitempty"`
 
-	// Resolution Set once the run is resolved. `manually_resolved` appears only on older runs.
-	Resolution  DunningRunResolution `json:"resolution,omitempty"`
-	ResolvedAt  time.Time            `json:"resolved_at,omitempty"`
-	State       DunningRunState      `json:"state"`
-	TenantId    string               `json:"tenant_id,omitempty"`
-	TestClockId string               `json:"test_clock_id,omitempty"`
-	UpdatedAt   time.Time            `json:"updated_at"`
+	// Resolution How the run ended, set when it is resolved. Exception:
+	// `action_failed` is set on a run that is still `active`. The
+	// final action (pause, cancel or mark uncollectible) failed and
+	// will be retried at `next_action_at`. `manually_resolved` appears
+	// only on older runs.
+	Resolution DunningRunResolution `json:"resolution,omitempty"`
+	ResolvedAt time.Time            `json:"resolved_at,omitempty"`
+	State      DunningRunState      `json:"state"`
+	TenantId   string               `json:"tenant_id,omitempty"`
+
+	// TestClockId Filled in on list responses.
+	TestClockId string    `json:"test_clock_id,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// DunningRunResolution Set once the run is resolved. `manually_resolved` appears only on older runs.
+// DunningRunResolution How the run ended, set when it is resolved. Exception:
+// `action_failed` is set on a run that is still `active`. The
+// final action (pause, cancel or mark uncollectible) failed and
+// will be retried at `next_action_at`. `manually_resolved` appears
+// only on older runs.
 type DunningRunResolution string
 
 // DunningRunState defines model for DunningRun.State.
@@ -3339,7 +3419,7 @@ type Invoice struct {
 	Footer              string    `json:"footer,omitempty"`
 	Id                  string    `json:"id"`
 
-	// InvoiceNumber Empty until the invoice is finalized.
+	// InvoiceNumber Set when the invoice is created, including drafts.
 	InvoiceNumber string `json:"invoice_number"`
 
 	// IsSimulated Whether this invoice's domain timestamps (created/issued/due/paid)
@@ -3650,7 +3730,11 @@ type LitellmSpendLog struct {
 	// CostBreakdown The provider's own cost, in dollars. When present, each event's
 	// provider cost comes from its part (input, output or cache read)
 	// instead of the provider-costs table. A part that is missing or
-	// negative falls back to the table.
+	// negative falls back to the table. `input_cost` includes cache
+	// reads, so the input event gets `input_cost` minus
+	// `cache_read_cost`. If there were cache reads but no
+	// `cache_read_cost`, the input and cache-read events use the
+	// provider-costs table.
 	CostBreakdown struct {
 		CacheReadCost float32 `json:"cache_read_cost,omitempty"`
 		InputCost     float32 `json:"input_cost,omitempty"`
@@ -3778,11 +3862,13 @@ type MemberInvitationStatus string
 // Meter defines model for Meter.
 type Meter struct {
 	Aggregation         MeterAggregation `json:"aggregation,omitempty"`
+	CreatedAt           time.Time        `json:"created_at,omitempty"`
 	Id                  string           `json:"id,omitempty"`
 	Key                 string           `json:"key,omitempty"`
 	Name                string           `json:"name,omitempty"`
 	RatingRuleVersionId string           `json:"rating_rule_version_id,omitempty"`
 	Unit                string           `json:"unit,omitempty"`
+	UpdatedAt           time.Time        `json:"updated_at,omitempty"`
 }
 
 // MeterAggregation defines model for Meter.Aggregation.
@@ -3831,11 +3917,17 @@ type Plan struct {
 	BaseBillTiming  PlanBaseBillTiming  `json:"base_bill_timing,omitempty"`
 	BillingInterval PlanBillingInterval `json:"billing_interval,omitempty"`
 	Code            string              `json:"code,omitempty"`
+	CreatedAt       time.Time           `json:"created_at,omitempty"`
 	Currency        string              `json:"currency,omitempty"`
+	Description     string              `json:"description,omitempty"`
 	Id              string              `json:"id,omitempty"`
 	MeterIds        []string            `json:"meter_ids,omitempty"`
 	Name            string              `json:"name,omitempty"`
 	Status          PlanStatus          `json:"status,omitempty"`
+
+	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
+	TaxCode   string    `json:"tax_code,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // PlanBaseBillTiming When the recurring base fee is invoiced relative to the period it covers.
@@ -3866,7 +3958,8 @@ type ProviderCostRate struct {
 
 // RatingRule defines model for RatingRule.
 type RatingRule struct {
-	Currency string `json:"currency,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	Currency  string    `json:"currency,omitempty"`
 
 	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Arbitrary precision; invoice line amounts and totals still round to whole cents.
 	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
@@ -3875,12 +3968,21 @@ type RatingRule struct {
 		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 		UpTo            int    `json:"up_to,omitempty"`
 	} `json:"graduated_tiers,omitempty"`
-	Id      string         `json:"id,omitempty"`
-	Mode    RatingRuleMode `json:"mode,omitempty"`
-	Name    string         `json:"name,omitempty"`
-	RuleKey string         `json:"rule_key,omitempty"`
-	Version int            `json:"version,omitempty"`
+	Id             string                   `json:"id,omitempty"`
+	LifecycleState RatingRuleLifecycleState `json:"lifecycle_state,omitempty"`
+	Mode           RatingRuleMode           `json:"mode,omitempty"`
+	Name           string                   `json:"name,omitempty"`
+
+	// OverageUnitAmountCents Per-unit overage rate in cents, as a decimal string.
+	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
+	PackageAmountCents     int64  `json:"package_amount_cents,omitempty"`
+	PackageSize            int64  `json:"package_size,omitempty"`
+	RuleKey                string `json:"rule_key,omitempty"`
+	Version                int    `json:"version,omitempty"`
 }
+
+// RatingRuleLifecycleState defines model for RatingRule.LifecycleState.
+type RatingRuleLifecycleState string
 
 // RatingRuleMode defines model for RatingRule.Mode.
 type RatingRuleMode string
@@ -4191,6 +4293,11 @@ type StripeConnection struct {
 
 // Subscription defines model for Subscription.
 type Subscription struct {
+	ActivatedAt time.Time `json:"activated_at,omitempty"`
+
+	// BillingAnchorDay Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions.
+	BillingAnchorDay int `json:"billing_anchor_day,omitempty"`
+
 	// BillingFailure Present on a subscription while the billing run is failing on the
 	// work that subscription has due now (a period close, or a scheduled
 	// mid-period cancel). Absent otherwise: a subscription that bills
@@ -4203,16 +4310,56 @@ type Subscription struct {
 	// until `POST /v1/subscriptions/{id}/retry-billing` is called.
 	//
 	// Never set on a subscription attached to a test clock.
-	BillingFailure BillingFailure          `json:"billing_failure,omitempty"`
-	BillingTime    SubscriptionBillingTime `json:"billing_time,omitempty"`
-	Code           string                  `json:"code,omitempty"`
-	CustomerId     string                  `json:"customer_id,omitempty"`
-	DisplayName    string                  `json:"display_name,omitempty"`
-	Id             string                  `json:"id,omitempty"`
-	PlanId         string                  `json:"plan_id,omitempty"`
-	Status         SubscriptionStatus      `json:"status,omitempty"`
-	TrialEndAt     time.Time               `json:"trial_end_at,omitempty"`
-	TrialStartAt   time.Time               `json:"trial_start_at,omitempty"`
+	BillingFailure BillingFailure `json:"billing_failure,omitempty"`
+
+	// BillingThresholds Limits that make Velox invoice before the period ends.
+	BillingThresholds SubscriptionBillingThresholds `json:"billing_thresholds,omitempty"`
+	BillingTime       SubscriptionBillingTime       `json:"billing_time"`
+
+	// CancelAt A scheduled cancel time, if one is set.
+	CancelAt time.Time `json:"cancel_at,omitempty"`
+
+	// CancelAtPeriodEnd True when the subscription cancels at the end of the current period.
+	CancelAtPeriodEnd bool `json:"cancel_at_period_end"`
+
+	// CancelEffectiveAt When a scheduled cancel takes effect. Absent when no cancel is scheduled.
+	CancelEffectiveAt time.Time `json:"cancel_effective_at,omitempty"`
+
+	// CanceledAt When the subscription was canceled. Absent until then.
+	CanceledAt time.Time `json:"canceled_at,omitempty"`
+	Code       string    `json:"code"`
+	CreatedAt  time.Time `json:"created_at"`
+
+	// CurrentBillingPeriodDisplay The current period as text, with the last day included, in the tenant's billing time zone.
+	CurrentBillingPeriodDisplay string `json:"current_billing_period_display,omitempty"`
+
+	// CurrentBillingPeriodEnd End of the current period (exclusive).
+	CurrentBillingPeriodEnd   time.Time `json:"current_billing_period_end,omitempty"`
+	CurrentBillingPeriodStart time.Time `json:"current_billing_period_start,omitempty"`
+	CustomerId                string    `json:"customer_id"`
+	DisplayName               string    `json:"display_name"`
+	Id                        string    `json:"id"`
+
+	// Items The subscription's priced lines. Each item names its plan.
+	Items         []SubscriptionItem `json:"items,omitempty"`
+	NextBillingAt time.Time          `json:"next_billing_at,omitempty"`
+
+	// OverageAction `block` or `charge` (the default).
+	OverageAction string `json:"overage_action,omitempty"`
+
+	// PauseCollection Present on a subscription while collection is paused. Invoices are
+	// still created, but stay drafts and are not charged.
+	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
+	StartedAt       time.Time                   `json:"started_at,omitempty"`
+	Status          SubscriptionStatus          `json:"status"`
+	TenantId        string                      `json:"tenant_id,omitempty"`
+	TestClockId     string                      `json:"test_clock_id,omitempty"`
+	TrialEndAt      time.Time                   `json:"trial_end_at,omitempty"`
+	TrialStartAt    time.Time                   `json:"trial_start_at,omitempty"`
+	UpdatedAt       time.Time                   `json:"updated_at"`
+
+	// UsageCapUnits Most usage units per billing period. Absent means no cap.
+	UsageCapUnits int64 `json:"usage_cap_units,omitempty"`
 }
 
 // SubscriptionBillingTime defines model for Subscription.BillingTime.
@@ -4328,7 +4475,7 @@ type SubscriptionTimelineEvent struct {
 	SimEffectiveAt time.Time                       `json:"sim_effective_at,omitempty"`
 	Source         SubscriptionTimelineEventSource `json:"source"`
 
-	// Status Display tone for the row, e.g. `info`, `succeeded`, `warning`, `canceled`.
+	// Status Display tone for the row: `info`, `succeeded`, `success` (scheduled plan change applied), `warning` or `canceled`.
 	Status      string `json:"status"`
 	TestClockId string `json:"test_clock_id,omitempty"`
 
@@ -4359,7 +4506,9 @@ type TenantSettings struct {
 	CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
 	CompanyCity         string `json:"company_city,omitempty"`
 
-	// CompanyCountry ISO 3166 alpha-2 code, such as `US`.
+	// CompanyCountry ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
+	// Whitespace is trimmed and the code is upper-cased before it is
+	// checked and stored.
 	CompanyCountry string `json:"company_country,omitempty"`
 	CompanyEmail   string `json:"company_email,omitempty"`
 
@@ -4381,7 +4530,9 @@ type TenantSettings struct {
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency"`
 
-	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as `txcd_10103001`.
+	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as
+	// `txcd_10103001`. Empty is allowed. Surrounding whitespace is
+	// trimmed before the check.
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
 	// InvoiceFooter Default footer for new invoices. An invoice's own footer takes precedence.
@@ -4435,7 +4586,9 @@ type TenantSettingsInput struct {
 	CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
 	CompanyCity         string `json:"company_city,omitempty"`
 
-	// CompanyCountry ISO 3166 alpha-2 code, such as `US`.
+	// CompanyCountry ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
+	// Whitespace is trimmed and the code is upper-cased before it is
+	// checked and stored.
 	CompanyCountry string `json:"company_country,omitempty"`
 	CompanyEmail   string `json:"company_email,omitempty"`
 
@@ -4454,7 +4607,9 @@ type TenantSettingsInput struct {
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency,omitempty"`
 
-	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as `txcd_10103001`.
+	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as
+	// `txcd_10103001`. Empty is allowed. Surrounding whitespace is
+	// trimmed before the check.
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
 	// InvoiceFooter Default footer for new invoices. An invoice's own footer takes precedence.
@@ -4832,9 +4987,13 @@ type BootstrapJSONBody struct {
 
 // ListCreditNotesParams defines parameters for ListCreditNotes.
 type ListCreditNotesParams struct {
-	InvoiceId    string                            `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
-	CustomerId   string                            `form:"customer_id,omitempty" json:"customer_id,omitempty"`
-	Status       ListCreditNotesParamsStatus       `form:"status,omitempty" json:"status,omitempty"`
+	InvoiceId  string                      `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
+	CustomerId string                      `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+	Status     ListCreditNotesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// RefundStatus `needs_attention` returns issued, non-test-clock notes whose
+	// refund failed, has been pending more than 72 hours, or has a
+	// refund amount still at `none` after 1 hour.
 	RefundStatus ListCreditNotesParamsRefundStatus `form:"refund_status,omitempty" json:"refund_status,omitempty"`
 
 	// Sort One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
@@ -4988,7 +5147,8 @@ type ListCustomerInvoicesParams struct {
 
 // SendCustomerPaymentSetupEmailJSONBody defines parameters for SendCustomerPaymentSetupEmail.
 type SendCustomerPaymentSetupEmailJSONBody struct {
-	// Note Optional text shown at the top of the email.
+	// Note Optional text shown at the top of the email. At most
+	// 2000 bytes (UTF-8) after trimming whitespace.
 	Note string `json:"note,omitempty"`
 }
 
@@ -5213,8 +5373,8 @@ type PostV1InvoicesIdSendJSONBody struct {
 	Email            openapi_types.Email `json:"email"`
 }
 
-// PostV1MembersInviteJSONBody defines parameters for PostV1MembersInvite.
-type PostV1MembersInviteJSONBody struct {
+// InviteMemberJSONBody defines parameters for InviteMember.
+type InviteMemberJSONBody struct {
 	Email openapi_types.Email `json:"email"`
 }
 
@@ -5293,9 +5453,11 @@ type UpdatePlanJSONBody struct {
 	Description string `json:"description,omitempty"`
 
 	// MeterIds Replaces the plan's meters. Omit to keep them.
-	MeterIds []string                 `json:"meter_ids,omitempty"`
-	Name     string                   `json:"name,omitempty"`
-	Status   UpdatePlanJSONBodyStatus `json:"status,omitempty"`
+	MeterIds []string `json:"meter_ids,omitempty"`
+
+	// Name Whitespace is trimmed. Empty or omitted keeps the current name.
+	Name   string                   `json:"name,omitempty"`
+	Status UpdatePlanJSONBodyStatus `json:"status,omitempty"`
 
 	// TaxCode Stripe product tax code. Omitting it clears the stored code.
 	TaxCode string `json:"tax_code,omitempty"`
@@ -5646,7 +5808,20 @@ type BackfillUsageEventJSONBody struct {
 
 	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
 	ExternalCustomerId string `json:"external_customer_id"`
-	IdempotencyKey     string `json:"idempotency_key,omitempty"`
+
+	// IdempotencyKey Your unique ID for this event. Pick it once, before the
+	// first send, and send the same key on every retry of the
+	// event. Keys are unique per tenant and mode (live or
+	// test), forever. An event whose key was already used is
+	// not stored again: the first event wins and the new body
+	// is discarded. So never reuse a key for a different
+	// event, such as a batch index or a timestamp that can
+	// repeat, or that usage is lost. Empty or whitespace-only
+	// keys are refused with 422, and so are keys longer than
+	// 255 characters. The `Idempotency-Key` header does not
+	// count as this key: it caches one HTTP response for 24
+	// hours.
+	IdempotencyKey string `json:"idempotency_key"`
 
 	// Properties Older name for `dimensions`. Used only when `dimensions` is absent.
 	Properties map[string]interface{} `json:"properties,omitempty"`
@@ -5820,8 +5995,8 @@ type RefundInvoiceJSONRequestBody RefundInvoiceJSONBody
 // PostV1InvoicesIdSendJSONRequestBody defines body for PostV1InvoicesIdSend for application/json ContentType.
 type PostV1InvoicesIdSendJSONRequestBody PostV1InvoicesIdSendJSONBody
 
-// PostV1MembersInviteJSONRequestBody defines body for PostV1MembersInvite for application/json ContentType.
-type PostV1MembersInviteJSONRequestBody PostV1MembersInviteJSONBody
+// InviteMemberJSONRequestBody defines body for InviteMember for application/json ContentType.
+type InviteMemberJSONRequestBody InviteMemberJSONBody
 
 // PostV1MetersJSONRequestBody defines body for PostV1Meters for application/json ContentType.
 type PostV1MetersJSONRequestBody PostV1MetersJSONBody
@@ -6449,16 +6624,16 @@ type ServerInterface interface {
 	VoidInvoice(w http.ResponseWriter, r *http.Request, id string)
 	// List workspace members and invitations
 	// (GET /v1/members)
-	GetV1Members(w http.ResponseWriter, r *http.Request)
+	ListMembers(w http.ResponseWriter, r *http.Request)
 	// Revoke a pending invitation
 	// (DELETE /v1/members/invitations/{id})
-	DeleteV1MembersInvitationsId(w http.ResponseWriter, r *http.Request, id string)
+	RevokeMemberInvitation(w http.ResponseWriter, r *http.Request, id string)
 	// Invite a teammate by email
 	// (POST /v1/members/invite)
-	PostV1MembersInvite(w http.ResponseWriter, r *http.Request)
+	InviteMember(w http.ResponseWriter, r *http.Request)
 	// Remove a member from the workspace
 	// (DELETE /v1/members/{userID})
-	DeleteV1MembersUserID(w http.ResponseWriter, r *http.Request, userID string)
+	RemoveMember(w http.ResponseWriter, r *http.Request, userID string)
 	// List all meter pricing rules
 	// (GET /v1/meter-pricing-rules)
 	ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request)
@@ -7244,25 +7419,25 @@ func (_ Unimplemented) VoidInvoice(w http.ResponseWriter, r *http.Request, id st
 
 // List workspace members and invitations
 // (GET /v1/members)
-func (_ Unimplemented) GetV1Members(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ListMembers(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Revoke a pending invitation
 // (DELETE /v1/members/invitations/{id})
-func (_ Unimplemented) DeleteV1MembersInvitationsId(w http.ResponseWriter, r *http.Request, id string) {
+func (_ Unimplemented) RevokeMemberInvitation(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Invite a teammate by email
 // (POST /v1/members/invite)
-func (_ Unimplemented) PostV1MembersInvite(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) InviteMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Remove a member from the workspace
 // (DELETE /v1/members/{userID})
-func (_ Unimplemented) DeleteV1MembersUserID(w http.ResponseWriter, r *http.Request, userID string) {
+func (_ Unimplemented) RemoveMember(w http.ResponseWriter, r *http.Request, userID string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11248,8 +11423,8 @@ func (siw *ServerInterfaceWrapper) VoidInvoice(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1Members operation middleware
-func (siw *ServerInterfaceWrapper) GetV1Members(w http.ResponseWriter, r *http.Request) {
+// ListMembers operation middleware
+func (siw *ServerInterfaceWrapper) ListMembers(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -11258,7 +11433,7 @@ func (siw *ServerInterfaceWrapper) GetV1Members(w http.ResponseWriter, r *http.R
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1Members(w, r)
+		siw.Handler.ListMembers(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11268,8 +11443,8 @@ func (siw *ServerInterfaceWrapper) GetV1Members(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1MembersInvitationsId operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1MembersInvitationsId(w http.ResponseWriter, r *http.Request) {
+// RevokeMemberInvitation operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMemberInvitation(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -11290,7 +11465,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1MembersInvitationsId(w http.ResponseW
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1MembersInvitationsId(w, r, id)
+		siw.Handler.RevokeMemberInvitation(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11300,8 +11475,8 @@ func (siw *ServerInterfaceWrapper) DeleteV1MembersInvitationsId(w http.ResponseW
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1MembersInvite operation middleware
-func (siw *ServerInterfaceWrapper) PostV1MembersInvite(w http.ResponseWriter, r *http.Request) {
+// InviteMember operation middleware
+func (siw *ServerInterfaceWrapper) InviteMember(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -11310,7 +11485,7 @@ func (siw *ServerInterfaceWrapper) PostV1MembersInvite(w http.ResponseWriter, r 
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1MembersInvite(w, r)
+		siw.Handler.InviteMember(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11320,8 +11495,8 @@ func (siw *ServerInterfaceWrapper) PostV1MembersInvite(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1MembersUserID operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1MembersUserID(w http.ResponseWriter, r *http.Request) {
+// RemoveMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -11342,7 +11517,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1MembersUserID(w http.ResponseWriter, 
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1MembersUserID(w, r, userID)
+		siw.Handler.RemoveMember(w, r, userID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14332,16 +14507,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/invoices/{id}/void", wrapper.VoidInvoice)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/members", wrapper.GetV1Members)
+		r.Get(options.BaseURL+"/v1/members", wrapper.ListMembers)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/members/invitations/{id}", wrapper.DeleteV1MembersInvitationsId)
+		r.Delete(options.BaseURL+"/v1/members/invitations/{id}", wrapper.RevokeMemberInvitation)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/members/invite", wrapper.PostV1MembersInvite)
+		r.Post(options.BaseURL+"/v1/members/invite", wrapper.InviteMember)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/members/{userID}", wrapper.DeleteV1MembersUserID)
+		r.Delete(options.BaseURL+"/v1/members/{userID}", wrapper.RemoveMember)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/meter-pricing-rules", wrapper.ListAllMeterPricingRules)

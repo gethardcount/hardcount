@@ -23,7 +23,13 @@ export interface DunningRun {
   next_action_at?: string;
   paused: boolean;
   resolved_at?: string;
-  /** Set once the run is resolved. `manually_resolved` appears only on older runs. */
+  /**
+     * How the run ended, set when it is resolved. Exception:
+     * `action_failed` is set on a run that is still `active`. The
+     * final action (pause, cancel or mark uncollectible) failed and
+     * will be retried at `next_action_at`. `manually_resolved` appears
+     * only on older runs.
+     */
   resolution?: DunningRunResolution;
   created_at: string;
   updated_at: string;
@@ -33,7 +39,8 @@ export interface DunningRun {
   invoice_amount_due_cents?: number;
   /** Filled in on list responses. */
   invoice_currency?: string;
-  /** The test clock's current time, when the customer is on a test clock. */
+  /** The test clock's current time, when the customer is on a test clock. Filled in on list responses. */
   effective_now?: string;
+  /** Filled in on list responses. */
   test_clock_id?: string;
 }

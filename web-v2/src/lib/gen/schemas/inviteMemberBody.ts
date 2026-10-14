@@ -8,9 +8,6 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type GetV1Members200MembersItem = {
-  user_id: string;
+export type InviteMemberBody = {
   email: string;
-  role: string;
-  joined_at: string;
 };

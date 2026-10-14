@@ -8,6 +8,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type PostV1MembersInviteBody = {
-  email: string;
-};
+export type RatingRuleLifecycleState = typeof RatingRuleLifecycleState[keyof typeof RatingRuleLifecycleState];
+
+
+export const RatingRuleLifecycleState = {
+  draft: 'draft',
+  active: 'active',
+  archived: 'archived',
+} as const;

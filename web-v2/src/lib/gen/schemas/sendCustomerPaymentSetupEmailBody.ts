@@ -10,8 +10,8 @@
 
 export type SendCustomerPaymentSetupEmailBody = {
   /**
-     * Optional text shown at the top of the email.
-     * @maxLength 2000
+     * Optional text shown at the top of the email. At most
+     * 2000 bytes (UTF-8) after trimming whitespace.
      */
   note?: string;
 };

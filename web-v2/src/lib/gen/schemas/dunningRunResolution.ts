@@ -9,7 +9,11 @@
  */
 
 /**
- * Set once the run is resolved. `manually_resolved` appears only on older runs.
+ * How the run ended, set when it is resolved. Exception:
+ * `action_failed` is set on a run that is still `active`. The
+ * final action (pause, cancel or mark uncollectible) failed and
+ * will be retried at `next_action_at`. `manually_resolved` appears
+ * only on older runs.
  */
 export type DunningRunResolution = typeof DunningRunResolution[keyof typeof DunningRunResolution];
 

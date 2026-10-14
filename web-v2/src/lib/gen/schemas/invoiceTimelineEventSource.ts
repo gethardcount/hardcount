@@ -13,7 +13,7 @@ export type InvoiceTimelineEventSource = typeof InvoiceTimelineEventSource[keyof
 
 export const InvoiceTimelineEventSource = {
   lifecycle: 'lifecycle',
-  stripe: 'stripe',
+  payment: 'payment',
   dunning: 'dunning',
   email: 'email',
   credit_note: 'credit_note',

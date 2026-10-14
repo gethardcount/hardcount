@@ -16,4 +16,6 @@ export interface Meter {
   unit?: string;
   aggregation?: MeterAggregation;
   rating_rule_version_id?: string;
+  created_at?: string;
+  updated_at?: string;
 }

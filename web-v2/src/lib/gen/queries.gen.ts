@@ -87,7 +87,6 @@ import type {
   GetV1CustomersIdMarginParams,
   GetV1CustomersParams,
   GetV1InvoicesParams,
-  GetV1Members200,
   GetV1ProviderCosts200,
   GetV1PublicCostDashboardToken200,
   GetV1SubscriptionsParams,
@@ -99,6 +98,7 @@ import type {
   GetWebhookEndpointStats200,
   IngestLitellmSpendBody,
   InstantiateRecipeBody,
+  InviteMemberBody,
   Invoice,
   InvoiceCreateRequest,
   InvoiceLineItem,
@@ -122,6 +122,7 @@ import type {
   ListDunningPolicies200,
   ListDunningRuns200,
   ListDunningRunsParams,
+  ListMembers200,
   ListMeterPricingRules200,
   ListPriceOverrides200,
   ListPriceOverridesParams,
@@ -160,7 +161,6 @@ import type {
   PostV1CustomersIdRotateCostDashboardToken200,
   PostV1InvoicesCreatePreviewBody,
   PostV1InvoicesIdSendBody,
-  PostV1MembersInviteBody,
   PostV1MetersBody,
   PostV1PlansBody,
   PostV1RatingRulesBody,
@@ -1659,9 +1659,13 @@ export const getSendCustomerPaymentSetupEmailUrl = (customerId: string,) => {
  * customer's browser to Stripe; Velox does not see them. The card
  * is saved when Stripe reports the setup succeeded.
  *
- * One send per customer per minute. A second call within the
- * minute returns 429 `cooldown_active` with a `Retry-After` header.
- * The send is written to the audit log.
+ * At most one call per customer per minute when the server has Redis
+ * configured. The minute starts at any call, including one that then
+ * fails, so a second call within it returns 429 `cooldown_active`
+ * with a `Retry-After` header. Without Redis there is no cooldown.
+ *
+ * A body that is not valid JSON is ignored and the email is sent
+ * without a note. The send is written to the audit log.
  * @summary Email the customer a link to add a payment method
  */
 export const sendCustomerPaymentSetupEmail = async (customerId: string,
@@ -6745,8 +6749,11 @@ export const getGetSubscriptionTimelineUrl = (id: string,) => {
 }
 
 /**
- * Returns the subscription's history from the audit log, oldest
- * first, as display-ready rows. It holds at most the 100 most recent
+ * Returns the subscription's history from the audit log as
+ * display-ready rows, in the order the actions took effect: by
+ * `sim_effective_at` for actions on a test-clock subscription,
+ * otherwise by `timestamp`. On a test-clock subscription `timestamp`
+ * (wall-clock) may therefore not be in ascending order. It holds at most the 100 most recent
  * entries. `truncated` is true when older entries were left out.
  * @summary Get subscription activity timeline
  */
@@ -8459,8 +8466,9 @@ export const getCollectInvoicePaymentUrl = (id: string,) => {
  * 2. Otherwise Velox charges the remaining amount to the customer's
  *    saved payment method with a Stripe PaymentIntent.
  *
- * On success, any active dunning run is resolved with
- * `payment_recovered`. Check `payment_status` on the returned invoice.
+ * After a successful card charge, any active dunning run is resolved
+ * with `payment_recovered`. Check `payment_status` on the returned
+ * invoice.
  *
  * A written-off (`uncollectible`) invoice cannot be charged here.
  * Record an offline payment or issue a new invoice instead.
@@ -8620,8 +8628,10 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
 
 /**
  * Returns everything that happened to an invoice, oldest first:
- * lifecycle steps (created, finalized, paid, voided), charge attempts,
- * Stripe webhooks, dunning retries, credit notes and customer emails.
+ * lifecycle steps (created, finalized, paid, voided, marked
+ * uncollectible), charge attempts (source `payment`, event_type
+ * `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
+ * notes and customer emails.
  * A draft invoice returns an empty list.
  *
  * If one source cannot be read, the rest is still returned and the
@@ -8992,10 +9002,10 @@ export const getRetryCreditNoteRefundUrl = (id: string,) => {
 
 /**
  * Sends the refund part of an `issued` credit note to Stripe again,
- * when its `refund_status` is `failed`, `pending` or `none`. The retry
- * uses the same idempotency key, so the customer is never refunded
- * twice. If Stripe already has the refund, Velox records its status
- * instead of creating a new one.
+ * when its `refund_status` is `failed`, `pending` or `none`. Before
+ * creating a refund, Velox asks Stripe for one already made for this
+ * note and records it if found, so a retry does not refund the
+ * customer twice.
  * @summary Retry a failed credit-note refund
  */
 export const retryCreditNoteRefund = async (id: string, options?: RequestInit): Promise<CreditNote> => {
@@ -10069,7 +10079,7 @@ export const usePostV1AuthAcceptInvite = <TError = Error,
       return useMutation(getPostV1AuthAcceptInviteMutationOptions(options), queryClient);
     }
 
-export const getGetV1MembersUrl = () => {
+export const getListMembersUrl = () => {
 
 
 
@@ -10085,9 +10095,9 @@ export const getGetV1MembersUrl = () => {
  * recorded but every member holds the full permission set. ADR-081.
  * @summary List workspace members and invitations
  */
-export const getV1Members = async ( options?: RequestInit): Promise<GetV1Members200> => {
+export const listMembers = async ( options?: RequestInit): Promise<ListMembers200> => {
 
-  return orvalClient<GetV1Members200>(getGetV1MembersUrl(),
+  return orvalClient<ListMembers200>(getListMembersUrl(),
   {
     ...options,
     method: 'GET'
@@ -10100,69 +10110,69 @@ export const getV1Members = async ( options?: RequestInit): Promise<GetV1Members
 
 
 
-export const getGetV1MembersQueryKey = () => {
+export const getListMembersQueryKey = () => {
     return [
     `/v1/members`
     ] as const;
     }
 
 
-export const getGetV1MembersQueryOptions = <TData = Awaited<ReturnType<typeof getV1Members>>, TError = Error>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Members>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListMembersQueryOptions = <TData = Awaited<ReturnType<typeof listMembers>>, TError = Error>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMembers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1MembersQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListMembersQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Members>>> = () => getV1Members(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMembers>>> = () => listMembers(requestOptions);
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getV1Members>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMembers>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type GetV1MembersQueryResult = NonNullable<Awaited<ReturnType<typeof getV1Members>>>
-export type GetV1MembersQueryError = Error
+export type ListMembersQueryResult = NonNullable<Awaited<ReturnType<typeof listMembers>>>
+export type ListMembersQueryError = Error
 
 
-export function useGetV1Members<TData = Awaited<ReturnType<typeof getV1Members>>, TError = Error>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Members>>, TError, TData>> & Pick<
+export function useListMembers<TData = Awaited<ReturnType<typeof listMembers>>, TError = Error>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMembers>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getV1Members>>,
+          Awaited<ReturnType<typeof listMembers>>,
           TError,
-          Awaited<ReturnType<typeof getV1Members>>
+          Awaited<ReturnType<typeof listMembers>>
         > , 'initialData'
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Members<TData = Awaited<ReturnType<typeof getV1Members>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Members>>, TError, TData>> & Pick<
+export function useListMembers<TData = Awaited<ReturnType<typeof listMembers>>, TError = Error>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMembers>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getV1Members>>,
+          Awaited<ReturnType<typeof listMembers>>,
           TError,
-          Awaited<ReturnType<typeof getV1Members>>
+          Awaited<ReturnType<typeof listMembers>>
         > , 'initialData'
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Members<TData = Awaited<ReturnType<typeof getV1Members>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Members>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListMembers<TData = Awaited<ReturnType<typeof listMembers>>, TError = Error>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMembers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List workspace members and invitations
  */
 
-export function useGetV1Members<TData = Awaited<ReturnType<typeof getV1Members>>, TError = Error>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Members>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export function useListMembers<TData = Awaited<ReturnType<typeof listMembers>>, TError = Error>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMembers>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1MembersQueryOptions(options)
+  const queryOptions = getListMembersQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -10175,7 +10185,7 @@ export function useGetV1Members<TData = Awaited<ReturnType<typeof getV1Members>>
 
 
 
-export const getPostV1MembersInviteUrl = () => {
+export const getInviteMemberUrl = () => {
 
 
 
@@ -10191,14 +10201,14 @@ export const getPostV1MembersInviteUrl = () => {
  * member or already has a pending invite. ADR-081.
  * @summary Invite a teammate by email
  */
-export const postV1MembersInvite = async (postV1MembersInviteBody: PostV1MembersInviteBody, options?: RequestInit): Promise<MemberInvitation> => {
+export const inviteMember = async (inviteMemberBody: InviteMemberBody, options?: RequestInit): Promise<MemberInvitation> => {
 
-  return orvalClient<MemberInvitation>(getPostV1MembersInviteUrl(),
+  return orvalClient<MemberInvitation>(getInviteMemberUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(postV1MembersInviteBody)
+    body: JSON.stringify(inviteMemberBody)
   }
 );}
 
@@ -10206,11 +10216,11 @@ export const postV1MembersInvite = async (postV1MembersInviteBody: PostV1Members
 
 
 
-export const getPostV1MembersInviteMutationOptions = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1MembersInvite>>, TError,{data: PostV1MembersInviteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof postV1MembersInvite>>, TError,{data: PostV1MembersInviteBody}, TContext> => {
+export const getInviteMemberMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof inviteMember>>, TError,{data: InviteMemberBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof inviteMember>>, TError,{data: InviteMemberBody}, TContext> => {
 
-const mutationKey = ['postV1MembersInvite'];
+const mutationKey = ['inviteMember'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -10220,10 +10230,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1MembersInvite>>, {data: PostV1MembersInviteBody}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof inviteMember>>, {data: InviteMemberBody}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1MembersInvite(data,requestOptions)
+          return  inviteMember(data,requestOptions)
         }
 
 
@@ -10233,25 +10243,25 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type PostV1MembersInviteMutationResult = NonNullable<Awaited<ReturnType<typeof postV1MembersInvite>>>
-    export type PostV1MembersInviteMutationBody = PostV1MembersInviteBody
-    export type PostV1MembersInviteMutationError = Error
+    export type InviteMemberMutationResult = NonNullable<Awaited<ReturnType<typeof inviteMember>>>
+    export type InviteMemberMutationBody = InviteMemberBody
+    export type InviteMemberMutationError = Error
 
     /**
  * @summary Invite a teammate by email
  */
-export const usePostV1MembersInvite = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1MembersInvite>>, TError,{data: PostV1MembersInviteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+export const useInviteMember = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof inviteMember>>, TError,{data: InviteMemberBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof postV1MembersInvite>>,
+        Awaited<ReturnType<typeof inviteMember>>,
         TError,
-        {data: PostV1MembersInviteBody},
+        {data: InviteMemberBody},
         TContext
       > => {
-      return useMutation(getPostV1MembersInviteMutationOptions(options), queryClient);
+      return useMutation(getInviteMemberMutationOptions(options), queryClient);
     }
 
-export const getDeleteV1MembersInvitationsIdUrl = (id: string,) => {
+export const getRevokeMemberInvitationUrl = (id: string,) => {
 
 
 
@@ -10265,9 +10275,9 @@ export const getDeleteV1MembersInvitationsIdUrl = (id: string,) => {
  * pending invitations can be revoked — accepted/revoked ones 404.
  * @summary Revoke a pending invitation
  */
-export const deleteV1MembersInvitationsId = async (id: string, options?: RequestInit): Promise<void> => {
+export const revokeMemberInvitation = async (id: string, options?: RequestInit): Promise<void> => {
 
-  return orvalClient<void>(getDeleteV1MembersInvitationsIdUrl(id),
+  return orvalClient<void>(getRevokeMemberInvitationUrl(id),
   {
     ...options,
     method: 'DELETE'
@@ -10280,11 +10290,11 @@ export const deleteV1MembersInvitationsId = async (id: string, options?: Request
 
 
 
-export const getDeleteV1MembersInvitationsIdMutationOptions = <TError = void,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1MembersInvitationsId>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteV1MembersInvitationsId>>, TError,{id: string}, TContext> => {
+export const getRevokeMemberInvitationMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext> => {
 
-const mutationKey = ['deleteV1MembersInvitationsId'];
+const mutationKey = ['revokeMemberInvitation'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -10294,10 +10304,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteV1MembersInvitationsId>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeMemberInvitation>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
-          return  deleteV1MembersInvitationsId(id,requestOptions)
+          return  revokeMemberInvitation(id,requestOptions)
         }
 
 
@@ -10307,25 +10317,25 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type DeleteV1MembersInvitationsIdMutationResult = NonNullable<Awaited<ReturnType<typeof deleteV1MembersInvitationsId>>>
+    export type RevokeMemberInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof revokeMemberInvitation>>>
 
-    export type DeleteV1MembersInvitationsIdMutationError = void
+    export type RevokeMemberInvitationMutationError = Error
 
     /**
  * @summary Revoke a pending invitation
  */
-export const useDeleteV1MembersInvitationsId = <TError = void,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1MembersInvitationsId>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+export const useRevokeMemberInvitation = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof deleteV1MembersInvitationsId>>,
+        Awaited<ReturnType<typeof revokeMemberInvitation>>,
         TError,
         {id: string},
         TContext
       > => {
-      return useMutation(getDeleteV1MembersInvitationsIdMutationOptions(options), queryClient);
+      return useMutation(getRevokeMemberInvitationMutationOptions(options), queryClient);
     }
 
-export const getDeleteV1MembersUserIDUrl = (userID: string,) => {
+export const getRemoveMemberUrl = (userID: string,) => {
 
 
 
@@ -10341,9 +10351,9 @@ export const getDeleteV1MembersUserIDUrl = (userID: string,) => {
  * removed. ADR-081.
  * @summary Remove a member from the workspace
  */
-export const deleteV1MembersUserID = async (userID: string, options?: RequestInit): Promise<void> => {
+export const removeMember = async (userID: string, options?: RequestInit): Promise<void> => {
 
-  return orvalClient<void>(getDeleteV1MembersUserIDUrl(userID),
+  return orvalClient<void>(getRemoveMemberUrl(userID),
   {
     ...options,
     method: 'DELETE'
@@ -10356,11 +10366,11 @@ export const deleteV1MembersUserID = async (userID: string, options?: RequestIni
 
 
 
-export const getDeleteV1MembersUserIDMutationOptions = <TError = void | Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1MembersUserID>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteV1MembersUserID>>, TError,{userID: string}, TContext> => {
+export const getRemoveMemberMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext> => {
 
-const mutationKey = ['deleteV1MembersUserID'];
+const mutationKey = ['removeMember'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -10370,10 +10380,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteV1MembersUserID>>, {userID: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeMember>>, {userID: string}> = (props) => {
           const {userID} = props ?? {};
 
-          return  deleteV1MembersUserID(userID,requestOptions)
+          return  removeMember(userID,requestOptions)
         }
 
 
@@ -10383,22 +10393,22 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type DeleteV1MembersUserIDMutationResult = NonNullable<Awaited<ReturnType<typeof deleteV1MembersUserID>>>
+    export type RemoveMemberMutationResult = NonNullable<Awaited<ReturnType<typeof removeMember>>>
 
-    export type DeleteV1MembersUserIDMutationError = void | Error
+    export type RemoveMemberMutationError = Error
 
     /**
  * @summary Remove a member from the workspace
  */
-export const useDeleteV1MembersUserID = <TError = void | Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1MembersUserID>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+export const useRemoveMember = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof deleteV1MembersUserID>>,
+        Awaited<ReturnType<typeof removeMember>>,
         TError,
         {userID: string},
         TContext
       > => {
-      return useMutation(getDeleteV1MembersUserIDMutationOptions(options), queryClient);
+      return useMutation(getRemoveMemberMutationOptions(options), queryClient);
     }
 
 export const getGetV1WhoamiUrl = () => {
@@ -12996,7 +13006,9 @@ export const getExportAuditLogCsvUrl = (params?: ExportAuditLogCsvParams,) => {
 }
 
 /**
- * Streams the whole audit log, newest first, with no row limit.
+ * Streams the audit log for the caller's mode (test or live), newest
+ * first, with no row limit. Settings changes are recorded in test
+ * mode, so they appear only in a test-mode export.
  * Takes the same filters as the audit-log list, so the dashboard's
  * filters and its export give the same rows. The date filters are
  * `date_from`/`date_to`; `from`/`to` are ignored here.

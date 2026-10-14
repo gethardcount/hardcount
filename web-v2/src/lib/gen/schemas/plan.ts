@@ -28,4 +28,9 @@ export interface Plan {
      */
   base_bill_timing?: PlanBaseBillTiming;
   meter_ids?: string[];
+  description?: string;
+  /** Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
+  tax_code?: string;
+  created_at?: string;
+  updated_at?: string;
 }

@@ -170,6 +170,28 @@ components:
             run on the clock's simulated time. Empty for live customers. The
             dashboard reads it to show the "test clock" badge + simulated-time
             banner on the customer and its invoices.
+        tenant_id:
+          type: string
+        email_status:
+          type: string
+          enum: [unknown, ok, bounced, complained]
+          description: Deliverability of `email`, learned from bounce and complaint reports.
+        email_last_bounced_at:
+          type: string
+          format: date-time
+        email_bounce_reason:
+          type: string
+        dunning_policy_id:
+          type: string
+          description: Assigned dunning policy; absent means the tenant default.
+        stripe_customer_id:
+          type: string
+          description: The Stripe customer. Absent until the first payment-method action.
+        livemode:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
 
     Meter:
       type: object
@@ -187,6 +209,12 @@ components:
           enum: [sum, count, max, last]
         rating_rule_version_id:
           type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     Plan:
       type: object
@@ -221,6 +249,17 @@ components:
           type: array
           items:
             type: string
+        description:
+          type: string
+        tax_code:
+          type: string
+          description: Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     RatingRule:
       type: object
@@ -254,11 +293,29 @@ components:
               unit_amount_cents:
                 type: string
                 description: Per-unit rate in cents, as a decimal string (see flat_amount_cents).
+        lifecycle_state:
+          type: string
+          enum: [draft, active, archived]
+        package_size:
+          type: integer
+          format: int64
+        package_amount_cents:
+          type: integer
+          format: int64
+        overage_unit_amount_cents:
+          type: string
+          description: Per-unit overage rate in cents, as a decimal string.
+        created_at:
+          type: string
+          format: date-time
 
     Subscription:
       type: object
+      required: [id, code, display_name, customer_id, status, billing_time, cancel_at_period_end, created_at, updated_at]
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         code:
           type: string
@@ -266,8 +323,11 @@ components:
           type: string
         customer_id:
           type: string
-        plan_id:
-          type: string
+        items:
+          type: array
+          description: The subscription's priced lines. Each item names its plan.
+          items:
+            $ref: "#/components/schemas/SubscriptionItem"
         status:
           type: string
           enum: [draft, trialing, active, canceled, archived]
@@ -280,8 +340,64 @@ components:
         trial_end_at:
           type: string
           format: date-time
+        started_at:
+          type: string
+          format: date-time
+        activated_at:
+          type: string
+          format: date-time
+        canceled_at:
+          type: string
+          format: date-time
+          description: When the subscription was canceled. Absent until then.
+        cancel_at:
+          type: string
+          format: date-time
+          description: A scheduled cancel time, if one is set.
+        cancel_at_period_end:
+          type: boolean
+          description: True when the subscription cancels at the end of the current period.
+        cancel_effective_at:
+          type: string
+          format: date-time
+          description: When a scheduled cancel takes effect. Absent when no cancel is scheduled.
+        pause_collection:
+          $ref: "#/components/schemas/SubscriptionPauseCollection"
+        billing_thresholds:
+          $ref: "#/components/schemas/SubscriptionBillingThresholds"
+        current_billing_period_start:
+          type: string
+          format: date-time
+        current_billing_period_end:
+          type: string
+          format: date-time
+          description: End of the current period (exclusive).
+        current_billing_period_display:
+          type: string
+          description: The current period as text, with the last day included, in the tenant's billing time zone.
+        next_billing_at:
+          type: string
+          format: date-time
+        billing_anchor_day:
+          type: integer
+          description: Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions.
+        usage_cap_units:
+          type: integer
+          format: int64
+          description: Most usage units per billing period. Absent means no cap.
+        overage_action:
+          type: string
+          description: "`block` or `charge` (the default)."
+        test_clock_id:
+          type: string
         billing_failure:
           $ref: "#/components/schemas/BillingFailure"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     BillingFailure:
       type: object
@@ -680,7 +796,7 @@ components:
           description: Empty for one-off invoices not tied to a subscription.
         invoice_number:
           type: string
-          description: Empty until the invoice is finalized.
+          description: Set when the invoice is created, including drafts.
         status:
           $ref: "#/components/schemas/InvoiceStatus"
         payment_status:
@@ -1101,6 +1217,7 @@ components:
 
     CreditBalance:
       type: object
+      required: [customer_id, balance_cents, total_granted, total_used, total_expired]
       properties:
         customer_id:
           type: string
@@ -1113,6 +1230,10 @@ components:
         total_used:
           type: integer
           format: int64
+        total_expired:
+          type: integer
+          format: int64
+          description: Credit written off by expiry.
 
     CreditLiveBalance:
       type: object
@@ -1636,7 +1757,10 @@ components:
               enum: [current_billing_cycle, explicit]
         subscriptions:
           type: array
-          description: Active and trialing subscriptions.
+          description: |
+            One entry per item of each active or trialing subscription. A
+            subscription with several plans appears once per plan, with the
+            same `id`.
           items:
             type: object
             required: [id, plan_id, plan_name, currency, current_period_start, current_period_end]
@@ -1971,7 +2095,7 @@ components:
           description: The audit action, e.g. `create`, `cancel`, `subscription.item_updated`.
         status:
           type: string
-          description: Display tone for the row, e.g. `info`, `succeeded`, `warning`, `canceled`.
+          description: "Display tone for the row: `info`, `succeeded`, `success` (scheduled plan change applied), `warning` or `canceled`."
         description:
           type: string
           description: One-line summary, e.g. "Subscription canceled".
@@ -2032,7 +2156,7 @@ components:
       properties:
         date:
           type: string
-          description: Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
         new:
           type: integer
           format: int64
@@ -2055,7 +2179,7 @@ components:
       properties:
         date:
           type: string
-          description: Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
         revenue_cents:
           type: integer
           format: int64
@@ -2069,7 +2193,7 @@ components:
       properties:
         date:
           type: string
-          description: Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
         events:
           type: integer
           format: int64
@@ -2411,7 +2535,7 @@ components:
           format: date-time
         source:
           type: string
-          enum: [lifecycle, stripe, dunning, email, credit_note]
+          enum: [lifecycle, payment, dunning, email, credit_note]
         event_type:
           type: string
           example: invoice.finalized
@@ -2501,7 +2625,12 @@ components:
             - retries_exhausted
             - action_failed
             - manually_resolved
-          description: Set once the run is resolved. `manually_resolved` appears only on older runs.
+          description: |
+            How the run ended, set when it is resolved. Exception:
+            `action_failed` is set on a run that is still `active`. The
+            final action (pause, cancel or mark uncollectible) failed and
+            will be retried at `next_action_at`. `manually_resolved` appears
+            only on older runs.
         created_at:
           type: string
           format: date-time
@@ -2521,9 +2650,10 @@ components:
         effective_now:
           type: string
           format: date-time
-          description: The test clock's current time, when the customer is on a test clock.
+          description: The test clock's current time, when the customer is on a test clock. Filled in on list responses.
         test_clock_id:
           type: string
+          description: Filled in on list responses.
 
     DunningRunEvent:
       type: object
@@ -2882,7 +3012,11 @@ components:
             The provider's own cost, in dollars. When present, each event's
             provider cost comes from its part (input, output or cache read)
             instead of the provider-costs table. A part that is missing or
-            negative falls back to the table.
+            negative falls back to the table. `input_cost` includes cache
+            reads, so the input event gets `input_cost` minus
+            `cache_read_cost`. If there were cache reads but no
+            `cache_read_cost`, the input and cache-read events use the
+            provider-costs table.
           properties:
             input_cost:
               type: number
@@ -3041,7 +3175,11 @@ components:
           description: What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
         default_product_tax_code:
           type: string
-          description: Stripe product tax code used when a plan has none, such as `txcd_10103001`.
+          pattern: "^(txcd_[0-9]{8})?$"
+          description: |
+            Stripe product tax code used when a plan has none, such as
+            `txcd_10103001`. Empty is allowed. Surrounding whitespace is
+            trimmed before the check.
         company_name:
           type: string
           maxLength: 255
@@ -3063,7 +3201,12 @@ components:
           maxLength: 20
         company_country:
           type: string
-          description: ISO 3166 alpha-2 code, such as `US`.
+          maxLength: 2
+          pattern: "^([A-Za-z]{2})?$"
+          description: |
+            ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
+            Whitespace is trimmed and the code is upper-cased before it is
+            checked and stored.
         company_email:
           type: string
         company_phone:
@@ -4044,9 +4187,13 @@ paths:
         customer's browser to Stripe; Velox does not see them. The card
         is saved when Stripe reports the setup succeeded.
 
-        One send per customer per minute. A second call within the
-        minute returns 429 `cooldown_active` with a `Retry-After` header.
-        The send is written to the audit log.
+        At most one call per customer per minute when the server has Redis
+        configured. The minute starts at any call, including one that then
+        fails, so a second call within it returns 429 `cooldown_active`
+        with a `Retry-After` header. Without Redis there is no cooldown.
+
+        A body that is not valid JSON is ignored and the email is sent
+        without a note. The send is written to the audit log.
       operationId: sendCustomerPaymentSetupEmail
       parameters:
         - name: customer_id
@@ -4063,8 +4210,9 @@ paths:
               properties:
                 note:
                   type: string
-                  maxLength: 2000
-                  description: Optional text shown at the top of the email.
+                  description: |
+                    Optional text shown at the top of the email. At most
+                    2000 bytes (UTF-8) after trimming whitespace.
       responses:
         "202":
           description: Email queued.
@@ -4087,14 +4235,14 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `note_too_long` (more than 2000 characters) or
+            `note_too_long` (more than 2000 bytes) or
             `missing_email` (the customer has no email).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "429":
-          description: A link was sent to this customer less than a minute ago (`cooldown_active`).
+          description: This endpoint was called for this customer less than a minute ago (`cooldown_active`).
           headers:
             Retry-After:
               description: Seconds to wait.
@@ -4104,8 +4252,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "500":
+          description: |
+            Stripe is not connected for this mode, or the setup session
+            could not be created. No email was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "502":
-          description: The email could not be queued (`email_enqueue_failed`). Retry.
+          description: |
+            The email could not be queued (`email_enqueue_failed`), or
+            Stripe refused to create the setup session with a message it
+            is safe to show (`provider_error`). Retry.
           content:
             application/json:
               schema:
@@ -4785,7 +4944,11 @@ paths:
           in: query
           schema:
             type: string
-            enum: [none, pending, succeeded, failed]
+            enum: [none, pending, succeeded, failed, needs_attention]
+          description: |
+            `needs_attention` returns issued, non-test-clock notes whose
+            refund failed, has been pending more than 72 hours, or has a
+            refund amount still at `none` after 1 hour.
         - name: sort
           in: query
           description: One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
@@ -5433,7 +5596,7 @@ paths:
               properties:
                 name:
                   type: string
-                  maxLength: 255
+                  description: Whitespace is trimmed. Empty or omitted keeps the current name.
                 description:
                   type: string
                   description: Omitting it clears the stored description.
@@ -5488,6 +5651,16 @@ paths:
             subscriptions use the plan (param `plan`), an unknown or unpriced
             meter in `meter_ids`, an invalid `base_bill_timing`, or an invalid
             `tax_code`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: |
+            `internal_error`. Among other causes, a `status` outside
+            `draft`, `active` and `archived` is not checked before it is
+            written, so the database refuses it and the call answers 500,
+            not 422. Nothing is changed.
           content:
             application/json:
               schema:
@@ -6566,8 +6739,11 @@ paths:
       summary: Get subscription activity timeline
       operationId: getSubscriptionTimeline
       description: |
-        Returns the subscription's history from the audit log, oldest
-        first, as display-ready rows. It holds at most the 100 most recent
+        Returns the subscription's history from the audit log as
+        display-ready rows, in the order the actions took effect: by
+        `sim_effective_at` for actions on a test-clock subscription,
+        otherwise by `timestamp`. On a test-clock subscription `timestamp`
+        (wall-clock) may therefore not be in ascending order. It holds at most the 100 most recent
         entries. `truncated` is true when older entries were left out.
       parameters:
         - name: id
@@ -6799,7 +6975,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [external_customer_id, event_name, timestamp]
+              required: [external_customer_id, event_name, timestamp, idempotency_key]
               properties:
                 external_customer_id:
                   type: string
@@ -6823,6 +6999,20 @@ paths:
                   description: Older name for `dimensions`. Used only when `dimensions` is absent.
                 idempotency_key:
                   type: string
+                  maxLength: 255
+                  description: |
+                    Your unique ID for this event. Pick it once, before the
+                    first send, and send the same key on every retry of the
+                    event. Keys are unique per tenant and mode (live or
+                    test), forever. An event whose key was already used is
+                    not stored again: the first event wins and the new body
+                    is discarded. So never reuse a key for a different
+                    event, such as a batch index or a timestamp that can
+                    repeat, or that usage is lost. Empty or whitespace-only
+                    keys are refused with 422, and so are keys longer than
+                    255 characters. The `Idempotency-Key` header does not
+                    count as this key: it caches one HTTP response for 24
+                    hours.
                 timestamp:
                   type: string
                   format: date-time
@@ -6853,7 +7043,9 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `validation_error`: missing `external_customer_id`, `event_name`
+            `validation_error`: a missing, empty or whitespace-only
+            `idempotency_key`, or one longer than 255 characters (param
+            `idempotency_key`); missing `external_customer_id`, `event_name`
             or `timestamp`; unknown customer or meter; a future or badly
             formatted `timestamp`; more than 16 dimensions or a non-scalar
             dimension value; a quantity of 10^26 or more.
@@ -7566,8 +7758,9 @@ paths:
         2. Otherwise Velox charges the remaining amount to the customer's
            saved payment method with a Stripe PaymentIntent.
 
-        On success, any active dunning run is resolved with
-        `payment_recovered`. Check `payment_status` on the returned invoice.
+        After a successful card charge, any active dunning run is resolved
+        with `payment_recovered`. Check `payment_status` on the returned
+        invoice.
 
         A written-off (`uncollectible`) invoice cannot be charged here.
         Record an offline payment or issue a new invoice instead.
@@ -7704,8 +7897,10 @@ paths:
       operationId: getInvoicePaymentTimeline
       description: |
         Returns everything that happened to an invoice, oldest first:
-        lifecycle steps (created, finalized, paid, voided), charge attempts,
-        Stripe webhooks, dunning retries, credit notes and customer emails.
+        lifecycle steps (created, finalized, paid, voided, marked
+        uncollectible), charge attempts (source `payment`, event_type
+        `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
+        notes and customer emails.
         A draft invoice returns an empty list.
 
         If one source cannot be read, the rest is still returned and the
@@ -7849,10 +8044,10 @@ paths:
       operationId: retryCreditNoteRefund
       description: |
         Sends the refund part of an `issued` credit note to Stripe again,
-        when its `refund_status` is `failed`, `pending` or `none`. The retry
-        uses the same idempotency key, so the customer is never refunded
-        twice. If Stripe already has the refund, Velox records its status
-        instead of creating a new one.
+        when its `refund_status` is `failed`, `pending` or `none`. Before
+        creating a refund, Velox asks Stripe for one already made for this
+        note and records it if found, so a retry does not refund the
+        customer twice.
       parameters:
         - name: id
           in: path
@@ -7879,6 +8074,15 @@ paths:
             Stripe is not connected, or the invoice was paid outside Stripe
             (void the note and issue a new one with
             `out_of_band_amount_cents`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: |
+            Stripe refused the refund again (code `provider_error`). The
+            note keeps `refund_status` `failed`; retry later. A Stripe error
+            without a safe message returns 500 instead.
           content:
             application/json:
               schema:
@@ -8353,6 +8557,7 @@ paths:
   /v1/members:
     get:
       tags: [Members]
+      operationId: listMembers
       security:
         - SessionCookie: []
       summary: List workspace members and invitations
@@ -8400,6 +8605,7 @@ paths:
   /v1/members/invite:
     post:
       tags: [Members]
+      operationId: inviteMember
       security:
         - SessionCookie: []
       summary: Invite a teammate by email
@@ -8443,6 +8649,7 @@ paths:
   /v1/members/invitations/{id}:
     delete:
       tags: [Members]
+      operationId: revokeMemberInvitation
       security:
         - SessionCookie: []
       summary: Revoke a pending invitation
@@ -8460,11 +8667,16 @@ paths:
         "204":
           description: Invitation revoked
         "404":
-          description: No pending invitation with this id
+          description: No pending invitation with this id (code `not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/members/{userID}:
     delete:
       tags: [Members]
+      operationId: removeMember
       security:
         - SessionCookie: []
       summary: Remove a member from the workspace
@@ -8484,7 +8696,11 @@ paths:
         "204":
           description: Member removed and sessions revoked
         "404":
-          description: User is not a member of this workspace
+          description: User is not a member of this workspace (code `not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "409":
           description: Self-removal or last-member removal blocked
           content:
@@ -8955,7 +9171,7 @@ paths:
                     items:
                       $ref: "#/components/schemas/Customer"
         "403":
-          description: Caller is in live mode
+          description: Caller is in live mode, or the key lacks the `testclock:write` permission (needed even to read test clocks).
           content:
             application/json:
               schema:
@@ -9311,7 +9527,9 @@ paths:
       tags: [System]
       summary: Export the audit log as CSV
       description: |
-        Streams the whole audit log, newest first, with no row limit.
+        Streams the audit log for the caller's mode (test or live), newest
+        first, with no row limit. Settings changes are recorded in test
+        mode, so they appear only in a test-mode export.
         Takes the same filters as the audit-log list, so the dashboard's
         filters and its export give the same rows. The date filters are
         `date_from`/`date_to`; `from`/`to` are ignored here.
@@ -9598,7 +9816,7 @@ paths:
             type: string
       responses:
         "200":
-          description: The run and its event history.
+          description: The run and its event history. `events` is empty if the event history could not be read.
           content:
             application/json:
               schema:
@@ -9811,6 +10029,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DunningPolicy"
+        "404":
+          description: "`not_found`: no policy with this id in this tenant and mode."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: Same validation as create.
           content:

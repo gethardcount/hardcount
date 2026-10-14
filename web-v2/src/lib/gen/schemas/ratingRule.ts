@@ -8,6 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { RatingRuleGraduatedTiersItem } from './ratingRuleGraduatedTiersItem';
+import type { RatingRuleLifecycleState } from './ratingRuleLifecycleState';
 import type { RatingRuleMode } from './ratingRuleMode';
 
 export interface RatingRule {
@@ -20,4 +21,10 @@ export interface RatingRule {
   /** Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Arbitrary precision; invoice line amounts and totals still round to whole cents. */
   flat_amount_cents?: string;
   graduated_tiers?: RatingRuleGraduatedTiersItem[];
+  lifecycle_state?: RatingRuleLifecycleState;
+  package_size?: number;
+  package_amount_cents?: number;
+  /** Per-unit overage rate in cents, as a decimal string. */
+  overage_unit_amount_cents?: string;
+  created_at?: string;
 }

@@ -16,4 +16,5 @@ export const ListCreditNotesRefundStatus = {
   pending: 'pending',
   succeeded: 'succeeded',
   failed: 'failed',
+  needs_attention: 'needs_attention',
 } as const;

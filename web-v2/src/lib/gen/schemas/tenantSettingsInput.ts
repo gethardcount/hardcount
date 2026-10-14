@@ -50,7 +50,12 @@ export interface TenantSettingsInput {
   tax_inclusive?: boolean;
   /** What to do when the tax provider fails. `block` holds the invoice until tax succeeds. */
   tax_on_failure?: TenantSettingsInputTaxOnFailure;
-  /** Stripe product tax code used when a plan has none, such as `txcd_10103001`. */
+  /**
+     * Stripe product tax code used when a plan has none, such as
+     * `txcd_10103001`. Empty is allowed. Surrounding whitespace is
+     * trimmed before the check.
+     * @pattern ^(txcd_[0-9]{8})?$
+     */
   default_product_tax_code?: string;
   /**
      * Shown on invoices and as the sender name on emails. No line breaks.
@@ -67,7 +72,13 @@ export interface TenantSettingsInput {
   company_state?: string;
   /** @maxLength 20 */
   company_postal_code?: string;
-  /** ISO 3166 alpha-2 code, such as `US`. */
+  /**
+     * ISO 3166 alpha-2 code, such as `US`. Empty is allowed.
+     * Whitespace is trimmed and the code is upper-cased before it is
+     * checked and stored.
+     * @maxLength 2
+     * @pattern ^([A-Za-z]{2})?$
+     */
   company_country?: string;
   company_email?: string;
   /** 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`. */

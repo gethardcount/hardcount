@@ -7,10 +7,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { GetV1Members200MembersItem } from './getV1Members200MembersItem';
+import type { ListMembers200MembersItem } from './listMembers200MembersItem';
 import type { MemberInvitation } from './memberInvitation';
 
-export type GetV1Members200 = {
-  members: GetV1Members200MembersItem[];
+export type ListMembers200 = {
+  members: ListMembers200MembersItem[];
   invitations: MemberInvitation[];
 };

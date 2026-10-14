@@ -21,7 +21,22 @@ export type BackfillUsageEventBody = {
   dimensions?: BackfillUsageEventBodyDimensions;
   /** Older name for `dimensions`. Used only when `dimensions` is absent. */
   properties?: BackfillUsageEventBodyProperties;
-  idempotency_key?: string;
+  /**
+     * Your unique ID for this event. Pick it once, before the
+     * first send, and send the same key on every retry of the
+     * event. Keys are unique per tenant and mode (live or
+     * test), forever. An event whose key was already used is
+     * not stored again: the first event wins and the new body
+     * is discarded. So never reuse a key for a different
+     * event, such as a batch index or a timestamp that can
+     * repeat, or that usage is lost. Empty or whitespace-only
+     * keys are refused with 422, and so are keys longer than
+     * 255 characters. The `Idempotency-Key` header does not
+     * count as this key: it caches one HTTP response for 24
+     * hours.
+     * @maxLength 255
+     */
+  idempotency_key: string;
   /** RFC 3339. Must not be in the future. */
   timestamp: string;
 };

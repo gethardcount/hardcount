@@ -8,18 +8,50 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { BillingFailure } from './billingFailure';
+import type { SubscriptionBillingThresholds } from './subscriptionBillingThresholds';
 import type { SubscriptionBillingTime } from './subscriptionBillingTime';
+import type { SubscriptionItem } from './subscriptionItem';
+import type { SubscriptionPauseCollection } from './subscriptionPauseCollection';
 import type { SubscriptionStatus } from './subscriptionStatus';
 
 export interface Subscription {
-  id?: string;
-  code?: string;
-  display_name?: string;
-  customer_id?: string;
-  plan_id?: string;
-  status?: SubscriptionStatus;
-  billing_time?: SubscriptionBillingTime;
+  id: string;
+  tenant_id?: string;
+  code: string;
+  display_name: string;
+  customer_id: string;
+  /** The subscription's priced lines. Each item names its plan. */
+  items?: SubscriptionItem[];
+  status: SubscriptionStatus;
+  billing_time: SubscriptionBillingTime;
   trial_start_at?: string;
   trial_end_at?: string;
+  started_at?: string;
+  activated_at?: string;
+  /** When the subscription was canceled. Absent until then. */
+  canceled_at?: string;
+  /** A scheduled cancel time, if one is set. */
+  cancel_at?: string;
+  /** True when the subscription cancels at the end of the current period. */
+  cancel_at_period_end: boolean;
+  /** When a scheduled cancel takes effect. Absent when no cancel is scheduled. */
+  cancel_effective_at?: string;
+  pause_collection?: SubscriptionPauseCollection;
+  billing_thresholds?: SubscriptionBillingThresholds;
+  current_billing_period_start?: string;
+  /** End of the current period (exclusive). */
+  current_billing_period_end?: string;
+  /** The current period as text, with the last day included, in the tenant's billing time zone. */
+  current_billing_period_display?: string;
+  next_billing_at?: string;
+  /** Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
+  billing_anchor_day?: number;
+  /** Most usage units per billing period. Absent means no cap. */
+  usage_cap_units?: number;
+  /** `block` or `charge` (the default). */
+  overage_action?: string;
+  test_clock_id?: string;
   billing_failure?: BillingFailure;
+  created_at: string;
+  updated_at: string;
 }

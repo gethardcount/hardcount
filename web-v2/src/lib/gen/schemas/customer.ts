@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { CustomerEmailStatus } from './customerEmailStatus';
 import type { CustomerStatus } from './customerStatus';
 
 export interface Customer {
@@ -33,4 +34,15 @@ export interface Customer {
      * banner on the customer and its invoices.
      */
   test_clock_id?: string;
+  tenant_id?: string;
+  /** Deliverability of `email`, learned from bounce and complaint reports. */
+  email_status?: CustomerEmailStatus;
+  email_last_bounced_at?: string;
+  email_bounce_reason?: string;
+  /** Assigned dunning policy; absent means the tenant default. */
+  dunning_policy_id?: string;
+  /** The Stripe customer. Absent until the first payment-method action. */
+  stripe_customer_id?: string;
+  livemode?: boolean;
+  updated_at?: string;
 }

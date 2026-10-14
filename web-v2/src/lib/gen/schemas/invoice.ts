@@ -33,7 +33,7 @@ export interface Invoice {
   customer_id: string;
   /** Empty for one-off invoices not tied to a subscription. */
   subscription_id: string;
-  /** Empty until the invoice is finalized. */
+  /** Set when the invoice is created, including drafts. */
   invoice_number: string;
   status: InvoiceStatus;
   payment_status: InvoicePaymentStatus;

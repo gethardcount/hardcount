@@ -16,7 +16,11 @@ import type { CustomerUsageTotalsItem } from './customerUsageTotalsItem';
 export interface CustomerUsage {
   customer_id: string;
   period: CustomerUsagePeriod;
-  /** Active and trialing subscriptions. */
+  /**
+     * One entry per item of each active or trialing subscription. A
+     * subscription with several plans appears once per plan, with the
+     * same `id`.
+     */
   subscriptions: CustomerUsageSubscriptionsItem[];
   meters: CustomerUsageMeter[];
   /** One entry per currency. */

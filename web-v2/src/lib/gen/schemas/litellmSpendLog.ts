@@ -41,7 +41,11 @@ export interface LitellmSpendLog {
      * The provider's own cost, in dollars. When present, each event's
      * provider cost comes from its part (input, output or cache read)
      * instead of the provider-costs table. A part that is missing or
-     * negative falls back to the table.
+     * negative falls back to the table. `input_cost` includes cache
+     * reads, so the input event gets `input_cost` minus
+     * `cache_read_cost`. If there were cache reads but no
+     * `cache_read_cost`, the input and cache-read events use the
+     * provider-costs table.
      */
   cost_breakdown?: LitellmSpendLogCostBreakdown;
   /** Unix seconds. Event time when `endTime` is absent. */

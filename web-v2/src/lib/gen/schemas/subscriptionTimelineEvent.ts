@@ -15,7 +15,7 @@ export interface SubscriptionTimelineEvent {
   source: SubscriptionTimelineEventSource;
   /** The audit action, e.g. `create`, `cancel`, `subscription.item_updated`. */
   event_type: string;
-  /** Display tone for the row, e.g. `info`, `succeeded`, `warning`, `canceled`. */
+  /** Display tone for the row: `info`, `succeeded`, `success` (scheduled plan change applied), `warning` or `canceled`. */
   status: string;
   /** One-line summary, e.g. "Subscription canceled". */
   description: string;

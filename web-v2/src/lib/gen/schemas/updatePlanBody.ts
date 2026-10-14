@@ -11,7 +11,7 @@ import type { UpdatePlanBodyBaseBillTiming } from './updatePlanBodyBaseBillTimin
 import type { UpdatePlanBodyStatus } from './updatePlanBodyStatus';
 
 export type UpdatePlanBody = {
-  /** @maxLength 255 */
+  /** Whitespace is trimmed. Empty or omitted keeps the current name. */
   name?: string;
   /** Omitting it clears the stored description. */
   description?: string;
