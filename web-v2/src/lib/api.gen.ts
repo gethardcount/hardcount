@@ -5775,13 +5775,11 @@ export interface components {
         Error: {
             error?: {
                 /**
-                 * @description Usually one of `invalid_request_error`,
-                 *     `authentication_error`, `rate_limit_error` or `api_error`.
-                 *     Some errors use another value: `invalid_state`,
-                 *     `validation_error` and `invalid_body` on a few routes, and
+                 * @description One of `invalid_request_error`, `authentication_error`,
+                 *     `rate_limit_error` or `api_error`, except when the
+                 *     `Idempotency-Key` header is the problem: then it is
                  *     `idempotency_error`, `conflict_idempotency`,
-                 *     `conflict_idempotency_unresolved` or `bad_request` when the
-                 *     `Idempotency-Key` header is the problem. Idempotency errors
+                 *     `conflict_idempotency_unresolved` or `bad_request`. Idempotency errors
                  *     have only `type` and `message`. See docs/api-surface.md.
                  * @example invalid_request_error
                  */
