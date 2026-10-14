@@ -76,6 +76,6 @@ The words Velox docs use, grouped by area. Each entry links to the doc that expl
 
 ## Project terms
 
-- **design partner (DP)**: An early customer who works with the team to shape the product. In Velox docs, many features are deferred until a design partner asks for them, for example RBAC or Helm charts. [More](roadmap.md#explicitly-deferred-on-hold-pending-design-partner)
+- **design partner (DP)**: An early customer who works with the team to shape the product. In Velox docs, many features are deferred until a design partner asks for them, for example RBAC or Helm charts. [More](roadmap.md#not-planned-for-now)
 - **site-set (and effect-firer, gated reader)**: Every code place that touches one state, such as an invoice status. That means each writer and each effect-firer (code that sends an email, webhook, Stripe call or ledger write on a change). It also means each gated reader (code that branches on the state), each caller and callee, and each crash point. [More](dev/money-path-robustness-playbook.md#2-the-meta-practice-complete-site-set-enumeration)
 - **FLOW (in MANUAL_TEST)**: One named section of MANUAL_TEST.md that a person runs by hand to prove a product feature works end to end. Each flow has a stable ID (for example FLOW S1) and checkbox steps, each with one observable result. [More](../MANUAL_TEST.md#flow-index)
