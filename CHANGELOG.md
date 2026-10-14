@@ -27,6 +27,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **The customer Activity card's total no longer adds up different currencies or calls quantities "events" (2026-10-15).** It showed one sum of every currency's usage in the first currency, and a count that was really billed quantity in mixed units. It now shows billed usage per currency; each meter row gives its own quantity and unit.
+
 - **A meter's row in Activity no longer reads "0 tokens · 0 rules" when its usage has no price (2026-10-15).** It now says both numbers, as in "0 tokens billed · 12,400 tokens not billed · no price matched", matching the notice above it.
 - **Activity's 7d, 30d and 90d windows include the latest usage (2026-10-15).** The window ended exactly at "now" and left out events stamped at that instant, which is every event sent without a timestamp to a customer on a test clock. The 30d view showed $0.00 while the Cycle view showed the usage. The Margin card had the same gap.
 - **Long emails and IDs no longer run over their labels (2026-10-15).** On a phone, the customer Details card and the subscription Properties card put each value under its label and wrap long values.
