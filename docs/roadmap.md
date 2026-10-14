@@ -4,16 +4,16 @@ What changed lately, and what is being worked on next. Every change, with its da
 
 ## Shipped recently
 
-October 2026 (items marked * are on `main` and arrive in the next release; the rest are in v0.6.1):
+October 2026 (v0.6.1 and v0.7.0):
 
-- **Try it with Docker only.\*** `deploy/compose/quickstart.sh` starts Velox from the published images and prints a login, and `./quickstart.sh demo` runs AI token usage through to an invoice.
-- **Late usage is billed.\*** An invoice is built an hour after its period ends (`INVOICE_GRACE_PERIOD`), so usage that arrives a little late still counts.
-- **Issued invoices do not change.\*** An invoice or credit note keeps the customer and company details it was issued with.
+- **Try it with Docker only.** `deploy/compose/quickstart.sh` starts Velox from the published images and prints a login, and `./quickstart.sh demo` runs AI token usage through to an invoice.
+- **Late usage is billed.** An invoice is built an hour after its period ends (`INVOICE_GRACE_PERIOD`), so usage that arrives a little late still counts.
+- **Issued invoices do not change.** An invoice or credit note keeps the customer and company details it was issued with.
 - **Billing that keeps failing is visible.** The dashboard marks subscriptions whose billing is failing, says why, and has a Retry button.
 - **Live credit balance.** `GET /v1/credits/balance/{customer_id}/live` and the public cost page show how much prepaid credit a customer has left, including usage not yet invoiced.
 - **LiteLLM works with a real proxy.** Usage from a LiteLLM proxy is recorded per model and token type, with the provider's own cost when the proxy sends it.
-- **Safer payments.\*** A void, write-off or bank payment waits for a card charge in progress, and a Stripe rate limit no longer stops an invoice.
-- **Login works in Safari when Velox runs on localhost.\***
+- **Safer payments.** A void, write-off or bank payment waits for a card charge in progress, and a Stripe rate limit no longer stops an invoice.
+- **Login works in Safari when Velox runs on localhost.**
 - **Security fixes.** Endpoints refuse ids from another account, webhooks check the address they connect to, and `/metrics` needs a token in production.
 - **Release images for ARM and Intel/AMD**, signed with cosign.
 

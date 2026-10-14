@@ -15,6 +15,10 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-14
+
+A one-command Docker install, late usage billed, issued invoices that never change, a complete API reference, and fixes from a pre-launch check. Breaking for usage ingest (`idempotency_key` is required) and for invoice timing (built 1 to 2 hours after the period ends). One database migration (0177).
+
 **Before upgrading:**
 
 - **Period-end invoices are now built 1 to 2 hours after the period ends** (was within 1 hour), so late usage is billed. Set `INVOICE_GRACE_PERIOD=0` for the old timing. Also later by up to the grace:
@@ -4889,7 +4893,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/getvelox/velox/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/getvelox/velox/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/getvelox/velox/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/getvelox/velox/compare/v0.4.0...v0.5.0
