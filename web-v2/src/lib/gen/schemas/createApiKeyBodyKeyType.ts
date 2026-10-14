@@ -8,12 +8,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type ErrorErrorType = typeof ErrorErrorType[keyof typeof ErrorErrorType];
+export type CreateApiKeyBodyKeyType = typeof CreateApiKeyBodyKeyType[keyof typeof CreateApiKeyBodyKeyType];
 
 
-export const ErrorErrorType = {
-  invalid_request_error: 'invalid_request_error',
-  authentication_error: 'authentication_error',
-  rate_limit_error: 'rate_limit_error',
-  api_error: 'api_error',
+export const CreateApiKeyBodyKeyType = {
+  secret: 'secret',
+  publishable: 'publishable',
+  platform: 'platform',
 } as const;

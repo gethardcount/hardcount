@@ -26,6 +26,8 @@ Older entries keep their original text.
 
 ### Added
 
+- **The API reference covers every route you call (2026-10-14, #962).** `api/openapi.yaml` documents 175 operations, up from 68. The few routes left out are listed in [API surface](docs/api-surface.md).
+
 - **Usage that arrives up to an hour after its period ends is billed: `INVOICE_GRACE_PERIOD` (2026-10-14, #961).** The invoice for an ended period is built once the grace (default `1h`, `0` to `72h`) has passed, for every subscription, flat-fee ones too. Invoice dates stay at the period end; the webhook, charge and dunning come up to that much later. Usage arriving after the invoice is stored, not billed. [ADR-120](docs/adr/120-invoice-grace-period-for-late-usage.md).
 
 - **Try Velox with only Docker: `deploy/compose/quickstart.sh` (2026-10-14, #959).** One command starts Velox from the published release images, writes the four secrets, creates the first login and prints it with a test API key. `./quickstart.sh demo` then runs the demo flow to a finalized invoice, in a container, so Go, Node and `jq` are not needed. It uses its own Compose project name and port 8080, so it does not touch another Velox stack on the same machine. The README quick start now uses it; the from-source setup moved to CONTRIBUTING.

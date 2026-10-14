@@ -17,8 +17,54 @@ import (
 )
 
 const (
-	BearerAuthScopes bearerAuthContextKey = "BearerAuth.Scopes"
+	BearerAuthScopes    bearerAuthContextKey    = "BearerAuth.Scopes"
+	SessionCookieScopes sessionCookieContextKey = "SessionCookie.Scopes"
 )
+
+// Defines values for APIKeyKeyType.
+const (
+	APIKeyKeyTypePlatform    APIKeyKeyType = "platform"
+	APIKeyKeyTypePublishable APIKeyKeyType = "publishable"
+	APIKeyKeyTypeSecret      APIKeyKeyType = "secret"
+)
+
+// Valid indicates whether the value is a known member of the APIKeyKeyType enum.
+func (e APIKeyKeyType) Valid() bool {
+	switch e {
+	case APIKeyKeyTypePlatform:
+		return true
+	case APIKeyKeyTypePublishable:
+		return true
+	case APIKeyKeyTypeSecret:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AnalyticsPeriod.
+const (
+	N12m AnalyticsPeriod = "12m"
+	N30d AnalyticsPeriod = "30d"
+	N7d  AnalyticsPeriod = "7d"
+	N90d AnalyticsPeriod = "90d"
+)
+
+// Valid indicates whether the value is a known member of the AnalyticsPeriod enum.
+func (e AnalyticsPeriod) Valid() bool {
+	switch e {
+	case N12m:
+		return true
+	case N30d:
+		return true
+	case N7d:
+		return true
+	case N90d:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for AttentionAction.
 const (
@@ -73,46 +119,46 @@ func (e AttentionAction) Valid() bool {
 
 // Defines values for AttentionReason.
 const (
-	AwaitingPayment      AttentionReason = "awaiting_payment"
-	CollectionPaused     AttentionReason = "collection_paused"
-	CommitExposure       AttentionReason = "commit_exposure"
-	DunningExhausted     AttentionReason = "dunning_exhausted"
-	NoPaymentMethod      AttentionReason = "no_payment_method"
-	PaymentAnomaly       AttentionReason = "payment_anomaly"
-	PaymentFailed        AttentionReason = "payment_failed"
-	PaymentProcessing    AttentionReason = "payment_processing"
-	PaymentScheduled     AttentionReason = "payment_scheduled"
-	PaymentUnconfirmed   AttentionReason = "payment_unconfirmed"
-	TaxCalculationFailed AttentionReason = "tax_calculation_failed"
-	TaxLocationRequired  AttentionReason = "tax_location_required"
+	AttentionReasonAwaitingPayment      AttentionReason = "awaiting_payment"
+	AttentionReasonCollectionPaused     AttentionReason = "collection_paused"
+	AttentionReasonCommitExposure       AttentionReason = "commit_exposure"
+	AttentionReasonDunningExhausted     AttentionReason = "dunning_exhausted"
+	AttentionReasonNoPaymentMethod      AttentionReason = "no_payment_method"
+	AttentionReasonPaymentAnomaly       AttentionReason = "payment_anomaly"
+	AttentionReasonPaymentFailed        AttentionReason = "payment_failed"
+	AttentionReasonPaymentProcessing    AttentionReason = "payment_processing"
+	AttentionReasonPaymentScheduled     AttentionReason = "payment_scheduled"
+	AttentionReasonPaymentUnconfirmed   AttentionReason = "payment_unconfirmed"
+	AttentionReasonTaxCalculationFailed AttentionReason = "tax_calculation_failed"
+	AttentionReasonTaxLocationRequired  AttentionReason = "tax_location_required"
 )
 
 // Valid indicates whether the value is a known member of the AttentionReason enum.
 func (e AttentionReason) Valid() bool {
 	switch e {
-	case AwaitingPayment:
+	case AttentionReasonAwaitingPayment:
 		return true
-	case CollectionPaused:
+	case AttentionReasonCollectionPaused:
 		return true
-	case CommitExposure:
+	case AttentionReasonCommitExposure:
 		return true
-	case DunningExhausted:
+	case AttentionReasonDunningExhausted:
 		return true
-	case NoPaymentMethod:
+	case AttentionReasonNoPaymentMethod:
 		return true
-	case PaymentAnomaly:
+	case AttentionReasonPaymentAnomaly:
 		return true
-	case PaymentFailed:
+	case AttentionReasonPaymentFailed:
 		return true
-	case PaymentProcessing:
+	case AttentionReasonPaymentProcessing:
 		return true
-	case PaymentScheduled:
+	case AttentionReasonPaymentScheduled:
 		return true
-	case PaymentUnconfirmed:
+	case AttentionReasonPaymentUnconfirmed:
 		return true
-	case TaxCalculationFailed:
+	case AttentionReasonTaxCalculationFailed:
 		return true
-	case TaxLocationRequired:
+	case AttentionReasonTaxLocationRequired:
 		return true
 	default:
 		return false
@@ -140,6 +186,114 @@ func (e AttentionSeverity) Valid() bool {
 	}
 }
 
+// Defines values for AuditLogEntryActorType.
+const (
+	ApiKey AuditLogEntryActorType = "api_key"
+	System AuditLogEntryActorType = "system"
+	User   AuditLogEntryActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuditLogEntryActorType enum.
+func (e AuditLogEntryActorType) Valid() bool {
+	switch e {
+	case ApiKey:
+		return true
+	case System:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreditLedgerEntryEntryType.
+const (
+	CreditLedgerEntryEntryTypeAdjustment CreditLedgerEntryEntryType = "adjustment"
+	CreditLedgerEntryEntryTypeExpiry     CreditLedgerEntryEntryType = "expiry"
+	CreditLedgerEntryEntryTypeGrant      CreditLedgerEntryEntryType = "grant"
+	CreditLedgerEntryEntryTypeUsage      CreditLedgerEntryEntryType = "usage"
+)
+
+// Valid indicates whether the value is a known member of the CreditLedgerEntryEntryType enum.
+func (e CreditLedgerEntryEntryType) Valid() bool {
+	switch e {
+	case CreditLedgerEntryEntryTypeAdjustment:
+		return true
+	case CreditLedgerEntryEntryTypeExpiry:
+		return true
+	case CreditLedgerEntryEntryTypeGrant:
+		return true
+	case CreditLedgerEntryEntryTypeUsage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreditLedgerEntryGrantKind.
+const (
+	CreditLedgerEntryGrantKindCommit      CreditLedgerEntryGrantKind = "commit"
+	CreditLedgerEntryGrantKindPromotional CreditLedgerEntryGrantKind = "promotional"
+)
+
+// Valid indicates whether the value is a known member of the CreditLedgerEntryGrantKind enum.
+func (e CreditLedgerEntryGrantKind) Valid() bool {
+	switch e {
+	case CreditLedgerEntryGrantKindCommit:
+		return true
+	case CreditLedgerEntryGrantKindPromotional:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreditNoteRefundStatus.
+const (
+	CreditNoteRefundStatusFailed    CreditNoteRefundStatus = "failed"
+	CreditNoteRefundStatusNone      CreditNoteRefundStatus = "none"
+	CreditNoteRefundStatusPending   CreditNoteRefundStatus = "pending"
+	CreditNoteRefundStatusSucceeded CreditNoteRefundStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the CreditNoteRefundStatus enum.
+func (e CreditNoteRefundStatus) Valid() bool {
+	switch e {
+	case CreditNoteRefundStatusFailed:
+		return true
+	case CreditNoteRefundStatusNone:
+		return true
+	case CreditNoteRefundStatusPending:
+		return true
+	case CreditNoteRefundStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreditNoteStatus.
+const (
+	CreditNoteStatusDraft  CreditNoteStatus = "draft"
+	CreditNoteStatusIssued CreditNoteStatus = "issued"
+	CreditNoteStatusVoided CreditNoteStatus = "voided"
+)
+
+// Valid indicates whether the value is a known member of the CreditNoteStatus enum.
+func (e CreditNoteStatus) Valid() bool {
+	switch e {
+	case CreditNoteStatusDraft:
+		return true
+	case CreditNoteStatusIssued:
+		return true
+	case CreditNoteStatusVoided:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CustomerStatus.
 const (
 	CustomerStatusActive   CustomerStatus = "active"
@@ -158,24 +312,333 @@ func (e CustomerStatus) Valid() bool {
 	}
 }
 
-// Defines values for ErrorErrorType.
+// Defines values for CustomerBillingProfileProfileStatus.
 const (
-	ApiError            ErrorErrorType = "api_error"
-	AuthenticationError ErrorErrorType = "authentication_error"
-	InvalidRequestError ErrorErrorType = "invalid_request_error"
-	RateLimitError      ErrorErrorType = "rate_limit_error"
+	Incomplete CustomerBillingProfileProfileStatus = "incomplete"
+	Ready      CustomerBillingProfileProfileStatus = "ready"
 )
 
-// Valid indicates whether the value is a known member of the ErrorErrorType enum.
-func (e ErrorErrorType) Valid() bool {
+// Valid indicates whether the value is a known member of the CustomerBillingProfileProfileStatus enum.
+func (e CustomerBillingProfileProfileStatus) Valid() bool {
 	switch e {
-	case ApiError:
+	case Incomplete:
 		return true
-	case AuthenticationError:
+	case Ready:
 		return true
-	case InvalidRequestError:
+	default:
+		return false
+	}
+}
+
+// Defines values for CustomerBillingProfileTaxStatus.
+const (
+	CustomerBillingProfileTaxStatusExempt        CustomerBillingProfileTaxStatus = "exempt"
+	CustomerBillingProfileTaxStatusReverseCharge CustomerBillingProfileTaxStatus = "reverse_charge"
+	CustomerBillingProfileTaxStatusStandard      CustomerBillingProfileTaxStatus = "standard"
+)
+
+// Valid indicates whether the value is a known member of the CustomerBillingProfileTaxStatus enum.
+func (e CustomerBillingProfileTaxStatus) Valid() bool {
+	switch e {
+	case CustomerBillingProfileTaxStatusExempt:
 		return true
-	case RateLimitError:
+	case CustomerBillingProfileTaxStatusReverseCharge:
+		return true
+	case CustomerBillingProfileTaxStatusStandard:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CustomerBillingProfileInputTaxStatus.
+const (
+	CustomerBillingProfileInputTaxStatusExempt        CustomerBillingProfileInputTaxStatus = "exempt"
+	CustomerBillingProfileInputTaxStatusReverseCharge CustomerBillingProfileInputTaxStatus = "reverse_charge"
+	CustomerBillingProfileInputTaxStatusStandard      CustomerBillingProfileInputTaxStatus = "standard"
+)
+
+// Valid indicates whether the value is a known member of the CustomerBillingProfileInputTaxStatus enum.
+func (e CustomerBillingProfileInputTaxStatus) Valid() bool {
+	switch e {
+	case CustomerBillingProfileInputTaxStatusExempt:
+		return true
+	case CustomerBillingProfileInputTaxStatusReverseCharge:
+		return true
+	case CustomerBillingProfileInputTaxStatusStandard:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CustomerPriceOverrideMode.
+const (
+	CustomerPriceOverrideModeFlat      CustomerPriceOverrideMode = "flat"
+	CustomerPriceOverrideModeGraduated CustomerPriceOverrideMode = "graduated"
+	CustomerPriceOverrideModePackage   CustomerPriceOverrideMode = "package"
+)
+
+// Valid indicates whether the value is a known member of the CustomerPriceOverrideMode enum.
+func (e CustomerPriceOverrideMode) Valid() bool {
+	switch e {
+	case CustomerPriceOverrideModeFlat:
+		return true
+	case CustomerPriceOverrideModeGraduated:
+		return true
+	case CustomerPriceOverrideModePackage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CustomerUsagePeriodSource.
+const (
+	CurrentBillingCycle CustomerUsagePeriodSource = "current_billing_cycle"
+	Explicit            CustomerUsagePeriodSource = "explicit"
+)
+
+// Valid indicates whether the value is a known member of the CustomerUsagePeriodSource enum.
+func (e CustomerUsagePeriodSource) Valid() bool {
+	switch e {
+	case CurrentBillingCycle:
+		return true
+	case Explicit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningPolicyFinalInvoiceAction.
+const (
+	DunningPolicyFinalInvoiceActionMarkUncollectible DunningPolicyFinalInvoiceAction = "mark_uncollectible"
+	DunningPolicyFinalInvoiceActionNone              DunningPolicyFinalInvoiceAction = "none"
+)
+
+// Valid indicates whether the value is a known member of the DunningPolicyFinalInvoiceAction enum.
+func (e DunningPolicyFinalInvoiceAction) Valid() bool {
+	switch e {
+	case DunningPolicyFinalInvoiceActionMarkUncollectible:
+		return true
+	case DunningPolicyFinalInvoiceActionNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningPolicyFinalSubscriptionAction.
+const (
+	DunningPolicyFinalSubscriptionActionCancel DunningPolicyFinalSubscriptionAction = "cancel"
+	DunningPolicyFinalSubscriptionActionNone   DunningPolicyFinalSubscriptionAction = "none"
+	DunningPolicyFinalSubscriptionActionPause  DunningPolicyFinalSubscriptionAction = "pause"
+)
+
+// Valid indicates whether the value is a known member of the DunningPolicyFinalSubscriptionAction enum.
+func (e DunningPolicyFinalSubscriptionAction) Valid() bool {
+	switch e {
+	case DunningPolicyFinalSubscriptionActionCancel:
+		return true
+	case DunningPolicyFinalSubscriptionActionNone:
+		return true
+	case DunningPolicyFinalSubscriptionActionPause:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningPolicyInputFinalInvoiceAction.
+const (
+	DunningPolicyInputFinalInvoiceActionMarkUncollectible DunningPolicyInputFinalInvoiceAction = "mark_uncollectible"
+	DunningPolicyInputFinalInvoiceActionNone              DunningPolicyInputFinalInvoiceAction = "none"
+)
+
+// Valid indicates whether the value is a known member of the DunningPolicyInputFinalInvoiceAction enum.
+func (e DunningPolicyInputFinalInvoiceAction) Valid() bool {
+	switch e {
+	case DunningPolicyInputFinalInvoiceActionMarkUncollectible:
+		return true
+	case DunningPolicyInputFinalInvoiceActionNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningPolicyInputFinalSubscriptionAction.
+const (
+	DunningPolicyInputFinalSubscriptionActionCancel DunningPolicyInputFinalSubscriptionAction = "cancel"
+	DunningPolicyInputFinalSubscriptionActionNone   DunningPolicyInputFinalSubscriptionAction = "none"
+	DunningPolicyInputFinalSubscriptionActionPause  DunningPolicyInputFinalSubscriptionAction = "pause"
+)
+
+// Valid indicates whether the value is a known member of the DunningPolicyInputFinalSubscriptionAction enum.
+func (e DunningPolicyInputFinalSubscriptionAction) Valid() bool {
+	switch e {
+	case DunningPolicyInputFinalSubscriptionActionCancel:
+		return true
+	case DunningPolicyInputFinalSubscriptionActionNone:
+		return true
+	case DunningPolicyInputFinalSubscriptionActionPause:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningPolicyListItemFinalInvoiceAction.
+const (
+	DunningPolicyListItemFinalInvoiceActionMarkUncollectible DunningPolicyListItemFinalInvoiceAction = "mark_uncollectible"
+	DunningPolicyListItemFinalInvoiceActionNone              DunningPolicyListItemFinalInvoiceAction = "none"
+)
+
+// Valid indicates whether the value is a known member of the DunningPolicyListItemFinalInvoiceAction enum.
+func (e DunningPolicyListItemFinalInvoiceAction) Valid() bool {
+	switch e {
+	case DunningPolicyListItemFinalInvoiceActionMarkUncollectible:
+		return true
+	case DunningPolicyListItemFinalInvoiceActionNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningPolicyListItemFinalSubscriptionAction.
+const (
+	DunningPolicyListItemFinalSubscriptionActionCancel DunningPolicyListItemFinalSubscriptionAction = "cancel"
+	DunningPolicyListItemFinalSubscriptionActionNone   DunningPolicyListItemFinalSubscriptionAction = "none"
+	DunningPolicyListItemFinalSubscriptionActionPause  DunningPolicyListItemFinalSubscriptionAction = "pause"
+)
+
+// Valid indicates whether the value is a known member of the DunningPolicyListItemFinalSubscriptionAction enum.
+func (e DunningPolicyListItemFinalSubscriptionAction) Valid() bool {
+	switch e {
+	case DunningPolicyListItemFinalSubscriptionActionCancel:
+		return true
+	case DunningPolicyListItemFinalSubscriptionActionNone:
+		return true
+	case DunningPolicyListItemFinalSubscriptionActionPause:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningRunResolution.
+const (
+	DunningRunResolutionActionFailed          DunningRunResolution = "action_failed"
+	DunningRunResolutionInvoiceNotCollectible DunningRunResolution = "invoice_not_collectible"
+	DunningRunResolutionInvoiceVoided         DunningRunResolution = "invoice_voided"
+	DunningRunResolutionManuallyResolved      DunningRunResolution = "manually_resolved"
+	DunningRunResolutionPaymentRecovered      DunningRunResolution = "payment_recovered"
+	DunningRunResolutionRetriesExhausted      DunningRunResolution = "retries_exhausted"
+)
+
+// Valid indicates whether the value is a known member of the DunningRunResolution enum.
+func (e DunningRunResolution) Valid() bool {
+	switch e {
+	case DunningRunResolutionActionFailed:
+		return true
+	case DunningRunResolutionInvoiceNotCollectible:
+		return true
+	case DunningRunResolutionInvoiceVoided:
+		return true
+	case DunningRunResolutionManuallyResolved:
+		return true
+	case DunningRunResolutionPaymentRecovered:
+		return true
+	case DunningRunResolutionRetriesExhausted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningRunState.
+const (
+	DunningRunStateActive    DunningRunState = "active"
+	DunningRunStateEscalated DunningRunState = "escalated"
+	DunningRunStatePaused    DunningRunState = "paused"
+	DunningRunStateResolved  DunningRunState = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the DunningRunState enum.
+func (e DunningRunState) Valid() bool {
+	switch e {
+	case DunningRunStateActive:
+		return true
+	case DunningRunStateEscalated:
+		return true
+	case DunningRunStatePaused:
+		return true
+	case DunningRunStateResolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningRunEventEventType.
+const (
+	DunningRunEventEventTypeDunningStarted DunningRunEventEventType = "dunning_started"
+	DunningRunEventEventTypeEscalated      DunningRunEventEventType = "escalated"
+	DunningRunEventEventTypePaused         DunningRunEventEventType = "paused"
+	DunningRunEventEventTypeResolved       DunningRunEventEventType = "resolved"
+	DunningRunEventEventTypeResumed        DunningRunEventEventType = "resumed"
+	DunningRunEventEventTypeRetryAttempted DunningRunEventEventType = "retry_attempted"
+	DunningRunEventEventTypeRetryFailed    DunningRunEventEventType = "retry_failed"
+	DunningRunEventEventTypeRetryScheduled DunningRunEventEventType = "retry_scheduled"
+	DunningRunEventEventTypeRetrySucceeded DunningRunEventEventType = "retry_succeeded"
+)
+
+// Valid indicates whether the value is a known member of the DunningRunEventEventType enum.
+func (e DunningRunEventEventType) Valid() bool {
+	switch e {
+	case DunningRunEventEventTypeDunningStarted:
+		return true
+	case DunningRunEventEventTypeEscalated:
+		return true
+	case DunningRunEventEventTypePaused:
+		return true
+	case DunningRunEventEventTypeResolved:
+		return true
+	case DunningRunEventEventTypeResumed:
+		return true
+	case DunningRunEventEventTypeRetryAttempted:
+		return true
+	case DunningRunEventEventTypeRetryFailed:
+		return true
+	case DunningRunEventEventTypeRetryScheduled:
+		return true
+	case DunningRunEventEventTypeRetrySucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DunningRunEventState.
+const (
+	DunningRunEventStateActive    DunningRunEventState = "active"
+	DunningRunEventStateEscalated DunningRunEventState = "escalated"
+	DunningRunEventStatePaused    DunningRunEventState = "paused"
+	DunningRunEventStateResolved  DunningRunEventState = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the DunningRunEventState enum.
+func (e DunningRunEventState) Valid() bool {
+	switch e {
+	case DunningRunEventStateActive:
+		return true
+	case DunningRunEventStateEscalated:
+		return true
+	case DunningRunEventStatePaused:
+		return true
+	case DunningRunEventStateResolved:
 		return true
 	default:
 		return false
@@ -184,28 +647,55 @@ func (e ErrorErrorType) Valid() bool {
 
 // Defines values for InvoiceBillingReason.
 const (
-	Manual             InvoiceBillingReason = "manual"
-	SubscriptionCancel InvoiceBillingReason = "subscription_cancel"
-	SubscriptionCreate InvoiceBillingReason = "subscription_create"
-	SubscriptionCycle  InvoiceBillingReason = "subscription_cycle"
-	SubscriptionUpdate InvoiceBillingReason = "subscription_update"
-	Threshold          InvoiceBillingReason = "threshold"
+	InvoiceBillingReasonManual             InvoiceBillingReason = "manual"
+	InvoiceBillingReasonSubscriptionCancel InvoiceBillingReason = "subscription_cancel"
+	InvoiceBillingReasonSubscriptionCreate InvoiceBillingReason = "subscription_create"
+	InvoiceBillingReasonSubscriptionCycle  InvoiceBillingReason = "subscription_cycle"
+	InvoiceBillingReasonSubscriptionUpdate InvoiceBillingReason = "subscription_update"
+	InvoiceBillingReasonThreshold          InvoiceBillingReason = "threshold"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceBillingReason enum.
 func (e InvoiceBillingReason) Valid() bool {
 	switch e {
-	case Manual:
+	case InvoiceBillingReasonManual:
 		return true
-	case SubscriptionCancel:
+	case InvoiceBillingReasonSubscriptionCancel:
 		return true
-	case SubscriptionCreate:
+	case InvoiceBillingReasonSubscriptionCreate:
 		return true
-	case SubscriptionCycle:
+	case InvoiceBillingReasonSubscriptionCycle:
 		return true
-	case SubscriptionUpdate:
+	case InvoiceBillingReasonSubscriptionUpdate:
 		return true
-	case Threshold:
+	case InvoiceBillingReasonThreshold:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvoiceLineItemInputLineType.
+const (
+	InvoiceLineItemInputLineTypeAddOn    InvoiceLineItemInputLineType = "add_on"
+	InvoiceLineItemInputLineTypeBaseFee  InvoiceLineItemInputLineType = "base_fee"
+	InvoiceLineItemInputLineTypeDiscount InvoiceLineItemInputLineType = "discount"
+	InvoiceLineItemInputLineTypeTax      InvoiceLineItemInputLineType = "tax"
+	InvoiceLineItemInputLineTypeUsage    InvoiceLineItemInputLineType = "usage"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceLineItemInputLineType enum.
+func (e InvoiceLineItemInputLineType) Valid() bool {
+	switch e {
+	case InvoiceLineItemInputLineTypeAddOn:
+		return true
+	case InvoiceLineItemInputLineTypeBaseFee:
+		return true
+	case InvoiceLineItemInputLineTypeDiscount:
+		return true
+	case InvoiceLineItemInputLineTypeTax:
+		return true
+	case InvoiceLineItemInputLineTypeUsage:
 		return true
 	default:
 		return false
@@ -214,25 +704,25 @@ func (e InvoiceBillingReason) Valid() bool {
 
 // Defines values for InvoiceLineType.
 const (
-	AddOn    InvoiceLineType = "add_on"
-	BaseFee  InvoiceLineType = "base_fee"
-	Discount InvoiceLineType = "discount"
-	Tax      InvoiceLineType = "tax"
-	Usage    InvoiceLineType = "usage"
+	InvoiceLineTypeAddOn    InvoiceLineType = "add_on"
+	InvoiceLineTypeBaseFee  InvoiceLineType = "base_fee"
+	InvoiceLineTypeDiscount InvoiceLineType = "discount"
+	InvoiceLineTypeTax      InvoiceLineType = "tax"
+	InvoiceLineTypeUsage    InvoiceLineType = "usage"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceLineType enum.
 func (e InvoiceLineType) Valid() bool {
 	switch e {
-	case AddOn:
+	case InvoiceLineTypeAddOn:
 		return true
-	case BaseFee:
+	case InvoiceLineTypeBaseFee:
 		return true
-	case Discount:
+	case InvoiceLineTypeDiscount:
 		return true
-	case Tax:
+	case InvoiceLineTypeTax:
 		return true
-	case Usage:
+	case InvoiceLineTypeUsage:
 		return true
 	default:
 		return false
@@ -260,6 +750,33 @@ func (e InvoicePaymentStatus) Valid() bool {
 	case InvoicePaymentStatusSucceeded:
 		return true
 	case InvoicePaymentStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvoicePaymentTimelineDegraded.
+const (
+	InvoicePaymentTimelineDegradedAudit          InvoicePaymentTimelineDegraded = "audit"
+	InvoicePaymentTimelineDegradedChargeAttempts InvoicePaymentTimelineDegraded = "charge_attempts"
+	InvoicePaymentTimelineDegradedCreditNotes    InvoicePaymentTimelineDegraded = "credit_notes"
+	InvoicePaymentTimelineDegradedDunning        InvoicePaymentTimelineDegraded = "dunning"
+	InvoicePaymentTimelineDegradedEmails         InvoicePaymentTimelineDegraded = "emails"
+)
+
+// Valid indicates whether the value is a known member of the InvoicePaymentTimelineDegraded enum.
+func (e InvoicePaymentTimelineDegraded) Valid() bool {
+	switch e {
+	case InvoicePaymentTimelineDegradedAudit:
+		return true
+	case InvoicePaymentTimelineDegradedChargeAttempts:
+		return true
+	case InvoicePaymentTimelineDegradedCreditNotes:
+		return true
+	case InvoicePaymentTimelineDegradedDunning:
+		return true
+	case InvoicePaymentTimelineDegradedEmails:
 		return true
 	default:
 		return false
@@ -314,6 +831,33 @@ func (e InvoiceTaxStatus) Valid() bool {
 	}
 }
 
+// Defines values for InvoiceTimelineEventSource.
+const (
+	InvoiceTimelineEventSourceCreditNote InvoiceTimelineEventSource = "credit_note"
+	InvoiceTimelineEventSourceDunning    InvoiceTimelineEventSource = "dunning"
+	InvoiceTimelineEventSourceEmail      InvoiceTimelineEventSource = "email"
+	InvoiceTimelineEventSourceLifecycle  InvoiceTimelineEventSource = "lifecycle"
+	InvoiceTimelineEventSourceStripe     InvoiceTimelineEventSource = "stripe"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceTimelineEventSource enum.
+func (e InvoiceTimelineEventSource) Valid() bool {
+	switch e {
+	case InvoiceTimelineEventSourceCreditNote:
+		return true
+	case InvoiceTimelineEventSourceDunning:
+		return true
+	case InvoiceTimelineEventSourceEmail:
+		return true
+	case InvoiceTimelineEventSourceLifecycle:
+		return true
+	case InvoiceTimelineEventSourceStripe:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ItemChangeType.
 const (
 	ItemChangeTypeAdd      ItemChangeType = "add"
@@ -340,22 +884,22 @@ func (e ItemChangeType) Valid() bool {
 
 // Defines values for MemberInvitationStatus.
 const (
-	Accepted MemberInvitationStatus = "accepted"
-	Expired  MemberInvitationStatus = "expired"
-	Pending  MemberInvitationStatus = "pending"
-	Revoked  MemberInvitationStatus = "revoked"
+	MemberInvitationStatusAccepted MemberInvitationStatus = "accepted"
+	MemberInvitationStatusExpired  MemberInvitationStatus = "expired"
+	MemberInvitationStatusPending  MemberInvitationStatus = "pending"
+	MemberInvitationStatusRevoked  MemberInvitationStatus = "revoked"
 )
 
 // Valid indicates whether the value is a known member of the MemberInvitationStatus enum.
 func (e MemberInvitationStatus) Valid() bool {
 	switch e {
-	case Accepted:
+	case MemberInvitationStatusAccepted:
 		return true
-	case Expired:
+	case MemberInvitationStatusExpired:
 		return true
-	case Pending:
+	case MemberInvitationStatusPending:
 		return true
-	case Revoked:
+	case MemberInvitationStatusRevoked:
 		return true
 	default:
 		return false
@@ -380,6 +924,33 @@ func (e MeterAggregation) Valid() bool {
 	case MeterAggregationMax:
 		return true
 	case MeterAggregationSum:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MeterPricingRuleAggregationMode.
+const (
+	MeterPricingRuleAggregationModeCount            MeterPricingRuleAggregationMode = "count"
+	MeterPricingRuleAggregationModeLastDuringPeriod MeterPricingRuleAggregationMode = "last_during_period"
+	MeterPricingRuleAggregationModeLastEver         MeterPricingRuleAggregationMode = "last_ever"
+	MeterPricingRuleAggregationModeMax              MeterPricingRuleAggregationMode = "max"
+	MeterPricingRuleAggregationModeSum              MeterPricingRuleAggregationMode = "sum"
+)
+
+// Valid indicates whether the value is a known member of the MeterPricingRuleAggregationMode enum.
+func (e MeterPricingRuleAggregationMode) Valid() bool {
+	switch e {
+	case MeterPricingRuleAggregationModeCount:
+		return true
+	case MeterPricingRuleAggregationModeLastDuringPeriod:
+		return true
+	case MeterPricingRuleAggregationModeLastEver:
+		return true
+	case MeterPricingRuleAggregationModeMax:
+		return true
+	case MeterPricingRuleAggregationModeSum:
 		return true
 	default:
 		return false
@@ -626,6 +1197,87 @@ func (e RecoveryWarningCode) Valid() bool {
 	}
 }
 
+// Defines values for SentEmailDeliveryState.
+const (
+	Bounced    SentEmailDeliveryState = "bounced"
+	Complained SentEmailDeliveryState = "complained"
+	Delivered  SentEmailDeliveryState = "delivered"
+	Unknown    SentEmailDeliveryState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the SentEmailDeliveryState enum.
+func (e SentEmailDeliveryState) Valid() bool {
+	switch e {
+	case Bounced:
+		return true
+	case Complained:
+		return true
+	case Delivered:
+		return true
+	case Unknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SentEmailEmailType.
+const (
+	SentEmailEmailTypeCreditNote          SentEmailEmailType = "credit_note"
+	SentEmailEmailTypeDunningEscalation   SentEmailEmailType = "dunning_escalation"
+	SentEmailEmailTypeDunningWarning      SentEmailEmailType = "dunning_warning"
+	SentEmailEmailTypeInvoice             SentEmailEmailType = "invoice"
+	SentEmailEmailTypePaymentFailed       SentEmailEmailType = "payment_failed"
+	SentEmailEmailTypePaymentReceipt      SentEmailEmailType = "payment_receipt"
+	SentEmailEmailTypePaymentSetupRequest SentEmailEmailType = "payment_setup_request"
+)
+
+// Valid indicates whether the value is a known member of the SentEmailEmailType enum.
+func (e SentEmailEmailType) Valid() bool {
+	switch e {
+	case SentEmailEmailTypeCreditNote:
+		return true
+	case SentEmailEmailTypeDunningEscalation:
+		return true
+	case SentEmailEmailTypeDunningWarning:
+		return true
+	case SentEmailEmailTypeInvoice:
+		return true
+	case SentEmailEmailTypePaymentFailed:
+		return true
+	case SentEmailEmailTypePaymentReceipt:
+		return true
+	case SentEmailEmailTypePaymentSetupRequest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SentEmailStatus.
+const (
+	SentEmailStatusDispatched SentEmailStatus = "dispatched"
+	SentEmailStatusFailed     SentEmailStatus = "failed"
+	SentEmailStatusPending    SentEmailStatus = "pending"
+	SentEmailStatusSkipped    SentEmailStatus = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the SentEmailStatus enum.
+func (e SentEmailStatus) Valid() bool {
+	switch e {
+	case SentEmailStatusDispatched:
+		return true
+	case SentEmailStatusFailed:
+		return true
+	case SentEmailStatusPending:
+		return true
+	case SentEmailStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SubscriptionBillingTime.
 const (
 	SubscriptionBillingTimeAnniversary SubscriptionBillingTime = "anniversary"
@@ -671,6 +1323,312 @@ func (e SubscriptionStatus) Valid() bool {
 	}
 }
 
+// Defines values for SubscriptionItemProrationType.
+const (
+	SubscriptionItemProrationTypeAdjustment SubscriptionItemProrationType = "adjustment"
+	SubscriptionItemProrationTypeCredit     SubscriptionItemProrationType = "credit"
+	SubscriptionItemProrationTypeInvoice    SubscriptionItemProrationType = "invoice"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionItemProrationType enum.
+func (e SubscriptionItemProrationType) Valid() bool {
+	switch e {
+	case SubscriptionItemProrationTypeAdjustment:
+		return true
+	case SubscriptionItemProrationTypeCredit:
+		return true
+	case SubscriptionItemProrationTypeInvoice:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SubscriptionPauseCollectionBehavior.
+const (
+	SubscriptionPauseCollectionBehaviorKeepAsDraft SubscriptionPauseCollectionBehavior = "keep_as_draft"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionPauseCollectionBehavior enum.
+func (e SubscriptionPauseCollectionBehavior) Valid() bool {
+	switch e {
+	case SubscriptionPauseCollectionBehaviorKeepAsDraft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SubscriptionTimelineEventSource.
+const (
+	Audit SubscriptionTimelineEventSource = "audit"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionTimelineEventSource enum.
+func (e SubscriptionTimelineEventSource) Valid() bool {
+	switch e {
+	case Audit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TenantStatus.
+const (
+	TenantStatusActive    TenantStatus = "active"
+	TenantStatusDeleted   TenantStatus = "deleted"
+	TenantStatusSuspended TenantStatus = "suspended"
+)
+
+// Valid indicates whether the value is a known member of the TenantStatus enum.
+func (e TenantStatus) Valid() bool {
+	switch e {
+	case TenantStatusActive:
+		return true
+	case TenantStatusDeleted:
+		return true
+	case TenantStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TenantSettingsTaxOnFailure.
+const (
+	TenantSettingsTaxOnFailureBlock          TenantSettingsTaxOnFailure = "block"
+	TenantSettingsTaxOnFailureFallbackManual TenantSettingsTaxOnFailure = "fallback_manual"
+)
+
+// Valid indicates whether the value is a known member of the TenantSettingsTaxOnFailure enum.
+func (e TenantSettingsTaxOnFailure) Valid() bool {
+	switch e {
+	case TenantSettingsTaxOnFailureBlock:
+		return true
+	case TenantSettingsTaxOnFailureFallbackManual:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TenantSettingsTaxProvider.
+const (
+	TenantSettingsTaxProviderManual    TenantSettingsTaxProvider = "manual"
+	TenantSettingsTaxProviderNone      TenantSettingsTaxProvider = "none"
+	TenantSettingsTaxProviderStripeTax TenantSettingsTaxProvider = "stripe_tax"
+)
+
+// Valid indicates whether the value is a known member of the TenantSettingsTaxProvider enum.
+func (e TenantSettingsTaxProvider) Valid() bool {
+	switch e {
+	case TenantSettingsTaxProviderManual:
+		return true
+	case TenantSettingsTaxProviderNone:
+		return true
+	case TenantSettingsTaxProviderStripeTax:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TenantSettingsInputTaxOnFailure.
+const (
+	TenantSettingsInputTaxOnFailureBlock          TenantSettingsInputTaxOnFailure = "block"
+	TenantSettingsInputTaxOnFailureFallbackManual TenantSettingsInputTaxOnFailure = "fallback_manual"
+)
+
+// Valid indicates whether the value is a known member of the TenantSettingsInputTaxOnFailure enum.
+func (e TenantSettingsInputTaxOnFailure) Valid() bool {
+	switch e {
+	case TenantSettingsInputTaxOnFailureBlock:
+		return true
+	case TenantSettingsInputTaxOnFailureFallbackManual:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TenantSettingsInputTaxProvider.
+const (
+	TenantSettingsInputTaxProviderManual    TenantSettingsInputTaxProvider = "manual"
+	TenantSettingsInputTaxProviderNone      TenantSettingsInputTaxProvider = "none"
+	TenantSettingsInputTaxProviderStripeTax TenantSettingsInputTaxProvider = "stripe_tax"
+)
+
+// Valid indicates whether the value is a known member of the TenantSettingsInputTaxProvider enum.
+func (e TenantSettingsInputTaxProvider) Valid() bool {
+	switch e {
+	case TenantSettingsInputTaxProviderManual:
+		return true
+	case TenantSettingsInputTaxProviderNone:
+		return true
+	case TenantSettingsInputTaxProviderStripeTax:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookDeliveryReplayResultStatus.
+const (
+	WebhookDeliveryReplayResultStatusQueued WebhookDeliveryReplayResultStatus = "queued"
+)
+
+// Valid indicates whether the value is a known member of the WebhookDeliveryReplayResultStatus enum.
+func (e WebhookDeliveryReplayResultStatus) Valid() bool {
+	switch e {
+	case WebhookDeliveryReplayResultStatusQueued:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookEndpointDeliveryStatus.
+const (
+	WebhookEndpointDeliveryStatusFailed    WebhookEndpointDeliveryStatus = "failed"
+	WebhookEndpointDeliveryStatusPending   WebhookEndpointDeliveryStatus = "pending"
+	WebhookEndpointDeliveryStatusSucceeded WebhookEndpointDeliveryStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the WebhookEndpointDeliveryStatus enum.
+func (e WebhookEndpointDeliveryStatus) Valid() bool {
+	switch e {
+	case WebhookEndpointDeliveryStatusFailed:
+		return true
+	case WebhookEndpointDeliveryStatusPending:
+		return true
+	case WebhookEndpointDeliveryStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookEventDeliveryAttemptStatus.
+const (
+	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
+	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
+	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
+func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
+	switch e {
+	case WebhookEventDeliveryAttemptStatusFailed:
+		return true
+	case WebhookEventDeliveryAttemptStatusPending:
+		return true
+	case WebhookEventDeliveryAttemptStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookReplayResultStatus.
+const (
+	WebhookReplayResultStatusNoMatchingEndpoints WebhookReplayResultStatus = "no_matching_endpoints"
+	WebhookReplayResultStatusQueued              WebhookReplayResultStatus = "queued"
+)
+
+// Valid indicates whether the value is a known member of the WebhookReplayResultStatus enum.
+func (e WebhookReplayResultStatus) Valid() bool {
+	switch e {
+	case WebhookReplayResultStatusNoMatchingEndpoints:
+		return true
+	case WebhookReplayResultStatusQueued:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateApiKeyJSONBodyKeyType.
+const (
+	CreateApiKeyJSONBodyKeyTypePlatform    CreateApiKeyJSONBodyKeyType = "platform"
+	CreateApiKeyJSONBodyKeyTypePublishable CreateApiKeyJSONBodyKeyType = "publishable"
+	CreateApiKeyJSONBodyKeyTypeSecret      CreateApiKeyJSONBodyKeyType = "secret"
+)
+
+// Valid indicates whether the value is a known member of the CreateApiKeyJSONBodyKeyType enum.
+func (e CreateApiKeyJSONBodyKeyType) Valid() bool {
+	switch e {
+	case CreateApiKeyJSONBodyKeyTypePlatform:
+		return true
+	case CreateApiKeyJSONBodyKeyTypePublishable:
+		return true
+	case CreateApiKeyJSONBodyKeyTypeSecret:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAuditLogParamsOrder.
+const (
+	CreatedAt ListAuditLogParamsOrder = "created_at"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditLogParamsOrder enum.
+func (e ListAuditLogParamsOrder) Valid() bool {
+	switch e {
+	case CreatedAt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CheckPasswordResetToken200JSONResponseBodyValid.
+const (
+	True CheckPasswordResetToken200JSONResponseBodyValid = true
+)
+
+// Valid indicates whether the value is a known member of the CheckPasswordResetToken200JSONResponseBodyValid enum.
+func (e CheckPasswordResetToken200JSONResponseBodyValid) Valid() bool {
+	switch e {
+	case True:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CheckPasswordResetToken422JSONResponseBodyReason.
+const (
+	InvalidOrExpired CheckPasswordResetToken422JSONResponseBodyReason = "invalid_or_expired"
+)
+
+// Valid indicates whether the value is a known member of the CheckPasswordResetToken422JSONResponseBodyReason enum.
+func (e CheckPasswordResetToken422JSONResponseBodyReason) Valid() bool {
+	switch e {
+	case InvalidOrExpired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CheckPasswordResetToken422JSONResponseBodyValid.
+const (
+	CheckPasswordResetToken422JSONResponseBodyValidFalse CheckPasswordResetToken422JSONResponseBodyValid = false
+)
+
+// Valid indicates whether the value is a known member of the CheckPasswordResetToken422JSONResponseBodyValid enum.
+func (e CheckPasswordResetToken422JSONResponseBodyValid) Valid() bool {
+	switch e {
+	case CheckPasswordResetToken422JSONResponseBodyValidFalse:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery.
 const (
 	NotConfigured PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "not_configured"
@@ -689,15 +1647,120 @@ func (e PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery) Valid() 
 	}
 }
 
+// Defines values for ListCreditNotesParamsStatus.
+const (
+	ListCreditNotesParamsStatusDraft  ListCreditNotesParamsStatus = "draft"
+	ListCreditNotesParamsStatusIssued ListCreditNotesParamsStatus = "issued"
+	ListCreditNotesParamsStatusVoided ListCreditNotesParamsStatus = "voided"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditNotesParamsStatus enum.
+func (e ListCreditNotesParamsStatus) Valid() bool {
+	switch e {
+	case ListCreditNotesParamsStatusDraft:
+		return true
+	case ListCreditNotesParamsStatusIssued:
+		return true
+	case ListCreditNotesParamsStatusVoided:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListCreditNotesParamsRefundStatus.
+const (
+	Failed    ListCreditNotesParamsRefundStatus = "failed"
+	None      ListCreditNotesParamsRefundStatus = "none"
+	Pending   ListCreditNotesParamsRefundStatus = "pending"
+	Succeeded ListCreditNotesParamsRefundStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditNotesParamsRefundStatus enum.
+func (e ListCreditNotesParamsRefundStatus) Valid() bool {
+	switch e {
+	case Failed:
+		return true
+	case None:
+		return true
+	case Pending:
+		return true
+	case Succeeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListCreditNotesParamsDir.
+const (
+	ListCreditNotesParamsDirAsc  ListCreditNotesParamsDir = "asc"
+	ListCreditNotesParamsDirDesc ListCreditNotesParamsDir = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditNotesParamsDir enum.
+func (e ListCreditNotesParamsDir) Valid() bool {
+	switch e {
+	case ListCreditNotesParamsDirAsc:
+		return true
+	case ListCreditNotesParamsDirDesc:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostV1CreditsGrantJSONBodyGrantKind.
 const (
-	Promotional PostV1CreditsGrantJSONBodyGrantKind = "promotional"
+	PostV1CreditsGrantJSONBodyGrantKindPromotional PostV1CreditsGrantJSONBodyGrantKind = "promotional"
 )
 
 // Valid indicates whether the value is a known member of the PostV1CreditsGrantJSONBodyGrantKind enum.
 func (e PostV1CreditsGrantJSONBodyGrantKind) Valid() bool {
 	switch e {
-	case Promotional:
+	case PostV1CreditsGrantJSONBodyGrantKindPromotional:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListCreditLedgerEntriesParamsEntryType.
+const (
+	ListCreditLedgerEntriesParamsEntryTypeAdjustment ListCreditLedgerEntriesParamsEntryType = "adjustment"
+	ListCreditLedgerEntriesParamsEntryTypeExpiry     ListCreditLedgerEntriesParamsEntryType = "expiry"
+	ListCreditLedgerEntriesParamsEntryTypeGrant      ListCreditLedgerEntriesParamsEntryType = "grant"
+	ListCreditLedgerEntriesParamsEntryTypeUsage      ListCreditLedgerEntriesParamsEntryType = "usage"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditLedgerEntriesParamsEntryType enum.
+func (e ListCreditLedgerEntriesParamsEntryType) Valid() bool {
+	switch e {
+	case ListCreditLedgerEntriesParamsEntryTypeAdjustment:
+		return true
+	case ListCreditLedgerEntriesParamsEntryTypeExpiry:
+		return true
+	case ListCreditLedgerEntriesParamsEntryTypeGrant:
+		return true
+	case ListCreditLedgerEntriesParamsEntryTypeUsage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListCreditLedgerEntriesParamsDir.
+const (
+	ListCreditLedgerEntriesParamsDirAsc  ListCreditLedgerEntriesParamsDir = "asc"
+	ListCreditLedgerEntriesParamsDirDesc ListCreditLedgerEntriesParamsDir = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListCreditLedgerEntriesParamsDir enum.
+func (e ListCreditLedgerEntriesParamsDir) Valid() bool {
+	switch e {
+	case ListCreditLedgerEntriesParamsDirAsc:
+		return true
+	case ListCreditLedgerEntriesParamsDirDesc:
 		return true
 	default:
 		return false
@@ -722,6 +1785,99 @@ func (e GetV1CustomersParamsDir) Valid() bool {
 	}
 }
 
+// Defines values for UpdateCustomerJSONBodyStatus.
+const (
+	UpdateCustomerJSONBodyStatusActive   UpdateCustomerJSONBodyStatus = "active"
+	UpdateCustomerJSONBodyStatusArchived UpdateCustomerJSONBodyStatus = "archived"
+)
+
+// Valid indicates whether the value is a known member of the UpdateCustomerJSONBodyStatus enum.
+func (e UpdateCustomerJSONBodyStatus) Valid() bool {
+	switch e {
+	case UpdateCustomerJSONBodyStatusActive:
+		return true
+	case UpdateCustomerJSONBodyStatusArchived:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeleteDunningPolicy200JSONResponseBodyStatus.
+const (
+	DeleteDunningPolicy200JSONResponseBodyStatusDeleted DeleteDunningPolicy200JSONResponseBodyStatus = "deleted"
+)
+
+// Valid indicates whether the value is a known member of the DeleteDunningPolicy200JSONResponseBodyStatus enum.
+func (e DeleteDunningPolicy200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case DeleteDunningPolicy200JSONResponseBodyStatusDeleted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SetDefaultDunningPolicy200JSONResponseBodyStatus.
+const (
+	DefaultUpdated SetDefaultDunningPolicy200JSONResponseBodyStatus = "default_updated"
+)
+
+// Valid indicates whether the value is a known member of the SetDefaultDunningPolicy200JSONResponseBodyStatus enum.
+func (e SetDefaultDunningPolicy200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case DefaultUpdated:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDunningRunsParamsState.
+const (
+	Active    ListDunningRunsParamsState = "active"
+	Escalated ListDunningRunsParamsState = "escalated"
+	Paused    ListDunningRunsParamsState = "paused"
+	Resolved  ListDunningRunsParamsState = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the ListDunningRunsParamsState enum.
+func (e ListDunningRunsParamsState) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Escalated:
+		return true
+	case Paused:
+		return true
+	case Resolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResolveDunningRunJSONBodyResolution.
+const (
+	ResolveDunningRunJSONBodyResolutionInvoiceNotCollectible ResolveDunningRunJSONBodyResolution = "invoice_not_collectible"
+	ResolveDunningRunJSONBodyResolutionInvoiceVoided         ResolveDunningRunJSONBodyResolution = "invoice_voided"
+	ResolveDunningRunJSONBodyResolutionPaymentRecovered      ResolveDunningRunJSONBodyResolution = "payment_recovered"
+)
+
+// Valid indicates whether the value is a known member of the ResolveDunningRunJSONBodyResolution enum.
+func (e ResolveDunningRunJSONBodyResolution) Valid() bool {
+	switch e {
+	case ResolveDunningRunJSONBodyResolutionInvoiceNotCollectible:
+		return true
+	case ResolveDunningRunJSONBodyResolutionInvoiceVoided:
+		return true
+	case ResolveDunningRunJSONBodyResolutionPaymentRecovered:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1InvoicesParamsDir.
 const (
 	GetV1InvoicesParamsDirAsc  GetV1InvoicesParamsDir = "asc"
@@ -734,6 +1890,45 @@ func (e GetV1InvoicesParamsDir) Valid() bool {
 	case GetV1InvoicesParamsDirAsc:
 		return true
 	case GetV1InvoicesParamsDirDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RefundInvoiceJSONBodyReason.
+const (
+	Duplicate           RefundInvoiceJSONBodyReason = "duplicate"
+	Fraudulent          RefundInvoiceJSONBodyReason = "fraudulent"
+	Other               RefundInvoiceJSONBodyReason = "other"
+	RequestedByCustomer RefundInvoiceJSONBodyReason = "requested_by_customer"
+)
+
+// Valid indicates whether the value is a known member of the RefundInvoiceJSONBodyReason enum.
+func (e RefundInvoiceJSONBodyReason) Valid() bool {
+	switch e {
+	case Duplicate:
+		return true
+	case Fraudulent:
+		return true
+	case Other:
+		return true
+	case RequestedByCustomer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResendInvoiceSetupLink200JSONResponseBodyStatus.
+const (
+	Sent ResendInvoiceSetupLink200JSONResponseBodyStatus = "sent"
+)
+
+// Valid indicates whether the value is a known member of the ResendInvoiceSetupLink200JSONResponseBodyStatus enum.
+func (e ResendInvoiceSetupLink200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case Sent:
 		return true
 	default:
 		return false
@@ -788,18 +1983,45 @@ func (e PatchV1MetersIdJSONBodyAggregation) Valid() bool {
 	}
 }
 
+// Defines values for UpsertMeterPricingRuleJSONBodyAggregationMode.
+const (
+	UpsertMeterPricingRuleJSONBodyAggregationModeCount            UpsertMeterPricingRuleJSONBodyAggregationMode = "count"
+	UpsertMeterPricingRuleJSONBodyAggregationModeLastDuringPeriod UpsertMeterPricingRuleJSONBodyAggregationMode = "last_during_period"
+	UpsertMeterPricingRuleJSONBodyAggregationModeLastEver         UpsertMeterPricingRuleJSONBodyAggregationMode = "last_ever"
+	UpsertMeterPricingRuleJSONBodyAggregationModeMax              UpsertMeterPricingRuleJSONBodyAggregationMode = "max"
+	UpsertMeterPricingRuleJSONBodyAggregationModeSum              UpsertMeterPricingRuleJSONBodyAggregationMode = "sum"
+)
+
+// Valid indicates whether the value is a known member of the UpsertMeterPricingRuleJSONBodyAggregationMode enum.
+func (e UpsertMeterPricingRuleJSONBodyAggregationMode) Valid() bool {
+	switch e {
+	case UpsertMeterPricingRuleJSONBodyAggregationModeCount:
+		return true
+	case UpsertMeterPricingRuleJSONBodyAggregationModeLastDuringPeriod:
+		return true
+	case UpsertMeterPricingRuleJSONBodyAggregationModeLastEver:
+		return true
+	case UpsertMeterPricingRuleJSONBodyAggregationModeMax:
+		return true
+	case UpsertMeterPricingRuleJSONBodyAggregationModeSum:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostV1PlansJSONBodyBaseBillTiming.
 const (
-	InAdvance PostV1PlansJSONBodyBaseBillTiming = "in_advance"
-	InArrears PostV1PlansJSONBodyBaseBillTiming = "in_arrears"
+	PostV1PlansJSONBodyBaseBillTimingInAdvance PostV1PlansJSONBodyBaseBillTiming = "in_advance"
+	PostV1PlansJSONBodyBaseBillTimingInArrears PostV1PlansJSONBodyBaseBillTiming = "in_arrears"
 )
 
 // Valid indicates whether the value is a known member of the PostV1PlansJSONBodyBaseBillTiming enum.
 func (e PostV1PlansJSONBodyBaseBillTiming) Valid() bool {
 	switch e {
-	case InAdvance:
+	case PostV1PlansJSONBodyBaseBillTimingInAdvance:
 		return true
-	case InArrears:
+	case PostV1PlansJSONBodyBaseBillTimingInArrears:
 		return true
 	default:
 		return false
@@ -818,6 +2040,81 @@ func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
 	case Monthly:
 		return true
 	case Yearly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdatePlanJSONBodyBaseBillTiming.
+const (
+	UpdatePlanJSONBodyBaseBillTimingInAdvance UpdatePlanJSONBodyBaseBillTiming = "in_advance"
+	UpdatePlanJSONBodyBaseBillTimingInArrears UpdatePlanJSONBodyBaseBillTiming = "in_arrears"
+)
+
+// Valid indicates whether the value is a known member of the UpdatePlanJSONBodyBaseBillTiming enum.
+func (e UpdatePlanJSONBodyBaseBillTiming) Valid() bool {
+	switch e {
+	case UpdatePlanJSONBodyBaseBillTimingInAdvance:
+		return true
+	case UpdatePlanJSONBodyBaseBillTimingInArrears:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdatePlanJSONBodyStatus.
+const (
+	UpdatePlanJSONBodyStatusActive   UpdatePlanJSONBodyStatus = "active"
+	UpdatePlanJSONBodyStatusArchived UpdatePlanJSONBodyStatus = "archived"
+	UpdatePlanJSONBodyStatusDraft    UpdatePlanJSONBodyStatus = "draft"
+)
+
+// Valid indicates whether the value is a known member of the UpdatePlanJSONBodyStatus enum.
+func (e UpdatePlanJSONBodyStatus) Valid() bool {
+	switch e {
+	case UpdatePlanJSONBodyStatusActive:
+		return true
+	case UpdatePlanJSONBodyStatusArchived:
+		return true
+	case UpdatePlanJSONBodyStatusDraft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreatePriceOverrideJSONBodyMode.
+const (
+	CreatePriceOverrideJSONBodyModeFlat      CreatePriceOverrideJSONBodyMode = "flat"
+	CreatePriceOverrideJSONBodyModeGraduated CreatePriceOverrideJSONBodyMode = "graduated"
+	CreatePriceOverrideJSONBodyModePackage   CreatePriceOverrideJSONBodyMode = "package"
+)
+
+// Valid indicates whether the value is a known member of the CreatePriceOverrideJSONBodyMode enum.
+func (e CreatePriceOverrideJSONBodyMode) Valid() bool {
+	switch e {
+	case CreatePriceOverrideJSONBodyModeFlat:
+		return true
+	case CreatePriceOverrideJSONBodyModeGraduated:
+		return true
+	case CreatePriceOverrideJSONBodyModePackage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeletePriceOverride200JSONResponseBodyActive.
+const (
+	DeletePriceOverride200JSONResponseBodyActiveFalse DeletePriceOverride200JSONResponseBodyActive = false
+)
+
+// Valid indicates whether the value is a known member of the DeletePriceOverride200JSONResponseBodyActive enum.
+func (e DeletePriceOverride200JSONResponseBodyActive) Valid() bool {
+	switch e {
+	case DeletePriceOverride200JSONResponseBodyActiveFalse:
 		return true
 	default:
 		return false
@@ -857,6 +2154,42 @@ func (e PostV1RatingRulesJSONBodyMode) Valid() bool {
 	case Graduated:
 		return true
 	case Package:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisconnectStripeParamsMode.
+const (
+	DisconnectStripeParamsModeLive DisconnectStripeParamsMode = "live"
+	DisconnectStripeParamsModeTest DisconnectStripeParamsMode = "test"
+)
+
+// Valid indicates whether the value is a known member of the DisconnectStripeParamsMode enum.
+func (e DisconnectStripeParamsMode) Valid() bool {
+	switch e {
+	case DisconnectStripeParamsModeLive:
+		return true
+	case DisconnectStripeParamsModeTest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SetStripeWebhookSecretParamsMode.
+const (
+	SetStripeWebhookSecretParamsModeLive SetStripeWebhookSecretParamsMode = "live"
+	SetStripeWebhookSecretParamsModeTest SetStripeWebhookSecretParamsMode = "test"
+)
+
+// Valid indicates whether the value is a known member of the SetStripeWebhookSecretParamsMode enum.
+func (e SetStripeWebhookSecretParamsMode) Valid() bool {
+	switch e {
+	case SetStripeWebhookSecretParamsModeLive:
+		return true
+	case SetStripeWebhookSecretParamsModeTest:
 		return true
 	default:
 		return false
@@ -914,6 +2247,57 @@ func (e PostV1SubscriptionsJSONBodyBillingTime) Valid() bool {
 	}
 }
 
+// Defines values for PauseSubscriptionCollectionJSONBodyBehavior.
+const (
+	PauseSubscriptionCollectionJSONBodyBehaviorKeepAsDraft PauseSubscriptionCollectionJSONBodyBehavior = "keep_as_draft"
+)
+
+// Valid indicates whether the value is a known member of the PauseSubscriptionCollectionJSONBodyBehavior enum.
+func (e PauseSubscriptionCollectionJSONBodyBehavior) Valid() bool {
+	switch e {
+	case PauseSubscriptionCollectionJSONBodyBehaviorKeepAsDraft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListTenantsParamsStatus.
+const (
+	ListTenantsParamsStatusActive    ListTenantsParamsStatus = "active"
+	ListTenantsParamsStatusDeleted   ListTenantsParamsStatus = "deleted"
+	ListTenantsParamsStatusSuspended ListTenantsParamsStatus = "suspended"
+)
+
+// Valid indicates whether the value is a known member of the ListTenantsParamsStatus enum.
+func (e ListTenantsParamsStatus) Valid() bool {
+	switch e {
+	case ListTenantsParamsStatusActive:
+		return true
+	case ListTenantsParamsStatusDeleted:
+		return true
+	case ListTenantsParamsStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetUsageSummary500JSONResponseBodyError.
+const (
+	InternalError GetUsageSummary500JSONResponseBodyError = "internal_error"
+)
+
+// Valid indicates whether the value is a known member of the GetUsageSummary500JSONResponseBodyError enum.
+func (e GetUsageSummary500JSONResponseBodyError) Valid() bool {
+	switch e {
+	case InternalError:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1Whoami200JSONResponseBodyKeyType.
 const (
 	Platform    GetV1Whoami200JSONResponseBodyKeyType = "platform"
@@ -933,6 +2317,186 @@ func (e GetV1Whoami200JSONResponseBodyKeyType) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// APIKey defines model for APIKey.
+type APIKey struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// ExpiresAt When the key stops working. Also set on the old key during a rotation grace period.
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	Id        string    `json:"id"`
+
+	// KeyPrefix The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key.
+	KeyPrefix string        `json:"key_prefix"`
+	KeyType   APIKeyKeyType `json:"key_type"`
+
+	// LastUsedAt Updated at most about once per interval, so it can lag a little.
+	LastUsedAt time.Time `json:"last_used_at,omitempty"`
+	Livemode   bool      `json:"livemode"`
+	Name       string    `json:"name"`
+	RevokedAt  time.Time `json:"revoked_at,omitempty"`
+	TenantId   string    `json:"tenant_id"`
+}
+
+// APIKeyKeyType defines model for APIKey.KeyType.
+type APIKeyKeyType string
+
+// APIKeyCreated defines model for APIKeyCreated.
+type APIKeyCreated struct {
+	Key APIKey `json:"key"`
+
+	// RawKey The full key. Shown only once; store it now.
+	RawKey string `json:"raw_key"`
+}
+
+// APIKeyRotation defines model for APIKeyRotation.
+type APIKeyRotation struct {
+	NewKey APIKey `json:"new_key"`
+	OldKey APIKey `json:"old_key"`
+
+	// RawKey The new key's full value. Shown only once.
+	RawKey string `json:"raw_key"`
+}
+
+// AnalyticsMrrMovementPoint defines model for AnalyticsMrrMovementPoint.
+type AnalyticsMrrMovementPoint struct {
+	Churned     int64 `json:"churned"`
+	Contraction int64 `json:"contraction"`
+
+	// Date Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+	Date      string `json:"date"`
+	Expansion int64  `json:"expansion"`
+	Net       int64  `json:"net"`
+	New       int64  `json:"new"`
+}
+
+// AnalyticsMrrMovementTotals MRR change in cents. `churned` and `contraction` are positive
+// amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+type AnalyticsMrrMovementTotals struct {
+	Churned     int64 `json:"churned"`
+	Contraction int64 `json:"contraction"`
+	Expansion   int64 `json:"expansion"`
+	Net         int64 `json:"net"`
+	New         int64 `json:"new"`
+}
+
+// AnalyticsOverview "The window" is the requested period, ending now. "The previous
+// window" is the one of equal length before it. Money is in cents of
+// `currency`.
+type AnalyticsOverview struct {
+	ActiveCustomers     int `json:"active_customers"`
+	ActiveSubscriptions int `json:"active_subscriptions"`
+
+	// Arr `mrr` times 12.
+	Arr int64 `json:"arr"`
+
+	// ArrPrev `mrr_prev` times 12.
+	ArrPrev int64 `json:"arr_prev"`
+
+	// AvgInvoiceValue Average total of invoices paid in the window.
+	AvgInvoiceValue int64 `json:"avg_invoice_value"`
+
+	// CreditBalanceTotal Sum of all customers' credit balances. Not limited to `currency`.
+	CreditBalanceTotal int64 `json:"credit_balance_total"`
+
+	// Currency The tenant's default currency. Every money field uses it.
+	Currency string `json:"currency"`
+
+	// DunningActive Dunning runs (automatic payment retries) still in progress.
+	DunningActive int `json:"dunning_active"`
+
+	// DunningRecoveryRate Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+	DunningRecoveryRate float64 `json:"dunning_recovery_rate"`
+
+	// FailedPayments Invoices created in the window whose payment failed. All currencies.
+	FailedPayments int `json:"failed_payments"`
+
+	// LogoChurnRate Subscriptions canceled in the window, divided by subscriptions active at its start. 0 when none were active.
+	LogoChurnRate float64 `json:"logo_churn_rate"`
+
+	// Mrr MRR of active subscriptions now.
+	Mrr int64 `json:"mrr"`
+
+	// MrrMovement MRR change in cents. `churned` and `contraction` are positive
+	// amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+	MrrMovement AnalyticsMrrMovementTotals `json:"mrr_movement"`
+
+	// MrrPrev MRR at the start of the window, rebuilt from item change history.
+	MrrPrev int64 `json:"mrr_prev"`
+
+	// NewCustomers Customers created in the window.
+	NewCustomers int `json:"new_customers"`
+
+	// Nrr Net revenue retention: (`mrr_prev` + expansion - contraction -
+	// churned) divided by `mrr_prev`. Can be above 1. 0 when
+	// `mrr_prev` is 0.
+	Nrr float64 `json:"nrr"`
+
+	// OpenInvoices Finalized invoices whose payment has not succeeded. All currencies.
+	OpenInvoices int `json:"open_invoices"`
+
+	// OutstandingAr Amount due on finalized invoices whose payment has not succeeded.
+	OutstandingAr int64 `json:"outstanding_ar"`
+
+	// PaidInvoices Invoices paid in the window.
+	PaidInvoices int             `json:"paid_invoices"`
+	Period       AnalyticsPeriod `json:"period"`
+
+	// RefundsNeedingAttention Issued credit notes whose refund failed, has been pending for
+	// more than 72 hours, or has not started an hour after issue.
+	RefundsNeedingAttention int `json:"refunds_needing_attention"`
+
+	// Revenue Total of invoices paid in the window.
+	Revenue int64 `json:"revenue"`
+
+	// RevenueChurnRate Churned MRR divided by `mrr_prev`. 0 when `mrr_prev` is 0.
+	RevenueChurnRate float64 `json:"revenue_churn_rate"`
+
+	// RevenuePrev Total of invoices paid in the previous window.
+	RevenuePrev int64 `json:"revenue_prev"`
+
+	// TrialingSubscriptions Subscriptions with status `active` whose `trial_end_at` is in
+	// the future. Subscriptions with status `trialing` are not
+	// counted.
+	TrialingSubscriptions int `json:"trialing_subscriptions"`
+
+	// UsageEvents Usage events with a timestamp in the window.
+	UsageEvents int64 `json:"usage_events"`
+}
+
+// AnalyticsPeriod defines model for AnalyticsPeriod.
+type AnalyticsPeriod string
+
+// AnalyticsRevenuePoint defines model for AnalyticsRevenuePoint.
+type AnalyticsRevenuePoint struct {
+	// Date Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+	Date         string `json:"date"`
+	InvoiceCount int    `json:"invoice_count"`
+
+	// RevenueCents Sum of invoice totals paid in the bucket.
+	RevenueCents int64 `json:"revenue_cents"`
+}
+
+// AnalyticsTopMeter defines model for AnalyticsTopMeter.
+type AnalyticsTopMeter struct {
+	Events    int64  `json:"events"`
+	Key       string `json:"key"`
+	MeterId   string `json:"meter_id"`
+	MeterName string `json:"meter_name"`
+
+	// Quantity Summed quantity, as a decimal string.
+	Quantity string `json:"quantity"`
+}
+
+// AnalyticsUsagePoint defines model for AnalyticsUsagePoint.
+type AnalyticsUsagePoint struct {
+	// Date Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`.
+	Date   string `json:"date"`
+	Events int64  `json:"events"`
+
+	// Quantity Summed quantity, as a decimal string.
+	Quantity string `json:"quantity"`
 }
 
 // Attention Unified "this invoice needs operator attention" surface.
@@ -1060,6 +2624,56 @@ type AttentionReason string
 // descending: Critical > Warning > Info.
 type AttentionSeverity string
 
+// AuditLogEntry defines model for AuditLogEntry.
+type AuditLogEntry struct {
+	// Action For example `create`, `update`, `revoke`, `finalize`.
+	Action string `json:"action"`
+
+	// ActorId User id, API key id, or `system`.
+	ActorId string `json:"actor_id"`
+
+	// ActorName Name of the API key, when the actor is a key.
+	ActorName string                 `json:"actor_name,omitempty"`
+	ActorType AuditLogEntryActorType `json:"actor_type"`
+	CreatedAt time.Time              `json:"created_at"`
+	Id        string                 `json:"id"`
+	IpAddress string                 `json:"ip_address,omitempty"`
+
+	// Metadata Action details. A settings change lists each changed field with `from` and `to`.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// RequestId Matches the `Velox-Request-Id` header of the request that made the change.
+	RequestId string `json:"request_id,omitempty"`
+
+	// ResourceId Can be empty for tenant-wide resources such as settings.
+	ResourceId    string `json:"resource_id"`
+	ResourceLabel string `json:"resource_label,omitempty"`
+	ResourceType  string `json:"resource_type"`
+
+	// SimEffectiveAt Simulated time, for entries made inside a test clock.
+	SimEffectiveAt time.Time `json:"sim_effective_at,omitempty"`
+
+	// SubjectDeleted The resource no longer exists because its test clock was deleted. The entry is kept.
+	SubjectDeleted bool   `json:"subject_deleted,omitempty"`
+	TenantId       string `json:"tenant_id,omitempty"`
+	TestClockId    string `json:"test_clock_id,omitempty"`
+}
+
+// AuditLogEntryActorType defines model for AuditLogEntry.ActorType.
+type AuditLogEntryActorType string
+
+// AuditLogFilters defines model for AuditLogFilters.
+type AuditLogFilters struct {
+	Actions       []string `json:"actions"`
+	ResourceTypes []string `json:"resource_types"`
+
+	// TestClocks Test clocks seen in the log, most recent activity first.
+	TestClocks []struct {
+		Id   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"test_clocks"`
+}
+
 // BillingFailure Present on a subscription while the billing run is failing on the
 // work that subscription has due now (a period close, or a scheduled
 // mid-period cancel). Absent otherwise: a subscription that bills
@@ -1097,6 +2711,28 @@ type BillingFailure struct {
 	Parked bool `json:"parked"`
 }
 
+// BootstrapResult defines model for BootstrapResult.
+type BootstrapResult struct {
+	Message string `json:"message"`
+
+	// OwnerEmail Dashboard login email.
+	OwnerEmail string `json:"owner_email"`
+
+	// OwnerPassword Dashboard login password (the one you sent, or the generated one).
+	OwnerPassword     string `json:"owner_password"`
+	PasswordGenerated bool   `json:"password_generated"`
+
+	// PublishableKeyTest Test-mode publishable key (`vlx_pub_test_...`).
+	PublishableKeyTest string `json:"publishable_key_test"`
+
+	// SecretKeyLive Live-mode secret key (`vlx_secret_live_...`).
+	SecretKeyLive string `json:"secret_key_live"`
+
+	// SecretKeyTest Test-mode secret key (`vlx_secret_test_...`).
+	SecretKeyTest string `json:"secret_key_test"`
+	Tenant        Tenant `json:"tenant"`
+}
+
 // CreditBalance defines model for CreditBalance.
 type CreditBalance struct {
 	BalanceCents int64  `json:"balance_cents,omitempty"`
@@ -1104,6 +2740,37 @@ type CreditBalance struct {
 	TotalGranted int64  `json:"total_granted,omitempty"`
 	TotalUsed    int64  `json:"total_used,omitempty"`
 }
+
+// CreditLedgerEntry defines model for CreditLedgerEntry.
+type CreditLedgerEntry struct {
+	// AmountCents Positive adds credit, negative removes it.
+	AmountCents int64 `json:"amount_cents"`
+
+	// BalanceAfter Customer's credit balance after this entry.
+	BalanceAfter int64 `json:"balance_after"`
+
+	// ConsumedCents For entries that add credit, how much has been used or expired.
+	ConsumedCents int64                      `json:"consumed_cents,omitempty"`
+	CreatedAt     time.Time                  `json:"created_at"`
+	CustomerId    string                     `json:"customer_id"`
+	Description   string                     `json:"description"`
+	EntryType     CreditLedgerEntryEntryType `json:"entry_type"`
+	ExpiresAt     time.Time                  `json:"expires_at,omitempty"`
+	GrantKind     CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
+	Id            string                     `json:"id"`
+	InvoiceId     string                     `json:"invoice_id,omitempty"`
+	Metadata      map[string]interface{}     `json:"metadata,omitempty"`
+
+	// SourceInvoiceId For a `commit` grant, the invoice that paid for it.
+	SourceInvoiceId string `json:"source_invoice_id,omitempty"`
+	TenantId        string `json:"tenant_id,omitempty"`
+}
+
+// CreditLedgerEntryEntryType defines model for CreditLedgerEntry.EntryType.
+type CreditLedgerEntryEntryType string
+
+// CreditLedgerEntryGrantKind defines model for CreditLedgerEntry.GrantKind.
+type CreditLedgerEntryGrantKind string
 
 // CreditLiveBalance A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero.
 type CreditLiveBalance struct {
@@ -1120,6 +2787,67 @@ type CreditLiveBalance struct {
 	// UnbilledUsageCents Metered usage that the next invoice of each subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
 	UnbilledUsageCents int64 `json:"unbilled_usage_cents"`
 }
+
+// CreditNote A credit note reduces what a customer owes on an invoice, or gives
+// money back after it was paid. Its total is split three ways: refund
+// to the card (`refund_amount_cents`), credit to the customer's
+// balance (`credit_amount_cents`), and money returned outside Velox
+// (`out_of_band_amount_cents`).
+type CreditNote struct {
+	// BillToSnapshot What an issued invoice or credit note prints about its buyer, copied
+	// when the document was issued (ADR-109). The printed name is
+	// `legal_name` when set, otherwise `display_name`.
+	BillToSnapshot DocumentBillTo `json:"bill_to_snapshot,omitempty"`
+
+	// CommitRetiredCents Prepaid commit credits this note retired. Absent on other notes.
+	CommitRetiredCents int64     `json:"commit_retired_cents,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	CreditAmountCents  int64     `json:"credit_amount_cents"`
+	CreditNoteNumber   string    `json:"credit_note_number"`
+	Currency           string    `json:"currency"`
+	CustomerId         string    `json:"customer_id"`
+	Id                 string    `json:"id"`
+	InvoiceId          string    `json:"invoice_id"`
+
+	// IsSimulated True when `issued_at` is test-clock time.
+	IsSimulated bool `json:"is_simulated"`
+
+	// IssuePending True on a draft that Velox will issue automatically.
+	IssuePending         bool                   `json:"issue_pending"`
+	IssuedAt             time.Time              `json:"issued_at,omitempty"`
+	Metadata             map[string]interface{} `json:"metadata,omitempty"`
+	OutOfBandAmountCents int64                  `json:"out_of_band_amount_cents"`
+	Reason               string                 `json:"reason"`
+
+	// RecordedAt Real-world time the row was written, when `created_at` is test-clock time.
+	RecordedAt        time.Time              `json:"recorded_at,omitempty"`
+	RefundAmountCents int64                  `json:"refund_amount_cents"`
+	RefundStatus      CreditNoteRefundStatus `json:"refund_status"`
+	Status            CreditNoteStatus       `json:"status"`
+	StripeRefundId    string                 `json:"stripe_refund_id,omitempty"`
+	SubtotalCents     int64                  `json:"subtotal_cents"`
+
+	// SupplierSnapshot What an issued invoice or credit note prints about its seller (the
+	// tenant's company), copied when the document was issued (ADR-109).
+	SupplierSnapshot DocumentSupplier `json:"supplier_snapshot,omitempty"`
+	TaxAmountCents   int64            `json:"tax_amount_cents"`
+
+	// TaxReversalPending True when the tax reversal failed and will be retried.
+	TaxReversalPending bool `json:"tax_reversal_pending"`
+
+	// TaxTransactionId Tax provider's reversal transaction, set when the note is issued.
+	TaxTransactionId string    `json:"tax_transaction_id,omitempty"`
+	TenantId         string    `json:"tenant_id,omitempty"`
+	TotalCents       int64     `json:"total_cents"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	VoidedAt         time.Time `json:"voided_at,omitempty"`
+}
+
+// CreditNoteRefundStatus defines model for CreditNote.RefundStatus.
+type CreditNoteRefundStatus string
+
+// CreditNoteStatus defines model for CreditNote.Status.
+type CreditNoteStatus string
 
 // Customer defines model for Customer.
 type Customer struct {
@@ -1146,6 +2874,211 @@ type Customer struct {
 
 // CustomerStatus defines model for Customer.Status.
 type CustomerStatus string
+
+// CustomerBillingProfile defines model for CustomerBillingProfile.
+type CustomerBillingProfile struct {
+	AddressLine1 string `json:"address_line1,omitempty"`
+	AddressLine2 string `json:"address_line2,omitempty"`
+	City         string `json:"city,omitempty"`
+
+	// Country ISO 3166 alpha-2 code, such as `US` or `IN`.
+	Country   string    `json:"country,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
+	// customer use it instead of the plan currency.
+	Currency   string `json:"currency,omitempty"`
+	CustomerId string `json:"customer_id"`
+	LegalName  string `json:"legal_name,omitempty"`
+
+	// Phone 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`.
+	Phone      string `json:"phone,omitempty"`
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// ProfileStatus Set by the server. `ready` when legal name, address line
+	// 1, city and country are all set.
+	ProfileStatus CustomerBillingProfileProfileStatus `json:"profile_status"`
+	State         string                              `json:"state,omitempty"`
+
+	// TaxExemptReason Required when `tax_status` is `exempt`.
+	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
+
+	// TaxId Buyer tax ID. Required when `tax_status` is `reverse_charge`.
+	TaxId string `json:"tax_id"`
+
+	// TaxIdType Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`).
+	TaxIdType string `json:"tax_id_type"`
+
+	// TaxStatus Defaults to `standard`.
+	TaxStatus CustomerBillingProfileTaxStatus `json:"tax_status"`
+	TenantId  string                          `json:"tenant_id,omitempty"`
+	UpdatedAt time.Time                       `json:"updated_at"`
+}
+
+// CustomerBillingProfileProfileStatus Set by the server. `ready` when legal name, address line
+// 1, city and country are all set.
+type CustomerBillingProfileProfileStatus string
+
+// CustomerBillingProfileTaxStatus Defaults to `standard`.
+type CustomerBillingProfileTaxStatus string
+
+// CustomerBillingProfileInput The billing details printed on invoices and used for tax. The
+// whole profile is replaced on every write.
+type CustomerBillingProfileInput struct {
+	AddressLine1 string `json:"address_line1,omitempty"`
+	AddressLine2 string `json:"address_line2,omitempty"`
+	City         string `json:"city,omitempty"`
+
+	// Country ISO 3166 alpha-2 code, such as `US` or `IN`.
+	Country string `json:"country,omitempty"`
+
+	// Currency ISO 4217 code, such as `USD`. When set, invoices for this
+	// customer use it instead of the plan currency.
+	Currency  string `json:"currency,omitempty"`
+	LegalName string `json:"legal_name,omitempty"`
+
+	// Phone 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`.
+	Phone      string `json:"phone,omitempty"`
+	PostalCode string `json:"postal_code,omitempty"`
+	State      string `json:"state,omitempty"`
+
+	// TaxExemptReason Required when `tax_status` is `exempt`.
+	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
+
+	// TaxId Buyer tax ID. Required when `tax_status` is `reverse_charge`.
+	TaxId string `json:"tax_id,omitempty"`
+
+	// TaxIdType Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`).
+	TaxIdType string `json:"tax_id_type,omitempty"`
+
+	// TaxStatus Defaults to `standard`.
+	TaxStatus CustomerBillingProfileInputTaxStatus `json:"tax_status,omitempty"`
+}
+
+// CustomerBillingProfileInputTaxStatus Defaults to `standard`.
+type CustomerBillingProfileInputTaxStatus string
+
+// CustomerOverview defines model for CustomerOverview.
+type CustomerOverview struct {
+	ActiveSubscriptions []Subscription `json:"active_subscriptions"`
+	CustomerId          string         `json:"customer_id"`
+
+	// OutstandingBalance Invoices that are not draft, voided or uncollectible and
+	// whose payment is pending, failed or unknown.
+	OutstandingBalance struct {
+		// TotalCents Sum of `amount_due_cents`. Amounts in different currencies are added together.
+		TotalCents  int64 `json:"total_cents"`
+		UnpaidCount int   `json:"unpaid_count"`
+	} `json:"outstanding_balance"`
+
+	// RecentInvoices The 5 newest invoices.
+	RecentInvoices []Invoice `json:"recent_invoices"`
+}
+
+// CustomerPriceOverride defines model for CustomerPriceOverride.
+type CustomerPriceOverride struct {
+	Active     bool      `json:"active"`
+	CreatedAt  time.Time `json:"created_at"`
+	CustomerId string    `json:"customer_id"`
+
+	// FlatAmountCents Per-unit rate in cents, as a decimal string.
+	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
+	GraduatedTiers  []struct {
+		// UnitAmountCents Per-unit rate in cents, as a decimal string.
+		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+
+		// UpTo 0 on the last tier means no upper bound.
+		UpTo int64 `json:"up_to,omitempty"`
+	} `json:"graduated_tiers,omitempty"`
+	Id   string                    `json:"id"`
+	Mode CustomerPriceOverrideMode `json:"mode"`
+
+	// OverageUnitAmountCents Per-unit overage rate in cents, as a decimal string.
+	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
+	PackageAmountCents     int64  `json:"package_amount_cents,omitempty"`
+	PackageSize            int64  `json:"package_size,omitempty"`
+
+	// RatingRuleVersionId The rule version named when the override was created. For reference only.
+	RatingRuleVersionId string `json:"rating_rule_version_id"`
+	Reason              string `json:"reason,omitempty"`
+
+	// RuleKey The rating rule this override replaces the price of, across all its versions.
+	RuleKey   string    `json:"rule_key"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CustomerPriceOverrideMode defines model for CustomerPriceOverride.Mode.
+type CustomerPriceOverrideMode string
+
+// CustomerUsage defines model for CustomerUsage.
+type CustomerUsage struct {
+	// Buckets One entry per UTC day in the period, including days with no usage.
+	Buckets []struct {
+		BucketStart time.Time `json:"bucket_start"`
+
+		// PerMeter Quantity per meter ID for that day, as a decimal string.
+		PerMeter map[string]string `json:"per_meter"`
+	} `json:"buckets"`
+	CustomerId string               `json:"customer_id"`
+	Meters     []CustomerUsageMeter `json:"meters"`
+	Period     struct {
+		From   time.Time                 `json:"from"`
+		Source CustomerUsagePeriodSource `json:"source"`
+		To     time.Time                 `json:"to"`
+	} `json:"period"`
+
+	// Subscriptions Active and trialing subscriptions.
+	Subscriptions []struct {
+		Currency           string    `json:"currency"`
+		CurrentPeriodEnd   time.Time `json:"current_period_end"`
+		CurrentPeriodStart time.Time `json:"current_period_start"`
+		Id                 string    `json:"id"`
+		PlanId             string    `json:"plan_id"`
+		PlanName           string    `json:"plan_name"`
+	} `json:"subscriptions"`
+
+	// Totals One entry per currency.
+	Totals []struct {
+		AmountCents int64  `json:"amount_cents"`
+		Currency    string `json:"currency"`
+	} `json:"totals"`
+	Warnings []string `json:"warnings"`
+}
+
+// CustomerUsagePeriodSource defines model for CustomerUsage.Period.Source.
+type CustomerUsagePeriodSource string
+
+// CustomerUsageMeter defines model for CustomerUsageMeter.
+type CustomerUsageMeter struct {
+	Currency  string `json:"currency"`
+	MeterId   string `json:"meter_id"`
+	MeterKey  string `json:"meter_key"`
+	MeterName string `json:"meter_name"`
+
+	// Rules One row per pricing rule that claimed events.
+	Rules []struct {
+		AmountCents    int64                  `json:"amount_cents"`
+		DimensionMatch map[string]interface{} `json:"dimension_match,omitempty"`
+
+		// Quantity Decimal string.
+		Quantity            string `json:"quantity"`
+		RatingRuleVersionId string `json:"rating_rule_version_id"`
+		RuleKey             string `json:"rule_key"`
+
+		// UnitAmountDecimal Price per unit in cents, as a decimal string; the same figure the invoice line shows.
+		UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
+
+		// Unmatched True for events that matched no pricing rule. Velox
+		// bills nothing for them, and they are left out of the
+		// meter's totals.
+		Unmatched bool `json:"unmatched,omitempty"`
+	} `json:"rules"`
+	TotalAmountCents int64 `json:"total_amount_cents"`
+
+	// TotalQuantity Decimal string.
+	TotalQuantity string `json:"total_quantity"`
+	Unit          string `json:"unit"`
+}
 
 // DocumentBillTo What an issued invoice or credit note prints about its buyer, copied
 // when the document was issued (ADR-109). The printed name is
@@ -1182,18 +3115,185 @@ type DocumentSupplier struct {
 	TaxId        string `json:"tax_id,omitempty"`
 }
 
+// DunningPolicy defines model for DunningPolicy.
+type DunningPolicy struct {
+	CreatedAt               time.Time                            `json:"created_at"`
+	Enabled                 bool                                 `json:"enabled"`
+	FinalInvoiceAction      DunningPolicyFinalInvoiceAction      `json:"final_invoice_action"`
+	FinalSubscriptionAction DunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
+	GracePeriodDays         int                                  `json:"grace_period_days"`
+	Id                      string                               `json:"id"`
+
+	// IsDefault Customers without an assigned policy use the default.
+	IsDefault        bool      `json:"is_default"`
+	MaxRetryAttempts int       `json:"max_retry_attempts"`
+	Name             string    `json:"name"`
+	RetrySchedule    []string  `json:"retry_schedule"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// DunningPolicyFinalInvoiceAction defines model for DunningPolicy.FinalInvoiceAction.
+type DunningPolicyFinalInvoiceAction string
+
+// DunningPolicyFinalSubscriptionAction defines model for DunningPolicy.FinalSubscriptionAction.
+type DunningPolicyFinalSubscriptionAction string
+
+// DunningPolicyInput defines model for DunningPolicyInput.
+type DunningPolicyInput struct {
+	// Enabled A disabled policy starts no dunning.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// FinalInvoiceAction What happens to the invoice when retries run out.
+	FinalInvoiceAction DunningPolicyInputFinalInvoiceAction `json:"final_invoice_action,omitempty"`
+
+	// FinalSubscriptionAction What happens to the subscription when retries run out.
+	FinalSubscriptionAction DunningPolicyInputFinalSubscriptionAction `json:"final_subscription_action,omitempty"`
+
+	// GracePeriodDays Days before the first retry. 0 or less means the default, 3.
+	GracePeriodDays int `json:"grace_period_days,omitempty"`
+
+	// MaxRetryAttempts 0 or less means the default, 3.
+	MaxRetryAttempts int    `json:"max_retry_attempts,omitempty"`
+	Name             string `json:"name,omitempty"`
+
+	// RetrySchedule Waits before retries 2 to N, as Go durations (h, m, s units; no
+	// days, so 3 days is "72h"). Needs at least
+	// `max_retry_attempts - 1` entries, each above zero.
+	RetrySchedule []string `json:"retry_schedule,omitempty"`
+}
+
+// DunningPolicyInputFinalInvoiceAction What happens to the invoice when retries run out.
+type DunningPolicyInputFinalInvoiceAction string
+
+// DunningPolicyInputFinalSubscriptionAction What happens to the subscription when retries run out.
+type DunningPolicyInputFinalSubscriptionAction string
+
+// DunningPolicyListItem defines model for DunningPolicyListItem.
+type DunningPolicyListItem struct {
+	// AssignedCustomers Customers explicitly assigned to this policy. Customers using it only as the default are not counted.
+	AssignedCustomers       int                                          `json:"assigned_customers"`
+	CreatedAt               time.Time                                    `json:"created_at"`
+	Enabled                 bool                                         `json:"enabled"`
+	FinalInvoiceAction      DunningPolicyListItemFinalInvoiceAction      `json:"final_invoice_action"`
+	FinalSubscriptionAction DunningPolicyListItemFinalSubscriptionAction `json:"final_subscription_action"`
+	GracePeriodDays         int                                          `json:"grace_period_days"`
+	Id                      string                                       `json:"id"`
+
+	// IsDefault Customers without an assigned policy use the default.
+	IsDefault        bool      `json:"is_default"`
+	MaxRetryAttempts int       `json:"max_retry_attempts"`
+	Name             string    `json:"name"`
+	RetrySchedule    []string  `json:"retry_schedule"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// DunningPolicyListItemFinalInvoiceAction defines model for DunningPolicyListItem.FinalInvoiceAction.
+type DunningPolicyListItemFinalInvoiceAction string
+
+// DunningPolicyListItemFinalSubscriptionAction defines model for DunningPolicyListItem.FinalSubscriptionAction.
+type DunningPolicyListItemFinalSubscriptionAction string
+
+// DunningRun defines model for DunningRun.
+type DunningRun struct {
+	AttemptCount int       `json:"attempt_count"`
+	CreatedAt    time.Time `json:"created_at"`
+	CustomerId   string    `json:"customer_id,omitempty"`
+
+	// EffectiveNow The test clock's current time, when the customer is on a test clock.
+	EffectiveNow time.Time `json:"effective_now,omitempty"`
+	Id           string    `json:"id"`
+
+	// InvoiceAmountDueCents Filled in on list responses.
+	InvoiceAmountDueCents int64 `json:"invoice_amount_due_cents,omitempty"`
+
+	// InvoiceCurrency Filled in on list responses.
+	InvoiceCurrency string `json:"invoice_currency,omitempty"`
+	InvoiceId       string `json:"invoice_id"`
+
+	// InvoiceNumber Filled in on list responses.
+	InvoiceNumber string    `json:"invoice_number,omitempty"`
+	LastAttemptAt time.Time `json:"last_attempt_at,omitempty"`
+	NextActionAt  time.Time `json:"next_action_at,omitempty"`
+	Paused        bool      `json:"paused"`
+	PolicyId      string    `json:"policy_id"`
+	Reason        string    `json:"reason,omitempty"`
+
+	// Resolution Set once the run is resolved. `manually_resolved` appears only on older runs.
+	Resolution  DunningRunResolution `json:"resolution,omitempty"`
+	ResolvedAt  time.Time            `json:"resolved_at,omitempty"`
+	State       DunningRunState      `json:"state"`
+	TenantId    string               `json:"tenant_id,omitempty"`
+	TestClockId string               `json:"test_clock_id,omitempty"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+}
+
+// DunningRunResolution Set once the run is resolved. `manually_resolved` appears only on older runs.
+type DunningRunResolution string
+
+// DunningRunState defines model for DunningRun.State.
+type DunningRunState string
+
+// DunningRunDetail defines model for DunningRunDetail.
+type DunningRunDetail struct {
+	Events []DunningRunEvent `json:"events"`
+	Run    DunningRun        `json:"run"`
+}
+
+// DunningRunEvent defines model for DunningRunEvent.
+type DunningRunEvent struct {
+	AttemptCount int                      `json:"attempt_count"`
+	CreatedAt    time.Time                `json:"created_at"`
+	EventType    DunningRunEventEventType `json:"event_type"`
+	Id           string                   `json:"id"`
+	InvoiceId    string                   `json:"invoice_id"`
+	Metadata     map[string]interface{}   `json:"metadata,omitempty"`
+	Reason       string                   `json:"reason,omitempty"`
+	RecordedAt   time.Time                `json:"recorded_at,omitempty"`
+	RunId        string                   `json:"run_id"`
+	State        DunningRunEventState     `json:"state"`
+	TenantId     string                   `json:"tenant_id,omitempty"`
+}
+
+// DunningRunEventEventType defines model for DunningRunEvent.EventType.
+type DunningRunEventEventType string
+
+// DunningRunEventState defines model for DunningRunEvent.State.
+type DunningRunEventState string
+
+// DunningStats defines model for DunningStats.
+type DunningStats struct {
+	ActiveCount int `json:"active_count"`
+
+	// AtRiskCents Amount due on active and escalated runs, in `currency` only.
+	AtRiskCents int64 `json:"at_risk_cents"`
+
+	// Currency The tenant's default currency.
+	Currency       string `json:"currency"`
+	EscalatedCount int    `json:"escalated_count"`
+	ResolvedCount  int    `json:"resolved_count"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Error struct {
-		Code      string         `json:"code,omitempty"`
-		Message   string         `json:"message,omitempty"`
-		RequestId string         `json:"request_id,omitempty"`
-		Type      ErrorErrorType `json:"type,omitempty"`
+		Code    string `json:"code,omitempty"`
+		Message string `json:"message,omitempty"`
+
+		// Param The request field the error is about. Sent only when the error names one.
+		Param     string `json:"param,omitempty"`
+		RequestId string `json:"request_id,omitempty"`
+
+		// Type Usually one of `invalid_request_error`,
+		// `authentication_error`, `rate_limit_error` or `api_error`.
+		// Some errors use another value: `invalid_state`,
+		// `validation_error` and `invalid_body` on a few routes, and
+		// `idempotency_error`, `conflict_idempotency`,
+		// `conflict_idempotency_unresolved` or `bad_request` when the
+		// `Idempotency-Key` header is the problem. Idempotency errors
+		// have only `type` and `message`. See docs/api-surface.md.
+		Type string `json:"type,omitempty"`
 	} `json:"error,omitempty"`
 }
-
-// ErrorErrorType defines model for Error.Error.Type.
-type ErrorErrorType string
 
 // Invoice A Velox invoice. Returned from create, finalize, void, list, get,
 // rotate-public-token, and collect-payment endpoints.
@@ -1360,6 +3460,26 @@ type Invoice struct {
 // that produced the invoice. Stamped at create time and never mutated.
 type InvoiceBillingReason string
 
+// InvoiceCreateRequest defines model for InvoiceCreateRequest.
+type InvoiceCreateRequest struct {
+	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
+	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
+
+	// Currency ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
+	Currency   string `json:"currency,omitempty"`
+	CustomerId string `json:"customer_id"`
+
+	// LineItems Lines created in the same transaction as the invoice.
+	LineItems []InvoiceLineItemInput `json:"line_items,omitempty"`
+	Memo      string                 `json:"memo,omitempty"`
+
+	// NetPaymentTermDays Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms.
+	NetPaymentTermDays int `json:"net_payment_term_days,omitempty"`
+
+	// SubscriptionId Optional. Leave out for a one-off invoice.
+	SubscriptionId string `json:"subscription_id,omitempty"`
+}
+
 // InvoiceLineItem A single line on an invoice.
 type InvoiceLineItem struct {
 	AmountCents        int64     `json:"amount_cents"`
@@ -1415,6 +3535,27 @@ type InvoiceLineItem struct {
 	UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
 }
 
+// InvoiceLineItemInput A line to add to a draft invoice.
+type InvoiceLineItemInput struct {
+	// CommitExpiresAt When the granted credit expires. Must be in the future. Needs
+	// `commit_granted_cents`. Absent means it never expires.
+	CommitExpiresAt time.Time `json:"commit_expires_at,omitempty"`
+
+	// CommitGrantedCents Makes this line a prepaid commit purchase: when the invoice is
+	// finalized, the customer gets this many cents of credit. Only on
+	// `add_on` lines of manual invoices, at most one per invoice.
+	CommitGrantedCents int64  `json:"commit_granted_cents,omitempty"`
+	Description        string `json:"description"`
+
+	// LineType Defaults to `add_on`.
+	LineType        InvoiceLineItemInputLineType `json:"line_type,omitempty"`
+	Quantity        int64                        `json:"quantity"`
+	UnitAmountCents int64                        `json:"unit_amount_cents"`
+}
+
+// InvoiceLineItemInputLineType Defaults to `add_on`.
+type InvoiceLineItemInputLineType string
+
 // InvoiceLineType defines model for InvoiceLineType.
 type InvoiceLineType string
 
@@ -1423,6 +3564,19 @@ type InvoiceLineType string
 // we cannot tell whether Stripe processed the charge — a reconciler
 // resolves these by querying Stripe after a cool-off window.
 type InvoicePaymentStatus string
+
+// InvoicePaymentTimeline defines model for InvoicePaymentTimeline.
+type InvoicePaymentTimeline struct {
+	// Degraded Sources that could not be read, so their rows are missing.
+	Degraded []InvoicePaymentTimelineDegraded `json:"degraded"`
+	Events   []InvoiceTimelineEvent           `json:"events"`
+
+	// Truncated True when the credit-note source hit its limit of 100 rows.
+	Truncated bool `json:"truncated"`
+}
+
+// InvoicePaymentTimelineDegraded defines model for InvoicePaymentTimeline.Degraded.
+type InvoicePaymentTimelineDegraded string
 
 // InvoiceStatus Lifecycle state of the invoice. `uncollectible` marks an invoice
 // a dunning policy has given up collecting (no further retries) while
@@ -1436,6 +3590,37 @@ type InvoiceStatus string
 // Pending/failed invoices are blocked from finalize so we never send
 // a wrong tax amount.
 type InvoiceTaxStatus string
+
+// InvoiceTimelineEvent defines model for InvoiceTimelineEvent.
+type InvoiceTimelineEvent struct {
+	AmountCents  int64  `json:"amount_cents,omitempty"`
+	AttemptCount int    `json:"attempt_count,omitempty"`
+	Currency     string `json:"currency,omitempty"`
+	Description  string `json:"description"`
+
+	// Detail Extra line shown under the description, for example the card used.
+	Detail    string `json:"detail,omitempty"`
+	Error     string `json:"error,omitempty"`
+	EventType string `json:"event_type"`
+
+	// Id Stable key for the row.
+	Id string `json:"id"`
+
+	// IsSimulated True when `timestamp` is test-clock time.
+	IsSimulated     bool   `json:"is_simulated,omitempty"`
+	PaymentIntentId string `json:"payment_intent_id,omitempty"`
+
+	// RecordedAt Real-world time of a row whose `timestamp` is test-clock time.
+	RecordedAt time.Time                  `json:"recorded_at,omitempty"`
+	Source     InvoiceTimelineEventSource `json:"source"`
+
+	// Status Display status, for example succeeded, failed, resolved, escalated or info.
+	Status    string    `json:"status"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// InvoiceTimelineEventSource defines model for InvoiceTimelineEvent.Source.
+type InvoiceTimelineEventSource string
 
 // InvoiceWithLineItems Response shape for `GET /v1/invoices/{id}`. The handler returns the
 // invoice and its line items as separate top-level keys (rather than
@@ -1452,6 +3637,89 @@ type InvoiceWithLineItems struct {
 // distinguish a plan-change and a quantity-change that happen to
 // share the same `(subscription, item, timestamp)`.
 type ItemChangeType string
+
+// LitellmSpendLog The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
+// Other fields are accepted and ignored.
+type LitellmSpendLog struct {
+	// CallType Only completion, acompletion, chat, chat.completion, embedding,
+	// aembedding, text_completion and atext_completion records produce
+	// usage. Others are skipped.
+	CallType         string `json:"call_type,omitempty"`
+	CompletionTokens int64  `json:"completion_tokens,omitempty"`
+
+	// CostBreakdown The provider's own cost, in dollars. When present, each event's
+	// provider cost comes from its part (input, output or cache read)
+	// instead of the provider-costs table. A part that is missing or
+	// negative falls back to the table.
+	CostBreakdown struct {
+		CacheReadCost float32 `json:"cache_read_cost,omitempty"`
+		InputCost     float32 `json:"input_cost,omitempty"`
+		OutputCost    float32 `json:"output_cost,omitempty"`
+		ToolUsageCost float32 `json:"tool_usage_cost,omitempty"`
+		TotalCost     float32 `json:"total_cost,omitempty"`
+	} `json:"cost_breakdown,omitempty"`
+	CustomLlmProvider string `json:"custom_llm_provider,omitempty"`
+
+	// EndTime Unix seconds. The event time. With neither, the customer's current time is used.
+	EndTime float32 `json:"endTime,omitempty"`
+
+	// EndUser Where LiteLLM Proxy puts the caller's `user`. Used when `user` is empty.
+	EndUser string `json:"end_user,omitempty"`
+
+	// Id LiteLLM's call id. Used to build the events' idempotency keys.
+	Id string `json:"id,omitempty"`
+
+	// Metadata `team_id` and `request_tags` become event dimensions;
+	// `usage_object` is read for token counts; other keys are ignored.
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Model    string                 `json:"model,omitempty"`
+
+	// PromptTokens Used when there is no `usage` object.
+	PromptTokens int64 `json:"prompt_tokens,omitempty"`
+
+	// ResponseCost Accepted but not stored.
+	ResponseCost float32 `json:"response_cost,omitempty"`
+
+	// StartTime Unix seconds. Event time when `endTime` is absent.
+	StartTime   float32 `json:"startTime,omitempty"`
+	TotalTokens int64   `json:"total_tokens,omitempty"`
+	Usage       struct {
+		// CacheCreationInputTokens Not billed on its own; billed as input only when included in prompt_tokens.
+		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+		CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
+		CompletionTokens         int64 `json:"completion_tokens,omitempty"`
+
+		// PromptTokens Includes cache-read tokens.
+		PromptTokens        int64 `json:"prompt_tokens,omitempty"`
+		PromptTokensDetails struct {
+			CachedTokens int64 `json:"cached_tokens,omitempty"`
+		} `json:"prompt_tokens_details,omitempty"`
+		TotalTokens int64 `json:"total_tokens,omitempty"`
+	} `json:"usage,omitempty"`
+
+	// User The customer's external_id.
+	User string `json:"user,omitempty"`
+}
+
+// LitellmSpendResult defines model for LitellmSpendResult.
+type LitellmSpendResult struct {
+	// Accepted Usage events newly recorded.
+	Accepted int `json:"accepted"`
+
+	// Deduplicated Usage events already recorded by an earlier delivery.
+	Deduplicated int `json:"deduplicated"`
+
+	// Errors One entry per event or record that was not recorded. A record can appear more than once.
+	Errors []struct {
+		Error string `json:"error"`
+
+		// Id The LiteLLM record id.
+		Id string `json:"id"`
+	} `json:"errors,omitempty"`
+
+	// Skipped Records that carry no billable tokens.
+	Skipped int `json:"skipped"`
+}
 
 // MarginReport defines model for MarginReport.
 type MarginReport struct {
@@ -1519,6 +3787,37 @@ type Meter struct {
 
 // MeterAggregation defines model for Meter.Aggregation.
 type MeterAggregation string
+
+// MeterPricingRule defines model for MeterPricingRule.
+type MeterPricingRule struct {
+	AggregationMode MeterPricingRuleAggregationMode `json:"aggregation_mode"`
+	CreatedAt       time.Time                       `json:"created_at"`
+
+	// DimensionMatch Dimensions an event must have for this rule to bill it. `{}` matches every event.
+	DimensionMatch map[string]interface{} `json:"dimension_match"`
+	Id             string                 `json:"id"`
+	MeterId        string                 `json:"meter_id"`
+
+	// Priority Rules are tried highest first.
+	Priority            int       `json:"priority"`
+	RatingRuleVersionId string    `json:"rating_rule_version_id"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// MeterPricingRuleAggregationMode defines model for MeterPricingRule.AggregationMode.
+type MeterPricingRuleAggregationMode string
+
+// PaymentMethod defines model for PaymentMethod.
+type PaymentMethod struct {
+	CardBrand    string    `json:"card_brand,omitempty"`
+	CardExpMonth int       `json:"card_exp_month,omitempty"`
+	CardExpYear  int       `json:"card_exp_year,omitempty"`
+	CardLast4    string    `json:"card_last4,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	Id           string    `json:"id"`
+	IsDefault    bool      `json:"is_default"`
+	Type         string    `json:"type"`
+}
 
 // Plan defines model for Plan.
 type Plan struct {
@@ -1833,6 +4132,63 @@ type RecoveryWarning struct {
 // RecoveryWarningCode defines model for RecoveryWarning.Code.
 type RecoveryWarningCode string
 
+// SentEmail defines model for SentEmail.
+type SentEmail struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeliveryState What the email provider reported back, if anything.
+	DeliveryState SentEmailDeliveryState `json:"delivery_state"`
+	DispatchedAt  time.Time              `json:"dispatched_at,omitempty"`
+	EmailType     SentEmailEmailType     `json:"email_type"`
+	Id            string                 `json:"id"`
+	InvoiceNumber string                 `json:"invoice_number,omitempty"`
+	LastError     string                 `json:"last_error,omitempty"`
+	Recipient     string                 `json:"recipient"`
+
+	// Status Velox's send state. `dispatched` means the mail server accepted it.
+	Status SentEmailStatus `json:"status"`
+}
+
+// SentEmailDeliveryState What the email provider reported back, if anything.
+type SentEmailDeliveryState string
+
+// SentEmailEmailType defines model for SentEmail.EmailType.
+type SentEmailEmailType string
+
+// SentEmailStatus Velox's send state. `dispatched` means the mail server accepted it.
+type SentEmailStatus string
+
+// StripeConnection defines model for StripeConnection.
+type StripeConnection struct {
+	CreatedAt        time.Time `json:"created_at"`
+	HasWebhookSecret bool      `json:"has_webhook_secret"`
+
+	// Id Also the `{id}` in the Stripe webhook URL `/v1/webhooks/stripe/{id}`.
+	Id string `json:"id"`
+
+	// LastVerifiedError Why the last Stripe check failed. Empty when it passed.
+	LastVerifiedError string `json:"last_verified_error,omitempty"`
+	Livemode          bool   `json:"livemode"`
+	PublishableKey    string `json:"publishable_key"`
+
+	// RetriesQueued Connect response only. Number of stuck invoices being retried in the background.
+	RetriesQueued  int    `json:"retries_queued,omitempty"`
+	SecretKeyLast4 string `json:"secret_key_last4"`
+
+	// SecretKeyPrefix First 12 characters of the secret key.
+	SecretKeyPrefix string `json:"secret_key_prefix,omitempty"`
+
+	// StripeAccountId Set after Stripe accepted the key.
+	StripeAccountId   string    `json:"stripe_account_id,omitempty"`
+	StripeAccountName string    `json:"stripe_account_name,omitempty"`
+	TenantId          string    `json:"tenant_id"`
+	UpdatedAt         time.Time `json:"updated_at"`
+
+	// VerifiedAt Last time Stripe accepted the key.
+	VerifiedAt         time.Time `json:"verified_at,omitempty"`
+	WebhookSecretLast4 string    `json:"webhook_secret_last4,omitempty"`
+}
+
 // Subscription defines model for Subscription.
 type Subscription struct {
 	// BillingFailure Present on a subscription while the billing run is failing on the
@@ -1865,6 +4221,304 @@ type SubscriptionBillingTime string
 // SubscriptionStatus defines model for Subscription.Status.
 type SubscriptionStatus string
 
+// SubscriptionBillingThresholds Limits that make Velox invoice before the period ends.
+type SubscriptionBillingThresholds struct {
+	// AmountGte Running-subtotal threshold in cents. Absent when not set.
+	AmountGte      int64                       `json:"amount_gte,omitempty"`
+	ItemThresholds []SubscriptionItemThreshold `json:"item_thresholds"`
+
+	// ResetBillingCycle Whether a threshold invoice starts a new billing period.
+	ResetBillingCycle bool `json:"reset_billing_cycle"`
+}
+
+// SubscriptionItem One priced line of a subscription. It pairs a plan with a quantity.
+type SubscriptionItem struct {
+	CreatedAt time.Time `json:"created_at"`
+	Id        string    `json:"id"`
+
+	// Metadata The item's stored metadata JSON, base64-encoded. Absent when empty.
+	Metadata               []byte    `json:"metadata,omitempty"`
+	PendingPlanEffectiveAt time.Time `json:"pending_plan_effective_at,omitempty"`
+
+	// PendingPlanId Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled.
+	PendingPlanId string `json:"pending_plan_id,omitempty"`
+
+	// PlanChangedAt When the plan was last changed immediately. Absent until the first such change.
+	PlanChangedAt  time.Time `json:"plan_changed_at,omitempty"`
+	PlanId         string    `json:"plan_id"`
+	Quantity       int64     `json:"quantity"`
+	SubscriptionId string    `json:"subscription_id"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// SubscriptionItemChangeResult defines model for SubscriptionItemChangeResult.
+type SubscriptionItemChangeResult struct {
+	// EffectiveAt When the change takes effect. For a scheduled plan change, the end of the current period.
+	EffectiveAt time.Time `json:"effective_at"`
+
+	// Item One priced line of a subscription. It pairs a plan with a quantity.
+	Item SubscriptionItem `json:"item"`
+
+	// Proration What Velox did to settle the rest of the period for an item change.
+	Proration SubscriptionItemProration `json:"proration,omitempty"`
+}
+
+// SubscriptionItemProration What Velox did to settle the rest of the period for an item change.
+type SubscriptionItemProration struct {
+	// AmountCents Gross amount, tax included: the invoice total (`invoice`), the
+	// amount credited to the balance (`credit`), or the amount due
+	// removed from the unpaid invoice (`adjustment`).
+	AmountCents int64 `json:"amount_cents"`
+
+	// InvoiceId The proration invoice. Present when `type` is `invoice`.
+	InvoiceId string `json:"invoice_id,omitempty"`
+	NewPlanId string `json:"new_plan_id"`
+	OldPlanId string `json:"old_plan_id"`
+
+	// ProrationFactor Share of the full billing cycle that was left, from 0 to 1.
+	ProrationFactor float64                       `json:"proration_factor"`
+	Type            SubscriptionItemProrationType `json:"type"`
+}
+
+// SubscriptionItemProrationType defines model for SubscriptionItemProration.Type.
+type SubscriptionItemProrationType string
+
+// SubscriptionItemThreshold defines model for SubscriptionItemThreshold.
+type SubscriptionItemThreshold struct {
+	SubscriptionItemId string `json:"subscription_item_id"`
+
+	// UsageGte Usage quantity threshold, as a decimal string.
+	UsageGte string `json:"usage_gte"`
+}
+
+// SubscriptionPauseCollection Present on a subscription while collection is paused. Invoices are
+// still created, but stay drafts and are not charged.
+type SubscriptionPauseCollection struct {
+	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
+
+	// ResumesAt When collection resumes. Absent when the pause lasts until it is cleared.
+	ResumesAt time.Time `json:"resumes_at,omitempty"`
+}
+
+// SubscriptionPauseCollectionBehavior defines model for SubscriptionPauseCollection.Behavior.
+type SubscriptionPauseCollectionBehavior string
+
+// SubscriptionTimelineEvent defines model for SubscriptionTimelineEvent.
+type SubscriptionTimelineEvent struct {
+	ActorId   string `json:"actor_id,omitempty"`
+	ActorName string `json:"actor_name,omitempty"`
+	ActorType string `json:"actor_type,omitempty"`
+
+	// Description One-line summary, e.g. "Subscription canceled".
+	Description string `json:"description"`
+
+	// Detail Optional second line with context.
+	Detail string `json:"detail,omitempty"`
+
+	// DetailTimestamp The instant `detail` refers to, for the client to format.
+	DetailTimestamp time.Time `json:"detail_timestamp,omitempty"`
+
+	// EventType The audit action, e.g. `create`, `cancel`, `subscription.item_updated`.
+	EventType string `json:"event_type"`
+
+	// IsSimulated True when the action affected a subscription on a test clock.
+	IsSimulated bool `json:"is_simulated,omitempty"`
+
+	// SimEffectiveAt The test clock's simulated time when the action took effect.
+	SimEffectiveAt time.Time                       `json:"sim_effective_at,omitempty"`
+	Source         SubscriptionTimelineEventSource `json:"source"`
+
+	// Status Display tone for the row, e.g. `info`, `succeeded`, `warning`, `canceled`.
+	Status      string `json:"status"`
+	TestClockId string `json:"test_clock_id,omitempty"`
+
+	// Timestamp When the action was recorded (wall-clock time).
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// SubscriptionTimelineEventSource defines model for SubscriptionTimelineEvent.Source.
+type SubscriptionTimelineEventSource string
+
+// Tenant defines model for Tenant.
+type Tenant struct {
+	CreatedAt time.Time    `json:"created_at"`
+	Id        string       `json:"id"`
+	Name      string       `json:"name"`
+	Status    TenantStatus `json:"status"`
+	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+// TenantStatus defines model for Tenant.Status.
+type TenantStatus string
+
+// TenantSettings defines model for TenantSettings.
+type TenantSettings struct {
+	// BrandColor Accent color on invoice PDFs, as `#rrggbb`.
+	BrandColor          string `json:"brand_color,omitempty"`
+	CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+	CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
+	CompanyCity         string `json:"company_city,omitempty"`
+
+	// CompanyCountry ISO 3166 alpha-2 code, such as `US`.
+	CompanyCountry string `json:"company_country,omitempty"`
+	CompanyEmail   string `json:"company_email,omitempty"`
+
+	// CompanyName Shown on invoices and as the sender name on emails. No line breaks.
+	CompanyName string `json:"company_name,omitempty"`
+
+	// CompanyPhone 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`.
+	CompanyPhone      string `json:"company_phone,omitempty"`
+	CompanyPostalCode string `json:"company_postal_code,omitempty"`
+	CompanyState      string `json:"company_state,omitempty"`
+
+	// CreatedAt Zero time when the tenant has never saved settings.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
+	// `credit.balance_low` webhook fires. null turns it off.
+	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
+
+	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
+	DefaultCurrency string `json:"default_currency"`
+
+	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as `txcd_10103001`.
+	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
+
+	// InvoiceFooter Default footer for new invoices. An invoice's own footer takes precedence.
+	InvoiceFooter string `json:"invoice_footer,omitempty"`
+
+	// InvoicePrefix Starts every invoice number, such as `VLX-000001`.
+	InvoicePrefix string `json:"invoice_prefix"`
+	LogoUrl       string `json:"logo_url,omitempty"`
+
+	// NetPaymentTerms Days until an invoice is due. 0 means due on issue.
+	NetPaymentTerms int `json:"net_payment_terms"`
+
+	// SupportUrl Must start with `http://` or `https://`. Printed in the invoice footer.
+	SupportUrl string `json:"support_url,omitempty"`
+
+	// TaxId Your own tax number (VAT, EIN, GSTIN), printed on invoices.
+	TaxId string `json:"tax_id,omitempty"`
+
+	// TaxInclusive Whether prices already include tax.
+	TaxInclusive bool `json:"tax_inclusive"`
+
+	// TaxName Label for the tax line, such as `VAT`.
+	TaxName string `json:"tax_name,omitempty"`
+
+	// TaxOnFailure What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+	TaxOnFailure TenantSettingsTaxOnFailure `json:"tax_on_failure,omitempty"`
+
+	// TaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
+	TaxProvider TenantSettingsTaxProvider `json:"tax_provider"`
+
+	// TaxRate Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider.
+	TaxRate  float32 `json:"tax_rate"`
+	TenantId string  `json:"tenant_id"`
+
+	// Timezone IANA zone name, such as `America/New_York`. `Local` is rejected. All billing date math uses this zone.
+	Timezone  string    `json:"timezone"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TenantSettingsTaxOnFailure What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+type TenantSettingsTaxOnFailure string
+
+// TenantSettingsTaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
+type TenantSettingsTaxProvider string
+
+// TenantSettingsInput Every field is optional. Fields you leave out keep their stored value.
+type TenantSettingsInput struct {
+	// BrandColor Accent color on invoice PDFs, as `#rrggbb`.
+	BrandColor          string `json:"brand_color,omitempty"`
+	CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+	CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
+	CompanyCity         string `json:"company_city,omitempty"`
+
+	// CompanyCountry ISO 3166 alpha-2 code, such as `US`.
+	CompanyCountry string `json:"company_country,omitempty"`
+	CompanyEmail   string `json:"company_email,omitempty"`
+
+	// CompanyName Shown on invoices and as the sender name on emails. No line breaks.
+	CompanyName string `json:"company_name,omitempty"`
+
+	// CompanyPhone 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`.
+	CompanyPhone      string `json:"company_phone,omitempty"`
+	CompanyPostalCode string `json:"company_postal_code,omitempty"`
+	CompanyState      string `json:"company_state,omitempty"`
+
+	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
+	// `credit.balance_low` webhook fires. null turns it off.
+	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
+
+	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
+	DefaultCurrency string `json:"default_currency,omitempty"`
+
+	// DefaultProductTaxCode Stripe product tax code used when a plan has none, such as `txcd_10103001`.
+	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
+
+	// InvoiceFooter Default footer for new invoices. An invoice's own footer takes precedence.
+	InvoiceFooter string `json:"invoice_footer,omitempty"`
+
+	// InvoicePrefix Starts every invoice number, such as `VLX-000001`.
+	InvoicePrefix string `json:"invoice_prefix,omitempty"`
+	LogoUrl       string `json:"logo_url,omitempty"`
+
+	// NetPaymentTerms Days until an invoice is due. 0 means due on issue.
+	NetPaymentTerms int `json:"net_payment_terms,omitempty"`
+
+	// SupportUrl Must start with `http://` or `https://`. Printed in the invoice footer.
+	SupportUrl string `json:"support_url,omitempty"`
+
+	// TaxId Your own tax number (VAT, EIN, GSTIN), printed on invoices.
+	TaxId string `json:"tax_id,omitempty"`
+
+	// TaxInclusive Whether prices already include tax.
+	TaxInclusive bool `json:"tax_inclusive,omitempty"`
+
+	// TaxName Label for the tax line, such as `VAT`.
+	TaxName string `json:"tax_name,omitempty"`
+
+	// TaxOnFailure What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+	TaxOnFailure TenantSettingsInputTaxOnFailure `json:"tax_on_failure,omitempty"`
+
+	// TaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
+	TaxProvider TenantSettingsInputTaxProvider `json:"tax_provider,omitempty"`
+
+	// TaxRate Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider.
+	TaxRate float32 `json:"tax_rate,omitempty"`
+
+	// Timezone IANA zone name, such as `America/New_York`. `Local` is rejected. All billing date math uses this zone.
+	Timezone string `json:"timezone,omitempty"`
+}
+
+// TenantSettingsInputTaxOnFailure What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+type TenantSettingsInputTaxOnFailure string
+
+// TenantSettingsInputTaxProvider `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
+type TenantSettingsInputTaxProvider string
+
+// UsageAggregate defines model for UsageAggregate.
+type UsageAggregate struct {
+	// ActiveCustomers Distinct customers among the matching events.
+	ActiveCustomers int `json:"active_customers"`
+
+	// ActiveMeters Distinct meters among the matching events.
+	ActiveMeters int `json:"active_meters"`
+
+	// ByMeter One row per meter, largest total first.
+	ByMeter []struct {
+		MeterId string `json:"meter_id"`
+
+		// Total Sum of quantities, as a decimal string.
+		Total string `json:"total"`
+	} `json:"by_meter"`
+	TotalEvents int `json:"total_events"`
+
+	// TotalUnits Sum of all matching quantities across meters, as a decimal string.
+	TotalUnits string `json:"total_units"`
+}
+
 // UsageEvent defines model for UsageEvent.
 type UsageEvent struct {
 	CustomerId     string                 `json:"customer_id,omitempty"`
@@ -1876,8 +4530,245 @@ type UsageEvent struct {
 	Timestamp      time.Time              `json:"timestamp,omitempty"`
 }
 
+// UsageSummary defines model for UsageSummary.
+type UsageSummary struct {
+	CustomerId string `json:"customer_id"`
+
+	// Meters Meter id to the sum of its quantities, as a decimal string.
+	Meters      map[string]string `json:"meters"`
+	PeriodFrom  time.Time         `json:"period_from"`
+	PeriodTo    time.Time         `json:"period_to"`
+	TotalEvents int               `json:"total_events"`
+}
+
+// WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
+type WebhookDeliveryReplayResult struct {
+	// DeliveryId The new delivery to this endpoint.
+	DeliveryId string `json:"delivery_id"`
+
+	// EventId The new event created by the replay.
+	EventId string `json:"event_id"`
+
+	// ReplayOf The original event.
+	ReplayOf string                            `json:"replay_of"`
+	Status   WebhookDeliveryReplayResultStatus `json:"status"`
+}
+
+// WebhookDeliveryReplayResultStatus defines model for WebhookDeliveryReplayResult.Status.
+type WebhookDeliveryReplayResultStatus string
+
+// WebhookEndpoint defines model for WebhookEndpoint.
+type WebhookEndpoint struct {
+	// Active false = paused.
+	Active      bool      `json:"active"`
+	CreatedAt   time.Time `json:"created_at"`
+	Description string    `json:"description,omitempty"`
+
+	// Events Subscribed event types. `*` means all.
+	Events                   []string  `json:"events"`
+	Id                       string    `json:"id"`
+	Livemode                 bool      `json:"livemode"`
+	SecondarySecretExpiresAt time.Time `json:"secondary_secret_expires_at,omitempty"`
+
+	// SecondarySecretLast4 The previous signing secret, during a rotation grace period.
+	SecondarySecretLast4 string    `json:"secondary_secret_last4,omitempty"`
+	SecretLast4          string    `json:"secret_last4"`
+	TenantId             string    `json:"tenant_id,omitempty"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	Url                  string    `json:"url"`
+}
+
+// WebhookEndpointDelivery defines model for WebhookEndpointDelivery.
+type WebhookEndpointDelivery struct {
+	AttemptCount int       `json:"attempt_count"`
+	CompletedAt  time.Time `json:"completed_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	Error        string    `json:"error"`
+	EventId      string    `json:"event_id"`
+	EventType    string    `json:"event_type"`
+	Id           string    `json:"id"`
+
+	// IsReplay The delivery came from a replay.
+	IsReplay        bool      `json:"is_replay"`
+	NextRetryAt     time.Time `json:"next_retry_at"`
+	ReplayOfEventId string    `json:"replay_of_event_id,omitempty"`
+
+	// ResponseBody First 4 KB of the receiver's response.
+	ResponseBody string                        `json:"response_body"`
+	Status       WebhookEndpointDeliveryStatus `json:"status"`
+
+	// StatusCode HTTP status from the receiver. 0 when there was no response.
+	StatusCode int `json:"status_code"`
+}
+
+// WebhookEndpointDeliveryStatus defines model for WebhookEndpointDelivery.Status.
+type WebhookEndpointDeliveryStatus string
+
+// WebhookEndpointStats defines model for WebhookEndpointStats.
+type WebhookEndpointStats struct {
+	EndpointId string `json:"endpoint_id"`
+	Failed     int    `json:"failed"`
+	Succeeded  int    `json:"succeeded"`
+
+	// SuccessRate Percent (0-100) of finished deliveries that succeeded. Pending deliveries are not counted. 0 when none finished.
+	SuccessRate float32 `json:"success_rate"`
+
+	// TotalDeliveries All deliveries, including pending ones.
+	TotalDeliveries int `json:"total_deliveries"`
+}
+
+// WebhookEventDeliveryAttempt defines model for WebhookEventDeliveryAttempt.
+type WebhookEventDeliveryAttempt struct {
+	// AttemptNo Position in the timeline, starting at 1.
+	AttemptNo           int       `json:"attempt_no"`
+	AttemptedAt         time.Time `json:"attempted_at"`
+	CompletedAt         time.Time `json:"completed_at"`
+	EndpointDescription string    `json:"endpoint_description"`
+	EndpointId          string    `json:"endpoint_id"`
+	EndpointUrl         string    `json:"endpoint_url"`
+	Error               string    `json:"error"`
+
+	// EventId The event this delivery sent. A replay's own id when `is_replay` is true.
+	EventId     string    `json:"event_id"`
+	Id          string    `json:"id"`
+	IsReplay    bool      `json:"is_replay"`
+	NextRetryAt time.Time `json:"next_retry_at"`
+
+	// ReplayEventId The replay's event id when `is_replay` is true; otherwise empty.
+	ReplayEventId string `json:"replay_event_id"`
+
+	// RequestPayloadSha256 SHA-256 of the event payload. Equal values mean the same payload was sent.
+	RequestPayloadSha256 string `json:"request_payload_sha256"`
+
+	// ResponseBody First 4 KB of the receiver's response.
+	ResponseBody string                            `json:"response_body"`
+	Status       WebhookEventDeliveryAttemptStatus `json:"status"`
+	StatusCode   int                               `json:"status_code"`
+}
+
+// WebhookEventDeliveryAttemptStatus defines model for WebhookEventDeliveryAttempt.Status.
+type WebhookEventDeliveryAttemptStatus string
+
+// WebhookReplayResult defines model for WebhookReplayResult.
+type WebhookReplayResult struct {
+	// EventId The new event created by the replay.
+	EventId string `json:"event_id"`
+
+	// ReplayOf The original event.
+	ReplayOf string                    `json:"replay_of"`
+	Status   WebhookReplayResultStatus `json:"status"`
+}
+
+// WebhookReplayResultStatus defines model for WebhookReplayResult.Status.
+type WebhookReplayResultStatus string
+
+// WebhookStreamFrame The JSON in each `data:` line of `/v1/webhook_events/stream`.
+type WebhookStreamFrame struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// CustomerId The payload's `customer_id`, or empty.
+	CustomerId      string    `json:"customer_id"`
+	EventId         string    `json:"event_id"`
+	EventType       string    `json:"event_type"`
+	LastAttemptAt   time.Time `json:"last_attempt_at"`
+	Livemode        bool      `json:"livemode"`
+	ReplayOfEventId string    `json:"replay_of_event_id"`
+
+	// Status Delivery state. Live frames send `pending`, `succeeded` or
+	// `failed`. Frames in the first batch send `pending`, `failed`,
+	// `delivered` (all deliveries succeeded) or `no_endpoints`.
+	Status string `json:"status"`
+}
+
 // bearerAuthContextKey is the context key for BearerAuth security scheme
 type bearerAuthContextKey string
+
+// sessionCookieContextKey is the context key for SessionCookie security scheme
+type sessionCookieContextKey string
+
+// GetAnalyticsMrrMovementParams defines parameters for GetAnalyticsMrrMovement.
+type GetAnalyticsMrrMovementParams struct {
+	// Period The window. Any other value is treated as `30d`. `12m` is 365 days.
+	Period AnalyticsPeriod `form:"period,omitempty" json:"period,omitempty"`
+}
+
+// GetAnalyticsOverviewParams defines parameters for GetAnalyticsOverview.
+type GetAnalyticsOverviewParams struct {
+	// Period The window. Any other value is treated as `30d`. `12m` is 365 days.
+	Period AnalyticsPeriod `form:"period,omitempty" json:"period,omitempty"`
+}
+
+// GetAnalyticsRevenueChartParams defines parameters for GetAnalyticsRevenueChart.
+type GetAnalyticsRevenueChartParams struct {
+	// Period The window. Any other value is treated as `30d`. `12m` is 365 days.
+	Period AnalyticsPeriod `form:"period,omitempty" json:"period,omitempty"`
+}
+
+// GetAnalyticsUsageParams defines parameters for GetAnalyticsUsage.
+type GetAnalyticsUsageParams struct {
+	// Period The window. Any other value is treated as `30d`. `12m` is 365 days.
+	Period AnalyticsPeriod `form:"period,omitempty" json:"period,omitempty"`
+}
+
+// CreateApiKeyJSONBody defines parameters for CreateApiKey.
+type CreateApiKeyJSONBody struct {
+	// ExpiresAt Optional. Must be in the future. Omit for a key that does not expire.
+	ExpiresAt time.Time                   `json:"expires_at,omitempty"`
+	KeyType   CreateApiKeyJSONBodyKeyType `json:"key_type,omitempty"`
+
+	// Name Label shown in the key list. Must not be blank.
+	Name string `json:"name"`
+}
+
+// CreateApiKeyJSONBodyKeyType defines parameters for CreateApiKey.
+type CreateApiKeyJSONBodyKeyType string
+
+// RotateApiKeyJSONBody defines parameters for RotateApiKey.
+type RotateApiKeyJSONBody struct {
+	// ExpiresInSeconds Grace period for the old key. 0 revokes it immediately.
+	ExpiresInSeconds int64 `json:"expires_in_seconds,omitempty"`
+}
+
+// ListAuditLogParams defines parameters for ListAuditLog.
+type ListAuditLogParams struct {
+	// ResourceType For example `invoice`, `api_key`, `setting`. See `/v1/audit-log/filters`.
+	ResourceType string `form:"resource_type,omitempty" json:"resource_type,omitempty"`
+	ResourceId   string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
+
+	// Action For example `create`, `update`, `revoke`. See `/v1/audit-log/filters`.
+	Action string `form:"action,omitempty" json:"action,omitempty"`
+
+	// ActorId A user id or an API key id.
+	ActorId string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
+	// DateFrom Lower bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (start of day, UTC).
+	DateFrom string `form:"date_from,omitempty" json:"date_from,omitempty"`
+
+	// DateTo Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59 UTC).
+	DateTo string `form:"date_to,omitempty" json:"date_to,omitempty"`
+
+	// TestClockId Only entries made inside this test clock's simulation. Works for deleted clocks too.
+	TestClockId string `form:"test_clock_id,omitempty" json:"test_clock_id,omitempty"`
+
+	// SimFrom Lower bound on `sim_effective_at` (simulated time), inclusive. Excludes entries with no simulated time.
+	SimFrom string `form:"sim_from,omitempty" json:"sim_from,omitempty"`
+
+	// SimTo Upper bound on `sim_effective_at`, inclusive.
+	SimTo string `form:"sim_to,omitempty" json:"sim_to,omitempty"`
+
+	// Order The only supported order. Any other value is a 400.
+	Order ListAuditLogParamsOrder `form:"order,omitempty" json:"order,omitempty"`
+	Limit int                     `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Ignored when `after` is set.
+	Offset int `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// After Cursor from a previous page's `next_cursor`. Takes precedence over `offset`.
+	After string `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// ListAuditLogParamsOrder defines parameters for ListAuditLog.
+type ListAuditLogParamsOrder string
 
 // PostV1AuthAcceptInviteJSONBody defines parameters for PostV1AuthAcceptInvite.
 type PostV1AuthAcceptInviteJSONBody struct {
@@ -1897,6 +4788,21 @@ type PostV1AuthModeJSONBody struct {
 	Livemode bool `json:"livemode"`
 }
 
+// CheckPasswordResetTokenParams defines parameters for CheckPasswordResetToken.
+type CheckPasswordResetTokenParams struct {
+	// Token The token from the reset link.
+	Token string `form:"token" json:"token"`
+}
+
+// CheckPasswordResetToken200JSONResponseBodyValid defines parameters for CheckPasswordResetToken.
+type CheckPasswordResetToken200JSONResponseBodyValid bool
+
+// CheckPasswordResetToken422JSONResponseBodyReason defines parameters for CheckPasswordResetToken.
+type CheckPasswordResetToken422JSONResponseBodyReason string
+
+// CheckPasswordResetToken422JSONResponseBodyValid defines parameters for CheckPasswordResetToken.
+type CheckPasswordResetToken422JSONResponseBodyValid bool
+
 // PostV1AuthPasswordResetConfirmJSONBody defines parameters for PostV1AuthPasswordResetConfirm.
 type PostV1AuthPasswordResetConfirmJSONBody struct {
 	Password string `json:"password"`
@@ -1910,6 +4816,46 @@ type PostV1AuthPasswordResetRequestJSONBody struct {
 
 // PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery defines parameters for PostV1AuthPasswordResetRequest.
 type PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery string
+
+// BootstrapJSONBody defines parameters for Bootstrap.
+type BootstrapJSONBody struct {
+	// OwnerEmail Must contain `@`.
+	OwnerEmail string `json:"owner_email,omitempty"`
+
+	// OwnerPassword 12 or more characters, at most 72 bytes. Omit to have Velox generate one.
+	OwnerPassword string `json:"owner_password,omitempty"`
+	TenantName    string `json:"tenant_name,omitempty"`
+
+	// Token The value of `VELOX_BOOTSTRAP_TOKEN`. Or send it as a Bearer token.
+	Token string `json:"token,omitempty"`
+}
+
+// ListCreditNotesParams defines parameters for ListCreditNotes.
+type ListCreditNotesParams struct {
+	InvoiceId    string                            `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
+	CustomerId   string                            `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+	Status       ListCreditNotesParamsStatus       `form:"status,omitempty" json:"status,omitempty"`
+	RefundStatus ListCreditNotesParamsRefundStatus `form:"refund_status,omitempty" json:"refund_status,omitempty"`
+
+	// Sort One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
+	Sort string                   `form:"sort,omitempty" json:"sort,omitempty"`
+	Dir  ListCreditNotesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+
+	// Limit Page size. Default 25, maximum 100.
+	Limit int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Maximum 10000.
+	Offset int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListCreditNotesParamsStatus defines parameters for ListCreditNotes.
+type ListCreditNotesParamsStatus string
+
+// ListCreditNotesParamsRefundStatus defines parameters for ListCreditNotes.
+type ListCreditNotesParamsRefundStatus string
+
+// ListCreditNotesParamsDir defines parameters for ListCreditNotes.
+type ListCreditNotesParamsDir string
 
 // PostV1CreditNotesJSONBody defines parameters for PostV1CreditNotes.
 type PostV1CreditNotesJSONBody struct {
@@ -1946,6 +4892,14 @@ type PostV1CreditNotesIdSendJSONBody struct {
 	Email            openapi_types.Email `json:"email"`
 }
 
+// AdjustCreditsJSONBody defines parameters for AdjustCredits.
+type AdjustCreditsJSONBody struct {
+	// AmountCents Positive adds credit, negative removes it. Not zero.
+	AmountCents int64  `json:"amount_cents"`
+	CustomerId  string `json:"customer_id"`
+	Description string `json:"description"`
+}
+
 // PostV1CreditsGrantJSONBody defines parameters for PostV1CreditsGrant.
 type PostV1CreditsGrantJSONBody struct {
 	AmountCents int64  `json:"amount_cents"`
@@ -1970,6 +4924,27 @@ type PostV1CreditsGrantJSONBodyGrantKind string
 type GetV1CreditsGrantsCustomerIdParams struct {
 	IncludeExhausted bool `form:"include_exhausted,omitempty" json:"include_exhausted,omitempty"`
 }
+
+// ListCreditLedgerEntriesParams defines parameters for ListCreditLedgerEntries.
+type ListCreditLedgerEntriesParams struct {
+	EntryType ListCreditLedgerEntriesParamsEntryType `form:"entry_type,omitempty" json:"entry_type,omitempty"`
+
+	// Sort One of created_at (default), amount_cents, entry_type, expires_at.
+	Sort string `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Dir Default desc.
+	Dir ListCreditLedgerEntriesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
+
+	// Limit Default 50, at most 100.
+	Limit  int `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListCreditLedgerEntriesParamsEntryType defines parameters for ListCreditLedgerEntries.
+type ListCreditLedgerEntriesParamsEntryType string
+
+// ListCreditLedgerEntriesParamsDir defines parameters for ListCreditLedgerEntries.
+type ListCreditLedgerEntriesParamsDir string
 
 // GetV1CustomersParams defines parameters for GetV1Customers.
 type GetV1CustomersParams struct {
@@ -2005,10 +4980,150 @@ type PostV1CustomersJSONBody struct {
 	ExternalId       string   `json:"external_id"`
 }
 
+// ListCustomerInvoicesParams defines parameters for ListCustomerInvoices.
+type ListCustomerInvoicesParams struct {
+	// Limit Default 25, at most 100.
+	Limit int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// SendCustomerPaymentSetupEmailJSONBody defines parameters for SendCustomerPaymentSetupEmail.
+type SendCustomerPaymentSetupEmailJSONBody struct {
+	// Note Optional text shown at the top of the email.
+	Note string `json:"note,omitempty"`
+}
+
+// CreateCustomerPaymentSetupSessionJSONBody defines parameters for CreateCustomerPaymentSetupSession.
+type CreateCustomerPaymentSetupSessionJSONBody struct {
+	// ReturnUrl Where Stripe sends the customer afterwards. Defaults to
+	// the dashboard's setup-complete page.
+	ReturnUrl string `json:"return_url,omitempty"`
+}
+
+// UpdateCustomerJSONBody defines parameters for UpdateCustomer.
+type UpdateCustomerJSONBody struct {
+	AdditionalEmails []string `json:"additional_emails,omitempty"`
+	DisplayName      string   `json:"display_name,omitempty"`
+
+	// DunningPolicyId Policy ID, or `""` to use the tenant default.
+	DunningPolicyId string                       `json:"dunning_policy_id,omitempty"`
+	Email           string                       `json:"email,omitempty"`
+	Status          UpdateCustomerJSONBodyStatus `json:"status,omitempty"`
+}
+
+// UpdateCustomerJSONBodyStatus defines parameters for UpdateCustomer.
+type UpdateCustomerJSONBodyStatus string
+
 // GetV1CustomersIdMarginParams defines parameters for GetV1CustomersIdMargin.
 type GetV1CustomersIdMarginParams struct {
 	From time.Time `form:"from,omitempty" json:"from,omitempty"`
 	To   time.Time `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// GetCustomerUsageParams defines parameters for GetCustomerUsage.
+type GetCustomerUsageParams struct {
+	// From Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC).
+	From string `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the window. RFC 3339 instant or `YYYY-MM-DD` (23:59:59 UTC that day).
+	To string `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// DeleteDunningPolicy200JSONResponseBodyStatus defines parameters for DeleteDunningPolicy.
+type DeleteDunningPolicy200JSONResponseBodyStatus string
+
+// SetDefaultDunningPolicy200JSONResponseBodyStatus defines parameters for SetDefaultDunningPolicy.
+type SetDefaultDunningPolicy200JSONResponseBodyStatus string
+
+// ListDunningRunsParams defines parameters for ListDunningRuns.
+type ListDunningRunsParams struct {
+	InvoiceId string                     `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
+	State     ListDunningRunsParamsState `form:"state,omitempty" json:"state,omitempty"`
+
+	// Limit Page size. Default 50, maximum 100.
+	Limit  int `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListDunningRunsParamsState defines parameters for ListDunningRuns.
+type ListDunningRunsParamsState string
+
+// ResolveDunningRunJSONBody defines parameters for ResolveDunningRun.
+type ResolveDunningRunJSONBody struct {
+	Resolution ResolveDunningRunJSONBodyResolution `json:"resolution"`
+}
+
+// ResolveDunningRunJSONBodyResolution defines parameters for ResolveDunningRun.
+type ResolveDunningRunJSONBodyResolution string
+
+// ExportAuditLogCsvParams defines parameters for ExportAuditLogCsv.
+type ExportAuditLogCsvParams struct {
+	// DateFrom Lower bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD`.
+	DateFrom string `form:"date_from,omitempty" json:"date_from,omitempty"`
+
+	// DateTo Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
+	DateTo       string `form:"date_to,omitempty" json:"date_to,omitempty"`
+	ResourceType string `form:"resource_type,omitempty" json:"resource_type,omitempty"`
+	ResourceId   string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
+	Action       string `form:"action,omitempty" json:"action,omitempty"`
+	ActorId      string `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+
+	// TestClockId Only rows from this test clock's simulation.
+	TestClockId string `form:"test_clock_id,omitempty" json:"test_clock_id,omitempty"`
+
+	// SimFrom Lower bound on simulated time (sim_effective_at). RFC 3339 or `YYYY-MM-DD`.
+	SimFrom string `form:"sim_from,omitempty" json:"sim_from,omitempty"`
+
+	// SimTo Upper bound on simulated time (sim_effective_at). RFC 3339 or `YYYY-MM-DD`.
+	SimTo string `form:"sim_to,omitempty" json:"sim_to,omitempty"`
+}
+
+// ExportCustomersCsvParams defines parameters for ExportCustomersCsv.
+type ExportCustomersCsvParams struct {
+	// From Lower bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD`.
+	From string `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
+	To string `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// ExportInvoicesCsvParams defines parameters for ExportInvoicesCsv.
+type ExportInvoicesCsvParams struct {
+	// From Lower bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD`.
+	From string `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
+	To string `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// ExportSubscriptionsCsvParams defines parameters for ExportSubscriptionsCsv.
+type ExportSubscriptionsCsvParams struct {
+	// From Lower bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD`.
+	From string `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
+	To string `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// ExportUsageEventsCsvParams defines parameters for ExportUsageEventsCsv.
+type ExportUsageEventsCsvParams struct {
+	// From Lower bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD`.
+	From string `form:"from" json:"from"`
+
+	// To Upper bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
+	To string `form:"to" json:"to"`
+}
+
+// IngestLitellmSpendJSONBody defines parameters for IngestLitellmSpend.
+type IngestLitellmSpendJSONBody struct {
+	union json.RawMessage
+}
+
+// IngestLitellmSpendJSONBody1 defines parameters for IngestLitellmSpend.
+type IngestLitellmSpendJSONBody1 = []LitellmSpendLog
+
+// IngestLitellmSpendJSONBody2 defines parameters for IngestLitellmSpend.
+type IngestLitellmSpendJSONBody2 struct {
+	Events []LitellmSpendLog `json:"events"`
 }
 
 // GetV1InvoicesParams defines parameters for GetV1Invoices.
@@ -2070,6 +5185,28 @@ type PostV1InvoicesCreatePreviewJSONBody struct {
 	SubscriptionId string `json:"subscription_id,omitempty"`
 }
 
+// RecordInvoicePaymentJSONBody defines parameters for RecordInvoicePayment.
+type RecordInvoicePaymentJSONBody struct {
+	// Note Free text, for example "Cheque 1234". Do not put personal data here: the audit log cannot be edited.
+	Note string `json:"note,omitempty"`
+}
+
+// RefundInvoiceJSONBody defines parameters for RefundInvoice.
+type RefundInvoiceJSONBody struct {
+	// AmountCents Amount to refund. 0 or absent refunds the full remaining amount.
+	AmountCents int64 `json:"amount_cents,omitempty"`
+
+	// Description Text for the credit note line. Defaults to "Refund: <reason>".
+	Description string                      `json:"description,omitempty"`
+	Reason      RefundInvoiceJSONBodyReason `json:"reason"`
+}
+
+// RefundInvoiceJSONBodyReason defines parameters for RefundInvoice.
+type RefundInvoiceJSONBodyReason string
+
+// ResendInvoiceSetupLink200JSONResponseBodyStatus defines parameters for ResendInvoiceSetupLink.
+type ResendInvoiceSetupLink200JSONResponseBodyStatus string
+
 // PostV1InvoicesIdSendJSONBody defines parameters for PostV1InvoicesIdSend.
 type PostV1InvoicesIdSendJSONBody struct {
 	AdditionalEmails []string            `json:"additional_emails,omitempty"`
@@ -2106,6 +5243,26 @@ type PatchV1MetersIdJSONBody struct {
 // PatchV1MetersIdJSONBodyAggregation defines parameters for PatchV1MetersId.
 type PatchV1MetersIdJSONBodyAggregation string
 
+// UpsertMeterPricingRuleJSONBody defines parameters for UpsertMeterPricingRule.
+type UpsertMeterPricingRuleJSONBody struct {
+	// AggregationMode How the matched events become one quantity for the period.
+	AggregationMode UpsertMeterPricingRuleJSONBodyAggregationMode `json:"aggregation_mode,omitempty"`
+
+	// DimensionMatch Event dimensions this rule claims, for example
+	// `{"model": "gpt-4o", "token_type": "input"}`. Values must be
+	// strings, numbers or booleans. Omitted or `{}` matches every event.
+	DimensionMatch map[string]interface{} `json:"dimension_match,omitempty"`
+
+	// Priority Higher wins when an event matches more than one rule.
+	Priority int `json:"priority,omitempty"`
+
+	// RatingRuleVersionId The rating rule that prices the matched usage. Must exist in this tenant and mode.
+	RatingRuleVersionId string `json:"rating_rule_version_id"`
+}
+
+// UpsertMeterPricingRuleJSONBodyAggregationMode defines parameters for UpsertMeterPricingRule.
+type UpsertMeterPricingRuleJSONBodyAggregationMode string
+
 // PostV1PlansJSONBody defines parameters for PostV1Plans.
 type PostV1PlansJSONBody struct {
 	BaseAmountCents int `json:"base_amount_cents,omitempty"`
@@ -2125,6 +5282,73 @@ type PostV1PlansJSONBodyBaseBillTiming string
 
 // PostV1PlansJSONBodyBillingInterval defines parameters for PostV1Plans.
 type PostV1PlansJSONBodyBillingInterval string
+
+// UpdatePlanJSONBody defines parameters for UpdatePlan.
+type UpdatePlanJSONBody struct {
+	// BaseAmountCents Ignored when 0 or less.
+	BaseAmountCents int64                            `json:"base_amount_cents,omitempty"`
+	BaseBillTiming  UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
+
+	// Description Omitting it clears the stored description.
+	Description string `json:"description,omitempty"`
+
+	// MeterIds Replaces the plan's meters. Omit to keep them.
+	MeterIds []string                 `json:"meter_ids,omitempty"`
+	Name     string                   `json:"name,omitempty"`
+	Status   UpdatePlanJSONBodyStatus `json:"status,omitempty"`
+
+	// TaxCode Stripe product tax code. Omitting it clears the stored code.
+	TaxCode string `json:"tax_code,omitempty"`
+}
+
+// UpdatePlanJSONBodyBaseBillTiming defines parameters for UpdatePlan.
+type UpdatePlanJSONBodyBaseBillTiming string
+
+// UpdatePlanJSONBodyStatus defines parameters for UpdatePlan.
+type UpdatePlanJSONBodyStatus string
+
+// ListPriceOverridesParams defines parameters for ListPriceOverrides.
+type ListPriceOverridesParams struct {
+	// CustomerId Only this customer's overrides.
+	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+}
+
+// CreatePriceOverrideJSONBody defines parameters for CreatePriceOverride.
+type CreatePriceOverrideJSONBody struct {
+	CustomerId string `json:"customer_id"`
+
+	// FlatAmountCents Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more.
+	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
+
+	// GraduatedTiers Used when `mode` is `graduated`. Each `up_to` must be larger
+	// than the one before, and the last tier must have
+	// `up_to: 0` (no upper bound).
+	GraduatedTiers []struct {
+		// UnitAmountCents Per-unit rate in cents, as a decimal string.
+		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+		UpTo            int64  `json:"up_to,omitempty"`
+	} `json:"graduated_tiers,omitempty"`
+	Mode CreatePriceOverrideJSONBodyMode `json:"mode"`
+
+	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string.
+	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
+
+	// PackageAmountCents Price of one package in cents. Used when `mode` is `package`.
+	PackageAmountCents int64 `json:"package_amount_cents,omitempty"`
+
+	// PackageSize Used when `mode` is `package`. Must be above 0.
+	PackageSize int64 `json:"package_size,omitempty"`
+
+	// RatingRuleVersionId Any version of the rule to override.
+	RatingRuleVersionId string `json:"rating_rule_version_id"`
+	Reason              string `json:"reason,omitempty"`
+}
+
+// CreatePriceOverrideJSONBodyMode defines parameters for CreatePriceOverride.
+type CreatePriceOverrideJSONBodyMode string
+
+// DeletePriceOverride200JSONResponseBodyActive defines parameters for DeletePriceOverride.
+type DeletePriceOverride200JSONResponseBodyActive bool
 
 // PutV1ProviderCostsJSONBody defines parameters for PutV1ProviderCosts.
 type PutV1ProviderCostsJSONBody struct {
@@ -2177,6 +5401,33 @@ type PreviewRecipeJSONBody struct {
 	Overrides map[string]interface{} `json:"overrides,omitempty"`
 }
 
+// ConnectStripeJSONBody defines parameters for ConnectStripe.
+type ConnectStripeJSONBody struct {
+	// Livemode false = test-mode keys, true = live-mode keys.
+	Livemode bool `json:"livemode"`
+
+	// PublishableKey Publishable (`pk_`) key for this mode.
+	PublishableKey string `json:"publishable_key"`
+
+	// SecretKey Secret (`sk_`) or restricted (`rk_`) key for this mode.
+	SecretKey string `json:"secret_key"`
+
+	// WebhookSecret Optional. The `whsec_` signing secret of the Stripe webhook endpoint. Can be added later with PATCH.
+	WebhookSecret string `json:"webhook_secret,omitempty"`
+}
+
+// DisconnectStripeParamsMode defines parameters for DisconnectStripe.
+type DisconnectStripeParamsMode string
+
+// SetStripeWebhookSecretJSONBody defines parameters for SetStripeWebhookSecret.
+type SetStripeWebhookSecretJSONBody struct {
+	// WebhookSecret Must start with `whsec_`.
+	WebhookSecret string `json:"webhook_secret"`
+}
+
+// SetStripeWebhookSecretParamsMode defines parameters for SetStripeWebhookSecret.
+type SetStripeWebhookSecretParamsMode string
+
 // GetV1SubscriptionsParams defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParams struct {
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
@@ -2224,6 +5475,82 @@ type PostV1SubscriptionsJSONBody struct {
 
 // PostV1SubscriptionsJSONBodyBillingTime defines parameters for PostV1Subscriptions.
 type PostV1SubscriptionsJSONBodyBillingTime string
+
+// SetSubscriptionBillingThresholdsJSONBody defines parameters for SetSubscriptionBillingThresholds.
+type SetSubscriptionBillingThresholdsJSONBody struct {
+	// AmountGte Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
+	AmountGte      int64 `json:"amount_gte,omitempty"`
+	ItemThresholds []struct {
+		// SubscriptionItemId An item of this subscription. Each item can appear once.
+		SubscriptionItemId string `json:"subscription_item_id"`
+
+		// UsageGte Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14").
+		UsageGte string `json:"usage_gte"`
+	} `json:"item_thresholds,omitempty"`
+
+	// ResetBillingCycle `true` starts a new billing period when a threshold
+	// invoice is issued. `false` keeps the period; the rest of
+	// the period's usage is billed at its normal end.
+	ResetBillingCycle bool `json:"reset_billing_cycle,omitempty"`
+}
+
+// ExtendSubscriptionTrialJSONBody defines parameters for ExtendSubscriptionTrial.
+type ExtendSubscriptionTrialJSONBody struct {
+	// TrialEnd The new trial end. Must be in the future and after the current `trial_end_at`.
+	TrialEnd time.Time `json:"trial_end"`
+}
+
+// AddSubscriptionItemJSONBody defines parameters for AddSubscriptionItem.
+type AddSubscriptionItemJSONBody struct {
+	PlanId   string `json:"plan_id"`
+	Quantity int64  `json:"quantity,omitempty"`
+}
+
+// UpdateSubscriptionItemJSONBody defines parameters for UpdateSubscriptionItem.
+type UpdateSubscriptionItemJSONBody struct {
+	// Immediate Apply a plan change now instead of at the end of the period. Ignored for quantity changes.
+	Immediate bool `json:"immediate,omitempty"`
+
+	// NewPlanId The plan to move the item to. Must differ from the current one and use the same base-fee billing timing (in advance or in arrears).
+	NewPlanId string `json:"new_plan_id,omitempty"`
+
+	// Quantity The new quantity. Must differ from the current one.
+	Quantity int64 `json:"quantity,omitempty"`
+}
+
+// PauseSubscriptionCollectionJSONBody defines parameters for PauseSubscriptionCollection.
+type PauseSubscriptionCollectionJSONBody struct {
+	Behavior PauseSubscriptionCollectionJSONBodyBehavior `json:"behavior"`
+
+	// ResumesAt When collection resumes. Must be in the future.
+	ResumesAt time.Time `json:"resumes_at,omitempty"`
+}
+
+// PauseSubscriptionCollectionJSONBodyBehavior defines parameters for PauseSubscriptionCollection.
+type PauseSubscriptionCollectionJSONBodyBehavior string
+
+// ScheduleSubscriptionCancelJSONBody defines parameters for ScheduleSubscriptionCancel.
+type ScheduleSubscriptionCancelJSONBody struct {
+	// AtPeriodEnd Cancel at the end of the current period (or of the trial, while trialing).
+	AtPeriodEnd bool `json:"at_period_end,omitempty"`
+
+	// CancelAt Cancel at this instant. Must be in the future.
+	CancelAt time.Time `json:"cancel_at,omitempty"`
+}
+
+// ListTenantsParams defines parameters for ListTenants.
+type ListTenantsParams struct {
+	Status ListTenantsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// ListTenantsParamsStatus defines parameters for ListTenants.
+type ListTenantsParamsStatus string
+
+// CreateTenantJSONBody defines parameters for CreateTenant.
+type CreateTenantJSONBody struct {
+	// Name Must not be blank.
+	Name string `json:"name"`
+}
 
 // PostV1TestClocksJSONBody defines parameters for PostV1TestClocks.
 type PostV1TestClocksJSONBody struct {
@@ -2292,6 +5619,56 @@ type PostV1UsageEventsJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
+// AggregateUsageEventsParams defines parameters for AggregateUsageEvents.
+type AggregateUsageEventsParams struct {
+	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+	MeterId    string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
+
+	// From Events at or after this time (RFC 3339).
+	From time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Events before this time (RFC 3339).
+	To time.Time `form:"to,omitempty" json:"to,omitempty"`
+
+	// Dimensions Comma-separated key=value pairs matched against event dimensions,
+	// same syntax as `GET /v1/usage-events`. Example:
+	// `model=gpt-4o,token_type=input`.
+	Dimensions string `form:"dimensions,omitempty" json:"dimensions,omitempty"`
+}
+
+// BackfillUsageEventJSONBody defines parameters for BackfillUsageEvent.
+type BackfillUsageEventJSONBody struct {
+	// Dimensions Scalar dimension values used to pick the pricing rule.
+	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
+
+	// EventName The meter key (e.g. "tokens").
+	EventName string `json:"event_name"`
+
+	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
+	ExternalCustomerId string `json:"external_customer_id"`
+	IdempotencyKey     string `json:"idempotency_key,omitempty"`
+
+	// Properties Older name for `dimensions`. Used only when `dimensions` is absent.
+	Properties map[string]interface{} `json:"properties,omitempty"`
+
+	// Quantity Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections.
+	Quantity BackfillUsageEventJSONBody_Quantity `json:"quantity,omitempty"`
+
+	// Timestamp RFC 3339. Must not be in the future.
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// BackfillUsageEventJSONBodyQuantity0 defines parameters for BackfillUsageEvent.
+type BackfillUsageEventJSONBodyQuantity0 = float32
+
+// BackfillUsageEventJSONBodyQuantity1 defines parameters for BackfillUsageEvent.
+type BackfillUsageEventJSONBodyQuantity1 = string
+
+// BackfillUsageEventJSONBody_Quantity defines parameters for BackfillUsageEvent.
+type BackfillUsageEventJSONBody_Quantity struct {
+	union json.RawMessage
+}
+
 // PostV1UsageEventsBatchJSONBody defines parameters for PostV1UsageEventsBatch.
 type PostV1UsageEventsBatchJSONBody = []struct {
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
@@ -2332,6 +5709,18 @@ type PostV1UsageEventsBatchJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
+// GetUsageSummaryParams defines parameters for GetUsageSummary.
+type GetUsageSummaryParams struct {
+	// From Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
+	From string `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59 UTC that day.
+	To string `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// GetUsageSummary500JSONResponseBodyError defines parameters for GetUsageSummary.
+type GetUsageSummary500JSONResponseBodyError string
+
 // PostV1WebhookEndpointsEndpointsJSONBody defines parameters for PostV1WebhookEndpointsEndpoints.
 type PostV1WebhookEndpointsEndpointsJSONBody struct {
 	Description string   `json:"description,omitempty"`
@@ -2350,6 +5739,12 @@ type PatchV1WebhookEndpointsEndpointsIdJSONBody struct {
 // GetV1Whoami200JSONResponseBodyKeyType defines parameters for GetV1Whoami.
 type GetV1Whoami200JSONResponseBodyKeyType string
 
+// CreateApiKeyJSONRequestBody defines body for CreateApiKey for application/json ContentType.
+type CreateApiKeyJSONRequestBody CreateApiKeyJSONBody
+
+// RotateApiKeyJSONRequestBody defines body for RotateApiKey for application/json ContentType.
+type RotateApiKeyJSONRequestBody RotateApiKeyJSONBody
+
 // PostV1AuthAcceptInviteJSONRequestBody defines body for PostV1AuthAcceptInvite for application/json ContentType.
 type PostV1AuthAcceptInviteJSONRequestBody PostV1AuthAcceptInviteJSONBody
 
@@ -2365,11 +5760,17 @@ type PostV1AuthPasswordResetConfirmJSONRequestBody PostV1AuthPasswordResetConfir
 // PostV1AuthPasswordResetRequestJSONRequestBody defines body for PostV1AuthPasswordResetRequest for application/json ContentType.
 type PostV1AuthPasswordResetRequestJSONRequestBody PostV1AuthPasswordResetRequestJSONBody
 
+// BootstrapJSONRequestBody defines body for Bootstrap for application/json ContentType.
+type BootstrapJSONRequestBody BootstrapJSONBody
+
 // PostV1CreditNotesJSONRequestBody defines body for PostV1CreditNotes for application/json ContentType.
 type PostV1CreditNotesJSONRequestBody PostV1CreditNotesJSONBody
 
 // PostV1CreditNotesIdSendJSONRequestBody defines body for PostV1CreditNotesIdSend for application/json ContentType.
 type PostV1CreditNotesIdSendJSONRequestBody PostV1CreditNotesIdSendJSONBody
+
+// AdjustCreditsJSONRequestBody defines body for AdjustCredits for application/json ContentType.
+type AdjustCreditsJSONRequestBody AdjustCreditsJSONBody
 
 // PostV1CreditsGrantJSONRequestBody defines body for PostV1CreditsGrant for application/json ContentType.
 type PostV1CreditsGrantJSONRequestBody PostV1CreditsGrantJSONBody
@@ -2377,8 +5778,44 @@ type PostV1CreditsGrantJSONRequestBody PostV1CreditsGrantJSONBody
 // PostV1CustomersJSONRequestBody defines body for PostV1Customers for application/json ContentType.
 type PostV1CustomersJSONRequestBody PostV1CustomersJSONBody
 
+// SendCustomerPaymentSetupEmailJSONRequestBody defines body for SendCustomerPaymentSetupEmail for application/json ContentType.
+type SendCustomerPaymentSetupEmailJSONRequestBody SendCustomerPaymentSetupEmailJSONBody
+
+// CreateCustomerPaymentSetupSessionJSONRequestBody defines body for CreateCustomerPaymentSetupSession for application/json ContentType.
+type CreateCustomerPaymentSetupSessionJSONRequestBody CreateCustomerPaymentSetupSessionJSONBody
+
+// UpdateCustomerJSONRequestBody defines body for UpdateCustomer for application/json ContentType.
+type UpdateCustomerJSONRequestBody UpdateCustomerJSONBody
+
+// UpsertCustomerBillingProfileJSONRequestBody defines body for UpsertCustomerBillingProfile for application/json ContentType.
+type UpsertCustomerBillingProfileJSONRequestBody = CustomerBillingProfileInput
+
+// CreateDunningPolicyJSONRequestBody defines body for CreateDunningPolicy for application/json ContentType.
+type CreateDunningPolicyJSONRequestBody = DunningPolicyInput
+
+// UpdateDunningPolicyJSONRequestBody defines body for UpdateDunningPolicy for application/json ContentType.
+type UpdateDunningPolicyJSONRequestBody = DunningPolicyInput
+
+// ResolveDunningRunJSONRequestBody defines body for ResolveDunningRun for application/json ContentType.
+type ResolveDunningRunJSONRequestBody ResolveDunningRunJSONBody
+
+// IngestLitellmSpendJSONRequestBody defines body for IngestLitellmSpend for application/json ContentType.
+type IngestLitellmSpendJSONRequestBody IngestLitellmSpendJSONBody
+
+// CreateInvoiceJSONRequestBody defines body for CreateInvoice for application/json ContentType.
+type CreateInvoiceJSONRequestBody = InvoiceCreateRequest
+
 // PostV1InvoicesCreatePreviewJSONRequestBody defines body for PostV1InvoicesCreatePreview for application/json ContentType.
 type PostV1InvoicesCreatePreviewJSONRequestBody PostV1InvoicesCreatePreviewJSONBody
+
+// AddInvoiceLineItemJSONRequestBody defines body for AddInvoiceLineItem for application/json ContentType.
+type AddInvoiceLineItemJSONRequestBody = InvoiceLineItemInput
+
+// RecordInvoicePaymentJSONRequestBody defines body for RecordInvoicePayment for application/json ContentType.
+type RecordInvoicePaymentJSONRequestBody RecordInvoicePaymentJSONBody
+
+// RefundInvoiceJSONRequestBody defines body for RefundInvoice for application/json ContentType.
+type RefundInvoiceJSONRequestBody RefundInvoiceJSONBody
 
 // PostV1InvoicesIdSendJSONRequestBody defines body for PostV1InvoicesIdSend for application/json ContentType.
 type PostV1InvoicesIdSendJSONRequestBody PostV1InvoicesIdSendJSONBody
@@ -2392,8 +5829,17 @@ type PostV1MetersJSONRequestBody PostV1MetersJSONBody
 // PatchV1MetersIdJSONRequestBody defines body for PatchV1MetersId for application/json ContentType.
 type PatchV1MetersIdJSONRequestBody PatchV1MetersIdJSONBody
 
+// UpsertMeterPricingRuleJSONRequestBody defines body for UpsertMeterPricingRule for application/json ContentType.
+type UpsertMeterPricingRuleJSONRequestBody UpsertMeterPricingRuleJSONBody
+
 // PostV1PlansJSONRequestBody defines body for PostV1Plans for application/json ContentType.
 type PostV1PlansJSONRequestBody PostV1PlansJSONBody
+
+// UpdatePlanJSONRequestBody defines body for UpdatePlan for application/json ContentType.
+type UpdatePlanJSONRequestBody UpdatePlanJSONBody
+
+// CreatePriceOverrideJSONRequestBody defines body for CreatePriceOverride for application/json ContentType.
+type CreatePriceOverrideJSONRequestBody CreatePriceOverrideJSONBody
 
 // PutV1ProviderCostsJSONRequestBody defines body for PutV1ProviderCosts for application/json ContentType.
 type PutV1ProviderCostsJSONRequestBody PutV1ProviderCostsJSONBody
@@ -2407,8 +5853,38 @@ type InstantiateRecipeJSONRequestBody InstantiateRecipeJSONBody
 // PreviewRecipeJSONRequestBody defines body for PreviewRecipe for application/json ContentType.
 type PreviewRecipeJSONRequestBody PreviewRecipeJSONBody
 
+// UpdateTenantSettingsJSONRequestBody defines body for UpdateTenantSettings for application/json ContentType.
+type UpdateTenantSettingsJSONRequestBody = TenantSettingsInput
+
+// ConnectStripeJSONRequestBody defines body for ConnectStripe for application/json ContentType.
+type ConnectStripeJSONRequestBody ConnectStripeJSONBody
+
+// SetStripeWebhookSecretJSONRequestBody defines body for SetStripeWebhookSecret for application/json ContentType.
+type SetStripeWebhookSecretJSONRequestBody SetStripeWebhookSecretJSONBody
+
 // PostV1SubscriptionsJSONRequestBody defines body for PostV1Subscriptions for application/json ContentType.
 type PostV1SubscriptionsJSONRequestBody PostV1SubscriptionsJSONBody
+
+// SetSubscriptionBillingThresholdsJSONRequestBody defines body for SetSubscriptionBillingThresholds for application/json ContentType.
+type SetSubscriptionBillingThresholdsJSONRequestBody SetSubscriptionBillingThresholdsJSONBody
+
+// ExtendSubscriptionTrialJSONRequestBody defines body for ExtendSubscriptionTrial for application/json ContentType.
+type ExtendSubscriptionTrialJSONRequestBody ExtendSubscriptionTrialJSONBody
+
+// AddSubscriptionItemJSONRequestBody defines body for AddSubscriptionItem for application/json ContentType.
+type AddSubscriptionItemJSONRequestBody AddSubscriptionItemJSONBody
+
+// UpdateSubscriptionItemJSONRequestBody defines body for UpdateSubscriptionItem for application/json ContentType.
+type UpdateSubscriptionItemJSONRequestBody UpdateSubscriptionItemJSONBody
+
+// PauseSubscriptionCollectionJSONRequestBody defines body for PauseSubscriptionCollection for application/json ContentType.
+type PauseSubscriptionCollectionJSONRequestBody PauseSubscriptionCollectionJSONBody
+
+// ScheduleSubscriptionCancelJSONRequestBody defines body for ScheduleSubscriptionCancel for application/json ContentType.
+type ScheduleSubscriptionCancelJSONRequestBody ScheduleSubscriptionCancelJSONBody
+
+// CreateTenantJSONRequestBody defines body for CreateTenant for application/json ContentType.
+type CreateTenantJSONRequestBody CreateTenantJSONBody
 
 // PostV1TestClocksJSONRequestBody defines body for PostV1TestClocks for application/json ContentType.
 type PostV1TestClocksJSONRequestBody PostV1TestClocksJSONBody
@@ -2419,6 +5895,9 @@ type PostV1TestClocksIdAdvanceJSONRequestBody PostV1TestClocksIdAdvanceJSONBody
 // PostV1UsageEventsJSONRequestBody defines body for PostV1UsageEvents for application/json ContentType.
 type PostV1UsageEventsJSONRequestBody PostV1UsageEventsJSONBody
 
+// BackfillUsageEventJSONRequestBody defines body for BackfillUsageEvent for application/json ContentType.
+type BackfillUsageEventJSONRequestBody BackfillUsageEventJSONBody
+
 // PostV1UsageEventsBatchJSONRequestBody defines body for PostV1UsageEventsBatch for application/json ContentType.
 type PostV1UsageEventsBatchJSONRequestBody = PostV1UsageEventsBatchJSONBody
 
@@ -2427,6 +5906,94 @@ type PostV1WebhookEndpointsEndpointsJSONRequestBody PostV1WebhookEndpointsEndpoi
 
 // PatchV1WebhookEndpointsEndpointsIdJSONRequestBody defines body for PatchV1WebhookEndpointsEndpointsId for application/json ContentType.
 type PatchV1WebhookEndpointsEndpointsIdJSONRequestBody PatchV1WebhookEndpointsEndpointsIdJSONBody
+
+// AsLitellmSpendLog returns the union data inside the IngestLitellmSpendJSONBody as a LitellmSpendLog
+func (t IngestLitellmSpendJSONBody) AsLitellmSpendLog() (LitellmSpendLog, error) {
+	var body LitellmSpendLog
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromLitellmSpendLog overwrites any union data inside the IngestLitellmSpendJSONBody as the provided LitellmSpendLog
+func (t *IngestLitellmSpendJSONBody) FromLitellmSpendLog(v LitellmSpendLog) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeLitellmSpendLog performs a merge with any union data inside the IngestLitellmSpendJSONBody, using the provided LitellmSpendLog
+func (t *IngestLitellmSpendJSONBody) MergeLitellmSpendLog(v LitellmSpendLog) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsIngestLitellmSpendJSONBody1 returns the union data inside the IngestLitellmSpendJSONBody as a IngestLitellmSpendJSONBody1
+func (t IngestLitellmSpendJSONBody) AsIngestLitellmSpendJSONBody1() (IngestLitellmSpendJSONBody1, error) {
+	var body IngestLitellmSpendJSONBody1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromIngestLitellmSpendJSONBody1 overwrites any union data inside the IngestLitellmSpendJSONBody as the provided IngestLitellmSpendJSONBody1
+func (t *IngestLitellmSpendJSONBody) FromIngestLitellmSpendJSONBody1(v IngestLitellmSpendJSONBody1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeIngestLitellmSpendJSONBody1 performs a merge with any union data inside the IngestLitellmSpendJSONBody, using the provided IngestLitellmSpendJSONBody1
+func (t *IngestLitellmSpendJSONBody) MergeIngestLitellmSpendJSONBody1(v IngestLitellmSpendJSONBody1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsIngestLitellmSpendJSONBody2 returns the union data inside the IngestLitellmSpendJSONBody as a IngestLitellmSpendJSONBody2
+func (t IngestLitellmSpendJSONBody) AsIngestLitellmSpendJSONBody2() (IngestLitellmSpendJSONBody2, error) {
+	var body IngestLitellmSpendJSONBody2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromIngestLitellmSpendJSONBody2 overwrites any union data inside the IngestLitellmSpendJSONBody as the provided IngestLitellmSpendJSONBody2
+func (t *IngestLitellmSpendJSONBody) FromIngestLitellmSpendJSONBody2(v IngestLitellmSpendJSONBody2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeIngestLitellmSpendJSONBody2 performs a merge with any union data inside the IngestLitellmSpendJSONBody, using the provided IngestLitellmSpendJSONBody2
+func (t *IngestLitellmSpendJSONBody) MergeIngestLitellmSpendJSONBody2(v IngestLitellmSpendJSONBody2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t IngestLitellmSpendJSONBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *IngestLitellmSpendJSONBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsPostV1UsageEventsJSONBodyQuantity0 returns the union data inside the PostV1UsageEventsJSONBody_Quantity as a PostV1UsageEventsJSONBodyQuantity0
 func (t PostV1UsageEventsJSONBody_Quantity) AsPostV1UsageEventsJSONBodyQuantity0() (PostV1UsageEventsJSONBodyQuantity0, error) {
@@ -2486,6 +6053,68 @@ func (t PostV1UsageEventsJSONBody_Quantity) MarshalJSON() ([]byte, error) {
 }
 
 func (t *PostV1UsageEventsJSONBody_Quantity) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsBackfillUsageEventJSONBodyQuantity0 returns the union data inside the BackfillUsageEventJSONBody_Quantity as a BackfillUsageEventJSONBodyQuantity0
+func (t BackfillUsageEventJSONBody_Quantity) AsBackfillUsageEventJSONBodyQuantity0() (BackfillUsageEventJSONBodyQuantity0, error) {
+	var body BackfillUsageEventJSONBodyQuantity0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBackfillUsageEventJSONBodyQuantity0 overwrites any union data inside the BackfillUsageEventJSONBody_Quantity as the provided BackfillUsageEventJSONBodyQuantity0
+func (t *BackfillUsageEventJSONBody_Quantity) FromBackfillUsageEventJSONBodyQuantity0(v BackfillUsageEventJSONBodyQuantity0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBackfillUsageEventJSONBodyQuantity0 performs a merge with any union data inside the BackfillUsageEventJSONBody_Quantity, using the provided BackfillUsageEventJSONBodyQuantity0
+func (t *BackfillUsageEventJSONBody_Quantity) MergeBackfillUsageEventJSONBodyQuantity0(v BackfillUsageEventJSONBodyQuantity0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBackfillUsageEventJSONBodyQuantity1 returns the union data inside the BackfillUsageEventJSONBody_Quantity as a BackfillUsageEventJSONBodyQuantity1
+func (t BackfillUsageEventJSONBody_Quantity) AsBackfillUsageEventJSONBodyQuantity1() (BackfillUsageEventJSONBodyQuantity1, error) {
+	var body BackfillUsageEventJSONBodyQuantity1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBackfillUsageEventJSONBodyQuantity1 overwrites any union data inside the BackfillUsageEventJSONBody_Quantity as the provided BackfillUsageEventJSONBodyQuantity1
+func (t *BackfillUsageEventJSONBody_Quantity) FromBackfillUsageEventJSONBodyQuantity1(v BackfillUsageEventJSONBodyQuantity1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBackfillUsageEventJSONBodyQuantity1 performs a merge with any union data inside the BackfillUsageEventJSONBody_Quantity, using the provided BackfillUsageEventJSONBodyQuantity1
+func (t *BackfillUsageEventJSONBody_Quantity) MergeBackfillUsageEventJSONBodyQuantity1(v BackfillUsageEventJSONBodyQuantity1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t BackfillUsageEventJSONBody_Quantity) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *BackfillUsageEventJSONBody_Quantity) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -2557,6 +6186,36 @@ type ServerInterface interface {
 	// Health check
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// Get MRR movement over time
+	// (GET /v1/analytics/mrr-movement)
+	GetAnalyticsMrrMovement(w http.ResponseWriter, r *http.Request, params GetAnalyticsMrrMovementParams)
+	// Get headline billing metrics
+	// (GET /v1/analytics/overview)
+	GetAnalyticsOverview(w http.ResponseWriter, r *http.Request, params GetAnalyticsOverviewParams)
+	// Get revenue over time
+	// (GET /v1/analytics/revenue-chart)
+	GetAnalyticsRevenueChart(w http.ResponseWriter, r *http.Request, params GetAnalyticsRevenueChartParams)
+	// Get usage over time
+	// (GET /v1/analytics/usage)
+	GetAnalyticsUsage(w http.ResponseWriter, r *http.Request, params GetAnalyticsUsageParams)
+	// List API keys
+	// (GET /v1/api-keys)
+	ListApiKeys(w http.ResponseWriter, r *http.Request)
+	// Create an API key
+	// (POST /v1/api-keys)
+	CreateApiKey(w http.ResponseWriter, r *http.Request)
+	// Revoke an API key
+	// (DELETE /v1/api-keys/{id})
+	RevokeApiKey(w http.ResponseWriter, r *http.Request, id string)
+	// Rotate an API key
+	// (POST /v1/api-keys/{id}/rotate)
+	RotateApiKey(w http.ResponseWriter, r *http.Request, id string)
+	// List audit log entries
+	// (GET /v1/audit-log)
+	ListAuditLog(w http.ResponseWriter, r *http.Request, params ListAuditLogParams)
+	// List audit log filter values
+	// (GET /v1/audit-log/filters)
+	GetAuditLogFilters(w http.ResponseWriter, r *http.Request)
 	// Accept a team invitation
 	// (POST /v1/auth/accept-invite)
 	PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request)
@@ -2572,6 +6231,9 @@ type ServerInterface interface {
 	// Switch the dashboard session between test and live mode
 	// (POST /v1/auth/mode)
 	PostV1AuthMode(w http.ResponseWriter, r *http.Request)
+	// Check a password reset token
+	// (GET /v1/auth/password-reset/check)
+	CheckPasswordResetToken(w http.ResponseWriter, r *http.Request, params CheckPasswordResetTokenParams)
 	// Set a new password using a reset token
 	// (POST /v1/auth/password-reset/confirm)
 	PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request)
@@ -2584,59 +6246,209 @@ type ServerInterface interface {
 	// Trigger billing cycle
 	// (POST /v1/billing/run)
 	PostV1BillingRun(w http.ResponseWriter, r *http.Request)
+	// Set up a new installation
+	// (POST /v1/bootstrap)
+	Bootstrap(w http.ResponseWriter, r *http.Request)
+	// List credit notes
+	// (GET /v1/credit-notes)
+	ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams)
 	// Create a credit note (line-based, or commit relief)
 	// (POST /v1/credit-notes)
 	PostV1CreditNotes(w http.ResponseWriter, r *http.Request)
+	// Get a credit note
+	// (GET /v1/credit-notes/{id})
+	GetCreditNote(w http.ResponseWriter, r *http.Request, id string)
+	// Issue a draft credit note
+	// (POST /v1/credit-notes/{id}/issue)
+	IssueCreditNote(w http.ResponseWriter, r *http.Request, id string)
+	// Download credit note PDF
+	// (GET /v1/credit-notes/{id}/pdf)
+	GetCreditNotePdf(w http.ResponseWriter, r *http.Request, id string)
+	// Retry a failed credit-note refund
+	// (POST /v1/credit-notes/{id}/retry-refund)
+	RetryCreditNoteRefund(w http.ResponseWriter, r *http.Request, id string)
 	// Email the credit-note document (PDF attached)
 	// (POST /v1/credit-notes/{id}/send)
 	PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Request, id string)
+	// Void a draft credit note
+	// (POST /v1/credit-notes/{id}/void)
+	VoidCreditNote(w http.ResponseWriter, r *http.Request, id string)
+	// Add or remove credit
+	// (POST /v1/credits/adjust)
+	AdjustCredits(w http.ResponseWriter, r *http.Request)
 	// Get customer credit balance
 	// (GET /v1/credits/balance/{customer_id})
 	GetV1CreditsBalanceCustomerId(w http.ResponseWriter, r *http.Request, customerId string)
 	// Get customer live credit balance
 	// (GET /v1/credits/balance/{customer_id}/live)
 	GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, r *http.Request, customerId string)
+	// List credit balances for all customers
+	// (GET /v1/credits/balances)
+	ListCreditBalances(w http.ResponseWriter, r *http.Request)
 	// Grant credits to customer
 	// (POST /v1/credits/grant)
 	PostV1CreditsGrant(w http.ResponseWriter, r *http.Request)
 	// Per-grant burndown + kind subtotals
 	// (GET /v1/credits/grants/{customer_id})
 	GetV1CreditsGrantsCustomerId(w http.ResponseWriter, r *http.Request, customerId string, params GetV1CreditsGrantsCustomerIdParams)
+	// List a customer's credit ledger
+	// (GET /v1/credits/ledger/{customer_id})
+	ListCreditLedgerEntries(w http.ResponseWriter, r *http.Request, customerId string, params ListCreditLedgerEntriesParams)
 	// List customers
 	// (GET /v1/customers)
 	GetV1Customers(w http.ResponseWriter, r *http.Request, params GetV1CustomersParams)
 	// Create customer
 	// (POST /v1/customers)
 	PostV1Customers(w http.ResponseWriter, r *http.Request)
+	// List the customer's invoices
+	// (GET /v1/customers/{customer_id}/invoices)
+	ListCustomerInvoices(w http.ResponseWriter, r *http.Request, customerId string, params ListCustomerInvoicesParams)
+	// Get a customer overview
+	// (GET /v1/customers/{customer_id}/overview)
+	GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string)
+	// List the customer's payment methods
+	// (GET /v1/customers/{customer_id}/payment-methods)
+	ListCustomerPaymentMethods(w http.ResponseWriter, r *http.Request, customerId string)
+	// Email the customer a link to add a payment method
+	// (POST /v1/customers/{customer_id}/payment-methods/send-setup-email)
+	SendCustomerPaymentSetupEmail(w http.ResponseWriter, r *http.Request, customerId string)
+	// Create a link for the customer to add a payment method
+	// (POST /v1/customers/{customer_id}/payment-methods/setup-session)
+	CreateCustomerPaymentSetupSession(w http.ResponseWriter, r *http.Request, customerId string)
+	// Detach a payment method
+	// (DELETE /v1/customers/{customer_id}/payment-methods/{pmID})
+	DetachCustomerPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string)
+	// Make a payment method the default
+	// (POST /v1/customers/{customer_id}/payment-methods/{pmID}/default)
+	SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string)
+	// List the customer's subscriptions
+	// (GET /v1/customers/{customer_id}/subscriptions)
+	ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request, customerId string)
+	// Get customer
+	// (GET /v1/customers/{id})
+	GetCustomer(w http.ResponseWriter, r *http.Request, id string)
+	// Update customer
+	// (PATCH /v1/customers/{id})
+	UpdateCustomer(w http.ResponseWriter, r *http.Request, id string)
+	// Get the customer's billing profile
+	// (GET /v1/customers/{id}/billing-profile)
+	GetCustomerBillingProfile(w http.ResponseWriter, r *http.Request, id string)
+	// Create or replace the customer's billing profile
+	// (PUT /v1/customers/{id}/billing-profile)
+	UpsertCustomerBillingProfile(w http.ResponseWriter, r *http.Request, id string)
 	// Per-customer margin report (operator only)
 	// (GET /v1/customers/{id}/margin)
 	GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request, id string, params GetV1CustomersIdMarginParams)
 	// Rotate the public cost-dashboard token (ADR-032)
 	// (POST /v1/customers/{id}/rotate-cost-dashboard-token)
 	PostV1CustomersIdRotateCostDashboardToken(w http.ResponseWriter, r *http.Request, id string)
+	// List emails sent to the customer
+	// (GET /v1/customers/{id}/sent-emails)
+	ListCustomerSentEmails(w http.ResponseWriter, r *http.Request, id string)
+	// Get the customer's usage and cost for a period
+	// (GET /v1/customers/{id}/usage)
+	GetCustomerUsage(w http.ResponseWriter, r *http.Request, id string, params GetCustomerUsageParams)
+	// List dunning policies
+	// (GET /v1/dunning/policies)
+	ListDunningPolicies(w http.ResponseWriter, r *http.Request)
+	// Create dunning policy
+	// (POST /v1/dunning/policies)
+	CreateDunningPolicy(w http.ResponseWriter, r *http.Request)
+	// Delete dunning policy
+	// (DELETE /v1/dunning/policies/{id})
+	DeleteDunningPolicy(w http.ResponseWriter, r *http.Request, id string)
+	// Get dunning policy
+	// (GET /v1/dunning/policies/{id})
+	GetDunningPolicy(w http.ResponseWriter, r *http.Request, id string)
+	// Replace dunning policy settings
+	// (PATCH /v1/dunning/policies/{id})
+	UpdateDunningPolicy(w http.ResponseWriter, r *http.Request, id string)
+	// Make a dunning policy the default
+	// (POST /v1/dunning/policies/{id}/set-default)
+	SetDefaultDunningPolicy(w http.ResponseWriter, r *http.Request, id string)
+	// List dunning runs
+	// (GET /v1/dunning/runs)
+	ListDunningRuns(w http.ResponseWriter, r *http.Request, params ListDunningRunsParams)
+	// Get a dunning run with its events
+	// (GET /v1/dunning/runs/{id})
+	GetDunningRun(w http.ResponseWriter, r *http.Request, id string)
+	// Resolve a dunning run
+	// (POST /v1/dunning/runs/{id}/resolve)
+	ResolveDunningRun(w http.ResponseWriter, r *http.Request, id string)
+	// Get dunning totals
+	// (GET /v1/dunning/stats)
+	GetDunningStats(w http.ResponseWriter, r *http.Request)
+	// Export the audit log as CSV
+	// (GET /v1/exports/audit-log.csv)
+	ExportAuditLogCsv(w http.ResponseWriter, r *http.Request, params ExportAuditLogCsvParams)
+	// Export customers as CSV
+	// (GET /v1/exports/customers.csv)
+	ExportCustomersCsv(w http.ResponseWriter, r *http.Request, params ExportCustomersCsvParams)
+	// Export invoices as CSV
+	// (GET /v1/exports/invoices.csv)
+	ExportInvoicesCsv(w http.ResponseWriter, r *http.Request, params ExportInvoicesCsvParams)
+	// Export subscriptions as CSV
+	// (GET /v1/exports/subscriptions.csv)
+	ExportSubscriptionsCsv(w http.ResponseWriter, r *http.Request, params ExportSubscriptionsCsvParams)
+	// Export usage events as CSV
+	// (GET /v1/exports/usage-events.csv)
+	ExportUsageEventsCsv(w http.ResponseWriter, r *http.Request, params ExportUsageEventsCsvParams)
+	// Ingest LiteLLM spend logs
+	// (POST /v1/integrations/litellm/spend)
+	IngestLitellmSpend(w http.ResponseWriter, r *http.Request)
 	// List invoices
 	// (GET /v1/invoices)
 	GetV1Invoices(w http.ResponseWriter, r *http.Request, params GetV1InvoicesParams)
+	// Create a draft invoice
+	// (POST /v1/invoices)
+	CreateInvoice(w http.ResponseWriter, r *http.Request)
 	// Preview the next invoice for a customer (Stripe-equivalent)
 	// (POST /v1/invoices/create_preview)
 	PostV1InvoicesCreatePreview(w http.ResponseWriter, r *http.Request)
 	// Get invoice with line items
 	// (GET /v1/invoices/{id})
 	GetInvoice(w http.ResponseWriter, r *http.Request, id string)
+	// Charge a finalized invoice now
+	// (POST /v1/invoices/{id}/collect)
+	CollectInvoicePayment(w http.ResponseWriter, r *http.Request, id string)
 	// Finalize draft invoice
 	// (POST /v1/invoices/{id}/finalize)
 	PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request, id string)
+	// Add a line item to a draft invoice
+	// (POST /v1/invoices/{id}/line-items)
+	AddInvoiceLineItem(w http.ResponseWriter, r *http.Request, id string)
+	// Write off an invoice as uncollectible
+	// (POST /v1/invoices/{id}/mark-uncollectible)
+	MarkInvoiceUncollectible(w http.ResponseWriter, r *http.Request, id string)
+	// Get the invoice activity timeline
+	// (GET /v1/invoices/{id}/payment-timeline)
+	GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.Request, id string)
 	// Download invoice PDF
 	// (GET /v1/invoices/{id}/pdf)
 	GetV1InvoicesIdPdf(w http.ResponseWriter, r *http.Request, id string)
+	// Record a payment made outside Stripe
+	// (POST /v1/invoices/{id}/record-payment)
+	RecordInvoicePayment(w http.ResponseWriter, r *http.Request, id string)
+	// Refund a paid invoice
+	// (POST /v1/invoices/{id}/refund)
+	RefundInvoice(w http.ResponseWriter, r *http.Request, id string)
+	// Resend the payment-method setup link
+	// (POST /v1/invoices/{id}/resend-setup-link)
+	ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Request, id string)
 	// Retry tax calculation on a deferred invoice
 	// (POST /v1/invoices/{id}/retry-tax)
 	PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request, id string)
+	// Replace the hosted invoice link
+	// (POST /v1/invoices/{id}/rotate-public-token)
+	RotateInvoicePublicToken(w http.ResponseWriter, r *http.Request, id string)
 	// Email the invoice (PDF attached) to a recipient
 	// (POST /v1/invoices/{id}/send)
 	PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Request, id string)
+	// Void an invoice
+	// (POST /v1/invoices/{id}/void)
+	VoidInvoice(w http.ResponseWriter, r *http.Request, id string)
 	// List workspace members and invitations
-	// (GET /v1/members/)
+	// (GET /v1/members)
 	GetV1Members(w http.ResponseWriter, r *http.Request)
 	// Revoke a pending invitation
 	// (DELETE /v1/members/invitations/{id})
@@ -2645,23 +6457,56 @@ type ServerInterface interface {
 	// (POST /v1/members/invite)
 	PostV1MembersInvite(w http.ResponseWriter, r *http.Request)
 	// Remove a member from the workspace
-	// (DELETE /v1/members/{user_id})
-	DeleteV1MembersUserId(w http.ResponseWriter, r *http.Request, userId string)
+	// (DELETE /v1/members/{userID})
+	DeleteV1MembersUserID(w http.ResponseWriter, r *http.Request, userID string)
+	// List all meter pricing rules
+	// (GET /v1/meter-pricing-rules)
+	ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request)
 	// List meters
 	// (GET /v1/meters)
 	GetV1Meters(w http.ResponseWriter, r *http.Request)
 	// Create meter
 	// (POST /v1/meters)
 	PostV1Meters(w http.ResponseWriter, r *http.Request)
+	// Get meter
+	// (GET /v1/meters/{id})
+	GetMeter(w http.ResponseWriter, r *http.Request, id string)
 	// Update meter (incl. the default rating-rule binding)
 	// (PATCH /v1/meters/{id})
 	PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string)
+	// List a meter's pricing rules
+	// (GET /v1/meters/{meter_id}/pricing-rules)
+	ListMeterPricingRules(w http.ResponseWriter, r *http.Request, meterId string)
+	// Create or update a meter pricing rule
+	// (POST /v1/meters/{meter_id}/pricing-rules)
+	UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string)
+	// Delete a meter pricing rule
+	// (DELETE /v1/meters/{meter_id}/pricing-rules/{id})
+	DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string)
+	// Get a meter pricing rule
+	// (GET /v1/meters/{meter_id}/pricing-rules/{id})
+	GetMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string)
 	// List plans
 	// (GET /v1/plans)
 	GetV1Plans(w http.ResponseWriter, r *http.Request)
 	// Create plan
 	// (POST /v1/plans)
 	PostV1Plans(w http.ResponseWriter, r *http.Request)
+	// Get plan
+	// (GET /v1/plans/{id})
+	GetPlan(w http.ResponseWriter, r *http.Request, id string)
+	// Update plan
+	// (PATCH /v1/plans/{id})
+	UpdatePlan(w http.ResponseWriter, r *http.Request, id string)
+	// List active price overrides
+	// (GET /v1/price-overrides)
+	ListPriceOverrides(w http.ResponseWriter, r *http.Request, params ListPriceOverridesParams)
+	// Create a customer price override
+	// (POST /v1/price-overrides)
+	CreatePriceOverride(w http.ResponseWriter, r *http.Request)
+	// End a customer price override
+	// (DELETE /v1/price-overrides/{id})
+	DeletePriceOverride(w http.ResponseWriter, r *http.Request, id string)
 	// List provider cost rates
 	// (GET /v1/provider-costs)
 	GetV1ProviderCosts(w http.ResponseWriter, r *http.Request)
@@ -2680,6 +6525,9 @@ type ServerInterface interface {
 	// Create rating rule
 	// (POST /v1/rating-rules)
 	PostV1RatingRules(w http.ResponseWriter, r *http.Request)
+	// Get rating rule
+	// (GET /v1/rating-rules/{id})
+	GetRatingRule(w http.ResponseWriter, r *http.Request, id string)
 	// List recipes
 	// (GET /v1/recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request)
@@ -2695,18 +6543,90 @@ type ServerInterface interface {
 	// Preview recipe
 	// (POST /v1/recipes/{key}/preview)
 	PreviewRecipe(w http.ResponseWriter, r *http.Request, key string)
+	// Get workspace settings
+	// (GET /v1/settings)
+	GetTenantSettings(w http.ResponseWriter, r *http.Request)
+	// Update workspace settings
+	// (PUT /v1/settings)
+	UpdateTenantSettings(w http.ResponseWriter, r *http.Request)
+	// List Stripe connections
+	// (GET /v1/settings/stripe)
+	ListStripeConnections(w http.ResponseWriter, r *http.Request)
+	// Connect a Stripe account
+	// (POST /v1/settings/stripe)
+	ConnectStripe(w http.ResponseWriter, r *http.Request)
+	// Disconnect Stripe for one mode
+	// (DELETE /v1/settings/stripe/{mode})
+	DisconnectStripe(w http.ResponseWriter, r *http.Request, mode DisconnectStripeParamsMode)
+	// Set the Stripe webhook signing secret
+	// (PATCH /v1/settings/stripe/{mode}/webhook)
+	SetStripeWebhookSecret(w http.ResponseWriter, r *http.Request, mode SetStripeWebhookSecretParamsMode)
 	// List subscriptions
 	// (GET /v1/subscriptions)
 	GetV1Subscriptions(w http.ResponseWriter, r *http.Request, params GetV1SubscriptionsParams)
 	// Create subscription
 	// (POST /v1/subscriptions)
 	PostV1Subscriptions(w http.ResponseWriter, r *http.Request)
+	// Get subscription
+	// (GET /v1/subscriptions/{id})
+	GetSubscription(w http.ResponseWriter, r *http.Request, id string)
 	// Activate draft subscription
 	// (POST /v1/subscriptions/{id}/activate)
 	PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request, id string)
+	// Clear billing thresholds
+	// (DELETE /v1/subscriptions/{id}/billing-thresholds)
+	ClearSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string)
+	// Set billing thresholds
+	// (PUT /v1/subscriptions/{id}/billing-thresholds)
+	SetSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string)
+	// Cancel subscription now
+	// (POST /v1/subscriptions/{id}/cancel)
+	CancelSubscription(w http.ResponseWriter, r *http.Request, id string)
+	// End trial now
+	// (POST /v1/subscriptions/{id}/end-trial)
+	EndSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string)
+	// Extend trial
+	// (POST /v1/subscriptions/{id}/extend-trial)
+	ExtendSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string)
+	// Add subscription item
+	// (POST /v1/subscriptions/{id}/items)
+	AddSubscriptionItem(w http.ResponseWriter, r *http.Request, id string)
+	// Remove subscription item
+	// (DELETE /v1/subscriptions/{id}/items/{itemID})
+	RemoveSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string)
+	// Change subscription item
+	// (PATCH /v1/subscriptions/{id}/items/{itemID})
+	UpdateSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string)
+	// Cancel a scheduled plan change
+	// (DELETE /v1/subscriptions/{id}/items/{itemID}/pending-change)
+	CancelSubscriptionItemPendingChange(w http.ResponseWriter, r *http.Request, id string, itemID string)
+	// Resume collection
+	// (DELETE /v1/subscriptions/{id}/pause-collection)
+	ResumeSubscriptionCollection(w http.ResponseWriter, r *http.Request, id string)
+	// Pause collection
+	// (PUT /v1/subscriptions/{id}/pause-collection)
+	PauseSubscriptionCollection(w http.ResponseWriter, r *http.Request, id string)
 	// Retry billing on a subscription whose billing is failing
 	// (POST /v1/subscriptions/{id}/retry-billing)
 	PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request, id string)
+	// Schedule a cancel
+	// (POST /v1/subscriptions/{id}/schedule-cancel)
+	ScheduleSubscriptionCancel(w http.ResponseWriter, r *http.Request, id string)
+	// Clear a scheduled cancel
+	// (DELETE /v1/subscriptions/{id}/scheduled-cancel)
+	ClearSubscriptionScheduledCancel(w http.ResponseWriter, r *http.Request, id string)
+	// Get subscription activity timeline
+	// (GET /v1/subscriptions/{id}/timeline)
+	GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string)
+	// List tenants
+	// (GET /v1/tenants)
+	ListTenants(w http.ResponseWriter, r *http.Request, params ListTenantsParams)
+	// Create a tenant
+	// (POST /v1/tenants)
+	CreateTenant(w http.ResponseWriter, r *http.Request)
+	// Get a tenant
+	// (GET /v1/tenants/{id})
+	GetTenant(w http.ResponseWriter, r *http.Request, id string)
 	// List test clocks for the active tenant
 	// (GET /v1/test-clocks)
 	GetV1TestClocks(w http.ResponseWriter, r *http.Request)
@@ -2722,6 +6642,9 @@ type ServerInterface interface {
 	// Advance the clock to a new frozen_time
 	// (POST /v1/test-clocks/{id}/advance)
 	PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.Request, id string)
+	// List customers attached to a test clock
+	// (GET /v1/test-clocks/{id}/customers)
+	ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string)
 	// Retry catchup on a clock parked in internal_failure
 	// (POST /v1/test-clocks/{id}/retry-advance)
 	PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request, id string)
@@ -2734,27 +6657,54 @@ type ServerInterface interface {
 	// Ingest usage event
 	// (POST /v1/usage-events)
 	PostV1UsageEvents(w http.ResponseWriter, r *http.Request)
+	// Usage totals
+	// (GET /v1/usage-events/aggregate)
+	AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams)
+	// Backfill a past usage event
+	// (POST /v1/usage-events/backfill)
+	BackfillUsageEvent(w http.ResponseWriter, r *http.Request)
 	// Batch ingest usage events (max 1000, all-or-nothing)
 	// (POST /v1/usage-events/batch)
 	PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request)
+	// Customer usage summary
+	// (GET /v1/usage-summary/{customer_id})
+	GetUsageSummary(w http.ResponseWriter, r *http.Request, customerId string, params GetUsageSummaryParams)
 	// List webhook endpoints
 	// (GET /v1/webhook-endpoints/endpoints)
 	GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request)
 	// Create webhook endpoint
 	// (POST /v1/webhook-endpoints/endpoints)
 	PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request)
+	// Delivery counts per webhook endpoint
+	// (GET /v1/webhook-endpoints/endpoints/stats)
+	GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request)
 	// Delete (disable) webhook endpoint
 	// (DELETE /v1/webhook-endpoints/endpoints/{id})
 	DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string)
 	// Update webhook endpoint (no secret rotation)
 	// (PATCH /v1/webhook-endpoints/endpoints/{id})
 	PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string)
+	// List an endpoint's recent deliveries
+	// (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
+	ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string)
+	// Resend one delivery to its endpoint
+	// (POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay)
+	ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id string, deliveryID string)
 	// Rotate signing secret (72h dual-signing grace)
 	// (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
 	PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request, id string)
 	// List recent outbound events (newest 50)
 	// (GET /v1/webhook-endpoints/events)
 	GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request)
+	// Stream webhook events live (Server-Sent Events)
+	// (GET /v1/webhook_events/stream)
+	StreamWebhookEvents(w http.ResponseWriter, r *http.Request)
+	// List all delivery attempts for an event
+	// (GET /v1/webhook_events/{id}/deliveries)
+	ListWebhookEventDeliveries(w http.ResponseWriter, r *http.Request, id string)
+	// Replay an event to all matching endpoints
+	// (POST /v1/webhook_events/{id}/replay)
+	ReplayWebhookEvent(w http.ResponseWriter, r *http.Request, id string)
 	// Resolve the current credential to its tenant context
 	// (GET /v1/whoami)
 	GetV1Whoami(w http.ResponseWriter, r *http.Request)
@@ -2767,6 +6717,66 @@ type Unimplemented struct{}
 // Health check
 // (GET /health)
 func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get MRR movement over time
+// (GET /v1/analytics/mrr-movement)
+func (_ Unimplemented) GetAnalyticsMrrMovement(w http.ResponseWriter, r *http.Request, params GetAnalyticsMrrMovementParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get headline billing metrics
+// (GET /v1/analytics/overview)
+func (_ Unimplemented) GetAnalyticsOverview(w http.ResponseWriter, r *http.Request, params GetAnalyticsOverviewParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get revenue over time
+// (GET /v1/analytics/revenue-chart)
+func (_ Unimplemented) GetAnalyticsRevenueChart(w http.ResponseWriter, r *http.Request, params GetAnalyticsRevenueChartParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get usage over time
+// (GET /v1/analytics/usage)
+func (_ Unimplemented) GetAnalyticsUsage(w http.ResponseWriter, r *http.Request, params GetAnalyticsUsageParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List API keys
+// (GET /v1/api-keys)
+func (_ Unimplemented) ListApiKeys(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create an API key
+// (POST /v1/api-keys)
+func (_ Unimplemented) CreateApiKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Revoke an API key
+// (DELETE /v1/api-keys/{id})
+func (_ Unimplemented) RevokeApiKey(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Rotate an API key
+// (POST /v1/api-keys/{id}/rotate)
+func (_ Unimplemented) RotateApiKey(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List audit log entries
+// (GET /v1/audit-log)
+func (_ Unimplemented) ListAuditLog(w http.ResponseWriter, r *http.Request, params ListAuditLogParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List audit log filter values
+// (GET /v1/audit-log/filters)
+func (_ Unimplemented) GetAuditLogFilters(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2800,6 +6810,12 @@ func (_ Unimplemented) PostV1AuthMode(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Check a password reset token
+// (GET /v1/auth/password-reset/check)
+func (_ Unimplemented) CheckPasswordResetToken(w http.ResponseWriter, r *http.Request, params CheckPasswordResetTokenParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Set a new password using a reset token
 // (POST /v1/auth/password-reset/confirm)
 func (_ Unimplemented) PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
@@ -2824,15 +6840,63 @@ func (_ Unimplemented) PostV1BillingRun(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Set up a new installation
+// (POST /v1/bootstrap)
+func (_ Unimplemented) Bootstrap(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List credit notes
+// (GET /v1/credit-notes)
+func (_ Unimplemented) ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Create a credit note (line-based, or commit relief)
 // (POST /v1/credit-notes)
 func (_ Unimplemented) PostV1CreditNotes(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Get a credit note
+// (GET /v1/credit-notes/{id})
+func (_ Unimplemented) GetCreditNote(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Issue a draft credit note
+// (POST /v1/credit-notes/{id}/issue)
+func (_ Unimplemented) IssueCreditNote(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Download credit note PDF
+// (GET /v1/credit-notes/{id}/pdf)
+func (_ Unimplemented) GetCreditNotePdf(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Retry a failed credit-note refund
+// (POST /v1/credit-notes/{id}/retry-refund)
+func (_ Unimplemented) RetryCreditNoteRefund(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Email the credit-note document (PDF attached)
 // (POST /v1/credit-notes/{id}/send)
 func (_ Unimplemented) PostV1CreditNotesIdSend(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Void a draft credit note
+// (POST /v1/credit-notes/{id}/void)
+func (_ Unimplemented) VoidCreditNote(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Add or remove credit
+// (POST /v1/credits/adjust)
+func (_ Unimplemented) AdjustCredits(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2848,6 +6912,12 @@ func (_ Unimplemented) GetV1CreditsBalanceCustomerIdLive(w http.ResponseWriter, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List credit balances for all customers
+// (GET /v1/credits/balances)
+func (_ Unimplemented) ListCreditBalances(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Grant credits to customer
 // (POST /v1/credits/grant)
 func (_ Unimplemented) PostV1CreditsGrant(w http.ResponseWriter, r *http.Request) {
@@ -2857,6 +6927,12 @@ func (_ Unimplemented) PostV1CreditsGrant(w http.ResponseWriter, r *http.Request
 // Per-grant burndown + kind subtotals
 // (GET /v1/credits/grants/{customer_id})
 func (_ Unimplemented) GetV1CreditsGrantsCustomerId(w http.ResponseWriter, r *http.Request, customerId string, params GetV1CreditsGrantsCustomerIdParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List a customer's credit ledger
+// (GET /v1/credits/ledger/{customer_id})
+func (_ Unimplemented) ListCreditLedgerEntries(w http.ResponseWriter, r *http.Request, customerId string, params ListCreditLedgerEntriesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2872,6 +6948,78 @@ func (_ Unimplemented) PostV1Customers(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List the customer's invoices
+// (GET /v1/customers/{customer_id}/invoices)
+func (_ Unimplemented) ListCustomerInvoices(w http.ResponseWriter, r *http.Request, customerId string, params ListCustomerInvoicesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a customer overview
+// (GET /v1/customers/{customer_id}/overview)
+func (_ Unimplemented) GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List the customer's payment methods
+// (GET /v1/customers/{customer_id}/payment-methods)
+func (_ Unimplemented) ListCustomerPaymentMethods(w http.ResponseWriter, r *http.Request, customerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Email the customer a link to add a payment method
+// (POST /v1/customers/{customer_id}/payment-methods/send-setup-email)
+func (_ Unimplemented) SendCustomerPaymentSetupEmail(w http.ResponseWriter, r *http.Request, customerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a link for the customer to add a payment method
+// (POST /v1/customers/{customer_id}/payment-methods/setup-session)
+func (_ Unimplemented) CreateCustomerPaymentSetupSession(w http.ResponseWriter, r *http.Request, customerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Detach a payment method
+// (DELETE /v1/customers/{customer_id}/payment-methods/{pmID})
+func (_ Unimplemented) DetachCustomerPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Make a payment method the default
+// (POST /v1/customers/{customer_id}/payment-methods/{pmID}/default)
+func (_ Unimplemented) SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List the customer's subscriptions
+// (GET /v1/customers/{customer_id}/subscriptions)
+func (_ Unimplemented) ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request, customerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get customer
+// (GET /v1/customers/{id})
+func (_ Unimplemented) GetCustomer(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Update customer
+// (PATCH /v1/customers/{id})
+func (_ Unimplemented) UpdateCustomer(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get the customer's billing profile
+// (GET /v1/customers/{id}/billing-profile)
+func (_ Unimplemented) GetCustomerBillingProfile(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create or replace the customer's billing profile
+// (PUT /v1/customers/{id}/billing-profile)
+func (_ Unimplemented) UpsertCustomerBillingProfile(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Per-customer margin report (operator only)
 // (GET /v1/customers/{id}/margin)
 func (_ Unimplemented) GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request, id string, params GetV1CustomersIdMarginParams) {
@@ -2884,9 +7032,123 @@ func (_ Unimplemented) PostV1CustomersIdRotateCostDashboardToken(w http.Response
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List emails sent to the customer
+// (GET /v1/customers/{id}/sent-emails)
+func (_ Unimplemented) ListCustomerSentEmails(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get the customer's usage and cost for a period
+// (GET /v1/customers/{id}/usage)
+func (_ Unimplemented) GetCustomerUsage(w http.ResponseWriter, r *http.Request, id string, params GetCustomerUsageParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List dunning policies
+// (GET /v1/dunning/policies)
+func (_ Unimplemented) ListDunningPolicies(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create dunning policy
+// (POST /v1/dunning/policies)
+func (_ Unimplemented) CreateDunningPolicy(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Delete dunning policy
+// (DELETE /v1/dunning/policies/{id})
+func (_ Unimplemented) DeleteDunningPolicy(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get dunning policy
+// (GET /v1/dunning/policies/{id})
+func (_ Unimplemented) GetDunningPolicy(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Replace dunning policy settings
+// (PATCH /v1/dunning/policies/{id})
+func (_ Unimplemented) UpdateDunningPolicy(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Make a dunning policy the default
+// (POST /v1/dunning/policies/{id}/set-default)
+func (_ Unimplemented) SetDefaultDunningPolicy(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List dunning runs
+// (GET /v1/dunning/runs)
+func (_ Unimplemented) ListDunningRuns(w http.ResponseWriter, r *http.Request, params ListDunningRunsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a dunning run with its events
+// (GET /v1/dunning/runs/{id})
+func (_ Unimplemented) GetDunningRun(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Resolve a dunning run
+// (POST /v1/dunning/runs/{id}/resolve)
+func (_ Unimplemented) ResolveDunningRun(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get dunning totals
+// (GET /v1/dunning/stats)
+func (_ Unimplemented) GetDunningStats(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Export the audit log as CSV
+// (GET /v1/exports/audit-log.csv)
+func (_ Unimplemented) ExportAuditLogCsv(w http.ResponseWriter, r *http.Request, params ExportAuditLogCsvParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Export customers as CSV
+// (GET /v1/exports/customers.csv)
+func (_ Unimplemented) ExportCustomersCsv(w http.ResponseWriter, r *http.Request, params ExportCustomersCsvParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Export invoices as CSV
+// (GET /v1/exports/invoices.csv)
+func (_ Unimplemented) ExportInvoicesCsv(w http.ResponseWriter, r *http.Request, params ExportInvoicesCsvParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Export subscriptions as CSV
+// (GET /v1/exports/subscriptions.csv)
+func (_ Unimplemented) ExportSubscriptionsCsv(w http.ResponseWriter, r *http.Request, params ExportSubscriptionsCsvParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Export usage events as CSV
+// (GET /v1/exports/usage-events.csv)
+func (_ Unimplemented) ExportUsageEventsCsv(w http.ResponseWriter, r *http.Request, params ExportUsageEventsCsvParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Ingest LiteLLM spend logs
+// (POST /v1/integrations/litellm/spend)
+func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List invoices
 // (GET /v1/invoices)
 func (_ Unimplemented) GetV1Invoices(w http.ResponseWriter, r *http.Request, params GetV1InvoicesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a draft invoice
+// (POST /v1/invoices)
+func (_ Unimplemented) CreateInvoice(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2902,9 +7164,33 @@ func (_ Unimplemented) GetInvoice(w http.ResponseWriter, r *http.Request, id str
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Charge a finalized invoice now
+// (POST /v1/invoices/{id}/collect)
+func (_ Unimplemented) CollectInvoicePayment(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Finalize draft invoice
 // (POST /v1/invoices/{id}/finalize)
 func (_ Unimplemented) PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Add a line item to a draft invoice
+// (POST /v1/invoices/{id}/line-items)
+func (_ Unimplemented) AddInvoiceLineItem(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Write off an invoice as uncollectible
+// (POST /v1/invoices/{id}/mark-uncollectible)
+func (_ Unimplemented) MarkInvoiceUncollectible(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get the invoice activity timeline
+// (GET /v1/invoices/{id}/payment-timeline)
+func (_ Unimplemented) GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2914,9 +7200,33 @@ func (_ Unimplemented) GetV1InvoicesIdPdf(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Record a payment made outside Stripe
+// (POST /v1/invoices/{id}/record-payment)
+func (_ Unimplemented) RecordInvoicePayment(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Refund a paid invoice
+// (POST /v1/invoices/{id}/refund)
+func (_ Unimplemented) RefundInvoice(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Resend the payment-method setup link
+// (POST /v1/invoices/{id}/resend-setup-link)
+func (_ Unimplemented) ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Retry tax calculation on a deferred invoice
 // (POST /v1/invoices/{id}/retry-tax)
 func (_ Unimplemented) PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Replace the hosted invoice link
+// (POST /v1/invoices/{id}/rotate-public-token)
+func (_ Unimplemented) RotateInvoicePublicToken(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2926,8 +7236,14 @@ func (_ Unimplemented) PostV1InvoicesIdSend(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Void an invoice
+// (POST /v1/invoices/{id}/void)
+func (_ Unimplemented) VoidInvoice(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List workspace members and invitations
-// (GET /v1/members/)
+// (GET /v1/members)
 func (_ Unimplemented) GetV1Members(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
@@ -2945,8 +7261,14 @@ func (_ Unimplemented) PostV1MembersInvite(w http.ResponseWriter, r *http.Reques
 }
 
 // Remove a member from the workspace
-// (DELETE /v1/members/{user_id})
-func (_ Unimplemented) DeleteV1MembersUserId(w http.ResponseWriter, r *http.Request, userId string) {
+// (DELETE /v1/members/{userID})
+func (_ Unimplemented) DeleteV1MembersUserID(w http.ResponseWriter, r *http.Request, userID string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List all meter pricing rules
+// (GET /v1/meter-pricing-rules)
+func (_ Unimplemented) ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2962,9 +7284,39 @@ func (_ Unimplemented) PostV1Meters(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Get meter
+// (GET /v1/meters/{id})
+func (_ Unimplemented) GetMeter(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Update meter (incl. the default rating-rule binding)
 // (PATCH /v1/meters/{id})
 func (_ Unimplemented) PatchV1MetersId(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List a meter's pricing rules
+// (GET /v1/meters/{meter_id}/pricing-rules)
+func (_ Unimplemented) ListMeterPricingRules(w http.ResponseWriter, r *http.Request, meterId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create or update a meter pricing rule
+// (POST /v1/meters/{meter_id}/pricing-rules)
+func (_ Unimplemented) UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Delete a meter pricing rule
+// (DELETE /v1/meters/{meter_id}/pricing-rules/{id})
+func (_ Unimplemented) DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a meter pricing rule
+// (GET /v1/meters/{meter_id}/pricing-rules/{id})
+func (_ Unimplemented) GetMeterPricingRule(w http.ResponseWriter, r *http.Request, meterId string, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2977,6 +7329,36 @@ func (_ Unimplemented) GetV1Plans(w http.ResponseWriter, r *http.Request) {
 // Create plan
 // (POST /v1/plans)
 func (_ Unimplemented) PostV1Plans(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get plan
+// (GET /v1/plans/{id})
+func (_ Unimplemented) GetPlan(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Update plan
+// (PATCH /v1/plans/{id})
+func (_ Unimplemented) UpdatePlan(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List active price overrides
+// (GET /v1/price-overrides)
+func (_ Unimplemented) ListPriceOverrides(w http.ResponseWriter, r *http.Request, params ListPriceOverridesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a customer price override
+// (POST /v1/price-overrides)
+func (_ Unimplemented) CreatePriceOverride(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// End a customer price override
+// (DELETE /v1/price-overrides/{id})
+func (_ Unimplemented) DeletePriceOverride(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3016,6 +7398,12 @@ func (_ Unimplemented) PostV1RatingRules(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Get rating rule
+// (GET /v1/rating-rules/{id})
+func (_ Unimplemented) GetRatingRule(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List recipes
 // (GET /v1/recipes)
 func (_ Unimplemented) ListRecipes(w http.ResponseWriter, r *http.Request) {
@@ -3046,6 +7434,42 @@ func (_ Unimplemented) PreviewRecipe(w http.ResponseWriter, r *http.Request, key
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Get workspace settings
+// (GET /v1/settings)
+func (_ Unimplemented) GetTenantSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Update workspace settings
+// (PUT /v1/settings)
+func (_ Unimplemented) UpdateTenantSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List Stripe connections
+// (GET /v1/settings/stripe)
+func (_ Unimplemented) ListStripeConnections(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Connect a Stripe account
+// (POST /v1/settings/stripe)
+func (_ Unimplemented) ConnectStripe(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Disconnect Stripe for one mode
+// (DELETE /v1/settings/stripe/{mode})
+func (_ Unimplemented) DisconnectStripe(w http.ResponseWriter, r *http.Request, mode DisconnectStripeParamsMode) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Set the Stripe webhook signing secret
+// (PATCH /v1/settings/stripe/{mode}/webhook)
+func (_ Unimplemented) SetStripeWebhookSecret(w http.ResponseWriter, r *http.Request, mode SetStripeWebhookSecretParamsMode) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List subscriptions
 // (GET /v1/subscriptions)
 func (_ Unimplemented) GetV1Subscriptions(w http.ResponseWriter, r *http.Request, params GetV1SubscriptionsParams) {
@@ -3058,15 +7482,123 @@ func (_ Unimplemented) PostV1Subscriptions(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Get subscription
+// (GET /v1/subscriptions/{id})
+func (_ Unimplemented) GetSubscription(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Activate draft subscription
 // (POST /v1/subscriptions/{id}/activate)
 func (_ Unimplemented) PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Clear billing thresholds
+// (DELETE /v1/subscriptions/{id}/billing-thresholds)
+func (_ Unimplemented) ClearSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Set billing thresholds
+// (PUT /v1/subscriptions/{id}/billing-thresholds)
+func (_ Unimplemented) SetSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Cancel subscription now
+// (POST /v1/subscriptions/{id}/cancel)
+func (_ Unimplemented) CancelSubscription(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// End trial now
+// (POST /v1/subscriptions/{id}/end-trial)
+func (_ Unimplemented) EndSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Extend trial
+// (POST /v1/subscriptions/{id}/extend-trial)
+func (_ Unimplemented) ExtendSubscriptionTrial(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Add subscription item
+// (POST /v1/subscriptions/{id}/items)
+func (_ Unimplemented) AddSubscriptionItem(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Remove subscription item
+// (DELETE /v1/subscriptions/{id}/items/{itemID})
+func (_ Unimplemented) RemoveSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Change subscription item
+// (PATCH /v1/subscriptions/{id}/items/{itemID})
+func (_ Unimplemented) UpdateSubscriptionItem(w http.ResponseWriter, r *http.Request, id string, itemID string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Cancel a scheduled plan change
+// (DELETE /v1/subscriptions/{id}/items/{itemID}/pending-change)
+func (_ Unimplemented) CancelSubscriptionItemPendingChange(w http.ResponseWriter, r *http.Request, id string, itemID string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Resume collection
+// (DELETE /v1/subscriptions/{id}/pause-collection)
+func (_ Unimplemented) ResumeSubscriptionCollection(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Pause collection
+// (PUT /v1/subscriptions/{id}/pause-collection)
+func (_ Unimplemented) PauseSubscriptionCollection(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Retry billing on a subscription whose billing is failing
 // (POST /v1/subscriptions/{id}/retry-billing)
 func (_ Unimplemented) PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Schedule a cancel
+// (POST /v1/subscriptions/{id}/schedule-cancel)
+func (_ Unimplemented) ScheduleSubscriptionCancel(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Clear a scheduled cancel
+// (DELETE /v1/subscriptions/{id}/scheduled-cancel)
+func (_ Unimplemented) ClearSubscriptionScheduledCancel(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get subscription activity timeline
+// (GET /v1/subscriptions/{id}/timeline)
+func (_ Unimplemented) GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List tenants
+// (GET /v1/tenants)
+func (_ Unimplemented) ListTenants(w http.ResponseWriter, r *http.Request, params ListTenantsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a tenant
+// (POST /v1/tenants)
+func (_ Unimplemented) CreateTenant(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a tenant
+// (GET /v1/tenants/{id})
+func (_ Unimplemented) GetTenant(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3100,6 +7632,12 @@ func (_ Unimplemented) PostV1TestClocksIdAdvance(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List customers attached to a test clock
+// (GET /v1/test-clocks/{id}/customers)
+func (_ Unimplemented) ListTestClockCustomers(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Retry catchup on a clock parked in internal_failure
 // (POST /v1/test-clocks/{id}/retry-advance)
 func (_ Unimplemented) PostV1TestClocksIdRetryAdvance(w http.ResponseWriter, r *http.Request, id string) {
@@ -3124,9 +7662,27 @@ func (_ Unimplemented) PostV1UsageEvents(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Usage totals
+// (GET /v1/usage-events/aggregate)
+func (_ Unimplemented) AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Backfill a past usage event
+// (POST /v1/usage-events/backfill)
+func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Batch ingest usage events (max 1000, all-or-nothing)
 // (POST /v1/usage-events/batch)
 func (_ Unimplemented) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Customer usage summary
+// (GET /v1/usage-summary/{customer_id})
+func (_ Unimplemented) GetUsageSummary(w http.ResponseWriter, r *http.Request, customerId string, params GetUsageSummaryParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3142,6 +7698,12 @@ func (_ Unimplemented) PostV1WebhookEndpointsEndpoints(w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Delivery counts per webhook endpoint
+// (GET /v1/webhook-endpoints/endpoints/stats)
+func (_ Unimplemented) GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Delete (disable) webhook endpoint
 // (DELETE /v1/webhook-endpoints/endpoints/{id})
 func (_ Unimplemented) DeleteV1WebhookEndpointsEndpointsId(w http.ResponseWriter, r *http.Request, id string) {
@@ -3154,6 +7716,18 @@ func (_ Unimplemented) PatchV1WebhookEndpointsEndpointsId(w http.ResponseWriter,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List an endpoint's recent deliveries
+// (GET /v1/webhook-endpoints/endpoints/{id}/deliveries)
+func (_ Unimplemented) ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Resend one delivery to its endpoint
+// (POST /v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay)
+func (_ Unimplemented) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id string, deliveryID string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Rotate signing secret (72h dual-signing grace)
 // (POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret)
 func (_ Unimplemented) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request, id string) {
@@ -3163,6 +7737,24 @@ func (_ Unimplemented) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.Resp
 // List recent outbound events (newest 50)
 // (GET /v1/webhook-endpoints/events)
 func (_ Unimplemented) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Stream webhook events live (Server-Sent Events)
+// (GET /v1/webhook_events/stream)
+func (_ Unimplemented) StreamWebhookEvents(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List all delivery attempts for an event
+// (GET /v1/webhook_events/{id}/deliveries)
+func (_ Unimplemented) ListWebhookEventDeliveries(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Replay an event to all matching endpoints
+// (POST /v1/webhook_events/{id}/replay)
+func (_ Unimplemented) ReplayWebhookEvent(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3195,14 +7787,483 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
-// PostV1AuthAcceptInvite operation middleware
-func (siw *ServerInterfaceWrapper) PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request) {
+// GetAnalyticsMrrMovement operation middleware
+func (siw *ServerInterfaceWrapper) GetAnalyticsMrrMovement(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
 
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAnalyticsMrrMovementParams
+
+	// ------------- Optional query parameter "period" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "period", r.URL.Query(), &params.Period, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "period"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "period", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAnalyticsMrrMovement(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAnalyticsOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetAnalyticsOverview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAnalyticsOverviewParams
+
+	// ------------- Optional query parameter "period" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "period", r.URL.Query(), &params.Period, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "period"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "period", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAnalyticsOverview(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAnalyticsRevenueChart operation middleware
+func (siw *ServerInterfaceWrapper) GetAnalyticsRevenueChart(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAnalyticsRevenueChartParams
+
+	// ------------- Optional query parameter "period" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "period", r.URL.Query(), &params.Period, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "period"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "period", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAnalyticsRevenueChart(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAnalyticsUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetAnalyticsUsage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAnalyticsUsageParams
+
+	// ------------- Optional query parameter "period" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "period", r.URL.Query(), &params.Period, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "period"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "period", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAnalyticsUsage(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListApiKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListApiKeys(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListApiKeys(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateApiKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateApiKey(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateApiKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeApiKey operation middleware
+func (siw *ServerInterfaceWrapper) RevokeApiKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeApiKey(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateApiKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateApiKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateApiKey(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAuditLog operation middleware
+func (siw *ServerInterfaceWrapper) ListAuditLog(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditLogParams
+
+	// ------------- Optional query parameter "resource_type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resource_type", r.URL.Query(), &params.ResourceType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "resource_type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resource_type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "resource_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resource_id", r.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "resource_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resource_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "action" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "action", r.URL.Query(), &params.Action, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "action"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "action", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_id", r.URL.Query(), &params.ActorId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "date_from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "date_from", r.URL.Query(), &params.DateFrom, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "date_from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "date_from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "date_to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "date_to", r.URL.Query(), &params.DateTo, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "date_to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "date_to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "test_clock_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "test_clock_id", r.URL.Query(), &params.TestClockId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "test_clock_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "test_clock_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sim_from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sim_from", r.URL.Query(), &params.SimFrom, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sim_from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sim_from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sim_to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sim_to", r.URL.Query(), &params.SimTo, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sim_to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sim_to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "order" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "order", r.URL.Query(), &params.Order, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "order"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "order", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditLog(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuditLogFilters operation middleware
+func (siw *ServerInterfaceWrapper) GetAuditLogFilters(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuditLogFilters(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PostV1AuthAcceptInvite operation middleware
+func (siw *ServerInterfaceWrapper) PostV1AuthAcceptInvite(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1AuthAcceptInvite(w, r)
@@ -3230,12 +8291,6 @@ func (siw *ServerInterfaceWrapper) GetV1AuthInviteToken(w http.ResponseWriter, r
 		return
 	}
 
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetV1AuthInviteToken(w, r, token)
 	}))
@@ -3249,12 +8304,6 @@ func (siw *ServerInterfaceWrapper) GetV1AuthInviteToken(w http.ResponseWriter, r
 
 // PostV1AuthLogin operation middleware
 func (siw *ServerInterfaceWrapper) PostV1AuthLogin(w http.ResponseWriter, r *http.Request) {
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1AuthLogin(w, r)
@@ -3272,7 +8321,7 @@ func (siw *ServerInterfaceWrapper) PostV1AuthLogout(w http.ResponseWriter, r *ht
 
 	ctx := r.Context()
 
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+	ctx = context.WithValue(ctx, SessionCookieScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -3292,7 +8341,7 @@ func (siw *ServerInterfaceWrapper) PostV1AuthMode(w http.ResponseWriter, r *http
 
 	ctx := r.Context()
 
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+	ctx = context.WithValue(ctx, SessionCookieScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -3307,14 +8356,41 @@ func (siw *ServerInterfaceWrapper) PostV1AuthMode(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// CheckPasswordResetToken operation middleware
+func (siw *ServerInterfaceWrapper) CheckPasswordResetToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CheckPasswordResetTokenParams
+
+	// ------------- Required query parameter "token" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "token", r.URL.Query(), &params.Token, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "token"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckPasswordResetToken(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1AuthPasswordResetConfirm operation middleware
 func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1AuthPasswordResetConfirm(w, r)
@@ -3329,12 +8405,6 @@ func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetConfirm(w http.Respons
 
 // PostV1AuthPasswordResetRequest operation middleware
 func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request) {
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1AuthPasswordResetRequest(w, r)
@@ -3399,6 +8469,150 @@ func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// Bootstrap operation middleware
+func (siw *ServerInterfaceWrapper) Bootstrap(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Bootstrap(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCreditNotes operation middleware
+func (siw *ServerInterfaceWrapper) ListCreditNotes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCreditNotesParams
+
+	// ------------- Optional query parameter "invoice_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "invoice_id", r.URL.Query(), &params.InvoiceId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "invoice_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "invoice_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "customer_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "customer_id", r.URL.Query(), &params.CustomerId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "customer_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "refund_status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "refund_status", r.URL.Query(), &params.RefundStatus, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "refund_status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refund_status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sort" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sort", r.URL.Query(), &params.Sort, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sort"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sort", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "dir" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dir", r.URL.Query(), &params.Dir, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dir"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dir", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCreditNotes(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1CreditNotes operation middleware
 func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *http.Request) {
 
@@ -3410,6 +8624,134 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1CreditNotes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCreditNote operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditNote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCreditNote(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IssueCreditNote operation middleware
+func (siw *ServerInterfaceWrapper) IssueCreditNote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IssueCreditNote(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCreditNotePdf operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditNotePdf(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCreditNotePdf(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryCreditNoteRefund operation middleware
+func (siw *ServerInterfaceWrapper) RetryCreditNoteRefund(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryCreditNoteRefund(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3442,6 +8784,58 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotesIdSend(w http.ResponseWriter
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1CreditNotesIdSend(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VoidCreditNote operation middleware
+func (siw *ServerInterfaceWrapper) VoidCreditNote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VoidCreditNote(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdjustCredits operation middleware
+func (siw *ServerInterfaceWrapper) AdjustCredits(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdjustCredits(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3515,6 +8909,26 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsBalanceCustomerIdLive(w http.Resp
 	handler.ServeHTTP(w, r)
 }
 
+// ListCreditBalances operation middleware
+func (siw *ServerInterfaceWrapper) ListCreditBalances(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCreditBalances(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1CreditsGrant operation middleware
 func (siw *ServerInterfaceWrapper) PostV1CreditsGrant(w http.ResponseWriter, r *http.Request) {
 
@@ -3574,6 +8988,106 @@ func (siw *ServerInterfaceWrapper) GetV1CreditsGrantsCustomerId(w http.ResponseW
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetV1CreditsGrantsCustomerId(w, r, customerId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCreditLedgerEntries operation middleware
+func (siw *ServerInterfaceWrapper) ListCreditLedgerEntries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCreditLedgerEntriesParams
+
+	// ------------- Optional query parameter "entry_type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "entry_type", r.URL.Query(), &params.EntryType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "entry_type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "entry_type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sort" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sort", r.URL.Query(), &params.Sort, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sort"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sort", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "dir" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dir", r.URL.Query(), &params.Dir, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dir"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dir", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCreditLedgerEntries(w, r, customerId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3733,6 +9247,424 @@ func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListCustomerInvoices operation middleware
+func (siw *ServerInterfaceWrapper) ListCustomerInvoices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCustomerInvoicesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCustomerInvoices(w, r, customerId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCustomerOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetCustomerOverview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCustomerOverview(w, r, customerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCustomerPaymentMethods operation middleware
+func (siw *ServerInterfaceWrapper) ListCustomerPaymentMethods(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCustomerPaymentMethods(w, r, customerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SendCustomerPaymentSetupEmail operation middleware
+func (siw *ServerInterfaceWrapper) SendCustomerPaymentSetupEmail(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SendCustomerPaymentSetupEmail(w, r, customerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCustomerPaymentSetupSession operation middleware
+func (siw *ServerInterfaceWrapper) CreateCustomerPaymentSetupSession(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCustomerPaymentSetupSession(w, r, customerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DetachCustomerPaymentMethod operation middleware
+func (siw *ServerInterfaceWrapper) DetachCustomerPaymentMethod(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "pmID" -------------
+	var pmid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pmID", chi.URLParam(r, "pmID"), &pmid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pmID", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DetachCustomerPaymentMethod(w, r, customerId, pmid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetCustomerDefaultPaymentMethod operation middleware
+func (siw *ServerInterfaceWrapper) SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "pmID" -------------
+	var pmid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pmID", chi.URLParam(r, "pmID"), &pmid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pmID", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetCustomerDefaultPaymentMethod(w, r, customerId, pmid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCustomerSubscriptions operation middleware
+func (siw *ServerInterfaceWrapper) ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCustomerSubscriptions(w, r, customerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCustomer operation middleware
+func (siw *ServerInterfaceWrapper) GetCustomer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCustomer(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCustomer operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCustomer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCustomer(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCustomerBillingProfile operation middleware
+func (siw *ServerInterfaceWrapper) GetCustomerBillingProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCustomerBillingProfile(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpsertCustomerBillingProfile operation middleware
+func (siw *ServerInterfaceWrapper) UpsertCustomerBillingProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpsertCustomerBillingProfile(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetV1CustomersIdMargin operation middleware
 func (siw *ServerInterfaceWrapper) GetV1CustomersIdMargin(w http.ResponseWriter, r *http.Request) {
 
@@ -3817,6 +9749,800 @@ func (siw *ServerInterfaceWrapper) PostV1CustomersIdRotateCostDashboardToken(w h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1CustomersIdRotateCostDashboardToken(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCustomerSentEmails operation middleware
+func (siw *ServerInterfaceWrapper) ListCustomerSentEmails(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCustomerSentEmails(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCustomerUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetCustomerUsage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetCustomerUsageParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCustomerUsage(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDunningPolicies operation middleware
+func (siw *ServerInterfaceWrapper) ListDunningPolicies(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDunningPolicies(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDunningPolicy operation middleware
+func (siw *ServerInterfaceWrapper) CreateDunningPolicy(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDunningPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDunningPolicy operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDunningPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDunningPolicy(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDunningPolicy operation middleware
+func (siw *ServerInterfaceWrapper) GetDunningPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDunningPolicy(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateDunningPolicy operation middleware
+func (siw *ServerInterfaceWrapper) UpdateDunningPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateDunningPolicy(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetDefaultDunningPolicy operation middleware
+func (siw *ServerInterfaceWrapper) SetDefaultDunningPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetDefaultDunningPolicy(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDunningRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListDunningRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDunningRunsParams
+
+	// ------------- Optional query parameter "invoice_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "invoice_id", r.URL.Query(), &params.InvoiceId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "invoice_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "invoice_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDunningRuns(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDunningRun operation middleware
+func (siw *ServerInterfaceWrapper) GetDunningRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDunningRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResolveDunningRun operation middleware
+func (siw *ServerInterfaceWrapper) ResolveDunningRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResolveDunningRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDunningStats operation middleware
+func (siw *ServerInterfaceWrapper) GetDunningStats(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDunningStats(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportAuditLogCsv operation middleware
+func (siw *ServerInterfaceWrapper) ExportAuditLogCsv(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportAuditLogCsvParams
+
+	// ------------- Optional query parameter "date_from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "date_from", r.URL.Query(), &params.DateFrom, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "date_from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "date_from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "date_to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "date_to", r.URL.Query(), &params.DateTo, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "date_to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "date_to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "resource_type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resource_type", r.URL.Query(), &params.ResourceType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "resource_type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resource_type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "resource_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resource_id", r.URL.Query(), &params.ResourceId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "resource_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resource_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "action" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "action", r.URL.Query(), &params.Action, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "action"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "action", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_id", r.URL.Query(), &params.ActorId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "test_clock_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "test_clock_id", r.URL.Query(), &params.TestClockId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "test_clock_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "test_clock_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sim_from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sim_from", r.URL.Query(), &params.SimFrom, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sim_from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sim_from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sim_to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sim_to", r.URL.Query(), &params.SimTo, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sim_to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sim_to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportAuditLogCsv(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportCustomersCsv operation middleware
+func (siw *ServerInterfaceWrapper) ExportCustomersCsv(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportCustomersCsvParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportCustomersCsv(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportInvoicesCsv operation middleware
+func (siw *ServerInterfaceWrapper) ExportInvoicesCsv(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportInvoicesCsvParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportInvoicesCsv(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportSubscriptionsCsv operation middleware
+func (siw *ServerInterfaceWrapper) ExportSubscriptionsCsv(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportSubscriptionsCsvParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportSubscriptionsCsv(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportUsageEventsCsv operation middleware
+func (siw *ServerInterfaceWrapper) ExportUsageEventsCsv(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportUsageEventsCsvParams
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportUsageEventsCsv(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IngestLitellmSpend operation middleware
+func (siw *ServerInterfaceWrapper) IngestLitellmSpend(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IngestLitellmSpend(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4034,6 +10760,26 @@ func (siw *ServerInterfaceWrapper) GetV1Invoices(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// CreateInvoice operation middleware
+func (siw *ServerInterfaceWrapper) CreateInvoice(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateInvoice(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1InvoicesCreatePreview operation middleware
 func (siw *ServerInterfaceWrapper) PostV1InvoicesCreatePreview(w http.ResponseWriter, r *http.Request) {
 
@@ -4086,6 +10832,38 @@ func (siw *ServerInterfaceWrapper) GetInvoice(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// CollectInvoicePayment operation middleware
+func (siw *ServerInterfaceWrapper) CollectInvoicePayment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CollectInvoicePayment(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1InvoicesIdFinalize operation middleware
 func (siw *ServerInterfaceWrapper) PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request) {
 
@@ -4109,6 +10887,102 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdFinalize(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1InvoicesIdFinalize(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddInvoiceLineItem operation middleware
+func (siw *ServerInterfaceWrapper) AddInvoiceLineItem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddInvoiceLineItem(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MarkInvoiceUncollectible operation middleware
+func (siw *ServerInterfaceWrapper) MarkInvoiceUncollectible(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MarkInvoiceUncollectible(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetInvoicePaymentTimeline operation middleware
+func (siw *ServerInterfaceWrapper) GetInvoicePaymentTimeline(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetInvoicePaymentTimeline(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4150,6 +11024,102 @@ func (siw *ServerInterfaceWrapper) GetV1InvoicesIdPdf(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// RecordInvoicePayment operation middleware
+func (siw *ServerInterfaceWrapper) RecordInvoicePayment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RecordInvoicePayment(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefundInvoice operation middleware
+func (siw *ServerInterfaceWrapper) RefundInvoice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefundInvoice(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResendInvoiceSetupLink operation middleware
+func (siw *ServerInterfaceWrapper) ResendInvoiceSetupLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResendInvoiceSetupLink(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1InvoicesIdRetryTax operation middleware
 func (siw *ServerInterfaceWrapper) PostV1InvoicesIdRetryTax(w http.ResponseWriter, r *http.Request) {
 
@@ -4173,6 +11143,38 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdRetryTax(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1InvoicesIdRetryTax(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateInvoicePublicToken operation middleware
+func (siw *ServerInterfaceWrapper) RotateInvoicePublicToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateInvoicePublicToken(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4214,12 +11216,44 @@ func (siw *ServerInterfaceWrapper) PostV1InvoicesIdSend(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// VoidInvoice operation middleware
+func (siw *ServerInterfaceWrapper) VoidInvoice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VoidInvoice(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetV1Members operation middleware
 func (siw *ServerInterfaceWrapper) GetV1Members(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+	ctx = context.WithValue(ctx, SessionCookieScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -4251,7 +11285,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1MembersInvitationsId(w http.ResponseW
 
 	ctx := r.Context()
 
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+	ctx = context.WithValue(ctx, SessionCookieScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -4271,7 +11305,7 @@ func (siw *ServerInterfaceWrapper) PostV1MembersInvite(w http.ResponseWriter, r 
 
 	ctx := r.Context()
 
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+	ctx = context.WithValue(ctx, SessionCookieScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -4286,20 +11320,40 @@ func (siw *ServerInterfaceWrapper) PostV1MembersInvite(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteV1MembersUserId operation middleware
-func (siw *ServerInterfaceWrapper) DeleteV1MembersUserId(w http.ResponseWriter, r *http.Request) {
+// DeleteV1MembersUserID operation middleware
+func (siw *ServerInterfaceWrapper) DeleteV1MembersUserID(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
 
-	// ------------- Path parameter "user_id" -------------
-	var userId string
+	// ------------- Path parameter "userID" -------------
+	var userID string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "user_id", chi.URLParam(r, "user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	err = runtime.BindStyledParameterWithOptions("simple", "userID", chi.URLParam(r, "userID"), &userID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userID", Err: err})
 		return
 	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, SessionCookieScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteV1MembersUserID(w, r, userID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAllMeterPricingRules operation middleware
+func (siw *ServerInterfaceWrapper) ListAllMeterPricingRules(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
@@ -4308,7 +11362,7 @@ func (siw *ServerInterfaceWrapper) DeleteV1MembersUserId(w http.ResponseWriter, 
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteV1MembersUserId(w, r, userId)
+		siw.Handler.ListAllMeterPricingRules(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4358,6 +11412,38 @@ func (siw *ServerInterfaceWrapper) PostV1Meters(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetMeter operation middleware
+func (siw *ServerInterfaceWrapper) GetMeter(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMeter(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PatchV1MetersId operation middleware
 func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *http.Request) {
 
@@ -4381,6 +11467,152 @@ func (siw *ServerInterfaceWrapper) PatchV1MetersId(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PatchV1MetersId(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMeterPricingRules operation middleware
+func (siw *ServerInterfaceWrapper) ListMeterPricingRules(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "meter_id" -------------
+	var meterId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMeterPricingRules(w, r, meterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpsertMeterPricingRule operation middleware
+func (siw *ServerInterfaceWrapper) UpsertMeterPricingRule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "meter_id" -------------
+	var meterId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpsertMeterPricingRule(w, r, meterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMeterPricingRule operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMeterPricingRule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "meter_id" -------------
+	var meterId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMeterPricingRule(w, r, meterId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMeterPricingRule operation middleware
+func (siw *ServerInterfaceWrapper) GetMeterPricingRule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "meter_id" -------------
+	var meterId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "meter_id", chi.URLParam(r, "meter_id"), &meterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMeterPricingRule(w, r, meterId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4421,6 +11653,161 @@ func (siw *ServerInterfaceWrapper) PostV1Plans(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1Plans(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPlan operation middleware
+func (siw *ServerInterfaceWrapper) GetPlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPlan(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePlan operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePlan(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPriceOverrides operation middleware
+func (siw *ServerInterfaceWrapper) ListPriceOverrides(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPriceOverridesParams
+
+	// ------------- Optional query parameter "customer_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "customer_id", r.URL.Query(), &params.CustomerId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "customer_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPriceOverrides(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePriceOverride operation middleware
+func (siw *ServerInterfaceWrapper) CreatePriceOverride(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePriceOverride(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeletePriceOverride operation middleware
+func (siw *ServerInterfaceWrapper) DeletePriceOverride(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeletePriceOverride(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4517,12 +11904,6 @@ func (siw *ServerInterfaceWrapper) GetV1PublicCostDashboardToken(w http.Response
 		return
 	}
 
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetV1PublicCostDashboardToken(w, r, token)
 	}))
@@ -4565,6 +11946,38 @@ func (siw *ServerInterfaceWrapper) PostV1RatingRules(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1RatingRules(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRatingRule operation middleware
+func (siw *ServerInterfaceWrapper) GetRatingRule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRatingRule(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4701,6 +12114,150 @@ func (siw *ServerInterfaceWrapper) PreviewRecipe(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PreviewRecipe(w, r, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTenantSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetTenantSettings(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTenantSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateTenantSettings operation middleware
+func (siw *ServerInterfaceWrapper) UpdateTenantSettings(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateTenantSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListStripeConnections operation middleware
+func (siw *ServerInterfaceWrapper) ListStripeConnections(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListStripeConnections(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConnectStripe operation middleware
+func (siw *ServerInterfaceWrapper) ConnectStripe(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConnectStripe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisconnectStripe operation middleware
+func (siw *ServerInterfaceWrapper) DisconnectStripe(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "mode" -------------
+	var mode DisconnectStripeParamsMode
+
+	err = runtime.BindStyledParameterWithOptions("simple", "mode", chi.URLParam(r, "mode"), &mode, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "mode", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisconnectStripe(w, r, mode)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetStripeWebhookSecret operation middleware
+func (siw *ServerInterfaceWrapper) SetStripeWebhookSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "mode" -------------
+	var mode SetStripeWebhookSecretParamsMode
+
+	err = runtime.BindStyledParameterWithOptions("simple", "mode", chi.URLParam(r, "mode"), &mode, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "mode", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetStripeWebhookSecret(w, r, mode)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4873,6 +12430,38 @@ func (siw *ServerInterfaceWrapper) PostV1Subscriptions(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetSubscription operation middleware
+func (siw *ServerInterfaceWrapper) GetSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSubscription(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1SubscriptionsIdActivate operation middleware
 func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.ResponseWriter, r *http.Request) {
 
@@ -4905,6 +12494,385 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdActivate(w http.Response
 	handler.ServeHTTP(w, r)
 }
 
+// ClearSubscriptionBillingThresholds operation middleware
+func (siw *ServerInterfaceWrapper) ClearSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClearSubscriptionBillingThresholds(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetSubscriptionBillingThresholds operation middleware
+func (siw *ServerInterfaceWrapper) SetSubscriptionBillingThresholds(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetSubscriptionBillingThresholds(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelSubscription operation middleware
+func (siw *ServerInterfaceWrapper) CancelSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelSubscription(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EndSubscriptionTrial operation middleware
+func (siw *ServerInterfaceWrapper) EndSubscriptionTrial(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EndSubscriptionTrial(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExtendSubscriptionTrial operation middleware
+func (siw *ServerInterfaceWrapper) ExtendSubscriptionTrial(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExtendSubscriptionTrial(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddSubscriptionItem operation middleware
+func (siw *ServerInterfaceWrapper) AddSubscriptionItem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddSubscriptionItem(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveSubscriptionItem operation middleware
+func (siw *ServerInterfaceWrapper) RemoveSubscriptionItem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "itemID" -------------
+	var itemID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "itemID", chi.URLParam(r, "itemID"), &itemID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "itemID", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveSubscriptionItem(w, r, id, itemID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSubscriptionItem operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSubscriptionItem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "itemID" -------------
+	var itemID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "itemID", chi.URLParam(r, "itemID"), &itemID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "itemID", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSubscriptionItem(w, r, id, itemID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelSubscriptionItemPendingChange operation middleware
+func (siw *ServerInterfaceWrapper) CancelSubscriptionItemPendingChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "itemID" -------------
+	var itemID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "itemID", chi.URLParam(r, "itemID"), &itemID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "itemID", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelSubscriptionItemPendingChange(w, r, id, itemID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResumeSubscriptionCollection operation middleware
+func (siw *ServerInterfaceWrapper) ResumeSubscriptionCollection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeSubscriptionCollection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PauseSubscriptionCollection operation middleware
+func (siw *ServerInterfaceWrapper) PauseSubscriptionCollection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PauseSubscriptionCollection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1SubscriptionsIdRetryBilling operation middleware
 func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.ResponseWriter, r *http.Request) {
 
@@ -4928,6 +12896,193 @@ func (siw *ServerInterfaceWrapper) PostV1SubscriptionsIdRetryBilling(w http.Resp
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1SubscriptionsIdRetryBilling(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScheduleSubscriptionCancel operation middleware
+func (siw *ServerInterfaceWrapper) ScheduleSubscriptionCancel(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScheduleSubscriptionCancel(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClearSubscriptionScheduledCancel operation middleware
+func (siw *ServerInterfaceWrapper) ClearSubscriptionScheduledCancel(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClearSubscriptionScheduledCancel(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSubscriptionTimeline operation middleware
+func (siw *ServerInterfaceWrapper) GetSubscriptionTimeline(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSubscriptionTimeline(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTenants operation middleware
+func (siw *ServerInterfaceWrapper) ListTenants(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTenantsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTenants(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTenant operation middleware
+func (siw *ServerInterfaceWrapper) CreateTenant(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTenant(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTenant operation middleware
+func (siw *ServerInterfaceWrapper) GetTenant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTenant(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5064,6 +13219,38 @@ func (siw *ServerInterfaceWrapper) PostV1TestClocksIdAdvance(w http.ResponseWrit
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1TestClocksIdAdvance(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTestClockCustomers operation middleware
+func (siw *ServerInterfaceWrapper) ListTestClockCustomers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTestClockCustomers(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5222,6 +13409,117 @@ func (siw *ServerInterfaceWrapper) PostV1UsageEvents(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// AggregateUsageEvents operation middleware
+func (siw *ServerInterfaceWrapper) AggregateUsageEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AggregateUsageEventsParams
+
+	// ------------- Optional query parameter "customer_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "customer_id", r.URL.Query(), &params.CustomerId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "customer_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "meter_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "meter_id", r.URL.Query(), &params.MeterId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "meter_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "dimensions" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dimensions", r.URL.Query(), &params.Dimensions, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dimensions"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dimensions", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AggregateUsageEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BackfillUsageEvent operation middleware
+func (siw *ServerInterfaceWrapper) BackfillUsageEvent(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BackfillUsageEvent(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1UsageEventsBatch operation middleware
 func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
 
@@ -5233,6 +13531,67 @@ func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter,
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1UsageEventsBatch(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUsageSummary operation middleware
+func (siw *ServerInterfaceWrapper) GetUsageSummary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customer_id" -------------
+	var customerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetUsageSummaryParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUsageSummary(w, r, customerId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5273,6 +13632,26 @@ func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpoints(w http.Respon
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1WebhookEndpointsEndpoints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWebhookEndpointStats operation middleware
+func (siw *ServerInterfaceWrapper) GetWebhookEndpointStats(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWebhookEndpointStats(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5346,6 +13725,79 @@ func (siw *ServerInterfaceWrapper) PatchV1WebhookEndpointsEndpointsId(w http.Res
 	handler.ServeHTTP(w, r)
 }
 
+// ListWebhookEndpointDeliveries operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookEndpointDeliveries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWebhookEndpointDeliveries(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReplayWebhookDelivery operation middleware
+func (siw *ServerInterfaceWrapper) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "deliveryID" -------------
+	var deliveryID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deliveryID", chi.URLParam(r, "deliveryID"), &deliveryID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "deliveryID", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReplayWebhookDelivery(w, r, id, deliveryID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PostV1WebhookEndpointsEndpointsIdRotateSecret operation middleware
 func (siw *ServerInterfaceWrapper) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.ResponseWriter, r *http.Request) {
 
@@ -5389,6 +13841,90 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWr
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetV1WebhookEndpointsEvents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StreamWebhookEvents operation middleware
+func (siw *ServerInterfaceWrapper) StreamWebhookEvents(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StreamWebhookEvents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWebhookEventDeliveries operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookEventDeliveries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWebhookEventDeliveries(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReplayWebhookEvent operation middleware
+func (siw *ServerInterfaceWrapper) ReplayWebhookEvent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReplayWebhookEvent(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5535,6 +14071,36 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/health", wrapper.GetHealth)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/analytics/mrr-movement", wrapper.GetAnalyticsMrrMovement)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/analytics/overview", wrapper.GetAnalyticsOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/analytics/revenue-chart", wrapper.GetAnalyticsRevenueChart)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/analytics/usage", wrapper.GetAnalyticsUsage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/api-keys", wrapper.ListApiKeys)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/api-keys", wrapper.CreateApiKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/api-keys/{id}", wrapper.RevokeApiKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/api-keys/{id}/rotate", wrapper.RotateApiKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/audit-log", wrapper.ListAuditLog)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/audit-log/filters", wrapper.GetAuditLogFilters)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/auth/accept-invite", wrapper.PostV1AuthAcceptInvite)
 	})
 	r.Group(func(r chi.Router) {
@@ -5550,6 +14116,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/auth/mode", wrapper.PostV1AuthMode)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/auth/password-reset/check", wrapper.CheckPasswordResetToken)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/auth/password-reset/confirm", wrapper.PostV1AuthPasswordResetConfirm)
 	})
 	r.Group(func(r chi.Router) {
@@ -5562,10 +14131,34 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/billing/run", wrapper.PostV1BillingRun)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/bootstrap", wrapper.Bootstrap)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credit-notes", wrapper.ListCreditNotes)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credit-notes", wrapper.PostV1CreditNotes)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credit-notes/{id}", wrapper.GetCreditNote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/credit-notes/{id}/issue", wrapper.IssueCreditNote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credit-notes/{id}/pdf", wrapper.GetCreditNotePdf)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/credit-notes/{id}/retry-refund", wrapper.RetryCreditNoteRefund)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credit-notes/{id}/send", wrapper.PostV1CreditNotesIdSend)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/credit-notes/{id}/void", wrapper.VoidCreditNote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/credits/adjust", wrapper.AdjustCredits)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}", wrapper.GetV1CreditsBalanceCustomerId)
@@ -5574,10 +14167,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/credits/balance/{customer_id}/live", wrapper.GetV1CreditsBalanceCustomerIdLive)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credits/balances", wrapper.ListCreditBalances)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credits/grant", wrapper.PostV1CreditsGrant)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credits/grants/{customer_id}", wrapper.GetV1CreditsGrantsCustomerId)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credits/ledger/{customer_id}", wrapper.ListCreditLedgerEntries)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers", wrapper.GetV1Customers)
@@ -5586,13 +14185,106 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/customers", wrapper.PostV1Customers)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/customers/{customer_id}/invoices", wrapper.ListCustomerInvoices)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/customers/{customer_id}/overview", wrapper.GetCustomerOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/customers/{customer_id}/payment-methods", wrapper.ListCustomerPaymentMethods)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/customers/{customer_id}/payment-methods/send-setup-email", wrapper.SendCustomerPaymentSetupEmail)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/customers/{customer_id}/payment-methods/setup-session", wrapper.CreateCustomerPaymentSetupSession)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/customers/{customer_id}/payment-methods/{pmID}", wrapper.DetachCustomerPaymentMethod)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/customers/{customer_id}/payment-methods/{pmID}/default", wrapper.SetCustomerDefaultPaymentMethod)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/customers/{customer_id}/subscriptions", wrapper.ListCustomerSubscriptions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/customers/{id}", wrapper.GetCustomer)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/customers/{id}", wrapper.UpdateCustomer)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/customers/{id}/billing-profile", wrapper.GetCustomerBillingProfile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/v1/customers/{id}/billing-profile", wrapper.UpsertCustomerBillingProfile)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{id}/margin", wrapper.GetV1CustomersIdMargin)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/customers/{id}/rotate-cost-dashboard-token", wrapper.PostV1CustomersIdRotateCostDashboardToken)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/customers/{id}/sent-emails", wrapper.ListCustomerSentEmails)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/customers/{id}/usage", wrapper.GetCustomerUsage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/dunning/policies", wrapper.ListDunningPolicies)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/dunning/policies", wrapper.CreateDunningPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/dunning/policies/{id}", wrapper.DeleteDunningPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/dunning/policies/{id}", wrapper.GetDunningPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/dunning/policies/{id}", wrapper.UpdateDunningPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/dunning/policies/{id}/set-default", wrapper.SetDefaultDunningPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/dunning/runs", wrapper.ListDunningRuns)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/dunning/runs/{id}", wrapper.GetDunningRun)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/dunning/runs/{id}/resolve", wrapper.ResolveDunningRun)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/dunning/stats", wrapper.GetDunningStats)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/exports/audit-log.csv", wrapper.ExportAuditLogCsv)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/exports/customers.csv", wrapper.ExportCustomersCsv)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/exports/invoices.csv", wrapper.ExportInvoicesCsv)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/exports/subscriptions.csv", wrapper.ExportSubscriptionsCsv)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/exports/usage-events.csv", wrapper.ExportUsageEventsCsv)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/integrations/litellm/spend", wrapper.IngestLitellmSpend)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/invoices", wrapper.GetV1Invoices)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices", wrapper.CreateInvoice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/create_preview", wrapper.PostV1InvoicesCreatePreview)
@@ -5601,19 +14293,46 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/invoices/{id}", wrapper.GetInvoice)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices/{id}/collect", wrapper.CollectInvoicePayment)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/finalize", wrapper.PostV1InvoicesIdFinalize)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices/{id}/line-items", wrapper.AddInvoiceLineItem)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices/{id}/mark-uncollectible", wrapper.MarkInvoiceUncollectible)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/invoices/{id}/payment-timeline", wrapper.GetInvoicePaymentTimeline)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/invoices/{id}/pdf", wrapper.GetV1InvoicesIdPdf)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices/{id}/record-payment", wrapper.RecordInvoicePayment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices/{id}/refund", wrapper.RefundInvoice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices/{id}/resend-setup-link", wrapper.ResendInvoiceSetupLink)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/retry-tax", wrapper.PostV1InvoicesIdRetryTax)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/invoices/{id}/rotate-public-token", wrapper.RotateInvoicePublicToken)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/send", wrapper.PostV1InvoicesIdSend)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/members/", wrapper.GetV1Members)
+		r.Post(options.BaseURL+"/v1/invoices/{id}/void", wrapper.VoidInvoice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/members", wrapper.GetV1Members)
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/v1/members/invitations/{id}", wrapper.DeleteV1MembersInvitationsId)
@@ -5622,7 +14341,10 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/members/invite", wrapper.PostV1MembersInvite)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/v1/members/{user_id}", wrapper.DeleteV1MembersUserId)
+		r.Delete(options.BaseURL+"/v1/members/{userID}", wrapper.DeleteV1MembersUserID)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/meter-pricing-rules", wrapper.ListAllMeterPricingRules)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/meters", wrapper.GetV1Meters)
@@ -5631,13 +14353,43 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/meters", wrapper.PostV1Meters)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/meters/{id}", wrapper.GetMeter)
+	})
+	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/v1/meters/{id}", wrapper.PatchV1MetersId)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules", wrapper.ListMeterPricingRules)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules", wrapper.UpsertMeterPricingRule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules/{id}", wrapper.DeleteMeterPricingRule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/meters/{meter_id}/pricing-rules/{id}", wrapper.GetMeterPricingRule)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/plans", wrapper.GetV1Plans)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/plans", wrapper.PostV1Plans)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/plans/{id}", wrapper.GetPlan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/plans/{id}", wrapper.UpdatePlan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/price-overrides", wrapper.ListPriceOverrides)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/price-overrides", wrapper.CreatePriceOverride)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/price-overrides/{id}", wrapper.DeletePriceOverride)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/provider-costs", wrapper.GetV1ProviderCosts)
@@ -5658,6 +14410,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/rating-rules", wrapper.PostV1RatingRules)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/rating-rules/{id}", wrapper.GetRatingRule)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/recipes", wrapper.ListRecipes)
 	})
 	r.Group(func(r chi.Router) {
@@ -5673,16 +14428,88 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/recipes/{key}/preview", wrapper.PreviewRecipe)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/settings", wrapper.GetTenantSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/v1/settings", wrapper.UpdateTenantSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/settings/stripe", wrapper.ListStripeConnections)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/settings/stripe", wrapper.ConnectStripe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/settings/stripe/{mode}", wrapper.DisconnectStripe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/settings/stripe/{mode}/webhook", wrapper.SetStripeWebhookSecret)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/subscriptions", wrapper.GetV1Subscriptions)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/subscriptions", wrapper.PostV1Subscriptions)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/subscriptions/{id}", wrapper.GetSubscription)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/subscriptions/{id}/activate", wrapper.PostV1SubscriptionsIdActivate)
 	})
 	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/subscriptions/{id}/billing-thresholds", wrapper.ClearSubscriptionBillingThresholds)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/v1/subscriptions/{id}/billing-thresholds", wrapper.SetSubscriptionBillingThresholds)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/cancel", wrapper.CancelSubscription)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/end-trial", wrapper.EndSubscriptionTrial)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/extend-trial", wrapper.ExtendSubscriptionTrial)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/items", wrapper.AddSubscriptionItem)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/subscriptions/{id}/items/{itemID}", wrapper.RemoveSubscriptionItem)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/subscriptions/{id}/items/{itemID}", wrapper.UpdateSubscriptionItem)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/subscriptions/{id}/items/{itemID}/pending-change", wrapper.CancelSubscriptionItemPendingChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/subscriptions/{id}/pause-collection", wrapper.ResumeSubscriptionCollection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/v1/subscriptions/{id}/pause-collection", wrapper.PauseSubscriptionCollection)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/subscriptions/{id}/retry-billing", wrapper.PostV1SubscriptionsIdRetryBilling)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/subscriptions/{id}/schedule-cancel", wrapper.ScheduleSubscriptionCancel)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/subscriptions/{id}/scheduled-cancel", wrapper.ClearSubscriptionScheduledCancel)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/subscriptions/{id}/timeline", wrapper.GetSubscriptionTimeline)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/tenants", wrapper.ListTenants)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/tenants", wrapper.CreateTenant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/tenants/{id}", wrapper.GetTenant)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/test-clocks", wrapper.GetV1TestClocks)
@@ -5700,6 +14527,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/test-clocks/{id}/advance", wrapper.PostV1TestClocksIdAdvance)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/test-clocks/{id}/customers", wrapper.ListTestClockCustomers)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/test-clocks/{id}/retry-advance", wrapper.PostV1TestClocksIdRetryAdvance)
 	})
 	r.Group(func(r chi.Router) {
@@ -5712,7 +14542,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/usage-events", wrapper.PostV1UsageEvents)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/usage-events/aggregate", wrapper.AggregateUsageEvents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/usage-events/backfill", wrapper.BackfillUsageEvent)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/usage-events/batch", wrapper.PostV1UsageEventsBatch)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/usage-summary/{customer_id}", wrapper.GetUsageSummary)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.GetV1WebhookEndpointsEndpoints)
@@ -5721,16 +14560,34 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.PostV1WebhookEndpointsEndpoints)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/stats", wrapper.GetWebhookEndpointStats)
+	})
+	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.DeleteV1WebhookEndpointsEndpointsId)
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}", wrapper.PatchV1WebhookEndpointsEndpointsId)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/deliveries", wrapper.ListWebhookEndpointDeliveries)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay", wrapper.ReplayWebhookDelivery)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/webhook-endpoints/endpoints/{id}/rotate-secret", wrapper.PostV1WebhookEndpointsEndpointsIdRotateSecret)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/events", wrapper.GetV1WebhookEndpointsEvents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/webhook_events/stream", wrapper.StreamWebhookEvents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/webhook_events/{id}/deliveries", wrapper.ListWebhookEventDeliveries)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/webhook_events/{id}/replay", wrapper.ReplayWebhookEvent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/whoami", wrapper.GetV1Whoami)

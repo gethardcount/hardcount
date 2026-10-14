@@ -1,9 +1,21 @@
 # API surface (selected)
 
 This page is a short list of the core API routes. The authoritative reference
-is [`api/openapi.yaml`](../api/openapi.yaml). It covers the core resource
-routes. Some operational routes (exports, analytics, audit log, settings)
-aren't in the spec yet.
+is [`api/openapi.yaml`](../api/openapi.yaml). It covers every route you call
+with an API key or a dashboard session, including exports, analytics, the
+audit log and settings. A few routes are left out because you do not call
+them yourself:
+
+- `GET /health/ready` and `/metrics`, for load balancers and Prometheus.
+- The data behind the hosted invoice and payment-update pages
+  (`/v1/public/invoices/*`, `/v1/public/payment-updates/*`). Share the page
+  link instead.
+- The inbound webhooks that Stripe and Postmark call
+  (`/v1/webhooks/stripe/{endpoint_id}`, `/v1/webhooks/postmark`).
+- Older routes the dashboard no longer uses: `/v1/checkout/setup`,
+  `/v1/checkout/status/{customerID}`, and
+  `/v1/webhook-endpoints/events/{id}/deliveries` and `/replay` (use
+  `/v1/webhook_events/{id}/...`).
 
 Error responses (statuses, the error body, and the exceptions) are in
 [Errors](#errors) at the end of this page.

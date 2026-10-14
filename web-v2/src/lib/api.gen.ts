@@ -184,6 +184,337 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/customers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get customer */
+        get: operations["getCustomer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update customer
+         * @description Changes only the fields you send. An empty `display_name` or
+         *     `email` is ignored, so you cannot clear the email here.
+         *
+         *     - `status: archived` is refused with 409 `invalid_state` while
+         *       the customer has a subscription that still bills. Cancel those
+         *       subscriptions first. Archiving does not stop dunning on unpaid
+         *       invoices.
+         *     - `dunning_policy_id` set to `""` removes the assignment, so the
+         *       tenant's default policy applies. A set ID must be a policy in
+         *       this tenant and mode, or the call returns 404. The change
+         *       applies to the next dunning run, not to runs already started.
+         *     - `additional_emails` replaces the whole CC list; `[]` clears
+         *       it. Entries are lowercased, deduplicated, capped at 10 and may
+         *       not equal the primary email.
+         *     - A new `email` that is already on the CC list is refused with
+         *       422 unless you send a new `additional_emails` too. Changing the
+         *       email resets its bounce state.
+         *
+         *     Name and email changes are copied to the linked Stripe customer
+         *     when there is one. A Stripe failure is logged and does not fail
+         *     the call. The change is written to the audit log (it records that
+         *     the email changed, not the address).
+         */
+        patch: operations["updateCustomer"];
+        trace?: never;
+    };
+    "/v1/customers/{id}/billing-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the customer's billing profile */
+        get: operations["getCustomerBillingProfile"];
+        /**
+         * Create or replace the customer's billing profile
+         * @description Writes the whole profile. Fields you leave out are stored empty,
+         *     so send every field you want to keep. `profile_status` is worked
+         *     out by the server: `ready` when legal name, address line 1, city
+         *     and country are all set, otherwise `incomplete`.
+         *
+         *     Checks, each answered with 422 and `param` set to the field:
+         *     `country` must be an ISO 3166 alpha-2 code; `currency` must be a
+         *     supported ISO 4217 code (zero-decimal currencies such as JPY are
+         *     refused); `phone` is 7 to 20 digits, spaces or `+-()`; `tax_id`
+         *     must match `tax_id_type` when the type is a known one;
+         *     `tax_status: exempt` needs `tax_exempt_reason`;
+         *     `tax_status: reverse_charge` needs `tax_id`. Country and currency
+         *     are stored in upper case.
+         *
+         *     A currency that differs from the plan currency of a subscription
+         *     that still bills is refused with 409 `invalid_state`, because
+         *     invoices would show plan prices in the new currency without
+         *     conversion.
+         *
+         *     After saving, the profile is copied to the linked Stripe customer
+         *     (best effort), and draft invoices whose tax failed on bad
+         *     customer data are retried. The change is written to the audit log.
+         */
+        put: operations["upsertCustomerBillingProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{id}/sent-emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List emails sent to the customer
+         * @description Billing emails tied to this customer's invoices from the last 30
+         *     days, newest first: invoice, payment receipt, payment failed,
+         *     payment setup request, dunning, and credit note emails. Emails
+         *     not tied to an invoice (such as a setup link sent from the
+         *     payment-methods page) are not listed. No paging. An unknown
+         *     customer ID returns an empty list, not 404.
+         */
+        get: operations["listCustomerSentEmails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the customer's usage and cost for a period
+         * @description Usage per meter on the customer's active and trialing
+         *     subscriptions, priced the same way the invoice prices it. With no
+         *     `from` and `to`, the period is the current billing cycle of the
+         *     subscription whose cycle started last. Send both or neither.
+         *
+         *     Errors: 404 if the customer does not exist. 422 when only one of
+         *     `from`/`to` is sent, when `from` is not before `to`, when the
+         *     window is longer than one year, or (code
+         *     `customer_has_no_subscription`) when no period is sent and the
+         *     customer has no subscription with a current cycle.
+         *
+         *     Decimal quantities are returned as strings. If the daily series
+         *     fails to load, `buckets` is empty and `warnings` says so.
+         */
+        get: operations["getCustomerUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{customer_id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a customer overview
+         * @description The customer's active subscriptions (up to 50), the 5 newest
+         *     invoices, and the amount still owed on unpaid invoices. A failed
+         *     read inside the overview returns an empty part or a zero balance
+         *     rather than an error.
+         */
+        get: operations["getCustomerOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{customer_id}/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the customer's invoices
+         * @description Newest first. Returns the first `limit` invoices only; there is
+         *     no `offset`. For paging and filters use
+         *     `GET /v1/invoices?customer_id=`.
+         */
+        get: operations["listCustomerInvoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{customer_id}/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the customer's subscriptions
+         * @description All statuses, newest first, up to 50. There is no paging and no
+         *     `total`; for more use `GET /v1/subscriptions?customer_id=`.
+         */
+        get: operations["listCustomerSubscriptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{customer_id}/payment-methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the customer's payment methods
+         * @description Saved payment methods that are not detached, default first, then
+         *     newest. At most 100. `total` is the number returned.
+         */
+        get: operations["listCustomerPaymentMethods"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{customer_id}/payment-methods/send-setup-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email the customer a link to add a payment method
+         * @description Creates a Stripe Checkout setup link (as `setup-session` does)
+         *     and queues an email with it to the customer's primary email. The
+         *     link is never sent to the CC list. The card details go from the
+         *     customer's browser to Stripe; Velox does not see them. The card
+         *     is saved when Stripe reports the setup succeeded.
+         *
+         *     One send per customer per minute. A second call within the
+         *     minute returns 429 `cooldown_active` with a `Retry-After` header.
+         *     The send is written to the audit log.
+         */
+        post: operations["sendCustomerPaymentSetupEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{customer_id}/payment-methods/setup-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a link for the customer to add a payment method
+         * @description Returns a Stripe Checkout URL in setup mode (card only, no
+         *     charge) for you to give to the customer. Creates the Stripe
+         *     customer on first use. When the customer finishes, Stripe sends
+         *     them to `return_url` with `?status=success` or `?status=cancel`
+         *     added. The card is saved when Stripe reports the setup succeeded.
+         *     The link is written to the audit log; if the audit row cannot be
+         *     written, no link is returned.
+         *
+         *     Fails with 500 when Stripe is not connected for this mode.
+         */
+        post: operations["createCustomerPaymentSetupSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{customer_id}/payment-methods/{pmID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Detach a payment method
+         * @description Detaches the card in Stripe and marks it detached in Velox. If it
+         *     was the default, the newest remaining card becomes the default in
+         *     the same step, and that change is copied to Stripe (best effort).
+         *     Both changes are written to the audit log. A Stripe error on the
+         *     detach returns 500 and leaves the card attached.
+         */
+        delete: operations["detachCustomerPaymentMethod"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customers/{customer_id}/payment-methods/{pmID}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a payment method the default
+         * @description Makes this card the one Velox charges and clears the flag on the
+         *     others. The change is copied to the Stripe customer (best effort;
+         *     a Stripe failure is recorded on the audit row and does not fail
+         *     the call).
+         */
+        post: operations["setCustomerDefaultPaymentMethod"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/public/cost-dashboard/{token}": {
         parameters: {
             query?: never;
@@ -395,7 +726,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get meter */
+        get: operations["getMeter"];
         put?: never;
         post?: never;
         delete?: never;
@@ -472,6 +804,87 @@ export interface paths {
         };
         trace?: never;
     };
+    "/v1/meters/{meter_id}/pricing-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a meter's pricing rules
+         * @description Every pricing rule on the meter, highest priority first, then oldest
+         *     first. At billing time each usage event is billed by the first rule
+         *     in this order whose `dimension_match` it matches. The meter id is
+         *     not checked: an unknown id returns an empty list.
+         */
+        get: operations["listMeterPricingRules"];
+        put?: never;
+        /**
+         * Create or update a meter pricing rule
+         * @description Binds a rating rule to the part of the meter's usage whose dimensions
+         *     match `dimension_match`. The rule is identified by the meter and
+         *     `rating_rule_version_id`: posting the same pair again updates
+         *     `dimension_match`, `aggregation_mode` and `priority` on the existing
+         *     rule and keeps its id. Both cases return 201. The meter id in the
+         *     path is used; a `meter_id` in the body is ignored.
+         */
+        post: operations["upsertMeterPricingRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/meters/{meter_id}/pricing-rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a meter pricing rule
+         * @description The rule is looked up by `id` alone; `meter_id` is not checked against it.
+         */
+        get: operations["getMeterPricingRule"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a meter pricing rule
+         * @description Removes the rule. Usage already invoiced is not changed; the next
+         *     invoices bill the meter's usage without this rule. The rule is
+         *     looked up by `id` alone; `meter_id` is not checked against it.
+         *     Deleting the meter's last price (no other rule and no default
+         *     rating rule on the meter) is refused while a plan with a draft,
+         *     trialing or active subscription uses the meter.
+         */
+        delete: operations["deleteMeterPricingRule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/meter-pricing-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List all meter pricing rules
+         * @description Every pricing rule on every meter in this tenant and mode, highest priority first.
+         */
+        get: operations["listAllMeterPricingRules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/credit-notes": {
         parameters: {
             query?: never;
@@ -479,7 +892,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List credit notes
+         * @description Lists credit notes, newest first by default. The response has no
+         *     `total`; page with `limit` and `offset` until a page comes back
+         *     shorter than `limit`.
+         */
+        get: operations["listCreditNotes"];
         put?: never;
         /**
          * Create a credit note (line-based, or commit relief)
@@ -595,6 +1014,79 @@ export interface paths {
                 };
             };
         };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credits/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add or remove credit
+         * @description Writes one `adjustment` entry to the customer's credit ledger. A
+         *     positive amount adds credit; a negative amount removes it. Audit
+         *     action is `credit.adjustment` or `credit.deduction`.
+         *
+         *     Errors (422, `param` names the field): `customer_id` or
+         *     `description` missing; `amount_cents` is zero, above 100000000
+         *     ($1,000,000), or a removal larger than the credit that can be
+         *     drawn (expired grants not yet written off do not count).
+         */
+        post: operations["adjustCredits"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credits/balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List credit balances for all customers
+         * @description One row per customer that has any credit ledger entry, highest
+         *     balance first. No paging and no `total`. `total_granted` is the
+         *     sum of every credit added (grants, positive adjustments and
+         *     reversals).
+         */
+        get: operations["listCreditBalances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credits/ledger/{customer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's credit ledger
+         * @description Ledger entries for one customer. `balance_after` is the running
+         *     balance in time order over the whole ledger, so it stays right
+         *     when you filter by `entry_type`. An unknown customer returns an
+         *     empty list, not 404.
+         */
+        get: operations["listCreditLedgerEntries"];
         put?: never;
         post?: never;
         delete?: never;
@@ -800,6 +1292,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/webhook-endpoints/endpoints/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an endpoint's recent deliveries
+         * @description Returns the endpoint and its 50 newest deliveries, newest first.
+         *     Each row names the event it carried. A deleted or unknown endpoint
+         *     returns 404.
+         */
+        get: operations["listWebhookEndpointDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend one delivery to its endpoint
+         * @description Sends the delivery's event again to this one endpoint only. Other
+         *     endpoints are not contacted. Velox copies the event to a new event
+         *     (`replay_of` points to the original) and queues a new delivery.
+         *     The original delivery is not changed. Sending happens in the
+         *     background, so `status` is always `queued`.
+         *     Writes an audit row.
+         */
+        post: operations["replayWebhookDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook-endpoints/endpoints/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Delivery counts per webhook endpoint
+         * @description All-time delivery counts for each endpoint that has deliveries, in
+         *     the caller's mode. Endpoints with no deliveries are not listed.
+         *     Deleted endpoints can appear.
+         */
+        get: operations["getWebhookEndpointStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhook-endpoints/events": {
         parameters: {
             query?: never;
@@ -826,6 +1387,92 @@ export interface paths {
                 };
             };
         };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook_events/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List all delivery attempts for an event
+         * @description Returns one timeline, oldest first, of every delivery for the
+         *     original event and for all of its replays. If `id` is a replay,
+         *     the timeline starts from its original event (`root_event_id`).
+         *     Rows keep the endpoint's URL and description even after the
+         *     endpoint is deleted.
+         */
+        get: operations["listWebhookEventDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook_events/{id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay an event to all matching endpoints
+         * @description Copies the event to a new event and queues it for every active
+         *     endpoint in the same mode that subscribes to its type. Endpoints
+         *     that already received it get it again. The original event and its
+         *     deliveries are not changed. Each call makes a new copy.
+         *
+         *     `replay_of` is always the original event, even when `id` is a
+         *     replay. `status` is `queued`, or `no_matching_endpoints` when no
+         *     endpoint will receive it. Sending happens in the background.
+         *     Writes an audit row. Needs only the `apikey:read` permission.
+         */
+        post: operations["replayWebhookEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook_events/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream webhook events live (Server-Sent Events)
+         * @description A long-lived Server-Sent Events stream of the tenant's outbound
+         *     webhook events. Accepts the dashboard session cookie or a Bearer
+         *     key with `apikey:read`. It has no 30-second request timeout.
+         *
+         *     On connect, the server sends the 50 newest events, newest first.
+         *     It then sends a frame for each new event, replay, and delivery
+         *     result. Every frame is `event: webhook_event` with a JSON
+         *     `data:` line. A comment line `: heartbeat` is sent every 15
+         *     seconds to keep proxies from closing the connection. The same
+         *     event can arrive more than once; de-duplicate by `event_id`.
+         *
+         *     Live frames are not filtered by mode: check `livemode` on each
+         *     frame. The first batch holds only the caller's mode. Live frames
+         *     come from the server instance that handled the event, so with
+         *     several replicas a client sees only that replica's events.
+         */
+        get: operations["streamWebhookEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -904,6 +1551,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plans/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get plan */
+        get: operations["getPlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update plan
+         * @description `name`, `base_amount_cents`, `base_bill_timing`, `meter_ids` and
+         *     `status` are left unchanged when omitted. `description` and
+         *     `tax_code` are always written: omitting them clears them. `code`,
+         *     `currency` and `billing_interval` cannot be changed and are ignored.
+         *
+         *     `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
+         *     subscriptions are billed. Changing any of them is refused while a
+         *     draft, trialing or active subscription uses the plan: create a new
+         *     plan instead. `base_amount_cents` can only be set to a value above 0.
+         *     Every meter in `meter_ids` must have a price (a default rating rule
+         *     or a pricing rule) in the plan's currency.
+         */
+        patch: operations["updatePlan"];
+        trace?: never;
+    };
     "/v1/rating-rules": {
         parameters: {
             query?: never;
@@ -971,6 +1649,26 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/rating-rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get rating rule
+         * @description Returns one rating rule version by its id.
+         */
+        get: operations["getRatingRule"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1213,6 +1911,366 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/subscriptions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get subscription
+         * @description Returns one subscription with its items.
+         */
+        get: operations["getSubscription"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel subscription now
+         * @description Cancels the subscription immediately. Works on `draft`, `trialing`
+         *     and `active` subscriptions.
+         *
+         *     In the same transaction, Velox writes the final invoice for the
+         *     part of the current period that has been used, and credits the
+         *     unused part of any base fee that was billed in advance. If a
+         *     billing period has already ended, it is billed first. If a
+         *     scheduled cancel was already due, that cancel takes effect at its
+         *     scheduled time and the canceled subscription is returned.
+         *
+         *     Sends the `subscription.canceled` webhook event.
+         */
+        post: operations["cancelSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/schedule-cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Schedule a cancel
+         * @description Schedules the subscription to cancel later. Set exactly one of
+         *     `at_period_end` or `cancel_at`. A new call replaces any earlier
+         *     schedule.
+         *
+         *     - **Active subscription.** `at_period_end` cancels at the end of
+         *       the current period. `cancel_at` must be on or after the end of
+         *       the current period. A date inside a later period is allowed, and
+         *       that period is billed up to the date.
+         *     - **Trialing subscription.** `at_period_end` cancels at the end of
+         *       the trial, with no charge. `cancel_at` must be exactly
+         *       `trial_end_at` (free cancel) or on or after
+         *       `current_billing_period_end`.
+         *
+         *     The response's `cancel_effective_at` says when the cancel takes
+         *     effect. Sends the `subscription.cancel_scheduled` webhook event.
+         */
+        post: operations["scheduleSubscriptionCancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/scheduled-cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear a scheduled cancel
+         * @description Removes a scheduled cancel. Calling it on a subscription with no
+         *     schedule returns the subscription unchanged. Sends the
+         *     `subscription.cancel_cleared` webhook event.
+         *
+         *     If the scheduled date has already passed, the cancel has taken
+         *     effect and the request answers 409.
+         */
+        delete: operations["clearSubscriptionScheduledCancel"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/pause-collection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Pause collection
+         * @description Pauses payment collection. The subscription keeps running: each
+         *     period still closes and its invoice is created, but the invoice
+         *     stays a draft. Velox does not finalize it, charge it or start
+         *     dunning (automatic payment retries).
+         *
+         *     Only `behavior: keep_as_draft` is supported. With `resumes_at`,
+         *     periods that end before that instant bill as drafts, and later
+         *     periods bill normally. Without it, the pause lasts until you call
+         *     `DELETE /v1/subscriptions/{id}/pause-collection`. A new call
+         *     replaces the current pause.
+         *
+         *     Sends the `subscription.collection_paused` webhook event.
+         */
+        put: operations["pauseSubscriptionCollection"];
+        post?: never;
+        /**
+         * Resume collection
+         * @description Ends a collection pause. The period that is running bills
+         *     normally; a period that ended during the pause keeps its draft
+         *     invoice. Calling it on a subscription that is not paused returns
+         *     the subscription unchanged. Sends the
+         *     `subscription.collection_resumed` webhook event.
+         */
+        delete: operations["resumeSubscriptionCollection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/end-trial": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End trial now
+         * @description Ends the trial now and makes the subscription `active`. The first
+         *     paid period starts now. Items whose base fee is billed in advance
+         *     get their first invoice at once.
+         *
+         *     Sends the `subscription.trial_ended` webhook event.
+         */
+        post: operations["endSubscriptionTrial"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/extend-trial": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Extend trial
+         * @description Moves the end of the trial later. The first paid period is moved
+         *     to start at the new trial end. A cancel scheduled with
+         *     `at_period_end` moves with the trial. To shorten a trial, use
+         *     `POST /v1/subscriptions/{id}/end-trial`.
+         *
+         *     Sends the `subscription.trial_extended` webhook event.
+         */
+        post: operations["extendSubscriptionTrial"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/billing-thresholds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set billing thresholds
+         * @description Sets the billing thresholds: limits that make Velox invoice before
+         *     the period ends. A threshold bills sooner; it does not cap or
+         *     block usage. Set `amount_gte`, `item_thresholds`, or both. The
+         *     first threshold reached triggers the invoice.
+         *
+         *     Each call replaces the whole configuration. Item thresholds left
+         *     out of the body are removed.
+         */
+        put: operations["setSubscriptionBillingThresholds"];
+        post?: never;
+        /**
+         * Clear billing thresholds
+         * @description Removes all billing thresholds. Calling it on a subscription with
+         *     no thresholds returns the subscription unchanged.
+         */
+        delete: operations["clearSubscriptionBillingThresholds"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add subscription item
+         * @description Adds a plan to the subscription as a new item. The plan must use
+         *     the same billing interval and currency as the other items, and
+         *     must not share meters with the customer's other live
+         *     subscriptions.
+         *
+         *     On an active subscription, a plan whose base fee is billed in
+         *     advance is charged for the rest of the current period, in the
+         *     same transaction as the add. An item added on the first day of the
+         *     period (in the tenant's timezone) pays for the whole period. A
+         *     plan billed in arrears is billed at the end of the period for the
+         *     days it was on the subscription.
+         *
+         *     Sends the `subscription.item.added` webhook event.
+         */
+        post: operations["addSubscriptionItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/items/{itemID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove subscription item
+         * @description Removes an item from the subscription. The last item of an active
+         *     subscription cannot be removed; cancel the subscription instead.
+         *
+         *     On an active subscription, the unused part of a base fee billed in
+         *     advance is credited in the same transaction. A plan billed in
+         *     arrears is billed at the end of the period for the days it was on
+         *     the subscription.
+         *
+         *     Sends the `subscription.item.removed` webhook event.
+         */
+        delete: operations["removeSubscriptionItem"];
+        options?: never;
+        head?: never;
+        /**
+         * Change subscription item
+         * @description Changes the quantity or the plan of one item. Send exactly one of
+         *     `quantity` or `new_plan_id`. The subscription must be `active`.
+         *
+         *     - **Quantity.** Takes effect now.
+         *     - **Plan, `immediate: true`.** Takes effect now. If the new plan
+         *       has a different billing interval, the current period ends now
+         *       and a new period starts on the new plan.
+         *     - **Plan, `immediate: false` (default).** Scheduled for the end of
+         *       the current period. The item shows it in `pending_plan_id` and
+         *       `pending_plan_effective_at`. Cancel it with
+         *       `DELETE /v1/subscriptions/{id}/items/{itemID}/pending-change`.
+         *
+         *     For a change that takes effect now on a plan billed in advance,
+         *     Velox settles the rest of the period at once. An increase is
+         *     invoiced. A decrease is credited to the customer's balance with a
+         *     credit note, or reduces the amount due when the period's invoice
+         *     is still unpaid. `proration` in the response describes the result.
+         *     A plan billed in arrears is settled at the end of the period.
+         *
+         *     Sends `subscription.item.updated`, or
+         *     `subscription.pending_change.scheduled` for a scheduled plan
+         *     change.
+         */
+        patch: operations["updateSubscriptionItem"];
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/items/{itemID}/pending-change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancel a scheduled plan change
+         * @description Cancels the plan change scheduled on an item. Calling it on an item
+         *     with no scheduled change returns the item unchanged. Sends the
+         *     `subscription.pending_change.canceled` webhook event.
+         *
+         *     If the period has already ended, the change has taken effect and
+         *     the request answers 409.
+         */
+        delete: operations["cancelSubscriptionItemPendingChange"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/subscriptions/{id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get subscription activity timeline
+         * @description Returns the subscription's history from the audit log, oldest
+         *     first, as display-ready rows. It holds at most the 100 most recent
+         *     entries. `truncated` is true when older entries were left out.
+         */
+        get: operations["getSubscriptionTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage-events": {
         parameters: {
             query?: never;
@@ -1445,6 +2503,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/usage-events/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill a past usage event
+         * @description Records one usage event with a past timestamp. Same body as
+         *     `POST /v1/usage-events`, but `timestamp` is required and must not be
+         *     after the customer's current time (a test clock's time when the
+         *     customer is on one). The event is marked `origin: backfill` and an
+         *     audit log entry is written.
+         *
+         *     The event counts toward the billing period its timestamp falls in
+         *     only if that period's invoice has not been built yet. An event for
+         *     an already-invoiced period is stored but never billed; bill it with
+         *     a one-off invoice.
+         *
+         *     Shares idempotency keys with live ingest: a repeated
+         *     `idempotency_key` returns 200 with the original event and an
+         *     `Idempotent-Replayed: true` header, and writes nothing.
+         *     Requires usage write permission.
+         */
+        post: operations["backfillUsageEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/usage-events/aggregate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage totals
+         * @description Event count, quantity totals, and a per-meter breakdown over every
+         *     usage event matching the filters (no paging). Quantities are plain
+         *     sums of event quantities, whatever the meter's aggregation, and
+         *     `total_units` adds quantities across all meters. A `from` or `to`
+         *     value that is not RFC 3339 is ignored, not rejected.
+         */
+        get: operations["aggregateUsageEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/usage-summary/{customer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Customer usage summary
+         * @description Per-meter quantity totals and the event count for one customer over
+         *     a window. Without `from` and `to` the window is the current calendar
+         *     month in UTC (the test clock's month when the customer is on one).
+         *     Quantities are plain sums, whatever the meter's aggregation. An
+         *     unknown customer id returns zero totals, not 404.
+         */
+        get: operations["getUsageSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/invoices": {
         parameters: {
             query?: never;
@@ -1505,7 +2645,24 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /**
+         * Create a draft invoice
+         * @description Creates a one-off invoice in `draft` status with billing reason
+         *     `manual`. Send `line_items` to create the invoice and its lines in
+         *     one transaction, or omit them and add lines later with
+         *     `POST /v1/invoices/{id}/line-items`.
+         *
+         *     Defaults when a field is left out:
+         *     - `currency`: the customer's billing-profile currency, then the
+         *       tenant default, then `USD`.
+         *     - `net_payment_term_days`: the tenant's net payment terms. A
+         *       negative value is stored as 0 (due on receipt).
+         *     - `billing_period_start` / `billing_period_end`: now.
+         *
+         *     Tax is not calculated here. It is calculated when the invoice is
+         *     finalized, so totals equal the subtotal until then.
+         */
+        post: operations["createInvoice"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1732,6 +2889,247 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/invoices/{id}/line-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a line item to a draft invoice
+         * @description Adds one line to a `draft` invoice and recomputes its totals.
+         *     `amount_cents` is `quantity × unit_amount_cents`. Only draft invoices
+         *     accept new lines.
+         */
+        post: operations["addInvoiceLineItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void an invoice
+         * @description Cancels a `draft`, `finalized` or `uncollectible` invoice. Voiding
+         *     is final. In the same transaction, credits that were applied to the
+         *     invoice go back to the customer's credit balance.
+         *
+         *     After the void, Velox stops collection at Stripe (expires open
+         *     Checkout sessions and cancels the PaymentIntent where Stripe allows
+         *     it) and resolves any active dunning run with `invoice_voided`.
+         *     Fires the `invoice.voided` webhook event.
+         *
+         *     A paid invoice cannot be voided: issue a credit note instead.
+         */
+        post: operations["voidInvoice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/resend-setup-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend the payment-method setup link
+         * @description Emails the customer the link to add a payment method again. It is
+         *     the same email Velox sends when an invoice is finalized and the
+         *     customer has no card on file. Once a card is added, Velox charges
+         *     the invoice automatically.
+         *
+         *     Works on unpaid invoices that are `finalized` or `uncollectible`.
+         *     This is different from `POST /v1/invoices/{id}/send`, which emails
+         *     the invoice itself with a link to pay it.
+         */
+        post: operations["resendInvoiceSetupLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/mark-uncollectible": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write off an invoice as uncollectible
+         * @description Moves a `finalized` invoice to `uncollectible` (a bad-debt write-off).
+         *     The invoice can still be paid later, for example with
+         *     `POST /v1/invoices/{id}/record-payment`. Tax is not reversed.
+         *
+         *     Resolves any active dunning run with `invoice_not_collectible`, so
+         *     payment retries stop. Fires the `invoice.marked_uncollectible`
+         *     webhook event.
+         */
+        post: operations["markInvoiceUncollectible"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/record-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a payment made outside Stripe
+         * @description Marks a `finalized` or `uncollectible` invoice as paid for money
+         *     received another way, such as a bank transfer, cheque or cash. The
+         *     full amount due is recorded; partial payments are not supported.
+         *
+         *     Resolves any active dunning run with `payment_recovered`. Fires the
+         *     `invoice.payment_recorded` webhook event. The optional `note` is
+         *     stored in the audit log, cut to 500 characters.
+         */
+        post: operations["recordInvoicePayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/rotate-public-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the hosted invoice link
+         * @description Creates a new `public_token` for the hosted invoice page. The old
+         *     link stops working at once. Use it when a link was shared with the
+         *     wrong people. Draft invoices have no public link.
+         */
+        post: operations["rotateInvoicePublicToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/collect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Charge a finalized invoice now
+         * @description Collects a `finalized`, unpaid invoice right away instead of waiting
+         *     for the automatic charge.
+         *
+         *     1. The customer's credit balance is applied first. If it covers the
+         *        whole amount, the invoice is marked paid and no card is charged.
+         *     2. Otherwise Velox charges the remaining amount to the customer's
+         *        saved payment method with a Stripe PaymentIntent.
+         *
+         *     On success, any active dunning run is resolved with
+         *     `payment_recovered`. Check `payment_status` on the returned invoice.
+         *
+         *     A written-off (`uncollectible`) invoice cannot be charged here.
+         *     Record an offline payment or issue a new invoice instead.
+         */
+        post: operations["collectInvoicePayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refund a paid invoice
+         * @description Refunds a `paid` invoice to the customer's card. Velox creates and
+         *     issues a credit note (a document that reduces what the customer
+         *     owes) for the refund, and sends the refund to Stripe.
+         *
+         *     Leave out `amount_cents`, or send 0, to refund everything not yet
+         *     refunded. The response is the credit note. Check its
+         *     `refund_status`: if Stripe failed, it is `failed` and can be retried
+         *     with `POST /v1/credit-notes/{id}/retry-refund`.
+         *
+         *     Only invoices paid by card through Stripe can be refunded here. For
+         *     an invoice paid outside Stripe, create a credit note with
+         *     `out_of_band_amount_cents`.
+         */
+        post: operations["refundInvoice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invoices/{id}/payment-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the invoice activity timeline
+         * @description Returns everything that happened to an invoice, oldest first:
+         *     lifecycle steps (created, finalized, paid, voided), charge attempts,
+         *     Stripe webhooks, dunning retries, credit notes and customer emails.
+         *     A draft invoice returns an empty list.
+         *
+         *     If one source cannot be read, the rest is still returned and the
+         *     source is named in `degraded`.
+         */
+        get: operations["getInvoicePaymentTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/credit-notes/{id}/send": {
         parameters: {
             query?: never;
@@ -1792,6 +3190,125 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credit-notes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a credit note
+         * @description Returns the credit note without its line items. The PDF has the lines.
+         */
+        get: operations["getCreditNote"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credit-notes/{id}/issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a draft credit note
+         * @description Moves a `draft` credit note to `issued` and applies it.
+         *     - Unpaid invoice: the invoice's amount due goes down.
+         *     - Paid invoice: the refund part is sent to Stripe, and the credit
+         *       part is added to the customer's credit balance.
+         *
+         *     Check the returned `status` and `refund_status`:
+         *     - A failed Stripe refund still returns 200, with `refund_status`
+         *       `failed`. Retry it with `POST /v1/credit-notes/{id}/retry-refund`.
+         *     - If the invoice's charge is still running, or the invoice is still
+         *       a draft, nothing changes and the note stays `draft`. Velox issues
+         *       it later.
+         *     - If the invoice was voided or written off, the draft is voided
+         *       instead and returned with `status` `voided`.
+         */
+        post: operations["issueCreditNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credit-notes/{id}/retry-refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed credit-note refund
+         * @description Sends the refund part of an `issued` credit note to Stripe again,
+         *     when its `refund_status` is `failed`, `pending` or `none`. The retry
+         *     uses the same idempotency key, so the customer is never refunded
+         *     twice. If Stripe already has the refund, Velox records its status
+         *     instead of creating a new one.
+         */
+        post: operations["retryCreditNoteRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credit-notes/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void a draft credit note
+         * @description Cancels a `draft` credit note. Issued credit notes are final and
+         *     cannot be voided.
+         */
+        post: operations["voidCreditNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credit-notes/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download credit note PDF
+         * @description Returns the credit note as a PDF, shown inline and named after the
+         *     credit note number. An issued note prints the customer and company
+         *     details it was issued with.
+         */
+        get: operations["getCreditNotePdf"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2202,6 +3719,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/password-reset/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check a password reset token
+         * @description Tells whether a reset token can still be used, without using it up.
+         *     The reset-password page calls it on load, so it can show "this link
+         *     is no longer valid" before the user types a new password. An
+         *     unknown, expired or already-used token returns 422 with
+         *     `valid: false`.
+         */
+        get: operations["checkPasswordResetToken"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/invite/{token}": {
         parameters: {
             query?: never;
@@ -2335,7 +3876,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/members/": {
+    "/v1/members": {
         parameters: {
             query?: never;
             header?: never;
@@ -2512,7 +4053,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/members/{user_id}": {
+    "/v1/members/{userID}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2535,7 +4076,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    user_id: string;
+                    userID: string;
                 };
                 cookie?: never;
             };
@@ -3353,6 +4894,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/test-clocks/{id}/customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List customers attached to a test clock
+         * @description Test mode only; a live-mode key gets 403. Returns every customer
+         *     attached to the clock. The list is not paginated.
+         */
+        get: operations["listTestClockCustomers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/recipes": {
         parameters: {
             query?: never;
@@ -3462,17 +5024,903 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/exports/customers.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export customers as CSV
+         * @description Streams every customer, newest first, from one consistent
+         *     snapshot. Columns: id, external_id, display_name, email, status,
+         *     email_status, created_at, updated_at.
+         *
+         *     Each export writes an `export` row to the audit log before any
+         *     data is sent. If that row cannot be written, the call returns 500
+         *     and sends nothing. If the export fails after it started, the last
+         *     row's first cell is `EXPORT_INCOMPLETE`: discard the file and
+         *     retry. Text cells that start with `= + - @` get a leading `'`
+         *     so spreadsheets do not run them as formulas.
+         */
+        get: operations["exportCustomersCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exports/invoices.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export invoices as CSV
+         * @description Streams every invoice, newest first, from one consistent
+         *     snapshot. Amounts are in cents. Columns: id, invoice_number,
+         *     customer_id, subscription_id, status, payment_status, currency,
+         *     subtotal_cents, tax_amount_cents, discount_cents,
+         *     total_amount_cents, amount_due_cents, amount_paid_cents,
+         *     credits_applied_cents, billing_period_start, billing_period_end,
+         *     tax_provider, tax_transaction_id, tax_reversed_at, issued_at,
+         *     due_at, paid_at, voided_at, uncollectible_at, created_at.
+         *
+         *     Audit row, `EXPORT_INCOMPLETE` marker and formula escaping work
+         *     as in the customers export.
+         */
+        get: operations["exportInvoicesCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exports/subscriptions.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export subscriptions as CSV
+         * @description Streams every subscription, newest first, from one consistent
+         *     snapshot. Columns: id, code, display_name, customer_id, status,
+         *     billing_time, trial_start_at, trial_end_at, started_at,
+         *     activated_at, canceled_at, current_billing_period_start,
+         *     current_billing_period_end, next_billing_at, plan_ids (plan IDs
+         *     joined with `|`), created_at.
+         *
+         *     Audit row, `EXPORT_INCOMPLETE` marker and formula escaping work
+         *     as in the customers export.
+         */
+        get: operations["exportSubscriptionsCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exports/usage-events.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export usage events as CSV
+         * @description Streams usage events whose `timestamp` falls in the window,
+         *     newest first, from one consistent snapshot. `from` and `to` are
+         *     both required and may span at most 366 days. Columns: id,
+         *     customer_id, meter_id, quantity, timestamp, idempotency_key,
+         *     origin, dimensions_json, provider_cost_micros,
+         *     provider_cost_source.
+         *
+         *     Audit row, `EXPORT_INCOMPLETE` marker and formula escaping work
+         *     as in the customers export.
+         */
+        get: operations["exportUsageEventsCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exports/audit-log.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the audit log as CSV
+         * @description Streams the whole audit log, newest first, with no row limit.
+         *     Takes the same filters as the audit-log list, so the dashboard's
+         *     filters and its export give the same rows. The date filters are
+         *     `date_from`/`date_to`; `from`/`to` are ignored here.
+         *
+         *     The export's own `export` row is written before the file is
+         *     sent. An unfiltered export includes it as the first data row;
+         *     a filtered export includes it only if it matches the filters.
+         *     Columns: id, created_at, actor_type, actor_id, actor_name,
+         *     action, resource_type, resource_id, resource_label, ip_address,
+         *     request_id, sim_effective_at, test_clock_id, metadata_json.
+         *
+         *     `EXPORT_INCOMPLETE` marker and formula escaping work as in the
+         *     customers export.
+         */
+        get: operations["exportAuditLogCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/analytics/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get headline billing metrics
+         * @description Returns the dashboard's headline metrics for a rolling window that
+         *     ends now, with values for the window before it where a comparison
+         *     makes sense.
+         *
+         *     Money is in cents of the tenant's default currency (USD when none
+         *     is set), named in `currency`. Invoices and plans in other
+         *     currencies are left out. MRR (monthly recurring revenue) counts
+         *     plan base fees only: base amount times quantity, with yearly
+         *     plans divided by 12. Usage charges are not included. Data from
+         *     test clocks is left out.
+         */
+        get: operations["getAnalyticsOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/analytics/revenue-chart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get revenue over time
+         * @description Returns paid-invoice revenue per day, or per month for `12m`.
+         *     Only invoices in the tenant's default currency are counted; the
+         *     currency is the `currency` of `GET /v1/analytics/overview`.
+         *     Buckets with no paid invoices are left out. Data from test clocks
+         *     is left out.
+         */
+        get: operations["getAnalyticsRevenueChart"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/analytics/mrr-movement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get MRR movement over time
+         * @description Returns how MRR (monthly recurring revenue from plan base fees)
+         *     changed, per day, or per month for `12m`, with totals.
+         *
+         *     - `new`: subscriptions activated in the bucket.
+         *     - `churned`: subscriptions canceled in the bucket.
+         *     - `expansion` and `contraction`: item adds, removals, and plan or
+         *       quantity changes on subscriptions that were active for the whole
+         *       window.
+         *
+         *     Only plans in the tenant's default currency are counted; the
+         *     currency is the `currency` of `GET /v1/analytics/overview`.
+         *     Buckets with no movement are left out. Data from test clocks is
+         *     left out.
+         */
+        get: operations["getAnalyticsMrrMovement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/analytics/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get usage over time
+         * @description Returns usage-event counts and summed quantities per day, or per
+         *     month for `12m`, the 10 meters with the most events, and totals.
+         *     Buckets and meters with no events are left out. Data from
+         *     customers on test clocks is left out.
+         */
+        get: operations["getAnalyticsUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dunning/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List dunning runs
+         * @description Dunning is the process of retrying a failed invoice payment on a
+         *     schedule. A dunning run tracks those retries for one invoice. Runs
+         *     are listed newest first.
+         */
+        get: operations["listDunningRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dunning/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a dunning run with its events */
+        get: operations["getDunningRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dunning/runs/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a dunning run
+         * @description Stops payment retries for a run and applies the chosen outcome to
+         *     its invoice first:
+         *     - `payment_recovered`: records an offline payment for the full
+         *       amount due, as `POST /v1/invoices/{id}/record-payment` does.
+         *     - `invoice_voided`: voids the invoice and stops collection at
+         *       Stripe, as `POST /v1/invoices/{id}/void` does.
+         *     - `invoice_not_collectible`: writes the invoice off, as
+         *       `POST /v1/invoices/{id}/mark-uncollectible` does.
+         *
+         *     If the invoice step fails, the run stays open and the error is
+         *     returned. If the invoice is already in the requested state, that
+         *     step is skipped. Fires the `dunning.resolved` webhook event once.
+         */
+        post: operations["resolveDunningRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dunning/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get dunning totals
+         * @description Counts of dunning runs by state, and the amount still due on active
+         *     and escalated runs. The amount covers only invoices in the tenant's
+         *     default currency, named in `currency`.
+         */
+        get: operations["getDunningStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dunning/policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List dunning policies
+         * @description Every dunning policy in this tenant and mode, the default first, then
+         *     oldest first. Each one carries how many customers are assigned to it.
+         */
+        get: operations["listDunningPolicies"];
+        put?: never;
+        /**
+         * Create dunning policy
+         * @description A dunning policy decides how failed payments are retried and what
+         *     happens when the retries run out. The first policy created in a
+         *     tenant and mode becomes the default; later ones do not (use
+         *     set-default). Customers without an assigned policy use the default.
+         *
+         *     `enabled` defaults to false. A disabled policy starts no dunning, so
+         *     send `enabled: true` for the policy to take effect.
+         */
+        post: operations["createDunningPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dunning/policies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get dunning policy */
+        get: operations["getDunningPolicy"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete dunning policy
+         * @description Deletes the policy. Refused for the default policy and for a policy
+         *     that customers are still assigned to.
+         */
+        delete: operations["deleteDunningPolicy"];
+        options?: never;
+        head?: never;
+        /**
+         * Replace dunning policy settings
+         * @description Replaces every setting of the policy with the body. This is not a
+         *     partial update: an omitted field takes its default (`enabled`
+         *     false, `name` empty, 3 attempts, 3 grace days, pause the
+         *     subscription, leave the invoice open). Send the full policy.
+         *     `is_default` cannot be changed here; use set-default.
+         */
+        patch: operations["updateDunningPolicy"];
+        trace?: never;
+    };
+    "/v1/dunning/policies/{id}/set-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a dunning policy the default
+         * @description Makes this policy the default and the previous default a normal
+         *     policy, in one step. Customers without an assigned policy use the
+         *     new default for dunning started from now on.
+         */
+        post: operations["setDefaultDunningPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/price-overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List active price overrides
+         * @description Active overrides only, newest first, at most 500. Closed or deleted
+         *     overrides are not listed. Requires pricing write permission.
+         */
+        get: operations["listPriceOverrides"];
+        put?: never;
+        /**
+         * Create a customer price override
+         * @description Gives one customer its own price for one rating rule. The override
+         *     is keyed by the rule's `rule_key`, so it keeps applying after a new
+         *     version of the rule is published. If the customer already has an
+         *     active override for that rule, it is closed and replaced by this one.
+         *     A new or replaced price applies from the customer's next billing
+         *     period; the current period keeps the price it opened with. The
+         *     override's currency is the rule's currency.
+         */
+        post: operations["createPriceOverride"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/price-overrides/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End a customer price override
+         * @description Marks the override inactive. The row is kept. The customer goes back
+         *     to the rule's normal price from the next billing period; the current
+         *     period keeps the price it opened with.
+         */
+        delete: operations["deletePriceOverride"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integrations/litellm/spend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest LiteLLM spend logs
+         * @description Target for LiteLLM Proxy's `generic_api` logging callback. Accepts
+         *     one LiteLLM log record, a JSON array of records, or
+         *     `{"events": [...]}`. Each completion, chat, text-completion or
+         *     embedding record becomes up to three usage events on the `tokens`
+         *     meter, one per `token_type` dimension: `input` (prompt tokens not
+         *     read from cache), `cache_read` and `output`. Each event also carries
+         *     `model` (a model family name when recognised), `model_raw` and
+         *     `provider`, plus `team_id` and `request_tags` from `metadata` when
+         *     present. Other call types, and records with no token counts, are
+         *     counted as `skipped`.
+         *
+         *     The customer is the record's `user` or `end_user` (or
+         *     `metadata.user_api_key_end_user_id`), matched against the
+         *     customer's `external_id`. Event idempotency keys are the record
+         *     `id` plus the token type, so a resent record is counted as
+         *     `deduplicated`, not billed twice.
+         *
+         *     A problem with one record (no customer, unknown customer or meter,
+         *     invalid event) is listed in `errors` and the rest of the batch
+         *     still goes in, with status 200. If the usage store cannot be
+         *     reached, the whole request fails with 503 so LiteLLM retries it.
+         *     Requires usage write permission.
+         */
+        post: operations["ingestLitellmSpend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List API keys
+         * @description Returns the newest 50 keys in the caller's mode (test or live),
+         *     newest first. Revoked and expired keys are included; check
+         *     `revoked_at` and `expires_at`. Key values are never returned.
+         *     There are no paging parameters and no `total`.
+         */
+        get: operations["listApiKeys"];
+        put?: never;
+        /**
+         * Create an API key
+         * @description Creates a key in the caller's mode: a test-mode caller gets a test
+         *     key, a live-mode caller gets a live key. The full key (`raw_key`)
+         *     is returned once and is never shown again. Velox stores only a
+         *     salted hash. `key_type` defaults to `secret`.
+         *
+         *     A `platform` key can only be issued by an existing platform key.
+         *     Platform keys do not hold the `apikey:write` permission this route
+         *     needs, so in practice this route never issues one (403).
+         *     Writes an audit row (never the key value).
+         */
+        post: operations["createApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/api-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an API key
+         * @description Sets `revoked_at` to now. The key fails authentication on its next
+         *     use. A caller may revoke the key it is using; its next request
+         *     then gets 401. Dashboard sessions are not tied to API keys, so
+         *     they are not affected. Writes an audit row.
+         */
+        delete: operations["revokeApiKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/api-keys/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate an API key
+         * @description Issues a new key with the same name, type, mode and `expires_at`
+         *     as the old one, and returns its full value once (`raw_key`).
+         *
+         *     The body is optional. With no body, or `expires_in_seconds: 0`,
+         *     the old key is revoked at once. A positive value keeps the old
+         *     key working for that many seconds (at most 604800, 7 days), so
+         *     deployed clients can switch without downtime. Writes an audit row.
+         */
+        post: operations["rotateApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get workspace settings
+         * @description Returns the tenant's billing settings: currency, timezone, invoice
+         *     numbering, payment terms, tax setup and the company details printed
+         *     on invoices. Settings are shared by test and live mode. A tenant
+         *     that never saved settings gets the defaults (USD, UTC, prefix
+         *     `VLX`, net 30, tax provider `manual`).
+         *     Requires the `apikey:write` permission (secret keys and dashboard
+         *     sessions).
+         */
+        get: operations["getTenantSettings"];
+        /**
+         * Update workspace settings
+         * @description Merges the body into the current settings. A field you leave out
+         *     keeps its stored value. A field you send is set, even to `""` or
+         *     `0`. Send `credit_balance_low_threshold_cents: null` to turn
+         *     low-balance alerts off.
+         *
+         *     Empty `default_currency`, `timezone`, `invoice_prefix`,
+         *     `tax_provider` and `tax_on_failure` fall back to their defaults.
+         *     `default_currency` and `company_country` are stored in upper case,
+         *     and `brand_color` in lower case. Choosing `stripe_tax` with no
+         *     `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
+         *     business use).
+         *
+         *     A save that changes a field writes one audit row listing each
+         *     change.
+         */
+        put: operations["updateTenantSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/stripe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Stripe connections
+         * @description Returns the tenant's Stripe connections for both modes in one list
+         *     (at most two rows, live first), whatever the caller's mode. No
+         *     secret values are returned, only prefixes and last four characters.
+         */
+        get: operations["listStripeConnections"];
+        put?: never;
+        /**
+         * Connect a Stripe account
+         * @description Saves your own Stripe keys for one mode (`livemode` in the body
+         *     picks the mode, not the caller's mode). Calling it again for the
+         *     same mode replaces the keys. Key prefixes must match the mode:
+         *     `sk_test_`/`rk_test_` and `pk_test_` for test, `sk_live_`/`rk_live_`
+         *     and `pk_live_` for live. Secrets are stored encrypted and are never
+         *     returned.
+         *
+         *     Velox then calls Stripe to check the key. A failed check still
+         *     returns 200: the keys are saved and `last_verified_error` says why
+         *     the check failed. On success, `verified_at` and the account fields
+         *     are set, and invoices that were stuck waiting for Stripe keys are
+         *     retried in the background (`retries_queued` gives the count).
+         *
+         *     Stripe sends payment webhooks to `/v1/webhooks/stripe/{id}`, where
+         *     `{id}` is the returned `id`. Writes an audit row.
+         */
+        post: operations["connectStripe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/stripe/{mode}/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set the Stripe webhook signing secret
+         * @description Saves the `whsec_` signing secret for a mode that is already
+         *     connected, without entering the API keys again. Velox does not call
+         *     Stripe here; the secret is checked on each incoming webhook.
+         *     Writes an audit row (never the secret).
+         */
+        patch: operations["setStripeWebhookSecret"];
+        trace?: never;
+    };
+    "/v1/settings/stripe/{mode}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect Stripe for one mode
+         * @description Deletes the saved Stripe keys for the mode. Velox cannot reach
+         *     Stripe in that mode until you connect again. Writes an audit row.
+         */
+        delete: operations["disconnectStripe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tenants
+         * @description Platform keys only. Returns the newest 50 tenants across the whole
+         *     installation, newest first. There are no paging parameters and no
+         *     `total`.
+         */
+        get: operations["listTenants"];
+        put?: never;
+        /**
+         * Create a tenant
+         * @description Platform keys only (`vlx_platform_`), sent as
+         *     `Authorization: Bearer`. Dashboard sessions are not accepted.
+         *     Creates an active tenant. It has no users and no API keys yet.
+         *     Writes an audit row.
+         */
+        post: operations["createTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a tenant
+         * @description Platform keys only. Reads any tenant in the installation.
+         */
+        get: operations["getTenant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set up a new installation
+         * @description One-time setup for a new installation. It works only while no
+         *     tenant exists and only when the server has `VELOX_BOOTSTRAP_TOKEN`
+         *     set. Send that token as `token` in the body or as
+         *     `Authorization: Bearer <token>`. Never send it in the query string.
+         *
+         *     In one transaction it creates the first tenant, its owner user, a
+         *     test secret key, a live secret key and a test publishable key. The
+         *     response is the only place the keys appear, and the password too
+         *     when Velox generated it. The response has `Cache-Control: no-store`.
+         *
+         *     Defaults: tenant name "Demo Tenant", owner email
+         *     `admin@velox.local`, and a generated password when
+         *     `owner_password` is empty. The `velox-bootstrap` command does the
+         *     same setup from the shell.
+         */
+        post: operations["bootstrap"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List audit log entries
+         * @description Returns the tenant's audit entries in the caller's mode, newest
+         *     first (by `created_at`, then `id`). All filters are exact matches
+         *     and can be combined.
+         *
+         *     Two ways to page:
+         *     - Offset: `limit` and `offset`. The response is `{data, total}`.
+         *       `total` stops counting at 10,001, so a value above 10,000 means
+         *       "more than 10,000".
+         *     - Cursor: pass `after`. The response is `{data, has_more,
+         *       next_cursor}` and has no `total`. Pass `next_cursor` as the next
+         *       `after`.
+         *
+         *     Settings changes are always recorded in test mode, so they do not
+         *     appear when you read the log in live mode.
+         */
+        get: operations["listAuditLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit-log/filters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List audit log filter values
+         * @description Returns the distinct `action` and `resource_type` values recorded
+         *     for the tenant in the caller's mode, plus the test clocks that
+         *     appear in the log. Deleted test clocks are included, named from
+         *     their audit entries. Use these to fill filter menus.
+         */
+        get: operations["getAuditLogFilters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         Error: {
             error?: {
-                /** @enum {string} */
-                type?: "invalid_request_error" | "authentication_error" | "rate_limit_error" | "api_error";
+                /**
+                 * @description Usually one of `invalid_request_error`,
+                 *     `authentication_error`, `rate_limit_error` or `api_error`.
+                 *     Some errors use another value: `invalid_state`,
+                 *     `validation_error` and `invalid_body` on a few routes, and
+                 *     `idempotency_error`, `conflict_idempotency`,
+                 *     `conflict_idempotency_unresolved` or `bad_request` when the
+                 *     `Idempotency-Key` header is the problem. Idempotency errors
+                 *     have only `type` and `message`. See docs/api-surface.md.
+                 * @example invalid_request_error
+                 */
+                type?: string;
                 code?: string;
                 message?: string;
                 request_id?: string;
+                /** @description The request field the error is about. Sent only when the error names one. */
+                param?: string;
             };
         };
         MemberInvitation: {
@@ -4331,6 +6779,1273 @@ export interface components {
             objects: components["schemas"]["RecipePreviewObjects"];
             warnings: string[];
         };
+        /**
+         * @description The billing details printed on invoices and used for tax. The
+         *     whole profile is replaced on every write.
+         */
+        CustomerBillingProfileInput: {
+            legal_name?: string;
+            /** @description 7 to 20 characters of digits, spaces, `+`, `-`, `(`, `)`. */
+            phone?: string;
+            address_line1?: string;
+            address_line2?: string;
+            city?: string;
+            state?: string;
+            postal_code?: string;
+            /** @description ISO 3166 alpha-2 code, such as `US` or `IN`. */
+            country?: string;
+            /**
+             * @description ISO 4217 code, such as `USD`. When set, invoices for this
+             *     customer use it instead of the plan currency.
+             */
+            currency?: string;
+            /**
+             * @description Defaults to `standard`.
+             * @enum {string}
+             */
+            tax_status?: "standard" | "exempt" | "reverse_charge";
+            /** @description Required when `tax_status` is `exempt`. */
+            tax_exempt_reason?: string;
+            /** @description Buyer tax ID. Required when `tax_status` is `reverse_charge`. */
+            tax_id?: string;
+            /** @description Tax ID kind, stored as its Stripe code (for example `eu_vat`, `in_gst`). */
+            tax_id_type?: string;
+        };
+        CustomerBillingProfile: components["schemas"]["CustomerBillingProfileInput"] & {
+            customer_id: string;
+            tenant_id?: string;
+            /**
+             * @description Set by the server. `ready` when legal name, address line
+             *     1, city and country are all set.
+             * @enum {string}
+             */
+            profile_status: "incomplete" | "ready";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SentEmail: {
+            id: string;
+            /** @enum {string} */
+            email_type: "invoice" | "payment_receipt" | "payment_failed" | "payment_setup_request" | "dunning_warning" | "dunning_escalation" | "credit_note";
+            recipient: string;
+            /**
+             * @description Velox's send state. `dispatched` means the mail server accepted it.
+             * @enum {string}
+             */
+            status: "pending" | "dispatched" | "failed" | "skipped";
+            /**
+             * @description What the email provider reported back, if anything.
+             * @enum {string}
+             */
+            delivery_state: "unknown" | "delivered" | "bounced" | "complained";
+            invoice_number?: string;
+            last_error?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            dispatched_at?: string;
+        };
+        CustomerUsage: {
+            customer_id: string;
+            period: {
+                /** Format: date-time */
+                from: string;
+                /** Format: date-time */
+                to: string;
+                /** @enum {string} */
+                source: "current_billing_cycle" | "explicit";
+            };
+            /** @description Active and trialing subscriptions. */
+            subscriptions: {
+                id: string;
+                plan_id: string;
+                plan_name: string;
+                currency: string;
+                /** Format: date-time */
+                current_period_start: string;
+                /** Format: date-time */
+                current_period_end: string;
+            }[];
+            meters: components["schemas"]["CustomerUsageMeter"][];
+            /** @description One entry per currency. */
+            totals: {
+                currency: string;
+                /** Format: int64 */
+                amount_cents: number;
+            }[];
+            warnings: string[];
+            /** @description One entry per UTC day in the period, including days with no usage. */
+            buckets: {
+                /** Format: date-time */
+                bucket_start: string;
+                /** @description Quantity per meter ID for that day, as a decimal string. */
+                per_meter: {
+                    [key: string]: string;
+                };
+            }[];
+        };
+        CustomerUsageMeter: {
+            meter_id: string;
+            meter_key: string;
+            meter_name: string;
+            unit: string;
+            currency: string;
+            /** @description Decimal string. */
+            total_quantity: string;
+            /** Format: int64 */
+            total_amount_cents: number;
+            /** @description One row per pricing rule that claimed events. */
+            rules: {
+                rating_rule_version_id: string;
+                rule_key: string;
+                dimension_match?: {
+                    [key: string]: unknown;
+                };
+                /** @description Decimal string. */
+                quantity: string;
+                /** Format: int64 */
+                amount_cents: number;
+                /** @description Price per unit in cents, as a decimal string; the same figure the invoice line shows. */
+                unit_amount_decimal?: string;
+                /**
+                 * @description True for events that matched no pricing rule. Velox
+                 *     bills nothing for them, and they are left out of the
+                 *     meter's totals.
+                 */
+                unmatched?: boolean;
+            }[];
+        };
+        CustomerOverview: {
+            customer_id: string;
+            active_subscriptions: components["schemas"]["Subscription"][];
+            /** @description The 5 newest invoices. */
+            recent_invoices: components["schemas"]["Invoice"][];
+            /**
+             * @description Invoices that are not draft, voided or uncollectible and
+             *     whose payment is pending, failed or unknown.
+             */
+            outstanding_balance: {
+                /**
+                 * Format: int64
+                 * @description Sum of `amount_due_cents`. Amounts in different currencies are added together.
+                 */
+                total_cents: number;
+                unpaid_count: number;
+            };
+        };
+        PaymentMethod: {
+            id: string;
+            /** @example card */
+            type: string;
+            card_brand?: string;
+            card_last4?: string;
+            card_exp_month?: number;
+            card_exp_year?: number;
+            is_default: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        CreditLedgerEntry: {
+            id: string;
+            tenant_id?: string;
+            customer_id: string;
+            /** @enum {string} */
+            entry_type: "grant" | "usage" | "expiry" | "adjustment";
+            /**
+             * Format: int64
+             * @description Positive adds credit, negative removes it.
+             */
+            amount_cents: number;
+            /**
+             * Format: int64
+             * @description Customer's credit balance after this entry.
+             */
+            balance_after: number;
+            description: string;
+            invoice_id?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description For entries that add credit, how much has been used or expired.
+             */
+            consumed_cents?: number;
+            /** @enum {string} */
+            grant_kind?: "commit" | "promotional";
+            /** @description For a `commit` grant, the invoice that paid for it. */
+            source_invoice_id?: string;
+        };
+        /** @description One priced line of a subscription. It pairs a plan with a quantity. */
+        SubscriptionItem: {
+            id: string;
+            subscription_id: string;
+            plan_id: string;
+            /** Format: int64 */
+            quantity: number;
+            /**
+             * Format: byte
+             * @description The item's stored metadata JSON, base64-encoded. Absent when empty.
+             */
+            metadata?: string;
+            /** @description Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled. */
+            pending_plan_id?: string;
+            /** Format: date-time */
+            pending_plan_effective_at?: string;
+            /**
+             * Format: date-time
+             * @description When the plan was last changed immediately. Absent until the first such change.
+             */
+            plan_changed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description Present on a subscription while collection is paused. Invoices are
+         *     still created, but stay drafts and are not charged.
+         */
+        SubscriptionPauseCollection: {
+            /** @enum {string} */
+            behavior: "keep_as_draft";
+            /**
+             * Format: date-time
+             * @description When collection resumes. Absent when the pause lasts until it is cleared.
+             */
+            resumes_at?: string;
+        };
+        /** @description Limits that make Velox invoice before the period ends. */
+        SubscriptionBillingThresholds: {
+            /**
+             * Format: int64
+             * @description Running-subtotal threshold in cents. Absent when not set.
+             */
+            amount_gte?: number;
+            /** @description Whether a threshold invoice starts a new billing period. */
+            reset_billing_cycle: boolean;
+            item_thresholds: components["schemas"]["SubscriptionItemThreshold"][];
+        };
+        SubscriptionItemThreshold: {
+            subscription_item_id: string;
+            /** @description Usage quantity threshold, as a decimal string. */
+            usage_gte: string;
+        };
+        /** @description What Velox did to settle the rest of the period for an item change. */
+        SubscriptionItemProration: {
+            old_plan_id: string;
+            new_plan_id: string;
+            /**
+             * Format: double
+             * @description Share of the full billing cycle that was left, from 0 to 1.
+             */
+            proration_factor: number;
+            /**
+             * Format: int64
+             * @description Gross amount, tax included: the invoice total (`invoice`), the
+             *     amount credited to the balance (`credit`), or the amount due
+             *     removed from the unpaid invoice (`adjustment`).
+             */
+            amount_cents: number;
+            /** @enum {string} */
+            type: "invoice" | "credit" | "adjustment";
+            /** @description The proration invoice. Present when `type` is `invoice`. */
+            invoice_id?: string;
+        };
+        SubscriptionItemChangeResult: {
+            item: components["schemas"]["SubscriptionItem"];
+            /**
+             * Format: date-time
+             * @description When the change takes effect. For a scheduled plan change, the end of the current period.
+             */
+            effective_at: string;
+            proration?: components["schemas"]["SubscriptionItemProration"];
+        };
+        SubscriptionTimelineEvent: {
+            /**
+             * Format: date-time
+             * @description When the action was recorded (wall-clock time).
+             */
+            timestamp: string;
+            /** @enum {string} */
+            source: "audit";
+            /** @description The audit action, e.g. `create`, `cancel`, `subscription.item_updated`. */
+            event_type: string;
+            /** @description Display tone for the row, e.g. `info`, `succeeded`, `warning`, `canceled`. */
+            status: string;
+            /** @description One-line summary, e.g. "Subscription canceled". */
+            description: string;
+            /** @description Optional second line with context. */
+            detail?: string;
+            /**
+             * Format: date-time
+             * @description The instant `detail` refers to, for the client to format.
+             */
+            detail_timestamp?: string;
+            actor_type?: string;
+            actor_name?: string;
+            actor_id?: string;
+            /** @description True when the action affected a subscription on a test clock. */
+            is_simulated?: boolean;
+            /**
+             * Format: date-time
+             * @description The test clock's simulated time when the action took effect.
+             */
+            sim_effective_at?: string;
+            test_clock_id?: string;
+        };
+        /**
+         * @default 30d
+         * @enum {string}
+         */
+        AnalyticsPeriod: "7d" | "30d" | "90d" | "12m";
+        /**
+         * @description MRR change in cents. `churned` and `contraction` are positive
+         *     amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
+         */
+        AnalyticsMrrMovementTotals: {
+            /** Format: int64 */
+            new: number;
+            /** Format: int64 */
+            expansion: number;
+            /** Format: int64 */
+            contraction: number;
+            /** Format: int64 */
+            churned: number;
+            /** Format: int64 */
+            net: number;
+        };
+        AnalyticsMrrMovementPoint: {
+            /** @description Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`. */
+            date: string;
+            /** Format: int64 */
+            new: number;
+            /** Format: int64 */
+            expansion: number;
+            /** Format: int64 */
+            contraction: number;
+            /** Format: int64 */
+            churned: number;
+            /** Format: int64 */
+            net: number;
+        };
+        AnalyticsRevenuePoint: {
+            /** @description Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`. */
+            date: string;
+            /**
+             * Format: int64
+             * @description Sum of invoice totals paid in the bucket.
+             */
+            revenue_cents: number;
+            invoice_count: number;
+        };
+        AnalyticsUsagePoint: {
+            /** @description Bucket in UTC, `YYYY-MM-DD` or `YYYY-MM` for `12m`. */
+            date: string;
+            /** Format: int64 */
+            events: number;
+            /** @description Summed quantity, as a decimal string. */
+            quantity: string;
+        };
+        AnalyticsTopMeter: {
+            meter_id: string;
+            meter_name: string;
+            key: string;
+            /** Format: int64 */
+            events: number;
+            /** @description Summed quantity, as a decimal string. */
+            quantity: string;
+        };
+        /**
+         * @description "The window" is the requested period, ending now. "The previous
+         *     window" is the one of equal length before it. Money is in cents of
+         *     `currency`.
+         */
+        AnalyticsOverview: {
+            period: components["schemas"]["AnalyticsPeriod"];
+            /** @description The tenant's default currency. Every money field uses it. */
+            currency: string;
+            /**
+             * Format: int64
+             * @description MRR of active subscriptions now.
+             */
+            mrr: number;
+            /**
+             * Format: int64
+             * @description MRR at the start of the window, rebuilt from item change history.
+             */
+            mrr_prev: number;
+            /**
+             * Format: int64
+             * @description `mrr` times 12.
+             */
+            arr: number;
+            /**
+             * Format: int64
+             * @description `mrr_prev` times 12.
+             */
+            arr_prev: number;
+            /**
+             * Format: int64
+             * @description Total of invoices paid in the window.
+             */
+            revenue: number;
+            /**
+             * Format: int64
+             * @description Total of invoices paid in the previous window.
+             */
+            revenue_prev: number;
+            /**
+             * Format: int64
+             * @description Amount due on finalized invoices whose payment has not succeeded.
+             */
+            outstanding_ar: number;
+            /**
+             * Format: int64
+             * @description Average total of invoices paid in the window.
+             */
+            avg_invoice_value: number;
+            /**
+             * Format: int64
+             * @description Sum of all customers' credit balances. Not limited to `currency`.
+             */
+            credit_balance_total: number;
+            active_customers: number;
+            /** @description Customers created in the window. */
+            new_customers: number;
+            active_subscriptions: number;
+            /**
+             * @description Subscriptions with status `active` whose `trial_end_at` is in
+             *     the future. Subscriptions with status `trialing` are not
+             *     counted.
+             */
+            trialing_subscriptions: number;
+            /** @description Invoices paid in the window. */
+            paid_invoices: number;
+            /** @description Invoices created in the window whose payment failed. All currencies. */
+            failed_payments: number;
+            /** @description Finalized invoices whose payment has not succeeded. All currencies. */
+            open_invoices: number;
+            /** @description Dunning runs (automatic payment retries) still in progress. */
+            dunning_active: number;
+            /**
+             * @description Issued credit notes whose refund failed, has been pending for
+             *     more than 72 hours, or has not started an hour after issue.
+             */
+            refunds_needing_attention: number;
+            /**
+             * Format: int64
+             * @description Usage events with a timestamp in the window.
+             */
+            usage_events: number;
+            /**
+             * Format: double
+             * @description Subscriptions canceled in the window, divided by subscriptions active at its start. 0 when none were active.
+             */
+            logo_churn_rate: number;
+            /**
+             * Format: double
+             * @description Churned MRR divided by `mrr_prev`. 0 when `mrr_prev` is 0.
+             */
+            revenue_churn_rate: number;
+            /**
+             * Format: double
+             * @description Net revenue retention: (`mrr_prev` + expansion - contraction -
+             *     churned) divided by `mrr_prev`. Can be above 1. 0 when
+             *     `mrr_prev` is 0.
+             */
+            nrr: number;
+            /**
+             * Format: double
+             * @description Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+             */
+            dunning_recovery_rate: number;
+            mrr_movement: components["schemas"]["AnalyticsMrrMovementTotals"];
+        };
+        /** @description A line to add to a draft invoice. */
+        InvoiceLineItemInput: {
+            description: string;
+            /**
+             * @description Defaults to `add_on`.
+             * @enum {string}
+             */
+            line_type?: "base_fee" | "usage" | "add_on" | "discount" | "tax";
+            /** Format: int64 */
+            quantity: number;
+            /** Format: int64 */
+            unit_amount_cents: number;
+            /**
+             * Format: int64
+             * @description Makes this line a prepaid commit purchase: when the invoice is
+             *     finalized, the customer gets this many cents of credit. Only on
+             *     `add_on` lines of manual invoices, at most one per invoice.
+             */
+            commit_granted_cents?: number;
+            /**
+             * Format: date-time
+             * @description When the granted credit expires. Must be in the future. Needs
+             *     `commit_granted_cents`. Absent means it never expires.
+             */
+            commit_expires_at?: string;
+        };
+        InvoiceCreateRequest: {
+            customer_id: string;
+            /** @description Optional. Leave out for a one-off invoice. */
+            subscription_id?: string;
+            /**
+             * @description ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
+             * @example USD
+             */
+            currency?: string;
+            /** Format: date-time */
+            billing_period_start?: string;
+            /** Format: date-time */
+            billing_period_end?: string;
+            /** @description Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms. */
+            net_payment_term_days?: number;
+            memo?: string;
+            /** @description Lines created in the same transaction as the invoice. */
+            line_items?: components["schemas"]["InvoiceLineItemInput"][];
+        };
+        /**
+         * @description A credit note reduces what a customer owes on an invoice, or gives
+         *     money back after it was paid. Its total is split three ways: refund
+         *     to the card (`refund_amount_cents`), credit to the customer's
+         *     balance (`credit_amount_cents`), and money returned outside Velox
+         *     (`out_of_band_amount_cents`).
+         */
+        CreditNote: {
+            id: string;
+            tenant_id?: string;
+            invoice_id: string;
+            customer_id: string;
+            credit_note_number: string;
+            /** @enum {string} */
+            status: "draft" | "issued" | "voided";
+            reason: string;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_amount_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            refund_amount_cents: number;
+            /** Format: int64 */
+            credit_amount_cents: number;
+            /** Format: int64 */
+            out_of_band_amount_cents: number;
+            /**
+             * Format: int64
+             * @description Prepaid commit credits this note retired. Absent on other notes.
+             */
+            commit_retired_cents?: number;
+            currency: string;
+            /** Format: date-time */
+            issued_at?: string;
+            /** Format: date-time */
+            voided_at?: string;
+            /** @enum {string} */
+            refund_status: "none" | "pending" | "succeeded" | "failed";
+            stripe_refund_id?: string;
+            bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
+            supplier_snapshot?: components["schemas"]["DocumentSupplier"];
+            /** @description Tax provider's reversal transaction, set when the note is issued. */
+            tax_transaction_id?: string;
+            /** @description True when `issued_at` is test-clock time. */
+            is_simulated: boolean;
+            /** @description True on a draft that Velox will issue automatically. */
+            issue_pending: boolean;
+            /** @description True when the tax reversal failed and will be retried. */
+            tax_reversal_pending: boolean;
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Real-world time the row was written, when `created_at` is test-clock time.
+             */
+            recorded_at?: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        InvoiceTimelineEvent: {
+            /** @description Stable key for the row. */
+            id: string;
+            /** Format: date-time */
+            timestamp: string;
+            /** @enum {string} */
+            source: "lifecycle" | "stripe" | "dunning" | "email" | "credit_note";
+            /** @example invoice.finalized */
+            event_type: string;
+            /** @description Display status, for example succeeded, failed, resolved, escalated or info. */
+            status: string;
+            description: string;
+            /** @description Extra line shown under the description, for example the card used. */
+            detail?: string;
+            error?: string;
+            /** Format: int64 */
+            amount_cents?: number;
+            currency?: string;
+            payment_intent_id?: string;
+            attempt_count?: number;
+            /** @description True when `timestamp` is test-clock time. */
+            is_simulated?: boolean;
+            /**
+             * Format: date-time
+             * @description Real-world time of a row whose `timestamp` is test-clock time.
+             */
+            recorded_at?: string;
+        };
+        InvoicePaymentTimeline: {
+            events: components["schemas"]["InvoiceTimelineEvent"][];
+            /** @description Sources that could not be read, so their rows are missing. */
+            degraded: ("audit" | "credit_notes" | "emails" | "dunning" | "charge_attempts")[];
+            /** @description True when the credit-note source hit its limit of 100 rows. */
+            truncated: boolean;
+        };
+        DunningRun: {
+            id: string;
+            tenant_id?: string;
+            invoice_id: string;
+            customer_id?: string;
+            policy_id: string;
+            /** @enum {string} */
+            state: "active" | "paused" | "escalated" | "resolved";
+            reason?: string;
+            attempt_count: number;
+            /** Format: date-time */
+            last_attempt_at?: string;
+            /** Format: date-time */
+            next_action_at?: string;
+            paused: boolean;
+            /** Format: date-time */
+            resolved_at?: string;
+            /**
+             * @description Set once the run is resolved. `manually_resolved` appears only on older runs.
+             * @enum {string}
+             */
+            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "manually_resolved";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Filled in on list responses. */
+            invoice_number?: string;
+            /**
+             * Format: int64
+             * @description Filled in on list responses.
+             */
+            invoice_amount_due_cents?: number;
+            /** @description Filled in on list responses. */
+            invoice_currency?: string;
+            /**
+             * Format: date-time
+             * @description The test clock's current time, when the customer is on a test clock.
+             */
+            effective_now?: string;
+            test_clock_id?: string;
+        };
+        DunningRunEvent: {
+            id: string;
+            run_id: string;
+            tenant_id?: string;
+            invoice_id: string;
+            /** @enum {string} */
+            event_type: "dunning_started" | "retry_scheduled" | "retry_attempted" | "retry_succeeded" | "retry_failed" | "paused" | "resumed" | "escalated" | "resolved";
+            /** @enum {string} */
+            state: "active" | "paused" | "escalated" | "resolved";
+            reason?: string;
+            attempt_count: number;
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            recorded_at?: string;
+        };
+        DunningRunDetail: {
+            run: components["schemas"]["DunningRun"];
+            events: components["schemas"]["DunningRunEvent"][];
+        };
+        DunningStats: {
+            active_count: number;
+            escalated_count: number;
+            resolved_count: number;
+            /**
+             * Format: int64
+             * @description Amount due on active and escalated runs, in `currency` only.
+             */
+            at_risk_cents: number;
+            /** @description The tenant's default currency. */
+            currency: string;
+        };
+        MeterPricingRule: {
+            id: string;
+            meter_id: string;
+            rating_rule_version_id: string;
+            /** @description Dimensions an event must have for this rule to bill it. `{}` matches every event. */
+            dimension_match: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            aggregation_mode: "sum" | "count" | "last_during_period" | "last_ever" | "max";
+            /** @description Rules are tried highest first. */
+            priority: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CustomerPriceOverride: {
+            /** @example vlx_cpo_1a2b3c4d5e6f7890 */
+            id: string;
+            /** @description The rating rule this override replaces the price of, across all its versions. */
+            rule_key: string;
+            customer_id: string;
+            /** @description The rule version named when the override was created. For reference only. */
+            rating_rule_version_id: string;
+            /** @enum {string} */
+            mode: "flat" | "graduated" | "package";
+            /** @description Per-unit rate in cents, as a decimal string. */
+            flat_amount_cents?: string;
+            graduated_tiers?: {
+                /**
+                 * Format: int64
+                 * @description 0 on the last tier means no upper bound.
+                 */
+                up_to?: number;
+                /** @description Per-unit rate in cents, as a decimal string. */
+                unit_amount_cents?: string;
+            }[] | null;
+            /** Format: int64 */
+            package_size?: number;
+            /** Format: int64 */
+            package_amount_cents?: number;
+            /** @description Per-unit overage rate in cents, as a decimal string. */
+            overage_unit_amount_cents?: string;
+            reason?: string;
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DunningPolicyInput: {
+            name?: string;
+            /**
+             * @description A disabled policy starts no dunning.
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * @description 0 or less means the default, 3.
+             * @default 3
+             */
+            max_retry_attempts: number;
+            /**
+             * @description Days before the first retry. 0 or less means the default, 3.
+             * @default 3
+             */
+            grace_period_days: number;
+            /**
+             * @description Waits before retries 2 to N, as Go durations (h, m, s units; no
+             *     days, so 3 days is "72h"). Needs at least
+             *     `max_retry_attempts - 1` entries, each above zero.
+             * @example [
+             *       "72h",
+             *       "120h"
+             *     ]
+             */
+            retry_schedule?: string[];
+            /**
+             * @description What happens to the subscription when retries run out.
+             * @default pause
+             * @enum {string}
+             */
+            final_subscription_action: "none" | "pause" | "cancel";
+            /**
+             * @description What happens to the invoice when retries run out.
+             * @default none
+             * @enum {string}
+             */
+            final_invoice_action: "none" | "mark_uncollectible";
+        };
+        DunningPolicy: {
+            /** @example vlx_dpol_1a2b3c4d5e6f7890 */
+            id: string;
+            name: string;
+            enabled: boolean;
+            /** @description Customers without an assigned policy use the default. */
+            is_default: boolean;
+            retry_schedule: string[] | null;
+            max_retry_attempts: number;
+            /** @enum {string} */
+            final_subscription_action: "none" | "pause" | "cancel";
+            /** @enum {string} */
+            final_invoice_action: "none" | "mark_uncollectible";
+            grace_period_days: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DunningPolicyListItem: components["schemas"]["DunningPolicy"] & {
+            /** @description Customers explicitly assigned to this policy. Customers using it only as the default are not counted. */
+            assigned_customers: number;
+        };
+        UsageAggregate: {
+            total_events: number;
+            /** @description Sum of all matching quantities across meters, as a decimal string. */
+            total_units: string;
+            /** @description Distinct meters among the matching events. */
+            active_meters: number;
+            /** @description Distinct customers among the matching events. */
+            active_customers: number;
+            /** @description One row per meter, largest total first. */
+            by_meter: {
+                meter_id: string;
+                /** @description Sum of quantities, as a decimal string. */
+                total: string;
+            }[];
+        };
+        UsageSummary: {
+            customer_id: string;
+            /** Format: date-time */
+            period_from: string;
+            /** Format: date-time */
+            period_to: string;
+            /** @description Meter id to the sum of its quantities, as a decimal string. */
+            meters: {
+                [key: string]: string;
+            };
+            total_events: number;
+        };
+        /**
+         * @description The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
+         *     Other fields are accepted and ignored.
+         */
+        LitellmSpendLog: {
+            /** @description LiteLLM's call id. Used to build the events' idempotency keys. */
+            id?: string;
+            /**
+             * @description Only completion, acompletion, chat, chat.completion, embedding,
+             *     aembedding, text_completion and atext_completion records produce
+             *     usage. Others are skipped.
+             */
+            call_type?: string;
+            model?: string;
+            custom_llm_provider?: string;
+            /** @description The customer's external_id. */
+            user?: string;
+            /** @description Where LiteLLM Proxy puts the caller's `user`. Used when `user` is empty. */
+            end_user?: string;
+            usage?: {
+                /**
+                 * Format: int64
+                 * @description Includes cache-read tokens.
+                 */
+                prompt_tokens?: number;
+                /** Format: int64 */
+                completion_tokens?: number;
+                /** Format: int64 */
+                total_tokens?: number;
+                prompt_tokens_details?: {
+                    /** Format: int64 */
+                    cached_tokens?: number;
+                };
+                /** Format: int64 */
+                cache_read_input_tokens?: number;
+                /**
+                 * Format: int64
+                 * @description Not billed on its own; billed as input only when included in prompt_tokens.
+                 */
+                cache_creation_input_tokens?: number;
+            };
+            /**
+             * Format: int64
+             * @description Used when there is no `usage` object.
+             */
+            prompt_tokens?: number;
+            /** Format: int64 */
+            completion_tokens?: number;
+            /** Format: int64 */
+            total_tokens?: number;
+            /** @description Accepted but not stored. */
+            response_cost?: number;
+            /**
+             * @description The provider's own cost, in dollars. When present, each event's
+             *     provider cost comes from its part (input, output or cache read)
+             *     instead of the provider-costs table. A part that is missing or
+             *     negative falls back to the table.
+             */
+            cost_breakdown?: {
+                input_cost?: number;
+                output_cost?: number;
+                cache_read_cost?: number;
+                tool_usage_cost?: number;
+                total_cost?: number;
+            };
+            /** @description Unix seconds. Event time when `endTime` is absent. */
+            startTime?: number;
+            /** @description Unix seconds. The event time. With neither, the customer's current time is used. */
+            endTime?: number;
+            /**
+             * @description `team_id` and `request_tags` become event dimensions;
+             *     `usage_object` is read for token counts; other keys are ignored.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        LitellmSpendResult: {
+            /** @description Usage events newly recorded. */
+            accepted: number;
+            /** @description Usage events already recorded by an earlier delivery. */
+            deduplicated: number;
+            /** @description Records that carry no billable tokens. */
+            skipped: number;
+            /** @description One entry per event or record that was not recorded. A record can appear more than once. */
+            errors?: {
+                /** @description The LiteLLM record id. */
+                id: string;
+                error: string;
+            }[];
+        };
+        APIKey: {
+            /** @example vlx_key_1a2b3c4d5e6f7890 */
+            id: string;
+            /**
+             * @description The start of the key (type, mode and a few characters), enough to tell keys apart. Never the full key.
+             * @example vlx_secret_test_1a2b3c4d
+             */
+            key_prefix: string;
+            /** @enum {string} */
+            key_type: "platform" | "secret" | "publishable";
+            livemode: boolean;
+            name: string;
+            tenant_id: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the key stops working. Also set on the old key during a rotation grace period.
+             */
+            expires_at?: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            /**
+             * Format: date-time
+             * @description Updated at most about once per interval, so it can lag a little.
+             */
+            last_used_at?: string;
+        };
+        APIKeyCreated: {
+            key: components["schemas"]["APIKey"];
+            /**
+             * @description The full key. Shown only once; store it now.
+             * @example vlx_secret_test_4f9c...
+             */
+            raw_key: string;
+        };
+        APIKeyRotation: {
+            old_key: components["schemas"]["APIKey"];
+            new_key: components["schemas"]["APIKey"];
+            /** @description The new key's full value. Shown only once. */
+            raw_key: string;
+        };
+        /** @description Every field is optional. Fields you leave out keep their stored value. */
+        TenantSettingsInput: {
+            /**
+             * @description ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
+             * @example USD
+             */
+            default_currency?: string;
+            /**
+             * @description IANA zone name, such as `America/New_York`. `Local` is rejected. All billing date math uses this zone.
+             * @example UTC
+             */
+            timezone?: string;
+            /** @description Starts every invoice number, such as `VLX-000001`. */
+            invoice_prefix?: string;
+            /** @description Days until an invoice is due. 0 means due on issue. */
+            net_payment_terms?: number;
+            /**
+             * Format: int64
+             * @description When a customer's credit balance drops below this amount, the
+             *     `credit.balance_low` webhook fires. null turns it off.
+             */
+            credit_balance_low_threshold_cents?: number | null;
+            /**
+             * @description `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax.
+             * @enum {string}
+             */
+            tax_provider?: "none" | "manual" | "stripe_tax";
+            /** @description Percent, up to 4 decimal places (18.5 = 18.5%). Used by the `manual` provider. */
+            tax_rate?: number;
+            /** @description Label for the tax line, such as `VAT`. */
+            tax_name?: string;
+            /** @description Whether prices already include tax. */
+            tax_inclusive?: boolean;
+            /**
+             * @description What to do when the tax provider fails. `block` holds the invoice until tax succeeds.
+             * @enum {string}
+             */
+            tax_on_failure?: "block" | "fallback_manual";
+            /** @description Stripe product tax code used when a plan has none, such as `txcd_10103001`. */
+            default_product_tax_code?: string;
+            /** @description Shown on invoices and as the sender name on emails. No line breaks. */
+            company_name?: string;
+            company_address_line1?: string;
+            company_address_line2?: string;
+            company_city?: string;
+            company_state?: string;
+            company_postal_code?: string;
+            /** @description ISO 3166 alpha-2 code, such as `US`. */
+            company_country?: string;
+            company_email?: string;
+            /** @description 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`. */
+            company_phone?: string;
+            logo_url?: string;
+            /** @description Accent color on invoice PDFs, as `#rrggbb`. */
+            brand_color?: string;
+            /** @description Your own tax number (VAT, EIN, GSTIN), printed on invoices. */
+            tax_id?: string;
+            /** @description Must start with `http://` or `https://`. Printed in the invoice footer. */
+            support_url?: string;
+            /** @description Default footer for new invoices. An invoice's own footer takes precedence. */
+            invoice_footer?: string;
+        };
+        TenantSettings: components["schemas"]["TenantSettingsInput"] & {
+            tenant_id: string;
+            /**
+             * Format: date-time
+             * @description Zero time when the tenant has never saved settings.
+             */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        StripeConnection: {
+            /** @description Also the `{id}` in the Stripe webhook URL `/v1/webhooks/stripe/{id}`. */
+            id: string;
+            tenant_id: string;
+            livemode: boolean;
+            /** @description Set after Stripe accepted the key. */
+            stripe_account_id?: string;
+            stripe_account_name?: string;
+            /** @description First 12 characters of the secret key. */
+            secret_key_prefix?: string;
+            secret_key_last4: string;
+            publishable_key: string;
+            webhook_secret_last4?: string;
+            has_webhook_secret: boolean;
+            /**
+             * Format: date-time
+             * @description Last time Stripe accepted the key.
+             */
+            verified_at?: string;
+            /** @description Why the last Stripe check failed. Empty when it passed. */
+            last_verified_error?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Connect response only. Number of stuck invoices being retried in the background. */
+            retries_queued?: number;
+        };
+        Tenant: {
+            /** @example vlx_ten_1a2b3c4d5e6f7890 */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            status: "active" | "suspended" | "deleted";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BootstrapResult: {
+            tenant: components["schemas"]["Tenant"];
+            /** @description Dashboard login email. */
+            owner_email: string;
+            /** @description Dashboard login password (the one you sent, or the generated one). */
+            owner_password: string;
+            password_generated: boolean;
+            /** @description Test-mode secret key (`vlx_secret_test_...`). */
+            secret_key_test: string;
+            /** @description Live-mode secret key (`vlx_secret_live_...`). */
+            secret_key_live: string;
+            /** @description Test-mode publishable key (`vlx_pub_test_...`). */
+            publishable_key_test: string;
+            message: string;
+        };
+        AuditLogEntry: {
+            id: string;
+            tenant_id?: string;
+            /** @enum {string} */
+            actor_type: "user" | "api_key" | "system";
+            /** @description User id, API key id, or `system`. */
+            actor_id: string;
+            /** @description Name of the API key, when the actor is a key. */
+            actor_name?: string;
+            /** @description For example `create`, `update`, `revoke`, `finalize`. */
+            action: string;
+            resource_type: string;
+            /** @description Can be empty for tenant-wide resources such as settings. */
+            resource_id: string;
+            resource_label?: string;
+            /** @description Action details. A settings change lists each changed field with `from` and `to`. */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            ip_address?: string;
+            /** @description Matches the `Velox-Request-Id` header of the request that made the change. */
+            request_id?: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Simulated time, for entries made inside a test clock.
+             */
+            sim_effective_at?: string;
+            test_clock_id?: string;
+            /** @description The resource no longer exists because its test clock was deleted. The entry is kept. */
+            subject_deleted?: boolean;
+        };
+        AuditLogFilters: {
+            actions: string[];
+            resource_types: string[];
+            /** @description Test clocks seen in the log, most recent activity first. */
+            test_clocks: {
+                id: string;
+                name: string;
+            }[];
+        };
+        WebhookEndpoint: {
+            id: string;
+            tenant_id?: string;
+            livemode: boolean;
+            url: string;
+            description?: string;
+            secret_last4: string;
+            /** @description Subscribed event types. `*` means all. */
+            events: string[];
+            /** @description false = paused. */
+            active: boolean;
+            /** @description The previous signing secret, during a rotation grace period. */
+            secondary_secret_last4?: string;
+            /** Format: date-time */
+            secondary_secret_expires_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        WebhookEndpointStats: {
+            endpoint_id: string;
+            /** @description All deliveries, including pending ones. */
+            total_deliveries: number;
+            succeeded: number;
+            failed: number;
+            /** @description Percent (0-100) of finished deliveries that succeeded. Pending deliveries are not counted. 0 when none finished. */
+            success_rate: number;
+        };
+        WebhookEndpointDelivery: {
+            id: string;
+            event_id: string;
+            event_type: string;
+            /** @description The delivery came from a replay. */
+            is_replay: boolean;
+            replay_of_event_id?: string;
+            /** @enum {string} */
+            status: "pending" | "succeeded" | "failed";
+            /** @description HTTP status from the receiver. 0 when there was no response. */
+            status_code: number;
+            attempt_count: number;
+            /** @description First 4 KB of the receiver's response. */
+            response_body: string;
+            error: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** Format: date-time */
+            next_retry_at: string | null;
+        };
+        WebhookEventDeliveryAttempt: {
+            id: string;
+            /** @description The event this delivery sent. A replay's own id when `is_replay` is true. */
+            event_id: string;
+            endpoint_id: string;
+            endpoint_url: string;
+            endpoint_description: string;
+            /** @description Position in the timeline, starting at 1. */
+            attempt_no: number;
+            /** @enum {string} */
+            status: "pending" | "succeeded" | "failed";
+            status_code: number;
+            /** @description First 4 KB of the receiver's response. */
+            response_body: string;
+            error: string;
+            /** @description SHA-256 of the event payload. Equal values mean the same payload was sent. */
+            request_payload_sha256: string;
+            /** Format: date-time */
+            attempted_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** Format: date-time */
+            next_retry_at: string | null;
+            is_replay: boolean;
+            /** @description The replay's event id when `is_replay` is true; otherwise empty. */
+            replay_event_id: string;
+        };
+        WebhookReplayResult: {
+            /** @description The new event created by the replay. */
+            event_id: string;
+            /** @description The original event. */
+            replay_of: string;
+            /** @enum {string} */
+            status: "queued" | "no_matching_endpoints";
+        };
+        WebhookDeliveryReplayResult: {
+            /** @description The new event created by the replay. */
+            event_id: string;
+            /** @description The original event. */
+            replay_of: string;
+            /** @description The new delivery to this endpoint. */
+            delivery_id: string;
+            /** @enum {string} */
+            status: "queued";
+        };
+        /** @description The JSON in each `data:` line of `/v1/webhook_events/stream`. */
+        WebhookStreamFrame: {
+            event_id: string;
+            event_type: string;
+            /** @description The payload's `customer_id`, or empty. */
+            customer_id: string;
+            /**
+             * @description Delivery state. Live frames send `pending`, `succeeded` or
+             *     `failed`. Frames in the first batch send `pending`, `failed`,
+             *     `delivered` (all deliveries succeeded) or `no_endpoints`.
+             */
+            status: string;
+            /** Format: date-time */
+            last_attempt_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            livemode: boolean;
+            replay_of_event_id: string | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -4340,6 +8055,2459 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The customer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    display_name?: string;
+                    email?: string;
+                    /** @enum {string} */
+                    status?: "active" | "archived";
+                    /** @description Policy ID, or `""` to use the tenant default. */
+                    dunning_policy_id?: string;
+                    additional_emails?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The updated customer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Customer, or the named dunning policy, not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Archive refused because a subscription still bills (`invalid_state`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description An email or CC entry is invalid (`param` names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCustomerBillingProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The billing profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerBillingProfile"];
+                };
+            };
+            /**
+             * @description The customer has no billing profile yet, or the customer does
+             *     not exist. Both return `billing profile not found`.
+             */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    upsertCustomerBillingProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerBillingProfileInput"];
+            };
+        };
+        responses: {
+            /** @description The stored profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerBillingProfile"];
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Currency conflicts with a billing subscription's plan currency (`invalid_state`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A field failed validation (`param` names it). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listCustomerSentEmails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sent emails. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sent_emails: components["schemas"]["SentEmail"][];
+                    };
+                };
+            };
+        };
+    };
+    getCustomerUsage: {
+        parameters: {
+            query?: {
+                /** @description Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC). */
+                from?: string;
+                /** @description End of the window. RFC 3339 instant or `YYYY-MM-DD` (23:59:59 UTC that day). */
+                to?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Usage for the period. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerUsage"];
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad or missing period (`param` is `from`, `to` or `period`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCustomerOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Customer overview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerOverview"];
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listCustomerInvoices: {
+        parameters: {
+            query?: {
+                /** @description Default 25, at most 100. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoices. `total` counts all of the customer's invoices. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Invoice"][];
+                        total: number;
+                    };
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listCustomerSubscriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subscriptions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Subscription"][];
+                    };
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listCustomerPaymentMethods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Payment methods. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PaymentMethod"][];
+                        total: number;
+                    };
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    sendCustomerPaymentSetupEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Optional text shown at the top of the email. */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Email queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The address the email was sent to. */
+                        to: string;
+                        subject: string;
+                    };
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `note_too_long` (more than 2000 characters) or
+             *     `missing_email` (the customer has no email).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A link was sent to this customer less than a minute ago (`cooldown_active`). */
+            429: {
+                headers: {
+                    /** @description Seconds to wait. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The email could not be queued (`email_enqueue_failed`). Retry. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Email sending is not set up on this server (`email_unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createCustomerPaymentSetupSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Where Stripe sends the customer afterwards. Defaults to
+                     *     the dashboard's setup-complete page.
+                     */
+                    return_url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Setup link created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Stripe Checkout URL. Expires on Stripe's schedule (about 24 hours). */
+                        url: string;
+                        /** @description Stripe Checkout Session ID. */
+                        session_id: string;
+                    };
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    detachCustomerPaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+                /** @description Velox payment method ID. */
+                pmID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The detached payment method. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethod"];
+                };
+            };
+            /** @description No such payment method for this customer. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setCustomerDefaultPaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+                /** @description Velox payment method ID. */
+                pmID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new default payment method. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethod"];
+                };
+            };
+            /** @description No such active payment method for this customer. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getMeter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The meter */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Meter"];
+                };
+            };
+            /** @description `not_found`: no meter with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listMeterPricingRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pricing rules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["MeterPricingRule"][];
+                    };
+                };
+            };
+        };
+    };
+    upsertMeterPricingRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The rating rule that prices the matched usage. Must exist in this tenant and mode. */
+                    rating_rule_version_id: string;
+                    /**
+                     * @description Event dimensions this rule claims, for example
+                     *     `{"model": "gpt-4o", "token_type": "input"}`. Values must be
+                     *     strings, numbers or booleans. Omitted or `{}` matches every event.
+                     */
+                    dimension_match?: {
+                        [key: string]: unknown;
+                    };
+                    /**
+                     * @description How the matched events become one quantity for the period.
+                     * @default sum
+                     * @enum {string}
+                     */
+                    aggregation_mode?: "sum" | "count" | "last_during_period" | "last_ever" | "max";
+                    /**
+                     * @description Higher wins when an event matches more than one rule.
+                     * @default 0
+                     */
+                    priority?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The created or updated rule */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeterPricingRule"];
+                };
+            };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `invalid_state`: the rating rule's currency differs from the
+             *     meter's other prices or from a plan that uses the meter, or the
+             *     rule has versions in more than one currency.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `validation_error`: unknown meter or rating rule, unknown
+             *     `aggregation_mode`, more than 16 `dimension_match` keys, or a
+             *     non-scalar `dimension_match` value.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getMeterPricingRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meter_id: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeterPricingRule"];
+                };
+            };
+            /** @description `not_found`: no rule with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteMeterPricingRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meter_id: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `not_found`: no rule with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `invalid_state`: this is the meter's last price and a live
+             *     subscription's plan uses the meter. The message names the plans.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listAllMeterPricingRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pricing rules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["MeterPricingRule"][];
+                    };
+                };
+            };
+        };
+    };
+    listCreditNotes: {
+        parameters: {
+            query?: {
+                invoice_id?: string;
+                customer_id?: string;
+                status?: "draft" | "issued" | "voided";
+                refund_status?: "none" | "pending" | "succeeded" | "failed";
+                /** @description One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default). */
+                sort?: string;
+                dir?: "asc" | "desc";
+                /** @description Page size. Default 25, maximum 100. */
+                limit?: number;
+                /** @description Maximum 10000. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credit note list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CreditNote"][];
+                    };
+                };
+            };
+        };
+    };
+    adjustCredits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    customer_id: string;
+                    /**
+                     * Format: int64
+                     * @description Positive adds credit, negative removes it. Not zero.
+                     */
+                    amount_cents: number;
+                    description: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The ledger entry written. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLedgerEntry"];
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Customer not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed (see description). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listCreditBalances: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Balances. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CreditBalance"][];
+                    };
+                };
+            };
+        };
+    };
+    listCreditLedgerEntries: {
+        parameters: {
+            query?: {
+                entry_type?: "grant" | "usage" | "expiry" | "adjustment";
+                /** @description One of created_at (default), amount_cents, entry_type, expires_at. */
+                sort?: string;
+                /** @description Default desc. */
+                dir?: "asc" | "desc";
+                /** @description Default 50, at most 100. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ledger entries. `total` counts entries matching the filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CreditLedgerEntry"][];
+                        total: number;
+                    };
+                };
+            };
+        };
+    };
+    listWebhookEndpointDeliveries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Endpoint and its deliveries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        endpoint: components["schemas"]["WebhookEndpoint"];
+                        data: components["schemas"]["WebhookEndpointDelivery"][];
+                    };
+                };
+            };
+            /** @description No such endpoint, or it was deleted */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    replayWebhookDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Endpoint id. */
+                id: string;
+                /** @description Delivery id. It must belong to this endpoint. */
+                deliveryID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replay queued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDeliveryReplayResult"];
+                };
+            };
+            /** @description No such delivery, the delivery belongs to another endpoint, or the endpoint was deleted */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The endpoint is paused (`active` is false). Resume it first. Code `invalid_state`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getWebhookEndpointStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One row per endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WebhookEndpointStats"][];
+                    };
+                };
+            };
+        };
+    };
+    listWebhookEventDeliveries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description An event id, either the original or a replay. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Delivery timeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The original event the timeline is built from. */
+                        root_event_id: string;
+                        deliveries: components["schemas"]["WebhookEventDeliveryAttempt"][];
+                    };
+                };
+            };
+            /** @description Caller lacks the `apikey:read` permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such event in this mode */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    replayWebhookEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replay created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookReplayResult"];
+                };
+            };
+            /** @description Caller lacks the `apikey:read` permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such event in this mode */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    streamWebhookEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /**
+             * @description Event stream. Each frame's `data` is a WebhookStreamFrame
+             *     object in JSON.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Missing or invalid credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Caller lacks the `apikey:read` permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            /** @description `not_found`: no plan with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updatePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** @description Omitting it clears the stored description. */
+                    description?: string;
+                    /**
+                     * Format: int64
+                     * @description Ignored when 0 or less.
+                     */
+                    base_amount_cents?: number;
+                    /** @enum {string} */
+                    base_bill_timing?: "in_advance" | "in_arrears";
+                    /** @description Replaces the plan's meters. Omit to keep them. */
+                    meter_ids?: string[];
+                    /** @enum {string} */
+                    status?: "draft" | "active" | "archived";
+                    /** @description Stripe product tax code. Omitting it clears the stored code. */
+                    tax_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The updated plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: no plan with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `invalid_state`: a meter in `meter_ids` is priced in a currency
+             *     other than the plan's.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `validation_error`: a billing field changed while live
+             *     subscriptions use the plan (param `plan`), an unknown or unpriced
+             *     meter in `meter_ids`, an invalid `base_bill_timing`, or an invalid
+             *     `tax_code`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRatingRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rating rule version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingRule"];
+                };
+            };
+            /** @description `not_found`: no rating rule with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subscription. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description Subscription not found (code `not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The canceled subscription. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the subscription is already `canceled` or
+             *     `archived`. Code `unbilled_period`: a billing period ended and
+             *     could not be invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    scheduleSubscriptionCancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Cancel at the end of the current period (or of the trial, while trialing). */
+                    at_period_end?: boolean;
+                    /**
+                     * Format: date-time
+                     * @description Cancel at this instant. Must be in the future.
+                     */
+                    cancel_at?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The subscription with the schedule set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the subscription is `canceled` or
+             *     `archived`, or its status changed while the request ran (read
+             *     it again and retry). Code `unbilled_period`: a billing period
+             *     ended and could not be invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `validation_error`: neither or both of `at_period_end` and
+             *     `cancel_at` are set, or `cancel_at` is in the past or breaks the
+             *     date rules above.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    clearSubscriptionScheduledCancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subscription with no scheduled cancel. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the scheduled cancel already took effect
+             *     when the billing period ended. Code `unbilled_period`: a billing
+             *     period ended and could not be invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    pauseSubscriptionCollection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    behavior: "keep_as_draft";
+                    /**
+                     * Format: date-time
+                     * @description When collection resumes. Must be in the future.
+                     */
+                    resumes_at?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The subscription with `pause_collection` set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the subscription is `canceled` or
+             *     `archived`. Code `unbilled_period`: a billing period ended and
+             *     could not be invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `validation_error`: `behavior` is missing or not
+             *     `keep_as_draft`, or `resumes_at` is not in the future.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resumeSubscriptionCollection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subscription with no `pause_collection`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `unbilled_period`: a billing period ended and could not be
+             *     invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    endSubscriptionTrial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The active subscription. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the subscription is not `trialing`, or it
+             *     has a scheduled cancel. Clear the scheduled cancel first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    extendSubscriptionTrial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: date-time
+                     * @description The new trial end. Must be in the future and after the current `trial_end_at`.
+                     */
+                    trial_end: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The subscription with the new `trial_end_at`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description The body is not valid JSON, or `trial_end` is not an RFC 3339 date-time. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the subscription is not `trialing`, or it
+             *     has a scheduled cancel with an explicit `cancel_at`. Clear the
+             *     scheduled cancel first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `trial_end` is missing, in the past, or not after the current
+             *     `trial_end_at`.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setSubscriptionBillingThresholds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: int64
+                     * @description Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
+                     */
+                    amount_gte?: number;
+                    /**
+                     * @description `true` starts a new billing period when a threshold
+                     *     invoice is issued. `false` keeps the period; the rest of
+                     *     the period's usage is billed at its normal end.
+                     * @default false
+                     */
+                    reset_billing_cycle?: boolean;
+                    item_thresholds?: {
+                        /** @description An item of this subscription. Each item can appear once. */
+                        subscription_item_id: string;
+                        /** @description Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14"). */
+                        usage_gte: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description The subscription with `billing_thresholds` set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Code `invalid_state`: the subscription is `canceled` or `archived`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Neither `amount_gte` nor `item_thresholds` is set;
+             *     `amount_gte` is negative; an item id is missing, repeated, or
+             *     not on this subscription; a `usage_gte` is not a number or is
+             *     negative; or the subscription's plans use more than one
+             *     currency.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    clearSubscriptionBillingThresholds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subscription with no `billing_thresholds`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    addSubscriptionItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    plan_id: string;
+                    /**
+                     * Format: int64
+                     * @default 1
+                     */
+                    quantity?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The new item. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionItem"];
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `already_exists`: the subscription already has an item for
+             *     this plan. Code `invalid_state`: the subscription is `canceled`
+             *     or `archived`; the plan's meters overlap another live
+             *     subscription of the customer; or the plan's currency differs
+             *     from the subscription's. Code `unpaid_invoice_blocks_change`:
+             *     the invoice for the current period is unpaid; settle or void it
+             *     first. Code `unbilled_period`: a billing period ended and could
+             *     not be invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `validation_error`: `plan_id` is missing or not found,
+             *     `quantity` is less than 1, or the plan's billing interval
+             *     differs from the other items'.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    removeSubscriptionItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                itemID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Item removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Subscription not found, or the item is not on this subscription. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: this is the last item of an active
+             *     subscription. Code `unbilled_period`: a billing period ended and
+             *     could not be invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateSubscriptionItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                itemID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: int64
+                     * @description The new quantity. Must differ from the current one.
+                     */
+                    quantity?: number;
+                    /** @description The plan to move the item to. Must differ from the current one and use the same base-fee billing timing (in advance or in arrears). */
+                    new_plan_id?: string;
+                    /**
+                     * @description Apply a plan change now instead of at the end of the period. Ignored for quantity changes.
+                     * @default false
+                     */
+                    immediate?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The changed item and when the change takes effect. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionItemChangeResult"];
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Subscription not found, or the item is not on this subscription. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the subscription is not `active`, the new
+             *     plan is archived, its meters overlap another live subscription
+             *     of the customer, or its currency differs. Code
+             *     `unpaid_invoice_blocks_change`: an increase would charge against
+             *     an unpaid invoice for the current period; settle or void it
+             *     first. Code `subscription_period_moved`: the billing period
+             *     changed while the request ran; read the subscription again and
+             *     retry. Code `unbilled_period`: a billing period ended and could
+             *     not be invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `validation_error`: neither or both of `quantity` and
+             *     `new_plan_id` are set; the value equals the current one;
+             *     `quantity` is less than 1; the new plan is not found; or the new
+             *     plan's billing timing or interval does not fit the subscription.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelSubscriptionItemPendingChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                itemID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The item with no pending plan change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionItem"];
+                };
+            };
+            /** @description The item is not found or is not on this subscription. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`: the change already took effect when the
+             *     billing period ended. Code `unbilled_period`: a billing period
+             *     ended and could not be invoiced; retry billing first.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSubscriptionTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Timeline events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        events: components["schemas"]["SubscriptionTimelineEvent"][];
+                        /** @description True when the subscription has more than 100 audit entries, so the earliest events are missing. */
+                        truncated: boolean;
+                    };
+                };
+            };
+            /** @description Subscription not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    backfillUsageEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
+                    external_customer_id: string;
+                    /** @description The meter key (e.g. "tokens"). */
+                    event_name: string;
+                    /** @description Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections. */
+                    quantity?: number | string;
+                    /** @description Scalar dimension values used to pick the pricing rule. */
+                    dimensions?: {
+                        [key: string]: unknown;
+                    };
+                    /** @description Older name for `dimensions`. Used only when `dimensions` is absent. */
+                    properties?: {
+                        [key: string]: unknown;
+                    };
+                    idempotency_key?: string;
+                    /**
+                     * Format: date-time
+                     * @description RFC 3339. Must not be in the future.
+                     */
+                    timestamp: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Idempotency replay. The original event, unchanged, with an `Idempotent-Replayed` header. */
+            200: {
+                headers: {
+                    "Idempotent-Replayed"?: "true";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageEvent"];
+                };
+            };
+            /** @description Event recorded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageEvent"];
+                };
+            };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `validation_error`: missing `external_customer_id`, `event_name`
+             *     or `timestamp`; unknown customer or meter; a future or badly
+             *     formatted `timestamp`; more than 16 dimensions or a non-scalar
+             *     dimension value; a quantity of 10^26 or more.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `ingest_unavailable`: the customer or meter lookup could not be
+             *     answered. Nothing was recorded; retry.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    aggregateUsageEvents: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                meter_id?: string;
+                /** @description Events at or after this time (RFC 3339). */
+                from?: string;
+                /** @description Events before this time (RFC 3339). */
+                to?: string;
+                /**
+                 * @description Comma-separated key=value pairs matched against event dimensions,
+                 *     same syntax as `GET /v1/usage-events`. Example:
+                 *     `model=gpt-4o,token_type=input`.
+                 */
+                dimensions?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Totals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageAggregate"];
+                };
+            };
+            /** @description `validation_error`: a malformed `dimensions` pair. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getUsageSummary: {
+        parameters: {
+            query?: {
+                /** @description Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
+                from?: string;
+                /** @description Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59 UTC that day. */
+                to?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Internal customer id (vlx_cus_...). */
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+            /** @description `validation_error`: `from` or `to` cannot be parsed, or `to` is before `from` (param names the field). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The totals could not be read. The body is `{"error": "internal_error"}`,
+             *     not the usual error object.
+             */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        error?: "internal_error";
+                    };
+                };
+            };
+        };
+    };
+    createInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft invoice created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            /** @description Body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Customer or subscription not found (code `not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Validation error: missing `customer_id`, unsupported currency, or
+             *     an invalid line item (the message names the line number).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The customer's currency could not be read (code
+             *     `currency_unavailable`). Retry the request.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getInvoice: {
         parameters: {
             query?: never;
@@ -4361,6 +10529,761 @@ export interface operations {
                 };
             };
             /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    addInvoiceLineItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceLineItemInput"];
+            };
+        };
+        responses: {
+            /** @description Line item created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceLineItem"];
+                };
+            };
+            /** @description Body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Validation error: the invoice is not a draft, or a line field is
+             *     invalid (for example a quantity of 0, or a second commit line).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    voidInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoice voided. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The invoice cannot be voided in its current state. Codes:
+             *     `invalid_state` (already paid or already voided),
+             *     `payment_in_flight` (a charge is still running), or
+             *     `payment_unidentifiable` (a charge's outcome could not be
+             *     identified; write the invoice off instead).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resendInvoiceSetupLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Email queued. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "sent";
+                    };
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Nothing was sent. Codes: `invoice_not_collectible` (the invoice
+             *     is draft, voided or paid), `payment_in_flight` or
+             *     `payment_unidentifiable` (a charge is unresolved), or
+             *     `no_email_on_file` (the customer has no email address).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    markInvoiceUncollectible: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoice written off. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The invoice cannot be written off in its current state. Codes:
+             *     `invalid_state` (draft, paid, voided, or already uncollectible)
+             *     or `payment_in_flight` (a charge is still running).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    recordInvoicePayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Free text, for example "Cheque 1234". Do not put personal data here: the audit log cannot be edited. */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Invoice marked paid. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            /** @description Body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The payment cannot be recorded. Codes: `invalid_state` (draft,
+             *     voided or already paid), `payment_in_flight` or
+             *     `payment_unidentifiable` (a card charge is unresolved).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rotateInvoicePublicToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoice with its new `public_token`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The invoice is a draft (code `invalid_state`). Finalize it first. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    collectInvoicePayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoice after the credit and charge steps. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description An earlier charge has an unknown outcome and must be resolved
+             *     first. Code `payment_in_flight` or `payment_unidentifiable`.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `validation_error`. The invoice is not finalized, is already
+             *     paid, or has no amount due; another charge is already running;
+             *     payments are not configured; or the customer has no payment
+             *     method set up.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Stripe declined or refused the charge (code `provider_error`).
+             *     The message gives the reason in plain words.
+             */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    refundInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: int64
+                     * @description Amount to refund. 0 or absent refunds the full remaining amount.
+                     */
+                    amount_cents?: number;
+                    /** @enum {string} */
+                    reason: "duplicate" | "fraudulent" | "requested_by_customer" | "other";
+                    /** @description Text for the credit note line. Defaults to "Refund: <reason>". */
+                    description?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The issued refund credit note. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNote"];
+                };
+            };
+            /** @description Body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`. The invoice is not paid, was paid outside
+             *     Stripe, has no payment to refund, or is already fully refunded.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Validation error: missing or unknown `reason`, a negative
+             *     amount, an amount above what is left to refund, or refunds are
+             *     not configured.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getInvoicePaymentTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Timeline events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoicePaymentTimeline"];
+                };
+            };
+            /** @description Invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCreditNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credit note. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNote"];
+                };
+            };
+            /** @description Credit note not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    issueCreditNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credit note after the issue attempt. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNote"];
+                };
+            };
+            /** @description Credit note not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The credit note is not a draft (code `invalid_state`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    retryCreditNoteRefund: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credit note with its updated `refund_status`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNote"];
+                };
+            };
+            /** @description Credit note not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`. The note is not issued, has no refund part,
+             *     the refund already succeeded or is still processing at Stripe,
+             *     Stripe is not connected, or the invoice was paid outside Stripe
+             *     (void the note and issue a new one with
+             *     `out_of_band_amount_cents`).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    voidCreditNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credit note voided. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNote"];
+                };
+            };
+            /** @description Credit note not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Code `invalid_state`. The note is already voided, is issued, or
+             *     its refund was already sent to Stripe.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCreditNotePdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PDF file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description Credit note not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    checkPasswordResetToken: {
+        parameters: {
+            query: {
+                /** @description The token from the reset link. */
+                token: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token can be used */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        valid: true;
+                    };
+                };
+            };
+            /** @description Token is unknown, expired or already used */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        valid: false;
+                        /** @enum {string} */
+                        reason: "invalid_or_expired";
+                    };
+                };
+            };
+            /** @description Rate limited (shared per-IP limit on `/v1/auth`) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listTestClockCustomers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Customers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Customer"][];
+                    };
+                };
+            };
+            /** @description Caller is in live mode */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Clock not found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -4536,6 +11459,1709 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    exportCustomersCsv: {
+        parameters: {
+            query?: {
+                /** @description Lower bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD`. */
+                from?: string;
+                /** @description Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC). */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV file (sent as an attachment). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description `from` or `to` is malformed, or `to` is before `from`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The export's audit row could not be written; nothing was sent. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    exportInvoicesCsv: {
+        parameters: {
+            query?: {
+                /** @description Lower bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD`. */
+                from?: string;
+                /** @description Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC). */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV file (sent as an attachment). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description `from` or `to` is malformed, or `to` is before `from`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The export's audit row could not be written; nothing was sent. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    exportSubscriptionsCsv: {
+        parameters: {
+            query?: {
+                /** @description Lower bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD`. */
+                from?: string;
+                /** @description Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC). */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV file (sent as an attachment). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description `from` or `to` is malformed, or `to` is before `from`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The export's audit row could not be written; nothing was sent. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    exportUsageEventsCsv: {
+        parameters: {
+            query: {
+                /** @description Lower bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD`. */
+                from: string;
+                /** @description Upper bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC). */
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV file (sent as an attachment). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description `from` or `to` is missing, or the window is longer than 366 days. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `from` or `to` is malformed, or `to` is before `from`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The export's audit row could not be written; nothing was sent. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    exportAuditLogCsv: {
+        parameters: {
+            query?: {
+                /** @description Lower bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD`. */
+                date_from?: string;
+                /** @description Upper bound on created_at, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC). */
+                date_to?: string;
+                resource_type?: string;
+                resource_id?: string;
+                action?: string;
+                actor_id?: string;
+                /** @description Only rows from this test clock's simulation. */
+                test_clock_id?: string;
+                /** @description Lower bound on simulated time (sim_effective_at). RFC 3339 or `YYYY-MM-DD`. */
+                sim_from?: string;
+                /** @description Upper bound on simulated time (sim_effective_at). RFC 3339 or `YYYY-MM-DD`. */
+                sim_to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV file (sent as an attachment). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description A date filter is malformed, or an upper bound is before its lower bound. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The export's audit row could not be written; nothing was sent. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAnalyticsOverview: {
+        parameters: {
+            query?: {
+                /** @description The window. Any other value is treated as `30d`. `12m` is 365 days. */
+                period?: components["schemas"]["AnalyticsPeriod"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Headline metrics. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsOverview"];
+                };
+            };
+        };
+    };
+    getAnalyticsRevenueChart: {
+        parameters: {
+            query?: {
+                /** @description The window. Any other value is treated as `30d`. `12m` is 365 days. */
+                period?: components["schemas"]["AnalyticsPeriod"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revenue series. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        period: components["schemas"]["AnalyticsPeriod"];
+                        data: components["schemas"]["AnalyticsRevenuePoint"][];
+                    };
+                };
+            };
+        };
+    };
+    getAnalyticsMrrMovement: {
+        parameters: {
+            query?: {
+                /** @description The window. Any other value is treated as `30d`. `12m` is 365 days. */
+                period?: components["schemas"]["AnalyticsPeriod"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MRR movement series and totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        period: components["schemas"]["AnalyticsPeriod"];
+                        data: components["schemas"]["AnalyticsMrrMovementPoint"][];
+                        totals: components["schemas"]["AnalyticsMrrMovementTotals"];
+                    };
+                };
+            };
+        };
+    };
+    getAnalyticsUsage: {
+        parameters: {
+            query?: {
+                /** @description The window. Any other value is treated as `30d`. `12m` is 365 days. */
+                period?: components["schemas"]["AnalyticsPeriod"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Usage series, top meters and totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        period: components["schemas"]["AnalyticsPeriod"];
+                        data: components["schemas"]["AnalyticsUsagePoint"][];
+                        top_meters: components["schemas"]["AnalyticsTopMeter"][];
+                        totals: {
+                            /** Format: int64 */
+                            events: number;
+                            /** @description Summed quantity, as a decimal string. */
+                            quantity: string;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    listDunningRuns: {
+        parameters: {
+            query?: {
+                invoice_id?: string;
+                state?: "active" | "paused" | "escalated" | "resolved";
+                /** @description Page size. Default 50, maximum 100. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dunning run list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["DunningRun"][];
+                        total: number;
+                    };
+                };
+            };
+        };
+    };
+    getDunningRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run and its event history. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DunningRunDetail"];
+                };
+            };
+            /** @description Dunning run not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resolveDunningRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    resolution: "payment_recovered" | "invoice_voided" | "invoice_not_collectible";
+                };
+            };
+        };
+        responses: {
+            /**
+             * @description The run as stored after the call. If another process resolved it
+             *     first, its existing resolution is returned.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DunningRun"];
+                };
+            };
+            /** @description Body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Dunning run or invoice not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The invoice step was refused because of the invoice's state, for
+             *     example voiding a paid invoice or a charge still running. Codes
+             *     as on the matching invoice endpoint.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `resolution` is missing or not one of the three values. The
+             *     old value `manually_resolved` is refused with its own message.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getDunningStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dunning totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DunningStats"];
+                };
+            };
+        };
+    };
+    listDunningPolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Policies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["DunningPolicyListItem"][];
+                    };
+                };
+            };
+        };
+    };
+    createDunningPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DunningPolicyInput"];
+            };
+        };
+        responses: {
+            /** @description The new policy */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DunningPolicy"];
+                };
+            };
+            /**
+             * @description `validation_error`: body is not valid JSON, the old
+             *     `final_action` field was sent, a limit was exceeded, an unknown
+             *     final action, or a `retry_schedule` entry that is too short or
+             *     not a valid duration.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getDunningPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DunningPolicy"];
+                };
+            };
+            /** @description `not_found`: no policy with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteDunningPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "deleted";
+                    };
+                };
+            };
+            /** @description `not_found`: no policy with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `invalid_state`: the policy is the default (make another policy
+             *     the default first), or customers are assigned to it (reassign
+             *     them first).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateDunningPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DunningPolicyInput"];
+            };
+        };
+        responses: {
+            /** @description The updated policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DunningPolicy"];
+                };
+            };
+            /** @description Same validation as create. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setDefaultDunningPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default changed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "default_updated";
+                    };
+                };
+            };
+            /** @description `not_found`: no policy with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listPriceOverrides: {
+        parameters: {
+            query?: {
+                /** @description Only this customer's overrides. */
+                customer_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Overrides */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CustomerPriceOverride"][];
+                    };
+                };
+            };
+        };
+    };
+    createPriceOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    customer_id: string;
+                    /** @description Any version of the rule to override. */
+                    rating_rule_version_id: string;
+                    /** @enum {string} */
+                    mode: "flat" | "graduated" | "package";
+                    /** @description Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more. */
+                    flat_amount_cents?: string;
+                    /**
+                     * @description Used when `mode` is `graduated`. Each `up_to` must be larger
+                     *     than the one before, and the last tier must have
+                     *     `up_to: 0` (no upper bound).
+                     */
+                    graduated_tiers?: {
+                        /** Format: int64 */
+                        up_to?: number;
+                        /** @description Per-unit rate in cents, as a decimal string. */
+                        unit_amount_cents?: string;
+                    }[];
+                    /**
+                     * Format: int64
+                     * @description Used when `mode` is `package`. Must be above 0.
+                     */
+                    package_size?: number;
+                    /**
+                     * Format: int64
+                     * @description Price of one package in cents. Used when `mode` is `package`.
+                     */
+                    package_amount_cents?: number;
+                    /** @description Package-mode per-unit overage rate in cents, as a decimal string. */
+                    overage_unit_amount_cents?: string;
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new override */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerPriceOverride"];
+                };
+            };
+            /** @description `invalid_request`: the body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: no customer with this id in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `already_exists`: another request created an override for the same customer and rule at the same moment. Retry. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `validation_error`: a missing field, an unknown rating rule, or a
+             *     price shape that cannot be billed (negative rate, bad tier table,
+             *     package size of 0).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deletePriceOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Override ended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @enum {boolean} */
+                        active: false;
+                    };
+                };
+            };
+            /** @description `not_found`: no active override with this id (it may already be ended). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    ingestLitellmSpend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LitellmSpendLog"] | components["schemas"]["LitellmSpendLog"][] | {
+                    events: components["schemas"]["LitellmSpendLog"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The batch was processed. Check `errors` for records that were not recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LitellmSpendResult"];
+                };
+            };
+            /** @description `invalid_request`: empty body or not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `ingest_unavailable`: the usage store could not be reached.
+             *     Retry the whole batch; events already recorded come back as
+             *     `deduplicated`.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listApiKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Key list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["APIKey"][];
+                    };
+                };
+            };
+            /** @description Caller lacks the `apikey:write` permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Label shown in the key list. Must not be blank. */
+                    name: string;
+                    /**
+                     * @default secret
+                     * @enum {string}
+                     */
+                    key_type?: "secret" | "publishable" | "platform";
+                    /**
+                     * Format: date-time
+                     * @description Optional. Must be in the future. Omit for a key that does not expire.
+                     */
+                    expires_at?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Key created. `raw_key` is shown only in this response. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyCreated"];
+                };
+            };
+            /** @description Body is not valid JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Caller lacks the `apikey:write` permission, or asked for a platform key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `name` missing, unknown `key_type`, or `expires_at` not in the future */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example vlx_key_1a2b3c4d5e6f7890 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The revoked key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKey"];
+                };
+            };
+            /** @description No such key in this mode, or it is already revoked */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rotateApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: int64
+                     * @description Grace period for the old key. 0 revokes it immediately.
+                     * @default 0
+                     */
+                    expires_in_seconds?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Rotation done. `raw_key` is the new key, shown only in this response. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyRotation"];
+                };
+            };
+            /** @description Body is present but not valid JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The key is a platform key and the caller is not a platform key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such key in this mode */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The key is already revoked (code `invalid_state`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `expires_in_seconds` is negative or over 604800, or the old key's `expires_at` has passed (the new key would copy it) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getTenantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSettings"];
+                };
+            };
+            /** @description Caller lacks the `apikey:write` permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateTenantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description Saved settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSettings"];
+                };
+            };
+            /** @description Body is not valid JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Caller lacks the `apikey:write` permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A field failed validation. `error.param` names the field. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listStripeConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connections */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["StripeConnection"][];
+                    };
+                };
+            };
+        };
+    };
+    connectStripe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description false = test-mode keys, true = live-mode keys. */
+                    livemode: boolean;
+                    /** @description Secret (`sk_`) or restricted (`rk_`) key for this mode. */
+                    secret_key: string;
+                    /** @description Publishable (`pk_`) key for this mode. */
+                    publishable_key: string;
+                    /** @description Optional. The `whsec_` signing secret of the Stripe webhook endpoint. Can be added later with PATCH. */
+                    webhook_secret?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Keys saved. Check `last_verified_error` to see whether Stripe accepted them. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StripeConnection"];
+                };
+            };
+            /** @description Body is not valid JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A key has the wrong prefix for the mode. `error.param` names the field. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setStripeWebhookSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: "test" | "live";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Must start with `whsec_`. */
+                    webhook_secret: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated connection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StripeConnection"];
+                };
+            };
+            /** @description `mode` is not `test` or `live`, or the body is not valid JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Stripe is not connected for this mode. Connect it first. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `webhook_secret` is missing or does not start with `whsec_` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    disconnectStripe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: "test" | "live";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disconnected */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `mode` is not `test` or `live` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Stripe is not connected for this mode */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listTenants: {
+        parameters: {
+            query?: {
+                status?: "active" | "suspended" | "deleted";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tenant list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Tenant"][];
+                    };
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The key is not a platform key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Must not be blank. */
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Tenant created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tenant"];
+                };
+            };
+            /** @description Body is not valid JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The key is not a platform key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `name` is missing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example vlx_ten_1a2b3c4d5e6f7890 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tenant"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The key is not a platform key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    bootstrap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description The value of `VELOX_BOOTSTRAP_TOKEN`. Or send it as a Bearer token. */
+                    token?: string;
+                    /** @default Demo Tenant */
+                    tenant_name?: string;
+                    /**
+                     * @description Must contain `@`.
+                     * @default admin@velox.local
+                     */
+                    owner_email?: string;
+                    /** @description 12 or more characters, at most 72 bytes. Omit to have Velox generate one. */
+                    owner_password?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Installation set up. Save these credentials; they are not shown again. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BootstrapResult"];
+                };
+            };
+            /** @description Bootstrap is disabled (`VELOX_BOOTSTRAP_TOKEN` not set) or the token is wrong */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description A tenant already exists (code `already_bootstrapped`), or a user
+             *     with `owner_email` already exists (code `already_exists`).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `owner_email` is not an email, or `owner_password` is too short or too long. Nothing was written. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listAuditLog: {
+        parameters: {
+            query?: {
+                /** @description For example `invoice`, `api_key`, `setting`. See `/v1/audit-log/filters`. */
+                resource_type?: string;
+                resource_id?: string;
+                /** @description For example `create`, `update`, `revoke`. See `/v1/audit-log/filters`. */
+                action?: string;
+                /** @description A user id or an API key id. */
+                actor_id?: string;
+                /** @description Lower bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (start of day, UTC). */
+                date_from?: string;
+                /** @description Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59 UTC). */
+                date_to?: string;
+                /** @description Only entries made inside this test clock's simulation. Works for deleted clocks too. */
+                test_clock_id?: string;
+                /** @description Lower bound on `sim_effective_at` (simulated time), inclusive. Excludes entries with no simulated time. */
+                sim_from?: string;
+                /** @description Upper bound on `sim_effective_at`, inclusive. */
+                sim_to?: string;
+                /** @description The only supported order. Any other value is a 400. */
+                order?: "created_at";
+                limit?: number;
+                /** @description Ignored when `after` is set. */
+                offset?: number;
+                /** @description Cursor from a previous page's `next_cursor`. Takes precedence over `offset`. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /**
+             * @description Audit entries. Offset paging returns `{data, total}`; cursor
+             *     paging returns `{data, has_more, next_cursor}`.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AuditLogEntry"][];
+                        /** @description Offset paging only. Capped at 10,001. */
+                        total?: number;
+                        /** @description Cursor paging only. */
+                        has_more?: boolean;
+                        /** @description Cursor paging only, present when `has_more` is true. */
+                        next_cursor?: string;
+                    };
+                };
+            };
+            /** @description Unsupported `order`, or a malformed `after` cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Caller lacks the `apikey:read` permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A date is not RFC3339 or YYYY-MM-DD, or a range ends before it starts */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAuditLogFilters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Filter values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogFilters"];
+                };
+            };
+            /** @description Caller lacks the `apikey:read` permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
