@@ -17,21 +17,32 @@ Velox owns the billing layer above the card charge: pricing, subscriptions, usag
 
 ## What it looks like
 
-One meter with model and token type on each event, and the invoice it produced a month later. The invoice below is what [`scripts/demo.sh`](scripts/demo.sh) produces against a running Velox, laid out for reading. The script prints the same numbers in plain lines.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-invoice-dark.png">
+  <img alt="A Velox invoice with one line per model and token type, each priced per 1M tokens, for a total of $3.88." src="docs/assets/readme-invoice-light.png" width="100%">
+</picture>
+
+One meter, with model and token type on each event, billed as one line per pair.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-margin-dark.png">
+  <img alt="The customer's margin card: $3.88 billed, $1.28 provider cost, 67.1% margin." src="docs/assets/readme-margin-light.png" width="100%">
+</picture>
+
+What the customer was billed against what the model provider charged you for the same tokens.
+
+`./quickstart.sh demo` makes an invoice like this and prints the same numbers:
 
 ```text
-ACME Corp — VLX-000001                                    $3.88
-──────────────────────────────────────────────────────────────
-Tokens (claude-sonnet-4.5 · input)       400,000    →   $1.20
-Tokens (claude-sonnet-4.5 · output)      175,000    →   $2.62
-Tokens (claude-sonnet-4.5 · cache_read)  200,000    →   $0.06
-──────────────────────────────────────────────────────────────
-Margin (billed $3.88 vs provider cost $1.28)            67.1%
+VLX-000001  total $3.88 USD  status finalized
+  Tokens (claude-sonnet-4.5 · input)  → $1.20
+  Tokens (claude-sonnet-4.5 · output)  → $2.62
+  Tokens (claude-sonnet-4.5 · cache_read)  → $0.06
+
+billed  $3.88
+cost    $1.28
+margin  67.1%
 ```
-
-![The full Velox invoice page for a paid invoice: the document with one line per (model, token_type) and unit prices quoted per 1M tokens, and an activity timeline running from cycle close to an operator-recorded bank-transfer payment](docs/assets/invoice-token-lines.png)
-
-One meter carried every token type, prices are stored exactly ($3.00 per 1M tokens), and the margin line comes from provider cost stamped on each event.
 
 ---
 
