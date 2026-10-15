@@ -465,10 +465,9 @@ export default function UsageEventsPage() {
                 <TableBody>
                   {events.map(ev => {
                     const v = eventQuantity(ev)
-                    // Render the raw string to preserve full decimal precision
-                    // — losing trailing zeros via toLocaleString hides the
-                    // distinction between "1.5" and "1.500000000000".
-                    const display = ev.quantity
+                    // Formatted as text, not through a float, so every digit
+                    // the server stored is kept (only separators are added).
+                    const display = formatQuantity(ev.quantity)
                     const dims = ev.dimensions && Object.keys(ev.dimensions).length > 0 ? ev.dimensions : null
                     return (
                       <TableRow key={ev.id}>
