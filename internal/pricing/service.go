@@ -699,11 +699,12 @@ func (s *Service) assertMetersPriced(ctx context.Context, tenantID string, meter
 // planInUseMessage is the refusal for a base price, billing timing or meter
 // change on a plan that live subscriptions use (ADR-034). It names the count,
 // not the fields: the caller knows what it sent, and an operator reads it
-// under the dialog that sent it. "Change plan" is the subscription page's
-// action that moves a subscription to another plan.
+// under the dialog that sent it. It doesn't point at Change plan: that action
+// only runs on active subscriptions and only to a plan with the same billing
+// timing and currency, so it is not a general way out of the lock.
 func planInUseMessage(liveSubs int) string {
 	return fmt.Sprintf("%s this plan, so its price, billing timing and meters are locked. "+
-		"Create a new plan and move them to it with Change plan.", subscriptionsUse(liveSubs))
+		"Create a new plan with the new terms instead.", subscriptionsUse(liveSubs))
 }
 
 // subscriptionsUse reads "1 subscription uses" or "3 subscriptions use".

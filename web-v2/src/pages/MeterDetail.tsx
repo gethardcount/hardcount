@@ -136,11 +136,11 @@ export default function MeterDetailPage() {
   const deleteMutation = useMutation({
     mutationFn: (ruleId: string) => api.deleteMeterPricingRule(id!, ruleId),
     onSuccess: () => {
-      toast.success('Price deleted')
+      toast.success('Price removed from meter')
       queryClient.invalidateQueries({ queryKey: ['meter-pricing-rules', id] })
       setDeleteTarget(null)
     },
-    onError: (err) => showApiError(err, 'Failed to delete price'),
+    onError: (err) => showApiError(err, 'Failed to remove price'),
   })
 
   usePageTitle(meter?.name)
@@ -373,7 +373,7 @@ export default function MeterDetailPage() {
                           size="icon"
                           className="h-7 w-7 text-muted-foreground hover:text-destructive"
                           onClick={() => setDeleteTarget(rule)}
-                          aria-label="Delete price"
+                          aria-label="Remove price from meter"
                         >
                           <Trash2 size={14} />
                         </Button>
@@ -479,18 +479,18 @@ export default function MeterDetailPage() {
         <TypedConfirmDialog
           open
           onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
-          title={`Delete ${ratingRules?.data.find(r => r.id === deleteTarget?.rating_rule_version_id)?.name ?? 'this price'}?`}
+          title={`Remove ${ratingRules?.data.find(r => r.id === deleteTarget?.rating_rule_version_id)?.name ?? 'this price'} from this meter?`}
           description={
             <>
               {deleteMatchedPriceSentence(
                 Object.entries(deleteTarget?.dimension_match ?? {}).map(([k, v]) => `${k}=${v}`).join(', '),
                 !!meter.rating_rule_version_id,
               )}{' '}
-              Type <span className="font-mono">delete</span> to confirm.
+              Type <span className="font-mono">remove</span> to confirm.
             </>
           }
-          confirmWord="delete"
-          confirmLabel="Delete price"
+          confirmWord="remove"
+          confirmLabel="Remove"
           onConfirm={() => deleteMutation.mutate(deleteTarget.id)}
           loading={deleteMutation.isPending}
         />

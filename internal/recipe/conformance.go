@@ -66,26 +66,44 @@ func formatDiffs(diffs []fieldDiff) string {
 // already exists with different money settings. The exact differences stay
 // in the text: the operator has to see both rates to choose. The next step
 // depends on what differs. The install form can pick the currency, so a
-// currency difference points there; the rates are fixed by the recipe, so a
-// rate difference means publishing a matching version of the existing price
-// (the next install adopts the price's current version, ruleConformanceDiff).
+// currency-only difference points there. Any other difference means
+// publishing a matching version of the existing price (the next install
+// adopts the price's current version, ruleConformanceDiff), and that version
+// reprices everyone already billed at this price from their next billing
+// period (GetRuleByKeyAsOf), so the message says so. When the currency and
+// the rates both differ, both steps are needed: switching currency alone
+// still fails on the rates.
 func priceConflictMessage(priceKey string, diffs []fieldDiff) string {
-	next := "Publish a new version of it with the recipe's rates on the Pricing page, then install again."
+	currency := ""
 	for _, d := range diffs {
 		if d.Field == "currency" {
-			next = fmt.Sprintf("Install the recipe in %s to use the existing price.", d.Got)
-			break
+			currency = d.Got
 		}
+	}
+	var next string
+	switch {
+	case currency != "" && len(diffs) == 1:
+		next = fmt.Sprintf("Install the recipe in %s to use the existing price.", currency)
+	case currency != "":
+		next = fmt.Sprintf("Install the recipe in %s, and publish a new version of the price with the recipe's rates on the Pricing page. "+
+			"Customers billed at this price pay the new rates from their next billing period.", currency)
+	default:
+		next = "To use it, publish a new version with the recipe's rates on the Pricing page, then install again. " +
+			"Customers billed at this price pay the new rates from their next billing period."
 	}
 	return fmt.Sprintf("Price %q already exists with different settings (%s). %s", priceKey, formatDiffs(diffs), next)
 }
 
 // meterConflictMessage is the refusal when a meter the recipe would create
 // already exists and adds up usage another way. Aggregation is the only
-// field compared (meterConformanceDiff).
+// field compared (meterConformanceDiff). The dashboard can't change a
+// meter's aggregation (the meter page shows it read-only); only the API can
+// (pricing.Service.UpdateMeter), and the engine adds up every open period's
+// usage with it, so the message says both instead of offering a step the
+// operator can't take on the page.
 func meterConflictMessage(meterKey string, diffs []fieldDiff) string {
 	return fmt.Sprintf("Meter %q already exists and adds up usage another way (%s), so the recipe can't use it. "+
-		"Change the meter to match, then install again.", meterKey, formatDiffs(diffs))
+		"Only the API can change that, and it changes what customers on this meter are billed.", meterKey, formatDiffs(diffs))
 }
 
 // meterCurrencyConflictMessage is the refusal when an existing meter's

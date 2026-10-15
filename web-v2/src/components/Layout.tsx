@@ -273,7 +273,7 @@ export function Layout({ children }: { children: ReactNode }) {
   }
   // Drives the live-mode Stripe-missing hard-blocker. The launcher itself
   // calls the same hook — React Query dedupes by key, so no duplicate fetches.
-  const { hasLiveStripe, dismissed: checklistHidden, setDismissed: setChecklistHidden } = useOnboardingSteps()
+  const { hasLiveStripe, offerShowAgain: offerShowChecklist, setDismissed: setChecklistHidden } = useOnboardingSteps()
 
   const handleLogout = async () => {
     await logout()
@@ -465,8 +465,9 @@ export function Layout({ children }: { children: ReactNode }) {
                 <MessageSquareWarning />
                 <span>Report an issue</span>
               </DropdownMenuItem>
-              {/* The only way back once the setup checklist's X was used. */}
-              {checklistHidden && (
+              {/* The only way back once the setup checklist's X was used.
+                  Absent once every step is done: the pill wouldn't return. */}
+              {offerShowChecklist && (
                 <DropdownMenuItem onClick={() => setChecklistHidden(false)}>
                   <ListChecks />
                   <span>Show setup checklist</span>

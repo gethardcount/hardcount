@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
+import { setupChecklistState } from '@/lib/homeNotices'
 
 export interface OnboardingStep {
   key: 'stripe' | 'plan' | 'customer' | 'subscription' | 'webhook'
@@ -66,7 +67,9 @@ export function useOnboardingSteps() {
     enabled: !!user,
   })
 
-  const enabled = !!user && !dismissed
+  // Queried while hidden too: the account menu offers "Show setup checklist"
+  // only when a step is left (setupChecklistState), which needs the steps.
+  const enabled = !!user
   const { data: overview } = useQuery({
     queryKey: ['onboarding-overview'],
     queryFn: () => api.getAnalyticsOverview(),
@@ -142,7 +145,7 @@ export function useOnboardingSteps() {
   // Don't flash the launcher before queries settle — avoids "0 of 5" pills
   // flickering for users who've actually completed everything.
   const loaded = !!overview && !!plansList && !!stripeCreds && !!webhookEndpoints
-  const show = enabled && loaded && complete < total
+  const { showPill: show, offerShowAgain } = setupChecklistState(dismissed, loaded, complete, total)
 
   return {
     steps,
@@ -151,6 +154,7 @@ export function useOnboardingSteps() {
     dismissed,
     setDismissed,
     show,
+    offerShowAgain,
     hasLiveStripe,
   }
 }

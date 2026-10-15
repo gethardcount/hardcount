@@ -14,7 +14,7 @@ export const PLAN_LOCKED_TITLE = 'Plan in use'
 // server's own count of those (GET /v1/plans/{id} live_subscription_count),
 // so the page and the refusal agree. Same sentence as the refusal.
 export function planLockedSentence(liveSubscriptions: number): string {
-  return `${subscriptionsUse(liveSubscriptions)} this plan, so its price, billing timing and meters are locked. Create a new plan and move them to it with Change plan.`
+  return `${subscriptionsUse(liveSubscriptions)} this plan, so its price, billing timing and meters are locked. Create a new plan with the new terms instead.`
 }
 
 // A plan's base price can be set to any amount above 0 but never back to 0:

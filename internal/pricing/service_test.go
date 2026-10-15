@@ -792,7 +792,7 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error blocking base_amount_cents mutation")
 		}
-		want := "1 subscription uses this plan, so its price, billing timing and meters are locked. Create a new plan and move them to it with Change plan."
+		want := "1 subscription uses this plan, so its price, billing timing and meters are locked. Create a new plan with the new terms instead."
 		if err.Error() != want {
 			t.Errorf("refusal text:\n got  %q\n want %q", err.Error(), want)
 		}

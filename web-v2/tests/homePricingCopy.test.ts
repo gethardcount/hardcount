@@ -6,12 +6,12 @@ import {
   basePriceZeroBlocked, deleteMatchedPriceSentence, planLockedSentence,
 } from '../src/lib/pricingCopy.ts'
 import { formatQuantity, quantityWithUnit, unitFor } from '../src/lib/usageQuantity.ts'
-import { showSimulatedTotalsNote, usageNoneYet } from '../src/lib/homeNotices.ts'
+import { setupChecklistState, showSimulatedTotalsNote, usageNoneYet } from '../src/lib/homeNotices.ts'
 
 test('plan lock names the server count, singular and plural, same words as the refusal', () => {
   assert.equal(
     planLockedSentence(1),
-    '1 subscription uses this plan, so its price, billing timing and meters are locked. Create a new plan and move them to it with Change plan.',
+    '1 subscription uses this plan, so its price, billing timing and meters are locked. Create a new plan with the new terms instead.',
   )
   assert.match(planLockedSentence(2), /^2 subscriptions use this plan,/)
   assert.match(planLockedSentence(1200), /^1,200 subscriptions use/)
@@ -70,4 +70,16 @@ test('Usage "Set up a meter" only when no meter exists', () => {
   assert.equal(usageNoneYet(2).setUpMeter, false)
   assert.equal(usageNoneYet(null).setUpMeter, false)
   assert.doesNotMatch(usageNoneYet(2).description, /create one/)
+})
+
+test('"Show setup checklist" is offered only when it would bring the pill back', () => {
+  // hidden with a step left: offered, and the pill stays away until clicked
+  assert.deepEqual(setupChecklistState(true, true, 3, 5), { showPill: false, offerShowAgain: true })
+  // hidden with every step done: clicking would show nothing, so no item
+  assert.deepEqual(setupChecklistState(true, true, 5, 5), { showPill: false, offerShowAgain: false })
+  // not hidden: the pill shows while a step is left, never the menu item
+  assert.deepEqual(setupChecklistState(false, true, 3, 5), { showPill: true, offerShowAgain: false })
+  assert.deepEqual(setupChecklistState(false, true, 5, 5), { showPill: false, offerShowAgain: false })
+  // still loading: neither
+  assert.deepEqual(setupChecklistState(true, false, 0, 5), { showPill: false, offerShowAgain: false })
 })
