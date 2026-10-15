@@ -11,7 +11,7 @@ import { api, type EndpointDelivery } from '@/lib/api'
 // and the events live tail (ADR-030 forensic layer).
 import { timeAgo, timeUntil, wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
-import { pausedEndpointNotice } from '@/lib/webhookNotices'
+import { pausedEndpointNotice, isAllEvents } from '@/lib/webhookNotices'
 import { Layout } from '@/components/Layout'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -189,10 +189,9 @@ export default function WebhookEndpointDetailPage() {
                 {pendingCount > 0 && <> {'·'} {pendingCount} pending</>}
               </span>
               <span className="flex flex-wrap gap-1">
-                {(endpoint.events || []).map(ev => (
-                  <Badge key={ev} variant="outline">{ev}</Badge>
-                ))}
-                {(!endpoint.events || endpoint.events.length === 0) && <Badge variant="outline">all events</Badge>}
+                {isAllEvents(endpoint.events)
+                  ? <Badge variant="outline">all events</Badge>
+                  : endpoint.events!.map(ev => <Badge key={ev} variant="outline">{ev}</Badge>)}
               </span>
             </div>
           )}

@@ -48,3 +48,9 @@ export function endpointSaveErrorTarget(err: unknown): 'url' | 'toast' {
   const field = (err as { field?: unknown } | null)?.field
   return field === 'url' ? 'url' : 'toast'
 }
+
+// isAllEvents: an endpoint listens to every event when its list is empty or
+// holds the "*" wildcard (what the dashboard sends for "All events").
+export function isAllEvents(events: readonly string[] | null | undefined): boolean {
+  return !events || events.length === 0 || events.includes('*')
+}

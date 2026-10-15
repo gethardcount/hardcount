@@ -1159,7 +1159,10 @@ function StripeCard({ livemode, current, onChanged }: {
               )}
               <ApiKeysForm
                 livemode={livemode}
-                connected={connected}
+                // Keys that never verified are not "rotated": the operator is
+                // still connecting, so the form keeps saying Connect and skips
+                // the rotate confirmation.
+                connected={!!current?.verified_at}
                 onSuccess={() => { setReplacingKeys(false); onChanged() }}
               />
             </>

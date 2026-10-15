@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { api, formatDate, formatDateTime, type WebhookEndpoint } from '@/lib/api'
 import { untilMs, wallClockNow } from '@/lib/effectiveNow'
 import { applyApiError, showApiError } from '@/lib/formErrors'
-import { endpointSaveErrorTarget } from '@/lib/webhookNotices'
+import { endpointSaveErrorTarget, isAllEvents } from '@/lib/webhookNotices'
 import { cn } from '@/lib/utils'
 import { Layout } from '@/components/Layout'
 
@@ -209,10 +209,9 @@ function EndpointsTab() {
                     <TableCell className="text-muted-foreground">{ep.description || '\u2014'}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        {(ep.events || []).map(ev => (
-                          <Badge key={ev} variant="outline">{ev}</Badge>
-                        ))}
-                        {(!ep.events || ep.events.length === 0) && <span className="text-xs text-muted-foreground">all</span>}
+                        {isAllEvents(ep.events)
+                          ? <span className="text-xs text-muted-foreground">all events</span>
+                          : ep.events!.map(ev => <Badge key={ev} variant="outline">{ev}</Badge>)}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -527,7 +526,7 @@ function EndpointEditDialog({ endpoint, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) {
-  const isWildcard = !endpoint.events || endpoint.events.length === 0 || endpoint.events.includes('*')
+  const isWildcard = isAllEvents(endpoint.events)
   const [url, setUrl] = useState(endpoint.url)
   const [description, setDescription] = useState(endpoint.description || '')
   const [active, setActive] = useState(endpoint.active)

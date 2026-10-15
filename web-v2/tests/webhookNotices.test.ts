@@ -2,7 +2,7 @@
 // each has two versions.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { endpointSaveErrorTarget, pausedEndpointNotice, replayToast } from '../src/lib/webhookNotices.ts'
+import { endpointSaveErrorTarget, pausedEndpointNotice, replayToast, isAllEvents } from '../src/lib/webhookNotices.ts'
 
 test('replay with no listening endpoint: warning, says nothing was sent', () => {
   const t = replayToast('no_matching_endpoints')
@@ -43,4 +43,11 @@ test('replay: only the explicit no-match status warns; any other status reads as
   // webhook.Service.Replay returns 'queued' or 'no_matching_endpoints'; a
   // missing status (older server) must not claim nothing was sent.
   assert.equal(replayToast(undefined).level, 'success')
+})
+
+test('isAllEvents: empty, missing and the * wildcard all mean every event', () => {
+  assert.equal(isAllEvents(undefined), true)
+  assert.equal(isAllEvents([]), true)
+  assert.equal(isAllEvents(['*']), true)
+  assert.equal(isAllEvents(['invoice.paid']), false)
 })

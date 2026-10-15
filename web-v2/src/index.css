@@ -25,6 +25,7 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -64,6 +65,7 @@
     --accent: oklch(0.98 0.01 285);
     --accent-foreground: oklch(0.45 0.22 285);
     --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(0.985 0 0);
     --border: oklch(0.922 0 0);
     /* Scroll-edge shadow (see components/ui/scroll-pane.tsx). Theme-aware
        because a black shadow is invisible on a dark surface. */
@@ -117,6 +119,7 @@
     --accent: oklch(0.22 0.08 285);
     --accent-foreground: oklch(0.75 0.20 285);
     --destructive: oklch(0.704 0.191 22.216);
+    --destructive-foreground: oklch(0.985 0 0);
     --border: oklch(1 0 0 / 10%);
     --scroll-shadow: oklch(0 0 0 / 55%);
     --input: oklch(1 0 0 / 15%);
