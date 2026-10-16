@@ -401,3 +401,15 @@ test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => 
   await newInvoice.click()
   await expect(page.getByRole('dialog').getByLabel('Currency')).toContainText('EUR')
 })
+
+test('Margin shows no margin when no provider cost is known', async ({ page }) => {
+  // The suite configures no provider cost rates, so nothing carries a cost.
+  // The card used to read "Provider cost $0.0000" here instead of a dash.
+  const { customer } = await subscribedCustomer()
+  await page.goto(`/customers/${customer.id}`)
+  const card = page.locator('[data-slot="card"]').filter({ has: page.getByText('Usage billing vs your provider costs') })
+  await expect(card.getByText('No provider costs configured, so there is no margin to show.')).toBeVisible()
+  await expect(card.getByRole('link', { name: 'Set up provider costs' })).toHaveAttribute('href', '/provider-costs')
+  await expect(card.getByText('Provider cost', { exact: true }).locator('..')).toContainText('—')
+  await expect(card.getByText('Margin', { exact: true }).locator('..').last()).not.toContainText('%')
+})
