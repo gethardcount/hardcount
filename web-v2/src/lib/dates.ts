@@ -133,6 +133,19 @@ export function calendarDaysUntil(iso: string, now: EffectiveNow, timezone?: str
   return dayNumber(t) - dayNumber(new Date(now))
 }
 
+// civilDateFrom returns the yyyy-mm-dd civil date `days` after the civil date
+// of `nowMs` in tenant TZ. Unlike civilDateAgo it takes the anchor as an
+// argument, so a clock-pinned entity passes its simulated now. Use it for a
+// picker floor whose date is later resolved with startOfDayInTZ in the same
+// zone: the pause dialog's earliest resume date is civilDateFrom(now, 1),
+// because start of today is already past and the server refuses it.
+export function civilDateFrom(nowMs: number, days: number, timezone?: string): string {
+  const tz = timezone || tenantTZ()
+  const [y, m, d] = formatInTimeZone(new Date(nowMs), tz, 'yyyy-MM-dd').split('-').map(Number)
+  const target = new Date(y, m - 1, d + days)
+  return formatYMD(target)
+}
+
 // ---------------------------------------------------------------------------
 // Inclusive billing-period display (ADR-058).
 //

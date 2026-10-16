@@ -7,7 +7,7 @@ import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { cancelImmediatelyText, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText, scheduleCancelToast } from '@/lib/subscriptionCopy'
 import { api, formatCents, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
-import { formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
+import { civilDateFrom, formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
@@ -150,6 +150,12 @@ export default function SubscriptionDetailPage() {
   // dots and the date-picker floors below. A sub frozen in the past must not
   // offer wall-clock dates its engine would treat as far-future.
   const nowDate = new Date(effectiveNow(sub?.test_clock_id ? testClock?.frozen_time : undefined))
+  // Earliest auto-resume date: tomorrow in tenant TZ. The pick is sent as
+  // start of that day (startOfDayInTZ), and start of today is already past,
+  // which the server refuses ("must be in the future"). The DatePicker reads
+  // its floor with browser-local getters, so it gets local midnight of that
+  // civil date.
+  const pauseResumeMinDate = new Date(`${civilDateFrom(nowDate.getTime(), 1)}T00:00:00`)
 
   // Activity timeline (T0-18) — chronological feed of lifecycle events
   // pulled from the audit log. Separate query key from the period-
@@ -1240,7 +1246,7 @@ export default function SubscriptionDetailPage() {
               value={pauseResumesAt}
               onChange={setPauseResumesAt}
               placeholder="Pick a date"
-              minDate={nowDate}
+              minDate={pauseResumeMinDate}
             />
             <p className="text-xs text-muted-foreground">
               Leave blank to pause until you resume it. With a date, collection resumes on that day.

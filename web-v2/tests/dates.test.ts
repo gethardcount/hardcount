@@ -5,7 +5,7 @@
 // built-in runner (the @/lib/api import is stubbed via tests/support).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom } from '../src/lib/dates.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
   // 2026-05-05 00:00 IST (UTC+5:30) = the previous UTC evening.
@@ -87,4 +87,20 @@ test('usageFilterEndYMD never ends before the start (same-day cancel)', () => {
   assert.equal(usageFilterEndYMD('2026-10-16T00:00:00Z', '2026-10-16T14:23:00Z', 'UTC'), '2026-10-16')
   // A zero-length stub at midnight still yields a non-inverted range.
   assert.equal(usageFilterEndYMD('2026-10-16T00:00:00Z', '2026-10-16T00:00:00Z', 'UTC'), '2026-10-16')
+})
+
+// Locks the pause dialog's earliest auto-resume date: tomorrow in tenant TZ,
+// from the subscription's effective now. Its start of day is always after now,
+// so the server's "resumes_at must be in the future" check passes.
+test('civilDateFrom(now, 1) is tomorrow in the tenant zone, and its start is in the future', () => {
+  // 2026-10-16 21:00 EDT = 2026-10-17T01:00Z: tomorrow is Oct 17 locally.
+  const nyEvening = Date.parse('2026-10-17T01:00:00Z')
+  assert.equal(civilDateFrom(nyEvening, 1, 'America/New_York'), '2026-10-17')
+  assert.ok(Date.parse(startOfDayInTZ(civilDateFrom(nyEvening, 1, 'America/New_York'), 'America/New_York')) > nyEvening)
+  // Mid-morning UTC: today's start is already past, tomorrow's is not.
+  const utcMorning = Date.parse('2026-10-16T09:00:00Z')
+  assert.equal(civilDateFrom(utcMorning, 1, 'UTC'), '2026-10-17')
+  assert.ok(Date.parse(startOfDayInTZ(civilDateFrom(utcMorning, 1, 'UTC'), 'UTC')) > utcMorning)
+  // Month and year rollover.
+  assert.equal(civilDateFrom(Date.parse('2026-12-31T12:00:00Z'), 1, 'UTC'), '2027-01-01')
 })
