@@ -6,9 +6,18 @@ linters:
     - depguard
   enable:
     - forbidigo
+    - nolintlint
 
   settings:
+    # A waiver must name the linter it waives and say why, so a bare
+    # //nolint or //nolint:forbidigo cannot silence the rules below.
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     forbidigo:
+      # Match on what a call resolves to, not how it is spelled, so an aliased
+      # import (stdtime.Now) is caught too.
+      analyze-types: true
       forbid:
         # ADR-030: clock-pinned entities live in simulated time. In the packages
         # that write them (scoped under exclusions below), read the time through

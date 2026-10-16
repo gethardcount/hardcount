@@ -393,9 +393,10 @@ func (m *memStore) GetEndpointStats(_ context.Context, tenantID string) ([]Endpo
 			counts[d.WebhookEndpointID] = s
 		}
 		s.TotalDeliveries++
-		if d.Status == domain.DeliverySucceeded { //nolint:staticcheck
+		switch d.Status {
+		case domain.DeliverySucceeded:
 			s.Succeeded++
-		} else if d.Status == domain.DeliveryFailed {
+		case domain.DeliveryFailed:
 			s.Failed++
 		}
 	}
