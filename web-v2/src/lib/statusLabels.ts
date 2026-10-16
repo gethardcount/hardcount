@@ -2,9 +2,10 @@
 //
 // The same invoice used to read "Open" (tab), "finalized" (badge),
 // "Showing finalized" (subtitle) and "pending" (payment badge) on one
-// screen. Every status badge now goes through these functions, so a state
-// has one name and one colour everywhere: lists, detail headers, search,
-// customer and subscription pages.
+// screen. The invoice badges (invoice list, invoice page, Home and the
+// customer page's recent invoices) go through these functions, so an
+// invoice state has one name and one colour. Other badges still use
+// lib/status; move them here when you touch them.
 
 export type StatusTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 export interface StatusDisplay { label: string; tone: StatusTone }

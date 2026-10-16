@@ -13,7 +13,9 @@ import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
-import { paymentStatusLabel, statusBadgeVariant, statusBorderColor } from '@/lib/status'
+import { paymentStatusLabel, statusBorderColor } from '@/lib/status'
+import { genericStatus, humanizeStatus, invoiceStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { attentionReasonLabel } from '@/lib/attentionLabels'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { DueBadge } from '@/components/DueBadge'
@@ -71,6 +73,20 @@ function SortableHead({
       </button>
     </TableHead>
   )
+}
+
+// The status tabs, named as the invoice badges name them (lib/statusLabels).
+const STATUS_TABS = [
+  { value: '', label: 'All', overdue: false },
+  { value: 'draft', label: 'Draft', overdue: false },
+  { value: 'finalized', label: 'Open', overdue: false },
+  { value: '', label: 'Past due', overdue: true },
+  { value: 'paid', label: 'Paid', overdue: false },
+  { value: 'voided', label: 'Void', overdue: false },
+]
+
+function statusTabLabel(status: string): string {
+  return STATUS_TABS.find(t => t.value === status && !t.overdue)?.label ?? humanizeStatus(status)
 }
 
 export default function InvoicesPage() {
@@ -230,7 +246,7 @@ export default function InvoicesPage() {
           <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
             <span>
               Track invoices, payments, and billing history
-              {statusFilter ? ` · Showing ${statusFilter}` : overdueFilter ? ' · Showing past due' : !paymentStatusFilter && !customerFilter && total > 0 ? ` · ${total} total` : ''}
+              {statusFilter ? ` · Showing ${statusTabLabel(statusFilter).toLowerCase()}` : overdueFilter ? ' · Showing past due' : !paymentStatusFilter && !customerFilter && total > 0 ? ` · ${total} total` : ''}
             </span>
             {paymentStatusFilter && (
               <Badge variant="secondary" className="gap-1">
@@ -275,14 +291,7 @@ export default function InvoicesPage() {
                 predicate (finalized + past due_at + unsettled), so it
                 rides a separate ?overdue= param. Stripe's invoice list
                 carries the same segment. */}
-            {[
-              { value: '', label: 'All', overdue: false },
-              { value: 'draft', label: 'Draft', overdue: false },
-              { value: 'finalized', label: 'Open', overdue: false },
-              { value: '', label: 'Past due', overdue: true },
-              { value: 'paid', label: 'Paid', overdue: false },
-              { value: 'voided', label: 'Voided', overdue: false },
-            ].map(f => {
+            {STATUS_TABS.map(f => {
               const active = f.overdue ? !!overdueFilter : !overdueFilter && statusFilter === f.value
               return (
                 <button
@@ -349,9 +358,9 @@ export default function InvoicesPage() {
                     : overdueFilter
                     ? 'No past-due invoices'
                     : statusFilter && paymentStatusFilter
-                    ? `No ${statusFilter} invoices match “${paymentStatusLabel(paymentStatusFilter)}”`
+                    ? `No ${statusTabLabel(statusFilter).toLowerCase()} invoices match “${paymentStatusLabel(paymentStatusFilter)}”`
                     : statusFilter
-                    ? `No ${statusFilter} invoices`
+                    ? `No ${statusTabLabel(statusFilter).toLowerCase()} invoices`
                     : paymentStatusFilter
                     ? `No invoices match “${paymentStatusLabel(paymentStatusFilter)}”`
                     : 'No invoices match the current filters'
@@ -399,7 +408,16 @@ export default function InvoicesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sorted.map((inv: Invoice) => (
+                  {sorted.map((inv: Invoice) => {
+                    // The invoice's own "now": a subscription invoice follows the
+                    // sub's clock; a manual one-off follows the customer's
+                    // (ADR-027). Wall-clock invoices resolve to '' → wall time.
+                    const now = effectiveNow(clockFrozenMap[
+                      (inv.subscription_id && subTestClockMap[inv.subscription_id]) ||
+                      customerMap[inv.customer_id]?.test_clock_id ||
+                      ''
+                    ])
+                    return (
                     <TableRow
                       key={inv.id}
                       className={cn('cursor-pointer hover:bg-muted/50 transition-colors border-l-[3px]', statusBorderColor(inv.payment_status))}
@@ -440,7 +458,7 @@ export default function InvoicesPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={statusBadgeVariant(inv.status)}>{inv.status}</Badge>
+                        <StatusBadge status={invoiceStatus(inv, now)} />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -456,7 +474,7 @@ export default function InvoicesPage() {
                               invoices, where pending/processing/failed is the
                               actual signal. */}
                           {inv.status !== 'draft' && inv.status !== 'paid' && inv.status !== 'voided' && (
-                            <Badge variant={statusBadgeVariant(inv.payment_status)}>{inv.payment_status}</Badge>
+                            <StatusBadge status={genericStatus(inv.payment_status)} />
                           )}
                           {/* Due-date countdown only on open invoices
                               (status='finalized'). 'paid' and
@@ -468,20 +486,7 @@ export default function InvoicesPage() {
                             <DueBadge
                               dueAt={inv.due_at}
                               warningDays={3}
-                              // Resolve the simulated "now" from the invoice's own clock:
-                              // a subscription invoice inherits the sub's pin; a MANUAL
-                              // one-off invoice has no sub, so fall back to the customer's
-                              // pin (ADR-027). Without the customer fallback a one-off
-                              // invoice on a clock-pinned customer counted its due-date
-                              // against wall-clock and understated urgency — "Due in 61d"
-                              // (green) while the engine sees it past due (mirrors
-                              // InvoiceDetail.tsx:207). Wall-clock invoices resolve to '' →
-                              // clockFrozenMap[''] is undefined → effectiveNow() → wall time.
-                              now={effectiveNow(clockFrozenMap[
-                                (inv.subscription_id && subTestClockMap[inv.subscription_id]) ||
-                                customerMap[inv.customer_id]?.test_clock_id ||
-                                ''
-                              ])}
+                              now={now}
                             />
                           )}
                           {inv.status === 'draft' && (
@@ -514,7 +519,8 @@ export default function InvoicesPage() {
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    )
+                  })}
                 </TableBody>
               </Table>
 

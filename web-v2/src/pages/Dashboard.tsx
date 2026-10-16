@@ -17,12 +17,12 @@ import { FeedSkeleton } from '@/components/ui/TableSkeleton'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { AlertTriangle, FlaskConical, Info } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { statusBadgeVariant } from '@/lib/status'
+import { invoiceStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { TrendCard } from '@/components/analytics/TrendCard'
 import { TrendCardSkeleton, ChartCardSkeleton } from '@/components/analytics/CardSkeleton'
 import { PeriodTabs } from '@/components/analytics/PeriodTabs'
@@ -328,17 +328,10 @@ export default function DashboardPage() {
                       <div className="flex items-center gap-3 min-w-0">
                         <PaymentStatusDot status={inv.payment_status} />
                         <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
-                        {/* Drafts: show "draft" pill instead of payment_status —
-                            payment_status is meaningless before finalize. */}
-                        {inv.status === 'draft' ? (
-                          <Badge variant={statusBadgeVariant('draft')} className="text-[10px]">
-                            draft
-                          </Badge>
-                        ) : (
-                          <Badge variant={statusBadgeVariant(inv.payment_status)} className="text-[10px]">
-                            {inv.payment_status}
-                          </Badge>
-                        )}
+                        <StatusBadge
+                          status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]?.test_clock_id))}
+                          className="text-[10px]"
+                        />
                         {/* Authoritative per-invoice flag — same rule as the
                             Invoices list; covers manual one-off invoices that
                             the old sub→clock lookup missed. */}

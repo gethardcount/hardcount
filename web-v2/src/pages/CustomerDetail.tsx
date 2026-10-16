@@ -29,6 +29,8 @@ import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { statusBadgeVariant } from '@/lib/status'
+import { invoiceStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -219,6 +221,9 @@ export default function CustomerDetailPage() {
     ;(clocksData?.data ?? []).forEach(c => { m[c.id] = c.name || c.id })
     return m
   }, [clocksData])
+  // The customer's "now" (its test clock when pinned), for Past due on the
+  // recent-invoice badges. Subscriptions inherit the customer's pin (ADR-027).
+  const invoiceNow = useEffectiveNow(customer?.test_clock_id)
 
   // Commit/promo burndown (2026-07-06): per-grant remaining + kind
   // subtotals — the DP's primary finance question on hybrid commit+usage.
@@ -1139,7 +1144,7 @@ export default function CustomerDetailPage() {
                       <p className="text-xs text-muted-foreground">{formatDate(inv.created_at)}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <Badge variant={statusVariant(inv.status)}>{inv.status}</Badge>
+                      <StatusBadge status={invoiceStatus(inv, invoiceNow)} />
                       <span className="text-sm font-medium">{formatCents(inv.total_amount_cents, inv.currency)}</span>
                     </div>
                   </Link>
@@ -2084,7 +2089,10 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
             </div>
 
             <div className="rounded-md border border-border overflow-hidden">
-              <div className="grid grid-cols-[1fr_150px_140px_160px_44px] gap-0 bg-muted/40 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {/* Columns from sm up; on a phone each line stacks (description
+                  and type full width, quantity and unit side by side) with
+                  its own field labels, so the dialog never scrolls sideways. */}
+              <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_150px_140px_160px_44px] gap-0 bg-muted/40 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 <div className="px-3 py-2">Description</div>
                 <div className="px-3 py-2">Type</div>
                 <div className="px-3 py-2">Qty</div>
@@ -2101,8 +2109,9 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                     : 0
                   return (
                     <div key={idx}>
-                    <div className="grid grid-cols-[1fr_150px_140px_160px_44px] items-start gap-0">
-                      <div className="px-3 py-2 space-y-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-[minmax(0,1fr)_150px_140px_160px_44px] items-start gap-0">
+                      <div className="col-span-2 sm:col-span-1 px-3 py-2 space-y-1">
+                        <span className="text-xs text-muted-foreground sm:hidden">Description</span>
                         <Input
                           placeholder="Implementation services"
                           value={line.description}
@@ -2113,7 +2122,8 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                         />
                         {lineErrs.description && <p className="text-xs text-destructive">{lineErrs.description}</p>}
                       </div>
-                      <div className="px-3 py-2">
+                      <div className="col-span-2 sm:col-span-1 px-3 py-2 space-y-1">
+                        <span className="text-xs text-muted-foreground sm:hidden">Type</span>
                         <Select items={COMPOSER_LINE_TYPES} value={line.line_type} onValueChange={v => updateLine(idx, { line_type: v ?? 'add_on' })}>
                           <SelectTrigger className="w-full">
                             <SelectValue />
@@ -2126,6 +2136,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                         </Select>
                       </div>
                       <div className="px-3 py-2 space-y-1">
+                        <span className="text-xs text-muted-foreground sm:hidden">Qty</span>
                         <Input
                           type="number"
                           inputMode="numeric"
@@ -2140,6 +2151,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                         {lineErrs.quantity && <p className="text-xs text-destructive">{lineErrs.quantity}</p>}
                       </div>
                       <div className="px-3 py-2 space-y-1">
+                        <span className="text-xs text-muted-foreground sm:hidden">Unit ({currencySymbol.trim() || currency})</span>
                         <Input
                           type="number"
                           inputMode="numeric"
@@ -2155,7 +2167,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                           ? <p className="text-xs text-destructive">{lineErrs.unit_amount_cents}</p>
                           : <p className="text-xs text-muted-foreground">= {formatCents(totalCents, currency)}</p>}
                       </div>
-                      <div className="px-3 py-2 flex justify-center">
+                      <div className="col-span-2 sm:col-span-1 px-3 py-2 flex justify-end sm:justify-center">
                         <Button
                           type="button"
                           variant="ghost"
@@ -2229,7 +2241,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
               it reads "Jun 1 – Jun 30". Blank = a one-off charge with no period. */}
           <div className="space-y-2">
             <Label>Service period (optional)</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
                 type="date"
                 aria-label="Service period start"

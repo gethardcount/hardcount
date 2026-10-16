@@ -29,9 +29,11 @@ import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { taxReasonLabel } from '@/lib/taxReasons'
 import { DueBadge } from '@/components/DueBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
+import { invoiceStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant, creditNoteReasonLabel, paymentIsUnresolved } from '@/lib/status'
+import { creditNoteReasonLabel, paymentIsUnresolved } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -61,8 +63,6 @@ import {
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
-
-const statusVariant = statusBadgeVariant
 
 // TaxReversedLine renders the "↳ Tax reversed $X (Stripe Tax)" sub-fact for a
 // credit note, shared by the pre-payment and post-payment settlement blocks so
@@ -139,21 +139,6 @@ function sellerBlock(invoice: Invoice, s?: TenantSettings | null): SellerBlock {
 
 function formatLineType(raw: string): string {
   return LINE_TYPE_LABELS[raw] || raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
-
-// humaniseInvoiceStatus maps the persisted enum to operator-facing
-// copy. Server-side codes (draft/finalized/paid/voided/uncollectible)
-// are stable; UI owns its own labels so wording changes don't require
-// a server roll. Keep matches Stripe Dashboard's column copy.
-function humaniseInvoiceStatus(raw: string): string {
-  const map: Record<string, string> = {
-    draft: 'Draft',
-    finalized: 'Open',
-    paid: 'Paid',
-    voided: 'Voided',
-    uncollectible: 'Uncollectible',
-  }
-  return map[raw] ?? raw
 }
 
 // aggregateTaxByJurisdiction rolls up per-line-item tax amounts into a single
@@ -1078,7 +1063,7 @@ export default function InvoiceDetailPage() {
               below; duplicating "payment_awaiting" up here was leaky
               domain-code and visually noisy. */}
           <div className="flex items-center gap-2 mt-5">
-            <Badge variant={statusVariant(invoice.status)}>{humaniseInvoiceStatus(invoice.status)}</Badge>
+            <StatusBadge status={invoiceStatus(invoice, effectiveNow(testClock?.frozen_time))} />
             {/* Simulated disclosure lives in the page banner alone
                 (ADR-099: once per scope) — the header pill duplicated it. */}
             {/* Bare date — the badge already says "Paid"/"Voided", so
