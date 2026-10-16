@@ -4815,7 +4815,11 @@ type UsageAggregate struct {
 
 	// ByMeter One row per meter, largest total first.
 	ByMeter []struct {
-		// Aggregation The meter's aggregation (`sum`, `count`, `max`, `last`) used for `value`; empty when unknown.
+		// Aggregation The aggregation billing uses for this meter's events (`sum`,
+		// `count`, `max`, `last`), read from its pricing rules and, for
+		// events no rule claims, the meter's own aggregation. `mixed`
+		// when those differ: `value` is then the plain sum, which
+		// billing may not use. Empty when unknown.
 		Aggregation string `json:"aggregation"`
 
 		// Customers Distinct customers with events on this meter.

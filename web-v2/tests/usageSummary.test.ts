@@ -37,9 +37,24 @@ test('fillDays without a window spans first to last event day', () => {
   assert.deepEqual(fillDays([]), [])
 })
 
+test('fillDays with no end date runs to today, zero on quiet recent days', () => {
+  const daily = [{ date: '2026-03-02', value: '4' }]
+  assert.deepEqual(fillDays(daily, '2026-03-01', '', '2026-03-05'), [0, 4, 0, 0, 0])
+  assert.deepEqual(fillDays(daily, undefined, undefined, '2026-03-04'), [4, 0, 0])
+  // A later event day still ends the line.
+  assert.deepEqual(fillDays([{ date: '2026-03-06', value: '1' }], '2026-03-05', '', '2026-03-05'), [0, 1])
+  // An explicit end date wins over today.
+  assert.deepEqual(fillDays(daily, '2026-03-01', '2026-03-02', '2026-03-09'), [0, 4])
+})
+
+test('a mixed meter is named as a raw sum that billing may count differently', () => {
+  assert.equal(meterModeBadge('mixed'), 'Mixed')
+  assert.match(meterValueCaption('mixed', 3), /^Sum of reported values\. .*may differ\.$/)
+})
+
 test('fillDays keeps the newest days when the window is too long', () => {
   const daily = [{ date: '2026-03-10', value: '9' }]
-  const out = fillDays(daily, '2020-01-01', '2026-03-10', 5)
+  const out = fillDays(daily, '2020-01-01', '2026-03-10', undefined, 5)
   assert.deepEqual(out, [0, 0, 0, 0, 9])
 })
 

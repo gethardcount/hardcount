@@ -33,11 +33,13 @@ type MeterResolver interface {
 	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
 }
 
-// MeterLister lists the tenant's meters. The aggregate endpoint reads each
-// meter's aggregation mode from it so a Maximum meter reports its peak,
-// not a sum of readings. Wired in router.go (pricing.Service).
+// MeterLister lists the tenant's meters and their pricing rules. The
+// aggregate endpoint works out each meter's aggregation from them (see
+// BillingModes) so a Maximum meter reports its peak, not a sum of
+// readings. Wired in router.go (pricing.Service).
 type MeterLister interface {
 	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
+	ListMeterPricingRules(ctx context.Context, tenantID string) ([]domain.MeterPricingRule, error)
 }
 
 type Handler struct {
@@ -497,9 +499,13 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(r.Context(), "aggregate usage events: list meters", "error", err)
 			return
 		}
-		for _, m := range meters {
-			modes[m.ID] = m.Aggregation
+		rules, err := h.meterModes.ListMeterPricingRules(r.Context(), filter.TenantID)
+		if err != nil {
+			respond.InternalError(w, r)
+			slog.ErrorContext(r.Context(), "aggregate usage events: list pricing rules", "error", err)
+			return
 		}
+		modes = BillingModes(meters, rules)
 	}
 
 	agg, err := h.svc.Aggregate(r.Context(), filter, modes)

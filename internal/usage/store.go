@@ -156,8 +156,77 @@ type DailyValue struct {
 	sum, count, sumOfCustomerMax, sumOfCustomerLast decimal.Decimal
 }
 
+// AggregationMixed is the by_meter aggregation of a meter whose events
+// bill under more than one mode. Its value is the plain sum of reported
+// quantities, which billing may not use.
+const AggregationMixed = "mixed"
+
+// BillingModes works out, for each meter, the one aggregation billing uses
+// for its events: "sum", "count", "max", "last", or AggregationMixed.
+//
+// Billing reads the mode from each pricing rule (meters.aggregation became
+// advisory in migration 0054). Events no rule claims bill under the
+// meter's own aggregation, so that mode counts too unless a rule with an
+// empty dimension_match claims everything. last_during_period and
+// last_ever both read here as "last": the latest reading in the window.
+func BillingModes(meters []domain.Meter, rules []domain.MeterPricingRule) map[string]string {
+	ruleModes := map[string]map[string]bool{}
+	catchAll := map[string]bool{}
+	for _, r := range rules {
+		if ruleModes[r.MeterID] == nil {
+			ruleModes[r.MeterID] = map[string]bool{}
+		}
+		ruleModes[r.MeterID][ruleMode(r.AggregationMode)] = true
+		if len(r.DimensionMatch) == 0 {
+			catchAll[r.MeterID] = true
+		}
+	}
+	out := make(map[string]string, len(meters))
+	for _, m := range meters {
+		set := map[string]bool{}
+		for mode := range ruleModes[m.ID] {
+			set[mode] = true
+		}
+		if !catchAll[m.ID] {
+			set[meterMode(m.Aggregation)] = true
+		}
+		if len(set) == 1 {
+			for mode := range set {
+				out[m.ID] = mode
+			}
+		} else {
+			out[m.ID] = AggregationMixed
+		}
+	}
+	return out
+}
+
+func ruleMode(m domain.AggregationMode) string {
+	switch m {
+	case domain.AggCount:
+		return "count"
+	case domain.AggMax:
+		return "max"
+	case domain.AggLastDuringPeriod, domain.AggLastEver:
+		return "last"
+	default:
+		return "sum"
+	}
+}
+
+// meterMode reads meters.aggregation the way billing does
+// (mapMeterAggregation): anything unrecognised bills as a sum.
+func meterMode(agg string) string {
+	switch agg {
+	case "count", "max", "last":
+		return agg
+	default:
+		return "sum"
+	}
+}
+
 // pick returns the candidate that matches an aggregation mode. An unknown
-// or empty mode falls back to the plain sum.
+// or empty mode, or AggregationMixed, falls back to the plain sum.
 func pick(mode string, sum, count, sumMax, sumLast decimal.Decimal) decimal.Decimal {
 	switch mode {
 	case "count":

@@ -21,7 +21,7 @@ Older entries keep their original text.
 
 ### Fixed
 
-- **Usage totals follow each meter's aggregation (2026-10-16).** The Usage page summed every reading, so a Maximum meter with 140, 210 and 120 GB showed 470 GB. Each meter now shows its value in its own unit, with a daily line. "Total Units", which added tokens, calls and GB, is gone. API: `GET /v1/usage-events/aggregate` rows gain `value`, `aggregation`, `events`, `customers`, `peak` and `daily`, and it takes `tz`.
+- **Usage totals follow each meter's aggregation (2026-10-16).** The Usage page summed every reading, so a Maximum meter with 140, 210 and 120 GB showed 470 GB. Each meter now shows its value in its own unit, with a daily line. "Total Units", which added tokens, calls and GB, is gone. The mode comes from the meter's pricing rules, as billing does; a meter whose rules count in different ways says so and shows the plain sum. API: `GET /v1/usage-events/aggregate` rows gain `value`, `aggregation` (`mixed` when the rules differ), `events`, `customers`, `peak` and `daily`, and it takes `tz`.
 
 ### Changed
 

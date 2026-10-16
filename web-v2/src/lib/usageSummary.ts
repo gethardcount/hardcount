@@ -22,6 +22,8 @@ export function meterValueCaption(aggregation: string, customers: number): strin
       return `Latest reading${customers > 1 ? ' per customer' : ''}${across}`
     case 'sum':
       return 'Sum of reported values'
+    case 'mixed':
+      return "Sum of reported values. This meter's pricing rules count usage in different ways, so the billed amount may differ."
     default:
       return 'Sum of reported values (aggregation unknown)'
   }
@@ -29,6 +31,7 @@ export function meterValueCaption(aggregation: string, customers: number): strin
 
 // meterModeBadge is the short aggregation label beside the meter name.
 export function meterModeBadge(aggregation: string): string {
+  if (aggregation === 'mixed') return 'Mixed'
   return aggregation ? meterAggregationLabel(aggregation) : 'Sum'
 }
 
@@ -47,14 +50,18 @@ export function addDays(date: string, n: number): string {
 
 // fillDays turns the server's sparse daily series (days with events only)
 // into one number per calendar day from `from` to `to` inclusive, with 0
-// for quiet days. Without a window (All time) it spans the first to the
-// last day with events. Capped at `maxDays` most recent days so a
-// multi-year window still draws a readable line.
-export function fillDays(daily: DailyPoint[], from?: string, to?: string, maxDays = 366): number[] {
-  if (daily.length === 0 && (!from || !to)) return []
+// for quiet days. A window with no end date ("Last 30 days", All time)
+// ends on `today` (the tenant's civil date), so quiet recent days show as
+// zero instead of the line stopping at the last event; a later event day
+// still extends it. Without `from` it starts on the first day with events.
+// Capped at `maxDays` most recent days so a multi-year window still draws
+// a readable line.
+export function fillDays(daily: DailyPoint[], from?: string, to?: string, today?: string, maxDays = 366): number[] {
+  if (daily.length === 0 && (!from || !(to || today))) return []
   const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date))
   let start = from || sorted[0]?.date
-  const end = to || sorted[sorted.length - 1]?.date
+  const lastEvent = sorted[sorted.length - 1]?.date
+  const end = to || [today, lastEvent].filter((d): d is string => !!d).sort().pop()
   if (!start || !end || start > end) return []
   const byDate = new Map(sorted.map(p => [p.date, Number(p.value) || 0]))
   // Cap from the end: the newest days matter most on a sparkline.

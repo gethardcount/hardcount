@@ -7732,7 +7732,13 @@ export interface components {
                 meter_id: string;
                 /** @description Plain sum of reported quantities, as a decimal string. */
                 total: string;
-                /** @description The meter's aggregation (`sum`, `count`, `max`, `last`) used for `value`; empty when unknown. */
+                /**
+                 * @description The aggregation billing uses for this meter's events (`sum`,
+                 *     `count`, `max`, `last`), read from its pricing rules and, for
+                 *     events no rule claims, the meter's own aggregation. `mixed`
+                 *     when those differ: `value` is then the plain sum, which
+                 *     billing may not use. Empty when unknown.
+                 */
                 aggregation: string;
                 /**
                  * @description Usage under the meter's aggregation, as a decimal string.

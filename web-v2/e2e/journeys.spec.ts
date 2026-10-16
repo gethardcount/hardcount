@@ -182,7 +182,7 @@ test('the Usage page shows a Maximum meter as its peak per customer, not the sum
   const id = uniq()
   const key = `e2e_storage_${id}`
   const meter = await api<{ id: string; name: string }>('POST', '/meters', {
-    key, name: `E2E Storage ${id}`, unit: 'GB', aggregation: 'max',
+    key, name: `E2E Storage across every region and every storage tier ${id}`, unit: 'GB', aggregation: 'max',
   })
   const a = await createCustomer()
   const b = await createCustomer()
@@ -197,6 +197,9 @@ test('the Usage page shows a Maximum meter as its peak per customer, not the sum
   await expect(row).toContainText('350 GB')
   await expect(row).toContainText('Peak reading per customer, added across 2 customers')
   await expect(row).not.toContainText('470')
+  // A long meter name is shown in full (it wraps), never cut off.
+  const name = row.getByRole('link', { name: meter.name, exact: true })
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
 })
 
 test('a dialog taller than the window keeps its actions in view', async ({ page }) => {

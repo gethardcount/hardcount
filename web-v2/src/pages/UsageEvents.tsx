@@ -9,6 +9,8 @@ import type { Customer, Meter, UsageEvent, UsageEventsAggregate, UsageMeterTotal
 import { downloadCSV } from '@/lib/csv'
 import { formatQuantity, quantityWithUnit } from '@/lib/usageQuantity'
 import { usageNoneYet } from '@/lib/homeNotices'
+import { formatYMDInTZ } from '@/lib/dates'
+import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
@@ -74,6 +76,9 @@ export default function UsageEventsPage() {
     [range, filterFrom, filterTo, tz],
   )
   const activeWindow = bounds.window
+  // The sparklines end on today in the tenant zone when the window has no
+  // end date (fillDays). Like the bounds, it is recomputed when tz changes.
+  const today = useMemo(() => formatYMDInTZ(new Date(wallClockNow()).toISOString(), tz), [tz])
   const { from: fromInstant, to: toInstant } = bounds
   const page = Math.max(1, parseInt(urlState.page) || 1)
   const [events, setEvents] = useState<UsageEvent[]>([])
@@ -412,7 +417,7 @@ export default function UsageEventsPage() {
             >
               <ul className="divide-y divide-border">
                 {meterRows.map(r => (
-                  <MeterSummaryRow key={r.meter_id} row={r} meter={r.meter} from={activeWindow.from} to={activeWindow.to} />
+                  <MeterSummaryRow key={r.meter_id} row={r} meter={r.meter} from={activeWindow.from} to={activeWindow.to} today={today} />
                 ))}
               </ul>
             </Section>
@@ -543,10 +548,10 @@ export default function UsageEventsPage() {
 // MeterSummaryRow is one meter on the Usage page: name and aggregation,
 // the value in the meter's unit with a caption saying what it is, and a
 // daily sparkline over the selected window.
-function MeterSummaryRow({ row, meter, from, to }: { row: UsageMeterTotal; meter?: Meter; from?: string; to?: string }) {
+function MeterSummaryRow({ row, meter, from, to, today }: { row: UsageMeterTotal; meter?: Meter; from?: string; to?: string; today: string }) {
   const name = meter?.name ?? row.meter_id
   const unit = row.aggregation === 'count' ? 'event' : (meter?.unit ?? '')
-  const values = fillDays(row.daily ?? [], from || undefined, to || undefined)
+  const values = fillDays(row.daily ?? [], from || undefined, to || undefined, today)
   const W = 160
   const H = 32
   // A single day has no shape to draw.
@@ -554,11 +559,12 @@ function MeterSummaryRow({ row, meter, from, to }: { row: UsageMeterTotal; meter
   return (
     <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
       <div className="min-w-0 sm:w-56 sm:shrink-0">
-        <div className="flex items-center gap-2">
+        {/* The full name wraps; a cut-off name could not be read anywhere. */}
+        <div className="flex items-start gap-2">
           {meter ? (
-            <Link to={`/meters/${meter.id}`} className="truncate text-sm font-medium text-foreground hover:underline">{name}</Link>
+            <Link to={`/meters/${meter.id}`} className="min-w-0 break-words text-sm font-medium text-foreground hover:underline">{name}</Link>
           ) : (
-            <span className="truncate text-sm font-medium text-foreground">{name}</span>
+            <span className="min-w-0 break-words text-sm font-medium text-foreground">{name}</span>
           )}
           <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">{meterModeBadge(row.aggregation)}</span>
         </div>
