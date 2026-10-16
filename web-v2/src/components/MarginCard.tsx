@@ -12,7 +12,7 @@ import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
 import { formatCivilPeriod } from '@/lib/dates'
 import { marginCardView } from '@/lib/actionOutcomes'
 import {
-  DEFAULT_MARGIN_PRESET, MARGIN_PRESETS, isOutsideWindow, marginWindowFor, marginWindowIsEmpty, rangeIncluding, type MarginPreset,
+  DEFAULT_MARGIN_PRESET, MARGIN_EMPTY_NOTE, MARGIN_PRESETS, isOutsideWindow, marginWindowFor, marginWindowIsEmpty, rangeIncluding, type MarginPreset,
 } from '@/lib/usageWindow'
 import { useGetV1CustomersIdMargin } from '@/lib/gen/queries.gen'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
@@ -239,10 +239,7 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
                 </Button>
               </div>
             ) : empty && (
-              <p className="text-sm text-muted-foreground mt-2">
-                No usage in the window yet. Add provider rates under Provider costs,
-                send usage, and margin appears here.
-              </p>
+              <p className="text-sm text-muted-foreground mt-2">{MARGIN_EMPTY_NOTE}</p>
             )}
           </>
         )}
