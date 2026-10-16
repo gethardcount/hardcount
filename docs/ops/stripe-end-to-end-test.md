@@ -176,7 +176,7 @@ automated retry-and-notify handling of a failed payment.
 
 Bootstrap seeds no plans, so create one first. Use the dashboard's Pricing
 page, or instantiate a [recipe](../glossary.md): a pre-built pricing template shipped with
-Velox. The recipe flows live in `MANUAL_TEST.md`.
+Velox.
 
 Price the plan at **2900 cents/month**, because the expected amounts in steps 4 and 7 assume it.
 Set its base fee to bill **in advance** (`base_bill_timing: in_advance`): step 4 expects an invoice

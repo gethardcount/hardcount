@@ -9,7 +9,7 @@
 - [ ] `go test ./... -race -short -count=1` passes
 - [ ] `make lint` passes (golangci-lint; see CONTRIBUTING's "What CI runs on your PR" for the full gate list)
 - [ ] `CHANGELOG.md` entry added — required for any user-visible change
-- [ ] `MANUAL_TEST.md` flow added/updated — required if UI-visible behavior changed
+- [ ] UI changed? A Playwright spec covers it (`cd web-v2 && npm run test:e2e`), and you looked at a screenshot of the screen
 - [ ] `make gen` re-run — required if `api/openapi.yaml` changed
 - [ ] Frontend touched? `cd web-v2 && npm run build && npm test && npm run lint` passes
 

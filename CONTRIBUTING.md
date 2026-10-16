@@ -97,10 +97,10 @@ locally before you push, so a failing CI build holds no surprises:
 | The same suite through a connection pooler | `scripts/pgbouncer-test.sh` | needs Docker; starts PgBouncer in transaction mode in front of the same Postgres |
 | Money-invariant sweep | `go run ./cmd/velox-doctor`, with `DATABASE_URL` set to the owner URL of the database you ran the golden path against | runs in CI after the golden-path demo, over the rows it wrote |
 | golangci-lint | `make lint` | config in `.golangci.yml`; much stricter than `go vet`. Also holds two Velox rules: no bare `time.Now()` in clock-pinned packages (waive with `//nolint:forbidigo // wall-clock: <reason>`), and no single-invoice period lookup in proration code (waive with `//nolint:forbidigo // single-invoice-ok: <reason>`) |
-| MANUAL_TEST currency | `make lint-manual-test` | flows may not name things the code no longer has |
 | Codegen drift | `make gen` then `git diff --exit-code` | required whenever `api/openapi.yaml` changes |
 | Vulnerability scan | `govulncheck ./...` | can fail when a new Go CVE is published, even if your change is fine. Say so in the PR and we'll handle it |
 | Frontend | `cd web-v2 && npm run build && npm test && npm run lint` | only if you touched `web-v2/` |
+| Dashboard end to end | `cd web-v2 && npm run test:e2e` | Playwright against a running API and dashboard; see [How we test](docs/testing.md). Not a required check yet |
 | Golden path | `make bootstrap`, then `make dev`, then `scripts/demo.sh <secret test key>` | CI boots a real server and walks recipe → invoice end to end; the key is printed by `make bootstrap` |
 | Browser tests | `cd web-v2 && npm run test:e2e` | Playwright against a real API; setup in [`web-v2/e2e/README.md`](web-v2/e2e/README.md). Not a required check yet |
 | Links between docs | `lychee --offline --include-fragments '**/*.md'` | internal links and anchors only |
@@ -111,12 +111,12 @@ Fork PRs get the identical CI run, because no gate uses secrets.
 ## Pull Requests
 
 1. Fork the repo and create a feature branch
-2. Write tests for new functionality
+2. Write tests for new functionality, at the layer [How we test](docs/testing.md) names for your change
 3. Run the gates above that your change touches (at minimum the two test commands)
 4. **Docs travel with the change, in the same PR:** any user-visible change
-   gets a `CHANGELOG.md` entry, and any UI-visible behavior change updates
-   the matching flow in `MANUAL_TEST.md` (the repo's hand-run walkthrough
-   scripts). This is a hard house rule — the bar is "the doc doesn't lie."
+   gets a `CHANGELOG.md` entry, and any UI change is covered by a
+   Playwright spec in `web-v2/e2e/`. This is a hard house rule — the bar
+   is "the doc doesn't lie."
    For how to write docs, see the [writing style guide](docs/dev/writing-style.md).
 5. Submit a PR with a clear description of what and why
 

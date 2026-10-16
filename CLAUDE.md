@@ -8,7 +8,7 @@ Each rule is explained in the section named after it.
 
 - **Architecture:** a domain never calls another domain's `Service`/`Store` directly. `internal/arch/boundaries_test.go` enforces this.
 - **Money-path changes:** before writing, list every code place that touches the state. Follow the money-path playbook.
-- **Walking MANUAL_TEST:** a UI box is not walked until you have looked at a screenshot of its interactive state.
+- **Testing:** every change ships with a test at the right layer. UI changes are checked with Playwright and by looking at the screen.
 - **Concurrent sessions:** work in your own git worktree, and check every branch before you claim a migration or ADR number.
 - **Documentation discipline:** every user-visible ship updates its docs in the same PR. The doc must not lie.
 
@@ -73,7 +73,7 @@ Two or more Claude Code sessions may work this repo at the same time. Rules:
 - **Claim a migration _or ADR_ number** only after checking origin/main **and** every local branch (`git worktree list`, `git branch -a`). Another session's unmerged migration or ADR may already hold the next number.
   - Also run `grep docs/adr/` across branches before you pick an ADR number.
   - Why: a duplicate migration number fails loudly at integration-test time, but a duplicate ADR number fails silently. Two `050`s once shipped (#196/#197) and were only caught and renumbered much later (#292).
-- **Stay on disjoint domains/packages** where possible. CHANGELOG/MANUAL_TEST conflicts are expected and cheap: whoever merges second rebases and keeps both sides' entries.
+- **Stay on disjoint domains/packages** where possible. CHANGELOG conflicts are expected and cheap: whoever merges second rebases and keeps both sides' entries.
 - **Merge small PRs promptly; rebase onto origin/main before push.** A conflicting PR gets no CI, because GitHub cannot build the merge ref. Rebase first, then watch checks.
 - **Shared singletons:**
   - One local Postgres. Concurrent `-short=false` runs from two sessions can interfere. Run unit tests freely, and treat CI as the integration gate.
@@ -98,30 +98,24 @@ Two or more Claude Code sessions may work this repo at the same time. Rules:
   - Redis is used for distributed rate limiting only.
 - **Credits:** event-sourced ledger (immutable append-only)
 
-## Walking MANUAL_TEST — read the strategy first
+## Testing
 
-Walking a flow (proving behavior) follows
-**[docs/dev/manual-test-strategy.md](docs/dev/manual-test-strategy.md)**. It is the
-proof-side sibling of the money-path playbook. It carries:
+How we test, which test to write for which change, and how to run each layer:
+**[docs/testing.md](docs/testing.md)**.
 
-- the five lenses (behavior / money / honesty / design / **visual**);
-- the twelve techniques that have each caught a real defect here (control-vs-treatment, negative controls,
-  provider-side verification, mutation verification, first-use bias, …);
-- the per-box protocol;
-- the evidence standard for an annotation.
-
-**The one rule worth repeating here:** text/DOM assertions cannot see layout
-bugs. A UI box is not walked until you have looked at a screenshot of its interactive state.
+- Every change ships with a test at the right layer. Money and state changes get a Go integration test against real Postgres.
+- UI changes are checked with Playwright (`cd web-v2 && npm run test:e2e`) and by looking at a screenshot of the screen. Text and DOM checks cannot see layout bugs.
+- Live Stripe, email, LiteLLM and PDF checks run by hand before each release: [docs/ops/release-checklist.md](docs/ops/release-checklist.md).
 
 ## Documentation discipline
 
 Every user-visible ship updates the docs that describe it, in the same PR:
 
 - `CHANGELOG.md` (Keep-a-Changelog) — what shipped, dated.
-- `MANUAL_TEST.md` — add or revise the matching FLOW so the assertions still match observable behavior. A flow whose assertions do not match observable behavior cannot be run; this kind of rot has already cost us once. Trimmed shape (post-2026-05-02): one observable per checkbox, no preamble prose, drop DB introspection unless it's the actual assertion. Delete or rewrite a stale flow; do not leave it with a note.
+- `docs/ops/release-checklist.md` if the change alters what a live Stripe, email or PDF check should see.
 - `docs/adr/` if the change is a decision worth re-litigating later.
 - `README.md` "Roadmap" section ("Recently shipped" / "Explicitly deferred") — keep aligned with reality; if a "Roadmap" item is silently descoped, edit the README first, then act.
 
 How to write them: **[docs/dev/writing-style.md](docs/dev/writing-style.md)** (point first, one idea per sentence, define terms, clarity and truth in separate PRs).
 
-The bar isn't "perfect docs." The bar is "the doc doesn't lie." A flow that says "logs link to stdout" when the code returns an error is worse than no flow.
+The bar isn't "perfect docs." The bar is "the doc doesn't lie." A doc that says "logs link to stdout" when the code returns an error is worse than no doc.

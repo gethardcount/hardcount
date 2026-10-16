@@ -42,6 +42,6 @@ where the spec and the generated artifacts disagree.
   `Date.now()` in the affected surfaces.
 - Money is formatted through `src/lib/priceDisplay.ts` — exact string math,
   never `parseFloat` on money strings.
-- Every user-visible change updates `CHANGELOG.md`, and UI-visible behavior
-  changes update the matching flow in `MANUAL_TEST.md` (same PR — see
-  CONTRIBUTING.md).
+- Every user-visible change updates `CHANGELOG.md`, and UI changes are
+  covered by a Playwright spec in `e2e/` (same PR — see
+  [How we test](../docs/testing.md)).

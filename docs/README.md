@@ -59,8 +59,9 @@ docs in the order listed. Words you may not know are in the
 3. [Money-path robustness playbook](dev/money-path-robustness-playbook.md):
    required for any change to invoices, payments, credits, dunning,
    subscriptions or tax.
-4. [Manual-test strategy](dev/manual-test-strategy.md) and
-   [MANUAL_TEST](../MANUAL_TEST.md): how flows are checked by hand.
+4. [How we test](testing.md): which test to write, and how to run it.
+   The [release checklist](ops/release-checklist.md) holds the live checks
+   run by hand before each release.
 5. [OpenAPI workflow](dev/openapi-workflow.md): changing the API contract.
 6. [Writing style](dev/writing-style.md): how to write docs here.
 7. AI coding agents start at [CLAUDE.md](../CLAUDE.md), then
@@ -97,6 +98,5 @@ is in the code and the docs above.
   its [remediation plan](dev/audit-2026-07-02-remediation-plan.md)
 - [HA readiness, 2026-07-06](dev/ha-readiness-2026-07-06.md)
 - [Design review, 2026-07-10](dev/design-review-2026-07-10.md)
-- [Product stability plan](dev/product-stability-plan.md) and
-  [manual-test findings](dev/manual-test-findings.md)
+- [Product stability plan](dev/product-stability-plan.md)
 - [CHANGELOG](../CHANGELOG.md)

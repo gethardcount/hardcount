@@ -94,14 +94,13 @@ result.
     next. Reviewing harder was not the answer. The cause was reasoning
     *locally* about the function in the diff, when the real surface was the
     whole state machine.
-- **[Manual-test strategy](dev/manual-test-strategy.md): how to prove.** "I
+- **[How we test](testing.md): how to prove.** "I
   clicked it and nothing broke" is not a test result here.
-  - Every flow is checked from five angles: behavior, money math, honest UI
-    copy, design, and what the screen actually looks like.
-  - Rules say what must happen before a test checkbox may be ticked.
-  - The list of testing techniques has one admission rule: a technique is
-    listed only if it once caught a real bug in this codebase. Where a
-    technique cites a PR, that PR records the bug it caught.
+  - Every change ships with an automated test at the right layer: Go tests
+    against real Postgres for money and state, Playwright for the dashboard.
+  - A fix is proven by watching its test fail without the fix.
+  - What only a real provider can show (Stripe, email, the PDF) is checked by
+    hand before each release.
 
   The strategy documents current practice, not aspirations.
 

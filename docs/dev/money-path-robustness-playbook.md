@@ -13,8 +13,8 @@ reviews Velox's billing code, with or without prior context.
   (§3).
 - Lock concurrency, money-invariant and crash-between-writes behavior with an
   automated test. Follow the §5 patterns: collision, real Postgres,
-  concurrent-resolver fake, mutation-verify. Skip it only where §5 allows
-  manual `[~]` or the test would repeat a proven pattern.
+  concurrent-resolver fake, mutation-verify. Skip it only where §5 allows a
+  hand check or the test would repeat a proven pattern.
 
 **Why it exists.** These bugs do not show up when you read only the path where
 everything succeeds (the happy-path read). They live in *sibling* call sites,
@@ -267,17 +267,17 @@ proof land on the table.
 
 ## 5. Test-lock doctrine
 
-**Must be an automated test.** This follows the MANUAL_TEST `[x]` durable rule:
-a behavior ticked `[x]` in MANUAL_TEST.md is locked by an automated test, while
-`[~]` marks manual-only verification. Three kinds of behavior need one:
+**Must be an automated test.** Three kinds of behavior need one (see
+[How we test](../testing.md) for the layers):
 
 - (i) **concurrency**: always;
 - (ii) **money-invariant**: automate unless it's an Nth duplicate of a proven
   pattern;
 - (iii) **partial-failure / crash-between-writes.**
 
-**Manual `[~]`** is only for observable/UI/live-external surfaces (live-Stripe
-exactly-once stays manual).
+**A hand check** is only for live external services, in the
+[release checklist](../ops/release-checklist.md) (live-Stripe exactly-once
+stays manual). Dashboard screens get a Playwright test.
 
 Five non-negotiable patterns:
 

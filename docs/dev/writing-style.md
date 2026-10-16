@@ -2,7 +2,7 @@
 
 How to write docs in this repo so they are easy to read and still precise.
 It applies to every Markdown file: README, guides, runbooks, ADRs, design
-docs, CHANGELOG, MANUAL_TEST and the files AI agents read (CLAUDE.md,
+docs, CHANGELOG, the release checklist and the files AI agents read (CLAUDE.md,
 playbooks). Use it when you write a new doc and when you touch an old one.
 
 ## Who reads our docs
@@ -18,7 +18,7 @@ most are short of time.
 | Contributor: an engineer making a first change | Where the code is, the rules, and why | CONTRIBUTING, architecture, ADRs |
 | Reviewer: a senior engineer skimming for 2 minutes | The result, the evidence, the reasoning | ENGINEERING.md, benchmarks |
 | AI agent working in the repo | Rules it can extract fast and follow exactly | CLAUDE.md, playbooks |
-| Maintainer, months later | A decision or a change, found fast | ADRs, CHANGELOG, MANUAL_TEST |
+| Maintainer, months later | A decision or a change, found fast | ADRs, CHANGELOG |
 
 The effort a reader spends should go into the ideas, never into untangling
 the sentences.
@@ -90,14 +90,12 @@ A bold outcome, then who is affected and what changes for them, then any
 action they must take, then a link. The mechanism, the tests and the history
 go in the PR description or the ADR.
 
-**MANUAL_TEST box.** The instruction is one observable. Evidence and traps go
-in sub-bullets underneath, so the step stays readable:
+**Checklist item** (for example in the release checklist). One action and
+the one result to see, on one line:
 
 ```markdown
-- [~] **Advance dialog blocks a target beyond +1y**: the Advance button is
-  disabled and the inline error names the maximum target.
-  - Evidence (2026-08-04): frozen Feb 1 2026, target Mar 1 2028 → disabled.
-  - Walk trap: commit the date (Enter or blur) before judging.
+- [ ] Refund: a credit note with "Refund to card" → `refund_status=succeeded`,
+  and the refund shows in the Stripe dashboard.
 ```
 
 **Runbook section.** Symptom, Why, Check (commands), Fix, Verify. A procedure

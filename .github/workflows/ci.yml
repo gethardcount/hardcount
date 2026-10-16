@@ -425,13 +425,6 @@ jobs:
             exit 1
           fi
 
-      # Anti-rot guard: fail if MANUAL_TEST.md names a metric / column / table /
-      # meter-key the code no longer has. CI catches generated-artifact drift but
-      # not prose; this is the cheap prose guard ("a flow that lies is worse than
-      # no flow"). Bypass a legitimate mention with a `currency-ok:` HTML comment.
-      - name: lint-manual-test (doc currency)
-        run: make lint-manual-test
-
       # The quickstart pulls a pinned release. It must name the same release
       # as the Compose template, so a release bump cannot update one and
       # leave the other pointing at an older version.

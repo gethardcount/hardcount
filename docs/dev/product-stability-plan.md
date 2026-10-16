@@ -5,7 +5,7 @@ maintained as a *standing condition*, not a one-time push.
 
 This is the third leg of the discipline set:
 [money-path-robustness-playbook](money-path-robustness-playbook.md) (build
-side), [manual-test-strategy](manual-test-strategy.md) (proof side), and this
+side), manual-test-strategy (proof side; since replaced by [How we test](../testing.md)), and this
 document (maintenance side — where residual defects live and what finds each
 class cheapest).
 

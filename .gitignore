@@ -18,10 +18,9 @@ velox-api
 
 # Walk screenshots dropped at the repo root.
 #
-# MANUAL_TEST annotations cite screenshots by name as evidence ("Screenshot
-# c2b-ledger-1280.png") and none of them are committed — zero image files are
-# tracked in this repo. They are local proof for whoever ran the walk, not
-# artifacts. But Playwright writes them next to the repo root rather than into
+# Hand checks take screenshots as evidence, and none of them are committed —
+# zero image files are tracked in this repo. They are local proof for whoever
+# ran the check, not artifacts. But Playwright writes them next to the repo root rather than into
 # the already-ignored .playwright-mcp/ when a bare filename is passed, so they
 # accumulate: 25 of them had piled up by 2026-08-04, ~3MB, from many sessions.
 #
