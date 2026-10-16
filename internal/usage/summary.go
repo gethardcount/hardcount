@@ -23,7 +23,10 @@ type UsageSummary struct {
 	TotalEvents int                        `json:"total_events"`
 }
 
-// GetSummary aggregates usage for a customer in the current billing period.
+// GetSummary aggregates usage for a customer over [from, to). The HTTP
+// handler defaults the window to the UTC calendar month of the customer's
+// effective now, which is not the billing period: an anniversary-billed
+// subscription's period starts mid-month, and the tenant zone is ignored.
 //
 // Aggregation is done server-side via store.Aggregate (COUNT(*) +
 // GROUP BY meter_id SUM) over the full filtered set. The previous

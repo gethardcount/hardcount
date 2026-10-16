@@ -714,7 +714,22 @@ is set, go to [14](#14-subscriptions-whose-billing-is-failing).
 **Fix**:
 
 - Usage that missed a built invoice: compare the customer's usage for the
-  period (`GET /v1/customers/{id}/usage`) with the invoice's usage lines.
+  invoice's period with the invoice's usage lines. Pass the period
+  explicitly. Without `from` and `to`, this endpoint returns the current
+  cycle, which is the next one once the invoice's period has closed:
+
+  ```bash
+  curl -sS "$API/v1/customers/$CUSTOMER/usage?from=$BILLING_PERIOD_START&to=$BILLING_PERIOD_END" \
+    -H "Authorization: Bearer $KEY"
+  ```
+
+  `$BILLING_PERIOD_START` and `$BILLING_PERIOD_END` are the invoice's
+  `billing_period_start` and `billing_period_end` (RFC3339). This endpoint
+  rates only meters on the customer's active or trialing subscriptions. For a
+  canceled subscription it returns `422 customer_has_no_subscription` without
+  a window, and `meters: []` with one. In that case list the raw events:
+  `GET /v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER&from=$BILLING_PERIOD_START&to=$BILLING_PERIOD_END`
+  (`from` inclusive, `to` exclusive, like the period).
   Bill the difference with a one-off invoice: `POST /v1/invoices`, then
   `POST /v1/invoices/{id}/line-items`, then `POST /v1/invoices/{id}/finalize`.
   For a max or last meter, the late events may change nothing; check the
@@ -763,6 +778,13 @@ curl -sS "$API/v1/customers/$CUSTOMER/usage" -H "Authorization: Bearer $KEY" \
 # Which dimension values are unpriced (e.g. the model name):
 curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER" -H "Authorization: Bearer $KEY"
 ```
+
+Without `from` and `to`, the customer usage call covers the current cycle.
+A WARN at period close is about the period that just ended, so add
+`?from=<billing_period_start>&to=<billing_period_end>` of that invoice to
+see it. For a canceled subscription the call returns no meters; use the
+usage-events call with the same `from` and `to`. See
+[15](#15-invoice-timing-and-late-usage) for details.
 
 The customer page shows the same "unmatched usage — not billed" row. The
 `subscription_id` and `quantity` in the WARN tell you which invoice left

@@ -97,9 +97,11 @@ type StandardLoggingPayload struct {
 	CostBreakdown *CostBreakdown `json:"cost_breakdown,omitempty"`
 
 	// StartTime / EndTime are unix-seconds floats (LiteLLM's
-	// convention). Used as the event timestamp; falls back to
-	// time.Now if zero so a misconfigured proxy doesn't drop
-	// the event entirely.
+	// convention). EndTime is the event timestamp, else StartTime.
+	// When both are zero the mapper leaves the timestamp empty and
+	// the usage service stamps the customer's effective now: the
+	// test clock's frozen_time for a pinned customer, wall-clock
+	// otherwise. The event is not dropped (see mapper.go).
 	StartTime float64 `json:"startTime,omitempty"`
 	EndTime   float64 `json:"endTime,omitempty"`
 

@@ -307,8 +307,9 @@ type Invoice struct {
 	// Computed on read (never persisted); the raw half-open
 	// BillingPeriodStart/End above are unchanged (SDK contract). Empty for
 	// one-off / no-period invoices so callers omit the period row. Every
-	// surface (PDF, hosted, dashboard, list) shows this one value verbatim so
-	// it can't drift across the Go and TS runtimes.
+	// surface that shows the period (PDF, dashboard, list) shows this one value
+	// verbatim so it can't drift across the Go and TS runtimes. The hosted
+	// invoice page shows no period; its linked PDF does.
 	BillingPeriodDisplay  string     `json:"billing_period_display,omitempty"`
 	IssuedAt              *time.Time `json:"issued_at,omitempty"`
 	DueAt                 *time.Time `json:"due_at,omitempty"`

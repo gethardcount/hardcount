@@ -96,7 +96,10 @@ type CustomerUsageResult struct {
 	// chart. One entry per UTC day in [period.from, period.to), missing
 	// days zero-filled so chart consumers don't have to gap-fill. Each
 	// bucket carries per-meter quantities — the frontend stacks them or
-	// flattens depending on the meter cardinality. Sums match Meters[].
+	// flattens depending on the meter cardinality. Bucket quantities are raw
+	// SUM(quantity) per meter and include usage no pricing rule matched, so
+	// they need not add up to Meters[] totals: those use each meter's
+	// aggregation (max, last, …) and leave the unmatched row out.
 	Buckets []CustomerUsageBucket `json:"buckets"`
 }
 

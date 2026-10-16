@@ -76,7 +76,7 @@ Each event is claimed by at most one pricing rule: the highest-priority match (t
 
 **Usage that no rule claims has no price.** A new model name with no rule is the common case. If the meter has a default price (`PATCH /v1/meters/{id}` with `rating_rule_version_id`), that price bills it. If not, Velox builds and sends the invoice without that usage, as Lago, Metronome and Orb do. You see it in four places:
 
-- the "unmatched usage — not billed" row of the customer's usage (`GET /v1/customers/{id}/usage`, and the customer page);
+- the "unmatched usage — not billed" row of the customer's usage (`GET /v1/customers/{id}/usage`, and the customer page). The API call covers the current cycle unless you pass `from` and `to`;
 - the invoice preview warning, which gives the quantity;
 - the `velox_usage_unpriced_quantity_total{meter_id, mode}` counter (test-clock simulations are not counted);
 - a server log line when the invoice is built.

@@ -123,8 +123,10 @@ curl -fsS http://localhost/v1/customers \
 Velox is running. To see a full flow, from usage to an invoice, run the demo from the repository root:
 
 ```bash
-VELOX_BASE=http://localhost ./scripts/demo.sh vlx_secret_test_...
+VELOX_BASE=http://localhost VELOX_DASHBOARD_URL=http://localhost ./scripts/demo.sh vlx_secret_test_...
 ```
+
+`VELOX_DASHBOARD_URL` makes the dashboard links the demo prints point at this stack. Without it they point at `http://localhost:5173`, the development server.
 
 ## Day-to-day commands
 
