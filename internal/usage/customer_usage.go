@@ -76,15 +76,11 @@ func NewCustomerUsageService(
 
 // CustomerUsagePeriod is the input window. Both From and To zero → default
 // to the customer's current billing cycle. Partial bounds (one zero, one
-// non-zero) are rejected with a 400 by resolvePeriod.
+// non-zero) are rejected with a 422 by resolvePeriod.
 type CustomerUsagePeriod struct {
 	From time.Time
 	To   time.Time
 }
-
-// MaxCustomerUsageWindow caps explicit-window queries at one year so the
-// LATERAL JOIN cost stays bounded — see docs/design-customer-usage.md.
-const MaxCustomerUsageWindow = 365 * 24 * time.Hour
 
 // CustomerUsageResult is the response shape for GET /v1/customers/{id}/usage.
 // Snake-case JSON keys, struct-tag enforced. Slices default to non-nil so
@@ -302,9 +298,9 @@ func composeDailyBuckets(rows []DailyBucketRow, from, to time.Time) []CustomerUs
 
 // resolvePeriod decides the [from, to) window to query. Default is the
 // primary active subscription's current cycle. Explicit ?from=&to= must
-// be a fully-formed past-window with from < to and span ≤ 1 year.
+// have from < to and span at most one calendar year (to ≤ from + 1y).
 //
-// Returns a DomainError so the handler maps to 400 with the right code.
+// Returns a DomainError so the handler maps to 422 with the right code.
 func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription) (time.Time, time.Time, string, error) {
 	hasFrom := !period.From.IsZero()
 	hasTo := !period.To.IsZero()
@@ -317,7 +313,12 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription) (time
 		if !period.From.Before(period.To) {
 			return time.Time{}, time.Time{}, "", errs.Invalid("period", "from must be strictly before to")
 		}
-		if period.To.Sub(period.From) > MaxCustomerUsageWindow {
+		// Explicit windows are capped at one CALENDAR year (from + 1y), so
+		// the LATERAL JOIN cost stays bounded — see
+		// docs/design-customer-usage.md. Calendar, not 365×24h: a leap
+		// year (2028-01-01..2028-12-31) and a 366-day yearly billing cycle
+		// are both one year and must be accepted.
+		if period.To.After(period.From.AddDate(1, 0, 0)) {
 			return time.Time{}, time.Time{}, "", errs.Invalid("period", "window must be ≤ 1 year")
 		}
 		return period.From, period.To, "explicit", nil

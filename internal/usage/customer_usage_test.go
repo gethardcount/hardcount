@@ -139,6 +139,8 @@ func TestResolvePeriod(t *testing.T) {
 	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	jun1 := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	leap1 := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
+	leapDec31End := time.Date(2028, 12, 31, 23, 59, 59, 999_999_000, time.UTC)
 
 	subWithCycle := func(start, end time.Time) domain.Subscription {
 		return domain.Subscription{
@@ -196,6 +198,30 @@ func TestResolvePeriod(t *testing.T) {
 		{
 			name:        "window > 1 year → 400",
 			period:      CustomerUsagePeriod{From: apr1, To: jun1.AddDate(1, 0, 0)},
+			wantErrCode: "",
+		},
+		{
+			// A leap year is one year. Date-only ?from=2028-01-01&to=2028-12-31
+			// (to = last microsecond of Dec 31) spans 366 days minus 1µs, which
+			// the old 365×24h cap rejected.
+			name:       "leap calendar year 2028 is within the one-year cap",
+			period:     CustomerUsagePeriod{From: leap1, To: leapDec31End},
+			wantSource: "explicit",
+			wantFrom:   leap1,
+			wantTo:     leapDec31End,
+		},
+		{
+			// A yearly billing cycle passed explicitly (as /margin does) is
+			// exactly one calendar year: 366 days when it spans Feb 29.
+			name:       "366-day yearly cycle passed explicitly is accepted",
+			period:     CustomerUsagePeriod{From: leap1, To: leap1.AddDate(1, 0, 0)},
+			wantSource: "explicit",
+			wantFrom:   leap1,
+			wantTo:     leap1.AddDate(1, 0, 0),
+		},
+		{
+			name:        "one calendar year plus a microsecond → 422",
+			period:      CustomerUsagePeriod{From: leap1, To: leap1.AddDate(1, 0, 0).Add(time.Microsecond)},
 			wantErrCode: "",
 		},
 		{

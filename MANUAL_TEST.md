@@ -1792,6 +1792,8 @@ The credit-note refund leg: operator retry, async webhook reconciliation, proact
 
 - [~] `GET /v1/customers/{customer_id}/overview` → `customer_id`, `active_subscriptions`, `recent_invoices` (5 most recent), `outstanding_balance`. *(walked on a customer holding a live subscription: one `active` subscription returned, one recent invoice, and `outstanding_balance: {total_cents: 1234, unpaid_count: 1}` — the aggregate over ALL unpaid invoices, not just the five listed. **Box corrected 2026-08-05:** it used to claim a "credit balance". The handler returns exactly the four keys above and no credit field of any kind — outstanding balance is what the customer **owes**, the opposite direction from credit they **hold**, so the old wording named a field that has never existed here.)*
 - [~] `/subscriptions`, `/invoices` scoped to that customer. *(walked with a control rather than by inspection: both endpoints returned only that customer's rows, while the tenant-wide `/v1/invoices` list over the same window carried 99 invoices belonging to other customers — so the scoping is doing real filtering.)*
+- [x] **A leap calendar year is within the one-year usage window**: `GET /v1/customers/{id}/usage?from=2028-01-01&to=2028-12-31` → 200 with `period.source: "explicit"`; `?from=2028-01-01T00:00:00Z&to=2029-01-01T00:00:01Z` → 422 "window must be ≤ 1 year". auto: `TestResolvePeriod`
+  - Before: the cap was 365×24h, so the 2028 range and any 366-day yearly cycle (also via `/margin`) answered 422.
 
 ## FLOW CU4: Archive cascade
 
