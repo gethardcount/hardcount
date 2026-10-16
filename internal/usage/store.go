@@ -169,14 +169,23 @@ const AggregationMixed = "mixed"
 // meter's own aggregation, so that mode counts too unless a rule with an
 // empty dimension_match claims everything. last_during_period and
 // last_ever both read here as "last": the latest reading in the window.
+//
+// Billing aggregates each bucket on its own — one per rule, plus the
+// unclaimed events when no rule claims everything (AggregateByPricingRules)
+// — and adds the buckets up. A sum or a count adds up the same either way,
+// but a peak or a latest reading does not: two rules' peaks added together
+// are not the peak of all the events. So a max or last meter with more than
+// one bucket is AggregationMixed too.
 func BillingModes(meters []domain.Meter, rules []domain.MeterPricingRule) map[string]string {
 	ruleModes := map[string]map[string]bool{}
+	ruleCount := map[string]int{}
 	catchAll := map[string]bool{}
 	for _, r := range rules {
 		if ruleModes[r.MeterID] == nil {
 			ruleModes[r.MeterID] = map[string]bool{}
 		}
 		ruleModes[r.MeterID][ruleMode(r.AggregationMode)] = true
+		ruleCount[r.MeterID]++
 		if len(r.DimensionMatch) == 0 {
 			catchAll[r.MeterID] = true
 		}
@@ -190,12 +199,17 @@ func BillingModes(meters []domain.Meter, rules []domain.MeterPricingRule) map[st
 		if !catchAll[m.ID] {
 			set[meterMode(m.Aggregation)] = true
 		}
+		buckets := ruleCount[m.ID]
+		if !catchAll[m.ID] {
+			buckets++
+		}
+		out[m.ID] = AggregationMixed
 		if len(set) == 1 {
 			for mode := range set {
-				out[m.ID] = mode
+				if buckets == 1 || (mode != "max" && mode != "last") {
+					out[m.ID] = mode
+				}
 			}
-		} else {
-			out[m.ID] = AggregationMixed
 		}
 	}
 	return out

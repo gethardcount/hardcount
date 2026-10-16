@@ -20,6 +20,11 @@ func TestBillingModes(t *testing.T) {
 		{ID: "same_mode", Aggregation: "sum"},
 		{ID: "unclaimed_differs", Aggregation: "sum"},
 		{ID: "latest", Aggregation: "sum"},
+		{ID: "max_two_rules", Aggregation: "sum"},
+		{ID: "max_rule_plus_unclaimed", Aggregation: "max"},
+		{ID: "last_rule_plus_unclaimed", Aggregation: "last"},
+		{ID: "max_catch_all_only", Aggregation: "sum"},
+		{ID: "count_two_rules", Aggregation: "sum"},
 	}
 	rules := []domain.MeterPricingRule{
 		{MeterID: "rule_overrides", AggregationMode: domain.AggMax},
@@ -30,6 +35,16 @@ func TestBillingModes(t *testing.T) {
 		// No catch-all rule: unclaimed events bill under the meter's sum.
 		{MeterID: "unclaimed_differs", AggregationMode: domain.AggCount, DimensionMatch: map[string]any{"model": "a"}},
 		{MeterID: "latest", AggregationMode: domain.AggLastDuringPeriod},
+		// Peaks per bucket, added up, are not the peak: several buckets of a
+		// max or last meter are mixed even when every bucket uses that mode.
+		{MeterID: "max_two_rules", AggregationMode: domain.AggMax, DimensionMatch: map[string]any{"region": "eu"}},
+		{MeterID: "max_two_rules", AggregationMode: domain.AggMax},
+		{MeterID: "max_rule_plus_unclaimed", AggregationMode: domain.AggMax, DimensionMatch: map[string]any{"region": "eu"}},
+		{MeterID: "last_rule_plus_unclaimed", AggregationMode: domain.AggLastEver, DimensionMatch: map[string]any{"region": "eu"}},
+		{MeterID: "max_catch_all_only", AggregationMode: domain.AggMax},
+		// Counts add up across buckets, so several count rules stay "count".
+		{MeterID: "count_two_rules", AggregationMode: domain.AggCount, DimensionMatch: map[string]any{"model": "a"}},
+		{MeterID: "count_two_rules", AggregationMode: domain.AggCount},
 	}
 	want := map[string]string{
 		"no_rules":          "max",
@@ -38,6 +53,12 @@ func TestBillingModes(t *testing.T) {
 		"same_mode":         "sum",
 		"unclaimed_differs": AggregationMixed,
 		"latest":            "last",
+
+		"max_two_rules":            AggregationMixed,
+		"max_rule_plus_unclaimed":  AggregationMixed,
+		"last_rule_plus_unclaimed": AggregationMixed,
+		"max_catch_all_only":       "max",
+		"count_two_rules":          "count",
 	}
 	got := BillingModes(meters, rules)
 	for id, w := range want {
