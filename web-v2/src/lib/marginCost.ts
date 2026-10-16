@@ -5,8 +5,6 @@
 // The server now leaves margin_bps out in that case and says why
 // (costed_events, cost_rates_configured); this turns that into the one
 // state the card renders.
-//
-// Dependency-free so node --test can import it.
 
 export type MarginCostState =
   | 'measured'   // at least one event in the window carries a provider cost

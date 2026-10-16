@@ -3967,7 +3967,7 @@ type MarginReport struct {
 	CustomerId   string    `json:"customer_id"`
 	From         time.Time `json:"from"`
 
-	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, or when costed_events is 0 (no provider cost known, so no margin).
+	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
 	MarginBps int64 `json:"margin_bps,omitempty"`
 
 	// RevenueCents Total rated usage revenue in the window.

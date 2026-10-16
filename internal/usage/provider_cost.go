@@ -277,9 +277,11 @@ type MarginReport struct {
 	CostCurrency string `json:"cost_currency"`
 	// MarginBps = (revenue − cost) / revenue in basis points; omitted
 	// when revenue is 0, when revenue is not in CostCurrency (a margin
-	// across two currencies would be a made-up number), and when no event
-	// in the window carries a provider cost (CostedEvents == 0). Without a
-	// cost the formula reads 100%, a margin nobody measured.
+	// across two currencies would be a made-up number), when no event
+	// in the window carries a provider cost (CostedEvents == 0), and when
+	// some event's cost is unknown (UnresolvedEvents > 0). Without a cost
+	// the formula reads 100%; with part of the cost missing it reads too
+	// high. Either way it is a margin nobody measured.
 	MarginBps *int64 `json:"margin_bps,omitempty"`
 	// CostedEvents counts the window's events that carry a stamped provider
 	// cost (zero cost included). Zero means the cost side is unknown, not
@@ -385,7 +387,7 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		}
 	}
 
-	if rep.RevenueCents > 0 && rep.RevenueCurrency == rep.CostCurrency && rep.CostedEvents > 0 {
+	if rep.RevenueCents > 0 && rep.RevenueCurrency == rep.CostCurrency && rep.CostedEvents > 0 && rep.UnresolvedEvents == 0 {
 		costCents := decimal.NewFromInt(rep.CostMicros).Div(decimal.NewFromInt(10000)) // micros → cents (1e4)
 		revCents := decimal.NewFromInt(rep.RevenueCents)
 		bps := revCents.Sub(costCents).Div(revCents).Mul(decimal.NewFromInt(10000)).Round(0).IntPart()

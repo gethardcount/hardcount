@@ -82,16 +82,6 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ingest flat: %v", err)
 	}
-	// One costable-but-unmatched event → unresolved counter.
-	ts3 := cycleStart.Add(3 * time.Hour)
-	if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
-		CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(100),
-		Dimensions: map[string]any{"model": "gpt-4o", "provider": "openai", "token_type": "input"},
-		Timestamp:  &ts3,
-	}); err != nil {
-		t.Fatalf("ingest unmatched: %v", err)
-	}
-
 	rep, err := usage.NewMarginAssembler(usageStore, f.custUsage).Get(ctx, f.tenantID, custID, cycleStart, cycleEnd)
 	if err != nil {
 		t.Fatalf("margin: %v", err)
@@ -100,8 +90,8 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	if rep.CostMicros != 4000 {
 		t.Errorf("cost = %d micros, want 4000", rep.CostMicros)
 	}
-	if rep.UnresolvedEvents != 1 {
-		t.Errorf("unresolved = %d, want 1 (the gpt-4o event)", rep.UnresolvedEvents)
+	if rep.UnresolvedEvents != 0 {
+		t.Errorf("unresolved = %d, want 0 before the gpt-4o event", rep.UnresolvedEvents)
 	}
 	// Revenue: sonnet 1000×3c + others rated by the flat default. The
 	// load-bearing assertions are attribution shape, not exact totals:
@@ -130,6 +120,32 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	// → margin just under 100%: 9990-9999 bps.
 	if *rep.MarginBps < 9900 || *rep.MarginBps > 10000 {
 		t.Errorf("margin_bps = %d, want ~9990s (cost 0.4c on $30+)", *rep.MarginBps)
+	}
+
+	// One costable-but-unmatched event: it adds revenue but no cost, so a
+	// margin over all revenue would be too high. The report counts it as
+	// unresolved and gives no margin. Mutation-verify: drop the
+	// UnresolvedEvents == 0 check in MarginAssembler.Get → red.
+	ts3 := cycleStart.Add(3 * time.Hour)
+	if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
+		CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(100),
+		Dimensions: map[string]any{"model": "gpt-4o", "provider": "openai", "token_type": "input"},
+		Timestamp:  &ts3,
+	}); err != nil {
+		t.Fatalf("ingest unmatched: %v", err)
+	}
+	rep, err = usage.NewMarginAssembler(usageStore, f.custUsage).Get(ctx, f.tenantID, custID, cycleStart, cycleEnd)
+	if err != nil {
+		t.Fatalf("margin after unmatched: %v", err)
+	}
+	if rep.UnresolvedEvents != 1 {
+		t.Errorf("unresolved = %d, want 1 (the gpt-4o event)", rep.UnresolvedEvents)
+	}
+	if rep.CostMicros != 4000 || rep.CostedEvents == 0 {
+		t.Errorf("cost = %d micros over %d events, want 4000 over the sonnet event", rep.CostMicros, rep.CostedEvents)
+	}
+	if rep.MarginBps != nil {
+		t.Errorf("margin_bps = %d, want none: one event's cost is unknown", *rep.MarginBps)
 	}
 }
 

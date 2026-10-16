@@ -6627,7 +6627,7 @@ export interface components {
             cost_currency: string;
             /**
              * Format: int64
-             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, or when costed_events is 0 (no provider cost known, so no margin).
+             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
              */
             margin_bps?: number;
             by_model: {

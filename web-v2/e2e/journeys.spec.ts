@@ -403,8 +403,12 @@ test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => 
 })
 
 test('Margin shows no margin when no provider cost is known', async ({ page }) => {
-  // The suite configures no provider cost rates, so nothing carries a cost.
   // The card used to read "Provider cost $0.0000" here instead of a dash.
+  // The "not configured" sentence needs a workspace with no provider cost
+  // rate at all; check that first so a rate left in the database fails here
+  // with a reason, not later on a missing sentence.
+  const rates = await api<{ data: unknown[] }>('GET', '/provider-costs')
+  expect(rates.data, 'this test needs a workspace with no provider cost rates; delete them or use a fresh e2e database').toHaveLength(0)
   const { customer } = await subscribedCustomer()
   await page.goto(`/customers/${customer.id}`)
   const card = page.locator('[data-slot="card"]').filter({ has: page.getByText('Usage billing vs your provider costs') })
