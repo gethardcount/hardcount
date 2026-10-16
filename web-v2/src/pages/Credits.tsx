@@ -593,11 +593,15 @@ export default function CreditsPage() {
 
 // ---- Grant / Deduct Dialog ----
 
-function CreditDialog({ mode, customerId, customerName, customers, open, onOpenChange, onDone }: {
+// Exported for the customer page's Credits section (Grant credits there).
+// currency: the customer's currency when the caller knows it; the amount
+// label and the confirm use it instead of the workspace default.
+export function CreditDialog({ mode, customerId, customerName, customers, currency, open, onOpenChange, onDone }: {
   mode: 'grant' | 'deduct'
   customerId: string
   customerName: string
   customers?: Customer[]
+  currency?: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onDone: () => void
@@ -748,7 +752,7 @@ function CreditDialog({ mode, customerId, customerName, customers, open, onOpenC
                 name="amount"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Amount ({getCurrencySymbol()})</FormLabel>
+                    <FormLabel>Amount ({getCurrencySymbol(currency).trim()})</FormLabel>
                     <FormControl>
                       <Input type="number" step="0.01" min="0.01" max={999999.99} placeholder="50.00" {...field} />
                     </FormControl>
@@ -841,7 +845,7 @@ function CreditDialog({ mode, customerId, customerName, customers, open, onOpenC
           <AlertDialogHeader>
             <AlertDialogTitle>{isDeduct ? 'Confirm Deduction' : 'Confirm Credit Grant'}</AlertDialogTitle>
             <AlertDialogDescription>
-              {isDeduct ? 'Deduct' : 'Grant'} {formatCents(confirmCents)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
+              {isDeduct ? 'Deduct' : 'Grant'} {formatCents(confirmCents, currency)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

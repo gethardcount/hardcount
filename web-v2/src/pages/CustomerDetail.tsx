@@ -29,6 +29,8 @@ import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
+import { creditTotalsLine, invoiceCreditNote } from '@/lib/customerCredits'
+import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
 import { statusBadgeVariant } from '@/lib/status'
 import { invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -36,10 +38,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -225,14 +224,6 @@ export default function CustomerDetailPage() {
   // The customer's "now" (its test clock when pinned), for Past due on the
   // recent-invoice badges. Subscriptions inherit the customer's pin (ADR-027).
   const invoiceNow = useEffectiveNow(customer?.test_clock_id)
-
-  // Commit/promo burndown (2026-07-06): per-grant remaining + kind
-  // subtotals — the DP's primary finance question on hybrid commit+usage.
-  const { data: creditGrants } = useQuery({
-    queryKey: ['credit-grants', id],
-    queryFn: () => api.listCreditGrants(id!),
-    enabled: !!id,
-  })
 
   const { data: overview } = useQuery({
     queryKey: ['customer-overview', id],
@@ -609,12 +600,8 @@ export default function CustomerDetailPage() {
                 </p>
                 {/* Kind split — money-backed commit liability must not read
                     as one number with free promo credits. */}
-                {creditGrants && (creditGrants.commit_remaining_cents > 0 || creditGrants.promotional_remaining_cents > 0) && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {creditGrants.commit_remaining_cents > 0 && <>Commit {creditMoney(creditGrants.commit_remaining_cents)}</>}
-                    {creditGrants.commit_remaining_cents > 0 && creditGrants.promotional_remaining_cents > 0 && ' · '}
-                    {creditGrants.promotional_remaining_cents > 0 && <>Promo {creditMoney(creditGrants.promotional_remaining_cents)}</>}
-                  </p>
+                {balanceData && creditCurrency && creditTotalsLine(balanceData, creditCurrency) && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{creditTotalsLine(balanceData, creditCurrency)}</p>
                 )}
               </Link>
             )}
@@ -637,6 +624,9 @@ export default function CustomerDetailPage() {
                     · {overview?.outstanding_balance?.unpaid_count} invoice{overview?.outstanding_balance?.unpaid_count === 1 ? '' : 's'}
                   </span>
                 </p>
+                {overview?.recent_invoices.some(inv => (inv.credits_applied_cents ?? 0) > 0) && (
+                  <p className="text-xs text-muted-foreground mt-0.5">Amount due after credit applied</p>
+                )}
               </Link>
             )}
             <div className="flex-1 min-w-0 px-6 py-4">
@@ -890,50 +880,18 @@ export default function CustomerDetailPage() {
         <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
       </div>
 
-      {/* Commit / credit-grant burndown — per-grant drawn vs remaining
-          (Metronome/Orb surface commitment burndown on the customer view;
-          this is the hybrid commit+usage DP's primary finance question). */}
-      {creditGrants && creditGrants.grants.length > 0 && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Credit grants</CardTitle>
-            <CardDescription>
-              Drawdown per grant. Commit grants are money-backed (funded by a
-              paid commit invoice); promotional grants burn first.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Grant</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead className="text-right">Granted</TableHead>
-                  <TableHead className="text-right">Drawn</TableHead>
-                  <TableHead className="text-right">Remaining</TableHead>
-                  <TableHead>Expires</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {creditGrants.grants.map(g => (
-                  <TableRow key={g.id}>
-                    <TableCell className="text-sm max-w-xs truncate" title={g.description}>{g.description}</TableCell>
-                    <TableCell>
-                      {g.grant_kind === 'commit' ? <Badge>Commit</Badge>
-                        : g.grant_kind === 'promotional' ? <Badge variant="secondary">Promo</Badge>
-                        : <Badge variant="outline">Credit</Badge>}
-                    </TableCell>
-                    <TableCell className="text-sm text-right">{creditMoney(g.amount_cents)}</TableCell>
-                    <TableCell className="text-sm text-right">{creditMoney(g.consumed_cents)}</TableCell>
-                    <TableCell className="text-sm text-right font-medium">{creditMoney(g.remaining_cents)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{g.expires_at ? formatDate(g.expires_at) : 'never'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+      {/* Credits: balance with granted/used/expired, every grant including
+          used-up ones, the latest ledger entries, and Grant credits. It waits
+          for the customer's currency, so no figure shows in the wrong one. */}
+      {creditCurrency && <div className="mt-6">
+        <CustomerCreditsSection
+          customerId={id!}
+          customerName={customer.display_name}
+          currency={creditCurrency}
+          testClockId={customer.test_clock_id}
+          readOnly={isArchived}
+        />
+      </div>}
 
       {/* Public cost-dashboard token — ADR-031 / MANUAL_TEST CU8. Operator
           rotates to mint a shareable URL the customer can embed (iframe
@@ -1142,7 +1100,12 @@ export default function CustomerDetailPage() {
                   <Link key={inv.id} to={`/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-accent/50 transition-colors">
                     <div>
                       <p className="text-sm font-medium text-foreground">{inv.invoice_number}</p>
-                      <p className="text-xs text-muted-foreground">{formatDate(inv.created_at)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(inv.created_at)}
+                        {/* Why amount due is below the total: Outstanding
+                            sums amount due, after credit. */}
+                        {invoiceCreditNote(inv) && <> · {invoiceCreditNote(inv)}</>}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
                       <StatusBadge status={invoiceStatus(inv, invoiceNow)} />
