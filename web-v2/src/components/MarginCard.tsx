@@ -29,7 +29,7 @@ import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@
 // billing period, so its total disagreed with the invoice on the same page.
 // currency: the customer's currency (useCustomerCurrency). The report names
 // no revenue currency when the window has no revenue, and that $0 must still
-// be in the customer's currency.
+// be in the customer's currency. Undefined while it loads: "—" until then.
 export function MarginCard({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
   const [preset, setPreset] = useState<MarginPreset>(DEFAULT_MARGIN_PRESET)
   const [customFrom, setCustomFrom] = useState('')
@@ -91,7 +91,8 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
   const costCurrency = rep?.cost_currency || 'USD'
   const mixedRevenue = !!rep && !revenueCurrency && rep.revenue_cents > 0
   const currencyMismatch = !!rep && !!revenueCurrency && revenueCurrency !== costCurrency && rep.revenue_cents > 0
-  const billed = (cents: number) => (mixedRevenue ? '—' : formatCents(cents, revenueCurrency || currency))
+  const shownCurrency = revenueCurrency || currency
+  const billed = (cents: number) => (mixedRevenue || !shownCurrency ? '—' : formatCents(cents, shownCurrency))
   // micros (1e-6 of the currency unit) → display amount.
   const cost = (micros: number) =>
     `${getCurrencySymbol(costCurrency)}${(micros / 1_000_000).toFixed(micros >= 100_000 ? 2 : 4)}`

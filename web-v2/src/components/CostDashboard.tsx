@@ -51,7 +51,8 @@ import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-re
 // last-invoice "X ago", and activity window all track simulation time. Omitted /
 // undefined for wall-clock customers, which fall back to Date.now() unchanged.
 // currency: the customer's currency (useCustomerCurrency), used for a figure
-// the server sent without one, such as an empty window's $0.
+// the server sent without one, such as an empty window's $0. Undefined while
+// it loads, and such a figure reads "—" until then.
 export function CostDashboard({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
   return (
     <div className="space-y-6">
@@ -405,7 +406,8 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
   // them would mix currencies. No "N events" line: total_quantity is billed
   // quantity in each meter's own unit, not an event count; the meter rows
   // below show each quantity with its unit.
-  const totalText = data ? (amountsByCurrencyText(data.totals) ?? formatCents(0, data.totals[0]?.currency ?? currency)) : ''
+  const zeroCurrency = data?.totals[0]?.currency ?? currency
+  const totalText = data ? (amountsByCurrencyText(data.totals) ?? (zeroCurrency ? formatCents(0, zeroCurrency) : '—')) : ''
 
   return (
     <section>

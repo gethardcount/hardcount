@@ -383,6 +383,21 @@ test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => 
   const plan = await createPlan('EUR')
   const customer = await createCustomer()
   await createSubscription(customer.id, plan.id)
+
+  // Hold the plan list back: until the page knows the currency it must not
+  // show one, and New invoice must wait, or the dialog opens in USD.
+  let release!: () => void
+  const held = new Promise<void>(r => { release = r })
+  await page.route(/\/v1\/plans(\?|$)/, async route => { await held; await route.continue() })
   await page.goto(`/customers/${customer.id}`)
-  await expect(page.getByRole('link', { name: /Credit Balance/ })).toContainText('€0.00')
+  const balance = page.getByRole('link', { name: /Credit Balance/ })
+  const newInvoice = page.getByRole('button', { name: 'New invoice' })
+  await expect(newInvoice).toBeDisabled()
+  await expect(balance).toContainText('—')
+  await expect(balance).not.toContainText('$')
+  release()
+
+  await expect(balance).toContainText('€0.00')
+  await newInvoice.click()
+  await expect(page.getByRole('dialog').getByLabel('Currency')).toContainText('EUR')
 })

@@ -5,7 +5,7 @@
 // card fell back to the workspace default (USD) instead of the plan.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { customerCurrencyNote, resolveCustomerCurrency } from '../src/lib/customerCurrency.ts'
+import { resolveCustomerCurrency } from '../src/lib/customerCurrency.ts'
 
 const plans = [
   { id: 'pln_eur', currency: 'EUR' },
@@ -22,18 +22,29 @@ test('a customer on a EUR plan with no profile and no invoice is shown in EUR', 
     workspaceDefault: 'USD',
   })
   assert.deepEqual(c, { currency: 'EUR', source: 'subscription' })
-  assert.equal(customerCurrencyNote(c), 'from the subscription plan')
 })
 
-test('the live plan wins over the billing profile and the invoices', () => {
+test('the billing profile wins over the live plan, as on the invoice', () => {
+  // engine.invoiceCurrency draws the invoice in the profile's currency
+  // first (ADR-100), so the page must too.
   const c = resolveCustomerCurrency({
     subscriptions: [{ status: 'trialing', items: [{ plan_id: 'pln_eur' }] }],
     plans,
     billingProfileCurrency: 'usd',
+    invoices: [{ currency: 'GBP', created_at: '2026-10-01T00:00:00Z' }],
+    workspaceDefault: 'CAD',
+  })
+  assert.deepEqual(c, { currency: 'USD', source: 'billing_profile' })
+})
+
+test('the live plan wins over the invoices', () => {
+  const c = resolveCustomerCurrency({
+    subscriptions: [{ status: 'active', items: [{ plan_id: 'pln_eur' }] }],
+    plans,
     invoices: [{ currency: 'USD', created_at: '2026-10-01T00:00:00Z' }],
     workspaceDefault: 'USD',
   })
-  assert.equal(c.currency, 'EUR')
+  assert.deepEqual(c, { currency: 'EUR', source: 'subscription' })
 })
 
 test('a canceled subscription does not set the currency', () => {
@@ -81,8 +92,8 @@ test('a plan the page has not loaded falls through instead of guessing', () => {
   const c = resolveCustomerCurrency({
     subscriptions: [{ status: 'active', items: [{ plan_id: 'pln_unknown' }] }],
     plans,
-    billingProfileCurrency: 'eur',
+    invoices: [{ currency: 'eur', created_at: '2026-10-01T00:00:00Z' }],
     workspaceDefault: 'USD',
   })
-  assert.equal(c.source, 'billing_profile')
+  assert.equal(c.source, 'invoice')
 })

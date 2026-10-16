@@ -16,9 +16,11 @@ export function useCustomerSubscriptions(customerId: string | undefined) {
 
 // useCustomerCurrency is resolveCustomerCurrency fed from the server: the
 // customer's subscriptions, every plan (an archived plan can still bill a live
-// subscription), the billing profile and the recent invoices. Until those
-// load it answers with the workspace default and `ready: false`.
-export function useCustomerCurrency(customerId: string | undefined): CustomerCurrency & { ready: boolean } {
+// subscription), the billing profile and the recent invoices. It is undefined
+// until all of them load: answering early with the workspace default showed a
+// EUR customer's figures in dollars for a moment, and a New invoice dialog
+// opened in that moment kept USD.
+export function useCustomerCurrency(customerId: string | undefined): CustomerCurrency | undefined {
   const subs = useCustomerSubscriptions(customerId)
   const plans = useQuery({
     queryKey: ['plans'],
@@ -37,13 +39,12 @@ export function useCustomerCurrency(customerId: string | undefined): CustomerCur
     queryFn: () => api.customerOverview(customerId!),
     enabled: !!customerId,
   })
-  const resolved = resolveCustomerCurrency({
+  if (subs.isLoading || plans.isLoading || profile.isLoading || overview.isLoading) return undefined
+  return resolveCustomerCurrency({
     subscriptions: subs.data?.data,
     plans: plans.data?.data,
     billingProfileCurrency: profile.data?.currency,
     invoices: overview.data?.recent_invoices,
     workspaceDefault: getActiveCurrency(),
   })
-  const ready = !subs.isLoading && !plans.isLoading && !profile.isLoading && !overview.isLoading
-  return { ...resolved, ready }
 }

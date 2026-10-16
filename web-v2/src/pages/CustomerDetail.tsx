@@ -266,8 +266,10 @@ export default function CustomerDetailPage() {
   // the live subscription's plan, then the billing profile, then the latest
   // invoice, then the workspace default (lib/customerCurrency). Credits have
   // no currency either; they are drawn 1:1 against the invoice (ADR-100).
+  // Undefined while it loads: figures read "—" rather than a wrong currency.
   const customerCurrency = useCustomerCurrency(id)
-  const creditCurrency = customerCurrency.currency
+  const creditCurrency = customerCurrency?.currency
+  const creditMoney = (cents: number) => (creditCurrency ? formatCents(cents, creditCurrency) : '—')
 
   const { data: metersData } = useQuery({
     queryKey: ['meters'],
@@ -479,7 +481,7 @@ export default function CustomerDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {!isArchived && (
-            <Button size="sm" onClick={() => setShowNewInvoice(true)}>
+            <Button size="sm" disabled={!customerCurrency} onClick={() => setShowNewInvoice(true)}>
               <FilePlus2 size={14} className="mr-1.5" />
               New invoice
             </Button>
@@ -601,15 +603,15 @@ export default function CustomerDetailPage() {
               <Link to={`/credits?customer=${id}`} className="flex-1 min-w-0 px-6 py-4 hover:bg-accent/50 transition-colors">
                 <p className="text-sm text-muted-foreground">Credit Balance</p>
                 <p className={cn('text-sm font-medium mt-1', (balance ?? 0) > 0 ? 'text-emerald-600' : 'text-foreground')}>
-                  {balance === undefined ? '—' : formatCents(balance, creditCurrency)}
+                  {balance === undefined ? '—' : creditMoney(balance)}
                 </p>
                 {/* Kind split — money-backed commit liability must not read
                     as one number with free promo credits. */}
                 {creditGrants && (creditGrants.commit_remaining_cents > 0 || creditGrants.promotional_remaining_cents > 0) && (
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {creditGrants.commit_remaining_cents > 0 && <>Commit {formatCents(creditGrants.commit_remaining_cents, creditCurrency)}</>}
+                    {creditGrants.commit_remaining_cents > 0 && <>Commit {creditMoney(creditGrants.commit_remaining_cents)}</>}
                     {creditGrants.commit_remaining_cents > 0 && creditGrants.promotional_remaining_cents > 0 && ' · '}
-                    {creditGrants.promotional_remaining_cents > 0 && <>Promo {formatCents(creditGrants.promotional_remaining_cents, creditCurrency)}</>}
+                    {creditGrants.promotional_remaining_cents > 0 && <>Promo {creditMoney(creditGrants.promotional_remaining_cents)}</>}
                   </p>
                 )}
               </Link>
@@ -877,13 +879,13 @@ export default function CustomerDetailPage() {
           customerTestClockId pins its relative-time/window surfaces to the
           customer's simulated clock (ADR-027) instead of wall-clock. */}
       <div className="mt-6">
-        <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency.currency} />
+        <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
       </div>
 
       {/* Margin — rated usage revenue vs provider COGS (ADR-079).
           Operator-only; never rendered on customer-facing surfaces. */}
       <div className="mt-6">
-        <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency.currency} />
+        <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
       </div>
 
       {/* Commit / credit-grant burndown — per-grant drawn vs remaining
@@ -919,9 +921,9 @@ export default function CustomerDetailPage() {
                         : g.grant_kind === 'promotional' ? <Badge variant="secondary">Promo</Badge>
                         : <Badge variant="outline">Credit</Badge>}
                     </TableCell>
-                    <TableCell className="text-sm text-right">{formatCents(g.amount_cents, creditCurrency)}</TableCell>
-                    <TableCell className="text-sm text-right">{formatCents(g.consumed_cents, creditCurrency)}</TableCell>
-                    <TableCell className="text-sm text-right font-medium">{formatCents(g.remaining_cents, creditCurrency)}</TableCell>
+                    <TableCell className="text-sm text-right">{creditMoney(g.amount_cents)}</TableCell>
+                    <TableCell className="text-sm text-right">{creditMoney(g.consumed_cents)}</TableCell>
+                    <TableCell className="text-sm text-right font-medium">{creditMoney(g.remaining_cents)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{g.expires_at ? formatDate(g.expires_at) : 'never'}</TableCell>
                   </TableRow>
                 ))}
@@ -1293,7 +1295,7 @@ export default function CustomerDetailPage() {
           create a draft invoice, attach line items, optionally finalize+send.
           Backed by POST /v1/invoices, POST /v1/invoices/{id}/line-items,
           POST /v1/invoices/{id}/finalize, POST /v1/invoices/{id}/send. */}
-      {showNewInvoice && id && customer && (
+      {showNewInvoice && id && customer && customerCurrency && (
         <NewInvoiceDialog
           customerId={id}
           customer={customer}
