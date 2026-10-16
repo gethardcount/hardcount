@@ -3,6 +3,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, formatCents } from '@/lib/api'
+import { fillRevenueBuckets } from '@/lib/revenueChart'
 import { outstandingText } from '@/lib/money'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
@@ -45,7 +46,7 @@ export default function DashboardPage() {
     queryKey: ['dashboard-overview', period],
     queryFn: () => api.getAnalyticsOverview(period),
   })
-  const { data: chartRes, isLoading: chartLoading } = useQuery({
+  const { data: chartRes, isLoading: chartLoading, dataUpdatedAt: chartFetchedAt } = useQuery({
     queryKey: ['dashboard-chart', period],
     queryFn: () => api.getRevenueChart(period),
   })
@@ -83,6 +84,15 @@ export default function DashboardPage() {
   const simulatedNote = showSimulatedTotalsNote(user?.livemode ?? false, clocks?.data?.length ?? 0)
 
   const chartData = useMemo(() => chartRes?.data ?? [], [chartRes])
+  // The server returns only buckets with revenue; the chart plots every bucket
+  // in the window, zero where nothing was paid, so a gap reads as a gap. The
+  // window is anchored on the fetch time, the closest client-side match to the
+  // server's time.Now(). The MRR card's sparkline below still reads the raw
+  // points; it is out of scope here.
+  const chartSeries = useMemo(
+    () => fillRevenueBuckets(chartData, chartRes?.period ?? period, chartFetchedAt),
+    [chartData, chartRes?.period, period, chartFetchedAt],
+  )
 
   const sparklineRevenue = useMemo(
     () => chartData.map(d => d.revenue_cents).slice(-12),
@@ -244,7 +254,7 @@ export default function DashboardPage() {
                 {chartData.length > 0 ? (
                   <div role="img" aria-label={`Revenue trend over the last ${PERIOD_LABELS[period].toLowerCase()}`}>
                   <ResponsiveContainer width="100%" height={220}>
-                    <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                    <AreaChart data={chartSeries} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
                       <defs>
                         <linearGradient id="dashRev" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor={theme.primary} stopOpacity={0.18} />
