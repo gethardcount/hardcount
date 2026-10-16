@@ -289,9 +289,10 @@ type Invoice struct {
 	// civil-midnight in — copied from the subscription's snapshot (ADR-077) at
 	// invoice creation and immutable thereafter. BillingPeriodDisplay is computed
 	// in THIS zone, not the live tenant TZ, so the inclusive last-day step lands
-	// on the right civil date even after a tenant changes its timezone. Empty for
-	// ad-hoc/manual invoices with no owning subscription (and legacy rows); the
-	// read path then falls back to the live tenant TZ, preserving prior behavior.
+	// on the right civil date even after a tenant changes its timezone. Manual
+	// invoices stamp the org zone at create too (2026-10-16). Empty only on
+	// legacy rows (engine rows before migration 0134, manual rows before that
+	// fix); the read path then falls back to the live tenant TZ.
 	BillingTimezone string `json:"billing_timezone,omitempty"`
 	// BillToSnapshot and SupplierSnapshot are the buyer and seller details
 	// this invoice was issued with (ADR-109), written in the transaction that

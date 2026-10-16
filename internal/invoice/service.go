@@ -559,11 +559,27 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		return domain.Invoice{}, err
 	}
 
+	// Read tenant settings once, for the default Net terms and the billing
+	// timezone. A read failure fails the create rather than guessing Net 30
+	// (P24) or stamping a wrong zone, and happens before an invoice number is
+	// spent. No reader wired (tests) means Net 30 and UTC, as in the engine.
+	var ts domain.TenantSettings
+	if s.settings != nil {
+		ts, err = s.settings.Get(ctx, tenantID)
+		if err != nil {
+			return domain.Invoice{}, fmt.Errorf("read tenant settings: %w", err)
+		}
+	}
+	// The org billing timezone is stamped on the invoice at create, as every
+	// engine writer does (ADR-077). Without it the PDF, hosted page and
+	// dunning email render Issued/Due/Paid dates in UTC while the period and
+	// the dashboard use the tenant zone, so the two disagree near midnight.
+	billingLoc := domain.LoadLocationOrUTC(ts.Timezone)
+
 	// Resolve net payment terms. An explicit value (including 0 = "Due on
 	// receipt") is honored verbatim; a negative value is clamped to 0. When
 	// omitted, the tenant's configured terms apply, 0 included, as on every
-	// engine invoice. A settings read failure fails the create rather than
-	// guessing Net 30 (P24), and happens before an invoice number is spent.
+	// engine invoice.
 	netDays := 30
 	switch {
 	case input.NetPaymentTermDays != nil:
@@ -572,10 +588,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 			netDays = 0
 		}
 	case s.settings != nil:
-		ts, err := s.settings.Get(ctx, tenantID)
-		if err != nil {
-			return domain.Invoice{}, fmt.Errorf("read tenant net payment terms: %w", err)
-		}
 		if ts.NetPaymentTerms < 0 {
 			return domain.Invoice{}, fmt.Errorf("tenant net payment terms is negative (%d)", ts.NetPaymentTerms)
 		}
@@ -608,6 +620,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	inv := domain.Invoice{
 		CustomerID:         input.CustomerID,
 		SubscriptionID:     input.SubscriptionID,
+		BillingTimezone:    billingLoc.String(),
 		InvoiceNumber:      invoiceNumber,
 		Status:             domain.InvoiceDraft,
 		PaymentStatus:      domain.PaymentPending,

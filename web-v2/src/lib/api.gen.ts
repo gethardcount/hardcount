@@ -6444,7 +6444,7 @@ export interface components {
             billing_period_end: string;
             /** @description Human period string with the inclusive last covered day ("Jun 1, 2028 – Jun 30, 2028"), date-only in the invoice's billing timezone (ADR-058 / ADR-077). Computed on read; the raw billing_period_start/end stay half-open. Empty/omitted for one-off invoices with no period. */
             billing_period_display?: string;
-            /** @description IANA timezone the period boundaries are anchored in — the org billing timezone resolved and denormalized onto the invoice at issue (ADR-077). billing_period_display is rendered in this zone, so an issued invoice's dates stay fixed even if the org later changes its timezone. Empty for ad-hoc/legacy invoices. */
+            /** @description IANA timezone the period boundaries are anchored in — the org billing timezone resolved and denormalized onto the invoice at issue (ADR-077). billing_period_display is rendered in this zone, so an issued invoice's dates stay fixed even if the org later changes its timezone. Empty only on legacy invoices created before the zone was stamped (cycle invoices before migration 0134, manual invoices before 2026-10-16). */
             billing_timezone?: string;
             /**
              * @description The buyer details this invoice was issued with (ADR-109), copied
