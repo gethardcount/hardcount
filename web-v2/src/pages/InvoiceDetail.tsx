@@ -8,8 +8,8 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { invoiceLineRate } from '@/lib/priceDisplay'
-import { api, downloadPDF, formatCents, formatRate, formatDate, formatDateTime, formatTaxRate, getCurrencySymbol, type TenantSettings, type DunningRun, type TimelineEvent, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
-import { formatCivilPeriod, formatYMDInTZ, inclusiveEndCivilYMD } from '@/lib/dates'
+import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type TenantSettings, type DunningRun, type TimelineEvent, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
+import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, inclusiveEndCivilYMD } from '@/lib/dates'
 import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
 import { amountInputToCents } from '@/lib/money'
@@ -1085,10 +1085,10 @@ export default function InvoiceDetailPage() {
                 prefixing the date with the same word is redundant.
                 "Paid Paid May 2, 2026" → "Paid · May 2, 2026". */}
             {invoice.status === 'voided' && invoice.voided_at && (
-              <span className="text-xs text-muted-foreground ml-1">{formatDate(invoice.voided_at)}</span>
+              <span className="text-xs text-muted-foreground ml-1">{formatInvoiceDate(invoice.voided_at, invoice.billing_timezone)}</span>
             )}
             {invoice.status === 'paid' && invoice.paid_at && (
-              <span className="text-xs text-muted-foreground ml-1">{formatDate(invoice.paid_at)}</span>
+              <span className="text-xs text-muted-foreground ml-1">{formatInvoiceDate(invoice.paid_at, invoice.billing_timezone)}</span>
             )}
           </div>
 
@@ -1150,12 +1150,12 @@ export default function InvoiceDetailPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Issued</p>
-              <p className="text-sm text-foreground">{invoice.issued_at ? formatDate(invoice.issued_at) : formatDate(invoice.created_at)}</p>
+              <p className="text-sm text-foreground">{formatInvoiceDate(invoice.issued_at || invoice.created_at, invoice.billing_timezone)}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Due</p>
               <div className="flex items-center gap-2">
-                <p className="text-sm text-foreground">{invoice.due_at ? formatDate(invoice.due_at) : '\u2014'}</p>
+                <p className="text-sm text-foreground">{invoice.due_at ? formatInvoiceDate(invoice.due_at, invoice.billing_timezone) : '\u2014'}</p>
                 {/* Due-date countdown only applies while the invoice
                     is open (finalized). status='paid' or 'voided'
                     are terminal — countdown becomes meaningless. The

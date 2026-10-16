@@ -72,6 +72,19 @@ export function formatExpiryHintInTZ(iso: string, timezone?: string): string {
   return formatInTimeZone(new Date(iso), tz, "MMMM d, yyyy 'at' h:mm a (zzz)")
 }
 
+// formatInvoiceDate renders an instant on an invoice document (issued, due,
+// paid, voided) as "MMM d, yyyy" in the invoice's own billing timezone, the
+// zone the org had when the invoice was issued (ADR-077). The PDF and the
+// hosted invoice page print these dates in that zone, so the dashboard must
+// too: after the org re-zones, the live tenant zone can name a different day
+// (due 2027-07-10T18:30Z is Jul 11 in Asia/Kolkata, Jul 10 in New York).
+// An empty billing timezone (legacy or ad-hoc invoices) falls back to the
+// tenant zone. `billingTimezone` is required so a caller must choose it.
+export function formatInvoiceDate(iso: string, billingTimezone: string | null | undefined): string {
+  const tz = billingTimezone || tenantTZ()
+  return formatInTimeZone(new Date(iso), tz, 'MMM d, yyyy')
+}
+
 // formatYMD returns a yyyy-MM-dd string from a Date object — used
 // when we need a date-only string for picker round-trips. Just a
 // thin wrapper over date-fns format() so callers don't import

@@ -5,7 +5,7 @@
 // built-in runner (the @/lib/api import is stubbed via tests/support).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate } from '../src/lib/dates.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
   // 2026-05-05 00:00 IST (UTC+5:30) = the previous UTC evening.
@@ -50,4 +50,20 @@ test('isAfterCivilToday uses the tenant date, not the UTC date', () => {
   assert.equal(isAfterCivilToday('2026-10-16', nowMs, 'America/New_York'), false, 'today is not')
   // East of UTC: 2026-10-16T20:00Z is Oct 17 01:30 in Kolkata, so Oct 17 is today.
   assert.equal(isAfterCivilToday('2026-10-17', Date.parse('2026-10-16T20:00:00Z'), 'Asia/Kolkata'), false)
+})
+
+// Backs MANUAL_TEST FLOW TZ1 (dashboard invoice dates): issued/due/paid/voided dates
+// render in the invoice's billing timezone, the zone the PDF and hosted page
+// use, not the live tenant zone. The test stub's tenant zone is unset, so the
+// fallback here is 'UTC'.
+test('formatInvoiceDate uses the invoice billing timezone, not the tenant zone', () => {
+  // Issued under Asia/Kolkata: due 2027-07-10T18:30Z is Jul 11 there (the PDF
+  // date), even if the org has since moved to America/New_York (Jul 10).
+  assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', 'Asia/Kolkata'), 'Jul 11, 2027')
+  assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', 'America/New_York'), 'Jul 10, 2027')
+})
+
+test('formatInvoiceDate falls back to the tenant zone when the invoice has none', () => {
+  assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', ''), 'Jul 10, 2027')
+  assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', undefined), 'Jul 10, 2027')
 })
