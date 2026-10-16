@@ -2616,7 +2616,7 @@ export interface paths {
                     from?: string;
                     /**
                      * @description Upper bound on created_at, inclusive. RFC3339 instant or
-                     *     bare YYYY-MM-DD (anchored at 23:59:59Z).
+                     *     bare YYYY-MM-DD (anchored at 23:59:59.999999Z, the end of that day).
                      */
                     to?: string;
                     /**
@@ -8363,7 +8363,7 @@ export interface operations {
             query?: {
                 /** @description Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC). */
                 from?: string;
-                /** @description End of the window. RFC 3339 instant or `YYYY-MM-DD` (23:59:59 UTC that day). */
+                /** @description End of the window, exclusive. RFC 3339 instant or `YYYY-MM-DD` (23:59:59.999999 UTC that day, so the day is included). */
                 to?: string;
             };
             header?: never;
@@ -10553,7 +10553,7 @@ export interface operations {
             query?: {
                 /** @description Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
                 from?: string;
-                /** @description Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59 UTC that day. */
+                /** @description Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
                 to?: string;
             };
             header?: never;
@@ -13405,7 +13405,7 @@ export interface operations {
                 actor_id?: string;
                 /** @description Lower bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (start of day, UTC). */
                 date_from?: string;
-                /** @description Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59 UTC). */
+                /** @description Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59.999999 UTC, the end of that day). */
                 date_to?: string;
                 /** @description Only entries made inside this test clock's simulation. Works for deleted clocks too. */
                 test_clock_id?: string;

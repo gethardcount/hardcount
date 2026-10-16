@@ -25,7 +25,7 @@ search?: string;
 from?: string;
 /**
  * Upper bound on created_at, inclusive. RFC3339 instant or
- * bare YYYY-MM-DD (anchored at 23:59:59Z).
+ * bare YYYY-MM-DD (anchored at 23:59:59.999999Z, the end of that day).
  */
 to?: string;
 /**

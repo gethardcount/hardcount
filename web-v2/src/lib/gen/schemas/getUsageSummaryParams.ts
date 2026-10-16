@@ -14,7 +14,7 @@ export type GetUsageSummaryParams = {
  */
 from?: string;
 /**
- * Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59 UTC that day.
+ * Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
  */
 to?: string;
 };

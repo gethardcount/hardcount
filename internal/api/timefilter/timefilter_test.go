@@ -114,3 +114,32 @@ func TestParseRange_CustomParamNames(t *testing.T) {
 		t.Errorf("date_to: got %q", got)
 	}
 }
+
+// A date-only `to` must reach the last MICROSECOND of the day, the
+// finest instant Postgres timestamptz stores. The old 23:59:59.000 bound
+// dropped every row stamped 23:59:59.000001–.999999 from the inclusive
+// consumers (invoice list, CSV exports, audit log). RFC3339 formatting
+// hides sub-second parts, so this asserts the nanosecond field directly.
+func TestParseRange_DateOnlyToIsLastMicrosecondOfDay(t *testing.T) {
+	r := httptest.NewRequest("GET", "/x?from=2026-10-01&to=2026-10-31", nil)
+	_, to, err := ParseRange(r, "from", "to")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := time.Date(2026, 10, 31, 23, 59, 59, 999_999_000, time.UTC)
+	if !to.Equal(want) {
+		t.Fatalf("to: got %s want %s", to.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano))
+	}
+	if to.Nanosecond() != 999_999_000 {
+		t.Fatalf("to nanoseconds: got %d want 999999000 (µs-aligned)", to.Nanosecond())
+	}
+	// An event at 23:59:59.4 on the named day is inside the window.
+	event := time.Date(2026, 10, 31, 23, 59, 59, 400_000_000, time.UTC)
+	if event.After(to) {
+		t.Fatalf("event %s falls after to %s", event.Format(time.RFC3339Nano), to.Format(time.RFC3339Nano))
+	}
+	// Still the same calendar day: no spill into Nov 1.
+	if to.Day() != 31 || to.Month() != time.October {
+		t.Fatalf("to spilled to %s", to.Format(time.RFC3339Nano))
+	}
+}

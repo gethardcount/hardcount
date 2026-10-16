@@ -28,7 +28,7 @@ actor_id?: string;
  */
 date_from?: string;
 /**
- * Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59 UTC).
+ * Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59.999999 UTC, the end of that day).
  */
 date_to?: string;
 /**

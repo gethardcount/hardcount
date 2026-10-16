@@ -4089,7 +4089,7 @@ paths:
             type: string
         - name: to
           in: query
-          description: End of the window. RFC 3339 instant or `YYYY-MM-DD` (23:59:59 UTC that day).
+          description: End of the window, exclusive. RFC 3339 instant or `YYYY-MM-DD` (23:59:59.999999 UTC that day, so the day is included).
           schema:
             type: string
       responses:
@@ -7239,7 +7239,7 @@ paths:
             type: string
         - name: to
           in: query
-          description: Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59 UTC that day.
+          description: Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
           schema:
             type: string
       responses:
@@ -7305,7 +7305,7 @@ paths:
           in: query
           description: |
             Upper bound on created_at, inclusive. RFC3339 instant or
-            bare YYYY-MM-DD (anchored at 23:59:59Z).
+            bare YYYY-MM-DD (anchored at 23:59:59.999999Z, the end of that day).
           schema:
             type: string
         - name: overdue
@@ -11170,7 +11170,7 @@ paths:
           in: query
           schema:
             type: string
-          description: Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59 UTC).
+          description: Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59.999999 UTC, the end of that day).
         - name: test_clock_id
           in: query
           schema:

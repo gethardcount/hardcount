@@ -5038,7 +5038,7 @@ type ListAuditLogParams struct {
 	// DateFrom Lower bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (start of day, UTC).
 	DateFrom string `form:"date_from,omitempty" json:"date_from,omitempty"`
 
-	// DateTo Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59 UTC).
+	// DateTo Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59.999999 UTC, the end of that day).
 	DateTo string `form:"date_to,omitempty" json:"date_to,omitempty"`
 
 	// TestClockId Only entries made inside this test clock's simulation. Works for deleted clocks too.
@@ -5323,7 +5323,7 @@ type GetCustomerUsageParams struct {
 	// From Start of the window. RFC 3339 instant or `YYYY-MM-DD` (start of that day, UTC).
 	From string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To End of the window. RFC 3339 instant or `YYYY-MM-DD` (23:59:59 UTC that day).
+	// To End of the window, exclusive. RFC 3339 instant or `YYYY-MM-DD` (23:59:59.999999 UTC that day, so the day is included).
 	To string `form:"to,omitempty" json:"to,omitempty"`
 }
 
@@ -5440,7 +5440,7 @@ type GetV1InvoicesParams struct {
 	From string `form:"from,omitempty" json:"from,omitempty"`
 
 	// To Upper bound on created_at, inclusive. RFC3339 instant or
-	// bare YYYY-MM-DD (anchored at 23:59:59Z).
+	// bare YYYY-MM-DD (anchored at 23:59:59.999999Z, the end of that day).
 	To string `form:"to,omitempty" json:"to,omitempty"`
 
 	// Overdue When true, restrict to open invoices past their due date
@@ -6037,7 +6037,7 @@ type GetUsageSummaryParams struct {
 	// From Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
 	From string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59 UTC that day.
+	// To Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
 	To string `form:"to,omitempty" json:"to,omitempty"`
 }
 
