@@ -21,6 +21,7 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Subscription dates agree, and the upcoming invoice says what it is (2026-10-17).** A canceled subscription no longer shows "Renews": the page and the list's "Next bill" column read "Ended <date>". Every page uses "access through Nov 15 · doesn't renew Nov 16". The Upcoming invoice card shows its period and "estimate as of", $0.00 when nothing is billed yet, and Retry when it fails to load. A trialing subscription without a card names its first charge. The Pause button reads "Pause collection…".
 - **Usage totals follow each meter's aggregation (2026-10-16).** The Usage page summed every reading, so a Maximum meter with 140, 210 and 120 GB showed 470 GB. Each meter now shows its value in its own unit, with a daily line. "Total Units", which added tokens, calls and GB, is gone. The mode comes from the meter's pricing rules, as billing does; a meter whose rules count in different ways, or a Maximum or Latest meter billed in several parts, says so and shows the plain sum. API: `GET /v1/usage-events/aggregate` rows gain `value`, `aggregation` (`mixed` when the rules differ), `events`, `customers`, `peak` and `daily`, and it takes `tz`.
 
 ### Changed

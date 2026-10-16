@@ -20,6 +20,8 @@ export interface TypedConfirmDialogProps {
   /** Word the user must type verbatim to enable the confirm button. Matching is case-insensitive so caps lock doesn't trap the user. */
   confirmWord: string
   confirmLabel: string
+  /** The dismiss button's words. Name what is kept ("Keep subscription") when "Cancel" would read as the action. */
+  cancelLabel?: string
   onConfirm: () => void
   loading?: boolean
   /**
@@ -45,6 +47,7 @@ export function TypedConfirmDialog({
   description,
   confirmWord,
   confirmLabel,
+  cancelLabel = 'Cancel',
   onConfirm,
   loading = false,
   children,
@@ -102,7 +105,7 @@ export function TypedConfirmDialog({
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={loading}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={loading}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             onClick={onConfirm}

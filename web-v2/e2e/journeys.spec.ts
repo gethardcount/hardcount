@@ -237,6 +237,24 @@ test('the next-invoice preview prorates a mid-month calendar start', async ({ pa
   const row = page.getByRole('row').filter({ hasText: base.description })
   await expect(row).toBeVisible()
   await expect(row).toContainText(usd(base.amount_cents))
+  // The card names the period it estimates and when the estimate was made.
+  await expect(page.getByText('Upcoming invoice', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Jan 13.*Jan 31, 2026 · estimate as of/)).toBeVisible()
+})
+
+test('a canceled subscription reads "Ended", never "Renews"', async ({ page }) => {
+  const { subscription } = await subscribedCustomer()
+  const canceled = await api<Subscription>('POST', `/subscriptions/${subscription.id}/cancel`)
+  expect(canceled.status).toBe('canceled')
+
+  await page.goto(`/subscriptions?search=${encodeURIComponent(subscription.code)}`)
+  const row = page.getByRole('row').filter({ hasText: subscription.display_name })
+  await expect(row).toContainText(/Ended [A-Z][a-z]{2} \d{1,2}, \d{4}/)
+  await expect(row).not.toContainText('Renews')
+
+  await page.goto(`/subscriptions/${subscription.id}`)
+  await expect(page.getByRole('heading', { name: subscription.display_name })).toBeVisible()
+  await expect(page.getByText(/Renews/)).toHaveCount(0)
 })
 
 test('the next-invoice preview says why a trial set to cancel has no invoice', async ({ page }) => {

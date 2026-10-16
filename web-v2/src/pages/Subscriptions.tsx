@@ -43,6 +43,8 @@ import { Plus, Search, Download, ArrowUpDown, ArrowUp, ArrowDown, Repeat } from 
 import { EmptyState } from '@/components/EmptyState'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
+import { formatCivilDate } from '@/lib/dates'
+import { nextBillCell, periodLabels } from '@/lib/subscriptionPeriod'
 import { useTestClocks } from '@/hooks/useClockFrozenMap'
 
 const PAGE_SIZE = 25
@@ -305,7 +307,7 @@ export default function SubscriptionsPage() {
                     <TableHead className="text-xs font-medium">Plan</TableHead>
                     <TableHead className="text-xs font-medium">Code</TableHead>
                     <SortableHead label="Status" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                    <SortableHead label="Next Billing" sortKey="next_billing_at" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                    <SortableHead label="Next bill" sortKey="next_billing_at" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -380,8 +382,19 @@ export default function SubscriptionsPage() {
                           />
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {sub.next_billing_at ? formatDate(sub.next_billing_at) : '\u2014'}
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        {(() => {
+                          // Same dates as the subscription page: a canceled
+                          // row reads "Ended …", never a renewal date.
+                          const firstPlan = plans.find(p => p.id === sub.items?.[0]?.plan_id)
+                          const cell = nextBillCell(periodLabels(
+                            sub,
+                            { date: (iso) => formatDate(iso), lastDay: (iso) => formatCivilDate(iso, undefined) },
+                            firstPlan?.base_bill_timing,
+                          ))
+                          if (!cell) return '\u2014'
+                          return <span className={cn(cell.tone === 'scheduled' && 'text-warning-foreground')}>{cell.text}</span>
+                        })()}
                       </TableCell>
                     </TableRow>
                   ))}
