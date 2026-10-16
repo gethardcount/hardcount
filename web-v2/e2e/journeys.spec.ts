@@ -417,3 +417,25 @@ test('Margin shows no margin when no provider cost is known', async ({ page }) =
   await expect(card.getByText('Provider cost', { exact: true }).locator('..')).toContainText('—')
   await expect(card.getByText('Margin', { exact: true }).locator('..').last()).not.toContainText('%')
 })
+
+test('grant credits from the customer page', async ({ page }) => {
+  const customer = await createCustomer()
+  await page.goto(`/customers/${customer.id}`)
+  const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
+  await expect(credits.getByText('No credits granted yet.')).toBeVisible()
+  await credits.getByRole('button', { name: 'Grant credits' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Grant Credits' })
+  await dialog.getByLabel(/^Amount/).fill('25.00')
+  await dialog.getByLabel('Description').fill('E2E customer-page credit')
+  await dialog.getByRole('button', { name: 'Grant Credits' }).click()
+  await page.getByRole('alertdialog', { name: 'Confirm Credit Grant' }).getByRole('button', { name: 'Grant Credits' }).click()
+
+  // The section refreshes in place: the grant row, then the balance and the
+  // totals match what the API holds.
+  await expect(credits.getByRole('row').filter({ hasText: 'E2E customer-page credit' })).toContainText(usd(2500))
+  const balance = await api<{ balance_cents: number }>('GET', `/credits/balance/${customer.id}`)
+  expect(balance.balance_cents).toBe(2500)
+  await expect(credits.getByText('Balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
+  await expect(credits.getByText(`Granted ${usd(2500)} · Used ${usd(0)}`)).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`/customers/${customer.id}$`))
+})
