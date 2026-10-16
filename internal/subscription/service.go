@@ -793,7 +793,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 
 	if input.TrialDays > 0 {
 		ts := now
-		te := now.AddDate(0, 0, input.TrialDays)
+		// Trial days are calendar days in the tenant zone: a 24h-per-day
+		// add drifts an hour across DST and can push trial_end (and so the
+		// first paid period's start) past civil midnight onto the next day.
+		te := domain.AddDaysIn(now, input.TrialDays, loc)
 		trialStart = &ts
 		trialEnd = &te
 		status = domain.SubscriptionTrialing
