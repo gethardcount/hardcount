@@ -102,7 +102,7 @@ result.
   - What only a real provider can show (Stripe, email, the PDF) is checked by
     hand before each release.
 
-  The strategy documents current practice, not aspirations.
+  This page documents current practice, not aspirations.
 
 ## 4. Three decisions, one reversal, and one thing the monitoring missed
 

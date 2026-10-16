@@ -23,12 +23,12 @@ so point it at a fresh or dedicated database if you want to keep yours clean.
 - [ ] Hosted invoice page: Pay with `4242` → "Paid" banner within seconds, and the card appears on the customer.
 - [ ] 3-D Secure: Pay with `4000 0027 6000 3184`, fail the challenge → the invoice stays unpaid; pass it → paid.
 - [ ] Refund: a credit note with "Refund to card" → `refund_status=succeeded`, and the refund shows in the Stripe dashboard.
-- [ ] Stripe Tax: tax provider "Stripe Tax", customer with a full US address → the invoice has a tax line that matches Stripe's calculation.
+- [ ] Stripe Tax: with a US state registration in the Stripe test account, tax provider "Stripe Tax", customer with a full US address → the invoice has a tax line that matches Stripe's calculation.
 
 ## Money walk across a renewal
 
 - On the Dunning policies page, create a policy and leave it enabled. A plain bootstrap has none. A policy made through the API without `enabled` is disabled, and the first policy becomes the default.
-- [ ] Mint a test clock, create a customer pinned to it, and subscribe it to a plan that bills in arrears (the default).
+- [ ] Mint a test clock, create a customer with an email, pinned to the clock, and subscribe it to a plan with a base fee (plans bill in arrears by default).
 - [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
 - [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run (automatic retries for a failed payment) starts.
 - [ ] Open the invoice link in the payment-failed email and pay with `4242` → the invoice is paid, and the dunning run shows recovered.
@@ -37,4 +37,4 @@ so point it at a fresh or dedicated database if you want to keep yours clean.
 
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
-- [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer.
+- [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
