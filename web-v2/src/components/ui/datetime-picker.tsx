@@ -128,7 +128,9 @@ export function DateTimePicker({
 
   return (
     <div className={cn('flex flex-col gap-1', className)}>
-      <div className="flex items-center gap-2">
+      {/* Wraps the time field under the date on narrow containers (a dialog
+          on a phone), instead of pushing it past the dialog's edge. */}
+      <div className="flex flex-wrap items-center gap-2">
         <DatePicker
           value={date}
           onChange={onDateChange}
@@ -138,7 +140,7 @@ export function DateTimePicker({
         />
         <div
           className={cn(
-            'flex items-center gap-1.5 rounded-md border bg-transparent dark:bg-input/30 px-2.5 h-9 transition-colors cursor-text',
+            'flex shrink-0 items-center gap-1.5 rounded-md border bg-transparent dark:bg-input/30 px-2.5 h-9 transition-colors cursor-text',
             'has-[input:focus-visible]:border-ring has-[input:focus-visible]:ring-3 has-[input:focus-visible]:ring-ring/50',
             hasError ? 'border-destructive' : 'border-input',
           )}

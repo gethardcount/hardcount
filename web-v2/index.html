@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Velox</title>
+    <script>
+      // Apply the saved theme before first paint, on every route (sign-in and
+      // public pages too), so a dark-mode user never sees a light flash and
+      // the login page follows the same setting as the dashboard.
+      // Customer-facing pages (hosted invoice, payment-method pages, portal)
+      // stay light: they are documents a customer opens, not the dashboard.
+      try {
+        var p = location.pathname;
+        var customerFacing = /^\/(invoice\/|update-payment|payment-method-added|portal)/.test(p);
+        var t = customerFacing ? 'light' : localStorage.getItem('velox-theme');
+        if (t === 'dark' || (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
