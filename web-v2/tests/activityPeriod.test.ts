@@ -1,7 +1,7 @@
 // The Activity card's Cycle header shows the same inclusive period as the
 // Upcoming card above it (current_billing_period_display), not the exclusive
 // end boundary. Explicit rolling windows are left to the caller.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { activityCyclePeriodLabel } from '../src/lib/activityPeriod.ts'
 

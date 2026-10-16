@@ -2,7 +2,7 @@
 // that day, never converted into the tenant timezone (which moved every label
 // one day back west of UTC). Locks the Dashboard revenue chart and the
 // customer Activity "Daily usage" chart labels.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { revenueBucketLabel, utcBucketLabel } from '../src/lib/chartLabels.ts'
 
