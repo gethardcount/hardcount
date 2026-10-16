@@ -2906,15 +2906,25 @@ type BootstrapResult struct {
 	Tenant        Tenant `json:"tenant"`
 }
 
-// CreditBalance defines model for CreditBalance.
+// CreditBalance A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
 type CreditBalance struct {
 	BalanceCents int64  `json:"balance_cents"`
 	CustomerId   string `json:"customer_id"`
 
+	// TotalDeducted Credit an operator deducted (a negative adjustment).
+	TotalDeducted int64 `json:"total_deducted"`
+
 	// TotalExpired Credit written off by expiry.
 	TotalExpired int64 `json:"total_expired"`
+
+	// TotalGranted Every credit added: grants, positive adjustments, and credit given back when an invoice it was applied to was voided.
 	TotalGranted int64 `json:"total_granted"`
-	TotalUsed    int64 `json:"total_used"`
+
+	// TotalRetired Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note.
+	TotalRetired int64 `json:"total_retired"`
+
+	// TotalUsed Credit applied to invoices.
+	TotalUsed int64 `json:"total_used"`
 }
 
 // CreditLedgerEntry defines model for CreditLedgerEntry.

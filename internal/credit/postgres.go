@@ -627,6 +627,9 @@ func (s *PostgresStore) drainPositiveBlocks(
 // per-block reversal or commit-burndown reporting needs. The eventual
 // reversal-semantics redesign stays deferred; the DATA is not deferrable
 // — a drain that happened unrecorded is unrecoverable.
+//
+// ListGrantSummaries reads this document back on negative adjustment
+// entries to report each grant's deducted_cents; keep the key names.
 type drainedBlock struct {
 	BlockID   string `json:"block_id"`
 	TakeCents int64  `json:"take_cents"`
@@ -986,7 +989,9 @@ func (s *PostgresStore) CommitGrantExposure(
 //
 // ListGrantSummaries pairs the entry with its grant by meta "grant_id" and
 // recognises it by meta "reason" (commit_void_retire / commit_refund_retire)
-// to report retired_cents — both callers must keep setting both keys.
+// to report retired_cents, and the balance totals (balanceWriteOffColumns)
+// tell a retire from an operator deduction by that reason — both callers
+// must keep setting both keys.
 func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, tenantID string, g commitGrantState, slice int64, bumpCNRetired bool, description string, meta map[string]any) error {
 	if slice <= 0 || slice > g.Remaining() {
 		return fmt.Errorf("retire slice %d out of range (remaining %d) on grant %s", slice, g.Remaining(), g.GrantID)
@@ -1198,6 +1203,22 @@ func (s *PostgresStore) GetByCreditNoteSource(ctx context.Context, tenantID, cre
 	return e, nil
 }
 
+// balanceWriteOffColumns are the CreditBalance totals that take credit away
+// without an invoice using it: expiry, commit retires and operator
+// deductions. With usage they cover every negative entry the ledger has
+// (usage, expiry, adjustment — retire or deduction), so
+// total_granted = total_used + total_expired + total_retired +
+// total_deducted + balance. Retires are adjustments recognised by the
+// reason retireCommitSliceTx writes; every other negative adjustment is a
+// deduction (AdjustAtomicAudited is the only other writer of one).
+const balanceWriteOffColumns = `COALESCE(SUM(CASE WHEN entry_type = 'expiry' THEN ABS(amount_cents) ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN entry_type = 'adjustment' AND amount_cents < 0
+			                   AND metadata->>'reason' IN ('commit_void_retire', 'commit_refund_retire')
+			              THEN ABS(amount_cents) ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN entry_type = 'adjustment' AND amount_cents < 0
+			                   AND COALESCE(metadata->>'reason', '') NOT IN ('commit_void_retire', 'commit_refund_retire')
+			              THEN ABS(amount_cents) ELSE 0 END), 0)`
+
 func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1213,9 +1234,9 @@ func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID str
 			COALESCE(SUM(amount_cents), 0),
 			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN entry_type = 'expiry' THEN ABS(amount_cents) ELSE 0 END), 0)
+			`+balanceWriteOffColumns+`
 		FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2
-	`, tenantID, customerID).Scan(&b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired)
+	`, tenantID, customerID).Scan(&b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted)
 
 	return b, err
 }
@@ -1262,7 +1283,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 			COALESCE(SUM(amount_cents), 0),
 			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN entry_type = 'expiry' THEN ABS(amount_cents) ELSE 0 END), 0)
+			`+balanceWriteOffColumns+`
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1
 		GROUP BY customer_id
@@ -1276,7 +1297,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 	var balances []domain.CreditBalance
 	for rows.Next() {
 		var b domain.CreditBalance
-		if err := rows.Scan(&b.CustomerID, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired); err != nil {
+		if err := rows.Scan(&b.CustomerID, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted); err != nil {
 			return nil, err
 		}
 		balances = append(balances, b)
@@ -1555,8 +1576,11 @@ func creditEntrySortColumn(key string) string {
 //   - RetiredCents: what a commit unwind took back — the remaining balance
 //     retired when the funding invoice is voided, and the slices retired by
 //     a credit note's relief (retireCommitSliceTx, ADR-078/ADR-080).
+//   - DeductedCents: what an operator deduction (a negative adjustment,
+//     AdjustAtomicAudited) drew from this block.
 //
-// Used credit is consumed - expired - retired.
+// Used credit — what invoices drew — is consumed - expired - retired -
+// deducted.
 type GrantSummary struct {
 	ID              string     `json:"id"`
 	EntryType       string     `json:"entry_type"`
@@ -1567,6 +1591,7 @@ type GrantSummary struct {
 	RemainingCents  int64      `json:"remaining_cents"`
 	ExpiredCents    int64      `json:"expired_cents"`
 	RetiredCents    int64      `json:"retired_cents"`
+	DeductedCents   int64      `json:"deducted_cents"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	SourceInvoiceID string     `json:"source_invoice_id,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -1588,7 +1613,8 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	if !includeExhausted {
 		exhausted = " AND g.consumed_cents < g.amount_cents"
 	}
-	// expired_cents and retired_cents come from the write-off entries,
+	// expired_cents, retired_cents and deducted_cents come from the entries
+	// that bump a grant's consumed_cents without an invoice using the credit,
 	// paired with their grant in one grouped pass over this customer's
 	// ledger:
 	//   - expiry entries by the exact description ExpireGrantAtomic writes
@@ -1598,27 +1624,49 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	//   - commit retire entries by metadata grant_id. retireCommitSliceTx is
 	//     their only writer (void + relief legs) and has written grant_id and
 	//     reason on every one since it was added (ADR-078, #371; #391).
+	//   - operator deductions (AdjustAtomicAudited's negative adjustments)
+	//     by the drained_blocks metadata drainPositiveBlocks records, one
+	//     {block_id, take_cents} per grant it drew from. Deductions written
+	//     before that metadata existed (2026-07-05) carry '{}' and cannot be
+	//     paired, so on such a grant their part still reads as used.
+	// Usage entries also carry drained_blocks; the entry_type filter keeps
+	// them out — they are what "used" means.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT g.id, g.entry_type, COALESCE(g.grant_kind,''), g.description,
 			g.amount_cents, g.consumed_cents,
-			COALESCE(w.expired_cents, 0), COALESCE(w.retired_cents, 0),
+			COALESCE(w.expired_cents, 0), COALESCE(w.retired_cents, 0), COALESCE(w.deducted_cents, 0),
 			g.expires_at, COALESCE(g.source_invoice_id,''), g.created_at
 		FROM customer_credit_ledger g
 		LEFT JOIN (
-			SELECT
-				CASE WHEN e.entry_type = 'expiry' THEN substring(e.description FROM 15)
-				     ELSE e.metadata->>'grant_id' END AS grant_id,
-				-SUM(e.amount_cents) FILTER (WHERE e.entry_type = 'expiry') AS expired_cents,
-				-SUM(e.amount_cents) FILTER (WHERE e.entry_type = 'adjustment') AS retired_cents
-			FROM customer_credit_ledger e
-			WHERE e.customer_id = $1
-			  AND ((e.entry_type = 'expiry' AND e.description LIKE 'Expired grant %')
-			    OR (e.entry_type = 'adjustment'
-			        AND e.metadata->>'reason' IN ('commit_void_retire', 'commit_refund_retire')))
-			GROUP BY 1
+			SELECT o.grant_id,
+				SUM(o.cents) FILTER (WHERE o.kind = 'expired') AS expired_cents,
+				SUM(o.cents) FILTER (WHERE o.kind = 'retired') AS retired_cents,
+				SUM(o.cents) FILTER (WHERE o.kind = 'deducted') AS deducted_cents
+			FROM (
+				SELECT substring(e.description FROM 15) AS grant_id, 'expired' AS kind, -e.amount_cents AS cents
+				FROM customer_credit_ledger e
+				WHERE e.tenant_id = $2 AND e.customer_id = $1
+				  AND e.entry_type = 'expiry' AND e.description LIKE 'Expired grant %'
+				UNION ALL
+				SELECT e.metadata->>'grant_id', 'retired', -e.amount_cents
+				FROM customer_credit_ledger e
+				WHERE e.tenant_id = $2 AND e.customer_id = $1
+				  AND e.entry_type = 'adjustment'
+				  AND e.metadata->>'reason' IN ('commit_void_retire', 'commit_refund_retire')
+				UNION ALL
+				SELECT d.value->>'block_id', 'deducted', (d.value->>'take_cents')::bigint
+				FROM customer_credit_ledger e
+				CROSS JOIN LATERAL jsonb_array_elements(
+					CASE WHEN jsonb_typeof(e.metadata->'drained_blocks') = 'array'
+					     THEN e.metadata->'drained_blocks' ELSE '[]'::jsonb END) AS d(value)
+				WHERE e.tenant_id = $2 AND e.customer_id = $1
+				  AND e.entry_type = 'adjustment' AND e.amount_cents < 0
+				  AND COALESCE(e.metadata->>'reason', '') NOT IN ('commit_void_retire', 'commit_refund_retire')
+			) o
+			GROUP BY o.grant_id
 		) w ON w.grant_id = g.id
-		WHERE g.customer_id = $1 AND g.amount_cents > 0`+exhausted+`
-		ORDER BY g.created_at DESC, g.id DESC`, customerID)
+		WHERE g.tenant_id = $2 AND g.customer_id = $1 AND g.amount_cents > 0`+exhausted+`
+		ORDER BY g.created_at DESC, g.id DESC`, customerID, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -1628,7 +1676,7 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	for rows.Next() {
 		var g GrantSummary
 		if err := rows.Scan(&g.ID, &g.EntryType, &g.GrantKind, &g.Description,
-			&g.AmountCents, &g.ConsumedCents, &g.ExpiredCents, &g.RetiredCents, &g.ExpiresAt, &g.SourceInvoiceID, &g.CreatedAt); err != nil {
+			&g.AmountCents, &g.ConsumedCents, &g.ExpiredCents, &g.RetiredCents, &g.DeductedCents, &g.ExpiresAt, &g.SourceInvoiceID, &g.CreatedAt); err != nil {
 			return nil, err
 		}
 		g.RemainingCents = g.AmountCents - g.ConsumedCents

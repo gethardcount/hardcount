@@ -999,11 +999,12 @@ export interface paths {
          *     cost-basis class (commit = money-backed, promotional = free,
          *     other = legacy/adjustments). include_exhausted=true adds
          *     fully-drawn blocks for history. Each grant's `consumed_cents`
-         *     also counts two write-offs: `expired_cents`, the part that expired
-         *     unused, and `retired_cents`, commit credit taken back when the
-         *     invoice that funded it was voided or refunded by a credit note.
-         *     The credit actually used is
-         *     `consumed_cents - expired_cents - retired_cents`.
+         *     also counts credit no invoice used: `expired_cents`, the part that
+         *     expired unused; `retired_cents`, commit credit taken back when the
+         *     invoice that funded it was voided or refunded by a credit note; and
+         *     `deducted_cents`, the part an operator deduction (a negative
+         *     adjustment) drew from this grant. The credit invoices actually used
+         *     is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
          */
         get: {
             parameters: {
@@ -6670,19 +6671,36 @@ export interface components {
             invoice: components["schemas"]["Invoice"];
             line_items: components["schemas"]["InvoiceLineItem"][];
         };
+        /** @description A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
         CreditBalance: {
             customer_id: string;
             /** Format: int64 */
             balance_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Every credit added: grants, positive adjustments, and credit given back when an invoice it was applied to was voided.
+             */
             total_granted: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Credit applied to invoices.
+             */
             total_used: number;
             /**
              * Format: int64
              * @description Credit written off by expiry.
              */
             total_expired: number;
+            /**
+             * Format: int64
+             * @description Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note.
+             */
+            total_retired: number;
+            /**
+             * Format: int64
+             * @description Credit an operator deducted (a negative adjustment).
+             */
+            total_deducted: number;
         };
         /** @description A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero. */
         CreditLiveBalance: {

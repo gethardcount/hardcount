@@ -15,8 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { CreditDialog } from '@/pages/Credits'
 
 // CustomerCreditsSection is the customer page's credit picture: the balance
-// with how much was granted, used and expired; every grant, including the
-// used-up ones behind a toggle; the latest ledger entries; and Grant credits.
+// with where the credit went (granted, used, expired, canceled, deducted);
+// every grant, including the finished ones behind a toggle; the latest
+// ledger entries; and Grant credits.
 // A grant that was fully applied to an invoice used to leave no trace here.
 export function CustomerCreditsSection({ customerId, customerName, currency, testClockId, readOnly }: {
   customerId: string
@@ -118,10 +119,16 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                               {state === 'used_up' && <Badge variant="secondary">Used up</Badge>}
                               {state === 'expired' && <Badge variant="warning">Expired</Badge>}
                               {state === 'canceled' && <Badge variant="secondary">Canceled</Badge>}
+                              {state === 'deducted' && <Badge variant="secondary">Deducted</Badge>}
                             </div>
                           </TableCell>
                           <TableCell className="text-right text-sm tabular-nums">{formatCents(g.amount_cents, currency)}</TableCell>
-                          <TableCell className="text-right text-sm tabular-nums">{formatCents(grantUsedCents(g), currency)}</TableCell>
+                          <TableCell className="text-right text-sm tabular-nums">
+                            {formatCents(grantUsedCents(g), currency)}
+                            {(g.deducted_cents ?? 0) > 0 && (
+                              <div className="text-xs text-muted-foreground whitespace-nowrap">Deducted {formatCents(g.deducted_cents, currency)}</div>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right text-sm font-medium tabular-nums">{formatCents(g.remaining_cents, currency)}</TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{g.expires_at ? formatDate(g.expires_at) : 'Never'}</TableCell>
                         </TableRow>
@@ -139,7 +146,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                 className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
               >
                 {showFinished ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                {showFinished ? 'Hide' : 'Show'} {split.finished.length} used-up, expired or canceled {split.finished.length === 1 ? 'grant' : 'grants'}
+                {showFinished ? 'Hide' : 'Show'} {split.finished.length} finished {split.finished.length === 1 ? 'grant' : 'grants'}
               </button>
             )}
           </div>

@@ -1248,7 +1248,12 @@ components:
 
     CreditBalance:
       type: object
-      required: [customer_id, balance_cents, total_granted, total_used, total_expired]
+      description: >
+        A customer's credit balance and where the credit went. Every cent
+        granted is either still in the balance or in one of the totals:
+        total_granted = total_used + total_expired + total_retired +
+        total_deducted + balance_cents.
+      required: [customer_id, balance_cents, total_granted, total_used, total_expired, total_retired, total_deducted]
       properties:
         customer_id:
           type: string
@@ -1258,13 +1263,27 @@ components:
         total_granted:
           type: integer
           format: int64
+          description: >
+            Every credit added: grants, positive adjustments, and credit given
+            back when an invoice it was applied to was voided.
         total_used:
           type: integer
           format: int64
+          description: Credit applied to invoices.
         total_expired:
           type: integer
           format: int64
           description: Credit written off by expiry.
+        total_retired:
+          type: integer
+          format: int64
+          description: >
+            Prepaid commit credit taken back because the invoice that funded
+            it was voided or refunded by a credit note.
+        total_deducted:
+          type: integer
+          format: int64
+          description: Credit an operator deducted (a negative adjustment).
 
     CreditLiveBalance:
       type: object
@@ -5151,11 +5170,12 @@ paths:
         cost-basis class (commit = money-backed, promotional = free,
         other = legacy/adjustments). include_exhausted=true adds
         fully-drawn blocks for history. Each grant's `consumed_cents`
-        also counts two write-offs: `expired_cents`, the part that expired
-        unused, and `retired_cents`, commit credit taken back when the
-        invoice that funded it was voided or refunded by a credit note.
-        The credit actually used is
-        `consumed_cents - expired_cents - retired_cents`.
+        also counts credit no invoice used: `expired_cents`, the part that
+        expired unused; `retired_cents`, commit credit taken back when the
+        invoice that funded it was voided or refunded by a credit note; and
+        `deducted_cents`, the part an operator deduction (a negative
+        adjustment) drew from this grant. The credit invoices actually used
+        is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
       parameters:
         - name: customer_id
           in: path

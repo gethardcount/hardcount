@@ -24,6 +24,19 @@ test('expired credit is named, in the customer currency', () => {
   )
 })
 
+test('canceled and deducted credit are named, so the totals add up to granted', () => {
+  // After a commit void: granted $100, used $40, $60 canceled. Without the
+  // Canceled part the line left $60 unexplained.
+  assert.equal(
+    creditTotalsLine({ balance_cents: 0, total_granted: 10000, total_used: 4000, total_expired: 0, total_retired: 6000, total_deducted: 0 }, 'USD'),
+    'Granted $100.00 · Used $40.00 · Canceled $60.00',
+  )
+  assert.equal(
+    creditTotalsLine({ balance_cents: 2000, total_granted: 15000, total_used: 3000, total_expired: 1000, total_retired: 0, total_deducted: 9000 }, 'USD'),
+    'Granted $150.00 · Used $30.00 · Expired $10.00 · Deducted $90.00',
+  )
+})
+
 test('grant state: used up, expired, active', () => {
   assert.equal(grantState({ amount_cents: 50000, consumed_cents: 50000, remaining_cents: 0 }, NOW), 'used_up')
   assert.equal(grantState({ amount_cents: 50000, consumed_cents: 0, remaining_cents: 50000, expires_at: '2026-12-01T00:00:00Z' }, NOW), 'active')
@@ -95,4 +108,18 @@ test('commit credit taken back with its invoice is "canceled", not used', () => 
   const thenExpired = { amount_cents: 10000, consumed_cents: 10000, remaining_cents: 0, expired_cents: 3500, retired_cents: 2500, expires_at: '2026-10-01T00:00:00Z' }
   assert.equal(grantState(thenExpired, NOW), 'expired')
   assert.equal(grantUsedCents(thenExpired), 4000)
+})
+
+test('a deduction is not counted as used, and a fully deducted grant reads Deducted', () => {
+  // $100 grant: $30 applied to an invoice, $70 deducted by an operator. The
+  // drain bumps consumed for both.
+  const mixed = { amount_cents: 10000, consumed_cents: 10000, remaining_cents: 0, deducted_cents: 7000 }
+  assert.equal(grantUsedCents(mixed), 3000)
+  assert.equal(grantState(mixed, NOW), 'used_up')
+  const partial = { amount_cents: 10000, consumed_cents: 5000, remaining_cents: 5000, deducted_cents: 2000 }
+  assert.equal(grantUsedCents(partial), 3000)
+  assert.equal(grantState(partial, NOW), 'active')
+  const deducted = { amount_cents: 5000, consumed_cents: 5000, remaining_cents: 0, deducted_cents: 5000 }
+  assert.equal(grantUsedCents(deducted), 0)
+  assert.equal(grantState(deducted, NOW), 'deducted')
 })

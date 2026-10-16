@@ -103,6 +103,14 @@ type CreditBalance struct {
 	TotalGranted int64  `json:"total_granted"`
 	TotalUsed    int64  `json:"total_used"`
 	TotalExpired int64  `json:"total_expired"`
+	// TotalRetired is commit credit taken back when the invoice that funded
+	// it was voided or refunded by a credit note. TotalDeducted is credit an
+	// operator deducted (a negative adjustment). With TotalUsed (applied to
+	// invoices) and TotalExpired they account for every cent granted:
+	// TotalGranted = TotalUsed + TotalExpired + TotalRetired + TotalDeducted
+	// + BalanceCents.
+	TotalRetired  int64 `json:"total_retired"`
+	TotalDeducted int64 `json:"total_deducted"`
 }
 
 // CreditLiveBalance is a customer's credit position right now (issue #1019):

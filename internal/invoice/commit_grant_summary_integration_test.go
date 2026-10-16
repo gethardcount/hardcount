@@ -14,7 +14,25 @@ import (
 // consumed by the retired part, so before retired_cents the page counted the
 // retired credit as "Used" and labelled a voided commit "Used up".
 // Mutation-verify: drop the commit-retire arm of ListGrantSummaries' JOIN
-// (retired_cents = 0) → both tests red.
+// (retired_cents = 0), or the retire arm of balanceWriteOffColumns
+// (total_retired = 0) → both tests red.
+
+// assertRetiredTotal: the balance totals name the retired part as
+// total_retired (the page's "Canceled"), not as a deduction, and the totals
+// add up to what was granted.
+func assertRetiredTotal(t *testing.T, h *commitHarness, ctx context.Context, wantRetired int64) {
+	t.Helper()
+	bal, err := h.creditSvc.GetBalance(ctx, h.tenantID, h.custID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal.TotalRetired != wantRetired || bal.TotalDeducted != 0 {
+		t.Errorf("total_retired=%d total_deducted=%d, want %d 0", bal.TotalRetired, bal.TotalDeducted, wantRetired)
+	}
+	if got := bal.TotalUsed + bal.TotalExpired + bal.TotalRetired + bal.TotalDeducted + bal.BalanceCents; got != bal.TotalGranted {
+		t.Errorf("used+expired+retired+deducted+balance = %d, want granted %d (%+v)", got, bal.TotalGranted, bal)
+	}
+}
 
 func grantSummaryFor(t *testing.T, h *commitHarness, ctx context.Context, grantID string) credit.GrantSummary {
 	t.Helper()
@@ -65,6 +83,7 @@ func TestGrantSummary_VoidRetiredIsNotUsed(t *testing.T) {
 	if used := g.ConsumedCents - g.ExpiredCents - g.RetiredCents; used != 4000 {
 		t.Errorf("used = %d, want 4000 (only the drawdown)", used)
 	}
+	assertRetiredTotal(t, h, ctx, 6000)
 }
 
 // TestGrantSummary_ReliefRetiredIsNotUsed: $100 commit paid, $40 drawn, a
@@ -101,4 +120,5 @@ func TestGrantSummary_ReliefRetiredIsNotUsed(t *testing.T) {
 	if used := g.ConsumedCents - g.ExpiredCents - g.RetiredCents; used != 4000 {
 		t.Errorf("used = %d, want 4000 (only the drawdown)", used)
 	}
+	assertRetiredTotal(t, h, ctx, 2500)
 }

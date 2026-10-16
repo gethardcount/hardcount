@@ -12,14 +12,22 @@ export interface CreditTotals {
   total_granted: number
   total_used: number
   total_expired: number
+  // Commit credit taken back with its voided or refunded invoice, and credit
+  // an operator deducted.
+  total_retired?: number
+  total_deducted?: number
 }
 
-// creditTotalsLine is "Granted $500.00 · Used $500.00", plus "· Expired $x"
-// when some expired. Null when nothing was ever granted.
+// creditTotalsLine is "Granted $500.00 · Used $500.00", plus "· Expired $x",
+// "· Canceled $x" and "· Deducted $x" for the parts that are above zero, so
+// Granted = Used + Expired + Canceled + Deducted + the balance shown above
+// it. Null when nothing was ever granted.
 export function creditTotalsLine(t: CreditTotals, currency: string): string | null {
   if (t.total_granted <= 0) return null
   const parts = [`Granted ${formatCents(t.total_granted, currency)}`, `Used ${formatCents(t.total_used, currency)}`]
   if (t.total_expired > 0) parts.push(`Expired ${formatCents(t.total_expired, currency)}`)
+  if ((t.total_retired ?? 0) > 0) parts.push(`Canceled ${formatCents(t.total_retired ?? 0, currency)}`)
+  if ((t.total_deducted ?? 0) > 0) parts.push(`Deducted ${formatCents(t.total_deducted ?? 0, currency)}`)
   return parts.join(' · ')
 }
 
@@ -27,36 +35,40 @@ export interface GrantRow {
   amount_cents: number
   consumed_cents: number
   remaining_cents: number
-  // consumed_cents also counts two write-offs, which the server names:
-  // expired_cents, what ran out of time unused (the expiry sweep sets
-  // consumed to the full amount), and retired_cents, commit credit taken
-  // back when its invoice was voided or refunded by a credit note.
+  // consumed_cents also counts credit no invoice used, which the server
+  // names: expired_cents, what ran out of time unused (the expiry sweep sets
+  // consumed to the full amount); retired_cents, commit credit taken back
+  // when its invoice was voided or refunded by a credit note; and
+  // deducted_cents, what an operator deducted from this grant.
   expired_cents?: number
   retired_cents?: number
+  deducted_cents?: number
   expires_at?: string
 }
 
-export type GrantState = 'active' | 'used_up' | 'expired' | 'canceled'
+export type GrantState = 'active' | 'used_up' | 'expired' | 'canceled' | 'deducted'
 
 // grantState: a grant with nothing left is "expired" when some of it ran out
 // of time unused, "canceled" when the rest was taken back with its invoice
-// (voided, or refunded by a credit note), and "used up" when invoices drew
-// all of it. Expiry wins over canceled: the sweep takes whatever is left, so
-// it is the last thing that can happen to a grant. A grant past its expiry
-// that the sweep has not written off yet is "expired" too.
+// (voided, or refunded by a credit note), "deducted" when an operator
+// deducted all of it, and "used up" when invoices drew some of it. Expiry
+// wins over canceled: the sweep takes whatever is left, so it is the last
+// thing that can happen to a grant. A grant past its expiry that the sweep
+// has not written off yet is "expired" too.
 export function grantState(g: GrantRow, nowMs: number): GrantState {
   if (g.remaining_cents > 0) {
     return g.expires_at && Date.parse(g.expires_at) <= nowMs ? 'expired' : 'active'
   }
   if ((g.expired_cents ?? 0) > 0) return 'expired'
   if ((g.retired_cents ?? 0) > 0) return 'canceled'
+  if ((g.deducted_cents ?? 0) > 0 && grantUsedCents(g) <= 0) return 'deducted'
   return 'used_up'
 }
 
-// grantUsedCents is what invoices really used: consumed less the expired and
-// canceled parts.
+// grantUsedCents is what invoices really used: consumed less the expired,
+// canceled and deducted parts.
 export function grantUsedCents(g: GrantRow): number {
-  return g.consumed_cents - (g.expired_cents ?? 0) - (g.retired_cents ?? 0)
+  return g.consumed_cents - (g.expired_cents ?? 0) - (g.retired_cents ?? 0) - (g.deducted_cents ?? 0)
 }
 
 // splitGrants keeps the order the server sent and separates the grants that

@@ -1075,6 +1075,10 @@ export interface CreditBalance {
   total_granted: number
   total_used: number
   total_expired: number
+  // Commit credit taken back with its voided or refunded invoice, and credit
+  // an operator deducted. granted = used + expired + retired + deducted + balance.
+  total_retired: number
+  total_deducted: number
 }
 
 // Per-grant burndown row (commit/promo drawdown surfaces, 2026-07-06).
@@ -1086,11 +1090,13 @@ export interface CreditGrantSummary {
   amount_cents: number
   consumed_cents: number
   remaining_cents: number
-  // Parts of consumed_cents that were written off, not used: expired_cents
-  // ran out of time; retired_cents was commit credit taken back when its
-  // invoice was voided or refunded. used = consumed - expired - retired.
+  // Parts of consumed_cents no invoice used: expired_cents ran out of time;
+  // retired_cents was commit credit taken back when its invoice was voided
+  // or refunded; deducted_cents an operator deducted.
+  // used = consumed - expired - retired - deducted.
   expired_cents: number
   retired_cents: number
+  deducted_cents: number
   expires_at?: string
   source_invoice_id?: string
   created_at: string
