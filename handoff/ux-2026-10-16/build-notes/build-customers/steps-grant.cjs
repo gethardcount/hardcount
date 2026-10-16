@@ -1,0 +1,1 @@
+module.exports = async (page) => { await page.getByRole('button', { name: 'Grant credits' }).first().click(); await page.waitForTimeout(600); await page.getByLabel(/Amount/).fill('25'); await page.getByLabel('Description').fill('ux preview only'); return 'viewport' }

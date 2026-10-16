@@ -1,0 +1,1 @@
+module.exports = async (page) => { const h = page.getByText('Margin', { exact: true }).first(); await h.scrollIntoViewIfNeeded(); await page.evaluate(() => { const m = document.querySelector('main'); }); await h.evaluate(el => el.scrollIntoView({ block: 'start' })); await page.waitForTimeout(800); return 'viewport' }
