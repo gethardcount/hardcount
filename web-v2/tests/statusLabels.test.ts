@@ -1,7 +1,7 @@
 // One status vocabulary: each state has one label and one tone everywhere.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { genericStatus, humanizeStatus, invoiceStatus, subscriptionFlags, subscriptionStatus } from '../src/lib/statusLabels.ts'
+import { genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, subscriptionFlags, subscriptionStatus } from '../src/lib/statusLabels.ts'
 
 const now = Date.parse('2026-10-16T12:00:00Z')
 
@@ -37,4 +37,18 @@ test('generic codes read as sentence case, never snake_case', () => {
   assert.deepEqual(genericStatus('no_endpoints'), { label: 'No endpoint', tone: 'neutral' })
   assert.deepEqual(genericStatus('escalated'), { label: 'Escalated', tone: 'warning' })
   assert.deepEqual(genericStatus('some_new_state'), { label: 'Some new state', tone: 'neutral' })
+})
+
+test('invoicePaymentChip never repeats what the invoice badge already says', () => {
+  // Badge "Payment failed" / "Processing" / "Paid": no chip beside it.
+  assert.equal(invoicePaymentChip({ status: 'finalized', payment_status: 'failed' }), null)
+  assert.equal(invoicePaymentChip({ status: 'finalized', payment_status: 'processing' }), null)
+  assert.equal(invoicePaymentChip({ status: 'finalized', payment_status: 'succeeded' }), null)
+  assert.equal(invoicePaymentChip({ status: 'paid', payment_status: 'succeeded' }), null)
+  // Drafts and voids have no payment to show.
+  assert.equal(invoicePaymentChip({ status: 'draft', payment_status: 'pending' }), null)
+  assert.equal(invoicePaymentChip({ status: 'voided', payment_status: 'pending' }), null)
+  // A payment state the badge does not carry still shows.
+  assert.deepEqual(invoicePaymentChip({ status: 'finalized', payment_status: 'pending' }), { label: 'Pending', tone: 'warning' })
+  assert.deepEqual(invoicePaymentChip({ status: 'uncollectible', payment_status: 'failed' }), { label: 'Failed', tone: 'danger' })
 })

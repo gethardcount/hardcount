@@ -47,6 +47,22 @@ export function invoiceStatus(inv: InvoiceStatusInput, nowMs: number): StatusDis
   return { label: humanizeStatus(inv.status), tone: 'neutral' }
 }
 
+// invoicePaymentChip is the payment chip shown beside the invoice badge, or
+// null when it would only repeat the badge. Drafts have no payment yet; Paid
+// and Void say all there is to say; and when the badge already reads Paid,
+// Processing or Payment failed, a "Succeeded"/"Processing"/"Failed" chip next
+// to it is the same fact twice. What is left is the payment state the badge
+// does not show (for example Pending beside Open, or beside Uncollectible).
+export function invoicePaymentChip(inv: InvoiceStatusInput): StatusDisplay | null {
+  if (inv.status === 'draft' || inv.status === 'paid' || inv.status === 'voided') return null
+  if (!inv.payment_status) return null
+  if (inv.status === 'finalized' && PAYMENT_IN_BADGE.has(inv.payment_status)) return null
+  return genericStatus(inv.payment_status)
+}
+
+// The payment states invoiceStatus folds into the badge of a finalized invoice.
+const PAYMENT_IN_BADGE = new Set(['succeeded', 'processing', 'failed'])
+
 export interface SubscriptionStatusInput {
   status: string
   pause_collection?: unknown
