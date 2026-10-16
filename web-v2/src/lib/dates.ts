@@ -64,6 +64,30 @@ export function addDaysInTZ(days: number, timezone?: string): string {
   return endOfDayInTZ(targetStr, tz)
 }
 
+// addCalendarMonthInTZ steps an instant forward one CALENDAR month on the
+// wall clock of `timezone`, clamping the day to the target month's last day
+// (Jan 31 → Feb 28) and keeping the wall time. It mirrors the engine's
+// domain.advanceAnchored month step (ADR-055 clamp, computed in the tenant
+// billing TZ per ADR-058), so a "+1mo" preset lands on the cycle close the
+// engine will compute. The month math runs on the zone's civil fields, never
+// on the browser's local Date fields: a browser in another zone would
+// otherwise step the wrong civil day (Oct 1 00:00Z read in Los Angeles is
+// Sep 30, so it stepped to Oct 31 and missed the Nov 1 close). A wall time
+// that falls in a DST gap resolves the way fromZonedTime resolves it.
+export function addCalendarMonthInTZ(instant: Date, timezone: string): Date {
+  const [y, m, d] = formatInTimeZone(instant, timezone, 'yyyy-MM-dd').split('-').map(Number)
+  const wall = formatInTimeZone(instant, timezone, 'HH:mm:ss.SSS')
+  // Month index m is 1-based, so m is already "next month" for Date.UTC; the
+  // UTC constructor normalizes December → January of the next year.
+  const next = new Date(Date.UTC(y, m, 1))
+  const ny = next.getUTCFullYear()
+  const nm = next.getUTCMonth() + 1
+  const lastDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate()
+  const day = Math.min(d, lastDay)
+  const civil = `${ny}-${String(nm).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  return fromZonedTime(`${civil}T${wall}`, timezone)
+}
+
 // formatDateInTZ returns a human-readable date+time string in tenant
 // TZ with zone abbreviation. Used by the "Key will expire on..."
 // hint and similar copy that needs explicit TZ context inline.

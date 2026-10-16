@@ -5,7 +5,7 @@
 // built-in runner (the @/lib/api import is stubbed via tests/support).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
   // 2026-05-05 00:00 IST (UTC+5:30) = the previous UTC evening.
@@ -103,4 +103,35 @@ test('civilDateFrom(now, 1) is tomorrow in the tenant zone, and its start is in 
   assert.ok(Date.parse(startOfDayInTZ(civilDateFrom(utcMorning, 1, 'UTC'), 'UTC')) > utcMorning)
   // Month and year rollover.
   assert.equal(civilDateFrom(Date.parse('2026-12-31T12:00:00Z'), 1, 'UTC'), '2027-01-01')
+})
+
+// Backs MANUAL_TEST FLOW TC2 ("+1mo" preset): the month step runs on
+// the tenant-zone wall clock with an end-of-month clamp, like the engine's
+// advanceAnchored. Every case names its zone explicitly, so the result must not
+// depend on the machine TZ — `npm test` is also run with TZ=America/Los_Angeles
+// and TZ=Asia/Kolkata to prove it.
+const plusMonth = (iso: string, tz: string) => addCalendarMonthInTZ(new Date(iso), tz).toISOString()
+
+test('addCalendarMonthInTZ clamps a month-end day to the next month\'s last day', () => {
+  // Jan 31 00:00 UTC → Feb 28, not Mar 1 (browser-local drift) or Mar 3 (overflow).
+  assert.equal(plusMonth('2026-01-31T00:00:00Z', 'UTC'), '2026-02-28T00:00:00.000Z')
+  // Leap year keeps Feb 29.
+  assert.equal(plusMonth('2028-01-31T00:00:00Z', 'UTC'), '2028-02-29T00:00:00.000Z')
+  // December rolls into January of the next year.
+  assert.equal(plusMonth('2026-12-31T00:00:00Z', 'UTC'), '2027-01-31T00:00:00.000Z')
+})
+
+test('addCalendarMonthInTZ lands on the 1st-of-month cycle close in the tenant zone', () => {
+  // Oct 1 00:00 UTC is Sep 30 in Los Angeles; stepping browser-local fields gave Oct 31.
+  assert.equal(plusMonth('2026-10-01T00:00:00Z', 'UTC'), '2026-11-01T00:00:00.000Z')
+  // Asia/Kolkata tenant: Jan 31 00:00 IST (= Jan 30 18:30Z) → Feb 28 00:00 IST.
+  assert.equal(plusMonth('2026-01-30T18:30:00Z', 'Asia/Kolkata'), '2026-02-27T18:30:00.000Z')
+})
+
+test('addCalendarMonthInTZ keeps the tenant wall time across a DST change', () => {
+  // Feb 15 09:00 EST (14:00Z) → Mar 15 09:00 EDT (13:00Z): same wall time, one hour less UTC.
+  assert.equal(plusMonth('2026-02-15T14:00:00Z', 'America/New_York'), '2026-03-15T13:00:00.000Z')
+  // A UTC tenant has no DST: Feb 15 12:00Z → Mar 15 12:00Z. A Los Angeles browser
+  // stepping its own fields crossed its Mar 8 DST change and landed on 11:00Z.
+  assert.equal(plusMonth('2026-02-15T12:00:00Z', 'UTC'), '2026-03-15T12:00:00.000Z')
 })

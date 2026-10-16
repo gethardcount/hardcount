@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 
 import { api, ApiError, formatDateTime, getTenantTimezone, type TestClock, type AdvanceSummary } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
+import { addCalendarMonthInTZ } from '@/lib/dates'
 import { cn } from '@/lib/utils'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { Layout } from '@/components/Layout'
@@ -490,20 +491,15 @@ function AdvanceClockDialog({
   // target month's last day). The raw setMonth overflow this preset
   // used to ship (Jan 31 → Mar 3) matched the PRE-ADR-055 engine and
   // overshot every month-end boundary after it (2026-07-19 truth audit).
+  // The step runs on the TENANT-TZ wall clock, like the engine: stepping
+  // the browser's local fields drifted for an operator outside the tenant
+  // zone (Oct 1 00:00Z from Los Angeles landed on Oct 31, not Nov 1).
   const presets: { label: string; advance: (d: Date) => Date }[] = [
     { label: '+1h', advance: d => new Date(d.getTime() + 60 * 60 * 1000) },
     { label: '+1d', advance: d => new Date(d.getTime() + 24 * 60 * 60 * 1000) },
     {
       label: '+1mo',
-      advance: d => {
-        const n = new Date(d)
-        const day = n.getDate()
-        n.setDate(1)
-        n.setMonth(n.getMonth() + 1)
-        const lastDay = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate()
-        n.setDate(Math.min(day, lastDay))
-        return n
-      },
+      advance: d => addCalendarMonthInTZ(d, tz),
     },
   ]
   const applyPreset = (advance: (d: Date) => Date) => {
