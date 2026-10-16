@@ -124,23 +124,6 @@ jobs:
           # instead of logging a warning.
           VELOX_LIVEMODE_STRICT: "true"
 
-      # Money-invariant sweep over whatever the integration suite left behind
-      # (docs/dev/product-stability-plan.md B1). The doctor's own test already
-      # proves the catalog runs and catches seeded violations on a fresh DB;
-      # THIS step asks a different question — did any test's real writer
-      # sequence leave data no legal writer should produce? Owner DSN on
-      # purpose: an RLS-scoped role would make the sweep silently blind.
-      # The harness truncates at SETUP only (internal/testutil/db.go), so the
-      # rows this sweep sees are whatever the alphabetically-last DB package's
-      # last test left behind — today that residue is doctor-clean; a package
-      # sorting after internal/webhook, or a test seeding a doctor-visible
-      # inconsistency, changes what is examined here.
-      - name: Money-invariant sweep (velox-doctor)
-        run: go run ./cmd/velox-doctor
-        env:
-          DATABASE_URL: postgres://velox:velox@localhost:5432/velox_test?sslmode=disable
-
-
   # The same integration suite with the APP pool behind PgBouncer in
   # TRANSACTION mode (ADR-114 PR-E). Since the leader-lease cutover every
   # statement Velox issues is meant to be self-contained; this job is what
@@ -272,8 +255,8 @@ jobs:
       - name: Run the golden path (scripts/demo.sh)
         run: ./scripts/demo.sh "$(cat secret.key)"
 
-      # The same sweep the test job runs, here over rows written by the real
-      # server through its API: an invoice, usage, a subscription.
+      # Money-invariant sweep over rows written by the real server through its
+      # API: an invoice, usage, a subscription.
       - name: Money-invariant sweep over the demo data (velox-doctor)
         run: go run ./cmd/velox-doctor
 
@@ -442,38 +425,12 @@ jobs:
             exit 1
           fi
 
-      # ADR-030 guard: bare `time.Now()` in service / store / engine
-      # code on clock-pinned-entity domains leaks wall-clock into
-      # rows that catchup queries read against frozen_time. Run as
-      # part of the lint job (no extra runner cost) — the script
-      # exits non-zero with a helpful message on any violation.
-      - name: lint-clock (ADR-030)
-        run: make lint-clock
-
-      # Funding-set invariant: a period can be funded by >1 invoice, so
-      # period-wide credit/clawback/void must reconcile against
-      # FindFundingInvoicesForPeriod, not a single-row lookup. Flags new
-      # unjustified single-invoice lookups (the class that caused the 2026-06-15
-      # multi-invoice proration bugs). Bypass a legitimate use with a same/
-      # preceding-line `// single-invoice-ok: <reason>`.
-      - name: lint-funding-set (ADR-048 amendment)
-        run: make lint-funding-set
-
       # Anti-rot guard: fail if MANUAL_TEST.md names a metric / column / table /
       # meter-key the code no longer has. CI catches generated-artifact drift but
       # not prose; this is the cheap prose guard ("a flow that lies is worse than
       # no flow"). Bypass a legitimate mention with a `currency-ok:` HTML comment.
       - name: lint-manual-test (doc currency)
         run: make lint-manual-test
-
-      # Timezone-display invariant (ADR-076): a civil-day .Format() must render
-      # in an explicit .In(loc) zone, never the process/host zone or a stray
-      # .UTC() on a customer date; and the ADR-075 process-UTC pin must be
-      # present. A green run is a machine-checked proof the invariant holds — it
-      # turns the reactive ADR-074/075 audits (~8 fixed render-site bugs) into a
-      # permanent gate. Bypass a genuine UTC/filename case with a same-line //tz:ok.
-      - name: lint-tz (ADR-076)
-        run: make lint-tz
 
       # The quickstart pulls a pinned release. It must name the same release
       # as the Compose template, so a release bump cannot update one and

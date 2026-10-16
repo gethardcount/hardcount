@@ -92,15 +92,12 @@ locally before you push, so a failing CI build holds no surprises:
 
 | Gate | Local command | Notes |
 |---|---|---|
-| Unit tests + race detector | `go test ./... -race -short -count=1` | the `unit` job, with `go vet ./...` |
+| Unit tests + race detector | `go test ./... -race -short -count=1` | the `unit` job, with `go vet ./...`. Includes the source-rule tests in `internal/arch`, for example: a calendar date must be formatted in an explicit zone (`.In(loc)`), or carry a same-line `//tz:ok` |
 | Integration tests | `go test -p 1 ./... -count=1 -short=false` | needs `docker compose up -d postgres`; test DBs are auto-provisioned |
 | The same suite through a connection pooler | `scripts/pgbouncer-test.sh` | needs Docker; starts PgBouncer in transaction mode in front of the same Postgres |
-| Money-invariant sweep | `DATABASE_URL=postgres://velox:velox@localhost:5432/velox_test?sslmode=disable go run ./cmd/velox-doctor` | runs in CI after the integration suite, over the rows the tests left behind |
-| golangci-lint | `make lint` | config in `.golangci.yml`; much stricter than `go vet` |
-| Clock discipline | `make lint-clock` | bans bare `time.Now()` in clock-pinned domains; bypass with `// wall-clock: <reason>` |
-| Funding-set invariant | `make lint-funding-set` | period-wide money ops must use the funding-set lookup |
+| Money-invariant sweep | `go run ./cmd/velox-doctor`, with `DATABASE_URL` set to the owner URL of the database you ran the golden path against | runs in CI after the golden-path demo, over the rows it wrote |
+| golangci-lint | `make lint` | config in `.golangci.yml`; much stricter than `go vet`. Also holds two Velox rules: no bare `time.Now()` in clock-pinned packages (waive with `//nolint:forbidigo // wall-clock: <reason>`), and no single-invoice period lookup in proration code (waive with `//nolint:forbidigo // single-invoice-ok: <reason>`) |
 | MANUAL_TEST currency | `make lint-manual-test` | flows may not name things the code no longer has |
-| Timezone display | `make lint-tz` | civil-day formats need an explicit zone; bypass with `//tz:ok` |
 | Codegen drift | `make gen` then `git diff --exit-code` | required whenever `api/openapi.yaml` changes |
 | Vulnerability scan | `govulncheck ./...` | can fail when a new Go CVE is published, even if your change is fine. Say so in the PR and we'll handle it |
 | Frontend | `cd web-v2 && npm run build && npm test && npm run lint` | only if you touched `web-v2/` |

@@ -242,7 +242,7 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 	// the operator edited it, never a test clock's frozen_time. (Dunning RUN
 	// timestamps elsewhere DO use clock.Now(ctx) — those live on the customer's
 	// simulated timeline; policy config writes escape the simulation boundary.)
-	now := time.Now().UTC() // wall-clock: operator config write (ADR-030 addendum), never frozen_time
+	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write (ADR-030 addendum), never frozen_time
 	scheduleJSON, _ := json.Marshal(p.RetrySchedule)
 	if p.ID == "" {
 		// INSERT new policy. The FIRST policy in a (tenant, livemode) scope is

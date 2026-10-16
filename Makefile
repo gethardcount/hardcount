@@ -1,4 +1,4 @@
-.PHONY: build run test lint lint-clock lint-funding-set lint-manual-test lint-tz migrate dev clean cli gen gen-go gen-ts
+.PHONY: build run test lint lint-manual-test migrate dev clean cli gen gen-go gen-ts
 
 # Build the velox binary
 build:
@@ -42,38 +42,16 @@ test-unit:
 test-verbose:
 	VELOX_LIVEMODE_STRICT=true go test ./... -v -short -count=1
 
-# Run linter
+# Run linter. Velox code rules live in .golangci.yml (forbidigo: wall-clock
+# time in clock-pinned packages, single-invoice period lookups) and in Go tests
+# under internal/arch (civil-day dates need an explicit zone).
 lint:
 	golangci-lint run ./...
-
-# ADR-030 guard: forbid bare time.Now() in service / store / engine
-# code under domains where clock-pinned entities live. Forces every
-# new timestamp write to go through the ctx-aware clock abstraction.
-# Bypassable per-line with `// wall-clock: <reason>` for the
-# legitimate carve-outs (cron tick, signature replay tolerance,
-# audit-log recorded_at).
-lint-clock:
-	@./scripts/lint-clock.sh
-
-# Funding-set invariant guard: a period can be funded by >1 invoice, so a
-# period-wide credit/clawback/void must use FindFundingInvoicesForPeriod, not a
-# single-row lookup. Flags new unjustified single-invoice lookups in proration
-# decision code (ADR-048 amendment).
-lint-funding-set:
-	@./scripts/lint-funding-set.sh
 
 # Anti-rot guard for MANUAL_TEST.md: fails if a flow names a metric / column /
 # table / meter-key the code no longer has (ADR-038/041/043/044 cleanups, etc.).
 lint-manual-test:
 	@./scripts/check-manual-test-currency.sh
-
-# Timezone-display invariant guard (ADR-076): a civil-day .Format() must render
-# in an explicit .In(loc) zone (the entity's billing/tenant TZ), never the
-# process/host zone or a stray .UTC() on a customer date. Also asserts the
-# ADR-075 process-UTC pin. Bypass a genuine UTC/filename case with a same-line
-# `//tz:ok`. Converts the reactive ADR-074/075 audits into a permanent CI proof.
-lint-tz:
-	@./scripts/lint-tz.sh
 
 # Run benchmarks
 bench:

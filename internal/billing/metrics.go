@@ -57,7 +57,7 @@ func NewMetrics(subs MetricsSubReader, invoices MetricsInvoiceReader, ttfi Metri
 func (m *Metrics) ComputeDashboard(ctx context.Context, tenantID string, plans map[string]domain.Plan) (Dashboard, error) {
 	d := Dashboard{
 		InvoicesByStatus: make(map[string]int),
-		GeneratedAt:      time.Now().UTC(), // wall-clock: when this report was computed
+		GeneratedAt:      time.Now().UTC(), //nolint:forbidigo // wall-clock: when this report was computed
 	}
 
 	// Active subscriptions → MRR
@@ -98,7 +98,7 @@ func (m *Metrics) ComputeDashboard(ctx context.Context, tenantID string, plans m
 	d.ARRCents = d.MRRCents * 12
 
 	// Revenue this month
-	monthStart := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC) // wall-clock: operator dashboard KPI spans all customers, not one test clock
+	monthStart := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC) //nolint:forbidigo // wall-clock: operator dashboard KPI spans all customers, not one test clock
 	recentInvoices, err := m.invoices.ListRecent(ctx, tenantID, monthStart, 1000)
 	if err != nil {
 		return d, err

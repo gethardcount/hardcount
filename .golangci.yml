@@ -4,6 +4,40 @@ linters:
   default: standard
   disable:
     - depguard
+  enable:
+    - forbidigo
+
+  settings:
+    forbidigo:
+      forbid:
+        # ADR-030: clock-pinned entities live in simulated time. In the packages
+        # that write them (scoped under exclusions below), read the time through
+        # the clock: s.clock.Now(ctx) in a service, clock.Now(ctx) in a store or
+        # render code. A genuine wall-clock use says why on the same line:
+        #   //nolint:forbidigo // wall-clock: <reason>
+        - pattern: ^time\.Now$
+          msg: "wall-clock: use s.clock.Now(ctx) or clock.Now(ctx) on clock-pinned entities (ADR-030); if wall-clock time is intended, add //nolint:forbidigo // wall-clock: <reason>"
+        # Funding-set invariant (ADR-048 amendment): a billing period can be
+        # funded by more than one invoice, so a period-wide credit, clawback or
+        # void must use FindFundingInvoicesForPeriod. A single-row lookup that
+        # is genuinely right (a routing gate, a dedup replay) says why:
+        #   //nolint:forbidigo // single-invoice-ok: <reason>
+        - pattern: \.(FindBaseInvoiceForPeriod|GetByProrationSource)$
+          msg: "single-invoice-ok: a period can be funded by several invoices; use FindFundingInvoicesForPeriod (ADR-048 amendment), or add //nolint:forbidigo // single-invoice-ok: <reason>"
+
+  exclusions:
+    rules:
+      # Each forbidigo rule applies only to the packages that own the invariant.
+      # The text match selects the rule by the start of its message.
+      - linters: [forbidigo]
+        text: "wall-clock:"
+        path-except: ^internal/(subscription|invoice|credit|dunning|customer|billing|creditnote|integrations/litellm)/
+      - linters: [forbidigo]
+        text: "single-invoice-ok:"
+        path-except: ^internal/(subscription|billing)/
+      # Tests may use wall-clock time and single-row lookups freely.
+      - linters: [forbidigo]
+        path: _test\.go$
 
 formatters:
   enable:

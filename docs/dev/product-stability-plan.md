@@ -95,7 +95,7 @@ violations. Converts the class that found the $46.69 stranding from
   issued-but-unapplied against live invoices
 - parked coherence: `payment_status='unknown' ⇒` no auto_charge_pending
 
-Wire-up: run after the integration suite in CI (fails the build on any
+Wire-up: run in CI after the golden-path demo (fails the build on any
 violation) and runnable ad hoc against dev/walk DBs. When a prod deploy
 exists, it becomes the ops health check. Every future bug class gets its
 invariant added here in the fixing PR — that is the mechanized half of
@@ -216,7 +216,7 @@ both describe a charge-in-place path ADR-113 deleted.
 
 | mechanism | when |
 |---|---|
-| doctor sweep | every CI integration run + before/after any walk session |
+| doctor sweep | every CI golden-path run + inside the clock soak + before/after any walk session |
 | pre-push gate + adversarial verify | every PR (verify: mandatory on money paths) |
 | fresh-tenant S1/S2 | before each DP-facing milestone |
 | clock soak | CI-locked (every integration run) |

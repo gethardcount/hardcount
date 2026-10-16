@@ -262,7 +262,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 // (reads) or misroutes writes into the live partition. Cross-mode cleanup
 // steps (token + idempotency purge) run once, outside the fan-out.
 func (s *Scheduler) runBillingHalf(ctx context.Context) {
-	start := time.Now() // wall-clock: measures how long the tick took
+	start := time.Now() //nolint:forbidigo // wall-clock: measures how long the tick took
 
 	// Mode-scoped work: live first (the bulk of traffic), then test. One
 	// mode's errors do not gate the other — they share nothing at the

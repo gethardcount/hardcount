@@ -896,7 +896,7 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 		// tax_transaction_id — and the wall-clock reconciler excludes
 		// clock-pinned invoices, so nothing recovered it. Real elapsed
 		// time is the only correct measure of a Stripe-side TTL.
-		if age := time.Now().UTC().Sub(createdAt); age > taxCalculationMaxAge { // wall-clock: Stripe's calc TTL is a real-world 24h, never the simulated clock
+		if age := time.Now().UTC().Sub(createdAt); age > taxCalculationMaxAge { //nolint:forbidigo // wall-clock: Stripe's calc TTL is a real-world 24h, never the simulated clock
 			de := errs.InvalidState(fmt.Sprintf(
 				"tax calculation expired (age %s, max %s) — retry tax to refresh, then finalize",
 				age.Truncate(time.Minute), taxCalculationMaxAge))
@@ -5303,7 +5303,7 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 	if e.charger == nil || e.paymentSetups == nil {
 		return 0, nil
 	}
-	start := time.Now() // wall-clock: measures how long the sweep ran, for its log line; not a billing instant
+	start := time.Now() //nolint:forbidigo // wall-clock: measures how long the sweep ran, for its log line; not a billing instant
 	fetch := func(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
 		pending, err := e.invoices.ListAutoChargePending(ctx, after, limit)
 		if err != nil {
@@ -5372,7 +5372,7 @@ func (e *Engine) EnrollFailedWithoutDunning(ctx context.Context, limit int) (int
 	// Cool-off cutoff. The sweep is livemode-only (clock-pinned rows are excluded
 	// by the store query), so a real-time cutoff against updated_at is correct and
 	// never touches simulated time.
-	olderThan := time.Now().UTC().Add(-failedDunningBackfillCoolOff) // wall-clock: reconciler is livemode-only; clock-pinned rows are excluded by the query
+	olderThan := time.Now().UTC().Add(-failedDunningBackfillCoolOff) //nolint:forbidigo // wall-clock: reconciler is livemode-only; clock-pinned rows are excluded by the query
 	pending, err := e.invoices.ListFailedWithoutDunningRun(ctx, olderThan, limit)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list failed-without-dunning for backfill: %w", err)}

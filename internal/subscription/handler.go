@@ -2263,10 +2263,10 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	// (ADR-048). In production h.invoices is always wired and this gate runs.
 	var haveSrc bool
 	if h.invoices != nil && sub.CurrentBillingPeriodStart != nil {
-		// single-invoice-ok: paid/unpaid routing gate only — the per-invoice
-		// credit MATH fans across FindFundingInvoicesForPeriod (resolveClawbackPieces).
+		// A single-row lookup is right here: it only routes paid vs unpaid. The
+		// per-invoice credit MATH fans across FindFundingInvoicesForPeriod (resolveClawbackPieces).
 		// Audit 2026-06-15 cleared the gate (0/3); base-paid implies the period was funded.
-		resolved, lookupErr := h.invoices.FindBaseInvoiceForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart)
+		resolved, lookupErr := h.invoices.FindBaseInvoiceForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart) //nolint:forbidigo // single-invoice-ok: paid/unpaid routing gate only
 		if lookupErr != nil {
 			// No source invoice for the period (e.g. a freshly created sub whose
 			// first prebill hasn't been generated). Nothing to anchor an
@@ -2576,10 +2576,10 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			// invoices from the billing-idempotency index so the collision
 			// no longer triggers there.
 			if errs.Code(err) == "invoice_proration_source_taken" {
-				// single-invoice-ok: proration-dedup replay — returns the prior invoice
+				// Proration-dedup replay — returns the prior invoice
 				// for THIS exact (item, change_type, change_at) to avoid double-issuing.
 				// An idempotency lookup, not a period-wide funding decision.
-				existing, lookupErr := h.invoices.GetByProrationSource(ctx, tenantID, sub.ID, spec.itemID, spec.changeType, spec.changeAt)
+				existing, lookupErr := h.invoices.GetByProrationSource(ctx, tenantID, sub.ID, spec.itemID, spec.changeType, spec.changeAt) //nolint:forbidigo // single-invoice-ok: proration-dedup replay
 				if lookupErr != nil {
 					return nil, fmt.Errorf("proration dedup lookup: %w", lookupErr)
 				}
@@ -2719,9 +2719,9 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			// AlreadyExists (e.g. credit_note_source) are distinct bugs
 			// and must propagate up. ADR-030 cross-flow audit 2026-05-28.
 			if errs.Code(err) == "credit_proration_source_taken" {
-				// single-invoice-ok: credit-ledger proration-dedup replay — same
+				// Credit-ledger proration-dedup replay — same
 				// idempotency lookup as the invoice path, not a funding decision.
-				existing, lookupErr := h.credits.GetByProrationSource(ctx, tenantID, sub.ID, spec.itemID, spec.changeType, spec.changeAt)
+				existing, lookupErr := h.credits.GetByProrationSource(ctx, tenantID, sub.ID, spec.itemID, spec.changeType, spec.changeAt) //nolint:forbidigo // single-invoice-ok: credit-ledger proration-dedup replay
 				if lookupErr != nil {
 					return nil, fmt.Errorf("proration credit dedup lookup: %w", lookupErr)
 				}
