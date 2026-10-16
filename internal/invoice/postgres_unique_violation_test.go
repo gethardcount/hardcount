@@ -3,6 +3,7 @@ package invoice
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -71,5 +72,64 @@ func TestMapInvoiceUniqueViolation_NonUniqueErrorPassesThrough(t *testing.T) {
 	}
 	if mapped := mapInvoiceUniqueViolation(errors.New("some other error"), domain.Invoice{}); mapped != nil {
 		t.Errorf("expected nil for non-pg error, got %v", mapped)
+	}
+}
+
+// The billing-period conflict names the period the way every other surface
+// shows it: inclusive last day in the invoice's billing timezone. Pre-fix it
+// printed the stored exclusive end ("2026-11-01..2026-12-01") for a period the
+// dashboard, PDF and hosted page show as "Nov 1 – Nov 30".
+func TestMapInvoiceUniqueViolation_BillingPeriodMessageIsInclusive(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load zone: %v", err)
+	}
+	pgErr := &pgconn.PgError{Code: "23505", ConstraintName: idxInvoicesBillingIdempotency}
+	cases := []struct {
+		name string
+		inv  domain.Invoice
+		want string
+	}{
+		{
+			name: "New York period, stamped zone",
+			inv: domain.Invoice{
+				SubscriptionID:     "sub_x",
+				BillingTimezone:    "America/New_York",
+				BillingPeriodStart: time.Date(2026, 11, 1, 0, 0, 0, 0, ny),
+				BillingPeriodEnd:   time.Date(2026, 12, 1, 0, 0, 0, 0, ny),
+			},
+			want: `invoice already exists for subscription "sub_x" period Nov 1, 2026 – Nov 30, 2026`,
+		},
+		{
+			name: "legacy row without a zone falls back to UTC",
+			inv: domain.Invoice{
+				SubscriptionID:     "sub_x",
+				BillingPeriodStart: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+				BillingPeriodEnd:   time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
+			},
+			want: `invoice already exists for subscription "sub_x" period Nov 1, 2026 – Nov 30, 2026`,
+		},
+		{
+			name: "zero-length period names the single day",
+			inv: domain.Invoice{
+				SubscriptionID:     "sub_x",
+				BillingTimezone:    "America/New_York",
+				BillingPeriodStart: time.Date(2026, 11, 1, 15, 0, 0, 0, ny),
+				BillingPeriodEnd:   time.Date(2026, 11, 1, 15, 0, 0, 0, ny),
+			},
+			want: `invoice already exists for subscription "sub_x" period Nov 1, 2026`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mapped := mapInvoiceUniqueViolation(pgErr, tc.inv)
+			var de *errs.DomainError
+			if !errors.As(mapped, &de) {
+				t.Fatalf("expected *errs.DomainError, got %T: %v", mapped, mapped)
+			}
+			if de.Message != tc.want {
+				t.Errorf("message:\n got  %q\n want %q", de.Message, tc.want)
+			}
+		})
 	}
 }
