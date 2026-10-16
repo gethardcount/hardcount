@@ -8954,7 +8954,7 @@ paths:
         `Authorization: Bearer` (SDK / curl). Cookie path returns
         `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
         All callers get `tenant_id`, `livemode`,
-        `can_email_setup_links` and `can_send_invites`.
+        `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
       responses:
         "200":
           description: Resolved auth context
@@ -8981,6 +8981,12 @@ paths:
                       Whether this server can invite a teammate. False when
                       email sending (SMTP) or DASHBOARD_BASE_URL is not set
                       up; inviting then fails with 409.
+                  smtp_configured:
+                    type: boolean
+                    description: |
+                      Whether this server has SMTP set up (SMTP_HOST). False
+                      means no email of any kind is sent. Settings → Email
+                      (`GET /v1/settings/email`) has the details.
                   user_id:
                     type: string
                   email:
@@ -10879,6 +10885,88 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: A field failed validation. `error.param` names the field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/settings/email:
+    get:
+      tags: [System]
+      summary: Email setup status
+      operationId: getEmailSettings
+      description: |
+        Read-only. Email is configured in the server environment, not per
+        workspace: `SMTP_HOST` and friends, plus the base URLs email links
+        are built from. Never returns credentials.
+      responses:
+        "200":
+          description: Email setup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [smtp_configured, smtp_host, from_address, tls_mode, links, can_email_setup_links, can_send_invites]
+                properties:
+                  smtp_configured:
+                    type: boolean
+                    description: False when `SMTP_HOST` is unset; every email then fails.
+                  smtp_host:
+                    type: string
+                    description: The SMTP relay host name, without port or credentials. Empty when not configured.
+                  from_address:
+                    type: string
+                    description: The envelope sender (`SMTP_FROM`).
+                  tls_mode:
+                    type: string
+                    enum: [starttls, implicit, none]
+                  links:
+                    type: array
+                    description: Every environment variable an email link is built from, set or not.
+                    items:
+                      type: object
+                      required: [env, set, effect]
+                      properties:
+                        env:
+                          type: string
+                          enum: [HOSTED_INVOICE_BASE_URL, PAYMENT_UPDATE_URL, DASHBOARD_BASE_URL]
+                        set:
+                          type: boolean
+                        effect:
+                          type: string
+                          description: What doesn't work while it is unset.
+                  can_email_setup_links:
+                    type: boolean
+                  can_send_invites:
+                    type: boolean
+  /v1/settings/email/test:
+    post:
+      tags: [System]
+      summary: Send a test email
+      operationId: sendTestEmail
+      description: |
+        Dashboard sessions only. Sends one plain-text email to the signed-in
+        member's own address, directly over SMTP (not queued), and returns
+        the server's answer. Writes an audit row on success.
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent_to]
+                properties:
+                  sent_to:
+                    type: string
+        "409":
+          description: "`email_not_configured`: SMTP_HOST is not set."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: "`smtp_error`: the SMTP server refused the email or could not be reached. The message carries its answer."
           content:
             application/json:
               schema:

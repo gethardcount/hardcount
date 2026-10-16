@@ -299,6 +299,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 
 	// --- settings / Stripe connection -------------------------------------
 	{"PUT", "/v1/settings"}:                         explicit("tenant.SettingsHandler.upsert → Log(update, setting) with a FIELD-LEVEL diff. A save that changes no field mutates nothing semantically and declares MarkSkip."),
+	{"POST", "/v1/settings/email/test"}:             explicit("api.emailSettingsHandler.sendTest → Log(send, setting: smtp; metadata action=test_email_sent; no address) after a successful SMTP send to the signed-in member."),
 	{"POST", "/v1/settings/stripe"}:                 explicit("tenantstripe.Handler.connect → Log(create, stripe_credentials) — never records the keys."),
 	{"DELETE", "/v1/settings/stripe/{mode}"}:        explicit("tenantstripe.Handler.delete → Log(delete, stripe_credentials)."),
 	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}: explicit("tenantstripe.Handler.setWebhook → Log(rotate, stripe_credentials: webhook_secret_set) — never records the secret."),

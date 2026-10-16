@@ -35,6 +35,7 @@ so point it at a fresh or dedicated database if you want to keep yours clean.
 
 ## Email, PDF, LiteLLM
 
+- [ ] Settings → Email → Send test email: the page says "Sent to" your address and the message arrives in Mailpit. With a wrong `SMTP_PORT`, the page shows the mail server's error instead.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).

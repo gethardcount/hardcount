@@ -163,6 +163,30 @@ func (s *Sender) IsConfigured() bool { return s.host != "" }
 // host name is exposed — never the credentials.
 func (s *Sender) SMTPHost() string { return s.host }
 
+// FromAddress returns the SMTP_FROM envelope address (or its default), for
+// the read-only Settings → Email status. Not a secret.
+func (s *Sender) FromAddress() string { return s.from }
+
+// TLSMode returns the transport mode: starttls, implicit or none.
+func (s *Sender) TLSMode() string { return s.tlsMode }
+
+// SendTestEmail sends a short plain-text message straight over SMTP (not
+// through the outbox), so the operator who asked sees the server's real
+// answer: ErrSMTPNotConfigured, a refused login, a dial timeout, or success.
+// Used only by Settings → Email "Send test email", which addresses it to the
+// signed-in member's own email.
+func (s *Sender) SendTestEmail(ctx context.Context, tenantID, to string) error {
+	subject := "Velox test email"
+	body := `This is a test email from Velox.
+
+If you can read it, invoices, receipts, payment reminders, password resets
+and team invites can be delivered from this server.
+
+— Velox
+`
+	return s.sendPlain(ctx, tenantID, to, "", subject, body)
+}
+
 // SetSettingsGetter wires the tenant settings store so Send* methods can
 // look up branding per email. Called from router.go; optional for tests.
 func (s *Sender) SetSettingsGetter(g SettingsGetter) { s.settings = g }

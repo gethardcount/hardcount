@@ -79,6 +79,7 @@ import type {
   GetAnalyticsUsage200,
   GetAnalyticsUsageParams,
   GetCustomerUsageParams,
+  GetEmailSettings200,
   GetPlan200,
   GetSubscriptionTimeline200,
   GetUsageSummary500,
@@ -191,6 +192,7 @@ import type {
   ScheduleSubscriptionCancelBody,
   SendCustomerPaymentSetupEmail202,
   SendCustomerPaymentSetupEmailBody,
+  SendTestEmail200,
   SetDefaultDunningPolicy200,
   SetStripeWebhookSecretBody,
   SetSubscriptionBillingThresholdsBody,
@@ -10445,7 +10447,7 @@ export const getGetV1WhoamiUrl = () => {
  * `Authorization: Bearer` (SDK / curl). Cookie path returns
  * `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
  * All callers get `tenant_id`, `livemode`,
- * `can_email_setup_links` and `can_send_invites`.
+ * `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
  * @summary Resolve the current credential to its tenant context
  */
 export const getV1Whoami = async ( options?: RequestInit): Promise<GetV1Whoami200> => {
@@ -15396,6 +15398,184 @@ export const useUpdateTenantSettings = <TError = Error,
         TContext
       > => {
       return useMutation(getUpdateTenantSettingsMutationOptions(options), queryClient);
+    }
+
+export const getGetEmailSettingsUrl = () => {
+
+
+
+
+  return `/v1/settings/email`
+}
+
+/**
+ * Read-only. Email is configured in the server environment, not per
+ * workspace: `SMTP_HOST` and friends, plus the base URLs email links
+ * are built from. Never returns credentials.
+ * @summary Email setup status
+ */
+export const getEmailSettings = async ( options?: RequestInit): Promise<GetEmailSettings200> => {
+
+  return orvalClient<GetEmailSettings200>(getGetEmailSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEmailSettingsQueryKey = () => {
+    return [
+    `/v1/settings/email`
+    ] as const;
+    }
+
+
+export const getGetEmailSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEmailSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEmailSettings>>> = () => getEmailSettings(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetEmailSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getEmailSettings>>>
+export type GetEmailSettingsQueryError = unknown
+
+
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getEmailSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getEmailSettings>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getEmailSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getEmailSettings>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Email setup status
+ */
+
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetEmailSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSendTestEmailUrl = () => {
+
+
+
+
+  return `/v1/settings/email/test`
+}
+
+/**
+ * Dashboard sessions only. Sends one plain-text email to the signed-in
+ * member's own address, directly over SMTP (not queued), and returns
+ * the server's answer. Writes an audit row on success.
+ * @summary Send a test email
+ */
+export const sendTestEmail = async ( options?: RequestInit): Promise<SendTestEmail200> => {
+
+  return orvalClient<SendTestEmail200>(getSendTestEmailUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSendTestEmailMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext> => {
+
+const mutationKey = ['sendTestEmail'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendTestEmail>>, void> = () => {
+
+
+          return  sendTestEmail(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendTestEmailMutationResult = NonNullable<Awaited<ReturnType<typeof sendTestEmail>>>
+
+    export type SendTestEmailMutationError = Error
+
+    /**
+ * @summary Send a test email
+ */
+export const useSendTestEmail = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof sendTestEmail>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getSendTestEmailMutationOptions(options), queryClient);
     }
 
 export const getConnectStripeUrl = () => {

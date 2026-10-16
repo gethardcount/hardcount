@@ -2286,6 +2286,48 @@ func (e PostV1RatingRulesJSONBodyMode) Valid() bool {
 	}
 }
 
+// Defines values for GetEmailSettings200JSONResponseBodyLinksEnv.
+const (
+	DASHBOARDBASEURL     GetEmailSettings200JSONResponseBodyLinksEnv = "DASHBOARD_BASE_URL"
+	HOSTEDINVOICEBASEURL GetEmailSettings200JSONResponseBodyLinksEnv = "HOSTED_INVOICE_BASE_URL"
+	PAYMENTUPDATEURL     GetEmailSettings200JSONResponseBodyLinksEnv = "PAYMENT_UPDATE_URL"
+)
+
+// Valid indicates whether the value is a known member of the GetEmailSettings200JSONResponseBodyLinksEnv enum.
+func (e GetEmailSettings200JSONResponseBodyLinksEnv) Valid() bool {
+	switch e {
+	case DASHBOARDBASEURL:
+		return true
+	case HOSTEDINVOICEBASEURL:
+		return true
+	case PAYMENTUPDATEURL:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetEmailSettings200JSONResponseBodyTlsMode.
+const (
+	Implicit GetEmailSettings200JSONResponseBodyTlsMode = "implicit"
+	None     GetEmailSettings200JSONResponseBodyTlsMode = "none"
+	Starttls GetEmailSettings200JSONResponseBodyTlsMode = "starttls"
+)
+
+// Valid indicates whether the value is a known member of the GetEmailSettings200JSONResponseBodyTlsMode enum.
+func (e GetEmailSettings200JSONResponseBodyTlsMode) Valid() bool {
+	switch e {
+	case Implicit:
+		return true
+	case None:
+		return true
+	case Starttls:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DisconnectStripeParamsMode.
 const (
 	DisconnectStripeParamsModeLive DisconnectStripeParamsMode = "live"
@@ -5775,6 +5817,12 @@ type PreviewRecipeJSONBody struct {
 	Overrides map[string]interface{} `json:"overrides,omitempty"`
 }
 
+// GetEmailSettings200JSONResponseBodyLinksEnv defines parameters for GetEmailSettings.
+type GetEmailSettings200JSONResponseBodyLinksEnv string
+
+// GetEmailSettings200JSONResponseBodyTlsMode defines parameters for GetEmailSettings.
+type GetEmailSettings200JSONResponseBodyTlsMode string
+
 // ConnectStripeJSONBody defines parameters for ConnectStripe.
 type ConnectStripeJSONBody struct {
 	// Livemode false = test-mode keys, true = live-mode keys.
@@ -6940,6 +6988,12 @@ type ServerInterface interface {
 	// Update workspace settings
 	// (PUT /v1/settings)
 	UpdateTenantSettings(w http.ResponseWriter, r *http.Request)
+	// Email setup status
+	// (GET /v1/settings/email)
+	GetEmailSettings(w http.ResponseWriter, r *http.Request)
+	// Send a test email
+	// (POST /v1/settings/email/test)
+	SendTestEmail(w http.ResponseWriter, r *http.Request)
 	// List Stripe connections
 	// (GET /v1/settings/stripe)
 	ListStripeConnections(w http.ResponseWriter, r *http.Request)
@@ -7834,6 +7888,18 @@ func (_ Unimplemented) GetTenantSettings(w http.ResponseWriter, r *http.Request)
 // Update workspace settings
 // (PUT /v1/settings)
 func (_ Unimplemented) UpdateTenantSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Email setup status
+// (GET /v1/settings/email)
+func (_ Unimplemented) GetEmailSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Send a test email
+// (POST /v1/settings/email/test)
+func (_ Unimplemented) SendTestEmail(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12554,6 +12620,46 @@ func (siw *ServerInterfaceWrapper) UpdateTenantSettings(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// GetEmailSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetEmailSettings(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetEmailSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SendTestEmail operation middleware
+func (siw *ServerInterfaceWrapper) SendTestEmail(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SendTestEmail(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListStripeConnections operation middleware
 func (siw *ServerInterfaceWrapper) ListStripeConnections(w http.ResponseWriter, r *http.Request) {
 
@@ -14836,6 +14942,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/v1/settings", wrapper.UpdateTenantSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/settings/email", wrapper.GetEmailSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/settings/email/test", wrapper.SendTestEmail)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/settings/stripe", wrapper.ListStripeConnections)

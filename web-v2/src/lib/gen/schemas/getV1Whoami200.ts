@@ -25,6 +25,12 @@ export type GetV1Whoami200 = {
      * up; inviting then fails with 409.
      */
   can_send_invites: boolean;
+  /**
+     * Whether this server has SMTP set up (SMTP_HOST). False
+     * means no email of any kind is sent. Settings → Email
+     * (`GET /v1/settings/email`) has the details.
+     */
+  smtp_configured?: boolean;
   user_id?: string;
   email?: string;
   key_id?: string;

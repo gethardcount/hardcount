@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -134,6 +135,11 @@ export function TeamTab() {
               tone={invitesNotice.tone}
               title={invitesNotice.title}
               className="mb-4"
+              actions={
+                <Link to="/settings?tab=email" className="text-sm font-medium text-primary hover:underline">
+                  Email settings
+                </Link>
+              }
               details={
                 <p>
                   For whoever runs Velox: set <code className="font-mono">SMTP_HOST</code> and{' '}

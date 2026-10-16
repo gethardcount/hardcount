@@ -4038,7 +4038,7 @@ export interface paths {
          *     `Authorization: Bearer` (SDK / curl). Cookie path returns
          *     `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
          *     All callers get `tenant_id`, `livemode`,
-         *     `can_email_setup_links` and `can_send_invites`.
+         *     `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
          */
         get: {
             parameters: {
@@ -4071,6 +4071,12 @@ export interface paths {
                              *     up; inviting then fails with 409.
                              */
                             can_send_invites: boolean;
+                            /**
+                             * @description Whether this server has SMTP set up (SMTP_HOST). False
+                             *     means no email of any kind is sent. Settings → Email
+                             *     (`GET /v1/settings/email`) has the details.
+                             */
+                            smtp_configured?: boolean;
                             user_id?: string;
                             email?: string;
                             key_id?: string;
@@ -5633,6 +5639,50 @@ export interface paths {
          */
         put: operations["updateTenantSettings"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Email setup status
+         * @description Read-only. Email is configured in the server environment, not per
+         *     workspace: `SMTP_HOST` and friends, plus the base URLs email links
+         *     are built from. Never returns credentials.
+         */
+        get: operations["getEmailSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/email/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test email
+         * @description Dashboard sessions only. Sends one plain-text email to the signed-in
+         *     member's own address, directly over SMTP (not queued), and returns
+         *     the server's answer. Writes an audit row on success.
+         */
+        post: operations["sendTestEmail"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13115,6 +13165,85 @@ export interface operations {
             };
             /** @description A field failed validation. `error.param` names the field. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getEmailSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Email setup */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description False when `SMTP_HOST` is unset; every email then fails. */
+                        smtp_configured: boolean;
+                        /** @description The SMTP relay host name, without port or credentials. Empty when not configured. */
+                        smtp_host: string;
+                        /** @description The envelope sender (`SMTP_FROM`). */
+                        from_address: string;
+                        /** @enum {string} */
+                        tls_mode: "starttls" | "implicit" | "none";
+                        /** @description Every environment variable an email link is built from, set or not. */
+                        links: {
+                            /** @enum {string} */
+                            env: "HOSTED_INVOICE_BASE_URL" | "PAYMENT_UPDATE_URL" | "DASHBOARD_BASE_URL";
+                            set: boolean;
+                            /** @description What doesn't work while it is unset. */
+                            effect: string;
+                        }[];
+                        can_email_setup_links: boolean;
+                        can_send_invites: boolean;
+                    };
+                };
+            };
+        };
+    };
+    sendTestEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sent_to: string;
+                    };
+                };
+            };
+            /** @description `email_not_configured`: SMTP_HOST is not set. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `smtp_error`: the SMTP server refused the email or could not be reached. The message carries its answer. */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

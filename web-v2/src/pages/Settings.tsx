@@ -50,8 +50,9 @@ import {
   postalPlaceholderForCountry,
 } from '@/lib/geo'
 
-import { Building2, CreditCard, FileText, Receipt, Check, AlertCircle, Info, Loader2, Trash2, Copy, ExternalLink, X, Users } from 'lucide-react'
+import { Building2, CreditCard, FileText, Receipt, Check, AlertCircle, Info, Loader2, Trash2, Copy, ExternalLink, X, Users, Mail } from 'lucide-react'
 import { TeamTab } from '@/components/TeamTab'
+import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
@@ -221,9 +222,9 @@ export default function SettingsPage() {
   // Tab values: 'general' is the default home; 'business' is accepted
   // as a back-compat alias since older bookmarks / external links
   // (docs, support emails) point at ?tab=business.
-  const tab = ((): 'general' | 'invoicing' | 'tax' | 'payments' | 'team' => {
+  const tab = ((): 'general' | 'invoicing' | 'tax' | 'payments' | 'email' | 'team' => {
     const q = searchParams.get('tab')
-    if (q === 'invoicing' || q === 'tax' || q === 'payments' || q === 'team') return q
+    if (q === 'invoicing' || q === 'tax' || q === 'payments' || q === 'email' || q === 'team') return q
     if (q === 'business') return 'general'
     return 'general'
   })()
@@ -360,13 +361,18 @@ export default function SettingsPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="mt-6">
+        {/* Six tabs are wider than a phone: the strip scrolls sideways
+            instead of widening the page. */}
+        <div className="-mx-4 max-w-[100vw] overflow-x-auto px-4 md:mx-0 md:px-0">
         <TabsList>
           <TabsTrigger value="general"><Building2 size={14} className="hidden sm:block" /> General</TabsTrigger>
           <TabsTrigger value="invoicing"><FileText size={14} className="hidden sm:block" /> Invoicing</TabsTrigger>
           <TabsTrigger value="tax"><Receipt size={14} className="hidden sm:block" /> Tax</TabsTrigger>
           <TabsTrigger value="payments"><CreditCard size={14} className="hidden sm:block" /> Payments</TabsTrigger>
+          <TabsTrigger value="email"><Mail size={14} className="hidden sm:block" /> Email</TabsTrigger>
           <TabsTrigger value="team"><Users size={14} className="hidden sm:block" /> Team</TabsTrigger>
         </TabsList>
+        </div>
 
         <div className="max-w-3xl mt-6 pb-24">
 
@@ -888,6 +894,11 @@ export default function SettingsPage() {
           {/* Team: members + invitations. Lives outside the settings
               form — membership changes apply immediately, there's
               nothing to save. */}
+          {/* Email: read-only server email setup + test send. */}
+          <TabsContent value="email">
+            <EmailSettingsPanel />
+          </TabsContent>
+
           <TabsContent value="team">
             <TeamTab />
           </TabsContent>

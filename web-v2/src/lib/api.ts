@@ -1,6 +1,7 @@
 import { setLastRequestId } from './lastRequestId'
 import { reportUnauthorized } from './sessionEnd'
 import { getCurrencySymbol } from './money'
+import type { EmailSettingsStatus } from './emailSettings'
 // Recipe wire types are GENERATED from api/openapi.yaml (single source of
 // truth) — the hand-written versions drifted from the server (`key` vs
 // `recipe_key`, a phantom `products` role) until the 2026-07-26 recipe
@@ -454,6 +455,12 @@ export const api = {
     apiRequest<TenantSettings>('GET', '/settings'),
   updateSettings: (data: Partial<TenantSettings>) =>
     apiRequest<TenantSettings>('PUT', '/settings', data),
+  // Settings → Email: read-only server email setup, and a test send to the
+  // signed-in member (dashboard session only).
+  getEmailSettings: () =>
+    apiRequest<EmailSettingsStatus>('GET', '/settings/email'),
+  sendTestEmail: () =>
+    apiRequest<{ sent_to: string }>('POST', '/settings/email/test'),
 
   // Dunning
   // Dunning policies (campaigns model, ADR-036). Multi-policy-per-

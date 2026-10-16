@@ -468,3 +468,28 @@ test('grant credits from the customer page', async ({ page }) => {
   await expect(credits.getByText(`Granted ${usd(2500)} · Used ${usd(0)}`)).toBeVisible()
   await expect(page).toHaveURL(new RegExp(`/customers/${customer.id}$`))
 })
+
+test('Settings → Email says what this server can send', async ({ page }) => {
+  type EmailStatus = { smtp_configured: boolean; links: { env: string; set: boolean; effect: string }[] }
+  const status = await api<EmailStatus>('GET', '/settings/email')
+  await page.goto('/settings?tab=email')
+  await expect(page.getByRole('tab', { name: 'Email', selected: true })).toBeVisible()
+
+  const missing = status.links.filter(l => !l.set).length
+  const label = !status.smtp_configured ? 'Not set up' : missing > 0 ? 'Partly set up' : 'Ready'
+  await expect(page.getByText(label, { exact: true })).toBeVisible()
+  if (!status.smtp_configured) {
+    await expect(page.getByText("This server can't send email")).toBeVisible()
+  }
+  // The test send goes over SMTP, so it is offered only when SMTP is set.
+  const send = page.getByRole('button', { name: 'Send test email' })
+  if (status.smtp_configured) await expect(send).toBeEnabled()
+  else await expect(send).toBeDisabled()
+
+  // Each email-link variable shows whether it is set and, if not, what breaks.
+  for (const l of status.links) {
+    const row = page.getByRole('listitem').filter({ hasText: l.env })
+    await expect(row.getByText(l.set ? 'Set' : 'Not set', { exact: true })).toBeVisible()
+    if (!l.set) await expect(row).toContainText(l.effect)
+  }
+})

@@ -17,6 +17,7 @@ Older entries keep their original text.
 
 ### Added
 
+- **Settings → Email shows whether this server can send email (2026-10-17).** A new Email tab lists the SMTP server, the from address and each email-link variable, says what fails while one is missing, and sends a test email to your own address with the mail server's real answer. Team's "Invites are off" notice links to it. API: `GET /v1/settings/email`, `POST /v1/settings/email/test` (dashboard sign-in only), and whoami gains `smtp_configured`.
 - **Browser tests for the dashboard (2026-10-16).** Contributors: `npm run test:e2e` in `web-v2` runs Playwright against a real API. It opens every page at desktop and phone width and fails on console errors, failed API calls or a page that scrolls sideways, plus five key journeys. CI runs it as the `e2e` job. See [web-v2/e2e/README.md](web-v2/e2e/README.md).
 
 ### Fixed

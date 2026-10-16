@@ -26,6 +26,10 @@ func TestSender_NotConfigured(t *testing.T) {
 	if !errors.Is(err, ErrSMTPNotConfigured) {
 		t.Errorf("unconfigured sender should return ErrSMTPNotConfigured, got: %v", err)
 	}
+	// Settings → Email maps this error to 409 email_not_configured.
+	if err := s.SendTestEmail(context.Background(), "t1", "ops@example.com"); !errors.Is(err, ErrSMTPNotConfigured) {
+		t.Errorf("SendTestEmail on an unconfigured sender: got %v, want ErrSMTPNotConfigured", err)
+	}
 }
 
 func TestSender_Configured(t *testing.T) {
