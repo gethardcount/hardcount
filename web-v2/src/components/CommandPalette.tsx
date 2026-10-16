@@ -6,7 +6,9 @@ import {
   FileText, User, Hash, Zap, type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { allNavItems } from '@/lib/navigation'
+import { allNavItems, isTestMode } from '@/lib/navigation'
+import { invoiceStatus } from '@/lib/statusLabels'
+import { wallClockNow } from '@/lib/effectiveNow'
 import { api, type Customer, type Invoice, type Plan, type Subscription, formatCents } from '@/lib/api'
 import {
   Command,
@@ -34,14 +36,22 @@ interface NavItem {
 
 // Pages come from the shared navigation config, so the palette lists exactly
 // what the sidebar does (it had drifted and missed four pages).
-function navItems(livemode: boolean): NavItem[] {
-  return allNavItems(livemode).map(i => ({
+function navItems(testMode: boolean): NavItem[] {
+  return allNavItems(testMode).map(i => ({
     id: `nav-${i.to}`,
     title: i.label,
     subtitle: i.hint,
     icon: i.icon,
     href: i.to,
   }))
+}
+
+// The palette doesn't load test clocks, so it can only judge "Past due" for
+// real-time invoices. A simulated invoice gets no "now" (NaN) and reads Open
+// rather than Past due by the wall clock, which its test clock may not have
+// reached.
+function paletteNow(inv: Invoice): number {
+  return inv.is_simulated ? NaN : wallClockNow()
 }
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
@@ -116,7 +126,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         <CommandEmpty>No results found</CommandEmpty>
 
         <CommandGroup heading="Navigation">
-          {navItems(!!user?.livemode).map(item => {
+          {navItems(isTestMode(user)).map(item => {
             const Icon = item.icon
             return (
               <CommandItem
@@ -177,7 +187,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   <FileText className="mr-2 h-4 w-4" />
                   <div className="flex flex-col">
                     <span>{inv.invoice_number}</span>
-                    <span className="text-xs opacity-60">{inv.status} · {formatCents(inv.total_amount_cents, inv.currency)}</span>
+                    <span className="text-xs opacity-60">{invoiceStatus(inv, paletteNow(inv)).label} · {formatCents(inv.amount_due_cents, inv.currency)} due</span>
                   </div>
                 </CommandItem>
               ))}

@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CommandPalette } from '@/components/CommandPalette'
-import { isNavActive, SETTINGS_NAV, visibleNav } from '@/lib/navigation'
+import { isNavActive, isTestMode, SETTINGS_NAV, visibleNav } from '@/lib/navigation'
 import { VeloxLogo } from '@/components/VeloxLogo'
 import { OnboardingLauncher } from '@/components/OnboardingLauncher'
 import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
@@ -337,14 +337,15 @@ export function Layout({ children }: { children: ReactNode }) {
         >
           <Search size={14} />
           <span className="flex-1 text-left">Search...</span>
-          <kbd className="text-[11px] bg-background px-1.5 py-0.5 rounded border border-border font-medium text-muted-foreground">
+          {/* Keyboard hint only where there is a keyboard (not the phone menu). */}
+          <kbd className="hidden md:inline text-[11px] bg-background px-1.5 py-0.5 rounded border border-border font-medium text-muted-foreground">
             {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl+'}K
           </kbd>
         </button>
       </div>
 
       <ScrollPane as="nav" aria-label="Main navigation" className="flex-1 min-h-0 p-3 space-y-1">
-        {visibleNav(!!user?.livemode).map(section => (
+        {visibleNav(isTestMode(user)).map(section => (
           <div key={section.title ?? 'top'} className="space-y-0.5">
             {section.title && (
               <p className="px-3 pt-4 pb-1 text-2xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -370,7 +371,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <div className="space-y-0.5 border-t border-border p-2">
         {/* Setup progress lives here, not as a floating pill: the pill sat
             over page content (buttons, last table rows) on every page. */}
-        <OnboardingLauncher variant="sidebar" />
+        <OnboardingLauncher />
         <NavLink item={SETTINGS_NAV} pathname={location.pathname} onClick={closeSidebar} />
         {user && (
           <DropdownMenu>
@@ -564,10 +565,6 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* Command Palette */}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
-
-      {/* Global onboarding launcher — floats bottom-right, self-hides when
-          the checklist is complete or dismissed. Rendered at the Layout level
-          so it persists across all authed routes, not just Dashboard. */}
     </div>
   )
 }

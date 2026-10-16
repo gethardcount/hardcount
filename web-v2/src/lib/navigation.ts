@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, FileText, CreditCard, Tag, Wallet, Settings,
-  Receipt, AlertTriangle, ScrollText, Globe, Key, BarChart3, Sparkles,
+  Receipt, AlertTriangle, ScrollText, Key, BarChart3, Sparkles,
   Clock, Coins, ListChecks, Webhook,
   type LucideIcon,
 } from 'lucide-react'
@@ -78,17 +78,24 @@ export const NAV_SECTIONS: NavSection[] = [
 // Settings sits in the sidebar footer, not in a section.
 export const SETTINGS_NAV: NavItem = { to: '/settings', label: 'Settings', icon: Settings, hint: 'Business, invoicing, tax, payments, team' }
 
+// isTestMode is true only once the signed-in user is known to be in test
+// mode. While the user is still loading it is false, so test-only items
+// (Test clocks) don't flash in the menu of a live-mode operator.
+export function isTestMode(user: { livemode: boolean } | null | undefined): boolean {
+  return !!user && !user.livemode
+}
+
 // visibleNav returns the sections for the current mode, dropping test-only
-// items in live mode and sections left empty.
-export function visibleNav(livemode: boolean): NavSection[] {
+// items outside test mode and sections left empty.
+export function visibleNav(testMode: boolean): NavSection[] {
   return NAV_SECTIONS
-    .map(s => ({ ...s, items: s.items.filter(i => !(i.testOnly && livemode)) }))
+    .map(s => ({ ...s, items: s.items.filter(i => !i.testOnly || testMode) }))
     .filter(s => s.items.length > 0)
 }
 
 // allNavItems is the flat list for search (palette), including Settings.
-export function allNavItems(livemode: boolean): NavItem[] {
-  return [...visibleNav(livemode).flatMap(s => s.items), SETTINGS_NAV]
+export function allNavItems(testMode: boolean): NavItem[] {
+  return [...visibleNav(testMode).flatMap(s => s.items), SETTINGS_NAV]
 }
 
 // isNavActive keeps a section highlighted on its detail pages
@@ -98,6 +105,3 @@ export function isNavActive(item: NavItem, pathname: string): boolean {
   if (item.to !== '/' && pathname.startsWith(item.to + '/')) return true
   return (item.owns ?? []).some(p => pathname.startsWith(p))
 }
-
-// Globe is kept exported for pages that link to webhooks with the old icon.
-export { Globe }

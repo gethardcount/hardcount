@@ -55,7 +55,6 @@ import { TeamTab } from '@/components/TeamTab'
 import { Callout } from '@/components/Callout'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
-import { useStickyActionBar } from '@/hooks/useStickyActionBar'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -179,7 +178,6 @@ export default function SettingsPage() {
 
   const form = watch()
   const hasChanges = isDirty
-  useStickyActionBar(hasChanges)
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -897,10 +895,7 @@ export default function SettingsPage() {
         </div>
       </Tabs>
 
-      {/* Sticky save bar. The onboarding pill (also fixed bottom-right,
-          z-30) hides while it shows (useStickyActionBar); a reserved right
-          edge left the bar too narrow at phone width and the pill still
-          covered Save Changes. */}
+      {/* Sticky save bar. */}
       {hasChanges && (
         <div className="fixed bottom-0 left-0 right-0 z-30 md:left-60">
           <div className={cn(CONTENT_BAND, 'px-4 md:px-8')}>

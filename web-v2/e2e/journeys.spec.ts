@@ -188,12 +188,29 @@ test('Ctrl+K opens any page, including the ones it used to miss', async ({ page 
   await expect(page.getByRole('heading', { level: 1, name: 'Provider costs', exact: true })).toBeVisible()
 })
 
+test('Ctrl+K names an invoice the way the invoice page does', async ({ page }) => {
+  const { invoice } = JSON.parse(fs.readFileSync(seedFile, 'utf8')) as Seed
+  expect(invoice.status).toBe('finalized')
+  await page.goto('/customers')
+  await expect(page.getByRole('heading', { level: 1, name: 'Customers', exact: true })).toBeVisible()
+  await page.keyboard.press('Control+k')
+  const palette = page.getByRole('dialog')
+  await palette.getByPlaceholder('Search customers, invoices, subscriptions...').fill(invoice.invoice_number)
+  const option = palette.getByRole('option', { name: new RegExp(invoice.invoice_number) })
+  await expect(option).toContainText(`Open · ${usd(invoice.amount_due_cents)} due`)
+  await expect(option).not.toContainText('finalized')
+})
+
 test('Escape closes the mobile menu', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/customers')
   await page.getByRole('button', { name: 'Open menu' }).click()
   const close = page.getByRole('button', { name: 'Close menu' })
   await expect(close).toBeInViewport()
+  // A phone has no keyboard shortcut to show.
+  const search = page.getByRole('button', { name: /^Search/ }).filter({ visible: true })
+  await expect(search).toBeVisible()
+  await expect(search.locator('kbd')).toBeHidden()
   await page.keyboard.press('Escape')
   await expect(close).not.toBeInViewport()
 })
