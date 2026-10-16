@@ -7,9 +7,26 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { UsageAggregateByMeterItemDailyItem } from './usageAggregateByMeterItemDailyItem';
 
 export type UsageAggregateByMeterItem = {
   meter_id: string;
-  /** Sum of quantities, as a decimal string. */
+  /** Plain sum of reported quantities, as a decimal string. */
   total: string;
+  /** The meter's aggregation (`sum`, `count`, `max`, `last`) used for `value`; empty when unknown. */
+  aggregation: string;
+  /**
+     * Usage under the meter's aggregation, as a decimal string.
+     * `max` and `last` take each customer's peak or latest
+     * reading in the window and add them across customers.
+     * Billing applies them per billing period.
+     */
+  value: string;
+  events: number;
+  /** Distinct customers with events on this meter. */
+  customers: number;
+  /** Highest single reported quantity, as a decimal string. */
+  peak: string;
+  /** One entry per calendar day (in `tz`) with events, oldest first. */
+  daily: UsageAggregateByMeterItemDailyItem[];
 };

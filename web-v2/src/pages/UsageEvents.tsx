@@ -5,7 +5,7 @@ import { api, formatDateTime } from '@/lib/api'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_ROWS, exportCapNotice, parseRange, rangeCaption, windowQueryBounds, usageEmptyKind, needsAnyEventCheck } from '@/lib/usageRange'
-import type { Customer, Meter, UsageEvent, UsageEventsAggregate } from '@/lib/api'
+import type { Customer, Meter, UsageEvent, UsageEventsAggregate, UsageMeterTotal } from '@/lib/api'
 import { downloadCSV } from '@/lib/csv'
 import { formatQuantity, quantityWithUnit } from '@/lib/usageQuantity'
 import { usageNoneYet } from '@/lib/homeNotices'
@@ -15,6 +15,10 @@ import { LoadError } from '@/components/LoadError'
 import { toast } from 'sonner'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { cn } from '@/lib/utils'
+import { fillDays, meterModeBadge, meterValueCaption, sparklinePoints } from '@/lib/usageSummary'
+import { KpiStrip } from '@/components/page/KpiStrip'
+import { Section } from '@/components/page/Section'
+import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { DatePicker } from '@/components/ui/date-picker'
@@ -36,7 +40,7 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination'
 
-import { Download, Activity, Hash, Gauge, Users } from 'lucide-react'
+import { Download, Activity } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { TableSkeleton } from '@/components/ui/TableSkeleton'
 import { useUrlState } from '@/hooks/useUrlState'
@@ -154,9 +158,11 @@ export default function UsageEventsPage() {
   // breakdown. Same filter scope as the events table but no limit/offset
   // — page navigation must NOT shift the totals (issue #7). Decimal
   // precision is preserved end-to-end via string-encoded NUMERIC(38,12).
+  // tz (the tenant timezone, above) buckets each meter's daily sparkline by
+  // the tenant's calendar day, the same days the date filters use.
   const { data: aggregate } = useQuery<UsageEventsAggregate>({
-    queryKey: ['usage-events-aggregate', filterQs],
-    queryFn: () => api.aggregateUsageEvents(filterQs || undefined),
+    queryKey: ['usage-events-aggregate', filterQs, tz],
+    queryFn: () => api.aggregateUsageEvents([filterQs, `tz=${encodeURIComponent(tz)}`].filter(Boolean).join('&')),
   })
 
   // Empty page under a time window: does the workspace have any event at
@@ -192,24 +198,14 @@ export default function UsageEventsPage() {
     [events, filterDim],
   )
 
-  // Meter breakdown enriched with display name + unit from the customer's
-  // meter list (the aggregate endpoint deliberately returns IDs only —
-  // joining client-side avoids a JOIN at SQL time and keeps the response
-  // tight). pct is computed from total_units so the bar sums to 100%.
-  const meterBreakdown = useMemo(() => {
+  // One row per meter, in its own unit and under its own aggregation (the
+  // server computes `value`). Sorted by name: values in different units
+  // have no common order.
+  const meterRows = useMemo(() => {
     const rows = aggregate?.by_meter ?? []
-    const grandTotal = Number(aggregate?.total_units ?? '0')
-    return rows.map(r => {
-      const totalNum = Number(r.total)
-      return {
-        id: r.meter_id,
-        name: meterMap[r.meter_id]?.name || r.meter_id.slice(0, 12) + '...',
-        unit: meterMap[r.meter_id]?.unit || 'unit',
-        total: r.total,
-        totalNum,
-        pct: grandTotal > 0 ? (totalNum / grandTotal) * 100 : 0,
-      }
-    })
+    return rows
+      .map(r => ({ ...r, meter: meterMap[r.meter_id] as Meter | undefined }))
+      .sort((a, b) => (a.meter?.name ?? a.meter_id).localeCompare(b.meter?.name ?? b.meter_id))
   }, [aggregate, meterMap])
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
@@ -270,24 +266,14 @@ export default function UsageEventsPage() {
     }
   }
 
-  // Stat-card values come from the server-side aggregate so that they
-  // reflect ALL filtered rows, not just the current page. Pagination
-  // must not shift these numbers (issue #7). total_units is formatted from
-  // the decimal string (separators, trailing zeros dropped, never through a
-  // float); the integer counts pass through .toLocaleString().
+  // Headline counts come from the server-side aggregate so they reflect
+  // ALL filtered rows, not the current page (issue #7). There is no
+  // cross-meter unit total: tokens, calls and GB don't add up.
   const totalEvents = aggregate?.total_events ?? total
-  const totalUnitsDisplay = aggregate ? formatQuantity(aggregate.total_units) : '—'
   const activeMeters = aggregate?.active_meters ?? 0
   const activeCustomers = aggregate?.active_customers ?? 0
 
   const scopeCaption = rangeCaption(range, activeWindow)
-
-  const statCards = [
-    { label: 'Total Events', value: totalEvents.toLocaleString(), icon: Activity, color: 'text-primary' },
-    { label: 'Total Units', value: totalUnitsDisplay, icon: Hash, color: 'text-blue-600' },
-    { label: 'Active Meters', value: activeMeters.toLocaleString(), icon: Gauge, color: 'text-amber-600' },
-    { label: 'Active Customers', value: activeCustomers.toLocaleString(), icon: Users, color: 'text-emerald-600' },
-  ]
 
   return (
     <Layout>
@@ -408,43 +394,28 @@ export default function UsageEventsPage() {
               operator lands on the 30-day default. */}
           <p className="text-xs text-muted-foreground mt-6">{scopeCaption}</p>
 
-          {/* Stat cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-            {statCards.map(card => (
-              <Card key={card.label}>
-                <CardContent className="px-5 py-4">
-                  <div className="flex items-center gap-3">
-                    <div className={cn('p-2 rounded-lg bg-muted', card.color)}>
-                      <card.icon size={18} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground">{card.label}</p>
-                      <p className="text-xl font-semibold text-foreground tabular-nums mt-0.5">{card.value}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <KpiStrip
+            className="mt-2"
+            items={[
+              { label: 'Events', value: totalEvents.toLocaleString() },
+              { label: 'Meters with usage', value: activeMeters.toLocaleString() },
+              { label: 'Customers with usage', value: activeCustomers.toLocaleString() },
+            ]}
+          />
 
-          {/* Meter breakdown */}
-          {meterBreakdown.length > 0 && (
-            <Card className="mt-6">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Usage by Meter</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {meterBreakdown.map(m => (
-                  <div key={m.id} className="flex items-center gap-3">
-                    <span className="text-sm text-foreground w-32 shrink-0 truncate" title={m.name}>{m.name}</span>
-                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full bg-primary rounded-full" style={{ width: `${m.pct}%` }} />
-                    </div>
-                    <span className="text-sm font-medium text-foreground tabular-nums shrink-0 text-right">{quantityWithUnit(m.total, m.unit)}</span>
-                  </div>
+          {meterRows.length > 0 && (
+            <Section
+              className="mt-6"
+              title="Usage by meter"
+              description="Each meter in its own unit and aggregation. Maximum and Latest value take one reading per customer in this window; billing takes one per billing period."
+              flush
+            >
+              <ul className="divide-y divide-border">
+                {meterRows.map(r => (
+                  <MeterSummaryRow key={r.meter_id} row={r} meter={r.meter} from={activeWindow.from} to={activeWindow.to} />
                 ))}
-              </CardContent>
-            </Card>
+              </ul>
+            </Section>
           )}
 
           {/* Events table */}
@@ -566,5 +537,51 @@ export default function UsageEventsPage() {
         </>
       )}
     </Layout>
+  )
+}
+
+// MeterSummaryRow is one meter on the Usage page: name and aggregation,
+// the value in the meter's unit with a caption saying what it is, and a
+// daily sparkline over the selected window.
+function MeterSummaryRow({ row, meter, from, to }: { row: UsageMeterTotal; meter?: Meter; from?: string; to?: string }) {
+  const name = meter?.name ?? row.meter_id
+  const unit = row.aggregation === 'count' ? 'event' : (meter?.unit ?? '')
+  const values = fillDays(row.daily ?? [], from || undefined, to || undefined)
+  const W = 160
+  const H = 32
+  // A single day has no shape to draw.
+  const points = values.length > 1 ? sparklinePoints(values, W, H) : ''
+  return (
+    <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
+      <div className="min-w-0 sm:w-56 sm:shrink-0">
+        <div className="flex items-center gap-2">
+          {meter ? (
+            <Link to={`/meters/${meter.id}`} className="truncate text-sm font-medium text-foreground hover:underline">{name}</Link>
+          ) : (
+            <span className="truncate text-sm font-medium text-foreground">{name}</span>
+          )}
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">{meterModeBadge(row.aggregation)}</span>
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {row.events.toLocaleString()} {row.events === 1 ? 'event' : 'events'} · {row.customers.toLocaleString()} {row.customers === 1 ? 'customer' : 'customers'}
+        </p>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-lg font-semibold tabular-nums text-foreground">{quantityWithUnit(row.value, unit)}</p>
+        <p className="text-xs text-muted-foreground">{meterValueCaption(row.aggregation, row.customers)}</p>
+      </div>
+      {points && (
+        <svg
+          width={W}
+          height={H}
+          viewBox={`-1 -2 ${W + 2} ${H + 4}`}
+          className="shrink-0 text-primary"
+          role="img"
+          aria-label={`${name}: daily usage, ${values.length} days`}
+        >
+          <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+      )}
+    </li>
   )
 }

@@ -33,11 +33,24 @@ type MeterResolver interface {
 	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
 }
 
-type Handler struct {
-	svc       *Service
-	customers CustomerResolver
-	meters    MeterResolver
+// MeterLister lists the tenant's meters. The aggregate endpoint reads each
+// meter's aggregation mode from it so a Maximum meter reports its peak,
+// not a sum of readings. Wired in router.go (pricing.Service).
+type MeterLister interface {
+	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
 }
+
+type Handler struct {
+	svc        *Service
+	customers  CustomerResolver
+	meters     MeterResolver
+	meterModes MeterLister
+}
+
+// SetMeterLister wires the meter list the aggregate endpoint reads modes
+// from. Unwired, every by_meter value is the plain sum with an empty
+// aggregation.
+func (h *Handler) SetMeterLister(l MeterLister) { h.meterModes = l }
 
 func NewHandler(svc *Service, customers CustomerResolver, meters MeterResolver) *Handler {
 	return &Handler{svc: svc, customers: customers, meters: meters}
@@ -464,8 +477,32 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 	// filtered set, not a 100-row page.
 	filter.Limit = 0
 	filter.Offset = 0
+	// tz buckets the per-meter daily series by calendar day (the tenant's
+	// timezone on the dashboard). Unknown names are refused, not ignored,
+	// so a typo never silently re-buckets the chart to UTC.
+	if tz := r.URL.Query().Get("tz"); tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil || tz == "Local" {
+			respond.Validation(w, r, fmt.Sprintf("tz: unknown time zone %q (use an IANA name such as Europe/Berlin)", tz))
+			return
+		}
+		filter.DayLoc = loc
+	}
 
-	agg, err := h.svc.Aggregate(r.Context(), filter)
+	modes := map[string]string{}
+	if h.meterModes != nil {
+		meters, err := h.meterModes.ListMeters(r.Context(), filter.TenantID)
+		if err != nil {
+			respond.InternalError(w, r)
+			slog.ErrorContext(r.Context(), "aggregate usage events: list meters", "error", err)
+			return
+		}
+		for _, m := range meters {
+			modes[m.ID] = m.Aggregation
+		}
+	}
+
+	agg, err := h.svc.Aggregate(r.Context(), filter, modes)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "aggregate usage events", "error", err)

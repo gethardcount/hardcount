@@ -1241,10 +1241,25 @@ export interface UsageEvent {
 // internal/usage/store.go (Aggregate, MeterTotal).
 export interface UsageEventsAggregate {
   total_events: number
+  // Adds every meter's quantities whatever the unit; not shown anywhere.
   total_units: string
   active_meters: number
   active_customers: number
-  by_meter: { meter_id: string; total: string }[]
+  by_meter: UsageMeterTotal[]
+}
+
+// One meter in the aggregate. `value` is the meter's usage under its own
+// aggregation (sum, count, per-customer peak or latest reading); `total`
+// is the plain sum of reported values. `daily` lists only days with events.
+export interface UsageMeterTotal {
+  meter_id: string
+  total: string
+  aggregation: string
+  value: string
+  events: number
+  customers: number
+  peak: string
+  daily: { date: string; value: string }[]
 }
 
 export type MeterAggregationMode =

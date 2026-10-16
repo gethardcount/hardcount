@@ -25,4 +25,9 @@ to?: string;
  * `model=gpt-4o,token_type=input`.
  */
 dimensions?: string;
+/**
+ * IANA time zone for the calendar days of `by_meter[].daily`
+ * (default UTC). An unknown name returns 422.
+ */
+tz?: string;
 };

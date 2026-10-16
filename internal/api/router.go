@@ -244,6 +244,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Proration deps are wired below after creditSvc + invoiceStore are available
 	usageSvc := usage.NewService(usageStore)
 	usageH := usage.NewHandler(usageSvc, customerStore, pricingSvc)
+	usageH.SetMeterLister(pricingSvc)
 	customerUsageSvc := usage.NewCustomerUsageService(usageSvc, customerStore, subStore, pricingSvc)
 	customerUsageH := usage.NewCustomerUsageHandler(customerUsageSvc)
 	// Provider cost rates + margin (ADR-079).

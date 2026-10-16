@@ -4815,14 +4815,39 @@ type UsageAggregate struct {
 
 	// ByMeter One row per meter, largest total first.
 	ByMeter []struct {
+		// Aggregation The meter's aggregation (`sum`, `count`, `max`, `last`) used for `value`; empty when unknown.
+		Aggregation string `json:"aggregation"`
+
+		// Customers Distinct customers with events on this meter.
+		Customers int `json:"customers"`
+
+		// Daily One entry per calendar day (in `tz`) with events, oldest first.
+		Daily []struct {
+			Date openapi_types.Date `json:"date"`
+
+			// Value The day's usage under the meter's aggregation.
+			Value string `json:"value"`
+		} `json:"daily"`
+		Events  int    `json:"events"`
 		MeterId string `json:"meter_id"`
 
-		// Total Sum of quantities, as a decimal string.
+		// Peak Highest single reported quantity, as a decimal string.
+		Peak string `json:"peak"`
+
+		// Total Plain sum of reported quantities, as a decimal string.
 		Total string `json:"total"`
+
+		// Value Usage under the meter's aggregation, as a decimal string.
+		// `max` and `last` take each customer's peak or latest
+		// reading in the window and add them across customers.
+		// Billing applies them per billing period.
+		Value string `json:"value"`
 	} `json:"by_meter"`
 	TotalEvents int `json:"total_events"`
 
-	// TotalUnits Sum of all matching quantities across meters, as a decimal string.
+	// TotalUnits Sum of all matching quantities across meters, as a decimal
+	// string. It adds different units and ignores each meter's
+	// aggregation; use `by_meter[].value` instead.
 	TotalUnits string `json:"total_units"`
 }
 
@@ -5960,6 +5985,10 @@ type AggregateUsageEventsParams struct {
 	// same syntax as `GET /v1/usage-events`. Example:
 	// `model=gpt-4o,token_type=input`.
 	Dimensions string `form:"dimensions,omitempty" json:"dimensions,omitempty"`
+
+	// Tz IANA time zone for the calendar days of `by_meter[].daily`
+	// (default UTC). An unknown name returns 422.
+	Tz string `form:"tz,omitempty" json:"tz,omitempty"`
 }
 
 // BackfillUsageEventJSONBody defines parameters for BackfillUsageEvent.
@@ -13824,6 +13853,19 @@ func (siw *ServerInterfaceWrapper) AggregateUsageEvents(w http.ResponseWriter, r
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dimensions"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dimensions", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "tz" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tz", r.URL.Query(), &params.Tz, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tz"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tz", Err: err})
 		}
 		return
 	}

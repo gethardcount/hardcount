@@ -377,6 +377,7 @@ export * from './upsertMeterPricingRuleBodyAggregationMode';
 export * from './upsertMeterPricingRuleBodyDimensionMatch';
 export * from './usageAggregate';
 export * from './usageAggregateByMeterItem';
+export * from './usageAggregateByMeterItemDailyItem';
 export * from './usageEvent';
 export * from './usageEventProperties';
 export * from './usageSummary';

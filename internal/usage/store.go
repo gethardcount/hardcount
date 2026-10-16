@@ -88,6 +88,9 @@ type ListFilter struct {
 	// volume = highest of any Velox table).
 	AfterTimestamp time.Time
 	AfterID        string
+	// DayLoc is read by Aggregate only: the per-meter daily series buckets
+	// events by calendar day in this location. nil means UTC.
+	DayLoc *time.Location
 }
 
 // Aggregate is the response shape of GET /v1/usage-events/aggregate. It
@@ -96,7 +99,9 @@ type ListFilter struct {
 // reductions over the current page of events.
 //
 // TotalUnits is decimal-string-encoded (NUMERIC(38,12) per ADR-005) so
-// fractional GPU-hours and partial tokens round-trip without loss.
+// fractional GPU-hours and partial tokens round-trip without loss. It adds
+// quantities across meters, whatever their units and modes, so it is kept
+// for API compatibility only; the dashboard shows ByMeter[].Value instead.
 type Aggregate struct {
 	TotalEvents     int             `json:"total_events"`
 	TotalUnits      decimal.Decimal `json:"total_units"`
@@ -106,9 +111,77 @@ type Aggregate struct {
 }
 
 // MeterTotal is the per-meter row in Aggregate.ByMeter — one entry per
-// distinct meter_id matching the filter, sorted by Total DESC so the
-// dashboard's horizontal-bar breakdown can render in priority order.
+// distinct meter_id matching the filter, sorted by Total DESC.
+//
+// Total is the plain sum of reported quantities. Value is the meter's
+// usage under its own aggregation (Service.Aggregate fills it from the
+// meter's mode), because a sum is the wrong number for a Maximum or a
+// Latest-value meter: three Storage readings of 140, 210 and 120 GB are a
+// 210 GB peak, not 470 GB.
+//
+//   - sum:   Value = sum of quantities
+//   - count: Value = number of events
+//   - max:   Value = each customer's highest reading in the window, added
+//     across customers
+//   - last:  Value = each customer's latest reading in the window, added
+//     across customers
+//
+// Billing applies max and last per billing period; the window here is the
+// caller's filter, which the dashboard labels.
 type MeterTotal struct {
 	MeterID string          `json:"meter_id"`
 	Total   decimal.Decimal `json:"total"`
+	// Aggregation is the meter's mode used for Value ("" when unknown;
+	// Value then equals Total).
+	Aggregation string          `json:"aggregation"`
+	Value       decimal.Decimal `json:"value"`
+	Events      int             `json:"events"`
+	Customers   int             `json:"customers"`
+	// Peak is the highest single reported quantity.
+	Peak  decimal.Decimal `json:"peak"`
+	Daily []DailyValue    `json:"daily"`
+
+	// Candidates the store computes; the service picks one per mode.
+	sumOfCustomerMax  decimal.Decimal
+	sumOfCustomerLast decimal.Decimal
+}
+
+// DailyValue is one calendar day of a meter's usage under the meter's
+// mode (sum, count, per-customer peak or latest reading, added across
+// customers). Days without events are absent.
+type DailyValue struct {
+	Date  string          `json:"date"` // YYYY-MM-DD in the request's tz
+	Value decimal.Decimal `json:"value"`
+
+	sum, count, sumOfCustomerMax, sumOfCustomerLast decimal.Decimal
+}
+
+// pick returns the candidate that matches an aggregation mode. An unknown
+// or empty mode falls back to the plain sum.
+func pick(mode string, sum, count, sumMax, sumLast decimal.Decimal) decimal.Decimal {
+	switch mode {
+	case "count":
+		return count
+	case "max":
+		return sumMax
+	case "last":
+		return sumLast
+	default:
+		return sum
+	}
+}
+
+// ApplyMeterModes fills Aggregation and Value on every row (and its daily
+// series) from the meter's aggregation mode. modes maps meter id to mode.
+func (a *Aggregate) ApplyMeterModes(modes map[string]string) {
+	for i := range a.ByMeter {
+		m := &a.ByMeter[i]
+		mode := modes[m.MeterID]
+		m.Aggregation = mode
+		m.Value = pick(mode, m.Total, decimal.NewFromInt(int64(m.Events)), m.sumOfCustomerMax, m.sumOfCustomerLast)
+		for j := range m.Daily {
+			d := &m.Daily[j]
+			d.Value = pick(mode, d.sum, d.count, d.sumOfCustomerMax, d.sumOfCustomerLast)
+		}
+	}
 }

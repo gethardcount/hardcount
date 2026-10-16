@@ -402,8 +402,18 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.UsageEv
 // stat cards reflect filtered totals rather than a reduce over the current
 // page of paginated events. Limit/Offset on the filter are intentionally
 // ignored — the whole point is the unbounded total.
-func (s *Service) Aggregate(ctx context.Context, filter ListFilter) (Aggregate, error) {
-	return s.store.Aggregate(ctx, filter)
+//
+// modes maps meter id to the meter's aggregation (sum, count, max, last);
+// each by_meter row's Value follows it. A meter missing from modes keeps
+// Value = Total (plain sum) and an empty Aggregation, so the caller can
+// tell the value was not mode-aware.
+func (s *Service) Aggregate(ctx context.Context, filter ListFilter, modes map[string]string) (Aggregate, error) {
+	agg, err := s.store.Aggregate(ctx, filter)
+	if err != nil {
+		return Aggregate{}, err
+	}
+	agg.ApplyMeterModes(modes)
+	return agg, nil
 }
 
 func (s *Service) AggregateForBillingPeriod(ctx context.Context, tenantID, customerID string, meterIDs []string, from, to time.Time) (map[string]decimal.Decimal, error) {

@@ -2558,10 +2558,14 @@ export interface paths {
         /**
          * Usage totals
          * @description Event count, quantity totals, and a per-meter breakdown over every
-         *     usage event matching the filters (no paging). Quantities are plain
-         *     sums of event quantities, whatever the meter's aggregation, and
-         *     `total_units` adds quantities across all meters. A `from` or `to`
-         *     value that is not RFC 3339 is ignored, not rejected.
+         *     usage event matching the filters (no paging). Each `by_meter` row
+         *     carries `value`, the meter's usage under its own aggregation: a
+         *     sum, an event count, each customer's peak (Maximum) or each
+         *     customer's latest reading (Latest value), added across customers.
+         *     `total` stays the plain sum of reported quantities. `total_units`
+         *     adds quantities across all meters whatever their units, and is kept
+         *     for compatibility only. A `from` or `to` value that is not RFC 3339
+         *     is ignored, not rejected.
          */
         get: operations["aggregateUsageEvents"];
         put?: never;
@@ -7713,7 +7717,11 @@ export interface components {
         };
         UsageAggregate: {
             total_events: number;
-            /** @description Sum of all matching quantities across meters, as a decimal string. */
+            /**
+             * @description Sum of all matching quantities across meters, as a decimal
+             *     string. It adds different units and ignores each meter's
+             *     aggregation; use `by_meter[].value` instead.
+             */
             total_units: string;
             /** @description Distinct meters among the matching events. */
             active_meters: number;
@@ -7722,8 +7730,29 @@ export interface components {
             /** @description One row per meter, largest total first. */
             by_meter: {
                 meter_id: string;
-                /** @description Sum of quantities, as a decimal string. */
+                /** @description Plain sum of reported quantities, as a decimal string. */
                 total: string;
+                /** @description The meter's aggregation (`sum`, `count`, `max`, `last`) used for `value`; empty when unknown. */
+                aggregation: string;
+                /**
+                 * @description Usage under the meter's aggregation, as a decimal string.
+                 *     `max` and `last` take each customer's peak or latest
+                 *     reading in the window and add them across customers.
+                 *     Billing applies them per billing period.
+                 */
+                value: string;
+                events: number;
+                /** @description Distinct customers with events on this meter. */
+                customers: number;
+                /** @description Highest single reported quantity, as a decimal string. */
+                peak: string;
+                /** @description One entry per calendar day (in `tz`) with events, oldest first. */
+                daily: {
+                    /** Format: date */
+                    date: string;
+                    /** @description The day's usage under the meter's aggregation. */
+                    value: string;
+                }[];
             }[];
         };
         UsageSummary: {
@@ -10571,6 +10600,11 @@ export interface operations {
                  *     `model=gpt-4o,token_type=input`.
                  */
                 dimensions?: string;
+                /**
+                 * @description IANA time zone for the calendar days of `by_meter[].daily`
+                 *     (default UTC). An unknown name returns 422.
+                 */
+                tz?: string;
             };
             header?: never;
             path?: never;
@@ -10587,7 +10621,7 @@ export interface operations {
                     "application/json": components["schemas"]["UsageAggregate"];
                 };
             };
-            /** @description `validation_error`: a malformed `dimensions` pair. */
+            /** @description `validation_error`: a malformed `dimensions` pair or an unknown `tz`. */
             422: {
                 headers: {
                     [name: string]: unknown;

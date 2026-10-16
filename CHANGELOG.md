@@ -19,6 +19,10 @@ Older entries keep their original text.
 
 - **Browser tests for the dashboard (2026-10-16).** Contributors: `npm run test:e2e` in `web-v2` runs Playwright against a real API. It opens every page at desktop and phone width and fails on console errors, failed API calls or a page that scrolls sideways, plus five key journeys. CI runs it as the `e2e` job. See [web-v2/e2e/README.md](web-v2/e2e/README.md).
 
+### Fixed
+
+- **Usage totals follow each meter's aggregation (2026-10-16).** The Usage page summed every reading, so a Maximum meter with 140, 210 and 120 GB showed 470 GB. Each meter now shows its value in its own unit, with a daily line. "Total Units", which added tokens, calls and GB, is gone. API: `GET /v1/usage-events/aggregate` rows gain `value`, `aggregation`, `events`, `customers`, `peak` and `daily`, and it takes `tz`.
+
 ### Changed
 
 - **Activity and Margin open on the billing period (2026-10-16).** On the customer page, Activity now opens on Cycle and Margin on "Current period", the window the invoice uses; Margin adds "Last invoiced period". A rolling 30 days never matched a period, so after the demo Margin read $0 beside a $3.88 invoice. An empty window now names the latest usage date (ADR-121).

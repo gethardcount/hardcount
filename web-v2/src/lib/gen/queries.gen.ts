@@ -7215,10 +7215,14 @@ export const getAggregateUsageEventsUrl = (params?: AggregateUsageEventsParams,)
 
 /**
  * Event count, quantity totals, and a per-meter breakdown over every
- * usage event matching the filters (no paging). Quantities are plain
- * sums of event quantities, whatever the meter's aggregation, and
- * `total_units` adds quantities across all meters. A `from` or `to`
- * value that is not RFC 3339 is ignored, not rejected.
+ * usage event matching the filters (no paging). Each `by_meter` row
+ * carries `value`, the meter's usage under its own aggregation: a
+ * sum, an event count, each customer's peak (Maximum) or each
+ * customer's latest reading (Latest value), added across customers.
+ * `total` stays the plain sum of reported quantities. `total_units`
+ * adds quantities across all meters whatever their units, and is kept
+ * for compatibility only. A `from` or `to` value that is not RFC 3339
+ * is ignored, not rejected.
  * @summary Usage totals
  */
 export const aggregateUsageEvents = async (params?: AggregateUsageEventsParams, options?: RequestInit): Promise<UsageAggregate> => {

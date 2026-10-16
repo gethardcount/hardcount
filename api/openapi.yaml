@@ -2987,7 +2987,10 @@ components:
           type: integer
         total_units:
           type: string
-          description: Sum of all matching quantities across meters, as a decimal string.
+          description: |
+            Sum of all matching quantities across meters, as a decimal
+            string. It adds different units and ignores each meter's
+            aggregation; use `by_meter[].value` instead.
         active_meters:
           type: integer
           description: Distinct meters among the matching events.
@@ -2999,13 +3002,44 @@ components:
           description: One row per meter, largest total first.
           items:
             type: object
-            required: [meter_id, total]
+            required: [meter_id, total, aggregation, value, events, customers, peak, daily]
             properties:
               meter_id:
                 type: string
               total:
                 type: string
-                description: Sum of quantities, as a decimal string.
+                description: Plain sum of reported quantities, as a decimal string.
+              aggregation:
+                type: string
+                description: The meter's aggregation (`sum`, `count`, `max`, `last`) used for `value`; empty when unknown.
+              value:
+                type: string
+                description: |
+                  Usage under the meter's aggregation, as a decimal string.
+                  `max` and `last` take each customer's peak or latest
+                  reading in the window and add them across customers.
+                  Billing applies them per billing period.
+              events:
+                type: integer
+              customers:
+                type: integer
+                description: Distinct customers with events on this meter.
+              peak:
+                type: string
+                description: Highest single reported quantity, as a decimal string.
+              daily:
+                type: array
+                description: One entry per calendar day (in `tz`) with events, oldest first.
+                items:
+                  type: object
+                  required: [date, value]
+                  properties:
+                    date:
+                      type: string
+                      format: date
+                    value:
+                      type: string
+                      description: The day's usage under the meter's aggregation.
 
     UsageSummary:
       type: object
@@ -7188,10 +7222,14 @@ paths:
       summary: Usage totals
       description: |
         Event count, quantity totals, and a per-meter breakdown over every
-        usage event matching the filters (no paging). Quantities are plain
-        sums of event quantities, whatever the meter's aggregation, and
-        `total_units` adds quantities across all meters. A `from` or `to`
-        value that is not RFC 3339 is ignored, not rejected.
+        usage event matching the filters (no paging). Each `by_meter` row
+        carries `value`, the meter's usage under its own aggregation: a
+        sum, an event count, each customer's peak (Maximum) or each
+        customer's latest reading (Latest value), added across customers.
+        `total` stays the plain sum of reported quantities. `total_units`
+        adds quantities across all meters whatever their units, and is kept
+        for compatibility only. A `from` or `to` value that is not RFC 3339
+        is ignored, not rejected.
       operationId: aggregateUsageEvents
       parameters:
         - name: customer_id
@@ -7222,6 +7260,13 @@ paths:
             `model=gpt-4o,token_type=input`.
           schema:
             type: string
+        - name: tz
+          in: query
+          description: |
+            IANA time zone for the calendar days of `by_meter[].daily`
+            (default UTC). An unknown name returns 422.
+          schema:
+            type: string
       responses:
         "200":
           description: Totals
@@ -7230,7 +7275,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UsageAggregate"
         "422":
-          description: "`validation_error`: a malformed `dimensions` pair."
+          description: "`validation_error`: a malformed `dimensions` pair or an unknown `tz`."
           content:
             application/json:
               schema:

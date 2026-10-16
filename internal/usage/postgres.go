@@ -311,15 +311,17 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.U
 }
 
 // Aggregate returns the totals + per-meter breakdown that powers the
-// /usage page's stat cards + "Usage by Meter" card. It honours the same
-// filter as List (customer / meter / from / to) but ignores limit/offset —
-// the whole point is to surface filtered totals, not page slices.
+// /usage page. It honours the same filter as List (customer / meter /
+// from / to / dimensions) but ignores limit/offset — the whole point is to
+// surface filtered totals, not page slices.
 //
-// SQL strategy: one row-of-totals query for COUNT/SUM/distinct-counts,
-// plus a GROUP BY meter_id query for the per-meter breakdown. Both run
-// inside the same tenant tx so RLS scopes them identically. SUM is
-// decimal-precision (NUMERIC(38,12)) so 0.5 + 0.5 + 0.0001 round-trips
-// to "1.0001" without floating-point drift.
+// SQL strategy: one row-of-totals query, then one per-meter query and one
+// per-(day, meter) query. The per-meter queries first roll up per
+// customer (sum, count, peak, latest reading) so the service can pick the
+// value that matches each meter's aggregation mode: a Maximum meter is the
+// sum of each customer's peak, never the sum of every reading. All three
+// run inside the same tenant tx so RLS scopes them identically. SUM is
+// decimal-precision (NUMERIC(38,12)).
 func (s *PostgresStore) Aggregate(ctx context.Context, filter ListFilter) (Aggregate, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {
@@ -342,28 +344,84 @@ func (s *PostgresStore) Aggregate(ctx context.Context, filter ListFilter) (Aggre
 		return Aggregate{}, fmt.Errorf("aggregate totals: %w", err)
 	}
 
+	// Latest reading: id DESC breaks same-timestamp ties, the same order
+	// AggregateForBillingPeriodByAgg's "last" query bills with.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT meter_id, COALESCE(SUM(quantity), 0)
-		FROM usage_events`+where+`
+		WITH per_customer AS (
+			SELECT meter_id, customer_id,
+				SUM(quantity) AS s,
+				COUNT(*) AS c,
+				MAX(quantity) AS mx,
+				(ARRAY_AGG(quantity ORDER BY timestamp DESC, id DESC))[1] AS lst
+			FROM usage_events`+where+`
+			GROUP BY meter_id, customer_id
+		)
+		SELECT meter_id, SUM(s), SUM(c)::bigint, COUNT(*), MAX(mx), SUM(mx), SUM(lst)
+		FROM per_customer
 		GROUP BY meter_id
-		ORDER BY 2 DESC`, args...)
+		ORDER BY 2 DESC, meter_id`, args...)
 	if err != nil {
 		return Aggregate{}, fmt.Errorf("aggregate by_meter: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
+	index := map[string]int{}
 	for rows.Next() {
 		var m MeterTotal
-		if err := rows.Scan(&m.MeterID, &m.Total); err != nil {
+		if err := rows.Scan(&m.MeterID, &m.Total, &m.Events, &m.Customers, &m.Peak, &m.sumOfCustomerMax, &m.sumOfCustomerLast); err != nil {
 			return Aggregate{}, err
 		}
+		m.Value = m.Total
+		m.Daily = []DailyValue{}
+		index[m.MeterID] = len(agg.ByMeter)
 		agg.ByMeter = append(agg.ByMeter, m)
 	}
 	if err := rows.Err(); err != nil {
 		return Aggregate{}, err
 	}
+	_ = rows.Close()
 	if agg.ByMeter == nil {
 		agg.ByMeter = []MeterTotal{}
+		return agg, nil
+	}
+
+	loc := "UTC"
+	if filter.DayLoc != nil {
+		loc = filter.DayLoc.String()
+	}
+	dayArgs := append(append([]any{}, args...), loc)
+	tzParam := fmt.Sprintf("$%d", len(dayArgs))
+	days, err := tx.QueryContext(ctx, `
+		WITH per_customer AS (
+			SELECT to_char(timestamp AT TIME ZONE `+tzParam+`, 'YYYY-MM-DD') AS d, meter_id, customer_id,
+				SUM(quantity) AS s,
+				COUNT(*) AS c,
+				MAX(quantity) AS mx,
+				(ARRAY_AGG(quantity ORDER BY timestamp DESC, id DESC))[1] AS lst
+			FROM usage_events`+where+`
+			GROUP BY 1, meter_id, customer_id
+		)
+		SELECT d, meter_id, SUM(s), SUM(c), SUM(mx), SUM(lst)
+		FROM per_customer
+		GROUP BY d, meter_id
+		ORDER BY d`, dayArgs...)
+	if err != nil {
+		return Aggregate{}, fmt.Errorf("aggregate daily: %w", err)
+	}
+	defer func() { _ = days.Close() }()
+	for days.Next() {
+		var meterID string
+		var d DailyValue
+		if err := days.Scan(&d.Date, &meterID, &d.sum, &d.count, &d.sumOfCustomerMax, &d.sumOfCustomerLast); err != nil {
+			return Aggregate{}, err
+		}
+		d.Value = d.sum
+		if i, ok := index[meterID]; ok {
+			agg.ByMeter[i].Daily = append(agg.ByMeter[i].Daily, d)
+		}
+	}
+	if err := days.Err(); err != nil {
+		return Aggregate{}, err
 	}
 	return agg, nil
 }
