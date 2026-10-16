@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge'
-import { daysUntil, type EffectiveNow } from '@/lib/effectiveNow'
+import { calendarDaysUntil } from '@/lib/dates'
+import type { EffectiveNow } from '@/lib/effectiveNow'
 
 interface DueBadgeProps {
   dueAt?: string | null
@@ -26,7 +27,10 @@ interface DueBadgeProps {
 export function DueBadge({ dueAt, warningDays = 3, className, now }: DueBadgeProps) {
   if (!dueAt) return null
 
-  const days = daysUntil(dueAt, now)
+  // Calendar days in tenant TZ, the zone the Due date beside the badge is
+  // printed in (formatDate). The deadline is a date, so on the due date the
+  // badge reads "Due today" all day, and "Past due 1d" from the next day.
+  const days = calendarDaysUntil(dueAt, now)
 
   if (days < 0) {
     const overdue = Math.abs(days)

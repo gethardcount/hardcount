@@ -1,6 +1,7 @@
 import { format } from 'date-fns'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { getTenantTimezone } from '@/lib/api'
+import type { EffectiveNow } from './effectiveNow'
 
 // Date helpers that interpret operator-picked civil dates in tenant
 // timezone, returning UTC ISO 8601 timestamps suitable for the wire.
@@ -99,6 +100,24 @@ export function formatYMDInTZ(iso: string, timezone?: string): string {
 // tomorrow, so tomorrow's date was refused as "not in the future".
 export function isAfterCivilToday(yyyymmdd: string, nowMs: number, timezone?: string): boolean {
   return yyyymmdd > formatYMDInTZ(new Date(nowMs).toISOString(), timezone)
+}
+
+// calendarDaysUntil counts CALENDAR days from the anchor's civil date to the
+// civil date of `iso`, both read in tenant TZ: 0 = same day, 1 = tomorrow,
+// -1 = yesterday. Use it where the UI prints a date beside the count, as the
+// invoice due badge does next to "Due Oct 16". An elapsed-time count
+// (daysUntil, ceil over 24h) disagreed with that date because due_at carries
+// the issue hour: due Oct 16 20:16 read "Due in 1d" on the morning of Oct 16
+// and "Due today" until 20:16 the next day. NaN for an unparseable iso.
+export function calendarDaysUntil(iso: string, now: EffectiveNow, timezone?: string): number {
+  const t = new Date(iso)
+  if (Number.isNaN(t.getTime())) return NaN
+  const tz = timezone || tenantTZ()
+  const dayNumber = (d: Date) => {
+    const [y, m, day] = formatInTimeZone(d, tz, 'yyyy-MM-dd').split('-').map(Number)
+    return Date.UTC(y, m - 1, day) / 86_400_000
+  }
+  return dayNumber(t) - dayNumber(new Date(now))
 }
 
 // ---------------------------------------------------------------------------
