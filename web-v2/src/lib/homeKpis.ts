@@ -1,5 +1,5 @@
 // The Home page KPI numbers and the baselines their trends compare against.
-// Plain functions so node --test can check them.
+// Plain functions so Vitest can check them.
 //
 // Rule: a trend compares two numbers the server computed with the same
 // definition. The page used to build baselines itself: Failed payments

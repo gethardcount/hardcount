@@ -150,6 +150,31 @@ test('the DRAFT mark fits inside the invoice at phone width', async ({ page }) =
   expect(fits).toBe(true)
 })
 
+test('Home counts trialing subscriptions and compares failed payments with the previous period', async ({ page }) => {
+  // A live (not test-clock) customer on a trial, so the trialing count the
+  // Customers card reads from the server is at least 1.
+  const plan = await createPlan()
+  const customer = await createCustomer()
+  const id = uniq()
+  const sub = await api<Subscription>('POST', '/subscriptions', {
+    code: `e2e-trial-${id}`,
+    display_name: `E2E Trial ${id}`,
+    customer_id: customer.id,
+    items: [{ plan_id: plan.id, quantity: 1 }],
+    trial_days: 14,
+    start_now: true,
+  })
+  expect(sub.status).toBe('trialing')
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1, name: 'Home', exact: true })).toBeVisible()
+  const customers = page.getByText('Customers', { exact: true }).locator('xpath=ancestor::*[@title][1]')
+  await expect(customers).toHaveAttribute('title', /active or trialing subscription/)
+  await expect(customers).toContainText(/\d+ active · [1-9]\d* trialing subscriptions?/)
+  const failed = page.getByText('Failed payments', { exact: true }).locator('..')
+  await expect(failed).toContainText(/\d+ in the previous 30 days/)
+})
+
 test('a dialog taller than the window keeps its actions in view', async ({ page }) => {
   const customer = await createCustomer()
   await page.setViewportSize({ width: 1440, height: 520 })
