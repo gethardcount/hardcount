@@ -3,7 +3,7 @@
 // versions, email set up or not; both versions live here so a test covers
 // each one.
 //
-// Dependency-free so node --test can load it.
+// Dependency-free so the unit tests can load it.
 
 import type { CalloutTone } from './calloutTone'
 

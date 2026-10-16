@@ -10,7 +10,7 @@
 // would save a free price nobody typed. Callers show an error on null; an
 // explicit "0" still returns "0".
 //
-// This module imports nothing so `node --test` can load it
+// This module imports nothing so the unit tests can load it
 // (tests/priceInput.test.ts).
 export function dollarsToRateCents(input: string): string | null {
   const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(input.trim())

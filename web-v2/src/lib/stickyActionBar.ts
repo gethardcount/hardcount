@@ -5,7 +5,7 @@
 //
 // A count, not a flag: two bars mounted at once, or one remounting before the
 // other unmounts, must not leave the pill hidden or shown wrongly.
-// Dependency-free so node --test can import it; the hooks live in
+// Dependency-free so the unit tests can import it; the hooks live in
 // hooks/useStickyActionBar.
 
 let count = 0

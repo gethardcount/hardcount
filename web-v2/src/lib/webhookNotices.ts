@@ -3,7 +3,7 @@
 // and where an endpoint save error goes (under the URL field, or a toast).
 // Kept here so a test covers each version.
 //
-// Dependency-free (duck-typed errors) so node --test can load it.
+// Dependency-free (duck-typed errors) so the unit tests can load it.
 
 export interface ToastCopy {
   level: 'success' | 'warning'

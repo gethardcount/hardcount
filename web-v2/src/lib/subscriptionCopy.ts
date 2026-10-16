@@ -1,5 +1,5 @@
 // Dialog and toast words on the subscription page that depend on state.
-// Dates come in already formatted, so this stays plain data for node --test.
+// Dates come in already formatted, so this stays plain data for the unit tests.
 
 export interface ToastCopy {
   title: string

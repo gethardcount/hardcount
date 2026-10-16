@@ -1,5 +1,5 @@
 // Words for the plan, meter and price pages that depend on state. Plain
-// functions so node --test can check each version.
+// functions so the unit tests can check each version.
 
 // "1 subscription uses" / "3 subscriptions use".
 function subscriptionsUse(n: number): string {

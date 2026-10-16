@@ -1,6 +1,6 @@
 // What the invoice page shows above the invoice, and the lines inside the
 // written-off notice that depend on real state. Plain data in, plain data
-// out, so node --test can check every branch without rendering.
+// out, so the unit tests can check every branch without rendering.
 
 // The page shows at most one notice above the invoice (the most urgent one).
 // Two can apply:

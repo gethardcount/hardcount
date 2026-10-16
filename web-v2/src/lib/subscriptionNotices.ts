@@ -1,5 +1,5 @@
 // What the subscription page shows under its header, and the copy that
-// depends on real state. Plain data in, plain data out, so node --test can
+// depends on real state. Plain data in, plain data out, so the unit tests can
 // check every branch without rendering.
 
 // Up to four notices can apply to one subscription. The page shows at most

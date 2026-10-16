@@ -3,7 +3,7 @@
 // (usage.CustomerUsageService.rateMeter). Its warning sentence names the
 // meter key and engine words ("matching no pricing rule"), so the dashboard
 // builds its own plain notice from the rows and keeps the server's words in
-// Details. Plain data so node --test can check it.
+// Details. Plain data so the unit tests can check it.
 
 export interface UnpricedMeter {
   meterId: string

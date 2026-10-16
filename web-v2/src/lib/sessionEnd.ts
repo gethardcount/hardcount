@@ -9,7 +9,7 @@
 // The check matters: a 401 from one endpoint does not prove the session is
 // gone, and signing someone out on a false alarm would lose their work.
 //
-// Dependency-free so node --test can drive it with fakes.
+// Dependency-free so the unit tests can drive it with fakes.
 
 // Requests whose 401 is part of signing in or out, not a sign of a lost
 // session. The check itself (whoami) is here too, so it cannot report itself.

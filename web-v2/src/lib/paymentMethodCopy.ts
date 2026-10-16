@@ -1,4 +1,4 @@
-// Words for a saved card and for removing one. Plain data so node --test can
+// Words for a saved card and for removing one. Plain data so the unit tests can
 // check each branch.
 
 export function cardLabel(pm: { card_brand?: string | null; card_last4?: string | null }): string {

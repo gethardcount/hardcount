@@ -9,7 +9,7 @@
 // ("Failed to fetch"). Those raw strings stay available for support in a
 // collapsed Details.
 //
-// Dependency-free (duck-typed, no import of lib/api) so node --test can load it.
+// Dependency-free (duck-typed, no import of lib/api) so the unit tests can load it.
 
 export type ErrorKind =
   | 'offline'   // no response: network down, server unreachable, or timed out

@@ -8,7 +8,7 @@
 // else in the dashboard (lib/errorCopy). A password rule from the server is a
 // fragment written to follow the field name, so it gets "Password" in front.
 //
-// Dependency-free (duck-typed) so node --test can load it.
+// Dependency-free (duck-typed) so the unit tests can load it.
 import { classifyError, errorSentence } from './errorCopy'
 
 export function authFormError(err: unknown): string {

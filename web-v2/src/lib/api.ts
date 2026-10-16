@@ -1831,7 +1831,7 @@ export async function downloadCreditNotePDF(creditNoteId: string, creditNoteNumb
   URL.revokeObjectURL(url)
 }
 
-// Money formatting lives in lib/money (dependency-free, so node --test can
+// Money formatting lives in lib/money (dependency-free, so the unit tests can
 // import it); re-exported here so every existing call site keeps working.
 export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, amountsByCurrencyText, atRiskText, prorationText } from './money'
 

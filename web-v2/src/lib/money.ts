@@ -1,4 +1,4 @@
-// Money formatting. Dependency-free so node --test can import it directly;
+// Money formatting. Dependency-free so the unit tests can import it directly;
 // lib/api re-exports these for the rest of the dashboard.
 //
 // The one rule worth repeating: an amount that belongs to an invoice is shown

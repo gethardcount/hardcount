@@ -1,5 +1,5 @@
 // Notes on the Dashboard and Usage pages that depend on state. Plain
-// functions so node --test can check each version.
+// functions so the unit tests can check each version.
 
 // Every Dashboard total leaves out test-clock customers and their
 // subscriptions, invoices and usage (internal/analytics/simfilter.go), while

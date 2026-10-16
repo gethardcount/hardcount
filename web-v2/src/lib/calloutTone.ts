@@ -5,7 +5,7 @@
 //   red:     money at risk or something is blocked
 // Every tone carries its own dark-mode classes; two hand-copied boxes on the
 // subscription page once had none and rendered as bright light-mode panels in
-// dark mode. Plain data so node --test can check it.
+// dark mode. Plain data so the unit tests can check it.
 
 export type CalloutTone = 'neutral' | 'amber' | 'red'
 
