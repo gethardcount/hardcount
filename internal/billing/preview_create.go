@@ -88,7 +88,8 @@ type CreatePreviewRequest struct {
 //  1. Customer existence (RLS makes cross-tenant IDs return ErrNotFound).
 //  2. Subscription resolution (explicit ID, or pick primary active sub).
 //  3. Period resolution (explicit window, or sub's current cycle).
-//  4. Defer to engine.previewWithWindow for the line composition.
+//  4. Defer to the engine: previewCycle (mirrors the cycle close) for the
+//     default window, previewWithWindow for an explicit one.
 //
 // Returns a PreviewResult with the same wire shape produced by
 // Engine.Preview so the cost dashboard can consume both surfaces with one
@@ -113,6 +114,12 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 		return PreviewResult{}, err
 	}
 
+	// No explicit window: the caller asks what the next invoice will be,
+	// so mirror the cycle close (proration included). An explicit window is
+	// a flat estimate over that window.
+	if req.Period.From.IsZero() && req.Period.To.IsZero() {
+		return s.engine.previewCycle(ctx, sub)
+	}
 	return s.engine.previewWithWindow(ctx, sub, from, to)
 }
 

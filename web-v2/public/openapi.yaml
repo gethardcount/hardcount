@@ -7490,14 +7490,16 @@ paths:
       tags: [Invoices]
       summary: Preview the next invoice for a customer (Stripe-equivalent)
       description: |
-        Answers "what is my next bill going to look like?" as a
-        full-period ESTIMATE. Usage lines are rated through the same
-        per-meter aggregation path as the cycle scan, but the estimate
-        deliberately does NOT replicate usage-cap scaling or mid-period
-        segment proration (ADR-045) — for capped or mid-period-changed
-        subscriptions the response carries `warnings[]` naming the
-        divergence and the finalized invoice can differ (lower, for
-        capped usage). Composes across customer / subscription / pricing;
+        Answers "what is my next bill going to look like?" from the usage
+        recorded so far. Without `period`, the preview mirrors the cycle
+        close for the subscription's current period: base fees prorate for
+        a short first period and per segment after a mid-period item add,
+        quantity change, plan swap or removal, and each meter's usage counts
+        only while a plan carrying it was on the subscription. With an
+        explicit `period`, it is a flat estimate over that window and warns
+        when a mid-period change makes the invoice differ. Neither applies
+        usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
+        says the invoice can be lower. Composes across customer / subscription / pricing;
         registered as a sibling of `/v1/invoices` (chi picks the more
         specific pattern, otherwise `/{id}` would capture
         `create_preview` as an invoice ID). See
