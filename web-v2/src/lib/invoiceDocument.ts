@@ -108,14 +108,16 @@ export interface IssueDates {
 // timestamp as a date (the page passes its own, timezone-aware formatter).
 // A composed (manual) draft gets its dates at finalize: due is Net N from
 // then. A cycle draft (a paused subscription's invoice, for example) keeps
-// the due date it was built with, so that date is shown.
+// the due date it was built with, so that date is shown. "Composed" matches
+// the server's isOperatorComposed: billing_reason 'manual', or none at all
+// (drafts written before the reason was stamped).
 export function issueDates(
   inv: { status: string; issued_at?: string | null; created_at?: string; due_at?: string | null; billing_reason?: string; net_payment_term_days?: number | null },
   fmt: (iso: string) => string,
 ): IssueDates {
   if (inv.status === 'draft') {
     const net = inv.net_payment_term_days
-    const composed = inv.billing_reason === 'manual'
+    const composed = !inv.billing_reason || inv.billing_reason === 'manual'
     if (composed || !inv.due_at) {
       return {
         issued: 'Draft — not issued',

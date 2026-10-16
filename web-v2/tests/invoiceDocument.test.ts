@@ -32,6 +32,13 @@ test('a composed draft is not issued and gets its due date at finalize', () => {
   assert.equal(issueDates({ status: 'draft', billing_reason: 'manual', net_payment_term_days: 0 }, fmt).dueHint, 'Due on receipt once finalized')
 })
 
+test('a draft with no billing reason counts as composed, as the server does', () => {
+  const d = issueDates({ status: 'draft', billing_reason: '', due_at: '2026-11-15T00:00:00Z', net_payment_term_days: 30 }, fmt)
+  assert.equal(d.due, '—')
+  assert.equal(d.dueHint, 'Net 30 from finalizing')
+  assert.equal(issueDates({ status: 'draft', due_at: '2026-11-15T00:00:00Z', net_payment_term_days: 30 }, fmt).due, '—')
+})
+
 test('a cycle draft keeps the due date it was built with', () => {
   const d = issueDates({ status: 'draft', billing_reason: 'subscription_cycle', due_at: '2026-11-12T00:00:00Z' }, fmt)
   assert.deepEqual(d, { issued: 'Draft — not issued', due: '2026-11-12' })

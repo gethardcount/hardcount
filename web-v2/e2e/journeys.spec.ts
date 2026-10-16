@@ -128,6 +128,28 @@ test('a draft invoice reads as a draft and shows its memo', async ({ page }) => 
   await expect(page.getByText('Memo', { exact: true }).locator('..')).toContainText(memo)
 })
 
+test('the DRAFT mark fits inside the invoice at phone width', async ({ page }) => {
+  const customer = await createCustomer()
+  const invoice = await api<Invoice>('POST', '/invoices', {
+    customer_id: customer.id,
+    currency: 'USD',
+    line_items: [{ description: 'E2E setup fee', line_type: 'add_on', quantity: 1, unit_amount_cents: 1000 }],
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/invoices/${invoice.id}`)
+  const mark = page.getByTestId('draft-watermark')
+  await expect(mark).toHaveText('DRAFT')
+  // The card clips overflow, so measure the word itself, not its box.
+  const fits = await mark.evaluate((el) => {
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const word = range.getBoundingClientRect()
+    const card = el.parentElement!.getBoundingClientRect()
+    return word.left >= card.left && word.right <= card.right
+  })
+  expect(fits).toBe(true)
+})
+
 test('a dialog taller than the window keeps its actions in view', async ({ page }) => {
   const customer = await createCustomer()
   await page.setViewportSize({ width: 1440, height: 520 })

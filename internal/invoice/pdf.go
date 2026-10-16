@@ -865,12 +865,22 @@ func sellerName(company ...CompanyInfo) string {
 }
 
 // issueDateRows are the date rows under "Number" in the details block. A
-// draft has not been issued: its issue and due dates are set when it is
-// finalized, so it prints "Draft — not issued" instead. Printing the dates
-// made a downloaded draft read as a live invoice.
+// draft has not been issued, so it prints "Draft — not issued" in place of
+// an issue date. Its due row follows what finalize will do, the same rule
+// the invoice page uses: an operator-composed draft gets its due date at
+// finalize (Net N from then), so it prints the terms; an engine draft (a
+// cycle invoice held as a draft) keeps the due date it was built with, so
+// that date is printed.
 func issueDateRows(inv domain.Invoice, loc *time.Location) [][2]string {
 	if inv.Status == domain.InvoiceDraft {
-		return [][2]string{{"Status", "Draft — not issued"}}
+		rows := [][2]string{{"Status", "Draft — not issued"}}
+		switch {
+		case isOperatorComposed(inv):
+			rows = append(rows, [2]string{"Due", draftDueTerms(inv.NetPaymentTermDays)})
+		case inv.DueAt != nil:
+			rows = append(rows, [2]string{"Due Date", inv.DueAt.In(loc).Format("January 2, 2006")})
+		}
+		return rows
 	}
 	var rows [][2]string
 	if inv.IssuedAt != nil {
@@ -880,6 +890,15 @@ func issueDateRows(inv domain.Invoice, loc *time.Location) [][2]string {
 		rows = append(rows, [2]string{"Due Date", inv.DueAt.In(loc).Format("January 2, 2006")})
 	}
 	return rows
+}
+
+// draftDueTerms is the due row of a composed draft, worded as the invoice
+// page words it.
+func draftDueTerms(netDays int) string {
+	if netDays == 0 {
+		return "Due on receipt once finalized"
+	}
+	return fmt.Sprintf("Net %d from finalizing", netDays)
 }
 
 // formatCityStatePostal joins "City, State Postal" with graceful handling

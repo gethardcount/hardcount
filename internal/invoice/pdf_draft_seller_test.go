@@ -8,25 +8,50 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// A draft is a preview: the PDF marks it DRAFT and prints "Draft — not
-// issued" in place of the issue and due dates, which are only set when the
-// draft is finalized.
+// A draft is a preview: the PDF prints "Draft — not issued" in place of the
+// issue date. The due row agrees with the invoice page (and with what
+// finalize does): a composed draft (billing_reason manual, or none) prints
+// its terms, because finalize sets its due date; an engine draft keeps the
+// due date it was built with, so that date is printed.
 func TestIssueDateRows_DraftIsNotIssued(t *testing.T) {
 	issued := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
 	due := issued.AddDate(0, 0, 30)
 
-	draft := domain.Invoice{Status: domain.InvoiceDraft, IssuedAt: &issued, DueAt: &due}
-	rows := issueDateRows(draft, time.UTC)
-	if len(rows) != 1 || rows[0] != [2]string{"Status", "Draft — not issued"} {
-		t.Fatalf("draft rows = %v, want only Status: Draft — not issued", rows)
+	for _, reason := range []domain.InvoiceBillingReason{domain.BillingReasonManual, ""} {
+		draft := domain.Invoice{Status: domain.InvoiceDraft, BillingReason: reason, IssuedAt: &issued, DueAt: &due, NetPaymentTermDays: 30}
+		want := [][2]string{{"Status", "Draft — not issued"}, {"Due", "Net 30 from finalizing"}}
+		if rows := issueDateRows(draft, time.UTC); !equalRows(rows, want) {
+			t.Fatalf("composed draft (reason %q) rows = %v, want %v", reason, rows, want)
+		}
+	}
+	onReceipt := domain.Invoice{Status: domain.InvoiceDraft, BillingReason: domain.BillingReasonManual, DueAt: &due}
+	if rows := issueDateRows(onReceipt, time.UTC); rows[1][1] != "Due on receipt once finalized" {
+		t.Fatalf("net 0 draft rows = %v", rows)
+	}
+
+	cycle := domain.Invoice{Status: domain.InvoiceDraft, BillingReason: domain.BillingReasonSubscriptionCycle, IssuedAt: &issued, DueAt: &due, NetPaymentTermDays: 30}
+	want := [][2]string{{"Status", "Draft — not issued"}, {"Due Date", "November 15, 2026"}}
+	if rows := issueDateRows(cycle, time.UTC); !equalRows(rows, want) {
+		t.Fatalf("cycle draft rows = %v, want %v", rows, want)
 	}
 
 	open := domain.Invoice{Status: domain.InvoiceFinalized, IssuedAt: &issued, DueAt: &due}
-	rows = issueDateRows(open, time.UTC)
-	want := [][2]string{{"Issued", "October 16, 2026"}, {"Due Date", "November 15, 2026"}}
-	if len(rows) != 2 || rows[0] != want[0] || rows[1] != want[1] {
+	want = [][2]string{{"Issued", "October 16, 2026"}, {"Due Date", "November 15, 2026"}}
+	if rows := issueDateRows(open, time.UTC); !equalRows(rows, want) {
 		t.Fatalf("finalized rows = %v, want %v", rows, want)
 	}
+}
+
+func equalRows(got, want [][2]string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestWatermarkFor(t *testing.T) {

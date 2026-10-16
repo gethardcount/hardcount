@@ -1000,9 +1000,9 @@ export default function InvoiceDetailPage() {
         invoice.status === 'voided' && 'border-destructive/30'
       )}>
         {/* Same mark the PDF carries: a draft is a preview, not an invoice
-            anyone owes on. */}
+            anyone owes on. Smaller on a phone so the whole word fits. */}
         {invoice.status === 'draft' && (
-          <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center select-none text-[7rem] font-bold tracking-widest text-foreground/[0.04] -rotate-12">
+          <span aria-hidden data-testid="draft-watermark" className="pointer-events-none absolute inset-0 flex items-center justify-center select-none text-[4.5rem] sm:text-[7rem] font-bold tracking-widest text-foreground/[0.04] -rotate-12">
             DRAFT
           </span>
         )}
