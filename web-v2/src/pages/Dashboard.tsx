@@ -2,8 +2,7 @@ import { useMemo, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { formatInTimeZone } from 'date-fns-tz'
-import { api, formatCents, getTenantTimezone } from '@/lib/api'
+import { api, formatCents } from '@/lib/api'
 import { outstandingText } from '@/lib/money'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
@@ -28,25 +27,13 @@ import { TrendCardSkeleton, ChartCardSkeleton } from '@/components/analytics/Car
 import { PeriodTabs } from '@/components/analytics/PeriodTabs'
 import { PERIOD_LABELS, type Period } from '@/components/analytics/period'
 import { tooltipStyle, useChartTheme } from '@/lib/chartTheme'
+import { revenueBucketLabel } from '@/lib/chartLabels'
 
 function formatCompactAmount(cents: number): string {
   const abs = Math.abs(cents)
   if (abs >= 100_000_00) return `$${Math.round(cents / 100_00)}K`
   if (abs >= 1_000_00) return `$${(cents / 100_00).toFixed(1)}K`
   return `$${Math.round(cents / 100)}`
-}
-
-// formatShortDate renders chart axis labels in tenant TZ so they
-// match what operators see elsewhere on the dashboard. Falls back
-// to browser-local before TenantTimezoneBootstrap seeds the value.
-// ADR-010.
-function formatShortDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  if (Number.isNaN(d.getTime())) return dateStr
-  const tz = getTenantTimezone()
-  return tz
-    ? formatInTimeZone(d, tz, 'MMM d')
-    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 export default function DashboardPage() {
@@ -267,7 +254,7 @@ export default function DashboardPage() {
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.grid} />
                       <XAxis
                         dataKey="date"
-                        tickFormatter={formatShortDate}
+                        tickFormatter={revenueBucketLabel}
                         tick={{ fontSize: 11, fill: theme.tick }}
                         axisLine={false}
                         tickLine={false}
@@ -281,7 +268,7 @@ export default function DashboardPage() {
                       />
                       <Tooltip
                         formatter={(value) => [formatCents(Number(value)), 'Revenue']}
-                        labelFormatter={(label) => formatShortDate(String(label))}
+                        labelFormatter={(label) => revenueBucketLabel(String(label))}
                         contentStyle={tooltipStyle(theme)}
                         itemStyle={{ color: theme.tooltipText }}
                         cursor={{ fill: theme.grid }}

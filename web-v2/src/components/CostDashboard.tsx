@@ -21,8 +21,8 @@ import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
-import { formatInTimeZone } from 'date-fns-tz'
-import { api, amountsByCurrencyText, formatCents, formatRate, formatDate, getTenantTimezone } from '@/lib/api'
+import { api, amountsByCurrencyText, formatCents, formatRate, formatDate } from '@/lib/api'
+import { utcBucketLabel } from '@/lib/chartLabels'
 import type { CustomerUsage, CustomerUsageMeter, CustomerUsageRule, Subscription, Invoice, InvoicePreview } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
@@ -530,14 +530,12 @@ function UsageChart({ usage }: { usage: CustomerUsage }) {
   const data = useMemo(
     () =>
       usage.buckets.map(b => {
-        // Render in tenant TZ so chart x-axis labels match what
-        // operators see elsewhere on the dashboard. ADR-010.
-        const tz = getTenantTimezone() || undefined
+        // bucket_start is the UTC midnight that starts a UTC-day bucket:
+        // label the day it names, not that instant in the tenant TZ
+        // (which read one day early west of UTC).
         const row: Record<string, number | string> = {
           date: b.bucket_start,
-          label: tz
-            ? formatInTimeZone(new Date(b.bucket_start), tz, 'MMM d')
-            : new Date(b.bucket_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          label: utcBucketLabel(b.bucket_start, 'MMM d'),
         }
         for (const m of meters) {
           row[m.meter_id] = Number(b.per_meter[m.meter_id] ?? 0)
@@ -587,10 +585,7 @@ function UsageChart({ usage }: { usage: CustomerUsage }) {
               labelFormatter={(label, payload) => {
                 if (!payload || !payload[0]) return label
                 const date = (payload[0].payload as { date: string }).date
-                const tz = getTenantTimezone() || undefined
-                return tz
-                  ? formatInTimeZone(new Date(date), tz, 'EEE, MMM d')
-                  : new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                return utcBucketLabel(date, 'EEE, MMM d')
               }}
               formatter={(value, _name, item) => {
                 const meterId = item.dataKey as string
