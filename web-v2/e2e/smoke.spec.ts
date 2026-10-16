@@ -15,7 +15,7 @@ interface Route {
 }
 
 const routes: Route[] = [
-  { name: 'dashboard', path: () => '/', heading: () => 'Dashboard' },
+  { name: 'home', path: () => '/', heading: () => 'Home' },
   { name: 'recipes', path: () => '/recipes', heading: () => 'Pricing recipes' },
   { name: 'customers', path: () => '/customers', heading: () => 'Customers' },
   { name: 'customer detail', path: s => `/customers/${s.customer.id}`, heading: s => s.customer.display_name },

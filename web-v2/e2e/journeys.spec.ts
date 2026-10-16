@@ -178,6 +178,26 @@ test('new invoice at phone width fits the dialog', async ({ page }) => {
   expect(await boxInside(send, dialog)).toBe(true)
 })
 
+test('Ctrl+K opens any page, including the ones it used to miss', async ({ page }) => {
+  await page.goto('/customers')
+  await expect(page.getByRole('heading', { level: 1, name: 'Customers', exact: true })).toBeVisible()
+  await page.keyboard.press('Control+k')
+  const palette = page.getByRole('dialog')
+  await palette.getByPlaceholder('Search customers, invoices, subscriptions...').fill('provider')
+  await palette.getByRole('option', { name: /^Provider costs/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Provider costs', exact: true })).toBeVisible()
+})
+
+test('Escape closes the mobile menu', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/customers')
+  await page.getByRole('button', { name: 'Open menu' }).click()
+  const close = page.getByRole('button', { name: 'Close menu' })
+  await expect(close).toBeInViewport()
+  await page.keyboard.press('Escape')
+  await expect(close).not.toBeInViewport()
+})
+
 test('grant credits and see the balance', async ({ page }) => {
   const customer = await createCustomer()
   await page.goto(`/customers/${customer.id}`)
