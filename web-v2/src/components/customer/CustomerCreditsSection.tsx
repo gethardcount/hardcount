@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, formatCents, formatDate } from '@/lib/api'
-import { creditTotalsLine, grantState, ledgerEntryLabel, splitGrants } from '@/lib/customerCredits'
+import { creditTotalsLine, grantState, grantUsedCents, ledgerEntryLabel, ledgerEntryTitle, splitGrants } from '@/lib/customerCredits'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
 import { Section } from '@/components/page/Section'
@@ -120,7 +120,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                             </div>
                           </TableCell>
                           <TableCell className="text-right text-sm tabular-nums">{formatCents(g.amount_cents, currency)}</TableCell>
-                          <TableCell className="text-right text-sm tabular-nums">{formatCents(g.consumed_cents, currency)}</TableCell>
+                          <TableCell className="text-right text-sm tabular-nums">{formatCents(grantUsedCents(g), currency)}</TableCell>
                           <TableCell className="text-right text-sm font-medium tabular-nums">{formatCents(g.remaining_cents, currency)}</TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{g.expires_at ? formatDate(g.expires_at) : 'Never'}</TableCell>
                         </TableRow>
@@ -152,12 +152,14 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                 <li key={e.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                   <div className="min-w-0">
                     <p className="truncate">
-                      {e.description || ledgerEntryLabel(e.entry_type)}
+                      {ledgerEntryTitle(e)}
                       {e.invoice_id && (
                         <Link to={`/invoices/${e.invoice_id}`} className="ml-2 text-xs text-primary underline-offset-2 hover:underline">Invoice</Link>
                       )}
                     </p>
-                    <p className="text-xs text-muted-foreground">{ledgerEntryLabel(e.entry_type)} · {formatDate(e.created_at)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {ledgerEntryTitle(e) === ledgerEntryLabel(e.entry_type) ? '' : `${ledgerEntryLabel(e.entry_type)} · `}{formatDate(e.created_at)}
+                    </p>
                   </div>
                   <span className={e.amount_cents < 0 ? 'shrink-0 tabular-nums' : 'shrink-0 tabular-nums text-success-foreground'}>
                     {e.amount_cents > 0 ? '+' : ''}{formatCents(e.amount_cents, currency)}

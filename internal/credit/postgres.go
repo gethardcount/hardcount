@@ -372,10 +372,11 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 		CustomerID:  customerID,
 		EntryType:   domain.CreditExpiry,
 		AmountCents: -remaining,
-		// velox-doctor's expired_grant_headroom_reopened check JOINs on this
-		// exact string ('Expired grant ' || grant id) to pair expiry entries
-		// with their grants — change the format and the check goes silently
-		// blind. Change both together (internal/doctor/checks.go).
+		// velox-doctor's expired_grant_headroom_reopened check and
+		// ListGrantSummaries' expired_cents JOIN on this exact string
+		// ('Expired grant ' || grant id) to pair expiry entries with their
+		// grants — change the format and both go silently blind. Change
+		// them together (internal/doctor/checks.go).
 		Description: fmt.Sprintf("Expired grant %s", grantID),
 		CreatedAt:   expiresAt.Time,
 	}); err != nil {
@@ -1542,6 +1543,11 @@ func creditEntrySortColumn(key string) string {
 // commit is drawn, when does it expire?"). remaining = amount - consumed;
 // consumed is bumped by every drain (drawdown, clawback, expiry, commit
 // retire), so this is the same arithmetic the drain order runs on.
+//
+// ExpiredCents is the part of consumed that expiry wrote off: the expiry
+// sweep (ExpireGrantAtomic) sets consumed = amount, so consumed alone
+// cannot tell "applied to invoices" from "ran out of time". Used credit is
+// consumed - expired.
 type GrantSummary struct {
 	ID              string     `json:"id"`
 	EntryType       string     `json:"entry_type"`
@@ -1550,6 +1556,7 @@ type GrantSummary struct {
 	AmountCents     int64      `json:"amount_cents"`
 	ConsumedCents   int64      `json:"consumed_cents"`
 	RemainingCents  int64      `json:"remaining_cents"`
+	ExpiredCents    int64      `json:"expired_cents"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	SourceInvoiceID string     `json:"source_invoice_id,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -1569,14 +1576,24 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 
 	exhausted := ""
 	if !includeExhausted {
-		exhausted = " AND consumed_cents < amount_cents"
+		exhausted = " AND g.consumed_cents < g.amount_cents"
 	}
+	// expired_cents: the grant's expiry entries, paired by the exact
+	// description ExpireGrantAtomic writes ('Expired grant ' || grant id),
+	// the same pairing velox-doctor and migration 0127 use. ExpireGrantAtomic
+	// is the only writer of expiry entries, so the pairing is exact.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, entry_type, COALESCE(grant_kind,''), description,
-			amount_cents, consumed_cents, expires_at, COALESCE(source_invoice_id,''), created_at
-		FROM customer_credit_ledger
-		WHERE customer_id = $1 AND amount_cents > 0`+exhausted+`
-		ORDER BY created_at DESC, id DESC`, customerID)
+		SELECT g.id, g.entry_type, COALESCE(g.grant_kind,''), g.description,
+			g.amount_cents, g.consumed_cents,
+			COALESCE((
+				SELECT -SUM(e.amount_cents) FROM customer_credit_ledger e
+				WHERE e.tenant_id = g.tenant_id AND e.customer_id = g.customer_id
+				  AND e.entry_type = 'expiry' AND e.description = 'Expired grant ' || g.id
+			), 0),
+			g.expires_at, COALESCE(g.source_invoice_id,''), g.created_at
+		FROM customer_credit_ledger g
+		WHERE g.customer_id = $1 AND g.amount_cents > 0`+exhausted+`
+		ORDER BY g.created_at DESC, g.id DESC`, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -1586,7 +1603,7 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	for rows.Next() {
 		var g GrantSummary
 		if err := rows.Scan(&g.ID, &g.EntryType, &g.GrantKind, &g.Description,
-			&g.AmountCents, &g.ConsumedCents, &g.ExpiresAt, &g.SourceInvoiceID, &g.CreatedAt); err != nil {
+			&g.AmountCents, &g.ConsumedCents, &g.ExpiredCents, &g.ExpiresAt, &g.SourceInvoiceID, &g.CreatedAt); err != nil {
 			return nil, err
 		}
 		g.RemainingCents = g.AmountCents - g.ConsumedCents

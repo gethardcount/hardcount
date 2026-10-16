@@ -29,7 +29,7 @@ import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
-import { creditTotalsLine, invoiceCreditNote } from '@/lib/customerCredits'
+import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
 import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
 import { statusBadgeVariant } from '@/lib/status'
 import { invoiceStatus } from '@/lib/statusLabels'
@@ -624,7 +624,7 @@ export default function CustomerDetailPage() {
                     · {overview?.outstanding_balance?.unpaid_count} invoice{overview?.outstanding_balance?.unpaid_count === 1 ? '' : 's'}
                   </span>
                 </p>
-                {overview?.recent_invoices.some(inv => (inv.credits_applied_cents ?? 0) > 0) && (
+                {outstandingIncludesCredit(overview?.recent_invoices ?? []) && (
                   <p className="text-xs text-muted-foreground mt-0.5">Amount due after credit applied</p>
                 )}
               </Link>

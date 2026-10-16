@@ -1086,6 +1086,8 @@ export interface CreditGrantSummary {
   amount_cents: number
   consumed_cents: number
   remaining_cents: number
+  // Part of consumed_cents that expired unused; used = consumed - expired.
+  expired_cents: number
   expires_at?: string
   source_invoice_id?: string
   created_at: string

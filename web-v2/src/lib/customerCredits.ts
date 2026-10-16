@@ -5,8 +5,6 @@
 // with something left, and Outstanding ($4,160) disagreed with the invoice
 // total ($4,660) with no word about the $500 of credit between them. These
 // helpers give the page the totals, the used-up grants and that sentence.
-//
-// Dependency-free so node --test can import it.
 import { formatCents } from './money.ts'
 
 export interface CreditTotals {
@@ -29,18 +27,27 @@ export interface GrantRow {
   amount_cents: number
   consumed_cents: number
   remaining_cents: number
+  // The part of consumed_cents that expired unused. The expiry sweep sets
+  // consumed to the full amount, so consumed alone counts it as used.
+  expired_cents?: number
   expires_at?: string
 }
 
 export type GrantState = 'active' | 'used_up' | 'expired'
 
-// grantState: a grant with nothing left is "used up" when invoices drew all
-// of it, "expired" when it ran out of time with some unused.
+// grantState: a grant with nothing left is "expired" when some of it ran out
+// of time unused, "used up" when invoices drew all of it. A grant past its
+// expiry that the sweep has not written off yet is "expired" too.
 export function grantState(g: GrantRow, nowMs: number): GrantState {
   if (g.remaining_cents > 0) {
     return g.expires_at && Date.parse(g.expires_at) <= nowMs ? 'expired' : 'active'
   }
-  return g.consumed_cents >= g.amount_cents ? 'used_up' : 'expired'
+  return (g.expired_cents ?? 0) > 0 ? 'expired' : 'used_up'
+}
+
+// grantUsedCents is what was really used: consumed less the expired part.
+export function grantUsedCents(g: GrantRow): number {
+  return g.consumed_cents - (g.expired_cents ?? 0)
 }
 
 // splitGrants keeps the order the server sent and separates the grants that
@@ -64,6 +71,21 @@ export function invoiceCreditNote(inv: {
   return `${formatCents(applied, inv.currency)} credit applied · ${formatCents(inv.amount_due_cents, inv.currency)} due`
 }
 
+// outstandingIncludesCredit: does any invoice counted in Outstanding have
+// credit applied? Outstanding counts the same invoices the server does
+// (GetOutstandingBalance): unpaid (pending, failed, unknown) and not draft,
+// voided or uncollectible. A paid invoice that had credit says nothing about
+// what is owed now.
+const UNPAID = new Set(['pending', 'failed', 'unknown'])
+const NOT_OWED = new Set(['draft', 'voided', 'uncollectible'])
+export function outstandingIncludesCredit(invoices: readonly {
+  status: string
+  payment_status: string
+  credits_applied_cents?: number
+}[]): boolean {
+  return invoices.some(inv => UNPAID.has(inv.payment_status) && !NOT_OWED.has(inv.status) && (inv.credits_applied_cents ?? 0) > 0)
+}
+
 // ledgerEntryLabel names a ledger entry type in plain words. "usage" is the
 // ledger's word for credit applied to an invoice.
 export function ledgerEntryLabel(entryType: string): string {
@@ -74,4 +96,12 @@ export function ledgerEntryLabel(entryType: string): string {
     case 'adjustment': return 'Adjustment'
     default: return entryType ? entryType[0].toUpperCase() + entryType.slice(1).replace(/_/g, ' ') : ''
   }
+}
+
+// ledgerEntryTitle is the line shown for a ledger entry. The server writes
+// expiry and usage descriptions with ids in them ("Expired grant vlx_…"), so
+// those read as their plain label; an operator's own description is kept.
+export function ledgerEntryTitle(e: { entry_type: string; description?: string }): string {
+  if (e.entry_type === 'expiry' || e.entry_type === 'usage') return ledgerEntryLabel(e.entry_type)
+  return e.description || ledgerEntryLabel(e.entry_type)
 }

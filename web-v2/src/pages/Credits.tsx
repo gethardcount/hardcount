@@ -721,7 +721,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
       }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{isDeduct ? 'Deduct Credits' : 'Grant Credits'}</DialogTitle>
+            <DialogTitle>{isDeduct ? 'Deduct credits' : 'Grant credits'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={onFormSubmit} noValidate className="space-y-4">

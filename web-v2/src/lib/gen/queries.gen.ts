@@ -3121,7 +3121,9 @@ export const getGetV1CreditsGrantsCustomerIdUrl = (customerId: string,
  * drawn / remaining per grant, expiry, and remaining split by
  * cost-basis class (commit = money-backed, promotional = free,
  * other = legacy/adjustments). include_exhausted=true adds
- * fully-drawn blocks for history.
+ * fully-drawn blocks for history. Each grant's `consumed_cents`
+ * includes any part that expired unused; `expired_cents` is that
+ * part, so the credit actually used is `consumed_cents - expired_cents`.
  * @summary Per-grant burndown + kind subtotals
  */
 export const getV1CreditsGrantsCustomerId = async (customerId: string,

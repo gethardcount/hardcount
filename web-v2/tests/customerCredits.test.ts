@@ -4,7 +4,7 @@
 import { test, beforeEach } from 'vitest'
 import assert from 'node:assert/strict'
 import { setActiveCurrency } from '../src/lib/money.ts'
-import { creditTotalsLine, grantState, invoiceCreditNote, ledgerEntryLabel, splitGrants } from '../src/lib/customerCredits.ts'
+import { creditTotalsLine, grantState, grantUsedCents, invoiceCreditNote, ledgerEntryLabel, ledgerEntryTitle, outstandingIncludesCredit, splitGrants } from '../src/lib/customerCredits.ts'
 
 beforeEach(() => setActiveCurrency('USD'))
 const NOW = Date.parse('2026-10-16T12:00:00Z')
@@ -26,9 +26,19 @@ test('expired credit is named, in the customer currency', () => {
 
 test('grant state: used up, expired, active', () => {
   assert.equal(grantState({ amount_cents: 50000, consumed_cents: 50000, remaining_cents: 0 }, NOW), 'used_up')
-  assert.equal(grantState({ amount_cents: 50000, consumed_cents: 1000, remaining_cents: 0, expires_at: '2026-10-01T00:00:00Z' }, NOW), 'expired')
   assert.equal(grantState({ amount_cents: 50000, consumed_cents: 0, remaining_cents: 50000, expires_at: '2026-12-01T00:00:00Z' }, NOW), 'active')
   assert.equal(grantState({ amount_cents: 50000, consumed_cents: 0, remaining_cents: 50000, expires_at: '2026-10-01T00:00:00Z' }, NOW), 'expired')
+})
+
+test('an expired grant is not "used up", and its expired part is not counted as used', () => {
+  // The expiry sweep sets consumed to the full amount: $30 applied, $70
+  // expired reads consumed $100. The server names the expired part.
+  const g = { amount_cents: 10000, consumed_cents: 10000, remaining_cents: 0, expired_cents: 7000, expires_at: '2026-10-01T00:00:00Z' }
+  assert.equal(grantState(g, NOW), 'expired')
+  assert.equal(grantUsedCents(g), 3000)
+  const usedUp = { amount_cents: 10000, consumed_cents: 10000, remaining_cents: 0, expired_cents: 0 }
+  assert.equal(grantState(usedUp, NOW), 'used_up')
+  assert.equal(grantUsedCents(usedUp), 10000)
 })
 
 test('used-up grants are kept, behind the active ones', () => {
@@ -52,4 +62,21 @@ test('an invoice with credit applied says why amount due is lower', () => {
 test('the ledger calls credit applied to an invoice "Applied", not "Usage"', () => {
   assert.equal(ledgerEntryLabel('usage'), 'Applied')
   assert.equal(ledgerEntryLabel('grant'), 'Grant')
+})
+
+test('expiry and usage entries read in plain words, not the server ids', () => {
+  assert.equal(ledgerEntryTitle({ entry_type: 'expiry', description: 'Expired grant vlx_ccl_123' }), 'Expired')
+  assert.equal(ledgerEntryTitle({ entry_type: 'usage', description: 'Applied to invoice vlx_inv_9' }), 'Applied')
+  assert.equal(ledgerEntryTitle({ entry_type: 'grant', description: 'Welcome credit' }), 'Welcome credit')
+  assert.equal(ledgerEntryTitle({ entry_type: 'adjustment', description: '' }), 'Adjustment')
+})
+
+test('"after credit applied" is said only when an unpaid invoice had credit', () => {
+  const paid = { status: 'paid', payment_status: 'succeeded', credits_applied_cents: 50000 }
+  const openNoCredit = { status: 'finalized', payment_status: 'pending', credits_applied_cents: 0 }
+  const openWithCredit = { status: 'finalized', payment_status: 'pending', credits_applied_cents: 50000 }
+  const voided = { status: 'voided', payment_status: 'pending', credits_applied_cents: 50000 }
+  assert.equal(outstandingIncludesCredit([paid, openNoCredit]), false)
+  assert.equal(outstandingIncludesCredit([voided]), false)
+  assert.equal(outstandingIncludesCredit([paid, openWithCredit]), true)
 })
