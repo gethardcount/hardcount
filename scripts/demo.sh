@@ -80,7 +80,11 @@ green "✓ Recipe live: tokens meter + per-model rates + plan $PLAN_ID"
 step "3. Test clock + customer"
 # The clock lets us simulate a whole billing month in seconds.
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-RUN=$(date +%H%M%S)
+# RUN makes this run's ids unique: customer external_id, subscription code
+# and LiteLLM call ids are unique per tenant, and a rerun must not collide.
+# Full UTC date and time plus a random suffix: a time of day alone repeats
+# the next day, and the PID alone repeats in a fresh container.
+RUN="$(date -u +%Y%m%d%H%M%S)-$RANDOM"
 CLOCK_ID=$(req POST "/v1/test-clocks" "{\"name\": \"demo\", \"frozen_time\": \"$NOW\"}" | jq -r '.id')
 CUST=$(req POST "/v1/customers" "{
   \"external_id\": \"acme_$RUN\",

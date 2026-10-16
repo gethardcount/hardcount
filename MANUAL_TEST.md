@@ -2320,6 +2320,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run ./cmd/velox
 
 - [~] From a fresh copy with only Docker, `deploy/compose/quickstart.sh` prints a dashboard address, a login and a test key, and exits 0. *(walked 2026-10-14 with VELOX_PORT=8090: 13 s with the images already pulled; 210 s on a first pull)*
 - [~] `./quickstart.sh demo` ends with a finalized invoice of $3.88 and a margin line, with no Go, Node or jq on the host. *(walked 2026-10-14: 13 s)*
+- [ ] Running `./quickstart.sh demo` a second time ends the same way, with a second demo customer: no `✗ POST /v1/customers → HTTP 409`. The customer's external id reads `acme_<yyyymmddhhmmss>-<n>`.
+  - The old id was the time of day only, so a rerun at the same second on a later day collided. Not reproducible by waiting; the id format is the observable.
 - [~] The printed login signs in to the dashboard, and the demo's invoice and customer are listed. *(walked 2026-10-14 in a browser)*
 - [~] Running `./quickstart.sh` again keeps the data and does not create a second login. *(walked 2026-10-14)*
 - [~] It does not touch another Velox stack on the machine: a development `velox-postgres-1` and its volume are unchanged after `up` and `destroy`. *(walked 2026-10-14; the first version used the project name `velox` and replaced that container, which is why the name is now `velox-quickstart`)*
