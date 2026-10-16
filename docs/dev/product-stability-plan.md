@@ -17,10 +17,10 @@ class cheapest).
    Jan 31 → Feb 28 date-math clamp) is a scheduled fix, not lore.
 3. **Dependabot: nothing open** except items on the deferred-with-trigger
    list (currently: react-router 8, orval-next).
-4. **Runbook truth-rate ≈ 100%** on sampled re-walks. The runbook is
-   `MANUAL_TEST.md`, the ledger of walked flows; a re-walk re-proves each of a
-   flow's checkboxes against current behavior. A checked box means *proven at walk
-   time*; the sample measures whether that still predicts current behavior.
+4. **No doc that lies.** Every user-visible change ships its docs and a test
+   at the right layer ([How we test](../testing.md)) in the same PR. (Until
+   October 2026 this goal was a truth rate for the hand-run runbook
+   `MANUAL_TEST.md`; B3 below records its last sample.)
 5. **Every deferral carries a trigger**, in the ADR or the register in
    `velox-ops` (the private planning repo). An open gap without a trigger is
    a bug in this plan.
@@ -61,8 +61,9 @@ New code is the largest defect source. The standing gates:
   pass — treat it as mandatory for money-path PRs, cheap optional elsewhere.
   Findings are verified by the author, not a refuter panel (agents assigned
   to knock findings down — measured useless here). Cap at ~5 finders.
-- **Same-PR doc rule**: CHANGELOG + the matching MANUAL_TEST flow + ADR (+
-  ADR index row) + README ship with the change. A doc that lies is a defect.
+- **Same-PR doc rule**: CHANGELOG + a test at the right layer (see
+  [How we test](../testing.md)) + ADR (+ ADR index row) + README ship with
+  the change. A doc that lies is a defect.
 - **Pre-push gate**: gofmt · go vet · `go test ./... -race -short -count=1` ·
   golangci-lint (its `unused` finding = deleted-test alarm) · `make gen`
   (BOTH halves — `npm run gen` alone lets the Go types drift) · `tsc -b`
@@ -142,8 +143,9 @@ the same-PR rule is failing.
 
 ### B5. Fresh-tenant smoke ritual *(no build — a rule)*
 
-S1/S2 (the MANUAL_TEST.md smoke flows; ~15 min) on a **fresh tenant**
-before any DP-facing (design-partner-facing) milestone.
+The [release checklist](../ops/release-checklist.md) and the Playwright suite
+on a **fresh tenant** before any DP-facing (design-partner-facing) milestone.
+(Until October 2026 this was S1/S2, the MANUAL_TEST.md smoke flows.)
 Fresh-tenant walks found 3 seam bugs that aged-tenant walks structurally
 could not.
 
@@ -192,9 +194,9 @@ both describe a charge-in-place path ADR-113 deleted.
 
 ## Pillar D — Rot prevention *(exists — keep enforced)*
 
-- Runbook: stale flow = rewrite or delete, never leave-and-document; the
-  same-PR revision rule is what kept D6 (a MANUAL_TEST flow) true through
-  three redesigns in one week.
+- Docs: a stale doc = rewrite or delete, never leave-and-document; the
+  same-PR revision rule is what kept D6 (a hand-run flow, since retired)
+  true through three redesigns in one week.
 - ADR index row lands in the same PR as the ADR (it silently rotted for a
   month at 28 missing entries).
 - Deferrals: every defer-with-trigger written to the velox-ops register in
@@ -218,9 +220,9 @@ both describe a charge-in-place path ADR-113 deleted.
 |---|---|
 | doctor sweep | every CI golden-path run + inside the clock soak + before/after any walk session |
 | pre-push gate + adversarial verify | every PR (verify: mandatory on money paths) |
-| fresh-tenant S1/S2 | before each DP-facing milestone |
+| fresh-tenant release checklist + Playwright | before each DP-facing milestone |
 | clock soak | CI-locked (every integration run) |
-| truth-rate sample | DONE (100%); repeat only if the same-PR rule is suspended |
+| truth-rate sample | DONE (100%); the runbook it measured is retired |
 | burn-down table review | monthly, or when any trigger fires |
 
 ## Order of execution from here

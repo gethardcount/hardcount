@@ -20,7 +20,7 @@ Most tests belong in layer 1. Layers 3 and 4 stay small on purpose.
 | You changed | Write |
 |---|---|
 | Money, an invoice, payment, credit, dunning, subscription or tax state | A Go integration test against real Postgres. Follow the [money-path playbook](dev/money-path-robustness-playbook.md) §5: test the collision, not only the happy path |
-| Pure logic with no database (a calculation, a parser, a formatter) | A Go unit test, or a Vitest test for dashboard code in `web-v2/src/lib` |
+| Pure logic with no database (a calculation, a parser, a formatter) | A Go unit test, or a Vitest test in `web-v2/tests/` for dashboard code |
 | An API endpoint | A Go test that calls the handler and checks the status code and body |
 | A rule about how code may be written | A golangci-lint rule in `.golangci.yml`, or a source test in `internal/arch` |
 | A dashboard page or a user journey | A Playwright spec in `web-v2/e2e/`. New pages are added to the smoke list |
@@ -28,6 +28,11 @@ Most tests belong in layer 1. Layers 3 and 4 stay small on purpose.
 
 A Playwright test checks that the screen shows what the API returned.
 Arithmetic stays in Go tests.
+
+A lint waiver names the linter and says why, on the same line, for example
+`//nolint:forbidigo // wall-clock: <reason>` or
+`//nolint:forbidigo // single-invoice-ok: <reason>`. A bare `//nolint` fails
+the lint.
 
 ## Run each layer locally
 
@@ -43,10 +48,10 @@ make lint                            # golangci-lint
 make gen && git diff --exit-code     # generated code matches api/openapi.yaml
 cd web-v2 && npx tsc -b && npx eslint .
 
-# Dashboard unit tests (Vitest)
+# Dashboard unit tests (Vitest, web-v2/tests/*.test.ts)
 cd web-v2 && npm test
 
-# Layer 3: Playwright (needs a running API and dashboard; see below)
+# Layer 3: Playwright (needs a running API and dashboard; see web-v2/e2e/README.md)
 cd web-v2 && npm run test:e2e
 ```
 
@@ -57,36 +62,25 @@ gate and its local command.
 
 ## Playwright: how the end-to-end tests work
 
-- **Where:** `web-v2/playwright.config.ts`, specs in `web-v2/e2e/*.spec.ts`,
-  seed code in `web-v2/e2e/fixtures/`. Chromium only.
-- **What runs:** the API (`go run ./cmd/velox`) and the built dashboard
-  (`vite build`, then `vite preview`, which forwards `/v1` to the API).
-- **Settings:** `E2E_BASE_URL` (default `http://127.0.0.1:4173`),
-  `E2E_API_URL` (default `http://127.0.0.1:8080`), `E2E_API_KEY`,
-  `E2E_EMAIL` and `E2E_PASSWORD`. The key and the sign-in come from
-  `velox-bootstrap`.
-- **Smoke spec:** `smoke.spec.ts` opens every dashboard page and the public
-  hosted invoice page, at 1440px and 390px wide. Each page must show its
-  heading, log no console errors, get no failed `/v1` response, and not
-  scroll sideways. There is one test per page, so a failure names the page.
-- **Journeys:** sign in, create a customer, subscribe it, advance a test
-  clock to the next renewal and see the invoice, open the hosted invoice
-  page, grant credits and see the balance.
+The specs live in `web-v2/e2e/` and run in Chromium against a real API and
+the built dashboard (`vite preview`, which forwards `/v1` to the API).
+
+- **Smoke:** `smoke.spec.ts` opens every dashboard page at 1440px and 390px
+  wide. A page fails if it logs a console error, an API call answers 400 or
+  more, the page scrolls sideways, or its heading is missing. Each page is
+  its own test, so a failure names the page.
+- **Journeys:** `journeys.spec.ts` signs in, creates a customer and a
+  subscription, advances a test clock to the renewal and opens the new
+  invoice, opens the public invoice page, and grants credits.
+- **Data:** the tests make their data through the public API, with the
+  test-mode secret key from `velox-bootstrap`. Each test uses its own unique
+  names, so the suite can run many times against the same database. Use a
+  database of your own anyway, so the tests never touch your dev data.
 - **In CI:** the `e2e` job runs on every PR. It is not a required check yet.
-  On a failure, download the `playwright-report` artifact. It holds a trace
-  you can open with `npx playwright show-trace`.
+  On a failure, download the `playwright-report` artifact and open its trace
+  with `npx playwright show-trace`.
 
-### Seed data
-
-The tests create their own data through the public API, using the test-mode
-secret key from `velox-bootstrap`. The seed code is TypeScript in
-`web-v2/e2e/fixtures/` and stops at the first API error. There are no shell
-scripts and no SQL inserts, so the seed follows the same rules a real
-integrator does.
-
-Each run starts from an empty database. Locally, create your own database
-for this. Never point the tests at the `velox` database you use for
-development.
+How to run them locally, step by step: [web-v2/e2e/README.md](../web-v2/e2e/README.md).
 
 ### Flaky tests
 
@@ -94,8 +88,8 @@ A flaky test passes and fails on the same code.
 
 - CI retries a failed test once. A test that passes on the retry is
   reported as flaky, not as passed.
-- Before you commit a spec, run it five times: `npx playwright test
-  --repeat-each 5 <spec>`.
+- Before you commit a spec, run it five times:
+  `npx playwright test --repeat-each 5 <spec>`.
 - Wait on the page or the network, never on a fixed sleep.
 - Select by role and label (`getByRole`, `getByLabel`), not by CSS class.
 - Fix or delete a flaky spec. Do not mark it as skipped and move on.
@@ -128,8 +122,8 @@ the golden path left behind.
 
 Until October 2026, hand-run test steps lived in `MANUAL_TEST.md`, with flow
 IDs such as `FLOW TC4` or `FLOW B10`. Some code comments and ADRs still name
-them. Commit `a75d02d5` is the last commit that has the file:
+them. To read the last version of the file:
 
 ```bash
-git show a75d02d5:MANUAL_TEST.md | less
+git show "$(git log -1 --format=%H --diff-filter=D -- MANUAL_TEST.md)^:MANUAL_TEST.md" | less
 ```

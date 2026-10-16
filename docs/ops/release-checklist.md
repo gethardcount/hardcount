@@ -3,6 +3,8 @@
 Run this by hand before each release tag. It covers what automated tests
 cannot prove because they fake the provider: Stripe, email, LiteLLM and the
 invoice PDF. Use Stripe test mode only. See [How we test](../testing.md).
+The checks write Stripe-linked test data into the database the server uses,
+so point it at a fresh or dedicated database if you want to keep yours clean.
 
 ## Setup
 
@@ -25,7 +27,9 @@ invoice PDF. Use Stripe test mode only. See [How we test](../testing.md).
 
 ## Money walk across a renewal
 
-- [ ] Mint a test clock, create a customer pinned to it with card `0341`, and subscribe it to a plan that bills in arrears (the default).
+- On the Dunning policies page, create a policy and leave it enabled. A plain bootstrap has none. A policy made through the API without `enabled` is disabled, and the first policy becomes the default.
+- [ ] Mint a test clock, create a customer pinned to it, and subscribe it to a plan that bills in arrears (the default).
+- [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
 - [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run (automatic retries for a failed payment) starts.
 - [ ] Open the invoice link in the payment-failed email and pay with `4242` → the invoice is paid, and the dunning run shows recovered.
 

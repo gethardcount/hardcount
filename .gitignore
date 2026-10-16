@@ -20,9 +20,10 @@ velox-api
 #
 # Hand checks take screenshots as evidence, and none of them are committed —
 # zero image files are tracked in this repo. They are local proof for whoever
-# ran the check, not artifacts. But Playwright writes them next to the repo root rather than into
-# the already-ignored .playwright-mcp/ when a bare filename is passed, so they
-# accumulate: 25 of them had piled up by 2026-08-04, ~3MB, from many sessions.
+# ran the check, not artifacts. But Playwright writes them next to the repo
+# root rather than into the already-ignored .playwright-mcp/ when a bare
+# filename is passed, so they accumulate: 25 of them had piled up by
+# 2026-08-04, ~3MB, from many sessions.
 #
 # Untracked and un-ignored is the bad combination — one `git add -A` in the
 # main working tree commits the lot. Scoped to the ROOT (`/*.png`, not
