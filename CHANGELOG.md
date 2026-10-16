@@ -42,7 +42,7 @@ Older entries keep their original text.
 
 ### Fixed
 
-- **Customer and plan pages list all their subscriptions (2026-10-16).** Both pages took the first 50 subscriptions of the whole tenant and kept the matching ones, so with more than 50 a customer could show "Subscriptions (0)". They now ask the API for that customer's or plan's subscriptions (up to 100).
+- **Customer and plan pages show their own subscriptions (2026-10-16).** Both pages took the first 50 subscriptions of the whole tenant and kept the matching ones, so with more than 50 a customer could show "Subscriptions (0)". They now ask the API for that customer's or plan's subscriptions. The count is the full number; the list shows the first 100 and says so when there are more.
 - **Pages fit a phone screen (2026-10-16).** On a 390px-wide phone, the Customers, Subscriptions, Invoices, Settings and customer credit pages were wider than the screen, so buttons such as Add Subscription sat off to the side. Their headers and filters now wrap, and the Settings tabs drop their icons on a phone.
 - **A date-only `to` filter now includes the last second of that day (2026-10-16).** `to=2026-10-31` ended at 23:59:59.000 UTC, so CSV exports, the invoice list and the audit log left out rows stamped 23:59:59.000001–.999999. It now ends at 23:59:59.999999 UTC.
 - **Customer usage accepts a full leap year (2026-10-16).** `GET /v1/customers/{id}/usage?from=2028-01-01&to=2028-12-31` answered 422 "window must be ≤ 1 year", because the cap was 365 days. It is now one calendar year, so a 366-day yearly cycle also works; `/v1/customers/{id}/margin` gets the same cap.

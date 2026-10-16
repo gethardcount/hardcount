@@ -89,12 +89,14 @@ export default function PlanDetailPage() {
     select: (res) => res.data,
   })
 
-  const { data: subsData } = useQuery({
+  const { data: subsPage } = useQuery({
     queryKey: ['plan-subscriptions', id],
-    // Filtered by the server, for the same reason as the customer page.
-    queryFn: () => api.listSubscriptions(`plan_id=${encodeURIComponent(id!)}&limit=100`).then(r => r.data),
+    // Filtered by the server, for the same reason as the customer page. The
+    // server returns at most 100; `total` is the real count.
+    queryFn: () => api.listSubscriptions(`plan_id=${encodeURIComponent(id!)}&limit=100`),
     enabled: !!id,
   })
+  const subsData = subsPage?.data
 
   // ids= of the subscribers actually shown — the old bare 50-row page
   // rendered raw customer ids for anyone past the 50th (P11).
@@ -119,6 +121,7 @@ export default function PlanDetailPage() {
   }, [customersData])
 
   const subscriptions = Array.isArray(subsData) ? subsData : []
+  const subsTotal = subsPage?.total ?? subscriptions.length
   const allMeters = Array.isArray(meters) ? meters : []
   const allRules = Array.isArray(ratingRules) ? ratingRules : []
 
@@ -385,7 +388,7 @@ export default function PlanDetailPage() {
       <Card className="mt-6">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Subscriptions ({subscriptions.length})</CardTitle>
+            <CardTitle className="text-sm">Subscriptions ({subsTotal})</CardTitle>
             {subscriptions.length > 0 && (
               <Link to="/subscriptions" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
                 View all
@@ -441,6 +444,9 @@ export default function PlanDetailPage() {
             </Table>
           ) : (
             <p className="text-sm text-muted-foreground text-center py-8">No subscriptions are using this plan yet</p>
+          )}
+          {subsTotal > subscriptions.length && (
+            <p className="px-6 py-2 text-xs text-muted-foreground border-t border-border">Showing the first {subscriptions.length} of {subsTotal}.</p>
           )}
         </CardContent>
       </Card>

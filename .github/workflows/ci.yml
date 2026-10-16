@@ -355,11 +355,17 @@ jobs:
       - name: Install frontend dependencies
         run: cd web-v2 && npm ci --legacy-peer-deps
 
+      # The browser build depends only on the Playwright version, so key on
+      # that: unrelated lockfile changes keep the cache.
+      - name: Read Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./web-v2/node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Cache Playwright browsers
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('web-v2/package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
       - name: Install Chromium
         run: cd web-v2 && npx playwright install --with-deps chromium

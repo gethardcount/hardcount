@@ -277,13 +277,16 @@ export default function CustomerDetailPage() {
     queryFn: () => api.listPlans().then(r => r.data.filter(p => p.status === 'active')),
   })
 
-  const { data: allSubs } = useQuery({
+  const { data: subsPage } = useQuery({
     queryKey: ['customer-subscriptions', id],
     // Filtered by the server: filtering one page of every subscription here
-    // dropped this customer's once the tenant had more than a page.
-    queryFn: () => api.listSubscriptions(`customer_id=${encodeURIComponent(id!)}&limit=100`).then(r => r.data),
+    // dropped this customer's once the tenant had more than a page. The
+    // server returns at most 100; `total` is the real count.
+    queryFn: () => api.listSubscriptions(`customer_id=${encodeURIComponent(id!)}&limit=100`),
     enabled: !!id,
   })
+  const allSubs = subsPage?.data
+  const subsTotal = subsPage?.total ?? allSubs?.length ?? 0
 
   // Split subs into active-ish (trialing/active/past_due) and terminal
   // (canceled/ended), sorted within each bucket by status priority then
@@ -632,7 +635,7 @@ export default function CustomerDetailPage() {
             )}
             <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Subscriptions</p>
-              <p className="text-sm font-medium text-foreground mt-1">{allSubs?.length ?? 0}</p>
+              <p className="text-sm font-medium text-foreground mt-1">{subsTotal}</p>
             </div>
             <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Created</p>
@@ -1064,7 +1067,7 @@ export default function CustomerDetailPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">Subscriptions ({allSubs?.length ?? 0})</CardTitle>
+              <CardTitle className="text-sm">Subscriptions ({subsTotal})</CardTitle>
               {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create Subscription</Button>}
             </div>
           </CardHeader>
@@ -1113,6 +1116,9 @@ export default function CustomerDetailPage() {
               )}
               {(!allSubs || allSubs.length === 0) && (
                 <p className="px-6 py-6 text-sm text-muted-foreground text-center">No subscriptions</p>
+              )}
+              {allSubs && subsTotal > allSubs.length && (
+                <p className="px-6 py-2 text-xs text-muted-foreground">Showing the first {allSubs.length} of {subsTotal}.</p>
               )}
             </div>
           </CardContent>

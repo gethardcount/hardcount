@@ -24,7 +24,9 @@ served by `vite preview`, which forwards `/v1` to the API. Use your own
 database so the tests never touch your dev data.
 
 ```bash
-# 1. A database of your own (the docker compose Postgres on :5432)
+export PGPASSWORD=velox
+# 1. A database of your own (the docker compose Postgres on :5432). The
+#    velox_app role the API runs as is created by docker/init.sql.
 psql -h localhost -U velox -d postgres -c 'CREATE DATABASE velox_e2e OWNER velox'
 psql -h localhost -U velox -d velox_e2e -c 'GRANT ALL ON SCHEMA public TO velox_app'
 psql -h localhost -U velox -d velox_e2e -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app'
