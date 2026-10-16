@@ -8996,6 +8996,12 @@ paths:
         included. Per-model margin renders only where pricing rules pin the
         model; other revenue is reported unattributed, never allocated by
         heuristic.
+
+        The window is `[from, to)`: `from` inclusive, `to` exclusive. A
+        missing bound defaults to the last 30 days ending at the customer's
+        current time, which is the test clock's frozen time when the
+        customer is on a test clock. `from` and `to` take RFC 3339 instants
+        only (no bare dates), and `from` must be before `to`.
       parameters:
         - name: id
           in: path
@@ -9004,11 +9010,13 @@ paths:
             type: string
         - name: from
           in: query
+          description: Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time.
           schema:
             type: string
             format: date-time
         - name: to
           in: query
+          description: Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock).
           schema:
             type: string
             format: date-time
@@ -9019,6 +9027,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MarginReport"
+        "400":
+          description: "`from` or `to` is not RFC 3339, or `from` is not before `to`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Customer not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The window is longer than one year.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/credits/grant:
     post:

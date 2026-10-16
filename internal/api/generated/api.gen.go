@@ -5314,8 +5314,11 @@ type UpdateCustomerJSONBodyStatus string
 
 // GetV1CustomersIdMarginParams defines parameters for GetV1CustomersIdMargin.
 type GetV1CustomersIdMarginParams struct {
+	// From Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time.
 	From time.Time `form:"from,omitempty" json:"from,omitempty"`
-	To   time.Time `form:"to,omitempty" json:"to,omitempty"`
+
+	// To Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock).
+	To time.Time `form:"to,omitempty" json:"to,omitempty"`
 }
 
 // GetCustomerUsageParams defines parameters for GetCustomerUsage.

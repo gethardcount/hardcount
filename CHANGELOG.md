@@ -40,6 +40,7 @@ Older entries keep their original text.
 
 - **A date-only `to` filter now includes the last second of that day (2026-10-16).** `to=2026-10-31` ended at 23:59:59.000 UTC, so CSV exports, the invoice list and the audit log left out rows stamped 23:59:59.000001–.999999. It now ends at 23:59:59.999999 UTC.
 - **Customer usage accepts a full leap year (2026-10-16).** `GET /v1/customers/{id}/usage?from=2028-01-01&to=2028-12-31` answered 422 "window must be ≤ 1 year", because the cap was 365 days. It is now one calendar year, so a 366-day yearly cycle also works; `/v1/customers/{id}/margin` gets the same cap.
+- **A margin request without dates follows the customer's test clock (2026-10-16).** `GET /v1/customers/{id}/margin` with no `from`/`to` covered the wall-clock last 30 days, so a customer on an advanced test clock read revenue 0 and cost 0. It now covers the 30 days ending at the clock's time. Customers not on a test clock are unchanged.
 - **Usage event log values have thousands separators (2026-10-15).** "+35000" now reads "+35,000", matching the totals above it; the value is formatted as text, so no digit is lost.
 
 - **Setting a plan's base price to 0 no longer reads "Plan updated" when nothing changed (2026-10-15).** The server keeps the old price when sent 0, so Edit plan now says the price can't go back to 0 and disables Save. The meter page's plan list shows each plan's base price in its own currency.

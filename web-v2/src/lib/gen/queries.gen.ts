@@ -10960,6 +10960,12 @@ export const getGetV1CustomersIdMarginUrl = (id: string,
  * included. Per-model margin renders only where pricing rules pin the
  * model; other revenue is reported unattributed, never allocated by
  * heuristic.
+ *
+ * The window is `[from, to)`: `from` inclusive, `to` exclusive. A
+ * missing bound defaults to the last 30 days ending at the customer's
+ * current time, which is the test clock's frozen time when the
+ * customer is on a test clock. `from` and `to` take RFC 3339 instants
+ * only (no bare dates), and `from` must be before `to`.
  * @summary Per-customer margin report (operator only)
  */
 export const getV1CustomersIdMargin = async (id: string,
@@ -10986,7 +10992,7 @@ export const getGetV1CustomersIdMarginQueryKey = (id: string,
     }
 
 
-export const getGetV1CustomersIdMarginQueryOptions = <TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = unknown>(id: string,
+export const getGetV1CustomersIdMarginQueryOptions = <TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = Error>(id: string,
     params?: GetV1CustomersIdMarginParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
@@ -11006,10 +11012,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1CustomersIdMarginQueryResult = NonNullable<Awaited<ReturnType<typeof getV1CustomersIdMargin>>>
-export type GetV1CustomersIdMarginQueryError = unknown
+export type GetV1CustomersIdMarginQueryError = Error
 
 
-export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = unknown>(
+export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = Error>(
  id: string,
     params: undefined |  GetV1CustomersIdMarginParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -11020,7 +11026,7 @@ export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = unknown>(
+export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = Error>(
  id: string,
     params?: GetV1CustomersIdMarginParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -11031,7 +11037,7 @@ export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = unknown>(
+export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = Error>(
  id: string,
     params?: GetV1CustomersIdMarginParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
@@ -11040,7 +11046,7 @@ export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV
  * @summary Per-customer margin report (operator only)
  */
 
-export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = unknown>(
+export function useGetV1CustomersIdMargin<TData = Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError = Error>(
  id: string,
     params?: GetV1CustomersIdMarginParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1CustomersIdMargin>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient

@@ -280,6 +280,17 @@ func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *M
 	return &MarginAssembler{store: store, usageSvc: usageSvc}
 }
 
+// effectiveNow is the customer's current time for the default margin
+// window: the usage Service's effectiveNow, the same resolution the
+// usage summary's default month uses (test-clock frozen_time when the
+// customer is pinned, wall-clock otherwise).
+func (a *MarginAssembler) effectiveNow(ctx context.Context, tenantID, customerID string) time.Time {
+	if a != nil && a.usageSvc != nil && a.usageSvc.usage != nil {
+		return a.usageSvc.usage.effectiveNow(ctx, tenantID, customerID)
+	}
+	return time.Now().UTC()
+}
+
 func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, from, to time.Time) (MarginReport, error) {
 	rep := MarginReport{CustomerID: customerID, From: from, To: to, CostCurrency: "USD", CacheWriteExcluded: true, ByModel: []MarginModelRow{}}
 
@@ -500,7 +511,7 @@ func providerCostLabel(r domain.ProviderCostRate) string {
 func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
-	from, to, err := parseWindow(r)
+	from, to, err := h.marginWindow(r, tenantID, customerID)
 	if err != nil {
 		respond.BadRequest(w, r, err.Error())
 		return
@@ -513,10 +524,28 @@ func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, rep)
 }
 
-// parseWindow reads from/to (RFC3339); defaults to the last 30 days.
-func parseWindow(r *http.Request) (time.Time, time.Time, error) {
-	now := time.Now().UTC()
-	from, to := now.AddDate(0, 0, -30), now
+// marginWindow is the Margin handler's [from, to): the request's bounds,
+// with missing ones defaulted around the customer's effective now.
+func (h *ProviderCostHandler) marginWindow(r *http.Request, tenantID, customerID string) (time.Time, time.Time, error) {
+	return parseWindow(r, func() time.Time {
+		return h.margin.effectiveNow(r.Context(), tenantID, customerID)
+	})
+}
+
+// parseWindow reads from/to (RFC3339); a missing bound defaults to the
+// last 30 days ending at now(). now is the CUSTOMER's effective now —
+// frozen_time for a customer pinned to a test clock — so a bare request
+// for a clock-pinned customer covers the simulated last 30 days, the
+// same timeline the usage summary and customer usage follow. It is
+// called only when a bound is missing, so an explicit window costs no
+// clock lookup.
+func parseWindow(r *http.Request, now func() time.Time) (time.Time, time.Time, error) {
+	q := r.URL.Query()
+	var from, to time.Time
+	if q.Get("from") == "" || q.Get("to") == "" {
+		n := now()
+		from, to = n.AddDate(0, 0, -30), n
+	}
 	if v := r.URL.Query().Get("from"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {

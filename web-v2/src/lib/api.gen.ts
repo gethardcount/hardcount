@@ -4284,11 +4284,19 @@ export interface paths {
          *     included. Per-model margin renders only where pricing rules pin the
          *     model; other revenue is reported unattributed, never allocated by
          *     heuristic.
+         *
+         *     The window is `[from, to)`: `from` inclusive, `to` exclusive. A
+         *     missing bound defaults to the last 30 days ending at the customer's
+         *     current time, which is the test clock's frozen time when the
+         *     customer is on a test clock. `from` and `to` take RFC 3339 instants
+         *     only (no bare dates), and `from` must be before `to`.
          */
         get: {
             parameters: {
                 query?: {
+                    /** @description Window start, inclusive. RFC 3339. Default is 30 days before the customer's current time. */
                     from?: string;
+                    /** @description Window end, exclusive. RFC 3339. Default is the customer's current time (test clock time for a customer on a test clock). */
                     to?: string;
                 };
                 header?: never;
@@ -4306,6 +4314,33 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["MarginReport"];
+                    };
+                };
+                /** @description `from` or `to` is not RFC 3339, or `from` is not before `to`. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Customer not found. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The window is longer than one year. */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
