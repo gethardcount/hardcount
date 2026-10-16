@@ -173,11 +173,12 @@ func RenderPDF(
 	y := 40.0
 
 	// ── Header: company (left), "CREDIT NOTE" label (right) ──
-	companyName := "Velox"
+	// Only what the tenant entered: an unset company name prints no name,
+	// never a made-up "Velox" seller (same rule as the invoice PDF).
+	companyName := strings.TrimSpace(company.Name)
 	var companyAddrLines []string
 	companyContact := ""
-	if company.Name != "" {
-		companyName = company.Name
+	{
 		if company.AddressLine1 != "" {
 			companyAddrLines = append(companyAddrLines, company.AddressLine1)
 		}
@@ -204,7 +205,9 @@ func RenderPDF(
 
 	setFont(true, 18)
 	setColor(30, 30, 30)
-	textAt(margin, y, companyName)
+	if companyName != "" {
+		textAt(margin, y, companyName)
+	}
 
 	setFont(true, 18)
 	setColor(100, 100, 100)

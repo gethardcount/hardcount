@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/signintech/gopdf"
@@ -321,11 +322,13 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		_ = pdf.Cell(nil, text)
 	}
 
-	// ── VOID watermark ──
-	if inv.Status == domain.InvoiceVoided {
+	// ── VOID / DRAFT watermark ──
+	// A draft is a preview, not a document the customer owes on. Without the
+	// mark a downloaded draft read as an issued invoice.
+	if wm := watermarkFor(inv.Status); wm != "" {
 		setFont(true, 72)
 		setColor(230, 230, 230)
-		textAt(55, 400, "VOID")
+		textAt(55, 400, wm)
 	}
 
 	pageW := 595.28 // A4 width in points
@@ -334,14 +337,17 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	y := 40.0
 
 	// ── Header ──
-	companyName := "Velox"
+	// The seller block prints only what the tenant entered. It used to fall
+	// back to "Velox", which put a made-up seller on a customer document; an
+	// unset company name now prints no name at all, and the dashboard warns
+	// the operator to fill in Settings → Business details.
+	companyName := sellerName(company...)
 	var companyAddrLines []string
 	companyContact := ""
 	var brandR, brandG, brandB uint8
 	brandSet := false
-	if len(company) > 0 && company[0].Name != "" {
+	if len(company) > 0 {
 		c := company[0]
-		companyName = c.Name
 		if c.AddressLine1 != "" {
 			companyAddrLines = append(companyAddrLines, c.AddressLine1)
 		}
@@ -376,7 +382,9 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	} else {
 		setColor(30, 30, 30)
 	}
-	textAt(margin, y, companyName)
+	if companyName != "" {
+		textAt(margin, y, companyName)
+	}
 
 	setFont(true, 18)
 	setColor(100, 100, 100)
@@ -446,11 +454,8 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	docLoc := domain.LoadLocationOrUTC(inv.BillingTimezone)
 
 	detailRow("Number", inv.InvoiceNumber)
-	if inv.IssuedAt != nil {
-		detailRow("Issued", inv.IssuedAt.In(docLoc).Format("January 2, 2006"))
-	}
-	if inv.DueAt != nil {
-		detailRow("Due Date", inv.DueAt.In(docLoc).Format("January 2, 2006"))
+	for _, row := range issueDateRows(inv, docLoc) {
+		detailRow(row[0], row[1])
 	}
 	// Inclusive last-day period ("Jun 1 – Jun 30"), authored once via
 	// domain.FormatInclusivePeriod (ADR-058 follow-up) and carried on
@@ -809,6 +814,8 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		}
 		setColor(200, 80, 80)
 		textAt(margin, y, fmt.Sprintf("This invoice was voided on %s. No payment is due.", voidDate))
+	} else if inv.Status == domain.InvoiceDraft {
+		textAt(margin, y, "Draft preview. This invoice has not been issued and nothing is owed on it yet.")
 	} else if inv.PaymentStatus == domain.PaymentSucceeded && inv.PaidAt != nil {
 		textAt(margin, y, fmt.Sprintf("Paid on %s - Thank you!", inv.PaidAt.In(docLoc).Format("January 2, 2006")))
 	} else {
@@ -834,6 +841,45 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		return nil, fmt.Errorf("render pdf: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// watermarkFor is the large background word a document carries: VOID on a
+// voided invoice, DRAFT on one not yet issued, none otherwise.
+func watermarkFor(status domain.InvoiceStatus) string {
+	switch status {
+	case domain.InvoiceVoided:
+		return "VOID"
+	case domain.InvoiceDraft:
+		return "DRAFT"
+	}
+	return ""
+}
+
+// sellerName is the seller name the PDF header prints: the tenant's company
+// name, or "" when it is unset. Never a placeholder.
+func sellerName(company ...CompanyInfo) string {
+	if len(company) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(company[0].Name)
+}
+
+// issueDateRows are the date rows under "Number" in the details block. A
+// draft has not been issued: its issue and due dates are set when it is
+// finalized, so it prints "Draft — not issued" instead. Printing the dates
+// made a downloaded draft read as a live invoice.
+func issueDateRows(inv domain.Invoice, loc *time.Location) [][2]string {
+	if inv.Status == domain.InvoiceDraft {
+		return [][2]string{{"Status", "Draft — not issued"}}
+	}
+	var rows [][2]string
+	if inv.IssuedAt != nil {
+		rows = append(rows, [2]string{"Issued", inv.IssuedAt.In(loc).Format("January 2, 2006")})
+	}
+	if inv.DueAt != nil {
+		rows = append(rows, [2]string{"Due Date", inv.DueAt.In(loc).Format("January 2, 2006")})
+	}
+	return rows
 }
 
 // formatCityStatePostal joins "City, State Postal" with graceful handling

@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { invoiceLineRate } from '@/lib/priceDisplay'
-import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type TenantSettings, type DunningRun, type TimelineEvent, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
+import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type DunningRun, type TimelineEvent, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
 import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD } from '@/lib/dates'
 import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
@@ -19,6 +19,7 @@ import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { Callout } from '@/components/Callout'
 import { pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
+import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
 import { classifyError } from '@/lib/errorCopy'
 import { useGetInvoice } from '@/lib/gen/queries.gen'
@@ -90,51 +91,6 @@ const LINE_TYPE_LABELS: Record<string, string> = {
   add_on: 'Add-On',
   discount: 'Discount',
   tax: 'Tax',
-}
-
-interface SellerBlock {
-  name?: string
-  email?: string
-  phone?: string
-  addressLines: string[]
-}
-
-function formatAddressLines(a: {
-  line1?: string; line2?: string; city?: string; state?: string; postal?: string; country?: string
-}): string[] {
-  const lines: string[] = []
-  if (a.line1) lines.push(a.line1)
-  if (a.line2) lines.push(a.line2)
-  const cityStatePostal = [a.city, a.state].filter(Boolean).join(', ')
-    + (a.postal ? ` ${a.postal}` : '')
-  if (cityStatePostal.trim()) lines.push(cityStatePostal.trim())
-  if (a.country) lines.push(a.country)
-  return lines
-}
-
-// sellerBlock is the "From" content. An issued invoice shows the company
-// details it was issued with (ADR-109), so a later settings edit does not
-// change it. A draft, or an invoice issued before the copy existed, shows the
-// current settings.
-function sellerBlock(invoice: Invoice, s?: TenantSettings | null): SellerBlock {
-  const snap = invoice.supplier_snapshot
-  if (snap) {
-    return {
-      name: snap.name, email: snap.email, phone: snap.phone,
-      addressLines: formatAddressLines({
-        line1: snap.address_line1, line2: snap.address_line2, city: snap.city,
-        state: snap.state, postal: snap.postal_code, country: snap.country,
-      }),
-    }
-  }
-  if (!s) return { addressLines: [] }
-  return {
-    name: s.company_name, email: s.company_email, phone: s.company_phone,
-    addressLines: formatAddressLines({
-      line1: s.company_address_line1, line2: s.company_address_line2, city: s.company_city,
-      state: s.company_state, postal: s.company_postal_code, country: s.company_country,
-    }),
-  }
 }
 
 function formatLineType(raw: string): string {
@@ -436,7 +392,7 @@ export default function InvoiceDetailPage() {
     (dunningRunsData ?? []).find(r => r.state === 'active') ??
     (dunningRunsData ?? []).find(r => r.state === 'escalated')
 
-  const { data: settings } = useQuery({
+  const { data: settings, isSuccess: settingsLoaded } = useQuery({
     queryKey: ['settings'],
     queryFn: () => api.getSettings(),
   })
@@ -668,6 +624,8 @@ export default function InvoiceDetailPage() {
   }
 
   const seller = sellerBlock(invoice, settings)
+  const noSeller = sellerMissing(invoice, settings, settingsLoaded)
+  const dates = issueDates(invoice, (iso) => formatInvoiceDate(iso, invoice.billing_timezone))
   const notice = pickInvoiceNotice(invoice)
 
   return (
@@ -1038,16 +996,25 @@ export default function InvoiceDetailPage() {
 
       {/* Invoice Document */}
       <Card className={cn(
-        'overflow-hidden',
+        'relative overflow-hidden',
         invoice.status === 'voided' && 'border-destructive/30'
       )}>
-        <CardContent className="p-8 sm:p-10">
+        {/* Same mark the PDF carries: a draft is a preview, not an invoice
+            anyone owes on. */}
+        {invoice.status === 'draft' && (
+          <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center select-none text-[7rem] font-bold tracking-widest text-foreground/[0.04] -rotate-12">
+            DRAFT
+          </span>
+        )}
+        <CardContent className="relative p-8 sm:p-10">
           {/* Document Header */}
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-2xl font-bold tracking-tight text-foreground">
-                {seller.name || 'VELOX'}
-              </p>
+              {/* The tenant's company name, or nothing: never a placeholder
+                  seller (the PDF used to print "Velox", this page "VELOX"). */}
+              {seller.name && (
+                <p className="text-2xl font-bold tracking-tight text-foreground">{seller.name}</p>
+              )}
               {seller.addressLines.map((line, i) => (
                 <p key={i} className="text-sm text-muted-foreground mt-1">{line}</p>
               ))}
@@ -1064,6 +1031,14 @@ export default function InvoiceDetailPage() {
               domain-code and visually noisy. */}
           <div className="flex items-center gap-2 mt-5">
             <StatusBadge status={invoiceStatus(invoice, effectiveNow(testClock?.frozen_time))} />
+            {noSeller && (
+              <Link
+                to={SELLER_SETTINGS_PATH}
+                className="inline-flex items-center gap-1 rounded-md bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning-foreground hover:underline"
+              >
+                Missing seller details <ArrowRight size={11} aria-hidden /> Settings
+              </Link>
+            )}
             {/* Simulated disclosure lives in the page banner alone
                 (ADR-099: once per scope) — the header pill duplicated it. */}
             {/* Bare date — the badge already says "Paid"/"Voided", so
@@ -1083,7 +1058,14 @@ export default function InvoiceDetailPage() {
           <div className="grid grid-cols-2 gap-8">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">From</p>
-              <p className="text-sm font-medium text-foreground">{seller.name || 'Your Company'}</p>
+              {seller.name ? (
+                <p className="text-sm font-medium text-foreground">{seller.name}</p>
+              ) : noSeller ? (
+                <p className="text-sm text-warning-foreground">
+                  No business name set. <Link to={SELLER_SETTINGS_PATH} className="underline">Add it in Settings</Link> so
+                  the PDF and payment page name who is billing.
+                </p>
+              ) : null}
               {seller.addressLines.map((line, i) => (
                 <p key={i} className="text-sm text-muted-foreground mt-0.5">{line}</p>
               ))}
@@ -1135,12 +1117,12 @@ export default function InvoiceDetailPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Issued</p>
-              <p className="text-sm text-foreground">{formatInvoiceDate(invoice.issued_at || invoice.created_at, invoice.billing_timezone)}</p>
+              <p className="text-sm text-foreground">{dates.issued}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Due</p>
               <div className="flex items-center gap-2">
-                <p className="text-sm text-foreground">{invoice.due_at ? formatInvoiceDate(invoice.due_at, invoice.billing_timezone) : '\u2014'}</p>
+                <p className="text-sm text-foreground">{dates.due}</p>
                 {/* Due-date countdown only applies while the invoice
                     is open (finalized). status='paid' or 'voided'
                     are terminal — countdown becomes meaningless. The
@@ -1152,6 +1134,7 @@ export default function InvoiceDetailPage() {
                   <DueBadge dueAt={invoice.due_at} warningDays={3} now={effectiveNow(testClock?.frozen_time)} />
                 )}
               </div>
+              {dates.dueHint && <p className="text-xs text-muted-foreground mt-0.5">{dates.dueHint}</p>}
             </div>
             {/* A billing period is a subscription-cycle concept. A manual
                 one-off invoice has no cycle, so the backend defaults
@@ -1455,6 +1438,14 @@ export default function InvoiceDetailPage() {
               })()}
             </div>
           </div>
+
+          {/* Memo: the note printed on the PDF and the payment page. */}
+          {invoice.memo && (
+            <div className="mt-6 pt-4 border-t border-dashed border-border">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Memo</p>
+              <p className="text-sm text-foreground whitespace-pre-line">{invoice.memo}</p>
+            </div>
+          )}
 
           {/* Tax treatment legend — shown when invoice carries a non-standard tax disposition */}
           {(invoice.tax_reverse_charge || invoice.tax_exempt_reason) && (
