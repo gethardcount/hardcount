@@ -8,51 +8,78 @@ import { DatePicker } from '@/components/ui/date-picker'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { formatCents, getCurrencySymbol } from '@/lib/api'
-import { endOfDayInTZ, startOfDayInTZ } from '@/lib/dates'
-import { rollingWindow } from '@/lib/effectiveNow'
+import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
+import { formatCivilPeriod } from '@/lib/dates'
 import { marginCardView } from '@/lib/actionOutcomes'
+import {
+  DEFAULT_MARGIN_PRESET, MARGIN_PRESETS, isOutsideWindow, marginWindowFor, marginWindowIsEmpty, rangeIncluding, type MarginPreset,
+} from '@/lib/usageWindow'
 import { useGetV1CustomersIdMargin } from '@/lib/gen/queries.gen'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
-
-const WINDOW_PRESETS = [
-  { key: '7d', label: 'Last 7 days', days: 7 },
-  { key: '30d', label: 'Last 30 days', days: 30 },
-  { key: '90d', label: 'Last 90 days', days: 90 },
-  { key: 'custom', label: 'Custom', days: 0 },
-] as const
+import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
 
 // Margin (ADR-079): rated usage revenue vs stamped provider COGS over an
-// operator-picked window (presets + custom dates; the API always took
-// from/to — the UI just never exposed them, hardwiring last-30-days).
-// Operator-only surface — COGS never renders on customer-facing pages.
-// Attribution is honest by design: per-model margin shows only where
-// pricing rules pin the model; everything else appears as "not
-// model-attributed" rather than being split by heuristic.
+// operator-picked window. Operator-only surface — COGS never renders on
+// customer-facing pages. Attribution is honest by design: per-model margin
+// shows only where pricing rules pin the model; everything else appears as
+// "not model-attributed" rather than being split by heuristic.
+//
+// The card opens on the customer's current billing period, with the last
+// invoiced period one click away (ADR-121). A rolling 30 days never matched a
+// billing period, so its total disagreed with the invoice on the same page.
 export function MarginCard({ customerId, customerTestClockId }: { customerId: string; customerTestClockId?: string }) {
-  const [preset, setPreset] = useState<typeof WINDOW_PRESETS[number]['key']>('30d')
+  const [preset, setPreset] = useState<MarginPreset>(DEFAULT_MARGIN_PRESET)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
 
-  // For a clock-pinned customer, anchor the preset window's upper bound to the
-  // clock's frozen_time: provider-costed usage events are stamped in simulation
-  // time (usage/service.go), so a wall-clock "last 30 days" sits before them and
-  // the card reads "$0.00 / Margin —". Custom absolute dates are left untouched.
+  // For a clock-pinned customer, anchor the rolling presets' upper bound to
+  // the clock's frozen_time: provider-costed usage events are stamped in
+  // simulation time (usage/service.go), so a wall-clock "last 30 days" sits
+  // before them. The billing periods come from the server, already on the
+  // customer's clock. Custom absolute dates are left untouched.
   const now = useEffectiveNow(customerTestClockId)
 
-  const params = useMemo(() => {
-    if (preset === 'custom') {
-      if (!customFrom || !customTo) return undefined // wait for both ends
-      return { from: startOfDayInTZ(customFrom), to: endOfDayInTZ(customTo) }
-    }
-    const days = WINDOW_PRESETS.find(p => p.key === preset)?.days ?? 30
-    return rollingWindow(days, now)
-  }, [preset, customFrom, customTo, now])
+  const cycleQuery = useCurrentCycleUsage(customerId, customerTestClockId, preset === 'cycle')
+  const invoicedQuery = useLastInvoicedPeriod(customerId, preset === 'last_invoiced')
 
-  const { data: rep, isError, refetch } = useGetV1CustomersIdMargin(customerId, params, {
+  const marginWindow = useMemo(() => marginWindowFor(preset, {
+    cycle: cycleQuery.data === undefined ? undefined : cycleQuery.data ? cycleQuery.data.period : null,
+    lastInvoiced: invoicedQuery.data,
+    now,
+    customFrom,
+    customTo,
+  }), [preset, cycleQuery.data, invoicedQuery.data, now, customFrom, customTo])
+  const params = marginWindow.kind === 'ready' ? { from: marginWindow.from, to: marginWindow.to } : undefined
+  const windowError = (preset === 'cycle' && cycleQuery.isError) || (preset === 'last_invoiced' && invoicedQuery.isError)
+
+  const { data: rep, isError: marginError, refetch } = useGetV1CustomersIdMargin(customerId, params, {
     query: { enabled: params !== undefined },
   })
-  const view = marginCardView({ hasWindow: params !== undefined, isError, hasData: !!rep })
+  const isError = windowError || marginError
+  const view = marginCardView({ hasWindow: marginWindow.kind !== 'pick-dates', isError, hasData: !!rep })
+
+  // An empty window points at the customer's newest usage, so "no usage
+  // here" never reads as "no usage at all".
+  const empty = !!rep && marginWindowIsEmpty(rep)
+  const latestQuery = useLatestUsageAt(customerId, empty)
+  const latestAt = empty && params && latestQuery.data && isOutsideWindow(latestQuery.data, params.from, params.to)
+    ? latestQuery.data
+    : null
+  const showLatest = () => {
+    if (!latestAt) return
+    const r = rangeIncluding(latestAt, now)
+    setCustomFrom(r.from)
+    setCustomTo(r.to)
+    setPreset('custom')
+  }
+  const retry = () => {
+    if (windowError) {
+      void cycleQuery.refetch()
+      void invoicedQuery.refetch()
+    } else {
+      void refetch()
+    }
+  }
 
   // Revenue is in the currency of the customer's prices; provider cost is in
   // the report's cost currency (USD). The API gives no margin when they
@@ -76,15 +103,20 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
               Usage billing vs your provider costs. Excludes base fees, credits,
               and taxes — this is usage unit economics, not accounting margin.
             </CardDescription>
+            {marginWindow.kind === 'ready' && marginWindow.period && (
+              <p className="text-xs text-muted-foreground mt-1 tabular-nums">
+                {formatCivilPeriod(marginWindow.from, marginWindow.to, undefined)}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
               aria-label="Margin window"
               className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
               value={preset}
-              onChange={e => setPreset(e.target.value as typeof preset)}
+              onChange={e => setPreset(e.target.value as MarginPreset)}
             >
-              {WINDOW_PRESETS.map(p => (
+              {MARGIN_PRESETS.map(p => (
                 <option key={p.key} value={p.key}>{p.label}</option>
               ))}
             </select>
@@ -108,7 +140,16 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
         ) : view === 'error' ? (
           <div className="flex flex-col items-center gap-3 p-6 text-center">
             <p className="text-sm text-foreground">Couldn&apos;t load margin. Try again.</p>
-            <Button variant="outline" size="sm" onClick={() => { void refetch() }}>Retry</Button>
+            <Button variant="outline" size="sm" onClick={retry}>Retry</Button>
+          </div>
+        ) : marginWindow.kind === 'no-cycle' || marginWindow.kind === 'no-invoice' ? (
+          <div className="flex flex-col items-center gap-3 p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              {marginWindow.kind === 'no-cycle'
+                ? 'This customer has no current billing period: no active subscription.'
+                : 'This customer has no invoiced billing period yet.'}
+            </p>
+            <Button variant="outline" size="sm" onClick={() => setPreset('30d')}>Show last 30 days</Button>
           </div>
         ) : view === 'loading' || !rep ? (
           <div className="flex justify-center p-6">
@@ -188,7 +229,16 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
                 after you add a matching rate are costed.
               </p>
             )}
-            {rep.by_model.length === 0 && rep.revenue_cents === 0 && rep.unresolved_events === 0 && (
+            {empty && latestAt ? (
+              <div className="flex flex-wrap items-center gap-3 mt-3">
+                <p className="text-sm text-muted-foreground">
+                  No usage in this window. Latest usage: {formatDate(latestAt)}.
+                </p>
+                <Button variant="outline" size="sm" onClick={showLatest}>
+                  Show from {formatDate(latestAt)}
+                </Button>
+              </div>
+            ) : empty && (
               <p className="text-sm text-muted-foreground mt-2">
                 No usage in the window yet. Add provider rates under Provider costs,
                 send usage, and margin appears here.

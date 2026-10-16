@@ -61,7 +61,8 @@ curl -X POST http://localhost:8080/v1/invoices/$INVOICE_ID/finalize \
   -H "Authorization: Bearer $VELOX_SECRET"
 
 # 6. Read one customer's usage margin: rated usage revenue against stamped
-#    provider cost (last 30 days unless you pass from/to)
+#    provider cost (last 30 days unless you pass from/to; the dashboard card
+#    opens on the current billing period instead, ADR-121)
 curl http://localhost:8080/v1/customers/$CUSTOMER_ID/margin \
   -H "Authorization: Bearer $VELOX_SECRET"
 ```

@@ -27,6 +27,8 @@ import type { CustomerUsage, CustomerUsageMeter, CustomerUsageRule, Subscription
 import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
 import { useEffectiveNow, useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
+import { fetchCustomerUsageOrNull, useCurrentCycleUsage, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
+import { DEFAULT_ACTIVITY_PRESET, isOutsideWindow, rangeIncluding, usageWindowIsEmpty } from '@/lib/usageWindow'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadError } from '@/components/LoadError'
@@ -360,7 +362,10 @@ function activityPresetToParams(p: ActivityPreset, now: EffectiveNow): { from?: 
 }
 
 function ActivitySection({ customerId, customerTestClockId }: { customerId: string; customerTestClockId?: string }) {
-  const [preset, setPreset] = useState<ActivityPreset>('last_30d')
+  // Opens on the current billing cycle, the window the Upcoming card and the
+  // invoice use (ADR-121). A rolling 30 days never matched a cycle, so its
+  // total disagreed with the invoice above it.
+  const [preset, setPreset] = useState<ActivityPreset>(DEFAULT_ACTIVITY_PRESET)
 
   // Anchor the rolling window to the customer's simulated "now" when pinned to a
   // test clock, so the 7/30/90d presets frame the simulated usage rather than a
@@ -369,26 +374,31 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
   // at mount) so it doesn't churn the query.
   const now = useEffectiveNow(customerTestClockId)
 
-  const { data, isLoading, error, refetch } = useQuery({
+  // The cycle query is shared with the Margin card's "Current period".
+  // fetchCustomerUsageOrNull turns 422 customer_has_no_subscription (the
+  // documented "no current cycle" state) and 404 into null, so the section
+  // renders its empty state instead of a red error.
+  const cycleQuery = useCurrentCycleUsage(customerId, customerTestClockId, preset === 'cycle')
+  const rollingQuery = useQuery({
     queryKey: ['customer-usage', customerId, preset, now],
-    queryFn: async () => {
-      try {
-        return await api.customerUsage(customerId, activityPresetToParams(preset, now))
-      } catch (err) {
-        // 422 customer_has_no_subscription is the documented "no current
-        // cycle" state — surface as an empty result so the section
-        // renders the empty-state instead of a red error. 404 same.
-        // Real network/auth errors fall through.
-        if (err && typeof err === 'object' && 'status' in err && 'code' in err) {
-          const s = (err as { status: number }).status
-          const c = (err as { code?: string }).code
-          if (s === 404) return null
-          if (s === 422 && c === 'customer_has_no_subscription') return null
-        }
-        throw err
-      }
-    },
+    queryFn: () => fetchCustomerUsageOrNull(customerId, activityPresetToParams(preset, now)),
+    enabled: preset !== 'cycle',
   })
+  const { data, isLoading, error, refetch } = preset === 'cycle' ? cycleQuery : rollingQuery
+
+  // An empty window points at the customer's newest usage, with a link that
+  // opens Usage events on a range that includes it.
+  const empty = !!data && usageWindowIsEmpty(data.buckets)
+  const latestQuery = useLatestUsageAt(customerId, empty)
+  const latestAt = empty && data && latestQuery.data && isOutsideWindow(latestQuery.data, data.period.from, data.period.to)
+    ? latestQuery.data
+    : null
+  const latestHref = latestAt
+    ? (() => {
+        const r = rangeIncluding(latestAt, now)
+        return `/usage?${new URLSearchParams({ customer: customerId, range: 'custom', from: r.from, to: r.to }).toString()}`
+      })()
+    : null
 
   const unpriced = useMemo(() => unpricedMeters(data?.meters ?? []), [data])
   // One figure per currency: totals has one entry per currency, and adding
@@ -452,6 +462,14 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
             <CardContent className="px-5 py-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Billed usage</p>
               <p className="text-2xl font-semibold tabular-nums mt-1">{totalText}</p>
+              {latestAt && latestHref && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  No usage in this window. Latest usage: {formatDate(latestAt)}.{' '}
+                  <Link to={latestHref} className="underline underline-offset-2 hover:text-foreground">
+                    View in Usage events
+                  </Link>
+                </p>
+              )}
             </CardContent>
           </Card>
 
