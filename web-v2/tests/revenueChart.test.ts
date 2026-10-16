@@ -1,6 +1,6 @@
 // Backs MANUAL_TEST FLOW U1 (Dashboard revenue chart): days with no paid invoices
 // plot as zero, so two payments 25 days apart are not drawn as neighbours.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { fillRevenueBuckets } from '../src/lib/revenueChart.ts'
 

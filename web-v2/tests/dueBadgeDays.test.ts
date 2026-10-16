@@ -2,7 +2,7 @@
 // with the Due date printed beside it. due_at carries the issue hour
 // (2026-10-16T20:16Z), which a 24h-ceil count turned into "Due in 1d" on the
 // morning of the due date and "Due today" through most of the next day.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { calendarDaysUntil } from '../src/lib/dates.ts'
 import { effectiveNow } from '../src/lib/effectiveNow.ts'

@@ -1,6 +1,6 @@
 // Windows for the customer page's Activity and Margin cards (ADR-121).
-// Pure functions, no DOM: runs on the built-in runner with `npm test`.
-import { test } from 'node:test'
+// Pure functions, no DOM: runs with `npm test`.
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { effectiveNow } from '../src/lib/effectiveNow.ts'
 import {
