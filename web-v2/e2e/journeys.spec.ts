@@ -202,6 +202,32 @@ test('the Usage page shows a Maximum meter as its peak per customer, not the sum
   expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
 })
 
+test('the next-invoice preview prorates a mid-month calendar start', async ({ page }) => {
+  // A clock frozen on Jan 13 and a calendar-billed subscription started then:
+  // its first period is Jan 13–31, 19 of January's 31 days.
+  const plan = await createPlan()
+  const clock = await api<{ id: string }>('POST', '/test-clocks', { name: `E2E Clock ${uniq()}`, frozen_time: '2026-01-13T12:00:00Z' })
+  const customer = await createCustomer(clock.id)
+  const id = uniq()
+  const sub = await api<Subscription>('POST', '/subscriptions', {
+    code: `e2e-cal-${id}`,
+    display_name: `E2E Calendar ${id}`,
+    customer_id: customer.id,
+    items: [{ plan_id: plan.id, quantity: 1 }],
+    billing_time: 'calendar',
+    start_now: true,
+  })
+  const preview = await api<{ lines: { description: string; amount_cents: number }[] }>('GET', `/billing/preview/${sub.id}`)
+  expect(preview.lines).toHaveLength(1)
+  const [base] = preview.lines
+  expect(base.description).toBe(`${plan.name} - base fee (qty 1, prorated 19/31 days)`)
+
+  await page.goto(`/subscriptions/${sub.id}`)
+  const row = page.getByRole('row').filter({ hasText: base.description })
+  await expect(row).toBeVisible()
+  await expect(row).toContainText(usd(base.amount_cents))
+})
+
 test('a dialog taller than the window keeps its actions in view', async ({ page }) => {
   const customer = await createCustomer()
   await page.setViewportSize({ width: 1440, height: 520 })
