@@ -30,6 +30,16 @@ test.describe('signed out', () => {
     await expect(page.getByText(invoice.invoice_number)).toBeVisible()
     await expect(page.getByText('Total', { exact: true }).locator('..')).toContainText(usd(invoice.total_amount_cents))
   })
+
+  test('sign-in follows dark mode; the hosted invoice stays light', async ({ page }) => {
+    const { invoice } = JSON.parse(fs.readFileSync(seedFile, 'utf8')) as Seed
+    await page.addInitScript(() => localStorage.setItem('velox-theme', 'dark'))
+    await page.goto('/login')
+    await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+    await page.goto(`/invoice/${invoice.public_token}`)
+    await expect(page.getByText(invoice.invoice_number)).toBeVisible()
+    await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)
+  })
 })
 
 test('create a customer', async ({ page }) => {
@@ -89,6 +99,20 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
   await expect(page.getByText('Subtotal', { exact: true }).locator('..')).toContainText(usd(invoice.subtotal_cents))
   await expect(page.getByText('Amount Due', { exact: true }).locator('..')).toContainText(usd(invoice.amount_due_cents))
+})
+
+test('a dialog taller than the window keeps its actions in view', async ({ page }) => {
+  const customer = await createCustomer()
+  await page.setViewportSize({ width: 1440, height: 520 })
+  await page.goto(`/customers/${customer.id}`)
+  await page.getByRole('button', { name: 'New invoice' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New invoice' })
+  await expect(dialog).toBeVisible()
+  // The dialog is capped at the window and scrolls inside itself...
+  expect(await dialog.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+  // ...while Cancel and Save & send stay on screen.
+  await expect(dialog.getByRole('button', { name: 'Save & send' })).toBeInViewport()
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeInViewport()
 })
 
 test('grant credits and see the balance', async ({ page }) => {
