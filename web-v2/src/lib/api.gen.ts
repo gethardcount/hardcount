@@ -6627,7 +6627,7 @@ export interface components {
             cost_currency: string;
             /**
              * Format: int64
-             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency.
+             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, or when costed_events is 0 (no provider cost known, so no margin).
              */
             margin_bps?: number;
             by_model: {
@@ -6646,6 +6646,13 @@ export interface components {
              * @description Token events with costable dims but no matching rate — add a rate to cost new events.
              */
             unresolved_events: number;
+            /**
+             * Format: int64
+             * @description Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown.
+             */
+            costed_events: number;
+            /** @description Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up. */
+            cost_rates_configured: boolean;
             cache_write_excluded?: boolean;
         };
         /**

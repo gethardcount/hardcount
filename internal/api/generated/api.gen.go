@@ -3957,11 +3957,17 @@ type MarginReport struct {
 	CostCurrency string `json:"cost_currency"`
 
 	// CostMicros Total stamped provider cost, micro-dollars.
-	CostMicros int64     `json:"cost_micros"`
-	CustomerId string    `json:"customer_id"`
-	From       time.Time `json:"from"`
+	CostMicros int64 `json:"cost_micros"`
 
-	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency.
+	// CostRatesConfigured Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up.
+	CostRatesConfigured bool `json:"cost_rates_configured"`
+
+	// CostedEvents Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown.
+	CostedEvents int64     `json:"costed_events"`
+	CustomerId   string    `json:"customer_id"`
+	From         time.Time `json:"from"`
+
+	// MarginBps (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, or when costed_events is 0 (no provider cost known, so no margin).
 	MarginBps int64 `json:"margin_bps,omitempty"`
 
 	// RevenueCents Total rated usage revenue in the window.

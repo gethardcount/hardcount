@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +12,7 @@ import {
 import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
 import { formatCivilPeriod } from '@/lib/dates'
 import { marginCardView } from '@/lib/actionOutcomes'
+import { marginCostNote, marginCostState } from '@/lib/marginCost'
 import {
   DEFAULT_MARGIN_PRESET, MARGIN_PRESETS, isOutsideWindow, marginWindowFor, marginWindowIsEmpty, rangeIncluding, type MarginPreset,
 } from '@/lib/usageWindow'
@@ -96,6 +98,11 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
   // micros (1e-6 of the currency unit) → display amount.
   const cost = (micros: number) =>
     `${getCurrencySymbol(costCurrency)}${(micros / 1_000_000).toFixed(micros >= 100_000 ? 2 : 4)}`
+  // No event carries a provider cost: the cost is unknown, not $0, and the
+  // margin is not 100% (the server leaves margin_bps out).
+  const costState = rep ? marginCostState(rep) : 'measured'
+  const costNote = marginCostNote(costState)
+  const costKnown = costState === 'measured'
 
   return (
     <Card>
@@ -168,7 +175,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Provider cost</p>
-                <p className="text-lg font-semibold text-foreground mt-0.5">{cost(rep.cost_micros)}</p>
+                <p className="text-lg font-semibold text-foreground mt-0.5">{costKnown ? cost(rep.cost_micros) : '—'}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Margin</p>
@@ -178,7 +185,15 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
               </div>
             </div>
 
-            {currencyMismatch && (
+            {costNote && (
+              <p className="text-xs text-muted-foreground mt-3">
+                {costNote}{' '}
+                <Link to="/provider-costs" className="text-primary underline-offset-2 hover:underline">
+                  {costState === 'no-rates' ? 'Set up provider costs' : 'Provider costs'}
+                </Link>
+              </p>
+            )}
+            {currencyMismatch && costKnown && (
               <p className="text-xs text-muted-foreground mt-3">
                 Margin needs billing and provider cost in one currency. This customer is
                 billed in {revenueCurrency} and provider cost is in {costCurrency}, so no

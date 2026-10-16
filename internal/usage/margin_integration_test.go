@@ -196,3 +196,65 @@ func TestMargin_CurrencyIsNamedAndNeverMixed(t *testing.T) {
 		})
 	}
 }
+
+// TestMargin_NoProviderCostMeansNoMargin: usage with no stamped provider cost
+// gives no margin. Before, the formula ran with cost 0 and the customer page
+// read "Provider cost $0.0000 · Margin 100.0%" for a tenant that had never set
+// up a provider rate. The report now says how many events carry a cost and
+// whether any rate exists, so the page can say which setup is missing.
+// Mutation-verify: drop the CostedEvents > 0 check → red.
+func TestMargin_NoProviderCostMeansNoMargin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: skipped in -short mode")
+	}
+	f := newCustomerUsageFixture(t, "Margin no cost")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
+	defer cancel()
+	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
+	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
+
+	rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
+		RuleKey: "api_calls", Name: "API calls", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
+	})
+	if err != nil {
+		t.Fatalf("rule: %v", err)
+	}
+	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
+		Key: "api_calls", Name: "API calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+	})
+	if err != nil {
+		t.Fatalf("meter: %v", err)
+	}
+	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_nocost", "pln_nocost", meter.ID, cycleStart, cycleEnd)
+	ts := cycleStart.Add(time.Hour)
+	if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
+		CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(100), Timestamp: &ts,
+	}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	asm := usage.NewMarginAssembler(usage.NewPostgresStore(f.db), f.custUsage)
+
+	rep, err := asm.Get(ctx, f.tenantID, custID, cycleStart, cycleEnd)
+	if err != nil {
+		t.Fatalf("margin: %v", err)
+	}
+	if rep.RevenueCents != 200 {
+		t.Fatalf("revenue = %d, want 200 (control: there is revenue)", rep.RevenueCents)
+	}
+	if rep.MarginBps != nil {
+		t.Errorf("margin_bps = %d, want none: no event carries a provider cost", *rep.MarginBps)
+	}
+	if rep.CostedEvents != 0 || rep.CostRatesConfigured {
+		t.Errorf("costed_events=%d cost_rates_configured=%v, want 0 false", rep.CostedEvents, rep.CostRatesConfigured)
+	}
+
+	// A rate that matches nothing here: rates exist, still no margin.
+	seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.000004")
+	rep, err = asm.Get(ctx, f.tenantID, custID, cycleStart, cycleEnd)
+	if err != nil {
+		t.Fatalf("margin: %v", err)
+	}
+	if !rep.CostRatesConfigured || rep.MarginBps != nil {
+		t.Errorf("after a rate: configured=%v margin present=%v, want true and false", rep.CostRatesConfigured, rep.MarginBps != nil)
+	}
+}

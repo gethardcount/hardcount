@@ -68,6 +68,21 @@ func (s *PostgresStore) ListProviderCostRates(ctx context.Context, tenantID stri
 	return out, rows.Err()
 }
 
+// HasProviderCostRates reports whether the tenant has any provider cost rate
+// in the current mode (RLS-scoped). The margin report uses it to tell "no
+// rates set up" apart from "rates exist but none matched".
+func (s *PostgresStore) HasProviderCostRates(ctx context.Context, tenantID string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return false, err
+	}
+	defer postgres.Rollback(tx)
+	var has bool
+	err = tx.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM provider_cost_rates WHERE tenant_id = $1)`, tenantID).Scan(&has)
+	return has, err
+}
+
 // UpsertProviderCostRate creates or edits-in-place the rate for a key
 // (current-rate semantics, ADR-079 D1: the per-event stamp is the history;
 // editing a rate only affects FUTURE events).
@@ -261,9 +276,19 @@ type MarginReport struct {
 	// and LiteLLM reports its cost in dollars.
 	CostCurrency string `json:"cost_currency"`
 	// MarginBps = (revenue − cost) / revenue in basis points; omitted
-	// when revenue is 0, and when revenue is not in CostCurrency (a margin
-	// across two currencies would be a made-up number).
-	MarginBps                *int64           `json:"margin_bps,omitempty"`
+	// when revenue is 0, when revenue is not in CostCurrency (a margin
+	// across two currencies would be a made-up number), and when no event
+	// in the window carries a provider cost (CostedEvents == 0). Without a
+	// cost the formula reads 100%, a margin nobody measured.
+	MarginBps *int64 `json:"margin_bps,omitempty"`
+	// CostedEvents counts the window's events that carry a stamped provider
+	// cost (zero cost included). Zero means the cost side is unknown, not
+	// free.
+	CostedEvents int64 `json:"costed_events"`
+	// CostRatesConfigured is whether the tenant has any provider cost rate
+	// at all. False with CostedEvents == 0 means "set up Provider costs";
+	// true means the rates exist but none matched this usage.
+	CostRatesConfigured      bool             `json:"cost_rates_configured"`
 	ByModel                  []MarginModelRow `json:"by_model"`
 	UnattributedRevenueCents int64            `json:"unattributed_revenue_cents"`
 	UnresolvedEvents         int64            `json:"unresolved_events"`
@@ -299,6 +324,10 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		return MarginReport{}, fmt.Errorf("aggregate provider cost: %w", err)
 	}
 	rep.UnresolvedEvents = unresolved
+	rep.CostRatesConfigured, err = a.store.HasProviderCostRates(ctx, tenantID)
+	if err != nil {
+		return MarginReport{}, fmt.Errorf("provider cost rates: %w", err)
+	}
 
 	// Revenue: rated usage for the same window, attributed per model ONLY
 	// where the rule's dimension_match pins model.
@@ -341,6 +370,7 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 	seen := map[string]bool{}
 	for _, c := range byModel {
 		rep.CostMicros += c.CostMicros
+		rep.CostedEvents += c.Events
 		row := MarginModelRow{Model: c.Model, CostMicros: c.CostMicros}
 		if rev, ok := revenueByModel[c.Model]; ok {
 			row.RevenueCents, row.Attributed = rev, true
@@ -355,7 +385,7 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		}
 	}
 
-	if rep.RevenueCents > 0 && rep.RevenueCurrency == rep.CostCurrency {
+	if rep.RevenueCents > 0 && rep.RevenueCurrency == rep.CostCurrency && rep.CostedEvents > 0 {
 		costCents := decimal.NewFromInt(rep.CostMicros).Div(decimal.NewFromInt(10000)) // micros → cents (1e4)
 		revCents := decimal.NewFromInt(rep.RevenueCents)
 		bps := revCents.Sub(costCents).Div(revCents).Mul(decimal.NewFromInt(10000)).Round(0).IntPart()
