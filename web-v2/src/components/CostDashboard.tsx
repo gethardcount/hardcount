@@ -32,6 +32,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 import { Button } from '@/components/ui/button'
+import { activityCyclePeriodLabel } from '@/lib/activityPeriod'
 import { UNPRICED_SENTENCE, UNPRICED_TITLE, meterQuantityLine, unpricedLine, unpricedMeters } from '@/lib/unpricedUsage'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -403,7 +404,8 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
           <h2 className="text-base font-semibold text-foreground">Activity</h2>
           {data?.period && (
             <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
-              {formatDate(data.period.from)} → {formatDate(data.period.to)}
+              {activityCyclePeriodLabel(data.period, undefined) ??
+                `${formatDate(data.period.from)} → ${formatDate(data.period.to)}`}
             </p>
           )}
         </div>
