@@ -7643,7 +7643,10 @@ export const getPostV1InvoicesCreatePreviewUrl = () => {
  * close for the subscription's current period: base fees prorate for
  * a short first period and per segment after a mid-period item add,
  * quantity change, plan swap or removal, and each meter's usage counts
- * only while a plan carrying it was on the subscription. With an
+ * only while a plan carrying it was on the subscription. For a
+ * trialing subscription it is the first invoice after the trial: the
+ * trial-end invoice when a plan bills in advance, otherwise the close
+ * of the first paid period, prorated the same way. With an
  * explicit `period`, it is a flat estimate over that window and warns
  * when a mid-period change makes the invoice differ. Neither applies
  * usage-cap scaling (ADR-045): a capped subscription's `warnings[]`

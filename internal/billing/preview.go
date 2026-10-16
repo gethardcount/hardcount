@@ -113,13 +113,15 @@ func (e *Engine) Preview(ctx context.Context, sub domain.Subscription) (PreviewR
 // 2026-10-16 the preview showed the full base fee for a 19-day calendar stub
 // the close billed at 19/31 (M-SUB-1).
 //
-// A trialing subscription keeps the flat window preview: its period is the
-// trial, and the close at trial end activates and bills from the activation
-// path, not from this period's segments.
+// A trialing subscription's current period is its first paid period (it
+// starts at the trial end, firstPeriodAfterTrial), so its preview is the
+// first invoice after the trial — see previewTrialEnd. The exception is a
+// trial that outlasts the current period: the close at its end only advances
+// it, so that keeps the flat window estimate.
 func (e *Engine) previewCycle(ctx context.Context, sub domain.Subscription) (PreviewResult, error) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
-	if sub.Status == domain.SubscriptionTrialing {
+	if sub.Status == domain.SubscriptionTrialing && sub.TrialEndAt != nil && sub.TrialEndAt.After(periodEnd) {
 		return e.previewWithWindow(ctx, sub, periodStart, periodEnd)
 	}
 	return e.previewWindow(ctx, sub, periodStart, periodEnd, true)
@@ -334,13 +336,29 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	if err != nil {
 		return PreviewResult{}, err
 	}
+	if sub.Status == domain.SubscriptionTrialing && trialCancelsFree(sub) {
+		// handleTrialState cancels free at trial end: no invoice.
+		result.Warnings = append(result.Warnings, "A cancel is scheduled for the end of the trial, so no invoice will be issued.")
+		result.Totals = computePreviewTotals(result.Lines)
+		return result, nil
+	}
+	if sub.Status == domain.SubscriptionTrialing {
+		if res, ok, err := e.previewTrialEnd(ctx, sub, plans, meterOrder, periodStart, periodEnd, loc, result); ok || err != nil {
+			return res, err
+		}
+	}
 	wm, err := e.loadThresholdWatermark(ctx, sub.TenantID, sub.ID, periodStart, periodEnd)
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	segsByItem, err := e.windowSegments(ctx, sub, periodStart, periodEnd)
-	if err != nil {
-		return PreviewResult{}, fmt.Errorf("preview: resolve segments: %w", err)
+	var segsByItem map[string][]baseSegment
+	if sub.Status == domain.SubscriptionTrialing {
+		segsByItem = trialConversionSegments(sub, periodStart, periodEnd)
+	} else {
+		segsByItem, err = e.windowSegments(ctx, sub, periodStart, periodEnd)
+		if err != nil {
+			return PreviewResult{}, fmt.Errorf("preview: resolve segments: %w", err)
+		}
 	}
 	// Plans referenced only by a segment (a removed item, a pre-swap plan)
 	// bill their segment too — same hydration as buildLineItems.
@@ -427,6 +445,69 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 
 	result.Totals = computePreviewTotals(result.Lines)
 	return result, nil
+}
+
+// trialConversionSegments are the segments a trialing subscription's items
+// will have once the trial converts. A trialing sub has no billing_intervals
+// rows yet: the conversion opens every item at the post-trial period start
+// (intervalOpenForItems, source "trial_convert"), which is the current
+// period's start. Derived through intervalSegmentsByItem, the reader the
+// close uses, so the preview clips them exactly as the close will.
+func trialConversionSegments(sub domain.Subscription, periodStart, periodEnd time.Time) map[string][]baseSegment {
+	rows := make(map[string][]domain.ItemInterval, len(sub.Items))
+	for _, it := range sub.Items {
+		rows[it.ID] = []domain.ItemInterval{{
+			SubscriptionItemID: it.ID, PlanID: it.PlanID, Quantity: it.Quantity, StartsAt: periodStart,
+		}}
+	}
+	return intervalSegmentsByItem(rows, periodStart, periodEnd)
+}
+
+// previewTrialEnd is the preview of a trialing subscription with an
+// in_advance item: the first invoice after the trial is the one the trial
+// end issues (ActivateAfterTrialWithBill → BillOnCreateTx), the in_advance
+// base fees for the first paid period, prorated on a calendar stub. Its
+// lines come from onCreateBaseLines, the math that invoice uses. ok=false
+// when no item is in_advance: the first invoice is then the first period's
+// close, which previewAsClose composes from trialConversionSegments.
+func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, plans map[string]domain.Plan, meterIDs []string, periodStart, periodEnd time.Time, loc *time.Location, result PreviewResult) (PreviewResult, bool, error) {
+	var advanceItems []domain.SubscriptionItem
+	hasArrears := false
+	for _, it := range sub.Items {
+		if plans[it.PlanID].BaseBillTiming == domain.BillInAdvance {
+			advanceItems = append(advanceItems, it)
+		} else {
+			hasArrears = true
+		}
+	}
+	if len(advanceItems) == 0 {
+		return PreviewResult{}, false, nil
+	}
+	currency, err := e.invoiceCurrency(ctx, sub, plans[advanceItems[0].PlanID].Currency)
+	if err != nil {
+		return PreviewResult{}, true, err
+	}
+	for _, bl := range onCreateBaseLines(sub, plans, advanceItems, periodStart, periodEnd, currency, loc) {
+		result.Lines = append(result.Lines, PreviewLine{
+			LineType:        "base_fee",
+			Description:     bl.line.Description,
+			Currency:        bl.line.Currency,
+			Quantity:        decimal.NewFromInt(bl.line.Quantity),
+			UnitAmountCents: bl.line.UnitAmountCents,
+			AmountCents:     bl.line.AmountCents,
+			PlanID:          bl.plan.ID,
+			BaseBillTiming:  bl.plan.BaseBillTiming,
+		})
+	}
+	// The trial-end invoice covers the first paid period itself, not the
+	// one after it (the in_advance header shift does not apply).
+	result.BillingPeriodStart, result.BillingPeriodEnd = periodStart, periodEnd
+	if hasArrears || len(meterIDs) > 0 {
+		result.Warnings = append(result.Warnings,
+			"This is the invoice issued when the trial ends. Fees billed in arrears and usage for this period are on the invoice at the end of the period.")
+	}
+	result.Totals = computePreviewTotals(result.Lines)
+	return result, true, nil
 }
 
 // previewMeter rates one meter's events for the customer over [from, to)

@@ -3658,43 +3658,12 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 	if err != nil {
 		return domain.Invoice{}, nil, false, err
 	}
-	lineItems := make([]domain.InvoiceLineItem, 0, len(advanceItems))
+	baseLines := onCreateBaseLines(sub, plans, advanceItems, periodStart, periodEnd, invoiceCurrency, billingLoc)
+	lineItems := make([]domain.InvoiceLineItem, 0, len(baseLines))
 	subtotal := int64(0)
-	periodDays := roundDays(periodEnd.Sub(periodStart))
-	for _, it := range advanceItems {
-		plan := plans[it.PlanID]
-		if plan.BaseAmountCents <= 0 {
-			continue
-		}
-		baseFee := plan.BaseAmountCents * it.Quantity
-		description := fmt.Sprintf("%s - base fee (qty %d)", plan.Name, it.Quantity)
-
-		fullCycleDays := roundDays(advanceBillingPeriod(periodStart, plan.BillingInterval, billingLoc, sub.BillingAnchorDay).Sub(periodStart))
-		if periodDays > 0 && fullCycleDays > 0 && periodDays < fullCycleDays {
-			baseFee = money.RoundHalfToEven(plan.BaseAmountCents*it.Quantity*int64(periodDays), int64(fullCycleDays))
-			description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, it.Quantity, periodDays, fullCycleDays)
-		}
-
-		unitAmount := plan.BaseAmountCents
-		if it.Quantity > 0 {
-			unitAmount = money.RoundHalfToEven(baseFee, it.Quantity)
-		}
-
-		baseStartCopy := periodStart
-		baseEndCopy := periodEnd
-		lineItems = append(lineItems, domain.InvoiceLineItem{
-			LineType:           domain.LineTypeBaseFee,
-			Description:        description,
-			Quantity:           it.Quantity,
-			UnitAmountCents:    unitAmount,
-			AmountCents:        baseFee,
-			TotalAmountCents:   baseFee,
-			Currency:           invoiceCurrency,
-			TaxCode:            plan.TaxCode,
-			BillingPeriodStart: &baseStartCopy,
-			BillingPeriodEnd:   &baseEndCopy,
-		})
-		subtotal += baseFee
+	for _, bl := range baseLines {
+		lineItems = append(lineItems, bl.line)
+		subtotal += bl.line.AmountCents
 	}
 
 	if subtotal <= 0 {
@@ -3742,6 +3711,52 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 		IsSimulated:        sub.TestClockID != "",
 	}
 	return inv, lineItems, true, nil
+}
+
+// onCreateBaseLines is the day-1 in_advance invoice's base-fee lines for
+// [periodStart, periodEnd]: one line per in_advance item, prorated when the
+// period is shorter than a full plan cycle (a calendar stub). Moved out of
+// buildOnCreateInvoice unchanged so the operator preview of a trialing
+// subscription (previewTrialEnd) shows the invoice the trial end issues with
+// this one copy of the math.
+func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, advanceItems []domain.SubscriptionItem, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location) []closeBaseLine {
+	out := make([]closeBaseLine, 0, len(advanceItems))
+	periodDays := roundDays(periodEnd.Sub(periodStart))
+	for _, it := range advanceItems {
+		plan := plans[it.PlanID]
+		if plan.BaseAmountCents <= 0 {
+			continue
+		}
+		baseFee := plan.BaseAmountCents * it.Quantity
+		description := fmt.Sprintf("%s - base fee (qty %d)", plan.Name, it.Quantity)
+
+		fullCycleDays := roundDays(advanceBillingPeriod(periodStart, plan.BillingInterval, billingLoc, sub.BillingAnchorDay).Sub(periodStart))
+		if periodDays > 0 && fullCycleDays > 0 && periodDays < fullCycleDays {
+			baseFee = money.RoundHalfToEven(plan.BaseAmountCents*it.Quantity*int64(periodDays), int64(fullCycleDays))
+			description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, it.Quantity, periodDays, fullCycleDays)
+		}
+
+		unitAmount := plan.BaseAmountCents
+		if it.Quantity > 0 {
+			unitAmount = money.RoundHalfToEven(baseFee, it.Quantity)
+		}
+
+		baseStartCopy := periodStart
+		baseEndCopy := periodEnd
+		out = append(out, closeBaseLine{plan: plan, line: domain.InvoiceLineItem{
+			LineType:           domain.LineTypeBaseFee,
+			Description:        description,
+			Quantity:           it.Quantity,
+			UnitAmountCents:    unitAmount,
+			AmountCents:        baseFee,
+			TotalAmountCents:   baseFee,
+			Currency:           invoiceCurrency,
+			TaxCode:            plan.TaxCode,
+			BillingPeriodStart: &baseStartCopy,
+			BillingPeriodEnd:   &baseEndCopy,
+		}})
+	}
+	return out
 }
 
 // FinalizeOnCreateInvoice runs the post-persist steps for a day-1 in_advance
