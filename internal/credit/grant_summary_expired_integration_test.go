@@ -59,8 +59,8 @@ func TestGrantSummary_SplitsExpiredFromUsed(t *testing.T) {
 	if g.ConsumedCents != 10000 || g.RemainingCents != 0 {
 		t.Errorf("expired grant consumed=%d remaining=%d, want 10000 0 (the sweep retires the block)", g.ConsumedCents, g.RemainingCents)
 	}
-	if g.ExpiredCents != 7000 {
-		t.Errorf("expired grant expired_cents = %d, want 7000", g.ExpiredCents)
+	if g.ExpiredCents != 7000 || g.RetiredCents != 0 {
+		t.Errorf("expired grant expired_cents=%d retired_cents=%d, want 7000 0", g.ExpiredCents, g.RetiredCents)
 	}
 	if usedCents := g.ConsumedCents - g.ExpiredCents; usedCents != 3000 {
 		t.Errorf("expired grant used = %d, want 3000 (the part applied to the invoice)", usedCents)
@@ -70,7 +70,7 @@ func TestGrantSummary_SplitsExpiredFromUsed(t *testing.T) {
 	if !ok {
 		t.Fatalf("used-up grant %s missing from the summary", used.ID)
 	}
-	if c.ConsumedCents != 2000 || c.ExpiredCents != 0 {
-		t.Errorf("used-up grant consumed=%d expired=%d, want 2000 0", c.ConsumedCents, c.ExpiredCents)
+	if c.ConsumedCents != 2000 || c.ExpiredCents != 0 || c.RetiredCents != 0 {
+		t.Errorf("used-up grant consumed=%d expired=%d retired=%d, want 2000 0 0", c.ConsumedCents, c.ExpiredCents, c.RetiredCents)
 	}
 }

@@ -999,8 +999,11 @@ export interface paths {
          *     cost-basis class (commit = money-backed, promotional = free,
          *     other = legacy/adjustments). include_exhausted=true adds
          *     fully-drawn blocks for history. Each grant's `consumed_cents`
-         *     includes any part that expired unused; `expired_cents` is that
-         *     part, so the credit actually used is `consumed_cents - expired_cents`.
+         *     also counts two write-offs: `expired_cents`, the part that expired
+         *     unused, and `retired_cents`, commit credit taken back when the
+         *     invoice that funded it was voided or refunded by a credit note.
+         *     The credit actually used is
+         *     `consumed_cents - expired_cents - retired_cents`.
          */
         get: {
             parameters: {

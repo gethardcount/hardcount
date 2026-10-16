@@ -27,27 +27,36 @@ export interface GrantRow {
   amount_cents: number
   consumed_cents: number
   remaining_cents: number
-  // The part of consumed_cents that expired unused. The expiry sweep sets
-  // consumed to the full amount, so consumed alone counts it as used.
+  // consumed_cents also counts two write-offs, which the server names:
+  // expired_cents, what ran out of time unused (the expiry sweep sets
+  // consumed to the full amount), and retired_cents, commit credit taken
+  // back when its invoice was voided or refunded by a credit note.
   expired_cents?: number
+  retired_cents?: number
   expires_at?: string
 }
 
-export type GrantState = 'active' | 'used_up' | 'expired'
+export type GrantState = 'active' | 'used_up' | 'expired' | 'canceled'
 
 // grantState: a grant with nothing left is "expired" when some of it ran out
-// of time unused, "used up" when invoices drew all of it. A grant past its
-// expiry that the sweep has not written off yet is "expired" too.
+// of time unused, "canceled" when the rest was taken back with its invoice
+// (voided, or refunded by a credit note), and "used up" when invoices drew
+// all of it. Expiry wins over canceled: the sweep takes whatever is left, so
+// it is the last thing that can happen to a grant. A grant past its expiry
+// that the sweep has not written off yet is "expired" too.
 export function grantState(g: GrantRow, nowMs: number): GrantState {
   if (g.remaining_cents > 0) {
     return g.expires_at && Date.parse(g.expires_at) <= nowMs ? 'expired' : 'active'
   }
-  return (g.expired_cents ?? 0) > 0 ? 'expired' : 'used_up'
+  if ((g.expired_cents ?? 0) > 0) return 'expired'
+  if ((g.retired_cents ?? 0) > 0) return 'canceled'
+  return 'used_up'
 }
 
-// grantUsedCents is what was really used: consumed less the expired part.
+// grantUsedCents is what invoices really used: consumed less the expired and
+// canceled parts.
 export function grantUsedCents(g: GrantRow): number {
-  return g.consumed_cents - (g.expired_cents ?? 0)
+  return g.consumed_cents - (g.expired_cents ?? 0) - (g.retired_cents ?? 0)
 }
 
 // splitGrants keeps the order the server sent and separates the grants that

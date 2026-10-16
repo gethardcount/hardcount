@@ -117,6 +117,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                               {g.grant_kind === 'promotional' && <Badge variant="secondary">Promotional</Badge>}
                               {state === 'used_up' && <Badge variant="secondary">Used up</Badge>}
                               {state === 'expired' && <Badge variant="warning">Expired</Badge>}
+                              {state === 'canceled' && <Badge variant="secondary">Canceled</Badge>}
                             </div>
                           </TableCell>
                           <TableCell className="text-right text-sm tabular-nums">{formatCents(g.amount_cents, currency)}</TableCell>
@@ -138,7 +139,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                 className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
               >
                 {showFinished ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                {showFinished ? 'Hide' : 'Show'} {split.finished.length} used-up or expired {split.finished.length === 1 ? 'grant' : 'grants'}
+                {showFinished ? 'Hide' : 'Show'} {split.finished.length} used-up, expired or canceled {split.finished.length === 1 ? 'grant' : 'grants'}
               </button>
             )}
           </div>

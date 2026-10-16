@@ -1086,8 +1086,11 @@ export interface CreditGrantSummary {
   amount_cents: number
   consumed_cents: number
   remaining_cents: number
-  // Part of consumed_cents that expired unused; used = consumed - expired.
+  // Parts of consumed_cents that were written off, not used: expired_cents
+  // ran out of time; retired_cents was commit credit taken back when its
+  // invoice was voided or refunded. used = consumed - expired - retired.
   expired_cents: number
+  retired_cents: number
   expires_at?: string
   source_invoice_id?: string
   created_at: string
