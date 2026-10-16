@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, downloadPDF, formatCents } from '@/lib/api'
 import { startOfDayInTZ, endOfDayInTZ } from '@/lib/dates'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import type { Customer, Invoice } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
 import { downloadServerCSV } from '@/lib/csv'
@@ -97,6 +98,9 @@ export default function InvoicesPage() {
   // Debounce the search term so the API sees one request per typing
   // pause; the input itself stays keystroke-responsive via URL state.
   const debouncedSearch = useDebouncedValue(search.trim(), 300)
+  // The date bounds depend on the tenant zone, which can arrive after the
+  // first render; listing it in the memo's deps recomputes them when it does.
+  const tz = useTenantTimezone()
 
   const queryParams = useMemo(() => {
     const params = new URLSearchParams()
@@ -111,8 +115,8 @@ export default function InvoicesPage() {
     // Dates convert tenant-TZ civil days to UTC instants per ADR-010;
     // the backend's shared ?from/?to contract is inclusive both ends.
     if (debouncedSearch) params.set('search', debouncedSearch)
-    if (dateFrom) params.set('from', startOfDayInTZ(dateFrom))
-    if (dateTo) params.set('to', endOfDayInTZ(dateTo))
+    if (dateFrom) params.set('from', startOfDayInTZ(dateFrom, tz))
+    if (dateTo) params.set('to', endOfDayInTZ(dateTo, tz))
     // Sort wiring: SPA had clickable column headers + URL state but the
     // params were never sent to the API — list rendered in arbitrary
     // order on ties. Backend validates against a closed allow-list and
@@ -121,7 +125,7 @@ export default function InvoicesPage() {
     if (sortKey) params.set('sort', sortKey)
     if (sortDir) params.set('dir', sortDir)
     return params.toString()
-  }, [page, statusFilter, paymentStatusFilter, customerFilter, overdueFilter, debouncedSearch, dateFrom, dateTo, sortKey, sortDir])
+  }, [page, statusFilter, paymentStatusFilter, customerFilter, overdueFilter, debouncedSearch, dateFrom, dateTo, tz, sortKey, sortDir])
 
   const { data: invoicesData, isLoading: loading, error: loadErrorObj, refetch } = useQuery({
     queryKey: ['invoices', queryParams],

@@ -15,6 +15,8 @@
 // The resolution is a pure function of (range, custom dates, today) so it can
 // be tested without a DOM or a clock.
 
+import { civilDateAgo, endOfDayInTZ, startOfDayInTZ } from './dates'
+
 export type RangeKey = '7d' | '30d' | '90d' | '12m' | 'all' | 'custom'
 
 export const RANGES: Record<RangeKey, { label: string; amount: number; unit: 'day' | 'month' }> = {
@@ -56,6 +58,26 @@ export function resolveWindow(
   if (range === 'all') return { from: '', to: '' }
   const { amount, unit } = RANGES[range]
   return { from: civilAgo(amount, unit), to: '' }
+}
+
+// windowQueryBounds is the window the page actually sends: the range's civil
+// dates turned into UTC instants at the start and end of day in `timezone`.
+// '' means unbounded. The zone is an explicit argument so the page's memo can
+// depend on it: a cold load renders before /v1/settings arrives, and bounds
+// computed then in the 'UTC' fallback must be recomputed once the tenant zone
+// is known (a New York tenant's "last 30 days" starts at 04:00Z, not 00:00Z).
+export function windowQueryBounds(
+  range: RangeKey,
+  custom: Window,
+  timezone: string,
+  now?: Date,
+): { window: Window; from: string; to: string } {
+  const civil = resolveWindow(range, custom, (amount, unit) => civilDateAgo(amount, unit, timezone, now))
+  return {
+    window: civil,
+    from: civil.from ? startOfDayInTZ(civil.from, timezone) : '',
+    to: civil.to ? endOfDayInTZ(civil.to, timezone) : '',
+  }
 }
 
 // rangeCaption names the window the stat cards cover. Without it, an operator

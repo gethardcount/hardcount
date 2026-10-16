@@ -3,8 +3,8 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery } from '@tanstack/react-query'
 import { api, formatDateTime } from '@/lib/api'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
-import { startOfDayInTZ, endOfDayInTZ, civilDateAgo } from '@/lib/dates'
-import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_ROWS, exportCapNotice, parseRange, rangeCaption, resolveWindow, usageEmptyKind, needsAnyEventCheck } from '@/lib/usageRange'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
+import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_ROWS, exportCapNotice, parseRange, rangeCaption, windowQueryBounds, usageEmptyKind, needsAnyEventCheck } from '@/lib/usageRange'
 import type { Customer, Meter, UsageEvent, UsageEventsAggregate } from '@/lib/api'
 import { downloadCSV } from '@/lib/csv'
 import { formatQuantity, quantityWithUnit } from '@/lib/usageQuantity'
@@ -56,15 +56,21 @@ export default function UsageEventsPage() {
   const { customer: filterCustomer, meter: filterMeter, from: filterFrom, to: filterTo, dim: filterDim } = urlState
   const range = parseRange(urlState.range)
 
-  // Recomputed each render so a long-lived tab's window stays anchored to
-  // today rather than to whenever the page was opened.
+  // The window is memoised on the filters AND the tenant timezone. On a cold
+  // load the page renders before /v1/settings arrives, so the first bounds use
+  // the 'UTC' fallback; tz changing when settings land recomputes them.
+  // Convert picked civil dates to UTC instants of start/end of day in tenant
+  // TZ, never browser-local, so operators in different zones filtering
+  // "from May 5" get the same rows. ADR-010.
   // Named activeWindow, not window — shadowing the DOM global in a React
   // component is a debugging trap waiting to happen.
-  const activeWindow = useMemo(
-    () => resolveWindow(range, { from: filterFrom, to: filterTo }, civilDateAgo),
-    [range, filterFrom, filterTo],
+  const tz = useTenantTimezone()
+  const bounds = useMemo(
+    () => windowQueryBounds(range, { from: filterFrom, to: filterTo }, tz),
+    [range, filterFrom, filterTo, tz],
   )
-  const { from: effectiveFrom, to: effectiveTo } = activeWindow
+  const activeWindow = bounds.window
+  const { from: fromInstant, to: toInstant } = bounds
   const page = Math.max(1, parseInt(urlState.page) || 1)
   const [events, setEvents] = useState<UsageEvent[]>([])
   const [total, setTotal] = useState(0)
@@ -121,16 +127,11 @@ export default function UsageEventsPage() {
     const parts: string[] = []
     if (filterCustomer) parts.push(`customer_id=${filterCustomer}`)
     if (filterMeter) parts.push(`meter_id=${filterMeter}`)
-    // Convert picked civil dates to UTC instants of start/end of day
-    // in tenant TZ. Pre-fix this used new Date(yyyymmdd).toISOString()
-    // which interprets the input string in BROWSER local TZ, so two
-    // operators in different TZs filtering "from May 5" got
-    // different results. ADR-010.
-    if (effectiveFrom) parts.push(`from=${startOfDayInTZ(effectiveFrom)}`)
-    if (effectiveTo) parts.push(`to=${endOfDayInTZ(effectiveTo)}`)
+    if (fromInstant) parts.push(`from=${fromInstant}`)
+    if (toInstant) parts.push(`to=${toInstant}`)
     if (filterDim) parts.push(`dimensions=${encodeURIComponent(filterDim)}`)
     return parts.join('&')
-  }, [filterCustomer, filterMeter, effectiveFrom, effectiveTo, filterDim])
+  }, [filterCustomer, filterMeter, fromInstant, toInstant, filterDim])
 
   // Server-side paginated fetch
   const loadEvents = useCallback(() => {

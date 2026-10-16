@@ -42,9 +42,9 @@ export function startOfDayInTZ(yyyymmdd: string, timezone?: string): string {
 // lands on the previous Mar 31, and JS Date normalizes the overflow days of
 // short months (Mar 31 minus 1 month = Mar 3, not Feb 31) — acceptable for a
 // coarse filter preset, and the same idiom the helpers above use.
-export function civilDateAgo(amount: number, unit: 'day' | 'month', timezone?: string): string {
+export function civilDateAgo(amount: number, unit: 'day' | 'month', timezone?: string, now: Date = new Date()): string {
   const tz = timezone || tenantTZ()
-  const todayStr = formatInTimeZone(new Date(), tz, 'yyyy-MM-dd')
+  const todayStr = formatInTimeZone(now, tz, 'yyyy-MM-dd')
   const [y, m, d] = todayStr.split('-').map(Number)
   const target = unit === 'day' ? new Date(y, m - 1, d - amount) : new Date(y, m - 1 - amount, d)
   return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`

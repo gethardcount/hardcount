@@ -122,3 +122,28 @@ test('export cap: a notice only when more events match than the file holds', () 
     description: '73,210 events match. Export a shorter date range to get the rest.',
   })
 })
+
+// Backs MANUAL_TEST FLOW TZ1 (date filters on a cold load): the bounds the
+// page sends are a function of the tenant zone. The page memoises them on that
+// zone, so when /v1/settings arrives after the first render they are rebuilt.
+import { windowQueryBounds } from '../src/lib/usageRange.ts'
+
+test('windowQueryBounds: last 30 days for a New York tenant starts at New York midnight', () => {
+  // Oct 16 2026 22:00 EDT = Oct 17 02:00Z. The UTC civil day is already Oct 17.
+  const now = new Date('2026-10-17T02:00:00Z')
+  const ny = windowQueryBounds('30d', noCustom, 'America/New_York', now)
+  assert.equal(ny.window.from, '2026-09-16')
+  assert.equal(ny.from, '2026-09-16T04:00:00.000Z')
+  assert.equal(ny.to, '')
+  // The pre-settings 'UTC' fallback gives a different window, which is why the
+  // page must recompute when the zone loads.
+  const utc = windowQueryBounds('30d', noCustom, 'UTC', now)
+  assert.equal(utc.from, '2026-09-17T00:00:00.000Z')
+})
+
+test('windowQueryBounds: custom dates become start and end of day in the given zone', () => {
+  const b = windowQueryBounds('custom', { from: '2026-05-05', to: '2026-05-06' }, 'Asia/Kolkata')
+  assert.equal(b.from, '2026-05-04T18:30:00.000Z')
+  assert.equal(b.to, '2026-05-06T18:29:59.999Z')
+  assert.deepEqual(windowQueryBounds('all', noCustom, 'Asia/Kolkata'), { window: noCustom, from: '', to: '' })
+})
