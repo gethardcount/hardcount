@@ -2190,7 +2190,7 @@ components:
       properties:
         date:
           type: string
-          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
+          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
         new:
           type: integer
           format: int64
@@ -2213,7 +2213,7 @@ components:
       properties:
         date:
           type: string
-          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
+          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
         revenue_cents:
           type: integer
           format: int64
@@ -2227,7 +2227,7 @@ components:
       properties:
         date:
           type: string
-          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
+          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
         events:
           type: integer
           format: int64

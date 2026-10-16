@@ -43,8 +43,13 @@ func (h *Handler) revenueChart(w http.ResponseWriter, r *http.Request) {
 		dateFmt = "YYYY-MM"
 	}
 
+	// Buckets are UTC days/months (handler.go promises UTC). `AT TIME ZONE
+	// 'UTC'` turns the timestamptz into a UTC wall-clock timestamp first, so
+	// neither date_trunc nor to_char reads the session TimeZone. Without
+	// it, a server on America/New_York put a 02:00Z row in the previous
+	// day's bucket.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT to_char(date_trunc($1, paid_at), $2) AS date,
+		SELECT to_char(date_trunc($1, paid_at AT TIME ZONE 'UTC'), $2) AS date,
 		       COALESCE(SUM(total_amount_cents), 0) AS revenue_cents,
 		       COUNT(*) AS invoice_count
 		FROM invoices

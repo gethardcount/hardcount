@@ -7194,7 +7194,7 @@ export interface components {
             net: number;
         };
         AnalyticsMrrMovementPoint: {
-            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default). */
+            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
             date: string;
             /** Format: int64 */
             new: number;
@@ -7208,7 +7208,7 @@ export interface components {
             net: number;
         };
         AnalyticsRevenuePoint: {
-            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default). */
+            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
             date: string;
             /**
              * Format: int64
@@ -7218,7 +7218,7 @@ export interface components {
             invoice_count: number;
         };
         AnalyticsUsagePoint: {
-            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default). */
+            /** @description Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
             date: string;
             /** Format: int64 */
             events: number;

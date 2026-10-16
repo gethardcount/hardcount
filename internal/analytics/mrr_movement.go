@@ -61,9 +61,11 @@ func (h *Handler) mrrMovement(w http.ResponseWriter, r *http.Request) {
 		return p
 	}
 
-	// New MRR per bucket: items of subs activated in this bucket.
+	// New MRR per bucket: items of subs activated in this bucket. All three
+	// queries bucket `AT TIME ZONE 'UTC'` so the buckets are UTC whatever the
+	// session TimeZone (see revenue_chart.go).
 	rows, err := tx.QueryContext(ctx, `
-		SELECT to_char(date_trunc($1, s.activated_at), $2) AS d,
+		SELECT to_char(date_trunc($1, s.activated_at AT TIME ZONE 'UTC'), $2) AS d,
 		       COALESCE(SUM(
 		           CASE WHEN p.billing_interval = 'yearly' THEN (p.base_amount_cents * si.quantity) / 12
 		                ELSE p.base_amount_cents * si.quantity
@@ -103,7 +105,7 @@ func (h *Handler) mrrMovement(w http.ResponseWriter, r *http.Request) {
 
 	// Churned MRR per bucket: items of subs canceled in this bucket.
 	rows, err = tx.QueryContext(ctx, `
-		SELECT to_char(date_trunc($1, s.canceled_at), $2) AS d,
+		SELECT to_char(date_trunc($1, s.canceled_at AT TIME ZONE 'UTC'), $2) AS d,
 		       COALESCE(SUM(
 		           CASE WHEN p.billing_interval = 'yearly' THEN (p.base_amount_cents * si.quantity) / 12
 		                ELSE p.base_amount_cents * si.quantity
@@ -142,7 +144,7 @@ func (h *Handler) mrrMovement(w http.ResponseWriter, r *http.Request) {
 	// no from_* and 'remove' no to_* — the old inner joins dropped both,
 	// so Net never reconciled with the headline MRR delta.
 	rows, err = tx.QueryContext(ctx, `
-		SELECT to_char(date_trunc($1, c.changed_at), $2) AS d,
+		SELECT to_char(date_trunc($1, c.changed_at AT TIME ZONE 'UTC'), $2) AS d,
 		       (
 		           COALESCE(CASE WHEN pto.billing_interval = 'yearly' THEN pto.base_amount_cents * c.to_quantity / 12
 		                 ELSE pto.base_amount_cents * c.to_quantity END, 0)

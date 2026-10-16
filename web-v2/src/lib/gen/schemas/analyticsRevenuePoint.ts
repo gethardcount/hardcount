@@ -9,7 +9,7 @@
  */
 
 export interface AnalyticsRevenuePoint {
-  /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default). */
+  /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
   date: string;
   /** Sum of invoice totals paid in the bucket. */
   revenue_cents: number;

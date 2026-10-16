@@ -2490,7 +2490,7 @@ type AnalyticsMrrMovementPoint struct {
 	Churned     int64 `json:"churned"`
 	Contraction int64 `json:"contraction"`
 
-	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
+	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
 	Date      string `json:"date"`
 	Expansion int64  `json:"expansion"`
 	Net       int64  `json:"net"`
@@ -2604,7 +2604,7 @@ type AnalyticsPeriod string
 
 // AnalyticsRevenuePoint defines model for AnalyticsRevenuePoint.
 type AnalyticsRevenuePoint struct {
-	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
+	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
 	Date         string `json:"date"`
 	InvoiceCount int    `json:"invoice_count"`
 
@@ -2625,7 +2625,7 @@ type AnalyticsTopMeter struct {
 
 // AnalyticsUsagePoint defines model for AnalyticsUsagePoint.
 type AnalyticsUsagePoint struct {
-	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default).
+	// Date Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
 	Date   string `json:"date"`
 	Events int64  `json:"events"`
 

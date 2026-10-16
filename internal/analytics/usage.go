@@ -61,8 +61,13 @@ func (h *Handler) usageAnalytics(w http.ResponseWriter, r *http.Request) {
 	// match), so Postgres applies it as a post-scan Filter and never as an
 	// Index Cond — and every usage_events btree leads with tenant_id. Without
 	// the predicate these three scans read every tenant's events.
+	// Buckets are UTC days/months (handler.go promises UTC). `AT TIME ZONE
+	// 'UTC'` turns the timestamptz into a UTC wall-clock timestamp first, so
+	// neither date_trunc nor to_char reads the session TimeZone. Without
+	// it, a server on America/New_York put a 02:00Z row in the previous
+	// day's bucket.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT to_char(date_trunc($1, timestamp), $2) AS d,
+		SELECT to_char(date_trunc($1, timestamp AT TIME ZONE 'UTC'), $2) AS d,
 		       COUNT(*) AS events,
 		       COALESCE(SUM(quantity), 0) AS qty
 		FROM usage_events

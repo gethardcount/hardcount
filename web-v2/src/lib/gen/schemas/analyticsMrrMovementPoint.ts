@@ -9,7 +9,7 @@
  */
 
 export interface AnalyticsMrrMovementPoint {
-  /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in the database server's time zone (UTC by default). */
+  /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
   date: string;
   new: number;
   expansion: number;
