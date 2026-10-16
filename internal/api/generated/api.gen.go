@@ -5516,6 +5516,15 @@ type ExportUsageEventsCsvParams struct {
 
 	// To Upper bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
 	To string `form:"to" json:"to"`
+
+	// CustomerId Only this customer's events.
+	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+
+	// MeterId Only this meter's events.
+	MeterId string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
+
+	// Dimensions Comma-separated key=value pairs, same syntax as `GET /v1/usage-events`.
+	Dimensions string `form:"dimensions,omitempty" json:"dimensions,omitempty"`
 }
 
 // IngestLitellmSpendJSONBody defines parameters for IngestLitellmSpend.
@@ -10974,6 +10983,45 @@ func (siw *ServerInterfaceWrapper) ExportUsageEventsCsv(w http.ResponseWriter, r
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "customer_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "customer_id", r.URL.Query(), &params.CustomerId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "customer_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "meter_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "meter_id", r.URL.Query(), &params.MeterId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "meter_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "meter_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "dimensions" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dimensions", r.URL.Query(), &params.Dimensions, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dimensions"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dimensions", Err: err})
 		}
 		return
 	}

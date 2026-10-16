@@ -970,6 +970,21 @@ func (s propertiesScanner) Scan(src any) error {
 // operator BACKFILL from a metered API event in the artifact they reconcile
 // with. The export's columns are its own contract.
 func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, from, to time.Time, fn func(domain.UsageEvent) error) error {
+	return s.StreamForExportFiltered(ctx, tenantID, from, to, ExportFilter{}, fn)
+}
+
+// ExportFilter narrows the usage export to what the Usage page shows:
+// one customer, one meter, and events whose dimensions contain every pair
+// (`properties @>`, the same match List uses). Empty fields do not filter.
+type ExportFilter struct {
+	CustomerID string
+	MeterID    string
+	Dimensions map[string]any
+}
+
+// StreamForExportFiltered is StreamForExport with the Usage page's filters,
+// so "Export CSV" downloads exactly the rows the page lists.
+func (s *PostgresStore) StreamForExportFiltered(ctx context.Context, tenantID string, from, to time.Time, f ExportFilter, fn func(domain.UsageEvent) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
@@ -978,13 +993,31 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 
 	// Tenant + livemode isolation is RLS's (TxTenant), as in List. The window is
 	// REQUIRED by the caller (the table is unbounded), so both bounds always bind.
+	where := "WHERE timestamp >= $1 AND timestamp <= $2"
+	args := []any{from, to}
+	if f.CustomerID != "" {
+		args = append(args, f.CustomerID)
+		where += fmt.Sprintf(" AND customer_id = $%d", len(args))
+	}
+	if f.MeterID != "" {
+		args = append(args, f.MeterID)
+		where += fmt.Sprintf(" AND meter_id = $%d", len(args))
+	}
+	if len(f.Dimensions) > 0 {
+		doc, err := json.Marshal(f.Dimensions)
+		if err != nil {
+			return fmt.Errorf("export dimensions: %w", err)
+		}
+		args = append(args, string(doc))
+		where += fmt.Sprintf(" AND properties @> $%d::jsonb", len(args))
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, customer_id, meter_id,
 			quantity, properties, COALESCE(idempotency_key,''), timestamp, origin,
 			provider_cost_micros, COALESCE(provider_cost_source,'')
 		FROM usage_events
-		WHERE timestamp >= $1 AND timestamp <= $2
-		ORDER BY timestamp DESC, id DESC`, from, to)
+		`+where+`
+		ORDER BY timestamp DESC, id DESC`, args...)
 	if err != nil {
 		return err
 	}

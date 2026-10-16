@@ -4,12 +4,12 @@ import { useQuery } from '@tanstack/react-query'
 import { api, formatDateTime } from '@/lib/api'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
-import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_ROWS, exportCapNotice, parseRange, rangeCaption, windowQueryBounds, usageEmptyKind, needsAnyEventCheck } from '@/lib/usageRange'
+import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_DAYS, parseDimensionFilter, parseRange, rangeCaption, windowQueryBounds, usageEmptyKind, usageExportWindow, needsAnyEventCheck } from '@/lib/usageRange'
 import type { Customer, Meter, UsageEvent, UsageEventsAggregate, UsageMeterTotal } from '@/lib/api'
-import { downloadCSV } from '@/lib/csv'
+import { downloadServerCSV } from '@/lib/csv'
 import { formatQuantity, quantityWithUnit } from '@/lib/usageQuantity'
 import { usageNoneYet } from '@/lib/homeNotices'
-import { formatYMDInTZ } from '@/lib/dates'
+import { formatYMDInTZ, startOfDayInTZ, endOfDayInTZ } from '@/lib/dates'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
@@ -61,6 +61,9 @@ export default function UsageEventsPage() {
   })
   const { customer: filterCustomer, meter: filterMeter, from: filterFrom, to: filterTo, dim: filterDim } = urlState
   const range = parseRange(urlState.range)
+  // Stable so the dimension box's 400ms wait is not restarted by unrelated
+  // re-renders (data arriving) while the operator types.
+  const commitDim = useCallback((v: string) => setUrlState({ dim: v, page: '1' }), [setUrlState])
 
   // The window is memoised on the filters AND the tenant timezone. On a cold
   // load the page renders before /v1/settings arrives, so the first bounds use
@@ -215,55 +218,25 @@ export default function UsageEventsPage() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
-  // Export pages through ALL filtered events (capped), not just the server's
-  // default page — pre-fix this called listUsageEvents with no limit and silently
-  // truncated the CSV to one page.
-  //
-  // This does NOT mirror AuditLog.tsx any more: that export became a SERVER-side
-  // stream with no cap (GET /v1/exports/audit-log.csv, ADR-090 §7) precisely
-  // because a browser page-walk with a row cap hands the operator a file that
-  // looks complete and is not. This page still page-walks, and still caps at
-  // EXPORT_MAX_ROWS — the same latent truncation, on a smaller artifact. Use
-  // /v1/exports/usage-events.csv (server-side, uncapped, snapshot-consistent)
-  // when that matters; wiring this button to it is the obvious follow-up.
-  // When the cap is hit the operator is told (exportCapNotice), using the
-  // filtered total the first page reports.
-  const EXPORT_PAGE_SIZE = 1000
+  // Export streams from the server (GET /v1/exports/usage-events.csv) with
+  // the page's filters: every matching row, uncapped, with event ids,
+  // customer and meter ids and ISO 8601 timestamps. One file covers at most
+  // 365 days; when the window is longer (or All time) the file holds the
+  // last 365 days and a toast says where it starts.
   const handleExport = async () => {
     setExporting(true)
     try {
-      const all: UsageEvent[] = []
-      let offset = 0
-      let matching = 0
-      while (all.length < EXPORT_MAX_ROWS) {
-        const parts = [`limit=${EXPORT_PAGE_SIZE}`, `offset=${offset}`]
-        if (filterQs) parts.push(filterQs)
-        const res = await api.listUsageEvents(parts.join('&'))
-        const batch = res.data || []
-        if (offset === 0) matching = res.total || 0
-        all.push(...batch)
-        if (batch.length < EXPORT_PAGE_SIZE) break
-        offset += EXPORT_PAGE_SIZE
+      const win = usageExportWindow(activeWindow, today)
+      const parts = [`from=${encodeURIComponent(startOfDayInTZ(win.from, tz))}`, `to=${encodeURIComponent(endOfDayInTZ(win.to, tz))}`]
+      if (filterCustomer) parts.push(`customer_id=${encodeURIComponent(filterCustomer)}`)
+      if (filterMeter) parts.push(`meter_id=${encodeURIComponent(filterMeter)}`)
+      if (filterDim) parts.push(`dimensions=${encodeURIComponent(filterDim)}`)
+      await downloadServerCSV(`/v1/exports/usage-events.csv?${parts.join('&')}`, 'usage-events.csv')
+      if (win.clamped) {
+        toast.info(`Exported ${win.from} to ${win.to}`, {
+          description: `One export covers up to ${EXPORT_MAX_DAYS} days. Pick a custom range to export earlier events.`,
+        })
       }
-      // Resolve names for exactly the exported rows via ids= (the old
-      // full-list fetch was itself capped at 50 — exported rows beyond
-      // it fell back to raw IDs anyway).
-      const exportIds = Array.from(new Set(all.map(ev => ev.customer_id).filter(Boolean)))
-      const nameById: Record<string, string> = {}
-      if (exportIds.length > 0) {
-        const res = await api.listCustomers(`ids=${exportIds.join(',')}&limit=${exportIds.length}`)
-        res.data.forEach(c => { nameById[c.id] = c.display_name })
-      }
-      const rows = all.slice(0, EXPORT_MAX_ROWS).map(ev => [
-        formatDateTime(ev.timestamp),
-        nameById[ev.customer_id] || customerMap[ev.customer_id]?.display_name || ev.customer_id,
-        meterMap[ev.meter_id]?.name || ev.meter_id,
-        ev.quantity,
-        ev.dimensions && Object.keys(ev.dimensions).length > 0 ? JSON.stringify(ev.dimensions) : '',
-      ])
-      downloadCSV('usage-events.csv', ['Timestamp', 'Customer', 'Meter', 'Value', 'Dimensions'], rows)
-      const capped = exportCapNotice(matching)
-      if (capped) toast.warning(capped.title, { description: capped.description })
     } catch (err) {
       showApiError(err, 'Export failed')
     } finally {
@@ -347,13 +320,7 @@ export default function UsageEventsPage() {
             />
           </>
         )}
-        <input
-          type="text"
-          value={filterDim}
-          onChange={(e) => setUrlState({ dim: e.target.value, page: '1' })}
-          placeholder="dimension (e.g. model=gpt-4)"
-          className="flex h-9 w-56 rounded-md border border-input bg-transparent px-3 py-1 text-sm font-mono shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring placeholder:text-muted-foreground placeholder:font-sans"
-        />
+        <DimensionFilter value={filterDim} onCommit={commitDim} />
       </div>
 
       {error ? (
@@ -589,5 +556,54 @@ function MeterSummaryRow({ row, meter, from, to, today }: { row: UsageMeterTotal
         </svg>
       )}
     </li>
+  )
+}
+
+// DimensionFilter keeps what the operator types locally and sends it to the
+// URL (and the server) only after typing pauses and the text is valid
+// key=value pairs. A half-typed "model" shows an inline hint instead of
+// replacing the page with a load error.
+function DimensionFilter({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value)
+  const [error, setError] = useState('')
+  // Follow outside changes (Clear filters, back button): adjust during
+  // render when the committed value moves.
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(value)
+    setError('')
+  }
+  useEffect(() => {
+    if (draft === value) return
+    const t = setTimeout(() => {
+      const parsed = parseDimensionFilter(draft)
+      if (parsed.ok) {
+        setError('')
+        if (parsed.value !== value) onCommit(parsed.value)
+      } else {
+        setError(parsed.error)
+      }
+    }, 400)
+    return () => clearTimeout(t)
+  }, [draft, value, onCommit])
+  return (
+    <div className="w-64">
+      <label htmlFor="usage-dimension-filter" className="sr-only">Dimension filter</label>
+      <input
+        id="usage-dimension-filter"
+        type="text"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        placeholder="Dimension, e.g. model=gpt-4o"
+        aria-invalid={!!error}
+        aria-describedby={error ? 'usage-dimension-error' : undefined}
+        className={cn(
+          'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm font-mono shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring placeholder:text-muted-foreground placeholder:font-sans',
+          error && 'border-danger focus-visible:ring-danger',
+        )}
+      />
+      {error && <p id="usage-dimension-error" className="mt-1 text-xs text-danger-foreground">{error}</p>}
+    </div>
   )
 }

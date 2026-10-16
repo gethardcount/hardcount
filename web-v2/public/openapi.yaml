@@ -9757,7 +9757,8 @@ paths:
       description: |
         Streams usage events whose `timestamp` falls in the window,
         newest first, from one consistent snapshot. `from` and `to` are
-        both required and may span at most 366 days. Columns: id,
+        both required and may span at most 366 days. `customer_id`,
+        `meter_id` and `dimensions` narrow it like the event list. Columns: id,
         customer_id, meter_id, quantity, timestamp, idempotency_key,
         origin, dimensions_json, provider_cost_micros,
         provider_cost_source.
@@ -9778,6 +9779,21 @@ paths:
           description: Upper bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
           schema:
             type: string
+        - name: customer_id
+          in: query
+          description: Only this customer's events.
+          schema:
+            type: string
+        - name: meter_id
+          in: query
+          description: Only this meter's events.
+          schema:
+            type: string
+        - name: dimensions
+          in: query
+          description: Comma-separated key=value pairs, same syntax as `GET /v1/usage-events`.
+          schema:
+            type: string
       responses:
         "200":
           description: CSV file (sent as an attachment).
@@ -9792,7 +9808,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: "`from` or `to` is malformed, or `to` is before `from`."
+          description: "`from` or `to` is malformed, `to` is before `from`, or a `dimensions` pair is malformed."
           content:
             application/json:
               schema:

@@ -17,4 +17,16 @@ from: string;
  * Upper bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
  */
 to: string;
+/**
+ * Only this customer's events.
+ */
+customer_id?: string;
+/**
+ * Only this meter's events.
+ */
+meter_id?: string;
+/**
+ * Comma-separated key=value pairs, same syntax as `GET /v1/usage-events`.
+ */
+dimensions?: string;
 };

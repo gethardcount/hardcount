@@ -5089,7 +5089,8 @@ export interface paths {
          * Export usage events as CSV
          * @description Streams usage events whose `timestamp` falls in the window,
          *     newest first, from one consistent snapshot. `from` and `to` are
-         *     both required and may span at most 366 days. Columns: id,
+         *     both required and may span at most 366 days. `customer_id`,
+         *     `meter_id` and `dimensions` narrow it like the event list. Columns: id,
          *     customer_id, meter_id, quantity, timestamp, idempotency_key,
          *     origin, dimensions_json, provider_cost_micros,
          *     provider_cost_source.
@@ -12107,6 +12108,12 @@ export interface operations {
                 from: string;
                 /** @description Upper bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC). */
                 to: string;
+                /** @description Only this customer's events. */
+                customer_id?: string;
+                /** @description Only this meter's events. */
+                meter_id?: string;
+                /** @description Comma-separated key=value pairs, same syntax as `GET /v1/usage-events`. */
+                dimensions?: string;
             };
             header?: never;
             path?: never;
@@ -12132,7 +12139,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `from` or `to` is malformed, or `to` is before `from`. */
+            /** @description `from` or `to` is malformed, `to` is before `from`, or a `dimensions` pair is malformed. */
             422: {
                 headers: {
                     [name: string]: unknown;

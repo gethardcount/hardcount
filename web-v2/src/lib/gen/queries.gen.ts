@@ -12920,7 +12920,8 @@ export const getExportUsageEventsCsvUrl = (params: ExportUsageEventsCsvParams,) 
 /**
  * Streams usage events whose `timestamp` falls in the window,
  * newest first, from one consistent snapshot. `from` and `to` are
- * both required and may span at most 366 days. Columns: id,
+ * both required and may span at most 366 days. `customer_id`,
+ * `meter_id` and `dimensions` narrow it like the event list. Columns: id,
  * customer_id, meter_id, quantity, timestamp, idempotency_key,
  * origin, dimensions_json, provider_cost_micros,
  * provider_cost_source.

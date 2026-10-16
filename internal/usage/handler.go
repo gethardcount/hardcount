@@ -624,6 +624,11 @@ func respondBatchRejected(w http.ResponseWriter, r *http.Request, errStrings []s
 	})
 }
 
+// ParseDimensionsParam parses the `dimensions` query value ("k=v,k2=v2")
+// the same way the list and aggregate endpoints do. Exported for the CSV
+// export, which takes the same filter.
+func ParseDimensionsParam(raw string) (map[string]any, error) { return parseDimensionsParam(raw) }
+
 // parseDimensionsParam parses the `dimensions` query param: comma-
 // separated key=value pairs ("model=gpt-4o,token_type=input"). Values
 // that parse as JSON booleans or numbers are typed accordingly

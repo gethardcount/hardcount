@@ -213,6 +213,40 @@ test('the Usage page shows a Maximum meter as its peak per customer, not the sum
   expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
 })
 
+test('Usage: a half-typed dimension shows a hint, and Export CSV holds only the filtered rows', async ({ page }) => {
+  const id = uniq()
+  const key = `e2e_tokens_${id}`
+  const meter = await api<{ id: string }>('POST', '/meters', { key, name: `E2E Tokens ${id}`, unit: 'token', aggregation: 'sum' })
+  const customer = await createCustomer()
+  for (const [model, quantity] of [['gpt-4o', '5'], ['gpt-4o', '7'], ['gpt-4o-mini', '11']] as const) {
+    await api('POST', '/usage-events', {
+      external_customer_id: customer.external_id, event_name: key, quantity,
+      dimensions: { model }, idempotency_key: `e2e_${uniq()}`,
+    })
+  }
+
+  await page.goto(`/usage?meter=${meter.id}`)
+  const box = page.getByLabel('Dimension filter')
+  await box.fill('model')
+  await expect(page.getByText('"model" needs a value: use key=value, for example model=gpt-4o')).toBeVisible()
+  // The page stays up; the half-typed filter never reached the server.
+  await expect(page.getByRole('heading', { level: 1, name: 'Usage Events', exact: true })).toBeVisible()
+  await expect(page).not.toHaveURL(/dim=/)
+
+  await box.fill('model=gpt-4o')
+  await expect(page).toHaveURL(/dim=model%3Dgpt-4o/)
+  await expect(page.getByText('"model" needs a value')).toBeHidden()
+
+  const downloading = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export CSV' }).click()
+  const file = fs.readFileSync(await (await downloading).path(), 'utf8')
+  const rows = file.trim().split('\n').slice(1)
+  // gpt-4o's two events, never gpt-4o-mini's.
+  expect(rows).toHaveLength(2)
+  expect(rows.every(r => r.includes(customer.id) && r.includes(meter.id))).toBe(true)
+  expect(rows.map(r => Number(r.split(',')[3])).sort()).toEqual([5, 7])
+})
+
 test('the next-invoice preview prorates a mid-month calendar start', async ({ page }) => {
   // A clock frozen on Jan 13 and a calendar-billed subscription started then:
   // its first period is Jan 13–31, 19 of January's 31 days.
