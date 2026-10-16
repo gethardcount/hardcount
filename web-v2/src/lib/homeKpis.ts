@@ -21,12 +21,12 @@ export interface Trend {
   previous: number
 }
 
-// What "Customers" means on Home. Shown as the card's tooltip.
+// What each Home card counts, shown under the number on the card.
 export const CUSTOMERS_DEFINITION =
-  'Customers with at least one active or trialing subscription. Customers on a test clock are not counted.'
+  'Customers with an active or trialing subscription. Test-clock customers are not counted.'
 
 export const FAILED_PAYMENTS_DEFINITION =
-  'Invoices created in this period whose payment failed, compared with the period before.'
+  'Invoices created in this period whose payment failed.'
 
 // Never negative: a count below zero is a bug, and a negative baseline turns
 // the percentage upside down.
@@ -42,11 +42,15 @@ export function failedPaymentsTrend(o: HomeOverviewCounts): Trend {
   return { current: count(o.failed_payments), previous: count(o.failed_payments_prev) }
 }
 
-// "3 active · 1 trialing subscriptions": the subscriptions behind the
-// customer count. Trialing shows only when there is one.
+// "2 active subscriptions · 1 trialing subscription": the subscriptions
+// behind the customer count, each count with its own noun. Trialing shows
+// only when there is one.
 export function subscriptionsHint(o: HomeOverviewCounts): string {
-  const active = count(o.active_subscriptions)
+  const active = subscriptions(count(o.active_subscriptions), 'active')
   const trialing = count(o.trialing_subscriptions)
-  const noun = active + trialing === 1 ? 'subscription' : 'subscriptions'
-  return trialing > 0 ? `${active} active · ${trialing} trialing ${noun}` : `${active} active ${noun}`
+  return trialing > 0 ? `${active} · ${subscriptions(trialing, 'trialing')}` : active
+}
+
+function subscriptions(n: number, kind: string): string {
+  return `${n} ${kind} ${n === 1 ? 'subscription' : 'subscriptions'}`
 }

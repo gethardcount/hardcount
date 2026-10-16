@@ -168,9 +168,12 @@ test('Home counts trialing subscriptions and compares failed payments with the p
 
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Home', exact: true })).toBeVisible()
-  const customers = page.getByText('Customers', { exact: true }).locator('xpath=ancestor::*[@title][1]')
-  await expect(customers).toHaveAttribute('title', /active or trialing subscription/)
-  await expect(customers).toContainText(/\d+ active · [1-9]\d* trialing subscriptions?/)
+  // The definition is on the card as text, not only in a hover tooltip.
+  const definition = page.getByText(/^Customers with an active or trialing subscription/)
+  await expect(definition).toBeVisible()
+  const customers = definition.locator('..')
+  await expect(customers).toContainText(/\d+ active subscriptions? · [1-9]\d* trialing subscriptions?/)
+  await expect(customers).not.toContainText(/\d+ active · /)
   const failed = page.getByText('Failed payments', { exact: true }).locator('..')
   await expect(failed).toContainText(/\d+ in the previous 30 days/)
 })

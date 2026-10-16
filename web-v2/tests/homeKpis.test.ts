@@ -29,7 +29,9 @@ test('a baseline is never negative', () => {
 })
 
 test('the hint names trialing subscriptions only when there are some', () => {
-  assert.equal(subscriptionsHint(base), '3 active · 1 trialing subscriptions')
+  assert.equal(subscriptionsHint(base), '3 active subscriptions · 1 trialing subscription')
+  assert.equal(subscriptionsHint({ ...base, active_subscriptions: 2, trialing_subscriptions: 1 }), '2 active subscriptions · 1 trialing subscription')
+  assert.equal(subscriptionsHint({ ...base, active_subscriptions: 1, trialing_subscriptions: 2 }), '1 active subscription · 2 trialing subscriptions')
   assert.equal(subscriptionsHint({ ...base, trialing_subscriptions: 0 }), '3 active subscriptions')
   assert.equal(subscriptionsHint({ ...base, active_subscriptions: 1, trialing_subscriptions: 0 }), '1 active subscription')
 })

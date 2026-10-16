@@ -88,8 +88,7 @@ export default function DashboardPage() {
   // The server returns only buckets with revenue; the chart plots every bucket
   // in the window, zero where nothing was paid, so a gap reads as a gap. The
   // window is anchored on the fetch time, the closest client-side match to the
-  // server's time.Now(). The MRR card's sparkline below still reads the raw
-  // points; it is out of scope here.
+  // server's time.Now().
   const chartSeries = useMemo(
     () => fillRevenueBuckets(chartData, chartRes?.period ?? period, chartFetchedAt),
     [chartData, chartRes?.period, period, chartFetchedAt],
@@ -212,14 +211,14 @@ export default function DashboardPage() {
             />
             <TrendCard
               label="Customers"
-              title={CUSTOMERS_DEFINITION}
+              definition={CUSTOMERS_DEFINITION}
               value={overview.live_customers}
               {...customersTrend(overview)}
               hint={subscriptionsHint(overview)}
             />
             <TrendCard
               label="Failed payments"
-              title={FAILED_PAYMENTS_DEFINITION}
+              definition={FAILED_PAYMENTS_DEFINITION}
               value={overview.failed_payments}
               {...failedPaymentsTrend(overview)}
               inverseDelta
