@@ -107,6 +107,27 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   await expect(page.getByText('Amount Due', { exact: true }).locator('..')).toContainText(usd(invoice.amount_due_cents))
 })
 
+test('a draft invoice reads as a draft and shows its memo', async ({ page }) => {
+  const customer = await createCustomer()
+  const memo = `E2E memo ${uniq()}`
+  const invoice = await api<Invoice>('POST', '/invoices', {
+    customer_id: customer.id,
+    currency: 'USD',
+    net_payment_term_days: 30,
+    memo,
+    line_items: [{ description: 'E2E setup fee', line_type: 'add_on', quantity: 1, unit_amount_cents: 1000 }],
+  })
+  expect(invoice.status).toBe('draft')
+
+  await page.goto(`/invoices/${invoice.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
+  // The API stamps provisional dates on a draft; the page must not show them
+  // as if the invoice had been issued.
+  await expect(page.getByText('Issued', { exact: true }).locator('..')).toContainText('Draft — not issued')
+  await expect(page.getByText('Due', { exact: true }).locator('..')).toContainText('Net 30 from finalizing')
+  await expect(page.getByText('Memo', { exact: true }).locator('..')).toContainText(memo)
+})
+
 test('a dialog taller than the window keeps its actions in view', async ({ page }) => {
   const customer = await createCustomer()
   await page.setViewportSize({ width: 1440, height: 520 })
