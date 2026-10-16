@@ -3436,7 +3436,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// from the gross inputs; in exclusive mode these pass through unchanged,
 	// so the caller always reads the authoritative values off the result.
 	totalWithTax := taxApp.SubtotalCents - taxApp.DiscountCents + taxApp.TaxAmountCents
-	dueAt := now.AddDate(0, 0, netDays)
+	dueAt := domain.AddDaysIn(now, netDays, billingLoc)
 
 	// Single source of truth for the draft/finalized decision —
 	// shared across all four invoice-emitting paths (cycle close,
@@ -3880,7 +3880,7 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 		return domain.Invoice{}, nil, false, fmt.Errorf("apply tax: %w", err)
 	}
 
-	dueAt := now.AddDate(0, 0, netDays)
+	dueAt := domain.AddDaysIn(now, netDays, billingLoc)
 
 	totalWithTax := taxApp.SubtotalCents - taxApp.DiscountCents + taxApp.TaxAmountCents
 
@@ -4613,7 +4613,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		return domain.Invoice{}, fmt.Errorf("apply tax on cancel: %w", err)
 	}
 	now := e.effectiveNow(ctx, sub)
-	dueAt := now.AddDate(0, 0, netDays)
+	dueAt := domain.AddDaysIn(now, netDays, billingLoc)
 	totalWithTax := taxApp.SubtotalCents - taxApp.DiscountCents + taxApp.TaxAmountCents
 
 	invoiceNumber, err := e.nextInvoiceNumber(ctx, tx, sub.TenantID)

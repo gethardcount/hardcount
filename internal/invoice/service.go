@@ -601,7 +601,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		return domain.Invoice{}, fmt.Errorf("allocate invoice number: %w", err)
 	}
 	issuedAt := now
-	dueAt := now.AddDate(0, 0, netDays)
+	// Net N runs on the tenant's civil calendar, so the due date stays the
+	// same wall-clock time across a DST change.
+	dueAt := domain.AddDaysIn(now, netDays, s.invoiceLocation(ctx, tenantID))
 
 	inv := domain.Invoice{
 		CustomerID:         input.CustomerID,
@@ -1105,7 +1107,7 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	var finalized domain.Invoice
 	if isOperatorComposed(inv) {
 		issuedAt := s.clock.Now(ctx)
-		dueAt := issuedAt.AddDate(0, 0, inv.NetPaymentTermDays)
+		dueAt := domain.AddDaysIn(issuedAt, inv.NetPaymentTermDays, s.invoiceDisplayLoc(ctx, inv))
 		finalized, err = s.store.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt)
 	} else {
 		finalized, err = s.store.UpdateStatus(ctx, tenantID, id, domain.InvoiceFinalized)

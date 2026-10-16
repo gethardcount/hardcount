@@ -2349,7 +2349,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			}
 			netDays = d
 		}
-		dueAt := now.AddDate(0, 0, netDays)
+		dueAt := domain.AddDaysIn(now, netDays, billingLoc)
 
 		periodStart := spec.changeAt
 		var periodEnd time.Time

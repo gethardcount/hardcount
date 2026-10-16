@@ -771,7 +771,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	}
 	totalWithTax := taxApp.SubtotalCents - taxApp.DiscountCents + taxApp.TaxAmountCents
 
-	dueAt := now.AddDate(0, 0, netDays)
+	dueAt := domain.AddDaysIn(now, netDays, billingLoc)
 
 	// Shared finalization gate (tax-pending OR pause-collection → Draft),
 	// same as every other invoice writer. The scan currently skips paused

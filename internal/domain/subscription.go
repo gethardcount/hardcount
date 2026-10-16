@@ -78,6 +78,20 @@ func LoadLocationOrUTC(name string) *time.Location {
 	return loc
 }
 
+// AddDaysIn advances t by n calendar days in loc and returns a UTC instant.
+// The day add runs on the civil calendar of loc, so the wall-clock time stays
+// the same across a DST change. A plain t.AddDate(0, 0, n) on a UTC instant
+// adds n×24h instead, which lands one hour off in loc when the span crosses a
+// DST change and can move the result across civil midnight.
+// Day-grade deadlines read as dates in the tenant timezone (invoice due dates,
+// trial ends) go through here. loc=nil falls back to UTC.
+func AddDaysIn(t time.Time, n int, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).AddDate(0, 0, n).UTC()
+}
+
 // InclusiveDisplayEnd converts a half-open period_end (the EXCLUSIVE boundary,
 // = the next period's start) into the last calendar day FULLY covered by the
 // period, in the tenant timezone `loc` — the industry-standard inclusive
@@ -270,8 +284,9 @@ func IsPeriodStartOnAnchor(t time.Time, anchorDay int, loc *time.Location) bool 
 // This is the single fix for the timezone date-math defect class: every
 // month/year advance MUST go through here (or NextBillingPeriodEnd, which
 // does), so the result no longer varies with whether the input time.Time was
-// freshly built in UTC or DB-scanned as time.Local. Day-grade adds
-// (AddDate(0,0,N) for trial/due dates) are TZ-invariant and need not route here.
+// freshly built in UTC or DB-scanned as time.Local. Day-grade adds are not
+// TZ-invariant either: N days on a UTC instant is N×24h, which crosses a DST
+// change one hour off civil time. Due dates and trial ends use AddDaysIn.
 func addIntervalIn(t time.Time, interval BillingInterval, loc *time.Location) time.Time {
 	if loc == nil {
 		loc = time.UTC
