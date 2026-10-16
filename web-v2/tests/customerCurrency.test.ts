@@ -5,7 +5,7 @@
 // card fell back to the workspace default (USD) instead of the plan.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { resolveCustomerCurrency } from '../src/lib/customerCurrency.ts'
+import { resolveCustomerCurrency, settledCustomerCurrency } from '../src/lib/customerCurrency.ts'
 
 const plans = [
   { id: 'pln_eur', currency: 'EUR' },
@@ -96,4 +96,15 @@ test('a plan the page has not loaded falls through instead of guessing', () => {
     workspaceDefault: 'USD',
   })
   assert.equal(c.source, 'invoice')
+})
+
+test('no currency while any read is loading or has failed', () => {
+  // A failed billing-profile read must not fall through to the plan or the
+  // workspace default: the profile's currency is the one the engine uses, so
+  // a New invoice dialog would open in a currency the engine refuses.
+  const input = () => ({ billingProfileCurrency: null, workspaceDefault: 'USD' })
+  const ok = { isLoading: false, isError: false }
+  assert.equal(settledCustomerCurrency([ok, { isLoading: true, isError: false }], input), undefined)
+  assert.equal(settledCustomerCurrency([ok, { isLoading: false, isError: true }], input), undefined)
+  assert.deepEqual(settledCustomerCurrency([ok, ok], input), { currency: 'USD', source: 'workspace' })
 })

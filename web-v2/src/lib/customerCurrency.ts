@@ -68,3 +68,24 @@ export function resolveCustomerCurrency(input: CurrencyInput): CustomerCurrency 
   if (newest?.currency) return { currency: newest.currency.toUpperCase(), source: 'invoice' }
   return { currency: input.workspaceDefault.toUpperCase(), source: 'workspace' }
 }
+
+// The state of one query feeding the answer (a react-query result fits).
+export interface CurrencyQueryState {
+  isLoading: boolean
+  isError: boolean
+}
+
+// settledCustomerCurrency answers only once every query has loaded without
+// error. While one loads, answering with the workspace default showed a EUR
+// customer's figures in dollars for a moment. When one has failed, the
+// fallback would be a guess: a failed billing-profile read would skip the
+// profile's currency, and a New invoice dialog would open in a currency the
+// engine then refuses. Undefined makes the page show "—" and keep New invoice
+// disabled.
+export function settledCustomerCurrency(
+  queries: readonly CurrencyQueryState[],
+  input: () => CurrencyInput,
+): CustomerCurrency | undefined {
+  if (queries.some(q => q.isLoading || q.isError)) return undefined
+  return resolveCustomerCurrency(input())
+}

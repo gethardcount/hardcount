@@ -262,11 +262,13 @@ export default function CustomerDetailPage() {
   })
   const profileCard = billingProfileCard({ data: billingProfile, isError: billingProfileError })
 
-  // One currency for every figure on this page that has none of its own:
-  // the live subscription's plan, then the billing profile, then the latest
-  // invoice, then the workspace default (lib/customerCurrency). Credits have
-  // no currency either; they are drawn 1:1 against the invoice (ADR-100).
-  // Undefined while it loads: figures read "—" rather than a wrong currency.
+  // One currency for every figure on this page that has none of its own, in
+  // the order the engine picks an invoice's currency: the billing profile,
+  // then the live subscription's plan, then the latest invoice, then the
+  // workspace default (lib/customerCurrency). Credits have no currency
+  // either; they are drawn 1:1 against the invoice (ADR-100). Undefined
+  // while it loads or if a read failed: figures read "—" and New invoice
+  // stays disabled rather than use a wrong currency.
   const customerCurrency = useCustomerCurrency(id)
   const creditCurrency = customerCurrency?.currency
   const creditMoney = (cents: number) => (creditCurrency ? formatCents(cents, creditCurrency) : '—')
