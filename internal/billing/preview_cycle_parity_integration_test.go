@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
@@ -230,20 +231,23 @@ func TestPreview_TrialEndingOn30thMatchesFirstInvoice(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create plan: %v", err)
 			}
-			// The shape subscription.Service.Create stamps for a trial
-			// (firstPeriodAfterTrial): the current period is the first PAID
-			// period, starting the day the trial ends.
-			created, err := f.subs.Create(clock.WithEffectiveNow(f.ctx, trialStart), f.tenantID, domain.Subscription{
+			// Created the way the API creates a trial: subscription.Service.Create
+			// with 29 trial days from Oct 1 stamps trial_end Oct 30 and, through
+			// firstPeriodAfterTrial, the first PAID period [Oct 30, Nov 1) as
+			// the current period.
+			created, err := subscription.NewService(f.subs, nil).Create(clock.WithEffectiveNow(f.ctx, trialStart), f.tenantID, subscription.CreateInput{
 				Code: "sub-trial30", DisplayName: "sub-trial30", CustomerID: f.custID,
-				Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeCalendar,
-				StartedAt: &trialStart, TrialStartAt: &trialStart, TrialEndAt: &trialEnd,
-				CurrentBillingPeriodStart: &trialEnd,
-				CurrentBillingPeriodEnd:   &firstEnd,
-				NextBillingAt:             &firstEnd,
-				Items:                     []domain.SubscriptionItem{{PlanID: p.ID, Quantity: 1}},
+				BillingTime: domain.BillingTimeCalendar, TrialDays: 29,
+				Items: []subscription.CreateItemInput{{PlanID: p.ID, Quantity: 1}},
 			})
 			if err != nil {
 				t.Fatalf("create trialing sub: %v", err)
+			}
+			if created.Status != domain.SubscriptionTrialing || created.TrialEndAt == nil || !created.TrialEndAt.Equal(trialEnd) ||
+				created.CurrentBillingPeriodStart == nil || !created.CurrentBillingPeriodStart.Equal(trialEnd) ||
+				created.CurrentBillingPeriodEnd == nil || !created.CurrentBillingPeriodEnd.Equal(firstEnd) {
+				t.Fatalf("created sub status=%s trial_end=%v period=[%v, %v), want trialing, trial_end %v, period [%v, %v)",
+					created.Status, created.TrialEndAt, created.CurrentBillingPeriodStart, created.CurrentBillingPeriodEnd, trialEnd, trialEnd, firstEnd)
 			}
 			sub, err := f.subs.Get(f.ctx, f.tenantID, created.ID)
 			if err != nil {

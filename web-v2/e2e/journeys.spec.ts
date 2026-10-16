@@ -228,6 +228,29 @@ test('the next-invoice preview prorates a mid-month calendar start', async ({ pa
   await expect(row).toContainText(usd(base.amount_cents))
 })
 
+test('the next-invoice preview says why a trial set to cancel has no invoice', async ({ page }) => {
+  // A trial canceled at its end issues no invoice, so the preview has no
+  // lines. The card used to show an empty table with no words.
+  const plan = await createPlan()
+  const customer = await createCustomer()
+  const id = uniq()
+  const sub = await api<Subscription>('POST', '/subscriptions', {
+    code: `e2e-trial-${id}`,
+    display_name: `E2E Trial ${id}`,
+    customer_id: customer.id,
+    items: [{ plan_id: plan.id, quantity: 1 }],
+    trial_days: 14,
+  })
+  await api('POST', `/subscriptions/${sub.id}/schedule-cancel`, { at_period_end: true })
+  const preview = await api<{ lines: unknown[]; warnings: string[] }>('GET', `/billing/preview/${sub.id}`)
+  expect(preview.lines).toHaveLength(0)
+  expect(preview.warnings).toContain('A cancel is scheduled for the end of the trial, so no invoice will be issued.')
+
+  await page.goto(`/subscriptions/${sub.id}`)
+  await expect(page.getByText('A cancel is scheduled for the end of the trial, so no invoice will be issued.')).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Description' })).toHaveCount(0)
+})
+
 test('a dialog taller than the window keeps its actions in view', async ({ page }) => {
   const customer = await createCustomer()
   await page.setViewportSize({ width: 1440, height: 520 })

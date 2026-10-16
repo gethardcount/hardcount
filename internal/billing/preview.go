@@ -471,13 +471,13 @@ func trialConversionSegments(sub domain.Subscription, periodStart, periodEnd tim
 // when no item is in_advance: the first invoice is then the first period's
 // close, which previewAsClose composes from trialConversionSegments.
 func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, plans map[string]domain.Plan, meterIDs []string, periodStart, periodEnd time.Time, loc *time.Location, result PreviewResult) (PreviewResult, bool, error) {
+	// Every item shares one bill timing (rejectMixedItemIntervals on every
+	// item write; a live plan's timing is immutable), so either all items
+	// are in_advance or none is.
 	var advanceItems []domain.SubscriptionItem
-	hasArrears := false
 	for _, it := range sub.Items {
 		if plans[it.PlanID].BaseBillTiming == domain.BillInAdvance {
 			advanceItems = append(advanceItems, it)
-		} else {
-			hasArrears = true
 		}
 	}
 	if len(advanceItems) == 0 {
@@ -502,9 +502,9 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, p
 	// The trial-end invoice covers the first paid period itself, not the
 	// one after it (the in_advance header shift does not apply).
 	result.BillingPeriodStart, result.BillingPeriodEnd = periodStart, periodEnd
-	if hasArrears || len(meterIDs) > 0 {
+	if len(meterIDs) > 0 {
 		result.Warnings = append(result.Warnings,
-			"This is the invoice issued when the trial ends. Fees billed in arrears and usage for this period are on the invoice at the end of the period.")
+			"This is the invoice issued when the trial ends. Usage for this period is on the invoice at the end of the period.")
 	}
 	result.Totals = computePreviewTotals(result.Lines)
 	return result, true, nil

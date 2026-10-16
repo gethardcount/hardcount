@@ -24,6 +24,7 @@ import { effectiveNow } from '@/lib/effectiveNow'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant } from '@/lib/status'
 import { subscriptionWillAutoCharge, hasUsableCard } from '@/lib/paymentReadiness'
+import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -144,6 +145,7 @@ export default function SubscriptionDetailPage() {
     enabled: !!id,
     retry: false,
   })
+  const previewNotes = preview ? invoicePreviewNotes(preview) : null
 
   // Simulated "now" as a Date (the clock's frozen_time when this sub is pinned,
   // else wall time) — the single anchor for the lifecycle timeline's past/future
@@ -1046,33 +1048,46 @@ export default function SubscriptionDetailPage() {
           <CardTitle className="text-sm">Next Invoice Preview</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {preview ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Quantity</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {preview.lines.map((line, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{line.description}</TableCell>
-                    <TableCell className="text-right tabular-nums">{Number(line.quantity).toLocaleString(undefined, { maximumFractionDigits: 6 })}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCents(line.amount_cents, line.currency)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-              <tfoot>
-                {preview.totals.map(t => (
-                  <TableRow key={t.currency} className="border-t-2">
-                    <TableCell colSpan={2} className="text-right font-semibold">Subtotal{preview.totals.length > 1 ? ` (${t.currency})` : ''}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatCents(t.amount_cents, t.currency)}</TableCell>
-                  </TableRow>
-                ))}
-              </tfoot>
-            </Table>
+          {preview && previewNotes ? (
+            previewNotes.empty ? (
+              <div className="px-6 py-8 text-center space-y-1">
+                {previewNotes.notes.map((n, i) => <p key={i} className="text-sm text-muted-foreground">{n}</p>)}
+              </div>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Description</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preview.lines.map((line, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{line.description}</TableCell>
+                        <TableCell className="text-right tabular-nums">{Number(line.quantity).toLocaleString(undefined, { maximumFractionDigits: 6 })}</TableCell>
+                        <TableCell className="text-right font-medium">{formatCents(line.amount_cents, line.currency)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                  <tfoot>
+                    {preview.totals.map(t => (
+                      <TableRow key={t.currency} className="border-t-2">
+                        <TableCell colSpan={2} className="text-right font-semibold">Subtotal{preview.totals.length > 1 ? ` (${t.currency})` : ''}</TableCell>
+                        <TableCell className="text-right font-semibold">{formatCents(t.amount_cents, t.currency)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </tfoot>
+                </Table>
+                {previewNotes.notes.length > 0 && (
+                  <ul className="border-t px-6 py-3 space-y-1 text-xs text-muted-foreground">
+                    {previewNotes.notes.map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                )}
+              </>
+            )
           ) : previewError ? (
             <div className="px-6 py-8 text-center">
               <p className="text-sm text-muted-foreground">Preview not available</p>
