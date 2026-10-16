@@ -3,7 +3,7 @@ import { test, expect, type Locator } from '@playwright/test'
 import { env, seedFile } from './fixtures/env'
 import { api, usd, uniq } from './fixtures/api'
 import {
-  createCustomer, createPlan, subscribedCustomer, invoicesFor,
+  createCustomer, createPlan, createSubscription, subscribedCustomer, invoicesFor,
   type Customer, type Invoice, type Seed, type Subscription,
 } from './fixtures/seed'
 
@@ -375,4 +375,14 @@ test('grant credits and see the balance', async ({ page }) => {
   const balance = await api<{ balance_cents: number }>('GET', `/credits/balance/${customer.id}`)
   expect(balance.balance_cents).toBe(2500)
   await expect(page.getByText('Credit Balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
+})
+
+test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => {
+  // No billing profile and no invoice yet: the live plan sets the currency.
+  // The page used to fall back to the workspace's USD and read $0.00.
+  const plan = await createPlan('EUR')
+  const customer = await createCustomer()
+  await createSubscription(customer.id, plan.id)
+  await page.goto(`/customers/${customer.id}`)
+  await expect(page.getByRole('link', { name: /Credit Balance/ })).toContainText('€0.00')
 })
