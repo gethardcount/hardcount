@@ -35,6 +35,14 @@ func TestIssueDateRows_DraftIsNotIssued(t *testing.T) {
 		t.Fatalf("cycle draft rows = %v, want %v", rows, want)
 	}
 
+	// A cycle draft without a due date prints the terms, as the page does,
+	// not a draft with no due row at all.
+	cycleNoDue := domain.Invoice{Status: domain.InvoiceDraft, BillingReason: domain.BillingReasonSubscriptionCycle, NetPaymentTermDays: 14}
+	want = [][2]string{{"Status", "Draft — not issued"}, {"Due", "Net 14 from finalizing"}}
+	if rows := issueDateRows(cycleNoDue, time.UTC); !equalRows(rows, want) {
+		t.Fatalf("cycle draft without due date rows = %v, want %v", rows, want)
+	}
+
 	open := domain.Invoice{Status: domain.InvoiceFinalized, IssuedAt: &issued, DueAt: &due}
 	want = [][2]string{{"Issued", "October 16, 2026"}, {"Due Date", "November 15, 2026"}}
 	if rows := issueDateRows(open, time.UTC); !equalRows(rows, want) {

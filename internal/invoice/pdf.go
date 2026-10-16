@@ -870,17 +870,15 @@ func sellerName(company ...CompanyInfo) string {
 // the invoice page uses: an operator-composed draft gets its due date at
 // finalize (Net N from then), so it prints the terms; an engine draft (a
 // cycle invoice held as a draft) keeps the due date it was built with, so
-// that date is printed.
+// that date is printed. An engine draft with no due date prints the terms,
+// as the page does (lib/invoiceDocument issueDates), rather than no due row.
 func issueDateRows(inv domain.Invoice, loc *time.Location) [][2]string {
 	if inv.Status == domain.InvoiceDraft {
 		rows := [][2]string{{"Status", "Draft — not issued"}}
-		switch {
-		case isOperatorComposed(inv):
-			rows = append(rows, [2]string{"Due", draftDueTerms(inv.NetPaymentTermDays)})
-		case inv.DueAt != nil:
-			rows = append(rows, [2]string{"Due Date", inv.DueAt.In(loc).Format("January 2, 2006")})
+		if isOperatorComposed(inv) || inv.DueAt == nil {
+			return append(rows, [2]string{"Due", draftDueTerms(inv.NetPaymentTermDays)})
 		}
-		return rows
+		return append(rows, [2]string{"Due Date", inv.DueAt.In(loc).Format("January 2, 2006")})
 	}
 	var rows [][2]string
 	if inv.IssuedAt != nil {
