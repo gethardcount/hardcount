@@ -4065,7 +4065,11 @@ paths:
         Usage per meter on the customer's active and trialing
         subscriptions, priced the same way the invoice prices it. With no
         `from` and `to`, the period is the current billing cycle of the
-        subscription whose cycle started last. Send both or neither.
+        subscription whose cycle started last, as of the customer's current
+        time (the test clock's time for a customer on a test clock). A
+        trialing subscription's cycle starts when its trial ends, so it is
+        not picked before then, unless no subscription's cycle has started.
+        Send both or neither.
 
         Errors: 404 if the customer does not exist. 422 when only one of
         `from`/`to` is sent, when `from` is not before `to`, when the

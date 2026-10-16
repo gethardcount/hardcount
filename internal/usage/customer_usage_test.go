@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
@@ -142,6 +143,12 @@ func TestResolvePeriod(t *testing.T) {
 	leap1 := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
 	leapDec31End := time.Date(2028, 12, 31, 23, 59, 59, 999_999_000, time.UTC)
 
+	oct1 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	oct10 := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	oct24 := time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
+	nov1 := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	nov24 := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+
 	subWithCycle := func(start, end time.Time) domain.Subscription {
 		return domain.Subscription{
 			ID:                        "sub_1",
@@ -150,6 +157,12 @@ func TestResolvePeriod(t *testing.T) {
 			CurrentBillingPeriodStart: &start,
 			CurrentBillingPeriodEnd:   &end,
 		}
+	}
+	trialingWithCycle := func(start, end time.Time) domain.Subscription {
+		sub := subWithCycle(start, end)
+		sub.ID = "sub_trial"
+		sub.Status = domain.SubscriptionTrialing
+		return sub
 	}
 
 	cases := []struct {
@@ -160,6 +173,7 @@ func TestResolvePeriod(t *testing.T) {
 		wantFrom    time.Time
 		wantTo      time.Time
 		wantErrCode string
+		now         time.Time // customer's effective now; zero → jun1
 	}{
 		{
 			name:       "default to current cycle",
@@ -225,6 +239,40 @@ func TestResolvePeriod(t *testing.T) {
 			wantErrCode: "",
 		},
 		{
+			// Sub A active Oct 1 → Nov 1. On Oct 10 sub B starts a 14-day
+			// trial; its stored period is the first PAID one, Oct 24 → Nov 24.
+			// Until Oct 24 the default must stay on A's running cycle.
+			name: "future trial cycle is skipped while another cycle runs",
+			subs: []domain.Subscription{
+				subWithCycle(oct1, nov1),
+				trialingWithCycle(oct24, nov24),
+			},
+			now:        oct10,
+			wantSource: "current_billing_cycle",
+			wantFrom:   oct1,
+			wantTo:     nov1,
+		},
+		{
+			name: "trial cycle is picked once it has started",
+			subs: []domain.Subscription{
+				subWithCycle(oct1, nov1),
+				trialingWithCycle(oct24, nov24),
+			},
+			now:        oct24,
+			wantSource: "current_billing_cycle",
+			wantFrom:   oct24,
+			wantTo:     nov24,
+		},
+		{
+			// No cycle has started: keep the long-standing pick (latest start).
+			name:       "only a future trial cycle falls back to it",
+			subs:       []domain.Subscription{trialingWithCycle(oct24, nov24)},
+			now:        oct10,
+			wantSource: "current_billing_cycle",
+			wantFrom:   oct24,
+			wantTo:     nov24,
+		},
+		{
 			name: "multi-sub picks latest period start",
 			subs: []domain.Subscription{
 				subWithCycle(apr1, may1),
@@ -238,7 +286,11 @@ func TestResolvePeriod(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			from, to, source, err := resolvePeriod(tc.period, tc.subs)
+			now := tc.now
+			if now.IsZero() {
+				now = jun1 // after every default-case cycle start above
+			}
+			from, to, source, err := resolvePeriod(tc.period, tc.subs, func() time.Time { return now })
 			if tc.wantSource == "" {
 				if err == nil {
 					t.Fatalf("expected error, got from=%v to=%v source=%s", from, to, source)
@@ -337,6 +389,50 @@ func TestCustomerUsageService_Get_SingleMeterFlat(t *testing.T) {
 	}
 	if res.Warnings == nil {
 		t.Errorf("warnings: must be []string{} (non-nil for empty array on wire), got nil")
+	}
+}
+
+// The default window follows the customer's effective now (test-clock
+// frozen_time), and skips a trialing sub whose stored period — its first PAID
+// period — has not started. Customer on a clock frozen at 2027-03-10: sub A
+// active 2027-03-01 → 04-01, sub B trialing with first paid period
+// 2027-03-24 → 04-24. The default must be A's running cycle; before the fix
+// it was B's future one, so A's usage read $0. The dates are in the wall-clock
+// future, so a wall-clock "now" would also pick B: this proves the
+// clock-resolver wiring, not just resolvePeriod.
+func TestCustomerUsageService_Get_DefaultSkipsNotYetStartedTrialCycle(t *testing.T) {
+	mar1 := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	mar10 := time.Date(2027, 3, 10, 0, 0, 0, 0, time.UTC)
+	mar24 := time.Date(2027, 3, 24, 0, 0, 0, 0, time.UTC)
+	apr1 := time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)
+	apr24 := time.Date(2027, 4, 24, 0, 0, 0, 0, time.UTC)
+
+	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
+		"t1/cus_1": {ID: "cus_1", TenantID: "t1"},
+	}}
+	subs := &fakeSubLister{subs: []domain.Subscription{
+		{
+			ID: "sub_a", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionActive,
+			CurrentBillingPeriodStart: &mar1, CurrentBillingPeriodEnd: &apr1,
+		},
+		{
+			ID: "sub_b", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionTrialing,
+			CurrentBillingPeriodStart: &mar24, CurrentBillingPeriodEnd: &apr24,
+		},
+	}}
+	usageSvc := NewService(newAggStore())
+	usageSvc.SetResolver(&fakeResolver{frozen: map[string]time.Time{"cus_1": mar10}})
+	svc := NewCustomerUsageService(usageSvc, customers, subs, &fakePricingReader{})
+
+	ctx := postgres.WithLivemode(context.Background(), false) // test clocks are test-mode only
+	res, err := svc.Get(ctx, "t1", "cus_1", CustomerUsagePeriod{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Period.From.Equal(mar1) || !res.Period.To.Equal(apr1) {
+		t.Errorf("default period: got %s → %s, want sub A's running cycle %s → %s (sub B's trial cycle starts %s, after the clock's %s)",
+			res.Period.From.Format(time.RFC3339), res.Period.To.Format(time.RFC3339),
+			mar1.Format(time.RFC3339), apr1.Format(time.RFC3339), mar24.Format(time.RFC3339), mar10.Format(time.RFC3339))
 	}
 }
 

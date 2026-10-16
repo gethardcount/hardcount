@@ -214,7 +214,9 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	}
 	activeSubs := filterActiveSubs(subs)
 
-	from, to, source, err := resolvePeriod(period, activeSubs)
+	from, to, source, err := resolvePeriod(period, activeSubs, func() time.Time {
+		return s.usage.effectiveNow(ctx, tenantID, customerID)
+	})
 	if err != nil {
 		return CustomerUsageResult{}, err
 	}
@@ -301,7 +303,10 @@ func composeDailyBuckets(rows []DailyBucketRow, from, to time.Time) []CustomerUs
 // have from < to and span at most one calendar year (to ≤ from + 1y).
 //
 // Returns a DomainError so the handler maps to 422 with the right code.
-func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription) (time.Time, time.Time, string, error) {
+//
+// now is the customer's effective now (test-clock frozen_time when pinned).
+// It is read only for the default, to skip cycles that have not started.
+func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now func() time.Time) (time.Time, time.Time, string, error) {
 	hasFrom := !period.From.IsZero()
 	hasTo := !period.To.IsZero()
 
@@ -324,16 +329,33 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription) (time
 		return period.From, period.To, "explicit", nil
 	}
 
-	// Default: pick the primary active subscription (latest period start).
-	var primary *domain.Subscription
+	// Default: pick the primary subscription — the one whose cycle started
+	// last. A cycle that starts after now has not started: a trialing sub
+	// stores its FIRST PAID period (firstPeriodAfterTrial), which begins at
+	// trial end. Picking it while another sub's cycle is running rated every
+	// meter over a future window, so the running cycle's usage read $0.
+	// Only when NO cycle has started (e.g. the customer's only sub is
+	// trialing) do we fall back to the latest-start pick across all subs,
+	// which is the long-standing behaviour for that case.
+	n := now()
+	var primary, primaryAny *domain.Subscription
 	for i := range subs {
 		sub := &subs[i]
 		if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 			continue
 		}
+		if primaryAny == nil || sub.CurrentBillingPeriodStart.After(*primaryAny.CurrentBillingPeriodStart) {
+			primaryAny = sub
+		}
+		if sub.CurrentBillingPeriodStart.After(n) {
+			continue
+		}
 		if primary == nil || sub.CurrentBillingPeriodStart.After(*primary.CurrentBillingPeriodStart) {
 			primary = sub
 		}
+	}
+	if primary == nil {
+		primary = primaryAny
 	}
 	if primary == nil {
 		return time.Time{}, time.Time{}, "", errs.Invalid(

@@ -1794,6 +1794,8 @@ The credit-note refund leg: operator retry, async webhook reconciliation, proact
 - [~] `/subscriptions`, `/invoices` scoped to that customer. *(walked with a control rather than by inspection: both endpoints returned only that customer's rows, while the tenant-wide `/v1/invoices` list over the same window carried 99 invoices belonging to other customers — so the scoping is doing real filtering.)*
 - [x] **A leap calendar year is within the one-year usage window**: `GET /v1/customers/{id}/usage?from=2028-01-01&to=2028-12-31` → 200 with `period.source: "explicit"`; `?from=2028-01-01T00:00:00Z&to=2029-01-01T00:00:01Z` → 422 "window must be ≤ 1 year". auto: `TestResolvePeriod`
   - Before: the cap was 365×24h, so the 2028 range and any 366-day yearly cycle (also via `/margin`) answered 422.
+- [x] **A trial that has not ended does not take over the default usage period**: customer with sub A active (cycle Oct 1 → Nov 1); on Oct 10 add sub B with a 14-day trial. `GET /v1/customers/{id}/usage` (no `from`/`to`) → `period.from` = Oct 1, `period.to` = Nov 1, and A's October usage is priced. After the trial ends (Oct 24) the default moves to B's cycle. auto: `TestCustomerUsageService_Get_DefaultSkipsNotYetStartedTrialCycle`, `TestResolvePeriod`
+  - Before: the default was B's first paid period (Oct 24 → Nov 24), so every meter read $0 on this endpoint and on the public cost dashboard.
 
 ## FLOW CU4: Archive cascade
 
