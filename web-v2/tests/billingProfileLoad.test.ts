@@ -5,7 +5,7 @@
 // Billing Profile" button over a profile that exists. Saving that blank form
 // replaces the whole profile, which resets the tax status and clears the tax
 // ID, and that changes the tax on later invoices.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { profileOrAbsent, billingProfileCard } from '../src/lib/billingProfileLoad.ts'
 

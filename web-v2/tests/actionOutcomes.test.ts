@@ -3,7 +3,7 @@
 // initiated" for an invoice credit settled with no charge, "collection paused"
 // after the pause failed, "Draft saved" for a finalized invoice, and a spinner
 // that never stopped after a failed load.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   collectOutcome,

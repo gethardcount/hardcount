@@ -4,7 +4,7 @@
 // async mutation. On money paths that legally repeat — issue credit note,
 // replay a webhook, create a one-off invoice — that is a real second refund /
 // second fan-out / second invoice, because the backend does not dedup.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { singleFlight } from '../src/hooks/useSingleFlight.ts'
 

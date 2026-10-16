@@ -1,6 +1,6 @@
 // Wording on the plan, meter, Dashboard and Usage pages that depends on
 // state. Each version gets its own case.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   basePriceZeroBlocked, deleteMatchedPriceSentence, planLockedSentence,

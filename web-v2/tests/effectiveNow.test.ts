@@ -5,9 +5,9 @@
 // This is the runtime companion: it proves each helper measures against the
 // ANCHOR, not wall-clock. If a helper ever leaked Date.now() back in, the frozen
 // 2027 assertions below would flip to real-time deltas (years, or "just now")
-// and fail — that's the mutation-verify. Pure functions, no DOM: runs on the
-// built-in runner with `npm test` (node --test, native TS type-stripping).
-import { test } from 'node:test'
+// and fail — that's the mutation-verify. Pure functions, no DOM: runs under
+// `npm test` (Vitest).
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   effectiveNow,

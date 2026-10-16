@@ -1,9 +1,9 @@
 // Locks MANUAL_TEST FLOW TZ1.3: civil-date pickers/filters interpret the picked
 // yyyy-mm-dd as start/end of that day IN THE TENANT TIMEZONE, returning the right
 // UTC instant — so a "from May 5" filter or an "expires May 5" key means the
-// operator's civil day regardless of who's viewing. Pure functions; runs on the
-// built-in runner (the @/lib/api import is stubbed via tests/support).
-import { test } from 'node:test'
+// operator's civil day regardless of who's viewing. Pure functions; runs under
+// `npm test` (Vitest).
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
 

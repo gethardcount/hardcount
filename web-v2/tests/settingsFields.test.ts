@@ -1,7 +1,7 @@
 // Save Changes with an invalid field on another tab did nothing: only the
 // open tab is rendered, so its error was invisible. The page now opens the
 // tab of the first invalid field and says what to fix.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { firstInvalidSettingsField, invalidSettingsToast } from '../src/lib/settingsFields.ts'
 

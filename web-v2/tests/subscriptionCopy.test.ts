@@ -1,6 +1,6 @@
 // Subscription dialogs and toasts say what really happens, branching on the
 // state the server returns.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   cancelImmediatelyText,

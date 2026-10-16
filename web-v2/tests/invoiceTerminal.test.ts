@@ -3,7 +3,7 @@
 //
 // The failure mode these guard is not a crash — it is a customer-facing page
 // asking for money on an invoice nobody is collecting, which renders perfectly.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   TERMINAL_INVOICE_STATUSES,

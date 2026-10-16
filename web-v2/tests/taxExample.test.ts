@@ -1,7 +1,7 @@
 // The Settings → Tax worked example. Every amount is formatted the same way
 // in the workspace currency; the base used to take its symbol from another
 // list, so a CAD workspace read "$100.00 … = CA$118.00".
-import { test, beforeEach } from 'node:test'
+import { test, beforeEach } from 'vitest'
 import assert from 'node:assert/strict'
 import { setActiveCurrency } from '../src/lib/money.ts'
 import { taxExampleAmounts } from '../src/lib/taxExample.ts'

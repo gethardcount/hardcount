@@ -592,6 +592,8 @@ jobs:
       # The web-v2 unit suite (effectiveNow drift-guard, csv, vocabulary) ran
       # NOWHERE in CI until 2026-07-19 — a green pipeline said nothing about
       # it.
+      # `npm test` = `vitest run` over web-v2/tests; the build step above
+      # already type-checked those tests (tsconfig.test.json under `tsc -b`).
       - name: Frontend unit tests
         run: cd web-v2 && npm test
 

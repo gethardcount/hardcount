@@ -1,7 +1,7 @@
 // The onboarding pill (fixed bottom-right) covered Settings' Save Changes
 // button at 390px. It hides while a sticky action bar is shown; these pin the
 // bookkeeping that decides "shown".
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { showStickyActionBar, stickyActionBarShown, subscribeStickyActionBar } from '../src/lib/stickyActionBar.ts'
 

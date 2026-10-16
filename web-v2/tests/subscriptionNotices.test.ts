@@ -1,7 +1,7 @@
 // The subscription page shows at most one notice box (the most urgent that
 // applies); every other notice is a one-line row that keeps its button. It
 // used to stack up to four boxes above the page.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   NO_CARD_SENTENCE,

@@ -8,7 +8,7 @@
     "dev": "vite",
     "prebuild": "npm run copy-spec",
     "build": "tsc -b && vite build",
-    "test": "node --test --import ./tests/support/register-alias.mjs tests/*.test.ts",
+    "test": "vitest run",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:e2e": "playwright test",
@@ -63,7 +63,8 @@
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.0",
-    "vite": "^8.1.5"
+    "vite": "^8.1.5",
+    "vitest": "^5.0.3"
   },
   "overrides": {
     "esbuild": "^0.28.1",

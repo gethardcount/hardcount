@@ -1,6 +1,6 @@
 // The cost dashboard's unpriced-usage notice is built from the unmatched
 // rows, not from the server's lowercase engine sentence.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { UNPRICED_SENTENCE, UNPRICED_TITLE, meterQuantityLine, unpricedLine, unpricedMeters } from '../src/lib/unpricedUsage.ts'
 

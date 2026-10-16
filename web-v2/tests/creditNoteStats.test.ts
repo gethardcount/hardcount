@@ -7,7 +7,7 @@
 // failed legs; the true figure was $162.60. "Refunded to Card" must count only
 // refund_status=succeeded; pending/failed are surfaced separately, never
 // folded into the money total.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { creditNoteStats } from '../src/lib/creditNoteStats.ts'
 

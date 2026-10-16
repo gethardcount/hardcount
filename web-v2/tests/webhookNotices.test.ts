@@ -1,6 +1,6 @@
 // Replay toast, paused-endpoint notice and where an endpoint save error goes:
 // each has two versions.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { endpointSaveErrorTarget, pausedEndpointNotice, replayToast, isAllEvents } from '../src/lib/webhookNotices.ts'
 

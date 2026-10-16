@@ -5,7 +5,7 @@
 //
 // The Go exporter neutralizes the server-side streams (internal/api/exports.go,
 // TestCSVSafe); this pins the client-side builder, which is the other half.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { csvSafeCell } from '../src/lib/csv.ts'
 

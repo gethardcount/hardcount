@@ -8,7 +8,7 @@
 //      (a typo'd URL must not silently reinstate the full-history scan), and
 //   2. 'all' still resolves to a genuinely unbounded window, because bounding
 //      the default must not remove the capability.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   DEFAULT_RANGE,

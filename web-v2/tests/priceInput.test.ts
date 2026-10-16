@@ -4,7 +4,7 @@
 // a blank price box from an operator who meant "free". dollarsToRateCents used
 // to turn blank or unreadable input into "0", and the rule saved as free. It
 // must return null for those, so the form can refuse.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { dollarsToRateCents } from '../src/lib/priceInput.ts'
 

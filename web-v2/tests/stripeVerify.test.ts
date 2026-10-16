@@ -1,7 +1,7 @@
 // The Stripe card used to say "Stripe verification failed: {json}" for a
 // refused key and for a network failure alike. The notice now follows the
 // kind the server records.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { stripeVerifyNotice } from '../src/lib/stripeVerify.ts'
 

@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -40,6 +41,11 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), keepConnectionsAlive()],
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
+  },
+  // `npm test` runs the unit tests in tests/ only — e2e specs belong to a
+  // different runner.
+  test: {
+    include: ['tests/**/*.test.ts'],
   },
   server: {
     // Bind all interfaces so `localhost`, 127.0.0.1, ::1, and the LAN IP all

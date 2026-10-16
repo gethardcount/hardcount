@@ -8,7 +8,7 @@
 // The boundary cases are where this kind of predicate goes wrong: a fade stuck
 // on at the true bottom reads as a rendering bug, and a fade that never appears
 // leaves the original problem in place.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { scrollEdges, scrollEdgeShadow } from '../src/lib/scrollAffordance.ts'
 

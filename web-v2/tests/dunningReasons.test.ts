@@ -1,7 +1,7 @@
 // The Dunning page printed reason tokens as-is, and showed a card-less run's
 // start cause in a red "Last failure reason" box for a payment that never
 // happened. Reasons now read as words.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { dunningReasonLabel } from '../src/lib/dunningReasons.ts'
 

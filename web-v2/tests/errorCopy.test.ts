@@ -2,7 +2,7 @@
 // title ("Failed to attach meter") and puts one sentence under it; before,
 // every API error threw the title away and showed a lower-case server
 // string plus "Request ID: …", even for a simple validation error.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   classifyError,

@@ -2,7 +2,7 @@
 // (a shared invoice link should open the invoice, not the home page), but
 // only to a path inside the dashboard, so a crafted link cannot send someone
 // off-site after they sign in.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { returnPath } from '../src/lib/returnPath.ts'
 

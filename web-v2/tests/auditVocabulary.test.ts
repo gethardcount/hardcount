@@ -10,7 +10,7 @@
 // EMITTED_ACTIONS below is swept from the Go .Log / .LogInTx call sites. If a
 // writer adds an action and nobody updates auditVocabulary.ts, the first test
 // fails.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import type { AuditEntry } from '../src/lib/api.ts'
 import {

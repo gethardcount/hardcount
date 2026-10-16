@@ -2,7 +2,7 @@
 // prevents: on a plain-HTTP install opened by IP address, the server accepts
 // the password, the browser discards the Secure cookie, and the operator is
 // returned to the sign-in page with no explanation.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { confirmSessionKept, sessionNotKeptMessage, signInRefusedMessage, plainHTTPSignInMessage, SessionNotKeptError } from '../src/lib/sessionKept.ts'
 

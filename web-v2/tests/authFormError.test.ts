@@ -1,5 +1,5 @@
 // What the sign-in pages say when a request fails.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { authFormError } from '../src/lib/authFormError.ts'
 

@@ -9,7 +9,7 @@
 //
 // This is the only automatable proof that fix holds; the alternative is
 // noticing a page that quietly stopped updating.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { pollIntervalForInvoice } from '../src/lib/invoicePolling.ts'
 type Invoice = { status: string; payment_status: string }

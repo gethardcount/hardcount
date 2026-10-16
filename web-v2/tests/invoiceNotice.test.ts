@@ -1,7 +1,7 @@
 // The invoice page shows at most one notice above the invoice, and the
 // written-off notice says what the subscription is really doing (it used to
 // say "The subscription remains active" even when dunning had paused it).
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   messageLines,

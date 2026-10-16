@@ -13,7 +13,7 @@
 //      by the allocation line going ✗. (this change)
 //
 // The fixture below is that real invoice — VLX-000067, walked 2026-08-03.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   creditNoteCeilings,

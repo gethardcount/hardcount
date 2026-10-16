@@ -2,7 +2,7 @@
 // label and "payment.no_payment_method" in grey under the buttons; the
 // invoice list's hover showed "no_payment_method — <whole paragraph>"; the
 // list filter chip read "payment: unknown".
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { attentionReasonLabel, supportCodeLine } from '../src/lib/attentionLabels.ts'
 import { paymentStatusLabel } from '../src/lib/status.ts'

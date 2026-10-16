@@ -1,7 +1,7 @@
 // One notice shape, three tones. Each coloured tone must carry dark-mode
 // classes: two hand-made boxes on the subscription page had none and showed
 // as bright light-mode panels in dark mode.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { CALLOUT_TONE_CLASSES, toneForSeverity } from '../src/lib/calloutTone.ts'
 

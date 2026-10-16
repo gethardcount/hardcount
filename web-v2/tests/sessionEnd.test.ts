@@ -1,7 +1,7 @@
 // A session that ends while a tab is open sends the operator to sign-in, but
 // only after the server confirms it: a 401 from one endpoint must not sign
 // anyone out, and many failing requests must cause one check, not many.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { createSessionEndWatcher, isSessionProbePath } from '../src/lib/sessionEnd.ts'
 

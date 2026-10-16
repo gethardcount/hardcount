@@ -1,7 +1,7 @@
 // Team invites and Forgot password each have two versions: email set up or
 // not. The off version must never promise an email; the on version must not
 // show a warning.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { inviteFormState, resetSentNotice } from '../src/lib/emailOffNotices.ts'
 

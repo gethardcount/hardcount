@@ -1,7 +1,7 @@
 // The no-card notice fires only for a subscription that will try to charge
 // a card. A trial set to cancel at or before its end never charges
 // (trials are free, ADR-069), so it must not claim renewals.
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { customerNeedsPaymentMethod, subscriptionWillAutoCharge } from '../src/lib/paymentReadiness.ts'
 
