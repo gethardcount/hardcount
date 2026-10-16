@@ -181,15 +181,36 @@ function inclusiveEndYMD(endISO: string, tz: string): [number, number, number] {
   return [back.getFullYear(), back.getMonth() + 1, back.getDate()]
 }
 
-// inclusiveEndCivilYMD is inclusiveEndYMD rendered as yyyy-mm-dd rather than
-// for display. Use it when a half-open period_end has to become a filter bound:
-// date-range filters are INCLUSIVE of their end day, so passing the raw
-// exclusive boundary through would widen the window by a full day and pull in
-// events that belong to the NEXT period — which, on a drill-down from an
-// invoice line, means showing usage the invoice did not bill.
-export function inclusiveEndCivilYMD(endISO: string, timezone?: string): string {
-  const [y, m, d] = inclusiveEndYMD(endISO, timezone || tenantTZ())
-  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+// usageFilterEndYMD turns a half-open period [start, end) into the INCLUSIVE
+// last day of a yyyy-mm-dd date-range filter: the drill-down from an invoice
+// line to the usage events it billed. The link must show exactly what the
+// invoice billed, and date-range filters include their whole end day.
+//
+//   - end at civil midnight in `timezone` (a normal cycle, Jun 1 → Jul 1): the
+//     end day belongs to the NEXT period, so step back one calendar day
+//     (→ Jun 30). Passing the boundary through would add a day of usage this
+//     invoice did not bill.
+//   - end mid-day (a cancel invoice ends at the cancel instant, Oct 16 15:00):
+//     usage up to that instant on the end day WAS billed, so the end day is
+//     kept (→ Oct 16). Stepping back would drop it, and a same-day cancel
+//     would give a "to" before its "from".
+//   - never before the start's civil day, so the range can't invert.
+//
+// A filter is day-grained, so a mid-day end can't be matched exactly: the
+// link then also covers the rest of the end day, which is the smaller error.
+export function usageFilterEndYMD(startISO: string, endISO: string, timezone?: string): string {
+  const tz = timezone || tenantTZ()
+  const end = new Date(endISO)
+  let ymd: string
+  if (formatInTimeZone(end, tz, 'HH:mm:ss.SSS') === '00:00:00.000') {
+    const [y, m, d] = inclusiveEndYMD(endISO, tz)
+    ymd = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  } else {
+    ymd = formatInTimeZone(end, tz, 'yyyy-MM-dd')
+  }
+  const startYMD = formatInTimeZone(new Date(startISO), tz, 'yyyy-MM-dd')
+  // yyyy-mm-dd strings compare correctly as text.
+  return ymd < startYMD ? startYMD : ymd
 }
 
 // formatCivilDate renders the INCLUSIVE last covered day of a half-open

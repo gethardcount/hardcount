@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { invoiceLineRate } from '@/lib/priceDisplay'
 import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type TenantSettings, type DunningRun, type TimelineEvent, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
-import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, inclusiveEndCivilYMD } from '@/lib/dates'
+import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD } from '@/lib/dates'
 import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
 import { amountInputToCents } from '@/lib/money'
@@ -275,7 +275,7 @@ export default function InvoiceDetailPage() {
       meter: item.meter_id,
       range: 'custom',
       from: formatYMDInTZ(startISO, tz),
-      to: inclusiveEndCivilYMD(endISO, tz),
+      to: usageFilterEndYMD(startISO, endISO, tz),
     })
     return `/usage?${params.toString()}`
   }

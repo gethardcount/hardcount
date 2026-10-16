@@ -5,7 +5,7 @@
 // built-in runner (the @/lib/api import is stubbed via tests/support).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD } from '../src/lib/dates.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
   // 2026-05-05 00:00 IST (UTC+5:30) = the previous UTC evening.
@@ -66,4 +66,25 @@ test('formatInvoiceDate uses the invoice billing timezone, not the tenant zone',
 test('formatInvoiceDate falls back to the tenant zone when the invoice has none', () => {
   assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', ''), 'Jul 10, 2027')
   assert.equal(formatInvoiceDate('2027-07-10T18:30:00Z', undefined), 'Jul 10, 2027')
+})
+
+// Locks MANUAL_TEST FLOW I1 "drill-down covers a cancel invoice's last day":
+// the invoice line → /usage link's `to` is the last day the invoice billed.
+test('usageFilterEndYMD steps back a day only when the period ends at civil midnight', () => {
+  // Normal cycle Oct 1 → Nov 1 (00:00 UTC): Nov 1 belongs to the next period.
+  assert.equal(usageFilterEndYMD('2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z', 'UTC'), '2026-10-31')
+  // Same cycle in New York: the boundary is midnight EDT, not UTC.
+  assert.equal(usageFilterEndYMD('2026-10-01T04:00:00Z', '2026-11-01T04:00:00Z', 'America/New_York'), '2026-10-31')
+})
+
+test('usageFilterEndYMD keeps the end day of a mid-day cancel invoice', () => {
+  // Cancel at Oct 16 15:00: usage from Oct 16 00:00-15:00 was billed.
+  assert.equal(usageFilterEndYMD('2026-10-01T00:00:00Z', '2026-10-16T15:00:00Z', 'UTC'), '2026-10-16')
+})
+
+test('usageFilterEndYMD never ends before the start (same-day cancel)', () => {
+  // Period Oct 16 00:00 → Oct 16 14:23: from=2026-10-16 must not get to=2026-10-15.
+  assert.equal(usageFilterEndYMD('2026-10-16T00:00:00Z', '2026-10-16T14:23:00Z', 'UTC'), '2026-10-16')
+  // A zero-length stub at midnight still yields a non-inverted range.
+  assert.equal(usageFilterEndYMD('2026-10-16T00:00:00Z', '2026-10-16T00:00:00Z', 'UTC'), '2026-10-16')
 })
