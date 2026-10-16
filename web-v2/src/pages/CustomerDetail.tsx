@@ -28,6 +28,7 @@ import { customerNeedsPaymentMethod } from '@/lib/paymentReadiness'
 import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
+import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
 import { statusBadgeVariant } from '@/lib/status'
 import { invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -261,13 +262,12 @@ export default function CustomerDetailPage() {
   })
   const profileCard = billingProfileCard({ data: billingProfile, isError: billingProfileError })
 
-  // Credits have no currency of their own: the ledger is drawn down 1:1
-  // against whatever currency this customer's invoices are in (ADR-100).
-  // So show them in the customer's billing currency, then their invoices'
-  // currency; the workspace default only when neither exists.
-  const creditCurrency = billingProfile?.currency
-    || overview?.recent_invoices?.find(inv => inv.currency)?.currency
-    || undefined
+  // One currency for every figure on this page that has none of its own:
+  // the live subscription's plan, then the billing profile, then the latest
+  // invoice, then the workspace default (lib/customerCurrency). Credits have
+  // no currency either; they are drawn 1:1 against the invoice (ADR-100).
+  const customerCurrency = useCustomerCurrency(id)
+  const creditCurrency = customerCurrency.currency
 
   const { data: metersData } = useQuery({
     queryKey: ['meters'],
@@ -282,14 +282,11 @@ export default function CustomerDetailPage() {
     queryFn: () => api.listPlans().then(r => r.data.filter(p => p.status === 'active')),
   })
 
-  const { data: subsPage } = useQuery({
-    queryKey: ['customer-subscriptions', id],
-    // Filtered by the server: filtering one page of every subscription here
-    // dropped this customer's once the tenant had more than a page. The
-    // server returns at most 100; `total` is the real count.
-    queryFn: () => api.listSubscriptions(`customer_id=${encodeURIComponent(id!)}&limit=100`),
-    enabled: !!id,
-  })
+  // Filtered by the server: filtering one page of every subscription here
+  // dropped this customer's once the tenant had more than a page. The
+  // server returns at most 100; `total` is the real count. The hook's query
+  // key is shared with the usage and currency cards, so it loads once.
+  const { data: subsPage } = useCustomerSubscriptions(id)
   const allSubs = subsPage?.data
   const subsTotal = subsPage?.total ?? allSubs?.length ?? 0
 
@@ -422,7 +419,7 @@ export default function CustomerDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['customer-overview', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-balance', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-billing-profile', id] })
-    queryClient.invalidateQueries({ queryKey: ['customer-subscriptions', id] })
+    queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-usage', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-payment-methods', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-dunning-override', id] })
@@ -880,13 +877,13 @@ export default function CustomerDetailPage() {
           customerTestClockId pins its relative-time/window surfaces to the
           customer's simulated clock (ADR-027) instead of wall-clock. */}
       <div className="mt-6">
-        <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} />
+        <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency.currency} />
       </div>
 
       {/* Margin — rated usage revenue vs provider COGS (ADR-079).
           Operator-only; never rendered on customer-facing surfaces. */}
       <div className="mt-6">
-        <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} />
+        <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency.currency} />
       </div>
 
       {/* Commit / credit-grant burndown — per-grant drawn vs remaining
@@ -1301,6 +1298,7 @@ export default function CustomerDetailPage() {
           customerId={id}
           customer={customer}
           billingProfile={billingProfile ?? null}
+          defaultCurrency={customerCurrency.currency}
           onClose={() => setShowNewInvoice(false)}
           onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
@@ -1791,17 +1789,17 @@ const blankLine = (): ComposerLine => ({
   commitExpiresAt: '',
 })
 
-function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCreated }: {
+function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrency, onClose, onCreated }: {
   customerId: string
   customer: Customer
   billingProfile: BillingProfile | null
+  defaultCurrency: string
   onClose: () => void
   onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
 }) {
-  // Default currency: prefer the customer's billing profile currency, else
-  // tenant default (USD here is a placeholder until the tenant settings query
-  // is plumbed; the operator can switch in one click).
-  const initialCurrency = (billingProfile?.currency || 'USD').toUpperCase()
+  // Default currency: the customer's currency (lib/customerCurrency), so a
+  // customer on a EUR plan opens in EUR. The operator can switch in one click.
+  const initialCurrency = defaultCurrency.toUpperCase()
   const [currency, setCurrency] = useState(initialCurrency)
   const [memo, setMemo] = useState('')
   // Service period (optional) — the inclusive dates this invoice covers.

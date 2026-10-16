@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
 import { useEffectiveNow, useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
 import { fetchCustomerUsageOrNull, useCurrentCycleUsage, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
+import { useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
 import { DEFAULT_ACTIVITY_PRESET, isOutsideWindow, rangeIncluding, usageWindowIsEmpty } from '@/lib/usageWindow'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -49,11 +50,13 @@ import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-re
 // from the clock's frozen_time instead of wall-clock, so the cycle bar,
 // last-invoice "X ago", and activity window all track simulation time. Omitted /
 // undefined for wall-clock customers, which fall back to Date.now() unchanged.
-export function CostDashboard({ customerId, customerTestClockId }: { customerId: string; customerTestClockId?: string }) {
+// currency: the customer's currency (useCustomerCurrency), used for a figure
+// the server sent without one, such as an empty window's $0.
+export function CostDashboard({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
   return (
     <div className="space-y-6">
       <UpcomingInvoicesSection customerId={customerId} />
-      <ActivitySection customerId={customerId} customerTestClockId={customerTestClockId} />
+      <ActivitySection customerId={customerId} customerTestClockId={customerTestClockId} currency={currency} />
     </div>
   )
 }
@@ -63,10 +66,7 @@ export function CostDashboard({ customerId, customerTestClockId }: { customerId:
 // ============================================================================
 
 function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
-  const { data: subsRes, isLoading } = useQuery({
-    queryKey: ['customer-subs-upcoming', customerId],
-    queryFn: () => api.listSubscriptions(`customer_id=${encodeURIComponent(customerId)}`),
-  })
+  const { data: subsRes, isLoading } = useCustomerSubscriptions(customerId)
 
   // Per-sub effective-now — the "now" baseline for this sub's cycle bar and
   // last-invoice "X ago". Resolved per subscription (not customer) because the
@@ -361,7 +361,7 @@ function activityPresetToParams(p: ActivityPreset, now: EffectiveNow): { from?: 
   return rollingWindow(days, now)
 }
 
-function ActivitySection({ customerId, customerTestClockId }: { customerId: string; customerTestClockId?: string }) {
+function ActivitySection({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
   // Opens on the current billing cycle, the window the Upcoming card and the
   // invoice use (ADR-121). A rolling 30 days never matched a cycle, so its
   // total disagreed with the invoice above it.
@@ -405,7 +405,7 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
   // them would mix currencies. No "N events" line: total_quantity is billed
   // quantity in each meter's own unit, not an event count; the meter rows
   // below show each quantity with its unit.
-  const totalText = data ? (amountsByCurrencyText(data.totals) ?? formatCents(0, data.totals[0]?.currency)) : ''
+  const totalText = data ? (amountsByCurrencyText(data.totals) ?? formatCents(0, data.totals[0]?.currency ?? currency)) : ''
 
   return (
     <section>

@@ -194,7 +194,7 @@ export default function SubscriptionDetailPage() {
     // CustomerDetail page stale until a hard refresh.
     if (sub?.customer_id) {
       queryClient.invalidateQueries({ queryKey: ['customer-overview', sub.customer_id] })
-      queryClient.invalidateQueries({ queryKey: ['customer-subscriptions', sub.customer_id] })
+      queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', sub.customer_id] })
     }
     queryClient.invalidateQueries({ queryKey: ['subscriptions-for-test-clock-chip'] })
     queryClient.invalidateQueries({ queryKey: ['subscriptions-for-trial-badge'] })

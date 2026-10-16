@@ -27,7 +27,10 @@ import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@
 // The card opens on the customer's current billing period, with the last
 // invoiced period one click away (ADR-121). A rolling 30 days never matched a
 // billing period, so its total disagreed with the invoice on the same page.
-export function MarginCard({ customerId, customerTestClockId }: { customerId: string; customerTestClockId?: string }) {
+// currency: the customer's currency (useCustomerCurrency). The report names
+// no revenue currency when the window has no revenue, and that $0 must still
+// be in the customer's currency.
+export function MarginCard({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
   const [preset, setPreset] = useState<MarginPreset>(DEFAULT_MARGIN_PRESET)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
@@ -88,7 +91,7 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
   const costCurrency = rep?.cost_currency || 'USD'
   const mixedRevenue = !!rep && !revenueCurrency && rep.revenue_cents > 0
   const currencyMismatch = !!rep && !!revenueCurrency && revenueCurrency !== costCurrency && rep.revenue_cents > 0
-  const billed = (cents: number) => (mixedRevenue ? '—' : formatCents(cents, revenueCurrency))
+  const billed = (cents: number) => (mixedRevenue ? '—' : formatCents(cents, revenueCurrency || currency))
   // micros (1e-6 of the currency unit) → display amount.
   const cost = (micros: number) =>
     `${getCurrencySymbol(costCurrency)}${(micros / 1_000_000).toFixed(micros >= 100_000 ? 2 : 4)}`
