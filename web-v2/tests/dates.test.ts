@@ -5,7 +5,7 @@
 // built-in runner (the @/lib/api import is stubbed via tests/support).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday } from '../src/lib/dates.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
   // 2026-05-05 00:00 IST (UTC+5:30) = the previous UTC evening.
@@ -39,4 +39,15 @@ test('the from/to pair brackets a row that is "May 5" in the tenant zone but not
   // May 6) must fall OUTSIDE the IST-May-5 bracket — the whole point of TZ anchoring.
   const rowUTCMay5ButISTMay6 = Date.parse('2026-05-05T22:00:00Z')
   assert.ok(rowUTCMay5ButISTMay6 > Date.parse(to), 'a UTC-May-5 / IST-May-6 row is excluded from the IST May-5 bracket')
+})
+
+// Locks the one-off invoice "Sells credits" expiry check: "today" is the tenant
+// civil date, the same zone endOfDayInTZ resolves the expiry in.
+test('isAfterCivilToday uses the tenant date, not the UTC date', () => {
+  // 2026-10-16 21:00 EDT = 2026-10-17T01:00Z. Locally it is still Oct 16.
+  const nowMs = Date.parse('2026-10-17T01:00:00Z')
+  assert.equal(isAfterCivilToday('2026-10-17', nowMs, 'America/New_York'), true, 'tomorrow is in the future')
+  assert.equal(isAfterCivilToday('2026-10-16', nowMs, 'America/New_York'), false, 'today is not')
+  // East of UTC: 2026-10-16T20:00Z is Oct 17 01:30 in Kolkata, so Oct 17 is today.
+  assert.equal(isAfterCivilToday('2026-10-17', Date.parse('2026-10-16T20:00:00Z'), 'Asia/Kolkata'), false)
 })

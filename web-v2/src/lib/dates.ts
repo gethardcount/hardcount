@@ -91,6 +91,16 @@ export function formatYMDInTZ(iso: string, timezone?: string): string {
   return formatInTimeZone(new Date(iso), tz, 'yyyy-MM-dd')
 }
 
+// isAfterCivilToday reports whether a picked yyyy-mm-dd is a later civil day
+// than "today" in tenant TZ, where today is the civil date of `nowMs` (the
+// entity's effective now, so a test clock is honoured). Use it to validate a
+// date that endOfDayInTZ will resolve in the same zone. Taking today from
+// toISOString() (the UTC date) instead made a New York evening count as
+// tomorrow, so tomorrow's date was refused as "not in the future".
+export function isAfterCivilToday(yyyymmdd: string, nowMs: number, timezone?: string): boolean {
+  return yyyymmdd > formatYMDInTZ(new Date(nowMs).toISOString(), timezone)
+}
+
 // ---------------------------------------------------------------------------
 // Inclusive billing-period display (ADR-058).
 //

@@ -13,7 +13,7 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
-import { endOfDayInTZ, startOfDayInTZ } from '@/lib/dates'
+import { endOfDayInTZ, isAfterCivilToday, startOfDayInTZ } from '@/lib/dates'
 import { Checkbox } from '@/components/ui/checkbox'
 import { MarginCard } from '@/components/MarginCard'
 import { Layout } from '@/components/Layout'
@@ -1880,8 +1880,9 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
         } else {
           commitGranted = granted
           if (l.commitExpiresAt) {
-            const today = new Date(now).toISOString().slice(0, 10)
-            if (l.commitExpiresAt <= today) {
+            // "Future" is judged in tenant TZ, the zone endOfDayInTZ resolves
+            // the expiry in below.
+            if (!isAfterCivilToday(l.commitExpiresAt, now)) {
               errs.commit = 'Credit expiry must be a future date'
             } else {
               commitExpires = endOfDayInTZ(l.commitExpiresAt)
