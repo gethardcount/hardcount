@@ -178,6 +178,27 @@ test('Home counts trialing subscriptions and compares failed payments with the p
   await expect(failed).toContainText(/\d+ in the previous 30 days/)
 })
 
+test('the Usage page shows a Maximum meter as its peak per customer, not the sum', async ({ page }) => {
+  const id = uniq()
+  const key = `e2e_storage_${id}`
+  const meter = await api<{ id: string; name: string }>('POST', '/meters', {
+    key, name: `E2E Storage ${id}`, unit: 'GB', aggregation: 'max',
+  })
+  const a = await createCustomer()
+  const b = await createCustomer()
+  for (const [customer, quantity] of [[a, '140'], [b, '210'], [b, '120']] as const) {
+    await api('POST', '/usage-events', { external_customer_id: customer.external_id, event_name: key, quantity, idempotency_key: `e2e_${uniq()}` })
+  }
+
+  await page.goto(`/usage?meter=${meter.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: 'Usage Events', exact: true })).toBeVisible()
+  const row = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: meter.name, exact: true }) })
+  // 140 (A's peak) + 210 (B's peak), never 140 + 210 + 120 = 470.
+  await expect(row).toContainText('350 GB')
+  await expect(row).toContainText('Peak reading per customer, added across 2 customers')
+  await expect(row).not.toContainText('470')
+})
+
 test('a dialog taller than the window keeps its actions in view', async ({ page }) => {
   const customer = await createCustomer()
   await page.setViewportSize({ width: 1440, height: 520 })
