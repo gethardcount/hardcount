@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright end-to-end runs
+/e2e/.state/
+/playwright-report/
+/test-results/

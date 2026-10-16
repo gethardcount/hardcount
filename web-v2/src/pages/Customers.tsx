@@ -211,13 +211,13 @@ export default function CustomersPage() {
 
   return (
     <Layout>
-      {/* Page header */}
-      <div className="flex justify-between items-center">
+      {/* Page header. Wraps on a phone so the actions stay on screen. */}
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Customers</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage customers and billing profiles{total > 0 ? ` · ${total} total` : ''}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {total > 0 && (
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download size={16} className="mr-2" />

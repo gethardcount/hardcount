@@ -113,4 +113,14 @@ export default defineConfig([
       'no-restricted-syntax': 'off',
     },
   },
+  {
+    // Playwright end-to-end tests run in Node, not in the app: they seed with
+    // real dates, and Playwright's `use` fixture argument is not a React hook.
+    files: ['e2e/**/*.ts', 'playwright.config.ts'],
+    languageOptions: { globals: globals.node },
+    rules: {
+      'no-restricted-syntax': 'off',
+      'react-hooks/rules-of-hooks': 'off',
+    },
+  },
 ])

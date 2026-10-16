@@ -363,11 +363,11 @@ export default function SettingsPage() {
 
       <Tabs value={tab} onValueChange={setTab} className="mt-6">
         <TabsList>
-          <TabsTrigger value="general"><Building2 size={14} /> General</TabsTrigger>
-          <TabsTrigger value="invoicing"><FileText size={14} /> Invoicing</TabsTrigger>
-          <TabsTrigger value="tax"><Receipt size={14} /> Tax</TabsTrigger>
-          <TabsTrigger value="payments"><CreditCard size={14} /> Payments</TabsTrigger>
-          <TabsTrigger value="team"><Users size={14} /> Team</TabsTrigger>
+          <TabsTrigger value="general"><Building2 size={14} className="hidden sm:block" /> General</TabsTrigger>
+          <TabsTrigger value="invoicing"><FileText size={14} className="hidden sm:block" /> Invoicing</TabsTrigger>
+          <TabsTrigger value="tax"><Receipt size={14} className="hidden sm:block" /> Tax</TabsTrigger>
+          <TabsTrigger value="payments"><CreditCard size={14} className="hidden sm:block" /> Payments</TabsTrigger>
+          <TabsTrigger value="team"><Users size={14} className="hidden sm:block" /> Team</TabsTrigger>
         </TabsList>
 
         <div className="max-w-3xl mt-6 pb-24">

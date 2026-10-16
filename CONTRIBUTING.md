@@ -105,6 +105,7 @@ locally before you push, so a failing CI build holds no surprises:
 | Vulnerability scan | `govulncheck ./...` | can fail when a new Go CVE is published, even if your change is fine. Say so in the PR and we'll handle it |
 | Frontend | `cd web-v2 && npm run build && npm test && npm run lint` | only if you touched `web-v2/` |
 | Golden path | `make bootstrap`, then `make dev`, then `scripts/demo.sh <secret test key>` | CI boots a real server and walks recipe → invoice end to end; the key is printed by `make bootstrap` |
+| Browser tests | `cd web-v2 && npm run test:e2e` | Playwright against a real API; setup in [`web-v2/e2e/README.md`](web-v2/e2e/README.md). Not a required check yet |
 | Links between docs | `lychee --offline --include-fragments '**/*.md'` | internal links and anchors only |
 | Docs style | `vale <changed .md files>` | advisory: it comments, it does not fail the build |
 

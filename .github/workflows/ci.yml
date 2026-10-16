@@ -281,6 +281,117 @@ jobs:
         if: failure()
         run: tail -100 server.log || true
 
+  # The dashboard in a real browser (Playwright, Chromium) against a real API
+  # and seeded data: every page at desktop and phone width, plus a few key
+  # journeys. The server setup is a copy of golden-path's. Not a required
+  # check yet. How to run it locally: web-v2/e2e/README.md.
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: velox
+          POSTGRES_USER: velox
+          POSTGRES_PASSWORD: velox
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U velox -d velox"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://velox:velox@localhost:5432/velox?sslmode=disable
+      VELOX_BOOTSTRAP_EMAIL: e2e@example.com
+      VELOX_BOOTSTRAP_PASSWORD: e2e-password-not-secret
+      E2E_EMAIL: e2e@example.com
+      E2E_PASSWORD: e2e-password-not-secret
+      E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_API_URL: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web-v2/package-lock.json
+
+      - name: Create app role (mirrors deploy/compose/postgres-init.sh)
+        run: |
+          PGPASSWORD=velox psql -v ON_ERROR_STOP=1 -h localhost -U velox -d velox <<'EOSQL'
+          CREATE ROLE velox_app WITH LOGIN PASSWORD 'velox_app';
+          GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
+          GRANT ALL ON SCHEMA public TO velox_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+          CREATE EXTENSION IF NOT EXISTS pgcrypto;
+          EOSQL
+
+      - name: Bootstrap (migrations + demo tenant + keys)
+        run: |
+          go run ./cmd/velox-bootstrap | tee bootstrap.out
+          key=$(grep -oE 'vlx_secret_test_[a-f0-9]+' bootstrap.out | head -1)
+          test -n "$key"
+          echo "E2E_API_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Start API
+        run: |
+          nohup go run ./cmd/velox > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -sf http://localhost:8080/health >/dev/null || { echo "server never became healthy"; tail -50 server.log; exit 1; }
+          grep -q 'using app database connection (RLS enforced)' server.log \
+            || { echo "server is not on the app connection: row-level security is off"; tail -50 server.log; exit 1; }
+
+      - name: Install frontend dependencies
+        run: cd web-v2 && npm ci --legacy-peer-deps
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web-v2/package-lock.json') }}
+
+      - name: Install Chromium
+        run: cd web-v2 && npx playwright install --with-deps chromium
+
+      - name: Build and serve the dashboard (vite preview, /v1 proxied to the API)
+        run: |
+          cd web-v2
+          npm run build
+          VELOX_API_TARGET=http://127.0.0.1:8080 nohup npx vite preview --host 127.0.0.1 --port 4173 --strictPort > preview.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4173/ >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4173/ >/dev/null || { echo "vite preview never came up"; cat preview.log; exit 1; }
+
+      - name: Run Playwright
+        run: cd web-v2 && npx playwright test
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            web-v2/playwright-report/
+            web-v2/test-results/
+          retention-days: 14
+
+      - name: Server log on failure
+        if: failure()
+        run: tail -100 server.log || true
+
   lint:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

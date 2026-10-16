@@ -223,8 +223,8 @@ export default function InvoicesPage() {
 
   return (
     <Layout>
-      {/* Page header */}
-      <div className="flex justify-between items-center">
+      {/* Page header. Wraps on a phone so the actions stay on screen. */}
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
@@ -263,14 +263,14 @@ export default function InvoicesPage() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {total > 0 && (
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download size={16} className="mr-2" />
               Export CSV
             </Button>
           )}
-          <div className="flex gap-1 bg-muted rounded-lg p-1">
+          <div className="flex flex-wrap gap-1 bg-muted rounded-lg p-1">
             {/* "Past due" is not an invoice status — it's a server-side
                 predicate (finalized + past due_at + unsettled), so it
                 rides a separate ?overdue= param. Stripe's invoice list
@@ -307,8 +307,8 @@ export default function InvoicesPage() {
           The row stays visible while a search/date filter is active so
           a zero-result query never hides its own input. */}
       {(total > 0 || search || dateFrom || dateTo) && (
-        <div className="flex items-center gap-3 mt-6">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-3 mt-6">
+          <div className="relative w-full sm:w-auto sm:flex-1">
             <Search size={16} className="absolute left-3 top-2.5 text-muted-foreground" />
             <Input
               value={search}
@@ -321,13 +321,13 @@ export default function InvoicesPage() {
             value={dateFrom}
             onChange={(v) => setUrlState({ dateFrom: v, page: '1' })}
             placeholder="From date"
-            className="w-44"
+            className="min-w-0 flex-1 sm:flex-none sm:w-44"
           />
           <DatePicker
             value={dateTo}
             onChange={(v) => setUrlState({ dateTo: v, page: '1' })}
             placeholder="To date"
-            className="w-44"
+            className="min-w-0 flex-1 sm:flex-none sm:w-44"
             minDate={dateFrom ? new Date(dateFrom + 'T00:00:00') : undefined}
           />
         </div>

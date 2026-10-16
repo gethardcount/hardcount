@@ -91,7 +91,8 @@ export default function PlanDetailPage() {
 
   const { data: subsData } = useQuery({
     queryKey: ['plan-subscriptions', id],
-    queryFn: () => api.listSubscriptions().then(r => r.data.filter(s => s.items?.some(it => it.plan_id === id))),
+    // Filtered by the server, for the same reason as the customer page.
+    queryFn: () => api.listSubscriptions(`plan_id=${encodeURIComponent(id!)}&limit=100`).then(r => r.data),
     enabled: !!id,
   })
 

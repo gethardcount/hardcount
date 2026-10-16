@@ -24,6 +24,7 @@ npx tsc -b         # strict typecheck. NOT `tsc --noEmit` — that silently
 npm run lint       # eslint
 npm test           # vitest
 npm run build      # tsc -b + vite build — the strictest of the four
+npm run test:e2e   # Playwright browser tests; needs a running API (e2e/README.md)
 ```
 
 ## Generated code — do not hand-edit

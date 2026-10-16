@@ -15,6 +15,10 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Added
+
+- **Browser tests for the dashboard (2026-10-16).** Contributors: `npm run test:e2e` in `web-v2` runs Playwright against a real API. It opens every page at desktop and phone width and fails on console errors, failed API calls or a page that scrolls sideways, plus five key journeys. CI runs it as the `e2e` job. See [web-v2/e2e/README.md](web-v2/e2e/README.md).
+
 ### Changed
 
 - **Invoice notices are one short sentence (2026-10-15).** API: `attention.message` was reworded for every reason. It is now one sentence per line, up to three lines split by newlines: the cause, then the setup-link email and the prepaid credit at risk when they apply. The explanation and payment ids moved to `attention.detail`. Match on `reason` and `code`, not on the text.
@@ -38,6 +42,8 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Customer and plan pages list all their subscriptions (2026-10-16).** Both pages took the first 50 subscriptions of the whole tenant and kept the matching ones, so with more than 50 a customer could show "Subscriptions (0)". They now ask the API for that customer's or plan's subscriptions (up to 100).
+- **Pages fit a phone screen (2026-10-16).** On a 390px-wide phone, the Customers, Subscriptions, Invoices, Settings and customer credit pages were wider than the screen, so buttons such as Add Subscription sat off to the side. Their headers and filters now wrap, and the Settings tabs drop their icons on a phone.
 - **A date-only `to` filter now includes the last second of that day (2026-10-16).** `to=2026-10-31` ended at 23:59:59.000 UTC, so CSV exports, the invoice list and the audit log left out rows stamped 23:59:59.000001–.999999. It now ends at 23:59:59.999999 UTC.
 - **Customer usage accepts a full leap year (2026-10-16).** `GET /v1/customers/{id}/usage?from=2028-01-01&to=2028-12-31` answered 422 "window must be ≤ 1 year", because the cap was 365 days. It is now one calendar year, so a 366-day yearly cycle also works; `/v1/customers/{id}/margin` gets the same cap.
 - **A margin request without dates follows the customer's test clock (2026-10-16).** `GET /v1/customers/{id}/margin` with no `from`/`to` covered the wall-clock last 30 days, so a customer on an advanced test clock read revenue 0 and cost 0. It now covers the 30 days ending at the clock's time. Customers not on a test clock are unchanged.

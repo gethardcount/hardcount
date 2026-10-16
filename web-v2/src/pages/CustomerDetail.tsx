@@ -279,7 +279,9 @@ export default function CustomerDetailPage() {
 
   const { data: allSubs } = useQuery({
     queryKey: ['customer-subscriptions', id],
-    queryFn: () => api.listSubscriptions().then(r => r.data.filter(s => s.customer_id === id)),
+    // Filtered by the server: filtering one page of every subscription here
+    // dropped this customer's once the tenant had more than a page.
+    queryFn: () => api.listSubscriptions(`customer_id=${encodeURIComponent(id!)}&limit=100`).then(r => r.data),
     enabled: !!id,
   })
 

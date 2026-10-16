@@ -264,11 +264,11 @@ export default function CreditsPage() {
     return (
       <Layout>
         {/* Header with back, customer info, balance, and actions */}
-        <div className="flex items-start gap-3 mb-6">
+        <div className="flex flex-wrap items-start gap-3 mb-6">
           <Button variant="ghost" size="sm" onClick={closeDetail} className="mt-1">
             <ArrowLeft size={18} />
           </Button>
-          <div className="flex-1">
+          <div className="flex-1 min-w-48">
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-semibold text-foreground">
                 {selectedCustomer?.display_name || 'Customer'}
@@ -294,7 +294,7 @@ export default function CreditsPage() {
 
         {/* Transaction History */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-3">
             <CardTitle className="text-sm">
               <span className="inline-flex items-center gap-2">
                 Transaction History
