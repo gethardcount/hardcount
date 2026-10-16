@@ -38,7 +38,7 @@ function formatCompactAmount(cents: number): string {
 }
 
 export default function DashboardPage() {
-  usePageTitle('Dashboard')
+  usePageTitle('Home')
   const [period, setPeriod] = useState<Period>('30d')
   const theme = useChartTheme()
 
@@ -148,7 +148,7 @@ export default function DashboardPage() {
     <Layout>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Home</h1>
           {dataUpdatedAt > 0 && (
             <p className="text-xs text-muted-foreground mt-1" aria-live="polite">
               {/* Query-freshness is genuinely wall-clock: it reports when THIS

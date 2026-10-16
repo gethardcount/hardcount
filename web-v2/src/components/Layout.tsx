@@ -2,10 +2,9 @@ import { useState, useEffect, useMemo, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, FileText, CreditCard, Tag, Wallet, LogOut, Settings,
-  Receipt, AlertTriangle, ScrollText, Globe, Key, Menu, X, BarChart3,
-  Sun, Moon, Search, ChevronsUpDown, MessageSquareWarning, Sparkles, Loader2,
-  Clock as ClockIcon, FlaskConical, ListChecks,
+  LogOut, AlertTriangle, Menu, X,
+  Sun, Moon, Search, ChevronsUpDown, MessageSquareWarning, Loader2,
+  FlaskConical, ListChecks,
   type LucideIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -15,7 +14,6 @@ import { CONTENT_BAND } from '@/lib/contentBand'
 import { api, setActiveCurrency } from '@/lib/api'
 import { getLastRequestId } from '@/lib/lastRequestId'
 import { useAuth } from '@/contexts/AuthContext'
-import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -25,56 +23,24 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CommandPalette } from '@/components/CommandPalette'
+import { isNavActive, SETTINGS_NAV, visibleNav } from '@/lib/navigation'
 import { VeloxLogo } from '@/components/VeloxLogo'
 import { OnboardingLauncher } from '@/components/OnboardingLauncher'
 import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
-const billingNav = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/customers', icon: Users, label: 'Customers' },
-  { to: '/invoices', icon: FileText, label: 'Invoices' },
-  { to: '/subscriptions', icon: CreditCard, label: 'Subscriptions' },
-  { to: '/usage', icon: BarChart3, label: 'Usage' },
-]
-
-const configNav = [
-  { to: '/pricing', icon: Tag, label: 'Pricing' },
-  { to: '/recipes', icon: Sparkles, label: 'Recipes' },
-  { to: '/credits', icon: Wallet, label: 'Credits' },
-  { to: '/provider-costs', icon: Tag, label: 'Provider costs' },
-  { to: '/credit-notes', icon: Receipt, label: 'Credit Notes' },
-  { to: '/dunning', icon: AlertTriangle, label: 'Dunning' },
-  { to: '/dunning-policies', icon: AlertTriangle, label: 'Dunning policies' },
-]
-
 type NavItem = { to: string; icon: LucideIcon; label: string }
 
-const systemNav: NavItem[] = [
-  { to: '/audit-log', icon: ScrollText, label: 'Audit Log' },
-  { to: '/webhooks', icon: Globe, label: 'Webhooks' },
-  { to: '/api-keys', icon: Key, label: 'API Keys' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
-]
-
-// Test-mode-only nav: shown when the active session is in test mode and
-// hidden when in live. Test clocks are the only entry today; the array
-// shape lets future test-only tooling slot in cleanly.
-const testOnlyNav: NavItem[] = [
-  { to: '/test-clocks', icon: ClockIcon, label: 'Test Clocks' },
-]
-
 function NavLink({
-  to, icon: Icon, label, pathname, onClick, count, badgeTone = 'info',
+  item, pathname, onClick, count, badgeTone = 'info',
 }: {
-  to: string; icon: LucideIcon; label: string; pathname: string; onClick?: () => void; count?: number; badgeTone?: 'info' | 'warning'
+  item: NavItem & { owns?: string[] }; pathname: string; onClick?: () => void; count?: number; badgeTone?: 'info' | 'warning'
 }) {
+  const { to, icon: Icon, label } = item
   // Prefix match keeps the section highlighted on detail pages
   // (/customers/:id highlights Customers). Pricing also owns the
   // /plans/:id and /meters/:id detail routes.
-  const active = pathname === to
-    || (to !== '/' && pathname.startsWith(to + '/'))
-    || (to === '/pricing' && (pathname.startsWith('/plans/') || pathname.startsWith('/meters/')))
+  const active = isNavActive({ ...item, hint: '' }, pathname)
   return (
     <div>
     <Tooltip>
@@ -103,11 +69,11 @@ function NavLink({
             </div>
             {count != null && count > 0 && (
               <span className={cn(
-                'text-[10px] font-medium rounded-full px-1.5 py-0.5 min-w-[18px] text-center',
+                'text-2xs font-medium rounded-full px-1.5 min-w-[18px] text-center',
                 // Invoices in payment retry need watching, not alarm: amber,
                 // the same colour as the Dashboard's row for the same count.
                 badgeTone === 'warning'
-                  ? 'bg-amber-500 text-amber-950'
+                  ? 'bg-warning text-foreground dark:text-background'
                   : 'bg-muted text-muted-foreground border border-border',
               )}>
                 {count}
@@ -325,6 +291,14 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const closeSidebar = () => setSidebarOpen(false)
 
+  // Escape closes the mobile menu, as it does every other overlay.
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [sidebarOpen])
+
   const sidebarContent = (
     <>
       {/* Header */}
@@ -370,45 +344,34 @@ export function Layout({ children }: { children: ReactNode }) {
       </div>
 
       <ScrollPane as="nav" aria-label="Main navigation" className="flex-1 min-h-0 p-3 space-y-1">
-        <p className="text-xs uppercase text-muted-foreground tracking-wider px-3 pt-2 pb-1">
-          Billing
-        </p>
-        {billingNav.map(item => (
-          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'warning' : 'info'} />
-        ))}
-
-        <p className="text-xs uppercase text-muted-foreground tracking-wider px-3 pt-4 pb-1">
-          Configuration
-        </p>
-        {configNav.map(item => (
-          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'warning' : 'info'} />
-        ))}
-
-        <Separator className="my-2" />
-
-        <p className="text-xs uppercase text-muted-foreground tracking-wider px-3 pt-2 pb-1">
-          System
-        </p>
-        {systemNav.map(item => (
-          <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} count={navCounts[item.to]} badgeTone={item.to === '/dunning' ? 'warning' : 'info'} />
-        ))}
-
-        {user && !user.livemode && (
-          <>
-            <p className="text-xs uppercase text-muted-foreground tracking-wider px-3 pt-4 pb-1 flex items-center gap-1.5">
-              <FlaskConical size={11} className="text-amber-500" />
-              Test mode
-            </p>
-            {testOnlyNav.map(item => (
-              <NavLink key={item.to} {...item} pathname={location.pathname} onClick={closeSidebar} />
+        {visibleNav(!!user?.livemode).map(section => (
+          <div key={section.title ?? 'top'} className="space-y-0.5">
+            {section.title && (
+              <p className="px-3 pt-4 pb-1 text-2xs font-medium uppercase tracking-wider text-muted-foreground">
+                {section.title}
+              </p>
+            )}
+            {section.items.map(item => (
+              <NavLink
+                key={item.to}
+                item={item}
+                pathname={location.pathname}
+                onClick={closeSidebar}
+                count={navCounts[item.to]}
+                badgeTone={item.to === '/dunning' ? 'warning' : 'info'}
+              />
             ))}
-          </>
-        )}
+          </div>
+        ))}
       </ScrollPane>
 
       {/* Footer — account menu (who am I). The mode switch lives at the TOP
           of the sidebar (environment-switcher slot), not here. */}
-      <div className="p-2 border-t border-border">
+      <div className="space-y-0.5 border-t border-border p-2">
+        {/* Setup progress lives here, not as a floating pill: the pill sat
+            over page content (buttons, last table rows) on every page. */}
+        <OnboardingLauncher variant="sidebar" />
+        <NavLink item={SETTINGS_NAV} pathname={location.pathname} onClick={closeSidebar} />
         {user && (
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -605,7 +568,6 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* Global onboarding launcher — floats bottom-right, self-hides when
           the checklist is complete or dismissed. Rendered at the Layout level
           so it persists across all authed routes, not just Dashboard. */}
-      <OnboardingLauncher />
     </div>
   )
 }

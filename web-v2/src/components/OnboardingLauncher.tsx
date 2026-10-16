@@ -13,7 +13,7 @@ import { ScrollPane } from '@/components/ui/scroll-pane'
 // the user completes the checklist or dismisses it; state lives in the
 // shared useOnboardingSteps hook. Hidden while a page shows a sticky action
 // bar (useStickyActionBar), which occupies the same corner.
-export function OnboardingLauncher() {
+export function OnboardingLauncher({ variant = 'floating' }: { variant?: 'floating' | 'sidebar' } = {}) {
   const [open, setOpen] = useState(false)
   const { steps, complete, total, show, setDismissed } = useOnboardingSteps()
   // A sticky action bar (Settings' Save Changes) sits in the same corner; at
@@ -31,9 +31,25 @@ export function OnboardingLauncher() {
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
-  if (!show || barShown) return null
+  // The sidebar row never collides with a page's sticky action bar.
+  if (!show || (barShown && variant === 'floating')) return null
 
   const next = steps.find(s => !s.done)
+
+  if (!open && variant === 'sidebar') {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={`Setup: ${complete} of ${total} complete. Open checklist.`}
+        className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
+      >
+        <ProgressRing value={complete} max={total} />
+        <span className="flex-1 text-left">Setup</span>
+        <span className="text-xs tabular-nums">{complete}/{total}</span>
+      </button>
+    )
+  }
 
   if (!open) {
     return (
@@ -59,7 +75,12 @@ export function OnboardingLauncher() {
     <div
       role="dialog"
       aria-labelledby="onboarding-launcher-title"
-      className="fixed bottom-5 right-5 z-30 w-[360px] max-w-[calc(100vw-2.5rem)] rounded-xl border border-border bg-card shadow-2xl"
+      // Opened from the sidebar row, the panel sits beside the sidebar
+      // (above the mobile menu's overlay), not in the far corner.
+      className={cn(
+        'fixed z-50 w-[360px] max-w-[calc(100vw-2.5rem)] rounded-xl border border-border bg-card shadow-2xl',
+        variant === 'sidebar' ? 'bottom-4 left-4 md:left-64' : 'bottom-5 right-5',
+      )}
     >
       <div className="flex items-start gap-3 px-4 pt-4 pb-2">
         <div className="flex-1 min-w-0">
