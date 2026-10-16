@@ -1725,12 +1725,19 @@ export interface AnalyticsOverview {
   outstanding_by_currency: { currency: string; amount_cents: number }[]
   avg_invoice_value: number
   credit_balance_total: number
+  // Customer records with status active (includes customers with no live
+  // subscription). Home shows live_customers instead.
   active_customers: number
   new_customers: number
+  // Customers with an active or trialing subscription, now and at the
+  // window start.
+  live_customers: number
+  live_customers_prev: number
   active_subscriptions: number
   trialing_subscriptions: number
   paid_invoices: number
   failed_payments: number
+  failed_payments_prev: number
   open_invoices: number
   dunning_active: number
   refunds_needing_attention: number

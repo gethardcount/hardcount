@@ -44,20 +44,31 @@ export interface AnalyticsOverview {
   avg_invoice_value: number;
   /** Sum of all customers' credit balances. Not limited to `currency`. */
   credit_balance_total: number;
+  /**
+     * Customer records with status `active`. Includes customers with
+     * no subscription or only canceled ones; `live_customers` counts
+     * the customers you bill.
+     */
   active_customers: number;
   /** Customers created in the window. */
   new_customers: number;
-  active_subscriptions: number;
+  /** Customers with at least one `active` or `trialing` subscription now. */
+  live_customers: number;
   /**
-     * Subscriptions with status `active` whose `trial_end_at` is in
-     * the future. Subscriptions with status `trialing` are not
-     * counted.
+     * `live_customers` at the start of the window, rebuilt from
+     * subscription start and cancel times.
      */
+  live_customers_prev: number;
+  /** Subscriptions with status `active`. */
+  active_subscriptions: number;
+  /** Subscriptions with status `trialing`. */
   trialing_subscriptions: number;
   /** Invoices paid in the window. */
   paid_invoices: number;
   /** Invoices created in the window whose payment failed. All currencies. */
   failed_payments: number;
+  /** `failed_payments` for the previous window. */
+  failed_payments_prev: number;
   /** Finalized invoices whose payment has not succeeded. All currencies. */
   open_invoices: number;
   /** Dunning runs (automatic payment retries) still in progress. */

@@ -2271,10 +2271,13 @@ components:
         - credit_balance_total
         - active_customers
         - new_customers
+        - live_customers
+        - live_customers_prev
         - active_subscriptions
         - trialing_subscriptions
         - paid_invoices
         - failed_payments
+        - failed_payments_prev
         - open_invoices
         - dunning_active
         - refunds_needing_attention
@@ -2349,23 +2352,36 @@ components:
           description: Sum of all customers' credit balances. Not limited to `currency`.
         active_customers:
           type: integer
+          description: |
+            Customer records with status `active`. Includes customers with
+            no subscription or only canceled ones; `live_customers` counts
+            the customers you bill.
         new_customers:
           type: integer
           description: Customers created in the window.
-        active_subscriptions:
+        live_customers:
           type: integer
-        trialing_subscriptions:
+          description: Customers with at least one `active` or `trialing` subscription now.
+        live_customers_prev:
           type: integer
           description: |
-            Subscriptions with status `active` whose `trial_end_at` is in
-            the future. Subscriptions with status `trialing` are not
-            counted.
+            `live_customers` at the start of the window, rebuilt from
+            subscription start and cancel times.
+        active_subscriptions:
+          type: integer
+          description: Subscriptions with status `active`.
+        trialing_subscriptions:
+          type: integer
+          description: Subscriptions with status `trialing`.
         paid_invoices:
           type: integer
           description: Invoices paid in the window.
         failed_payments:
           type: integer
           description: Invoices created in the window whose payment failed. All currencies.
+        failed_payments_prev:
+          type: integer
+          description: "`failed_payments` for the previous window."
         open_invoices:
           type: integer
           description: Finalized invoices whose payment has not succeeded. All currencies.

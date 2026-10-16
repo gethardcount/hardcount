@@ -125,8 +125,9 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 	expected := []string{
 		"period", "currency", "mrr", "mrr_prev", "arr", "arr_prev",
 		"revenue", "revenue_prev", "outstanding_ar", "outstanding_by_currency", "avg_invoice_value", "credit_balance_total",
-		"active_customers", "new_customers", "active_subscriptions", "trialing_subscriptions",
-		"paid_invoices", "failed_payments", "open_invoices",
+		"active_customers", "new_customers", "live_customers", "live_customers_prev",
+		"active_subscriptions", "trialing_subscriptions",
+		"paid_invoices", "failed_payments", "failed_payments_prev", "open_invoices",
 		"dunning_active", "refunds_needing_attention", "usage_events",
 		"logo_churn_rate", "revenue_churn_rate", "nrr", "dunning_recovery_rate",
 		"mrr_movement",

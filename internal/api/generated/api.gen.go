@@ -2511,7 +2511,12 @@ type AnalyticsMrrMovementTotals struct {
 // window" is the one of equal length before it. Money is in cents of
 // `currency`.
 type AnalyticsOverview struct {
-	ActiveCustomers     int `json:"active_customers"`
+	// ActiveCustomers Customer records with status `active`. Includes customers with
+	// no subscription or only canceled ones; `live_customers` counts
+	// the customers you bill.
+	ActiveCustomers int `json:"active_customers"`
+
+	// ActiveSubscriptions Subscriptions with status `active`.
 	ActiveSubscriptions int `json:"active_subscriptions"`
 
 	// Arr `mrr` times 12.
@@ -2537,6 +2542,16 @@ type AnalyticsOverview struct {
 
 	// FailedPayments Invoices created in the window whose payment failed. All currencies.
 	FailedPayments int `json:"failed_payments"`
+
+	// FailedPaymentsPrev `failed_payments` for the previous window.
+	FailedPaymentsPrev int `json:"failed_payments_prev"`
+
+	// LiveCustomers Customers with at least one `active` or `trialing` subscription now.
+	LiveCustomers int `json:"live_customers"`
+
+	// LiveCustomersPrev `live_customers` at the start of the window, rebuilt from
+	// subscription start and cancel times.
+	LiveCustomersPrev int `json:"live_customers_prev"`
 
 	// LogoChurnRate Subscriptions canceled in the window, divided by subscriptions active at its start. 0 when none were active.
 	LogoChurnRate float64 `json:"logo_churn_rate"`
@@ -2590,9 +2605,7 @@ type AnalyticsOverview struct {
 	// RevenuePrev Total of invoices paid in the previous window.
 	RevenuePrev int64 `json:"revenue_prev"`
 
-	// TrialingSubscriptions Subscriptions with status `active` whose `trial_end_at` is in
-	// the future. Subscriptions with status `trialing` are not
-	// counted.
+	// TrialingSubscriptions Subscriptions with status `trialing`.
 	TrialingSubscriptions int `json:"trialing_subscriptions"`
 
 	// UsageEvents Usage events with a timestamp in the window.

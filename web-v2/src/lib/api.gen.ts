@@ -7298,20 +7298,31 @@ export interface components {
              * @description Sum of all customers' credit balances. Not limited to `currency`.
              */
             credit_balance_total: number;
+            /**
+             * @description Customer records with status `active`. Includes customers with
+             *     no subscription or only canceled ones; `live_customers` counts
+             *     the customers you bill.
+             */
             active_customers: number;
             /** @description Customers created in the window. */
             new_customers: number;
-            active_subscriptions: number;
+            /** @description Customers with at least one `active` or `trialing` subscription now. */
+            live_customers: number;
             /**
-             * @description Subscriptions with status `active` whose `trial_end_at` is in
-             *     the future. Subscriptions with status `trialing` are not
-             *     counted.
+             * @description `live_customers` at the start of the window, rebuilt from
+             *     subscription start and cancel times.
              */
+            live_customers_prev: number;
+            /** @description Subscriptions with status `active`. */
+            active_subscriptions: number;
+            /** @description Subscriptions with status `trialing`. */
             trialing_subscriptions: number;
             /** @description Invoices paid in the window. */
             paid_invoices: number;
             /** @description Invoices created in the window whose payment failed. All currencies. */
             failed_payments: number;
+            /** @description `failed_payments` for the previous window. */
+            failed_payments_prev: number;
             /** @description Finalized invoices whose payment has not succeeded. All currencies. */
             open_invoices: number;
             /** @description Dunning runs (automatic payment retries) still in progress. */

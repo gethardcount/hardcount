@@ -42,16 +42,26 @@ type OverviewResponse struct {
 	OutstandingByCurrency []CurrencyAmount `json:"outstanding_by_currency"`
 
 	// Counts
-	ActiveCustomers  int   `json:"active_customers"`
-	NewCustomers     int   `json:"new_customers"`
-	ActiveSubs       int   `json:"active_subscriptions"`
-	TrialingSubs     int   `json:"trialing_subscriptions"`
-	PaidInvoices     int   `json:"paid_invoices"`
-	FailedPayments   int   `json:"failed_payments"`
-	OpenInvoices     int   `json:"open_invoices"`
-	DunningActive    int   `json:"dunning_active"`
-	RefundsAttention int   `json:"refunds_needing_attention"`
-	UsageEvents      int64 `json:"usage_events"`
+	ActiveCustomers int `json:"active_customers"`
+	NewCustomers    int `json:"new_customers"`
+	// LiveCustomers counts distinct customers with at least one active or
+	// trialing subscription: the customers you are billing or about to bill.
+	// ActiveCustomers counts customer records with status active, which also
+	// includes customers with no subscription or only canceled ones.
+	LiveCustomers int `json:"live_customers"`
+	// LiveCustomersPrev is the same count at the start of the window, rebuilt
+	// from subscription start and cancel times (like mrr_prev). It is never
+	// negative, unlike "live now minus new in the window" would be.
+	LiveCustomersPrev  int   `json:"live_customers_prev"`
+	ActiveSubs         int   `json:"active_subscriptions"`
+	TrialingSubs       int   `json:"trialing_subscriptions"`
+	PaidInvoices       int   `json:"paid_invoices"`
+	FailedPayments     int   `json:"failed_payments"`
+	FailedPaymentsPrev int   `json:"failed_payments_prev"`
+	OpenInvoices       int   `json:"open_invoices"`
+	DunningActive      int   `json:"dunning_active"`
+	RefundsAttention   int   `json:"refunds_needing_attention"`
+	UsageEvents        int64 `json:"usage_events"`
 
 	// Rates (0..1)
 	LogoChurnRate       float64 `json:"logo_churn_rate"`
@@ -143,8 +153,23 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 			[]any{period.Start, period.End}},
 		{"active_subs", &resp.ActiveSubs,
 			`SELECT COUNT(*) FROM subscriptions WHERE status = 'active'` + notSimSubBare, nil},
+		// A subscription in its trial has status 'trialing' (it flips to
+		// 'active' when the trial ends). The old predicate, status 'active'
+		// with a future trial_end_at, matched no row, so this always read 0.
 		{"trialing_subs", &resp.TrialingSubs,
-			`SELECT COUNT(*) FROM subscriptions WHERE status = 'active' AND trial_end_at IS NOT NULL AND trial_end_at > now()` + notSimSubBare, nil},
+			`SELECT COUNT(*) FROM subscriptions WHERE status = 'trialing'` + notSimSubBare, nil},
+		{"live_customers", &resp.LiveCustomers,
+			`SELECT COUNT(DISTINCT customer_id) FROM subscriptions WHERE status IN ('active', 'trialing')` + notSimSubBare, nil},
+		// Live at the window start: started (trial or paid) at or before it
+		// and not canceled by then. Drafts never started; archived rows are
+		// out of the billing set.
+		{"live_customers_prev", &resp.LiveCustomersPrev,
+			`SELECT COUNT(DISTINCT customer_id) FROM subscriptions
+			 WHERE status NOT IN ('draft', 'archived')
+			   AND COALESCE(started_at, activated_at) IS NOT NULL
+			   AND COALESCE(started_at, activated_at) <= $1
+			   AND (canceled_at IS NULL OR canceled_at > $1)` + notSimSubBare,
+			[]any{period.Start}},
 		{"outstanding_ar", &resp.OutstandingAR,
 			`SELECT COALESCE(SUM(amount_due_cents), 0) FROM invoices WHERE status = 'finalized' AND payment_status != 'succeeded' AND currency = $1` + notSimInvoice,
 			[]any{defaultCurrency}},
@@ -157,6 +182,11 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		{"failed_payments", &resp.FailedPayments,
 			`SELECT COUNT(*) FROM invoices WHERE payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
 			[]any{period.Start, period.End}},
+		// Same predicate over the previous window, so the trend compares like
+		// with like (the dashboard used to compare against a hard-coded 0).
+		{"failed_payments_prev", &resp.FailedPaymentsPrev,
+			`SELECT COUNT(*) FROM invoices WHERE payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
+			[]any{period.PrevStart, period.PrevEnd}},
 		{"open_invoices", &resp.OpenInvoices,
 			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status != 'succeeded'` + notSimInvoice, nil},
 		{"dunning_active", &resp.DunningActive,
