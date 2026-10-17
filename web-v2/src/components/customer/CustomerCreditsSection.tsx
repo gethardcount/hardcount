@@ -96,7 +96,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
             <p className="mb-2 text-xs font-medium text-muted-foreground">Grants</p>
             {shown.some(g => g.grant_kind === 'commit' || g.grant_kind === 'promotional') && (
               <p className="mb-2 text-xs text-muted-foreground">
-                Commit credit was paid for on an invoice. Promotional credit is free and is used up first.
+                Commit credit was bought on an invoice. Promotional credit is free and is used up first.
               </p>
             )}
             {shown.length > 0 && (

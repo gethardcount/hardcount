@@ -1613,7 +1613,7 @@ export default function InvoiceDetailPage() {
         title="Mark invoice uncollectible"
         description="Records this invoice as bad debt. The invoice stays on the books for audit, but dunning automation halts and no further collection is attempted. If the payment provider later confirms the charge did go through, the invoice still settles as paid on its own."
         confirmWord="WRITE OFF"
-        confirmLabel="Mark Uncollectible"
+        confirmLabel="Mark uncollectible"
         onConfirm={() => markUncollectibleMutation.mutate()}
         loading={markUncollectibleMutation.isPending}
       >
@@ -1653,7 +1653,7 @@ export default function InvoiceDetailPage() {
         title="Rotate public link"
         description="This invalidates the current public URL for this invoice and mints a new one. Any email, message, or page still linking to the old URL will stop working. Use this if the current link was shared somewhere it shouldn't have been."
         confirmWord="ROTATE"
-        confirmLabel="Rotate Link"
+        confirmLabel="Rotate link"
         onConfirm={() => rotatePublicTokenMutation.mutate()}
         loading={rotatePublicTokenMutation.isPending}
       />
