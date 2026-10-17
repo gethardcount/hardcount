@@ -150,6 +150,7 @@ A migration is a versioned script that changes the database schema. Velox ships 
 - Set `RUN_MIGRATIONS_ON_BOOT=true` and Velox applies any new ones when it starts. The Compose stack and the local `.env.example` both set it. The default is `false`.
 - If several copies start at once, only one applies them and the others wait.
 - **Never roll back in production.** The "down" scripts exist for development. To undo a change in production, write a new migration.
+- **Each migration waits at most 5 seconds for a table lock.** While a migration waits for a lock, other queries on that table wait behind it, so Velox stops the upgrade instead of letting the table stall. The migration leaves nothing behind; run the upgrade again when the table is quieter. `MIGRATION_LOCK_TIMEOUT` changes the limit. See [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md).
 - **If an upgrade stops midway,** Velox refuses to start and says `schema_migrations is dirty`. Check the schema, then repair with `velox migrate force <version>`. See [A database upgrade failed midway](ops/runbook/migration-failed-midway.md).
 
 ## Upgrading
@@ -192,6 +193,7 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 |---|---|---|
 | `APP_ENV` | `local` | `local`, `staging` or `production`. Outside `local`, cookies are marked secure and the start-up checks on this page apply. A value that starts with `prod` but is not exactly `production`, such as `prod`, stops start-up. Any other unrecognised value starts with a warning and is treated as not production. |
 | `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. |
+| `MIGRATION_LOCK_TIMEOUT` | `5s` | How long a database upgrade waits for a table lock before it stops. A duration such as `30s`, or `0` for no limit. Any other value stops the upgrade. |
 | `DASHBOARD_BASE_URL` | unset | The dashboard's address, used in password-reset links. If unset, no password-reset emails are sent. For local development use `http://localhost:5173`. |
 | `CUSTOMER_PORTAL_URL` | unset | The dashboard's address, with no path. Stripe returns a customer here after they save a card. If unset, Stripe sends them to `http://localhost:5173`, which exists only in local development; the card is still saved. |
 | `SMTP_HOST`, `SMTP_PORT` | unset | Your email server. If unset, Velox sends no email. The local `.env.example` points these at Mailpit; the Compose stack leaves them unset. See [email setup](ops/email-setup.md). |

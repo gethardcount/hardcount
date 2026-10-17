@@ -20,8 +20,9 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	mpg "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -80,11 +81,25 @@ const (
 // shared pool would leave it unusable for every subsequent operation (e.g.,
 // CheckSchemaReady, serving requests). This helper keeps that close
 // side-effect scoped to a pool the caller never sees.
+//
+// Every session it opens carries lock_timeout (LockTimeoutEnv, default
+// DefaultLockTimeout), so a migration that cannot get a table lock stops
+// instead of waiting with every app query on that table queued behind it
+// (#987). statement_timeout is deliberately left alone: once a migration
+// holds its locks, cutting it off would roll back work on a large table
+// and fail the upgrade; write-blocking DDL is kept out of new migrations
+// by TestNewMigrationsAvoidBlockingDDL instead.
 func openMigrationPool(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("pgx", dsn)
+	timeout, err := lockTimeout()
 	if err != nil {
-		return nil, fmt.Errorf("open migration db: %w", err)
+		return nil, err
 	}
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse migration db url: %w", err)
+	}
+	cfg.RuntimeParams["lock_timeout"] = strconv.FormatInt(timeout.Milliseconds(), 10)
+	db := stdlib.OpenDB(*cfg)
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
@@ -306,6 +321,9 @@ func upHybrid(dsn string, noTxVersions map[uint]struct{}) error {
 		if _, isNoTx := noTxVersions[v]; isNoTx {
 			start := time.Now()
 			if err := applyNoTxOnPool(dsn, v, "up"); err != nil {
+				if isLockTimeout(err) {
+					return newLockTimeoutError(statusDB, v, curVer, false, err)
+				}
 				return fmt.Errorf("apply no-tx migration %04d up: %w", v, err)
 			}
 			slog.Info("no-tx migration applied",
@@ -319,6 +337,9 @@ func upHybrid(dsn string, noTxVersions map[uint]struct{}) error {
 		// In-tx step via the library — re-using all of golang-migrate's
 		// machinery (advisory lock, dirty bookkeeping, error formatting).
 		if err := stepOneViaLibrary(dsn, +1); err != nil {
+			if isLockTimeout(err) {
+				return newLockTimeoutError(statusDB, v, curVer, true, err)
+			}
 			return fmt.Errorf("apply migration %04d up via library: %w", v, err)
 		}
 		applied++
@@ -462,7 +483,7 @@ func applyNoTx(db *sql.DB, version uint, direction string) error {
 		if strings.TrimSpace(stmt) == "" {
 			continue
 		}
-		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+		if err := execNoTxStatement(ctx, conn, stmt); err != nil {
 			return fmt.Errorf("statement %d: %w", i+1, err)
 		}
 	}
@@ -471,6 +492,31 @@ func applyNoTx(db *sql.DB, version uint, direction string) error {
 		return fmt.Errorf("mark clean after no-tx run: %w", err)
 	}
 	return nil
+}
+
+// concurrentlyPattern finds CREATE/DROP INDEX CONCURRENTLY and REINDEX
+// ... CONCURRENTLY statements.
+var concurrentlyPattern = regexp.MustCompile(`(?i)\bCONCURRENTLY\b`)
+
+// execNoTxStatement runs one statement of a no-tx migration. A
+// CONCURRENTLY statement runs with no lock timeout: its lock does not
+// block reads or writes, so waiting queues no app traffic, and it spends
+// most of its time waiting for older transactions to finish. Timing it
+// out would only leave an INVALID index behind for the next run to trip
+// over. Every other statement keeps the session's lock_timeout.
+func execNoTxStatement(ctx context.Context, conn *sql.Conn, stmt string) error {
+	if !concurrentlyPattern.MatchString(stmt) {
+		_, err := conn.ExecContext(ctx, stmt)
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `SET lock_timeout = 0`); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, stmt); err != nil {
+		return err
+	}
+	_, err := conn.ExecContext(ctx, `RESET lock_timeout`)
+	return err
 }
 
 // postApplyVersion computes the version that schema_migrations should hold

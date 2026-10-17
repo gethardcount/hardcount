@@ -395,6 +395,8 @@ Never roll the database back. If a release goes wrong, restore the backup from s
 
 If the API will not start and its log says `schema_migrations is dirty`, a database change stopped midway. Follow [A database upgrade failed midway](ops/runbook/migration-failed-midway.md).
 
+If it says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query. Nothing needs repair: start the API again, or see [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md).
+
 ## Related
 
 - [Install on one VM](../deploy/compose/README.md): each install step explained, and fixes for start-up errors.

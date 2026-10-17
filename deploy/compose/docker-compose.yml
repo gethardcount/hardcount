@@ -85,6 +85,8 @@ services:
       APP_ENV: ${APP_ENV:-production}
       PORT: "8080"
       RUN_MIGRATIONS_ON_BOOT: "true"
+      # How long a database upgrade waits for a table lock (empty = 5s, 0 = no limit).
+      MIGRATION_LOCK_TIMEOUT: ${MIGRATION_LOCK_TIMEOUT:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # How long after a billing period ends its invoice is built (0 to 72h).
       # Delays every period-end invoice; see docs/self-host.md.
