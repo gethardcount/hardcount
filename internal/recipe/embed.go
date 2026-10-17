@@ -1,7 +1,7 @@
 // Package recipe implements the pricing recipes feature: one-call
 // instantiation of a pre-baked product+meter+pricing-rule+plan+dunning
 // graph for AI-platform and SaaS pricing patterns. See
-// docs/design-recipes.md.
+// docs/design/recipes.md.
 package recipe
 
 import (

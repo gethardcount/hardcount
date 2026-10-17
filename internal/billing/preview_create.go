@@ -28,7 +28,7 @@ type SubscriptionLister interface {
 }
 
 // PreviewService composes the per-domain reads behind
-// POST /v1/invoices/create_preview. See docs/design-create-preview.md.
+// POST /v1/invoices/create_preview. See docs/design/create-preview.md.
 //
 // The hard work — dimension-match-aware aggregation in
 // usage.AggregateByPricingRules and per-rule pricing via

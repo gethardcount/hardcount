@@ -71,7 +71,7 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > close) the window. Recovery is operator replay of LiteLLM's spend
 > logs — deterministic idempotency keys make it a pure gap-fill, with a
 > hard deadline at period finalize. Full analysis:
-> `docs/dev/ha-readiness-2026-07-06.md` ("Downtime = money?").
+> `docs/records/ha-readiness-2026-07-06.md` ("Downtime = money?").
 
 > **Amendment (2026-08-30): a store failure is a 503, not a 200 with
 > `errors[]`.** The status code answers one question — did Velox reach a

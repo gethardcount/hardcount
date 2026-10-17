@@ -58,7 +58,7 @@ type Store interface {
 	ListOverrides(ctx context.Context, tenantID, customerID string) ([]domain.CustomerPriceOverride, error)
 
 	// Meter pricing rules — N-rules-per-meter dispatch via dimension_match.
-	// See docs/design-multi-dim-meters.md.
+	// See docs/design/multi-dim-meters.md.
 	UpsertMeterPricingRule(ctx context.Context, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error)
 	UpsertMeterPricingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error)
 	GetMeterPricingRule(ctx context.Context, tenantID, id string) (domain.MeterPricingRule, error)

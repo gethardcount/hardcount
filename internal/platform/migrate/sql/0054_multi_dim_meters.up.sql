@@ -1,6 +1,6 @@
 -- Multi-dimensional meters: foundation for AI-native pricing.
 --
--- Three coordinated changes per docs/design-multi-dim-meters.md:
+-- Three coordinated changes per docs/design/multi-dim-meters.md:
 --
 --   1. usage_events.quantity becomes NUMERIC(38, 12).
 --      AI usage is intrinsically fractional (GPU-hours, cached-token

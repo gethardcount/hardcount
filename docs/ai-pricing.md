@@ -283,4 +283,4 @@ their own from LiteLLM yet: for Anthropic and Bedrock, LiteLLM counts them
 as input tokens, so they are billed at your input price. See [LiteLLM
 integration](integrations/litellm.md).
 
-Related: [the design of multi-dimension meters](design-multi-dim-meters.md).
+Related: [the design of multi-dimension meters](design/multi-dim-meters.md).

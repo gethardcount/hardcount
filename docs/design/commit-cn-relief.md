@@ -1,5 +1,7 @@
 # Design: paid-commit credit-note relief (ADR-078 phase 2)
 
+> **Status: shipped. Design written 2026-07-06.** The current rules are [ADR-080](../adr/080-paid-commit-cn-relief.md). Where this page and the code disagree, the code wins.
+
 Status: **panel-settled 2026-07-06** (a 3-lens divergent panel — independent designs argued from different lenses, then adversarially judged — workflow wf_bf1f8e30-0cf). This doc is the build spec; ADR-080 records the decisions. Implement exactly this — the cap formula was mechanically verified against `internal/platform/money/round.go`.
 
 ## The worked example (settles the cap)

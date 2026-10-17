@@ -1,12 +1,14 @@
 # Create-Preview Endpoint — Technical Design
 
+> **Status: shipped. Design written 2026-04-26.** No ADR decided this endpoint, so the code is the current record. Where this page and the code disagree, the code wins.
+
 > **This is a design document from 2026-04-26**, written alongside the build of `POST /v1/invoices/create_preview` (later corrected 2026-08-23 for 422 error statuses). No ADR decided this endpoint; the shipped code (`internal/billing/preview.go`, `preview_create.go`) and this doc are the record.
-> Later decisions that changed how the preview prices: [ADR-045](adr/045-decimal-per-unit-pricing-rates.md) (decimal per-unit rates; the preview does not apply usage caps and warns when one could bind), [ADR-054](adr/054-effective-unit-price-decimal-display.md) (full-precision per-unit price on lines), [ADR-070](adr/070-price-change-semantics.md) (prices at the rule version and customer override in force when the period opened; a failed price or override lookup aborts the preview instead of falling back to list price), the 2026-10-16 change that made the default-window preview mirror the cycle close (`previewCycle`: base fees prorate for a short first period and per segment after mid-period changes, and usage is rated over the windows the close bills; an explicit `period` keeps the flat estimate and its mid-period warning), and [ADR-066](adr/066-threshold-money-semantics.md): the preview does not model threshold fires, so for a subscription whose billing threshold has `reset_billing_cycle=true` the preview shows the full base fee while the fire bills a prorated one.
+> Later decisions that changed how the preview prices: [ADR-045](../adr/045-decimal-per-unit-pricing-rates.md) (decimal per-unit rates; the preview does not apply usage caps and warns when one could bind), [ADR-054](../adr/054-effective-unit-price-decimal-display.md) (full-precision per-unit price on lines), [ADR-070](../adr/070-price-change-semantics.md) (prices at the rule version and customer override in force when the period opened; a failed price or override lookup aborts the preview instead of falling back to list price), the 2026-10-16 change that made the default-window preview mirror the cycle close (`previewCycle`: base fees prorate for a short first period and per segment after mid-period changes, and usage is rated over the windows the close bills; an explicit `period` keeps the flat estimate and its mid-period warning), and [ADR-066](../adr/066-threshold-money-semantics.md): the preview does not model threshold fires, so for a subscription whose billing threshold has `reset_billing_cycle=true` the preview shows the full base fee while the fire bills a prorated one.
 
 > **Status:** Shipped (2026-04-26) — `POST /v1/invoices/create_preview`
 > **Owner:** Track A (the backend workstream)
 > **Last revised:** 2026-08-23 — error-status corrections: the shipped surface returns 422 for validation failures, not the 400 originally written here
-> **Related:** `docs/design-customer-usage.md` (sibling read surface, same composition pattern), `docs/design-multi-dim-meters.md` (multi-dim dependency — `usage.AggregateByPricingRules` is the engine)
+> **Related:** `docs/design/customer-usage.md` (sibling read surface, same composition pattern), `docs/design/multi-dim-meters.md` (multi-dim dependency — `usage.AggregateByPricingRules` is the engine)
 
 ## Motivation
 
@@ -52,7 +54,7 @@ The slice is exactly the same composition pattern as `customer-usage`: customer 
 
 ## API surface
 
-> **Wire-contract conventions** (consistent with `/v1/*`, see `docs/design-customer-usage.md` § wire-contract):
+> **Wire-contract conventions** (consistent with `/v1/*`, see `docs/design/customer-usage.md` § wire-contract):
 >
 > - **Snake-case JSON keys**, struct-tag enforced.
 > - **Customer identity is the customer ID** (`vlx_cus_…`). Mirrors customer-usage.

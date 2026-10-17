@@ -14,7 +14,7 @@ import (
 // record what it created (CreatedObjects) for the dashboard's install badge.
 // (ADR-085: apply is idempotent additive — no force, no uninstall.)
 //
-// See docs/design-recipes.md.
+// See docs/design/recipes.md.
 type RecipeInstance struct {
 	ID             string         `json:"id"`
 	TenantID       string         `json:"tenant_id,omitempty"`
@@ -47,7 +47,7 @@ type CreatedObjects struct {
 // RenderedRecipe ready for instantiation.
 //
 // JSON tags use snake_case to match the rest of /v1/* and the wire
-// contract in docs/design-recipes.md.
+// contract in docs/design/recipes.md.
 type Recipe struct {
 	Key         string           `json:"key"`
 	Version     string           `json:"version"`

@@ -1,28 +1,37 @@
 # Velox documentation
 
-Start here to find the right doc. Pick what you want to do, then read the
-docs in the order listed. Words you may not know are in the
-[glossary](glossary.md), with plain meanings first.
+**New here? Read the [README](../README.md), then run the
+[quick start](quick-start.md).**
 
-## Decide if Velox fits
+After that, pick what you want to do and read the docs in the order
+listed. Words you may not know are in the [glossary](glossary.md), with
+plain meanings first.
+
+## Try it
 
 1. [README](../README.md): what Velox is, who it is for, and a demo.
-2. [How Velox works](how-velox-works.md): one picture and six steps, from
-   a usage event to a paid invoice.
+2. [Quick start](quick-start.md): start Velox on your computer with only
+   Docker, run the demo, and see one month of token usage become an
+   invoice, its PDF and a margin report. Each step says what you see.
 3. [What Velox is not](../README.md#what-velox-is-not): the cases where
    another tool is the better choice.
 4. [What's in the box](features.md): every feature, in one list.
 5. [How Velox compares](comparison.md) with four open-source billing
    engines, with sources, and [why Velox exists](why-velox.md).
-6. [How Velox is engineered](ENGINEERING.md): the principles, one page.
-7. [Will it take our volume?](scale.md): what was measured, and where one
+6. [Roadmap](roadmap.md): what shipped recently and what is deferred.
+
+## Understand it
+
+1. [How Velox works](how-velox-works.md): one picture and six steps, from
+   a usage event to a paid invoice.
+2. [Glossary](glossary.md): the words you will meet, plain meaning first.
+3. [Will it take our volume?](scale.md): what was measured, and where one
    Postgres stops being enough.
-
-## Try it on your machine
-
-1. [Quick start](quick-start.md): start Velox on your computer with only
-   Docker, run the demo, and see one month of token usage become an
-   invoice, its PDF and a margin report. Each step says what you see.
+4. [How Velox is engineered](ENGINEERING.md): the principles, one page,
+   and [the evidence behind them](engineering-evidence.md).
+5. The measured runs in full:
+   [correctness under failure](benchmarks/failure-correctness.md) and
+   [sustained throughput](benchmarks/sustained-throughput.md).
 
 ## Connect your product
 
@@ -40,7 +49,7 @@ docs in the order listed. Words you may not know are in the
 7. [LiteLLM integration](integrations/litellm.md): send token usage from a
    LiteLLM proxy without writing code.
 
-## Run it in production
+## Run it for real
 
 1. [Self-host](self-host.md): what you need and how the pieces fit.
 2. [Docker Compose on one VM](../deploy/compose/README.md): step-by-step
@@ -71,39 +80,17 @@ docs in the order listed. Words you may not know are in the
    step-by-step Stripe commands.
 5. [OpenAPI workflow](dev/openapi-workflow.md): changing the API contract.
 6. [Writing style](dev/writing-style.md): how to write docs here.
-7. AI coding agents start at [CLAUDE.md](../CLAUDE.md), then
-   [agent prompting standards](dev/agent-prompting-standards.md).
+7. AI coding agents start at [CLAUDE.md](../CLAUDE.md).
 
-## Understand a decision
+## Archive
 
-- [The evidence behind the engineering principles](engineering-evidence.md).
-- [Correctness under failure](benchmarks/failure-correctness.md) and
-  [Sustained throughput](benchmarks/sustained-throughput.md): the measured
-  runs in full.
-- [Roadmap](roadmap.md): what shipped recently and what is deferred.
+Background for a decision. You do not need these to use or run Velox.
 
 - [Architecture decision records (ADRs)](adr/README.md): one decision per
   file, with the reasons and the alternatives.
-- Design docs, written while each feature was planned. Where a design doc
-  and the code disagree, the code and the ADRs are the current record.
-  - [Billing thresholds](design-billing-thresholds.md)
-  - [CC on billing emails](design-cc-emails.md)
-  - [Create-preview endpoint](design-create-preview.md)
-  - [Customer usage endpoint](design-customer-usage.md)
-  - [Multi-dimensional meters](design-multi-dim-meters.md)
-  - [Pricing recipes](design-recipes.md)
-  - [Provider cost tables](design-cost-tables.md)
-  - [Prepaid commits](design-prepaid-commits.md)
-  - [Paid-commit credit-note relief](design-commit-cn-relief.md)
-
-## Records
-
-Dated documents. They describe the state on their date; the current truth
-is in the code and the docs above.
-
-- [Full-product audit, 2026-07-02](dev/audit-2026-07-02-full-product.md) and
-  its [remediation plan](dev/audit-2026-07-02-remediation-plan.md)
-- [HA readiness, 2026-07-06](dev/ha-readiness-2026-07-06.md)
-- [Design review, 2026-07-10](dev/design-review-2026-07-10.md)
-- [Product stability plan](dev/product-stability-plan.md)
-- [CHANGELOG](../CHANGELOG.md)
+- [Design docs](design/README.md): the plan for each feature, written
+  before it was built. Where a design doc and the code disagree, the code
+  and the ADRs are the current record.
+- [Records](records/README.md): dated audits, reviews and plans, kept as
+  written.
+- [CHANGELOG](../CHANGELOG.md): every change, by date.

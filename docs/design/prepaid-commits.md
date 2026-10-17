@@ -1,5 +1,7 @@
 # Design — Prepaid commits + drawdown (LOCKED)
 
+> **Status: shipped. Design written 2026-07-05.** The current rules are [ADR-078](../adr/078-prepaid-commits-phase-1.md). Where this page and the code disagree, the code wins.
+
 **Status:** LOCKED for build (2026-07-05) after (1) Orb 3-0 adversarial
 verification, (2) a 4-platform peer sweep (Metronome/Lago/Stripe/AI-infra
 — 43/45 claims quote-verified), and (3) a 6-lens adversarial design panel

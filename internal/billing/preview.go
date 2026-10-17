@@ -22,7 +22,7 @@ import (
 //     pricing identity). Single-rule meters keep the one-line-per-meter
 //     shape with no DimensionMatch.
 //
-// See docs/design-create-preview.md.
+// See docs/design/create-preview.md.
 type PreviewLine struct {
 	LineType            string          `json:"line_type"`
 	Description         string          `json:"description"`

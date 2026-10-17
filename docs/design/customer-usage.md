@@ -1,8 +1,10 @@
 # Customer Usage Endpoint — Technical Design
 
+> **Status: shipped. Design written 2026-04-26.** No ADR decided this endpoint, so the code is the current record. Where this page and the code disagree, the code wins.
+
 > **Design document, written 2026-04-26 before the build.** The endpoint (`GET /v1/customers/{id}/usage`) has shipped; no ADR decided it, so the code is the current record: `internal/usage/customer_usage.go` and `customer_usage_handler.go`, with the dashboard in `web-v2/src/components/CostDashboard.tsx`.
-> Later decisions that changed it: [ADR-032](adr/032-public-cost-dashboard-projection.md) added the public, token-protected cost-dashboard view of this data; [ADR-044](adr/044-canonical-ai-token-metering-model.md) made one `token_type` dimension the canonical token shape (the example response already uses it; leftover names like `gpt4_input_uncached` predate it); [ADR-045](adr/045-decimal-per-unit-pricing-rates.md) made per-unit rates decimal; [ADR-054](adr/054-effective-unit-price-decimal-display.md) added the full-precision per-unit price to each rule row; [ADR-070](adr/070-price-change-semantics.md) prices each rule (and any customer override) at the version in force at the start of the window, the same way invoices do.
-> Related designs: `docs/design-multi-dim-meters.md`, `docs/design-recipes.md`.
+> Later decisions that changed it: [ADR-032](../adr/032-public-cost-dashboard-projection.md) added the public, token-protected cost-dashboard view of this data; [ADR-044](../adr/044-canonical-ai-token-metering-model.md) made one `token_type` dimension the canonical token shape (the example response already uses it; leftover names like `gpt4_input_uncached` predate it); [ADR-045](../adr/045-decimal-per-unit-pricing-rates.md) made per-unit rates decimal; [ADR-054](../adr/054-effective-unit-price-decimal-display.md) added the full-precision per-unit price to each rule row; [ADR-070](../adr/070-price-change-semantics.md) prices each rule (and any customer override) at the version in force at the start of the window, the same way invoices do.
+> Related designs: `docs/design/multi-dim-meters.md`, `docs/design/recipes.md`.
 
 ## Motivation
 
@@ -45,7 +47,7 @@ This endpoint is **composition, not new aggregation logic**. The hard SQL alread
 
 ## API surface
 
-> **Wire-contract conventions** (consistent with `/v1/*`, see `docs/design-recipes.md` § wire-contract):
+> **Wire-contract conventions** (consistent with `/v1/*`, see `docs/design/recipes.md` § wire-contract):
 >
 > - **Snake-case JSON keys**, struct-tag enforced. Picker-side TS types match.
 > - **Customer identity is the customer ID** (`vlx_cus_…`), not the external ID (the identifier the tenant's own system uses for the customer). Use `?external_id=` if you need external-ID lookup; defer for v2 or wrap as a separate endpoint.

@@ -63,7 +63,7 @@ func (h *Handler) Routes() chi.Router {
 // Critical: chi/v5 dispatches by registration order. We register
 // /stream BEFORE /{id} so a literal "stream" path doesn't get captured
 // as an ID and route to the deliveries handler. See
-// docs/design-create-preview.md for the canonical write-up.
+// docs/design/create-preview.md for the canonical write-up.
 //
 // Note: the SSE handler (streamEvents) IS exposed here for tests and
 // dev-time mounting, but the production router mounts /stream

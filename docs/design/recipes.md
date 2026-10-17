@@ -1,7 +1,9 @@
 # Pricing Recipes — Technical Design
 
+> **Status: shipped. Design written 2026-04-25.** The current rules are [ADR-085](../adr/085-recipe-idempotent-apply.md). Where this page and the code disagree, the code wins.
+
 > **Design document from 2026-04-25, kept as written.** Recipes have shipped; the code in `internal/recipe/` is the live behavior.
-> The current design is recorded in [ADR-085](adr/085-recipe-idempotent-apply.md) (applying a recipe is idempotent and additive; supersedes [ADR-083](adr/083-recipe-adoption-conformance-gate.md)), with the token pricing shape in [ADR-044](adr/044-canonical-ai-token-metering-model.md) and [ADR-045](adr/045-decimal-per-unit-pricing-rates.md), rule adoption without republishing in [ADR-070](adr/070-price-change-semantics.md), and the cross-currency meter refusal in [ADR-100](adr/100-currency-coherence-guard-ring.md).
+> The current design is recorded in [ADR-085](../adr/085-recipe-idempotent-apply.md) (applying a recipe is idempotent and additive; supersedes [ADR-083](../adr/083-recipe-adoption-conformance-gate.md)), with the token pricing shape in [ADR-044](../adr/044-canonical-ai-token-metering-model.md) and [ADR-045](../adr/045-decimal-per-unit-pricing-rates.md), rule adoption without republishing in [ADR-070](../adr/070-price-change-semantics.md), and the cross-currency meter refusal in [ADR-100](../adr/100-currency-coherence-guard-ring.md).
 > Where the body below is now out of date:
 >
 > 1. Only three built-ins ship (`anthropic_style`, `openai_style`, `replicate_style`); `b2b_saas_pro` and `marketplace_gmv` were dropped on 2026-05-14.

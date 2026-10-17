@@ -38,7 +38,7 @@ discovery.
 
 When the design or review stage runs as a multi-agent panel or workflow
 (several AI agents prompted in parallel), prompt the agents per
-[agent-prompting-standards.md](agent-prompting-standards.md). It covers
+[docs/records/agent-prompting-standards.md](../records/agent-prompting-standards.md). It covers
 grounded claims, sending the reasoning along with each request
 (reason-with-request), effort routing, and the optional mid-build
 spec-conformance verifier.
@@ -338,4 +338,4 @@ Five non-negotiable patterns:
 ## 6. Current posture (as of 2026-07-11)
 
 The dated census of each class's status moved to
-[money-path-census-2026-07.md](money-path-census-2026-07.md).
+[docs/records/money-path-census-2026-07.md](../records/money-path-census-2026-07.md).

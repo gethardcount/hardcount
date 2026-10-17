@@ -48,13 +48,13 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   `model` or `token_type`, as key-value pairs. Pricing rules match on them,
   so one meter can be priced at many rates. Up to 16 keys, and each value is
   a single value (text, number, true/false or null), never a list or an
-  object. [More](design-multi-dim-meters.md#subset-match-semantics)
+  object. [More](design/multi-dim-meters.md#subset-match-semantics)
 - **pricing rule**: A rule on a meter that picks the usage events to price.
   It takes the events whose dimensions contain every key-value pair in its
   `dimension_match`. It combines them into one quantity (sum, count, max or
   last value) and prices that quantity with a rating rule. If rules overlap,
   the highest-priority rule claims each event, so nothing counts twice.
-  [More](design-multi-dim-meters.md#priority--claim-semantics)
+  [More](design/multi-dim-meters.md#priority--claim-semantics)
 - **rating rule**: A price formula that turns a usage quantity into money:
   a flat rate per unit, graduated tiers, or fixed-size packages. It is
   identified by its `rule_key` and has versions. Billing uses the version
@@ -114,7 +114,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   period's running subtotal, or a usage count on one item (`usage_gte`).
   Crossing it issues an invoice with `billing_reason` "threshold", and can
   restart the cycle if you choose. Usage is never blocked.
-  [More](design-billing-thresholds.md)
+  [More](design/billing-thresholds.md)
 - **invoice states (draft, finalized, paid, void, uncollectible)**: Where
   an invoice is in its life. Draft: you can still change it. Finalized:
   issued and owed. Paid. Void: canceled, as if the debt never existed (the
@@ -142,7 +142,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   when it is billed, so less is charged. Free promotional credit is used
   before paid credit. Within each, the credit that expires soonest goes
   first. A commit's own purchase invoice can never be paid with credit.
-  [More](design-prepaid-commits.md#d7-drawdown-order-null-safe)
+  [More](design/prepaid-commits.md#d7-drawdown-order-null-safe)
 - **credit note (CN)**: A document that lowers what a customer owes on an
   invoice. On an unpaid invoice it lowers the amount due. On a paid one,
   its total is split between a refund to the card, credit to the
@@ -207,7 +207,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   by provider, model and token type, kept separately for live and test
   mode. When a usage event arrives, Velox uses it to record that event's
   cost, unless the sender already sent the real cost.
-  [More](design-cost-tables.md)
+  [More](design/cost-tables.md)
 - **COGS and margin**: COGS (cost of goods sold) is what you pay providers
   for a customer's usage. Velox records it on each usage event when the
   event arrives, from the sent cost or the cost table. Margin is what you
@@ -299,7 +299,7 @@ them to use Velox.
   states no correct code could produce, such as invoice totals that do not
   add up. It exits 1 when it finds a problem, or 2 if a check cannot run. It
   runs in CI and needs a database role that can see every row.
-  [More](dev/product-stability-plan.md)
+  [More](records/product-stability-plan.md)
 
 ### Working on the code
 

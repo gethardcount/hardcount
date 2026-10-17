@@ -1,5 +1,7 @@
 # Design — Provider cost tables + margin (LOCKED)
 
+> **Status: shipped. Design written 2026-07-05.** The current rules are [ADR-079](../adr/079-provider-cost-tables.md). Where this page and the code disagree, the code wins.
+
 **Status:** LOCKED for build (2026-07-05) after a 4-platform quote-verified
 sweep (workflow run wf_2edadfc3: 37/40 claims) and a 5-lens adversarial panel
 (workflow run wf_977f5dc5: ingest-perf, money-semantics, schema-lifecycle, scope,

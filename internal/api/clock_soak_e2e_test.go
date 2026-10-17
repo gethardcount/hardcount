@@ -16,7 +16,7 @@ import (
 )
 
 // TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary is the stability plan's
-// B2 soak (docs/dev/product-stability-plan.md): one subscription anchored on
+// B2 soak (docs/records/product-stability-plan.md): one subscription anchored on
 // the WORST day of the month (the 31st), driven through 13 real cycle closes
 // across a year boundary and two Februaries, through the REAL server — the
 // test-clock advance endpoint, the catchup orchestrator, the billing engine —

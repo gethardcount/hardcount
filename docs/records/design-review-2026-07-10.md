@@ -1,5 +1,7 @@
 # Design-quality review — 2026-07-10
 
+> **Record of 2026-07-10, kept as written.** The current truth is in the code, the ADRs and the live docs.
+
 **Method.** Two-phase funnel, adversarially verified. Phase 1: an 8-scout *wrong-model smell census*
 (bug-churn shapes, parallel writers, containment accretion, hand-rolled-vs-standard, coupling, dead
 schema, FE patterns, fired-trigger deferrals) ranked 15 candidates. Phase 2: 9 deep model reviews on

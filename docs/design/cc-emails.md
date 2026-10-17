@@ -1,5 +1,7 @@
 # Design: additional_emails + CC coverage — multi-recipient billing emails
 
+> **Status: shipped. Design written 2026-07-06.** The current rules are [ADR-082](../adr/082-email-recipient-semantics.md). Where this page and the code disagree, the code wins.
+
 Settled 2026-07-06 by a divergent design panel (independent designs
 argued from competing lenses — peer parity vs plumbing simplicity —
 plus an adversarial judge, wf_f804205b-528). Register item (the tracked

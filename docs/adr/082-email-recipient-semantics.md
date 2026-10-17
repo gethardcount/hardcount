@@ -2,7 +2,7 @@
 
 Date: 2026-07-06
 Status: Accepted
-Design basis: docs/design-cc-emails.md (two-lens divergent panel +
+Design basis: docs/design/cc-emails.md (two-lens divergent panel +
 adversarial judge; plumbing claims verified against the code before
 acceptance).
 Register items: "Invoice/receipt/dunning emails go to exactly one

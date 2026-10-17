@@ -94,4 +94,4 @@ Why: v0.4.0 changed how copies agree on who runs each job. An old copy and a new
 
 - [Self-host](../self-host.md): settings, Postgres and monitoring.
 - [Leader leases runbook](runbook-leader-leases.md): what to do when a background job seems stuck.
-- [HA readiness review](../dev/ha-readiness-2026-07-06.md): the dated record of what was checked for two or more copies, and why.
+- [HA readiness review](../records/ha-readiness-2026-07-06.md): the dated record of what was checked for two or more copies, and why.

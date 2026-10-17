@@ -178,7 +178,7 @@ func (m AggregationMode) IsValid() bool {
 // meter has dimension_match='{}' which matches every event; priority=0
 // keeps it last so specific rules win.
 //
-// See docs/design-multi-dim-meters.md for the resolution algorithm.
+// See docs/design/multi-dim-meters.md for the resolution algorithm.
 type MeterPricingRule struct {
 	ID                  string          `json:"id"`
 	TenantID            string          `json:"tenant_id,omitempty"`

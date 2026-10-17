@@ -1,5 +1,7 @@
 # HA readiness — SPOF register and the multi-replica plan (2026-07-06)
 
+> **Record of 2026-07-06, with later amendments.** To run two or more copies today, read [High availability](../ops/high-availability.md).
+
 > **Amendment 2026-10-17.** One VM with the Compose stack is also a
 > supported production setup, for a small team that can accept a few
 > minutes of downtime during a restart. Two or more replicas is the

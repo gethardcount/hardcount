@@ -1,10 +1,12 @@
 # Product stability plan — fewest live defects, provably
 
+> **Record, kept as written.** Some items in it were later dropped or closed, so check the code before acting on any of it.
+
 **Aim:** product stability — the fewest issues/gaps/bugs in the product,
 maintained as a *standing condition*, not a one-time push.
 
 This is the third leg of the discipline set:
-[money-path-robustness-playbook](money-path-robustness-playbook.md) (build
+[money-path-robustness-playbook](../dev/money-path-robustness-playbook.md) (build
 side), manual-test-strategy (proof side; since replaced by [How we test](../testing.md)), and this
 document (maintenance side — where residual defects live and what finds each
 class cheapest).
@@ -143,7 +145,7 @@ the same-PR rule is failing.
 
 ### B5. Fresh-tenant smoke ritual *(no build — a rule)*
 
-The [release checklist](release-checklist.md) and the Playwright suite
+The [release checklist](../dev/release-checklist.md) and the Playwright suite
 on a **fresh tenant** before any DP-facing (design-partner-facing) milestone.
 (Until October 2026 this was S1/S2, the MANUAL_TEST.md smoke flows.)
 Fresh-tenant walks found 3 seam bugs that aged-tenant walks structurally

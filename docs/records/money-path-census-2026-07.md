@@ -1,6 +1,8 @@
 # Money-path census (2026-07)
 
-A dated census, moved verbatim from the [Money-Path Robustness Playbook](money-path-robustness-playbook.md); its § numbers refer to that playbook.
+> **Record of 2026-07, kept as written.** A census here is a dated count of which money-path failure classes the code still had.
+
+A dated census, moved verbatim from the [Money-Path Robustness Playbook](../dev/money-path-robustness-playbook.md); its § numbers refer to that playbook.
 
 <!-- vale off -->
 <!-- Recorded text, kept as written (docs/dev/writing-style.md: do not rewrite records). -->
@@ -11,9 +13,9 @@ A dated census, moved verbatim from the [Money-Path Robustness Playbook](money-p
 lifecycle became its own design-of-record (**ADR-086** — is_simulated gates on
 all five wall-clock money sweeps, clock teardown, branded `EffectiveNow` on the
 FE; supersedes ADR-016); the HA/N=2 posture is documented in
-`ha-readiness-2026-07-06.md` (10 hazards, 17 verified-safe; build trigger =
+`docs/records/ha-readiness-2026-07-06.md` (10 hazards, 17 verified-safe; build trigger =
 production cutover); and the 2026-07-10 design-quality review
-(`design-review-2026-07-10.md`) shipped a fix-now batch (#427–#440) including
+(`docs/records/design-review-2026-07-10.md`) shipped a fix-now batch (#427–#440) including
 the `domain.TaxFacts` embed (class-A/B adjacent: the tax-fact field-drop class
 is now a compile error), typed effect outcomes (`domain.NotifyOutcome` — a
 skipped effect is never a silent nil), and fail-loud parity on the cancel

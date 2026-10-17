@@ -2717,7 +2717,7 @@ export interface paths {
          *     registered as a sibling of `/v1/invoices` (chi picks the more
          *     specific pattern, otherwise `/{id}` would capture
          *     `create_preview` as an invoice ID). See
-         *     [`docs/design-create-preview.md`](../docs/design-create-preview.md).
+         *     [`docs/design/create-preview.md`](../docs/design/create-preview.md).
          */
         post: {
             parameters: {

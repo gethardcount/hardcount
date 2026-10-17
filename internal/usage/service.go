@@ -434,7 +434,7 @@ func (s *Service) AggregateDailyBuckets(ctx context.Context, tenantID, customerI
 // as a meter-default is rejected because it would silently break the
 // "current state" semantics for unclaimed events.
 //
-// See docs/design-multi-dim-meters.md for the resolution semantics; this
+// See docs/design/multi-dim-meters.md for the resolution semantics; this
 // method is the runtime entry point that billing-finalize will call.
 func (s *Service) AggregateByPricingRules(
 	ctx context.Context,

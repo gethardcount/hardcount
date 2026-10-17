@@ -1,7 +1,7 @@
 # ADR-078: Prepaid commits + drawdown, phase 1
 
 **Status:** Accepted (2026-07-05)
-**Context:** `docs/design-prepaid-commits.md` (the locked design — peer-swept
+**Context:** `docs/design/prepaid-commits.md` (the locked design — peer-swept
 across Metronome/Lago/Stripe/AI-infra with adversarial quote-verification,
 then a 6-lens adversarial design panel; this ADR records the decisions, the
 design doc holds the full evidence and census).
@@ -133,7 +133,7 @@ Triggered by a live observation on VLX-000060: $96.52 invoiced, $0.00
 collected, dunning since Jul 30, and **$100.00 of the customer's credit
 fully spendable** — with nothing anywhere in the product saying so.
 
-**1. D3's fast-follow is shipped.** `docs/design-prepaid-commits.md` listed
+**1. D3's fast-follow is shipped.** `docs/design/prepaid-commits.md` listed
 "surfacing unpaid-funded grants in the attention dashboard" as a fast-follow
 candidate; it is now built. A `commit_exposure` reason + `void_invoice`
 action report an unpaid invoice whose commit credit is still live, on

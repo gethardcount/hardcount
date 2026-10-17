@@ -90,7 +90,7 @@ const (
 	// permanently lost. Nothing surfaced the state, so nobody could void in
 	// time — observed live on VLX-000060: $96.52 invoiced, $0.00 collected,
 	// $100.00 still drawable, dunning since Jul 30, and no surface said so.
-	// docs/design-prepaid-commits.md D3 named this exact surfacing a
+	// docs/design/prepaid-commits.md D3 named this exact surfacing a
 	// "fast-follow candidate"; this is that fast-follow.
 	//
 	// This reason is only ever SYNTHESIZED when nothing else fired — see

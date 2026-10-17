@@ -3,7 +3,7 @@
 Date: 2026-07-06
 Status: Accepted
 Supplements: ADR-078 (prepaid commits phase 1), ADR-061 (atomic CN issue)
-Design basis: docs/design-commit-cn-relief.md (3-lens divergent panel +
+Design basis: docs/design/commit-cn-relief.md (3-lens divergent panel +
 adversarial judge; the cap arithmetic was mechanically verified against
 `internal/platform/money/round.go` before acceptance).
 

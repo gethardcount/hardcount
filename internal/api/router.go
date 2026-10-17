@@ -1349,7 +1349,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// the DoS the #21 design avoids. This per-IP limiter is the only
 	// brute-force floor on auth in v1 — a per-(IP×account) login throttle
 	// is deferred (ADR-094). The HA-readiness audit (docs/dev/
-	// ha-readiness-2026-07-06.md) found the prior wiring mounted the
+	// docs/records/ha-readiness-2026-07-06.md) found the prior wiring mounted the
 	// fail-closed general limiter on /v1/auth, contradicting this
 	// stated design — a prod Redis outage killed dashboard login.
 	authLimiter := mw.NewRateLimiter(rdb, "general",
@@ -1362,7 +1362,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// first hour of wiring the proxy — and LiteLLM at stock config retries
 	// NOTHING (max_retries=0; the queue is cleared on any send error —
 	// verified against LiteLLM source 2026-07-06, see docs/dev/
-	// ha-readiness-2026-07-06.md), so every 429 was a silently dropped,
+	// docs/records/ha-readiness-2026-07-06.md), so every 429 was a silently dropped,
 	// permanently unbilled event. Peer
 	// anchor: Stripe meter events allow 1,000 calls/s live; Orb's TEST mode
 	// alone allows 2,000 events/min. Default 1000 req/s per key, override
@@ -1758,7 +1758,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// create_preview must mount BEFORE /invoices because chi tries
 		// patterns in registration order — once /invoices is mounted with
 		// /{id}/... children, "create_preview" would be claimed as an
-		// invoice ID. See docs/design-create-preview.md.
+		// invoice ID. See docs/design/create-preview.md.
 		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/invoices/create_preview", createPreviewH.Routes())
 		r.With(auth.RequireMethod(auth.PermInvoiceRead, auth.PermInvoiceWrite)).Mount("/invoices", invoiceH.Routes())
 		r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/credit-notes", creditNoteH.Routes())

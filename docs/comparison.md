@@ -53,9 +53,9 @@ Links to other projects are pinned to the commit that was read.
 **Velox**
 
 - Licence: [`LICENSE`](../LICENSE). Services: [`deploy/compose/docker-compose.yml`](../deploy/compose/docker-compose.yml).
-- Pricing by dimension: [`design-multi-dim-meters.md`](design-multi-dim-meters.md). Prepaid commits: [ADR-078](adr/078-prepaid-commits-phase-1.md).
+- Pricing by dimension: [`docs/design/multi-dim-meters.md`](design/multi-dim-meters.md). Prepaid commits: [ADR-078](adr/078-prepaid-commits-phase-1.md).
 - Webhooks: [`webhooks.md`](webhooks.md). Throughput: [`benchmarks/sustained-throughput.md`](benchmarks/sustained-throughput.md).
-- Invoice preview: [`design-create-preview.md`](design-create-preview.md). Card-only checkout: [`internal/payment/checkout.go`](../internal/payment/checkout.go).
+- Invoice preview: [`docs/design/create-preview.md`](design/create-preview.md). Card-only checkout: [`internal/payment/checkout.go`](../internal/payment/checkout.go).
 
 **Lago**
 

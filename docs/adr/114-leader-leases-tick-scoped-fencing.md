@@ -4,7 +4,7 @@
 **Date:** 2026-08-30
 **Amended:** 2026-08-30 — migration 0175 adds `not_before` (cooldown after a lost tick) so `last_tick_*` means completed ticks only (sweep S5)
 **Amends:** ADR-006 (background scheduler; the leader gate it assumed), ADR-072 (transport lease model — unchanged, now composed with a leader fence), ADR-073 (boot contract — `VerifyAdvisoryLockTopology` retired)
-**Plan of record:** [docs/dev/ha-readiness-2026-07-06.md](../dev/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
+**Plan of record:** [docs/records/ha-readiness-2026-07-06.md](../records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
 
 ## Summary
 

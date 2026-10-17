@@ -1,5 +1,7 @@
 # Agent Prompting Standards (Claude Fable 5)
 
+> **Internal tooling record.** How the maintainer writes prompts for AI agents that work on this repo. You do not need it to use or contribute to Velox.
+
 Reusable prompt fragments and rules for every multi-agent workflow this repo
 runs — adversarial design panels, audit finders (read-only defect-hunting
 agents), verifiers, migration sweeps. Distilled from Anthropic's Fable 5
@@ -7,7 +9,7 @@ prompting guide (2026) plus what our own
 panels proved works. Copy the fragments; don't re-derive them per workflow.
 
 Scope: this is a **tooling** discipline. Money-path methodology stays in
-[money-path-robustness-playbook.md](money-path-robustness-playbook.md); this
+[money-path-robustness-playbook.md](../dev/money-path-robustness-playbook.md); this
 doc is only about how we *prompt the agents* that execute that methodology.
 
 ## 1. Ground every claim (finders, auditors, status reporters)

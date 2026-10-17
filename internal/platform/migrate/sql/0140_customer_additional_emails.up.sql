@@ -1,4 +1,4 @@
--- Additional billing-email recipients (ADR-082, design-cc-emails.md).
+-- Additional billing-email recipients (ADR-082, docs/design/cc-emails.md).
 -- CC'd on billing documents and billing-state emails (invoice, receipt,
 -- dunning warning/escalation, payment failed, credit note) — never on
 -- credential-bearing emails (setup links, password reset, invites).

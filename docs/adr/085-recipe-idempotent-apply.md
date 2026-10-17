@@ -15,7 +15,7 @@ The self-made bug class was **adopt-by-natural-key** in the first place. A recip
 
 Once that's the base case, the rest of the accreted machinery turns out to be answering a question nobody actually asks:
 
-- **`Uninstall`** presumes a recipe *owns* what it created, the way `helm uninstall` owns a release's rendered manifests. It doesn't — the plan the recipe generated can carry live subscriptions the moment a customer signs up, and the rating rules/meter it adopted are shared reference data another recipe or the operator may also be using. `DELETE /v1/recipes/instances/{id}` (the design's original contract) only ever dropped the `recipe_instances` index row — "no cascade" was called out as intentional in `docs/design-recipes.md` from the start. An operation that can't retract anything isn't an uninstall; it's a badge deletion that makes the audit trail lie about what was applied.
+- **`Uninstall`** presumes a recipe *owns* what it created, the way `helm uninstall` owns a release's rendered manifests. It doesn't — the plan the recipe generated can carry live subscriptions the moment a customer signs up, and the rating rules/meter it adopted are shared reference data another recipe or the operator may also be using. `DELETE /v1/recipes/instances/{id}` (the design's original contract) only ever dropped the `recipe_instances` index row — "no cascade" was called out as intentional in `docs/design/recipes.md` from the start. An operation that can't retract anything isn't an uninstall; it's a badge deletion that makes the audit trail lie about what was applied.
 - **`seed_sample_data`** answers "give me fake data to click around" — a demo-seeding need, not a provisioning one (`feedback_no_seed_data_shortcut`: no seed-demo-data buttons; empty + educate, or a separate demo tenant). It shipped fully parsed and validated and was never wired to a writer — the honest state of an unbuilt feature, not a working one.
 - **`Force`** existed to blow away and redo an install. Once install never collides (plans are never adopted) there's nothing to force through.
 
@@ -70,7 +70,7 @@ The real repeat action operators take against a recipe isn't "take this back" �
 - **Generator/scaffolding tools hand off their output and have no uninstall** — `create-react-app`, `vercel deploy`, Backstage software templates all generate an artifact and step away; there's no corresponding teardown command, because the generator doesn't own what it produced once it exists. That's the exact shape of a recipe-generated plan.
 - **Infra-as-code tools that DO expose a teardown (Helm `uninstall`, Terraform `destroy`) do so because they continuously own and reconcile a set of managed resources across every subsequent change.** A recipe doesn't reconcile anything after the one apply call — it's a single generative event, closer to `helm template | kubectl apply` than to a Helm release. The tools in that same continuous-ownership category instead expose **inspect + upgrade** (`helm get`, `helm upgrade`), not delete-and-redo.
 
-So "install" is the one real event a recipe performs. "Update" — re-applying additively against a newer template version — is the real repeat use case, deferred below because it needs execution semantics this ADR doesn't build yet. "Uninstall" isn't a real operation at all: nothing in the object graph a recipe touches is safe to retract, and the code's own migration-era comment already said as much (`docs/design-recipes.md`: "no cascade... this is intentional").
+So "install" is the one real event a recipe performs. "Update" — re-applying additively against a newer template version — is the real repeat use case, deferred below because it needs execution semantics this ADR doesn't build yet. "Uninstall" isn't a real operation at all: nothing in the object graph a recipe touches is safe to retract, and the code's own migration-era comment already said as much (`docs/design/recipes.md`: "no cascade... this is intentional").
 
 ## Deferred
 
@@ -113,4 +113,4 @@ Each item below is cut for a **named** reason, with the trigger that reopens it:
 - `internal/recipe/service.go` (`Instantiate`, `freePlanCode`), `internal/recipe/conformance.go` (`meterConformanceDiff`), `internal/recipe/store.go`, `internal/recipe/handler.go`, `internal/domain/recipe.go`
 - Migration `0055_recipe_instances` (badge schema — unchanged by this ADR)
 - Memory: `feedback_complexity_accretion_smell`, `feedback_no_silent_fallbacks`, `feedback_no_seed_data_shortcut`, `feedback_longterm_fixes`
-- `docs/design-recipes.md` (amended alongside this ADR)
+- `docs/design/recipes.md` (amended alongside this ADR)

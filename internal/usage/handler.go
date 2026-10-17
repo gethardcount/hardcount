@@ -84,7 +84,7 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 // Quantity accepts both number (5) and string ("5.5") forms via shopspring's
 // UnmarshalJSON; the response side serializes as a string for precision.
 //
-// Dimensions: per docs/design-multi-dim-meters.md, AI-native ingest uses
+// Dimensions: per docs/design/multi-dim-meters.md, AI-native ingest uses
 // `dimensions` as the field name for the JSONB filter that pricing rules
 // dispatch on. Properties is the original name and is kept as an alias
 // for backward compatibility — if both are present, dimensions wins (it

@@ -1,8 +1,10 @@
 # Billing Thresholds — Technical Design
 
+> **Status: shipped. Design written 2026-04-26.** The current rules are [ADR-065](../adr/065-threshold-scan-boundary-fire-once-drain.md) and [ADR-066](../adr/066-threshold-money-semantics.md). Where this page and the code disagree, the code wins.
+
 > **Design document, last revised 2026-04-26** (the pre-build RFC; shipped with migration `0056_subscription_billing_thresholds`). The body below is kept as written and is not the current design.
 >
-> **Current design:** [ADR-065](adr/065-threshold-scan-boundary-fire-once-drain.md) (scan kernel: boundary-skip, fire-once probe, full drain), [ADR-066](adr/066-threshold-money-semantics.md) (money semantics: prorated reset base, atomic fire-then-reset), [ADR-115](adr/115-one-closer-for-the-billing-period.md) (a threshold fire and the cycle close cannot both bill one period), and [ADR-029](adr/029-fully-disjoint-test-clock-flows.md) section 2 (the threshold scan skips test-clock subscriptions; they are scanned when the clock is advanced). Code: `internal/billing/threshold_scan.go`, `internal/subscription/`.
+> **Current design:** [ADR-065](../adr/065-threshold-scan-boundary-fire-once-drain.md) (scan kernel: boundary-skip, fire-once probe, full drain), [ADR-066](../adr/066-threshold-money-semantics.md) (money semantics: prorated reset base, atomic fire-then-reset), [ADR-115](../adr/115-one-closer-for-the-billing-period.md) (a threshold fire and the cycle close cannot both bill one period), and [ADR-029](../adr/029-fully-disjoint-test-clock-flows.md) section 2 (the threshold scan skips test-clock subscriptions; they are scanned when the clock is advanced). Code: `internal/billing/threshold_scan.go`, `internal/subscription/`.
 >
 > **Where the body is out of date** (verified against code 2026-08-23):
 >
@@ -14,7 +16,7 @@
 > 6. The scheduler tick is now reconcilers → auto-charge retry → dunning enrollment → threshold scan → cycle scan.
 > 7. `amount_gte` is integer cents in the currency's **minor** unit; the body's "major-unit-cents" contradicts itself.
 >
-> Related design docs: `docs/design-create-preview.md` (same wire conventions), `docs/design-multi-dim-meters.md` (`usage.AggregateByPricingRules`).
+> Related design docs: `docs/design/create-preview.md` (same wire conventions), `docs/design/multi-dim-meters.md` (`usage.AggregateByPricingRules`).
 
 ## Motivation
 
@@ -68,7 +70,7 @@ The only **new** code is:
 
 ## Wire contract
 
-> **Conventions** (consistent with `/v1/*`, see `docs/design-customer-usage.md` § wire-contract and `docs/design-create-preview.md`):
+> **Conventions** (consistent with `/v1/*`, see `docs/design/customer-usage.md` § wire-contract and `docs/design/create-preview.md`):
 >
 > - **Snake-case JSON keys.**
 > - **Decimal `usage_gte` marshals as a precise string** (`"1000000.000000000000"`) per ADR-005.

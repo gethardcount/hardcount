@@ -629,7 +629,7 @@ func (s *PostgresStore) AggregateForBillingPeriod(ctx context.Context, tenantID,
 }
 
 // AggregateByPricingRules implements the priority+claim resolution path
-// described in docs/design-multi-dim-meters.md. Strategy:
+// described in docs/design/multi-dim-meters.md. Strategy:
 //
 //  1. Rank meter_pricing_rules by (priority DESC, created_at ASC, id ASC)
 //     so the ROW_NUMBER is fully deterministic. The id tiebreaker covers

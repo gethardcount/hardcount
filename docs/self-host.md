@@ -50,7 +50,7 @@ Things to know:
 - **Background jobs run once, not once per copy.** Billing runs, payment retries and webhook delivery are background jobs. The copies agree, through a row in Postgres, on which one runs each job. The others stand by, and one takes over within about 15 seconds if the first dies.
 - **Connection poolers.** PgBouncer in transaction mode works for the server, and CI runs the test suite through it. RDS Proxy is expected to behave the same way but has not been tested ([details](ops/postgres-requirements.md)). Run database upgrades (migrations) over a direct connection.
 - **Give each copy 120 seconds to shut down.** On a stop signal, a copy first tells the load balancer it is leaving, then finishes its work. The worst case is 90 seconds.
-- **A few features still assume one copy.** The live event stream in the dashboard is one. None of them touch money. The full list is in the [readiness review](dev/ha-readiness-2026-07-06.md).
+- **A few features still assume one copy.** The live event stream in the dashboard is one. None of them touch money. The full list is in the [readiness review](records/ha-readiness-2026-07-06.md).
 
 Load balancer setup, health checks, shutdown and rolling upgrades: [High availability](ops/high-availability.md).
 

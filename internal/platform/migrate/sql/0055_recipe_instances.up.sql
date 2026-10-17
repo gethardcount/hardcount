@@ -16,7 +16,7 @@
 -- installed); to retire generated entities operators edit/archive them
 -- directly (ADR-085: apply is idempotent additive — no force, no uninstall).
 --
--- See docs/design-recipes.md for the full design and override semantics.
+-- See docs/design/recipes.md for the full design and override semantics.
 
 CREATE TABLE recipe_instances (
     id                  TEXT PRIMARY KEY DEFAULT 'vlx_rec_' || encode(gen_random_bytes(12), 'hex'),

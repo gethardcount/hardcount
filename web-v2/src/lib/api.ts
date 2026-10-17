@@ -440,7 +440,7 @@ export const api = {
   // Pass {customer_id} and the server picks the primary active sub +
   // current cycle. Pass {customer_id, subscription_id} to preview a
   // specific sub. Pass {customer_id, period: {from, to}} to preview an
-  // explicit window. See docs/design-create-preview.md.
+  // explicit window. See docs/design/create-preview.md.
   createInvoicePreview: (data: { customer_id: string; subscription_id?: string; period?: { from: string; to: string } }) =>
     apiRequest<InvoicePreview>('POST', '/invoices/create_preview', data),
 
@@ -498,7 +498,7 @@ export const api = {
   voidCreditNote: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/void`),
   retryCreditNoteRefund: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/retry-refund`),
 
-  // Recipes (pricing templates) — see docs/design-recipes.md
+  // Recipes (pricing templates) — see docs/design/recipes.md
   listRecipes: () => apiRequest<ListRecipes200>('GET', '/recipes'),
   getRecipe: (key: string) => apiRequest<RecipeDetail>('GET', `/recipes/${key}`),
   previewRecipe: (key: string, overrides: Record<string, string | number>) =>
@@ -1243,7 +1243,7 @@ export interface UsageEvent {
   // String-encoded NUMERIC(38, 12) — decimal precision for fractional GPU-hours
   // and partial tokens. Coerce via Number() / parseFloat() at display time.
   quantity: string
-  // Free-form dimensions per docs/design-multi-dim-meters.md, subset-matched
+  // Free-form dimensions per docs/design/multi-dim-meters.md, subset-matched
   // by pricing rules.
   dimensions?: Record<string, string | number | boolean>
   idempotency_key: string

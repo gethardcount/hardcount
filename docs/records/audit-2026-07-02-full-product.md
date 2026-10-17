@@ -1,5 +1,7 @@
 # Velox — Full-Product Audit Report (2026-07-02)
 
+> **Record of 2026-07-02, kept as written.** Every high and medium finding was fixed or given a named deferral by 2026-07-03 (see the [remediation plan](audit-2026-07-02-remediation-plan.md)). File and line references point at the code of that date.
+
 Synthesized from 18 completed area audits. 117 findings survived adversarial verification (all CONFIRMED; ~110 distinct defects after de-duplicating shared roots): **0 critical, 16 high, 51 medium, 50 low**. The UNVERIFIED bucket is empty — nothing awaits re-verification.
 
 ---
