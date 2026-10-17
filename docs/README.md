@@ -23,18 +23,21 @@ docs in the order listed. Words you may not know are in the
 1. [Quick start](quick-start.md): start Velox on your computer with only
    Docker, run the demo, and see one month of token usage become an
    invoice, its PDF and a margin report. Each step says what you see.
-2. [AI pricing in code](ai-pricing.md): one meter, a prepaid commit and a
-   margin read, in five steps.
 
 ## Connect your product
 
-1. [API surface](api-surface.md): the core routes. The full reference is
+1. [Send usage and get your first invoice](first-invoice.md): create a
+   customer, send token usage with curl or LiteLLM, and open the invoice,
+   in about ten minutes. Start here.
+2. [AI pricing reference](ai-pricing.md): the models each recipe prices,
+   pricing your own model, prepaid credit, and margin.
+3. [API surface](api-surface.md): the core routes. The full reference is
    [`api/openapi.yaml`](../api/openapi.yaml).
-2. [API keys](api-keys.md): key types, rotation, and adding tenants.
-3. [Webhooks](webhooks.md): events, signatures, and retries.
-4. [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md):
+4. [API keys](api-keys.md): key types, rotation, and adding tenants.
+5. [Webhooks](webhooks.md): events, signatures, and retries.
+6. [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md):
    poll a prepaid customer's live credit balance and gate in your own code.
-5. [LiteLLM integration](integrations/litellm.md): send token usage from a
+7. [LiteLLM integration](integrations/litellm.md): send token usage from a
    LiteLLM proxy without writing code.
 
 ## Run it in production

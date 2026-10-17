@@ -1,37 +1,81 @@
-# LiteLLM → Velox integration
+# LiteLLM integration
 
-This guide shows how to meter LLM usage into Velox through LiteLLM, the open-source proxy that fronts many LLM providers behind one API.
+LiteLLM is an open-source proxy that sits between your app and many AI
+providers. This page connects it to Velox, so that every AI call your
+customers make becomes usage in Velox. You write no code: you add a few
+lines to the proxy's config file.
 
-Add a success callback to your LiteLLM proxy config, as step 2 shows. It uses LiteLLM's generic-API logger, which POSTs each completed call to an HTTP endpoint. Every LLM call then lands in Velox as a [usage event](../glossary.md). You write no glue code.
+Think of it as a receipt printer on the proxy. After each AI call, LiteLLM
+sends Velox a record of the tokens used, and Velox turns it into usage
+events for that customer.
 
-## 1. Create the `tokens` meter in Velox
+**Who it is for:** teams that already run a LiteLLM proxy. Not using
+LiteLLM? Send usage with the API instead: see [Send usage and get your
+first invoice](../first-invoice.md).
 
-The adapter writes to a single meter called `tokens`. A meter is a named usage counter that Velox aggregates for billing. Each event carries its token role on a `token_type` dimension, a key/value attribute on the event. The meter must exist before LiteLLM starts POSTing.
+## Before you start
 
-The recommended way is to instantiate one of the AI-native recipes (pre-built pricing templates). Each recipe creates the `tokens` meter plus the per-`{model, token_type}` pricing rules.
+You need all of these before LiteLLM sends its first call. Usage that
+arrives before them is not billed.
+
+1. **Velox running, and a secret API key.** A publishable key cannot send
+   usage. The commands below use the variables from [the first invoice
+   page](../first-invoice.md#before-you-start):
+
+   ```bash
+   export VELOX=http://localhost:8080
+   export VELOX_KEY=vlx_secret_test_…   # your test secret key
+   ```
+
+2. **A `tokens` meter with prices.** Step 1 below creates it.
+3. **Each customer created in Velox, and on a plan.** The customer's
+   external ID (your own ID for it) must be the `user` you pass to LiteLLM.
+   The subscription puts the customer on a plan, so the usage lands on an
+   invoice. [The first invoice page](../first-invoice.md), steps 2 to 4,
+   shows both calls.
+
+> **Create the customer first.** If LiteLLM sends usage for a `user` that
+> Velox does not know, Velox answers with an error row and does not keep
+> that usage. LiteLLM does not send it again. Create the customer, then
+> send the usage again yourself.
+
+## 1. Load prices for your models
+
+The easiest way is a recipe: a ready-made pricing setup that Velox creates
+in one call. It creates the `tokens` meter (a counter for tokens), a price
+for each model and kind of token, and a monthly plan. Use
+`anthropic_style` for Claude models or `openai_style` for OpenAI models.
+[AI pricing](../ai-pricing.md#ready-made-recipes) lists the models each one
+prices.
 
 ```bash
-curl -X POST "$VELOX/v1/recipes/anthropic_style/instantiate" \
+curl -s -X POST "$VELOX/v1/recipes/anthropic_style/instantiate" \
   -H "Authorization: Bearer $VELOX_KEY" \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{}' | jq -r '.created_objects.plan_ids[0]'
 ```
 
-The API key you use picks test or live mode (`vlx_secret_test_…` or `vlx_secret_live_…`). There is no `livemode` request field.
+**You see:** the plan ID, such as `vlx_pln_…`.
 
-You can also create the meter by hand. To bill it, you then still need pricing rules per `{model, token_type}`:
+The API key picks test or live mode: `vlx_secret_test_…` or
+`vlx_secret_live_…`. There is no `livemode` field in the request.
+
+You can also create the meter by hand. You then also need a price for each
+model and kind of token
+([how](../ai-pricing.md#price-a-model-a-recipe-does-not-cover)):
 
 ```bash
-curl -X POST "$VELOX/v1/meters" \
+curl -s -X POST "$VELOX/v1/meters" \
   -H "Authorization: Bearer $VELOX_KEY" \
   -H "Content-Type: application/json" \
   -d '{"key":"tokens","name":"Tokens","unit":"tokens","aggregation":"sum"}'
 ```
 
-## 2. Configure the LiteLLM proxy
+## 2. Add Velox to the proxy config
 
-Add the following to your `litellm_config.yaml`. It uses LiteLLM's `generic_api` callback, in the
-current format. It was checked on 2026-10-12 with a real LiteLLM 1.83.9 proxy posting into Velox:
+Add this to your `litellm_config.yaml`. It uses LiteLLM's `generic_api`
+callback, which sends a record of each finished call to a web address.
+Tested with LiteLLM 1.83.9.
 
 ```yaml
 litellm_settings:
@@ -43,28 +87,34 @@ callback_settings:
     endpoint: "https://<your-velox-host>/v1/integrations/litellm/spend"
     headers:
       Authorization: Bearer vlx_secret_test_…
-    # Retry on 5xx / transport errors. LiteLLM defaults to max_retries 0
-    # and, via YAML, a 0s delay — it drops the batch on the first failed
-    # send. Velox answers 503 when its usage store is unreachable (a
-    # managed-Postgres failover, a replica mid-rolling-restart); 5+10+20+40s
-    # of retries covers both. Replays are safe: every row is
-    # idempotency-keyed, so an already-recorded row comes back as
-    # `deduplicated`, never double-counted.
     max_retries: 4
     retry_delay: 5
     timeout: 10
 ```
 
-The older env-var form (`success_callback: ["generic"]` +
-`GENERIC_LOGGER_ENDPOINT`/`GENERIC_LOGGER_HEADERS`) still works on current
-LiteLLM, but it is legacy. With either form, Velox accepts three payload shapes: single, batched
-(`json_array`), and `{"events": [...]}`.
+- **`endpoint`:** your Velox address. On your own computer it is
+  `http://localhost:8080`. If LiteLLM runs in a Docker container and Velox
+  does not, `localhost` points at the container itself. Use
+  `http://host.docker.internal:8080` instead. On Linux, start the container
+  with `--add-host=host.docker.internal:host-gateway` for that name to
+  work.
+- **`Authorization`:** a secret key, as in "Before you start".
+- **`max_retries` and `retry_delay`:** keep these. LiteLLM's default is no
+  retries, so one failed send loses the batch. Velox answers 503 when its
+  database is briefly out of reach, such as during a restart. Four retries
+  5, 10, 20 and 40 seconds apart cover that. Sending a batch again is safe,
+  because Velox counts each record once.
 
-Point `<your-velox-host>` at your Velox API (local dev: `http://localhost:8080`). Use a **secret** key. Publishable keys (the client-side-safe key type) don't have `PermUsageWrite`, the permission to write usage events. See [API key types](../glossary.md) in the glossary.
+The older form (`success_callback: ["generic"]` with
+`GENERIC_LOGGER_ENDPOINT` and `GENERIC_LOGGER_HEADERS`) still works on
+current LiteLLM, but it is the legacy form. With either form, Velox
+accepts a single record, a list of records (`json_array`), or
+`{"events": [...]}`.
 
-## 3. Set `user=` on every call
+## 3. Set `user` on every call
 
-The adapter matches LiteLLM's `user` field to the Velox customer whose `external_id` equals it. The code comment below calls the same field `external_customer_id`. It is your own customer identifier, stored on the Velox customer record. Set it on every LiteLLM call:
+Velox finds the customer by LiteLLM's `user` field: it must equal the
+external ID of a customer you created in Velox. Set it on every call:
 
 ```python
 import litellm
@@ -72,98 +122,157 @@ import litellm
 response = litellm.completion(
     model="claude-sonnet-4-5-20250929",
     messages=[{"role": "user", "content": "Hello"}],
-    user="cus_acme_corp",   # ← Velox external_customer_id
+    user="acme-1",   # the customer's external ID in Velox
     metadata={
-        "team_id": "team_engineering",  # surfaces as a Velox dimension
+        "team_id": "team_engineering",  # becomes a label on the usage
     },
 )
 ```
 
-The proxy logs that value as `end_user` on the record it sends, and Velox reads it from there. A hand-built payload can send `user` instead.
+The proxy logs that value as `end_user`, and Velox reads it from there. A
+record you build by hand can send `user` instead.
 
-Without `user=`, the adapter rejects the event with `payload.user is required`. The rest of the batch is accepted normally. The failure lands as a per-row entry in the 200 response's `errors[]`.
+A call without `user` is refused with `payload.user is required`. The rest
+of the batch is still accepted. The refusal is a row in the `errors` list
+of the 200 response (see [Response](#response)).
 
 ## 4. What lands in Velox
 
-For each completion call, the adapter emits **up to three** usage events. All of them go to the single `tokens` meter, and the `token_type` dimension tells them apart. The roles never count the same token twice (additive-disjoint). LiteLLM's `prompt_tokens` already includes cached reads, so the mapper splits them apart.
+Each AI call becomes up to three usage events on the `tokens` meter. The
+`token_type` label tells them apart, and no token is counted twice.
+LiteLLM's `prompt_tokens` already includes tokens read from the cache, so
+Velox takes those out of `input`.
 
-| `token_type` | Quantity                                         | Idempotency key             |
-|--------------|--------------------------------------------------|-----------------------------|
-| `input`      | `prompt_tokens − cached_tokens` (uncached input) | `<litellm_id>:input`        |
-| `cache_read` | `prompt_tokens_details.cached_tokens` or `cache_read_input_tokens` (if any) | `<litellm_id>:cache_read`   |
-| `output`     | `usage.completion_tokens`                        | `<litellm_id>:output`       |
+| `token_type` | Quantity | Idempotency key |
+|---|---|---|
+| `input` | `prompt_tokens` minus the cached tokens | `<litellm_id>:input` |
+| `cache_read` | `prompt_tokens_details.cached_tokens` or `cache_read_input_tokens`, if any | `<litellm_id>:cache_read` |
+| `output` | `usage.completion_tokens` | `<litellm_id>:output` |
 
-The [idempotency key](../glossary.md) deduplicates retries: a resend with the same key can't count twice.
+The idempotency key is a unique ID for each event. If LiteLLM sends the same
+call again, Velox counts it once.
 
-Every event also carries these dimensions:
+Each event also carries these labels (dimensions):
 
-- `{model, model_raw, provider, team_id?}`.
-- `request_tags` becomes a dimension only when it arrives under `metadata`. A current proxy sends its tags at the top level of the record, so they are not a dimension today.
-- `model` is the **canonical recipe family**, the normalized name that pricing rules key on. The mapper normalizes LiteLLM's raw string, for example `claude-sonnet-4-5-20250929` → `claude-sonnet-4.5`.
-- `model_raw` preserves the verbatim string for audit.
+- `model`: the model family name that prices are set on. Velox turns
+  LiteLLM's model name into it, for example `claude-sonnet-4-5-20250929`
+  becomes `claude-sonnet-4.5`.
+- `model_raw`: the model name exactly as LiteLLM sent it.
+- `provider`: the provider, from LiteLLM's `custom_llm_provider`.
+- `team_id`, when the call has one in `metadata`.
+- `request_tags`, only when the tags arrive under `metadata`. A current
+  proxy sends its tags outside `metadata`, so they are not a label today.
 
-Each event's metadata carries the LiteLLM call ID, the response cost (audit-only), and the call's original metadata under `litellm_metadata.*`.
+Each event also keeps the LiteLLM call ID, LiteLLM's own cost figure (for
+reference only), and the call's original metadata under
+`litellm_metadata.*`.
 
-Cache-**write** tokens (`cache_creation`) have no `token_type` of their own, because LiteLLM doesn't expose the 5m-vs-1h cache-write TTL split (BerriAI/litellm#15056). LiteLLM 1.83.9 counts them in `prompt_tokens` for Anthropic and Bedrock, so they are in the `input` event and billed at your input price. The mapper logs a warning when it sees them.
+**Cache-write tokens** (`cache_creation`) have no `token_type` of their own
+yet, because LiteLLM does not say which cache lifetime they used (5 minutes
+or 1 hour). LiteLLM 1.83.9 counts them in `prompt_tokens` for Anthropic and
+Bedrock, so they are in the `input` event and billed at your input price.
+Velox logs a warning when it sees them.
 
-## 5. Verify
+## 5. Check that it worked
+
+Make one call through the proxy for your customer, then list the
+customer's usage:
 
 ```bash
-# Resolve the internal customer id from the external one, then tail events.
-# (The usage-events list filters on the INTERNAL customer_id.)
-CUST_ID=$(curl -s "$VELOX/v1/customers?external_id=cus_acme_corp" \
+CUSTOMER_ID=$(curl -s "$VELOX/v1/customers?external_id=acme-1" \
   -H "Authorization: Bearer $VELOX_KEY" | jq -r '.data[0].id')
-curl "$VELOX/v1/usage-events?customer_id=$CUST_ID&limit=5" \
-  -H "Authorization: Bearer $VELOX_KEY"
+curl -s "$VELOX/v1/usage-events?customer_id=$CUSTOMER_ID&limit=5" \
+  -H "Authorization: Bearer $VELOX_KEY" | jq -c '.data[] | {quantity, dimensions}'
 ```
 
-You should see one or more `tokens` events per LiteLLM call (up to three when prompt caching is used: `input`, `cache_read`, `output`), each with a `token_type` dimension plus `model` / `model_raw` / `provider`.
+**You see:** one line for each event, newest first, such as:
 
-## Reference: response shape
+```text
+{"quantity":"200000","dimensions":{"model":"claude-sonnet-4.5","model_raw":"claude-sonnet-4-5-20250929","provider":"anthropic","token_type":"output"}}
+{"quantity":"1000000","dimensions":{"model":"claude-sonnet-4.5","model_raw":"claude-sonnet-4-5-20250929","provider":"anthropic","token_type":"input"}}
+```
 
-`POST /v1/integrations/litellm/spend` returns 200 with:
+The usage list takes Velox's own customer ID, so the first command looks
+it up from the external ID. The events also show on the **Usage** page in
+the dashboard.
+
+## Response
+
+`POST /v1/integrations/litellm/spend` answers 200 with counts, plus an
+`errors` list when some rows were refused. For a call whose `user` is not a
+Velox customer, you see one error row for each event of that call:
 
 ```json
 {
-  "accepted": 12,
+  "accepted": 0,
   "deduplicated": 0,
-  "skipped": 1,
+  "skipped": 0,
   "errors": [
     {
       "id": "litellm_call_xyz",
-      "error": "customer \"cus_unknown\" not found (set user=<external_customer_id> on the LiteLLM call)"
+      "error": "customer \"acme-unknown\" not found (set user=<external_customer_id> on the LiteLLM call)"
+    },
+    {
+      "id": "litellm_call_xyz",
+      "error": "customer \"acme-unknown\" not found (set user=<external_customer_id> on the LiteLLM call)"
     }
   ]
 }
 ```
 
-`skipped` covers non-token-bearing calls (image generation, moderation) and zero-token failed completions.
+| Field | Meaning |
+|---|---|
+| `accepted` | New events Velox saved. |
+| `deduplicated` | Events Velox already had, from an earlier send of the same call. |
+| `skipped` | Calls with no tokens to bill, such as image generation, moderation, or a failed call with zero tokens. |
+| `errors` | Rows Velox refused: an unknown `user`, a missing `tokens` meter, or a record that is not valid. |
 
-`errors[]` lists per-row reasons. Each is a verdict Velox reached on that row: an unmapped `user`, a missing meter, or a payload that failed validation. These never make the batch fail, so monitor `errors[]`.
+A refused row does not fail the batch, and Velox does not keep it. LiteLLM
+sees a 200 and treats the batch as delivered. So watch `errors`: usage for
+a customer that does not exist yet is lost unless you send it again after
+you create the customer.
 
-A row in `errors[]` is **not kept** for a later retry. LiteLLM sees a 200 and treats the batch as delivered. So usage for a customer that does not exist yet in Velox is lost unless you resend it after creating the customer.
-
-The status code answers a different question: could Velox record the batch at all?
+The status code answers a different question: could Velox save the batch
+at all?
 
 | Status | Meaning | What to do |
 |---|---|---|
-| 400 | Malformed body. | — |
-| `503 authentication_unavailable` | The API-key store is unreachable. The batch was **not** recorded. | Retry the whole batch. |
-| `503 ingest_unavailable` | The usage store is unreachable or unable to commit. The batch was **not** recorded. | Retry the whole batch. |
+| 400 | The body is not valid. | Fix the request. |
+| `503 authentication_unavailable` | Velox could not check the API key. The batch was not saved. | Send the whole batch again. |
+| `503 ingest_unavailable` | Velox could not reach or write its usage store. The batch was not saved. | Send the whole batch again. |
 
-On a retry, rows that did commit before the abort replay as `deduplicated`. Configure `max_retries` as in step 2, so LiteLLM does the retrying.
+When you send a batch again, rows that were saved before the failure come
+back as `deduplicated`. With `max_retries` set as in step 2, LiteLLM does
+this for you.
 
-## Caveats
+## Things to know
 
-- **Cost figures**: LiteLLM's `response_cost` does not drive Velox billing.
-  - The billable amount comes from your pricing rules.
-  - Per-event COGS (cost of goods sold: what the provider charged you) comes from your provider [cost table](../glossary.md). See ADR-079: `PUT /v1/provider-costs`, stamped on each event at ingest as `provider_cost_micros`.
-  - LiteLLM's own `response_cost` is whole-call: one total that spans up to three per-role events. So Velox never stamps it on an event.
-  - When the record carries `cost_breakdown`, each event gets LiteLLM's cost for its own tokens instead of the table's: `output_cost` on `output`, `cache_read_cost` on `cache_read`, and `input_cost` minus `cache_read_cost` on `input` (LiteLLM's `input_cost` includes cache reads and cache writes). If there were cache reads but no `cache_read_cost`, `input` and `cache_read` use your cost table.
-- **Provider for Claude on Bedrock or Vertex**: the `provider` dimension comes from LiteLLM's `custom_llm_provider`. Claude called through AWS Bedrock arrives with provider `bedrock`, and through Google Vertex with provider `vertex_ai`, not `anthropic`. Cost rates match on provider, so add rates for `bedrock` or `vertex_ai` too. Without them, those events get no cost and the margin report counts them as unresolved.
-- **`tokens` meter must exist**: a missing meter lands as a per-row `errors[]` entry in the 200 response. This is the same path as a missing `user`.
-- **Single tenant per API key**: each Velox API key pins to one [tenant](../glossary.md) (one isolated billing account). Multi-tenant LiteLLM proxies route through a separate API key per tenant, not through a metadata field on the call.
+- **LiteLLM's cost figure does not set the bill.**
+  - What the customer pays comes from your prices in Velox.
+  - What the usage cost you comes from your
+    [provider costs](../ai-pricing.md#see-your-margin) (`PUT
+    /v1/provider-costs`). Velox saves that cost on each event when it
+    arrives.
+  - LiteLLM's `response_cost` is one total for the whole call, which can
+    span three events. So Velox never saves it on an event.
+  - When the record has `cost_breakdown`, each event gets LiteLLM's cost
+    for its own tokens instead of your provider cost: `output_cost` on
+    `output`, `cache_read_cost` on `cache_read`, and `input_cost` minus
+    `cache_read_cost` on `input` (LiteLLM's `input_cost` includes cache
+    reads and cache writes). If there were cache reads but no
+    `cache_read_cost`, `input` and `cache_read` use your provider costs.
+- **Claude on AWS Bedrock or Google Vertex has a different provider.**
+  The `provider` label comes from LiteLLM's `custom_llm_provider`. Claude
+  through Bedrock arrives as `bedrock`, and through Vertex as `vertex_ai`,
+  not `anthropic`. Provider costs match on provider, so add costs for
+  `bedrock` or `vertex_ai` too. Without them, those events have no cost,
+  and the margin report counts them as unresolved.
+- **The `tokens` meter must exist.** Without it, each event comes back as
+  a row in `errors`, the same as an unknown `user`.
+- **One Velox account for each API key.** Each key belongs to one tenant
+  (one separate billing account in Velox). A LiteLLM proxy that serves
+  several tenants must send each tenant's usage with that tenant's key. A
+  field in the call's metadata cannot choose the tenant.
 
-## Design history
-
-These decisions are recorded as architecture decision records (ADRs). [ADR-033](../adr/033-litellm-spend-adapter.md) is the original adapter design. [ADR-044](../adr/044-canonical-ai-token-metering-model.md) superseded it for the metering shape: one `tokens` meter + `token_type` dimension.
+Related: [ADR-044](../adr/044-canonical-ai-token-metering-model.md), the
+decision behind one `tokens` meter with a `token_type` label.
