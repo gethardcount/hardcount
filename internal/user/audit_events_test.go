@@ -26,12 +26,13 @@ type recordingAuditRecorder struct {
 type recordedAudit struct {
 	tenantID, action, resourceType, resourceID, label string
 	actorType, actorID                                string
+	ip                                                string
 	meta                                              map[string]any
 }
 
 func (r *recordingAuditRecorder) Log(ctx context.Context, tenantID, action, resourceType, resourceID, label string, meta map[string]any) error {
 	at, aid := audit.ResolveActor(ctx)
-	r.calls = append(r.calls, recordedAudit{tenantID, action, resourceType, resourceID, label, at, aid, meta})
+	r.calls = append(r.calls, recordedAudit{tenantID, action, resourceType, resourceID, label, at, aid, audit.ClientIP(ctx), meta})
 	return nil
 }
 
