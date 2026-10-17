@@ -82,7 +82,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
 - **subscription**: A customer's agreement to pay for one or more plans,
   period after period. It holds items (each a plan and a quantity). Its
   status is draft, trialing, active, canceled or archived.
-  [More](features.md#billing-building-blocks)
+  [More](features.md#subscriptions-and-invoices)
 - **billing period**: The dates one subscription invoice covers. The start
   day is included and the end is not. Periods start and end at midnight in
   the tenant's billing timezone. A monthly period starts either on the 1st

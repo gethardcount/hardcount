@@ -15,7 +15,7 @@ plain meanings first.
    invoice, its PDF and a margin report. Each step says what you see.
 3. [What Velox is not](../README.md#what-velox-is-not): the cases where
    another tool is the better choice.
-4. [What's in the box](features.md): every feature, in one list.
+4. [What's in the box](features.md): every feature, with what it does for you.
 5. [How Velox compares](comparison.md) with four open-source billing
    engines, with sources, and [why Velox exists](why-velox.md).
 6. [Roadmap](roadmap.md): what shipped recently and what is deferred.

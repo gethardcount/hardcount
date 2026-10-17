@@ -1,47 +1,101 @@
 # What's in the box
 
-Everything below ships in the one MIT edition. For the cases Velox does not cover, see [What Velox is not](../README.md#what-velox-is-not).
+This page lists what Velox does, grouped by job, with what each feature does
+for you and where to read more. Everything below ships in the one MIT
+edition: there is no paid tier. For what Velox does not cover, see
+[What Velox is not](../README.md#what-velox-is-not).
 
-## AI/usage-native
+**Who it is for:** anyone checking whether a feature they need exists.
 
-- **Multi-dimensional meters**: one meter can have many pricing rules, and each event can carry dimensions (such as `model`) that pick the rule.
-- **LiteLLM**: point LiteLLM's spend callback at Velox, and each call becomes token events with `model` and `provider` dimensions. A replayed call is counted once. No SDK is needed. It needs a `tokens` meter (the AI recipes create one) and customers whose external ID matches LiteLLM's `user` ([guide](integrations/litellm.md)).
-- **Prepaid commits + drawdown**: sell "pay $9k, get $10k" as a line on a one-off invoice. When the invoice finalizes, the credit is granted in the same transaction, before the invoice is paid. Each later invoice for the customer draws it down when it is issued, using promotional credit first ([ADR-078](adr/078-prepaid-commits-phase-1.md)).
-- **Per-customer margin in-app**:
-  - Maintain provider rates once (`/v1/provider-costs`).
-  - At ingest, each event gets its cost from the rate table when a rate matches its provider, model and token type. Events with no matching rate get no cost, and the margin report counts them.
-  - `GET /v1/customers/{id}/margin` compares one customer's usage revenue with its provider cost. Base fees, credits and taxes are left out. Usage revenue that can't be matched to a model goes in `unattributed_revenue_cents` ([ADR-079](adr/079-provider-cost-tables.md)).
-- **Decimal quantities & rates**: quantities are `NUMERIC(38,12)`, for fractional GPU-hours and partial tokens. Per-unit prices are stored as exact decimals, so a rate of $3.00 per 1M tokens is kept as written. Each invoice line is then rounded to whole cents.
-- **Per-rule aggregation modes**: `sum`, `count`, `last_during_period`, `last_ever`, `max`.
-- **Pricing recipes**: one call instantiates products + prices + meters + dunning (`anthropic_style`, `openai_style`, `replicate_style`).
-- **Customer cost visibility**: a per-customer usage/cost breakdown in the dashboard. There is also a public JSON endpoint, opened with a per-customer token, that your app can render ("$4.31 of GPT-4 this billing period"). It shows usage charges so far this period and the customer's credit balance. A packaged embeddable widget is roadmap, not shipped.
+## Pricing for AI and usage
 
-## Self-host first
+A meter is a counter for one kind of usage, such as tokens. Dimensions are
+labels on a usage event, such as `model` or `token_type`.
 
-- **One application process**: a single Go binary.
-  - No queue broker, no worker fleet, no separate scheduler. Background jobs are goroutines in the same process. Pending webhook and email deliveries wait in Postgres tables, so there is one thing to deploy and restart.
-  - The Compose file adds Postgres, Redis (distributed rate limiting only), the static dashboard and an nginx front door. That makes five containers, one of which is Velox.
-- **MIT, and nothing is gated**: no licence key, no premium tier, no feature that unlocks when you pay.
-  - That includes dunning, the feature that recovers your failed payments.
-  - Every release so far is MIT, and an MIT release stays MIT. The maintainers do not plan to move any existing feature behind a key.
-  - Check this against whatever else you are evaluating. For example, Lago's automatic dunning is a [premium add-on](https://getlago.com/docs/guide/dunning/automatic-dunning). Velox has no SSO or RBAC to gate (see [What Velox is not](../README.md#what-velox-is-not)).
-- **Nothing phones home**: no licence check, no telemetry, no analytics SDK. OpenTelemetry tracing exists and exports to *your* collector when you configure one.
-- **Data sovereignty**: Velox stores customer billing data in your own Postgres. It sends data out only to services you configure, such as Stripe for payments and tax, and your SMTP server for email. This transfers the compliance obligations to you; it does not remove them. "Self-hosted so it's compliant by default" is not a claim we'll make.
-- **Append-only audit log**: database triggers refuse any update or delete of an audit row.
-- **Row-Level Security**: the database keeps test data apart from live data, and one tenant's rows apart from another's.
+| Feature | What it does for you | Learn more |
+|---|---|---|
+| Meters with dimensions | One meter can have many prices. Each usage event carries labels, such as `model`, that pick its price. So one Tokens meter prices every model and token type. | [How Velox works](how-velox-works.md) |
+| Pricing recipes | One call creates a meter, prices, a plan and a dunning policy for a common pricing shape: `anthropic_style`, `openai_style` or `replicate_style`. | [AI pricing](ai-pricing.md) |
+| LiteLLM | Point LiteLLM's spend callback at Velox, and each AI call becomes token usage, labelled with `model` and `provider`. A resent call is counted once. No SDK (client library) is needed. | [LiteLLM guide](integrations/litellm.md) |
+| Prepaid commits | Sell "pay $9k, get $10k of usage" as a line on a one-off invoice. The credit is added when that invoice is finalized, in the same step and before it is paid. Each later invoice uses it up when it is issued, free (promotional) credit first. | [AI pricing](ai-pricing.md#sell-prepaid-credit-a-prepaid-commit) |
+| Margin per customer | Enter what each AI provider charges you per token, once. Velox then shows each customer's usage revenue next to what it cost you. | [AI pricing](ai-pricing.md#see-your-margin) |
+| Exact decimals | Quantities can be fractions, such as part of a GPU-hour, with up to 12 decimal places. Prices are kept exactly as written, such as $3.00 per 1M tokens. Each invoice line is rounded to whole cents. | [Glossary](glossary.md) |
+| Ways to count | Each price picks how usage adds up: `sum`, `count`, `max`, the last value in the period (`last_during_period`), or the last value ever (`last_ever`). | [Glossary](glossary.md) |
+| Usage your customers can see | A usage and cost breakdown per customer in the dashboard, and a JSON link your app can show the customer ("$4.31 of GPT-4 this billing period"). | [Roadmap](roadmap.md) |
 
-## Billing building blocks
+Good to know:
 
-- **Subscriptions**: trial state machine with atomic flips · pause-collection · scheduled cancellation · plan changes with proration (you're only charged for the part of the period each price was active).
-- **Pricing & discounts**: per-customer price overrides · prepaid credit ledger drawn against usage. Coupons were cut before launch. Discounts use credits and per-customer price overrides instead ([ADR-039](adr/039-cut-coupons-pre-launch.md)).
-- **Invoicing & collection**: PDF invoices · hosted invoice page with secure tokens · branded emails · dunning with a circuit breaker · invoice preview (subtotal only: no tax or credits).
-- **Billing thresholds**: set a level on spend or on usage quantity, and Velox issues an invoice early when the period's running total reaches it. It fires at most once per billing period. With `reset_billing_cycle`, a fire starts a new period, so it can fire again. Velox checks thresholds on each billing run: every hour, or every 5 minutes when `APP_ENV=local`. It bills earlier; it does not stop usage.
-- **Credits & refunds**: event-sourced credit ledger · a live balance read (credit left after usage not yet invoiced, for [stopping usage when credit runs out](stop-usage-when-credit-runs-out.md)) · credit notes (the formal "we owe you" document) with refunds.
-- **Reliability & observability**:
-  - Idempotency keys: send an `Idempotency-Key` header on a POST, PUT or PATCH, and a retry within 24 hours returns the first response instead of running the request again. A server error stays cached too (except on usage ingest, where a replay is deduplicated), so a retry cannot repeat a charge that may already have gone through.
-  - Webhook outbox: every outbound webhook event is written to a Postgres table, and a dispatcher delivers it from there with retries. Some events are written in the same transaction as the change: `invoice.paid`, `payment.succeeded`, `payment.failed`, the credit-balance events, `dunning.started`, and subscription `created`, `activated`, `trial_ended` and `canceled`. The rest are written just after the change commits. If that write fails, Velox logs an error and the event is not sent. Customer emails are queued post-commit and delivered at-least-once from the queue.
-  - Webhook signing with a 72h dual-signing rotation grace: during the window, both the old and the new secret sign every delivery.
-  - A live webhook event tail with per-attempt delivery timelines.
-  - Test clocks move a test customer forward through months of billing without waiting for real time.
+- **LiteLLM** needs a `tokens` meter (the AI recipes create one) and
+  customers whose external ID matches LiteLLM's `user`.
+- **Margin** uses the costs saved with `/v1/provider-costs` and is read with
+  `GET /v1/customers/{id}/margin`. It leaves out base fees, credits and
+  taxes. Usage with no saved cost gets no cost, and the report counts it.
+  Revenue it cannot match to a model is shown apart, in
+  `unattributed_revenue_cents`.
+- **The customer's JSON link** opens with a per-customer token. It shows
+  usage charges so far this period and the credit balance. A ready-made
+  widget is on the roadmap, not shipped.
 
-See [`CHANGELOG.md`](../CHANGELOG.md) for the full ship log.
+## Runs on your own servers
+
+| Feature | What it does for you | Learn more |
+|---|---|---|
+| One program to run | Velox is a single Go program. Background jobs run inside it, so there is no queue, worker fleet or separate scheduler to run. The Compose file adds Postgres, Redis (for rate limits only), the dashboard and nginx in front: five containers, one of them Velox. | [Self-host](self-host.md) |
+| Nothing is locked | MIT licence, no licence key, no premium tier, no feature that unlocks when you pay. That includes dunning (retrying failed payments). An MIT release stays MIT, and the maintainers do not plan to move any feature behind a key. | [Comparison](comparison.md) |
+| Nothing phones home | No licence check, no telemetry, no analytics SDK. Tracing (OpenTelemetry) goes only to a collector you set up. | [Self-host](self-host.md) |
+| Your data stays with you | Billing data lives in your own Postgres. Velox sends data only to services you set up, such as Stripe for payments and tax, and your email server. You still own the compliance work; self-hosting does not do it for you. | [Why Velox](why-velox.md) |
+| Audit log that cannot be edited | A log of who changed what in your account. The database refuses to change or delete any entry in it. | [Architecture](architecture.md) |
+| Data kept apart | The database itself keeps test data apart from live data, and one account's data apart from another's (Row-Level Security). | [Self-host](self-host.md#the-two-database-users) |
+
+Good to know: check "nothing is locked" against whatever else you are
+evaluating. For example, Lago's automatic dunning is a
+[premium add-on](https://getlago.com/docs/guide/dunning/automatic-dunning).
+Velox has no SSO or role-based access to lock (see
+[What Velox is not](../README.md#what-velox-is-not)).
+
+## Subscriptions and invoices
+
+| Feature | What it does for you | Learn more |
+|---|---|---|
+| Subscriptions | Trials, pausing collection (invoices stay drafts), cancelling at period end, and plan changes with proration: the customer pays only for the part of the period each price was active. | [The Velox API](api-surface.md#customers-and-subscriptions) |
+| Discounts | A different price for one customer (a price override), or credit. There are no coupons: they were cut before launch, and credit and price overrides do the job. | [The Velox API](api-surface.md#credits-and-refunds) |
+| Invoices | PDF invoices, a hosted invoice page the customer opens from a secure link, and emails with your branding. | [How Velox works](how-velox-works.md) |
+| Invoice preview | See the next invoice before it is made. The preview shows the subtotal only, without tax or credits. | [The Velox API](api-surface.md#invoices-and-billing) |
+| Dunning | When a card payment fails, Velox retries it on a schedule and emails the customer. If every retry fails, it does what your policy says. | [How Velox works](how-velox-works.md) |
+| Billing thresholds | Set a spend or usage level, and Velox makes an invoice early once the period's total reaches it. It bills earlier; it does not stop usage. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
+
+Good to know about billing thresholds: one fires at most once per billing
+period. With `reset_billing_cycle`, it starts a new period, so it can fire
+again. Velox checks thresholds on each billing run: every hour, or every 5
+minutes when `APP_ENV=local`.
+
+## Credits and refunds
+
+| Feature | What it does for you | Learn more |
+|---|---|---|
+| Credit balance | Give customers credit and see every change to it. Each change is a new record; nothing is overwritten. | [The Velox API](api-surface.md#credits-and-refunds) |
+| Live balance | The credit left after usage not yet invoiced, so your app can stop serving a customer whose credit has run out. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
+| Credit notes and refunds | A credit note lowers what a customer owes on an invoice, as a balance credit or a refund to the card. | [The Velox API](api-surface.md#credits-and-refunds) |
+
+## Reliability
+
+| Feature | What it does for you | Learn more |
+|---|---|---|
+| Safe retries | Send an `Idempotency-Key` header on a POST, PUT or PATCH, and a retry within 24 hours gets the first answer instead of running again. A server error is saved too (except on usage routes, where each event's own key stops double counting), so a retry cannot repeat a charge that may have gone through. | [The Velox API](api-surface.md#sending-usage-safely) |
+| Webhooks that are not lost | Every webhook waits in a database table and is retried for about 26.5 hours. Payment, subscription and credit events are saved together with the change, so a crash cannot drop them. | [Webhooks](webhooks.md#three-rules-for-your-receiver) |
+| Signed webhooks | Every webhook is signed. When you rotate the secret, both the old and the new secret sign each message for 72 hours. | [Webhooks](webhooks.md#verifying-signatures) |
+| Live webhook log | Watch webhooks as they go out, with every delivery attempt. | [Webhooks](webhooks.md#retries) |
+| Test clocks | A test clock is a pretend clock for test customers: move it forward and months of billing happen in seconds. | [First invoice](first-invoice.md) |
+| Emails are not lost | Customer emails are queued after the change is saved, and sent at least once from the queue. | [Email setup](ops/email-setup.md) |
+
+Good to know about webhooks: these are saved together with the change that
+causes them: `invoice.paid`, `payment.succeeded`, `payment.failed`, the
+credit-balance events, `dunning.started`, and subscription `created`,
+`activated`, `trial_ended` and `canceled`. The rest are saved just after
+the change. If that save fails, Velox logs an error and the event is not
+sent.
+
+Related: [CHANGELOG](../CHANGELOG.md) (everything shipped, by date) and the
+decision records behind coupons ([ADR-039](adr/039-cut-coupons-pre-launch.md)),
+prepaid commits ([ADR-078](adr/078-prepaid-commits-phase-1.md)) and margin
+([ADR-079](adr/079-provider-cost-tables.md)).
