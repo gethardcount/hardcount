@@ -7,18 +7,18 @@ import (
 )
 
 // TestCorrelationHeader_CtxRoundTrip pins the ctx→header contract: the
-// header renders iff the ctx carries a well-formed outbox id, and a
+// header value is set iff the ctx carries a well-formed outbox id, and a
 // malformed value (injection attempt, oversize) drops the header rather
 // than emitting anything.
 func TestCorrelationHeader_CtxRoundTrip(t *testing.T) {
-	if got := correlationHeader(context.Background()); got != "" {
+	if got := correlationID(context.Background()); got != "" {
 		t.Errorf("no ctx id: want empty header, got %q", got)
 	}
 
 	ctx := WithCorrelation(context.Background(), "vlx_emob_00112233445566778899aabb")
-	want := "X-PM-Metadata-vlx-outbox-id: vlx_emob_00112233445566778899aabb\r\n"
-	if got := correlationHeader(ctx); got != want {
-		t.Errorf("header: got %q, want %q", got, want)
+	want := "vlx_emob_00112233445566778899aabb"
+	if got := correlationID(ctx); got != want {
+		t.Errorf("header value: got %q, want %q", got, want)
 	}
 
 	for name, bad := range map[string]string{
@@ -27,7 +27,7 @@ func TestCorrelationHeader_CtxRoundTrip(t *testing.T) {
 		"oversize":       strings.Repeat("a", 81),
 		"empty":          "",
 	} {
-		if got := correlationHeader(WithCorrelation(context.Background(), bad)); got != "" {
+		if got := correlationID(WithCorrelation(context.Background(), bad)); got != "" {
 			t.Errorf("%s: want dropped header, got %q", name, got)
 		}
 	}

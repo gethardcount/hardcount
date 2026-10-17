@@ -41,9 +41,10 @@ recipients on Billing emails.
    addresses — the email_changed convention).
 
 3. **Transport**: ONE MIME message, primary in `To:`, additional in a
-   **visible `Cc:` header** (rendered per-address via
-   `(&mail.Address{Address: a}).String()` — the fromHeaderValue
-   injection-neutralization pattern), one SMTP transaction with RCPT TO
+   **visible `Cc:` header** (each address handed to the go-mail
+   builder as a `mail.Address`; the builder refuses an address holding
+   a control character, because net/mail writes the domain part as
+   given), one SMTP transaction with RCPT TO
    for primary + each surviving CC. Rejected: N separate envelopes —
    each email is one outbox row (a DB-queued send drained by the
    dispatcher), so one row with N retry states = duplicate sends on

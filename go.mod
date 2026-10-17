@@ -18,6 +18,7 @@ require (
 	github.com/signintech/gopdf v0.36.0
 	github.com/sony/gobreaker/v2 v2.4.0
 	github.com/stripe/stripe-go/v82 v82.5.1
+	github.com/wneessen/go-mail v0.8.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.45.0

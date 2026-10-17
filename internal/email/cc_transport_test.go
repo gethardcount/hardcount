@@ -121,7 +121,9 @@ func (s *scriptedSMTP) session(conn net.Conn) {
 				if strings.TrimRight(dl, "\r\n") == "." {
 					break
 				}
-				b.WriteString(dl)
+				// Undo the sender's dot-stuffing (RFC 5321 §4.5.2) so
+				// lastData is the message itself, as a real server stores it.
+				b.WriteString(strings.TrimPrefix(dl, "."))
 			}
 			s.mu.Lock()
 			s.data = append(s.data, b.String())
@@ -210,16 +212,20 @@ func TestCC_HeaderAndEnvelope(t *testing.T) {
 
 // TestCC_HeaderInjectionNeutralized: a CRLF-bearing CC value (defense in
 // depth — normalization upstream should already reject it) cannot smuggle
-// a raw header line: mail.Address rendering quotes/escapes the value.
+// a raw header line: the builder refuses the address, so the send fails
+// before any SMTP traffic.
 func TestCC_HeaderInjectionNeutralized(t *testing.T) {
 	srv := newScriptedSMTP(t)
 	s := newCCTestSender(t, srv)
 
-	_ = s.sendRich(context.Background(), richMessage{
+	err := s.sendRich(context.Background(), richMessage{
 		TenantID: "t1", To: "ap@acme.test",
 		Cc:      []string{"evil@x.test>\r\nBcc: victim@y.test"},
 		Subject: "x", TextBody: "b", HTMLBody: "<p>b</p>",
 	})
+	if err == nil {
+		t.Error("a CRLF-bearing CC must fail the send")
+	}
 	data := srv.lastData()
 	for _, line := range strings.Split(data, "\r\n") {
 		if strings.HasPrefix(line, "Bcc:") {

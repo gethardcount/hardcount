@@ -1,14 +1,14 @@
 package email
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
-	"mime"
 	"net"
 	"net/mail"
 	"net/smtp"
@@ -16,6 +16,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	gomail "github.com/wneessen/go-mail"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -794,61 +796,11 @@ func (s *Sender) sendRich(ctx context.Context, msg richMessage) error {
 	}
 	cc := s.filterSuppressedCC(ctx, msg.TenantID, msg.Cc)
 
-	var body strings.Builder
-	fmt.Fprintf(&body, "From: %s\r\n", fromHeaderValue(msg.FromName, s.from))
-	fmt.Fprintf(&body, "To: %s\r\n", msg.To)
-	if len(cc) > 0 {
-		// Visible CC (Orb/Stripe semantics). Each address rendered via
-		// mail.Address so a CRLF-bearing value can never smuggle a raw
-		// header line — same neutralization as fromHeaderValue.
-		rendered := make([]string, len(cc))
-		for i, a := range cc {
-			rendered[i] = (&mail.Address{Address: a}).String()
-		}
-		fmt.Fprintf(&body, "Cc: %s\r\n", strings.Join(rendered, ", "))
+	body, err := s.buildRich(ctx, msg, cc)
+	if err != nil {
+		return fmt.Errorf("build email: %w", err)
 	}
-	fmt.Fprintf(&body, "Subject: %s\r\n", encodeHeader(msg.Subject))
-	body.WriteString("MIME-Version: 1.0\r\n")
-	body.WriteString(correlationHeader(ctx))
-
-	altBoundary := "velox-alt-" + nonce()
-	mixedBoundary := "velox-mix-" + nonce()
-
-	if len(msg.AttachmentData) > 0 {
-		fmt.Fprintf(&body, "Content-Type: multipart/mixed; boundary=\"%s\"\r\n\r\n", mixedBoundary)
-		fmt.Fprintf(&body, "--%s\r\n", mixedBoundary)
-	}
-
-	// multipart/alternative wrapper for text + html
-	fmt.Fprintf(&body, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", altBoundary)
-
-	// text part
-	fmt.Fprintf(&body, "--%s\r\n", altBoundary)
-	body.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	body.WriteString("Content-Transfer-Encoding: 7bit\r\n\r\n")
-	body.WriteString(msg.TextBody)
-	body.WriteString("\r\n")
-
-	// html part
-	fmt.Fprintf(&body, "--%s\r\n", altBoundary)
-	body.WriteString("Content-Type: text/html; charset=utf-8\r\n")
-	body.WriteString("Content-Transfer-Encoding: 7bit\r\n\r\n")
-	body.WriteString(msg.HTMLBody)
-	body.WriteString("\r\n")
-
-	fmt.Fprintf(&body, "--%s--\r\n", altBoundary)
-
-	if len(msg.AttachmentData) > 0 {
-		// PDF attachment part
-		fmt.Fprintf(&body, "--%s\r\n", mixedBoundary)
-		fmt.Fprintf(&body, "Content-Type: application/pdf; name=\"%s\"\r\n", msg.AttachmentName)
-		body.WriteString("Content-Transfer-Encoding: base64\r\n")
-		fmt.Fprintf(&body, "Content-Disposition: attachment; filename=\"%s\"\r\n\r\n", msg.AttachmentName)
-		body.WriteString(wrapBase64(base64.StdEncoding.EncodeToString(msg.AttachmentData), 76))
-		fmt.Fprintf(&body, "\r\n--%s--\r\n", mixedBoundary)
-	}
-
-	if err := s.deliver(ctx, msg.TenantID, msg.To, cc, []byte(body.String())); err != nil {
+	if err := s.deliver(ctx, msg.TenantID, msg.To, cc, body); err != nil {
 		// deliver never returns a CC-only rejection (those are handled
 		// and bounce-attributed internally), so attributing this error's
 		// bounce to the PRIMARY recipient stays correct.
@@ -1019,16 +971,11 @@ func (s *Sender) sendPlain(ctx context.Context, tenantID, to, fromName, subject,
 	if err := s.checkSuppression(ctx, tenantID, to); err != nil {
 		return err
 	}
-	var msg strings.Builder
-	fmt.Fprintf(&msg, "From: %s\r\n", fromHeaderValue(fromName, s.from))
-	fmt.Fprintf(&msg, "To: %s\r\n", to)
-	fmt.Fprintf(&msg, "Subject: %s\r\n", encodeHeader(subject))
-	msg.WriteString("MIME-Version: 1.0\r\n")
-	msg.WriteString(correlationHeader(ctx))
-	msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-	msg.WriteString(body)
-
-	if err := s.deliver(ctx, tenantID, to, nil, []byte(msg.String())); err != nil {
+	msg, err := s.buildPlain(ctx, to, fromName, subject, body)
+	if err != nil {
+		return fmt.Errorf("build email: %w", err)
+	}
+	if err := s.deliver(ctx, tenantID, to, nil, msg); err != nil {
 		slog.Error("send email failed", "to", to, "subject", subject, "error", err)
 		s.reportBounceIfPermanent(ctx, tenantID, to, err)
 		return fmt.Errorf("send email: %w", err)
@@ -1037,52 +984,92 @@ func (s *Sender) sendPlain(ctx context.Context, tenantID, to, fromName, subject,
 	return nil
 }
 
-// ---- Utilities ----
+// ---- Message building ----
+//
+// go-mail builds the message bytes; deliver() sends them. Building by hand
+// had left out the Date and Message-ID headers (RFC 5322 §3.6), labelled
+// UTF-8 text "7bit", and sent long HTML and operator-note lines whole,
+// past SMTP's 1,000-octet limit (RFC 5321 §4.5.3.1.6). go-mail encodes
+// text parts as quoted-printable and the attachment as base64, both in
+// lines of at most 76 octets, and encodes non-ASCII header text.
 
-// fromHeaderValue renders the From header. mail.Address.String()
-// RFC-2047-encodes the display name and never emits raw CR/LF, so a tenant
-// CompanyName carrying a header-injection payload (e.g. "Acme\r\nBcc: …")
-// cannot smuggle extra SMTP headers through the From line.
-func fromHeaderValue(fromName, addr string) string {
-	if fromName == "" {
-		return addr
+// buildRich renders a multipart/alternative (text + HTML) message, wrapped
+// in multipart/mixed when it carries the PDF attachment. cc is the list
+// after suppression filtering, so a suppressed address is not shown.
+func (s *Sender) buildRich(ctx context.Context, msg richMessage, cc []string) ([]byte, error) {
+	m, err := s.newMessage(ctx, msg.FromName, msg.To, cc, msg.Subject)
+	if err != nil {
+		return nil, err
 	}
-	return (&mail.Address{Name: fromName, Address: addr}).String()
+	m.SetBodyString(gomail.TypeTextPlain, msg.TextBody)
+	m.AddAlternativeString(gomail.TypeTextHTML, msg.HTMLBody)
+	if len(msg.AttachmentData) > 0 {
+		m.AttachReadSeeker(msg.AttachmentName, bytes.NewReader(msg.AttachmentData),
+			gomail.WithFileContentType("application/pdf"))
+	}
+	return writeMessage(m)
 }
 
-// encodeHeader Q-encodes any header value (e.g. Subject) that contains
-// non-ASCII or control characters — CR/LF included — neutralizing header
-// injection regardless of which upstream field flowed in.
-func encodeHeader(v string) string {
-	return mime.QEncoding.Encode("utf-8", v)
+// buildPlain renders a single text/plain message.
+func (s *Sender) buildPlain(ctx context.Context, to, fromName, subject, body string) ([]byte, error) {
+	m, err := s.newMessage(ctx, fromName, to, nil, subject)
+	if err != nil {
+		return nil, err
+	}
+	m.SetBodyString(gomail.TypeTextPlain, body)
+	return writeMessage(m)
 }
+
+// newMessage sets the headers every Velox email carries.
+//
+// Addresses go in as net/mail values, never as "Name <addr>" text to
+// parse: FromFormat would mangle a tenant name holding quotes or
+// backslashes. net/mail encodes the display name, so a name carrying
+// CR/LF cannot start a header line, but it writes the domain part of an
+// address as given; an address with a control character is refused here
+// rather than written into a header.
+//
+// The Message-ID is a random 130-bit value on the SMTP_FROM domain, the
+// domain the operator authenticates with SPF and DKIM. go-mail adds the
+// Date (the time the bytes are built) and MIME-Version headers itself. No
+// User-Agent header names the library.
+func (s *Sender) newMessage(ctx context.Context, fromName, to string, cc []string, subject string) (*gomail.Msg, error) {
+	for _, addr := range append([]string{s.from, to}, cc...) {
+		if strings.IndexFunc(addr, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+			return nil, fmt.Errorf("email address %q contains a control character", addr)
+		}
+	}
+	m := gomail.NewMsg(gomail.WithNoDefaultUserAgent())
+	m.FromMailAddress(&mail.Address{Name: fromName, Address: s.from})
+	m.ToMailAddress(&mail.Address{Address: to})
+	if len(cc) > 0 {
+		// Visible Cc (ADR-082): one header listing every kept address.
+		addrs := make([]*mail.Address, len(cc))
+		for i, a := range cc {
+			addrs[i] = &mail.Address{Address: a}
+		}
+		m.CcMailAddress(addrs...)
+	}
+	m.Subject(subject)
+	m.SetMessageIDWithValue(rand.Text() + "@" + s.from[strings.LastIndex(s.from, "@")+1:])
+	if id := correlationID(ctx); id != "" {
+		m.SetGenHeader(gomail.Header(correlationHeaderName), id)
+	}
+	return m, nil
+}
+
+func writeMessage(m *gomail.Msg) ([]byte, error) {
+	var buf bytes.Buffer
+	if _, err := m.WriteTo(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// ---- Utilities ----
 
 func formatAmount(cents int64, currency string) string {
 	return fmt.Sprintf("%s %d.%02d", strings.ToUpper(currency), cents/100, cents%100)
-}
-
-// wrapBase64 inserts CRLF every n chars. RFC 2045 recommends ≤76 per
-// line; most clients accept longer but some classical relays don't.
-func wrapBase64(s string, n int) string {
-	if n <= 0 || len(s) <= n {
-		return s
-	}
-	var b strings.Builder
-	for i := 0; i < len(s); i += n {
-		end := i + n
-		if end > len(s) {
-			end = len(s)
-		}
-		b.WriteString(s[i:end])
-		b.WriteString("\r\n")
-	}
-	return strings.TrimRight(b.String(), "\r\n")
-}
-
-// nonce produces a short MIME-boundary-safe token. No cryptographic
-// requirement — just uniqueness within a single message.
-func nonce() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
 func envOr(key, fallback string) string {

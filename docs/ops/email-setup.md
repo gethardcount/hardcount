@@ -68,6 +68,8 @@ Before you go live, set up your sending domain at your provider, so emails are t
 
 Each provider has step-by-step DNS instructions. You do this once per sending domain.
 
+Use a `SMTP_FROM` address on that domain. Every email Velox sends carries a `Date` and a `Message-ID` header, and the Message-ID ends with the `SMTP_FROM` domain.
+
 ## What breaks when a setting is missing
 
 Velox starts without any of these. It logs one warning at start-up for each one that is missing:

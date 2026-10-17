@@ -138,7 +138,7 @@ stuck: [A background job is stuck](ops/runbook/background-job-stuck.md).
 
 ## Tech stack
 
-**Backend** — Go 1.26, chi/v5 router, PostgreSQL 16 with RLS, `shopspring/decimal` for money, `signintech/gopdf` for invoices, Prometheus metrics.
+**Backend** — Go 1.26, chi/v5 router, PostgreSQL 16 with RLS, `shopspring/decimal` for money, `signintech/gopdf` for invoices, `wneessen/go-mail` to build emails (Velox's own SMTP code sends them), Prometheus metrics.
 
 **Frontend** — React 19, TypeScript, Vite, TailwindCSS, shadcn/ui, Lucide icons.
 
