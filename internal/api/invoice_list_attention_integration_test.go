@@ -99,8 +99,9 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 		return inv.ID
 	}
 
-	// One row per batched fact.
-	awaiting := newInvoice("awaiting", newCustomer("ready", "ready@acme.test", true), "", domain.InvoiceFinalized, domain.PaymentPending)
+	// One row per batched fact. Create queues a finalized, pending invoice for
+	// collection (collectionQueuedAtFinalize), so a ready card reads "scheduled".
+	scheduled := newInvoice("scheduled", newCustomer("ready", "ready@acme.test", true), "", domain.InvoiceFinalized, domain.PaymentPending)
 
 	pausedCust := newCustomer("paused", "paused@acme.test", true)
 	exec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time, pause_collection_behavior)
@@ -171,7 +172,7 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 		return false
 	}
 	for id, want := range map[string]string{
-		awaiting:      "payment.awaiting",          // ready card: payment readiness
+		scheduled:     "payment.scheduled",         // ready card, queued at finalize: payment readiness
 		paused:        "payment.collection_paused", // queued on a paused sub: pause state
 		noCardEmail:   "payment.no_payment_method", // no card
 		noCardNoEmail: "payment.no_payment_method", // no card
