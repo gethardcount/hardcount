@@ -42,7 +42,8 @@ plain meanings first.
    pricing your own model, prepaid credit, and margin.
 3. [API surface](api-surface.md): the core routes. The full reference is
    [`api/openapi.yaml`](../api/openapi.yaml).
-4. [API keys](api-keys.md): key types, rotation, and adding tenants.
+4. [API keys](api-keys.md): get a key, send it, test and live mode, and
+   rotation.
 5. [Webhooks](webhooks.md): events, signatures, and retries.
 6. [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md):
    poll a prepaid customer's live credit balance and gate in your own code.

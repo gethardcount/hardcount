@@ -87,6 +87,23 @@ cd web-v2 && npm install && npm run dev
 # → http://localhost:5173
 ```
 
+### Add a second account
+
+One Velox server can hold many accounts (tenants), each with its own data,
+dashboard users and API keys. To add another one, run the bootstrap tool
+again with a different owner email:
+
+```bash
+make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@local \
+  VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \
+  VELOX_BOOTSTRAP_TENANT='Tenant B'
+```
+
+The tool runs from source, so it needs Go and this repository. It is not in
+the Docker image. There is no button for this in the dashboard, and a
+secret key cannot do it: only a platform key can manage accounts, and a
+standard Velox server issues none.
+
 ## Postgres
 
 The Compose stack ships Postgres 16 with default settings, which is enough for trying Velox. For your own Postgres:
