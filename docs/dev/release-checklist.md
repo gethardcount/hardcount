@@ -41,6 +41,7 @@ has built them: [Fresh install and upgrade](#fresh-install-and-upgrade) and
 
 - [ ] Settings → Email → Send test email: the page says "Sent to" your address and the message arrives in Mailpit. With a wrong `SMTP_PORT`, the page shows the mail server's error instead.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
+- [ ] In Mailpit's Headers tab for that invoice email, `Date` and `Message-ID` are present and the Message-ID ends in the `SMTP_FROM` domain. A customer name with accents (such as `Müller`) reads correctly in both the HTML and Text tabs.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
 

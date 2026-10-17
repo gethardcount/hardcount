@@ -39,13 +39,16 @@ recipients on Billing emails.
    addresses — the email_changed convention).
 
 3. **Transport**: ONE MIME message, primary in `To:`, additional in a
-   **visible `Cc:` header** (rendered per-address via
-   `(&mail.Address{Address: a}).String()` — the fromHeaderValue
-   injection-neutralization pattern), one SMTP transaction with RCPT TO
-   for primary + each surviving CC. Rejected: N separate envelopes —
-   each email is one outbox row (a DB-queued send drained by the
-   dispatcher), so one row with N retry states = duplicate sends on
-   retry — and BCC (no peer blind-copies invoices).
+   **visible `Cc:` header**, one SMTP transaction with RCPT TO for
+   primary + each surviving CC. Each CC goes into the header as its own
+   `mail.Address{Address: a}`, so a CR or LF in an address is dropped
+   and can never start a header line. Since 2026-10-17 go-mail's
+   `CcMailAddress` writes that header: go-mail builds the message and
+   our own `deliver()` still sends it.
+   Rejected: N separate envelopes, because each email is one outbox row
+   (a DB-queued send drained by the dispatcher), so one row with N retry
+   states = duplicate sends on retry. Also rejected: BCC (no peer
+   blind-copies invoices).
 
 4. **deliver() error attribution** (adversarial blindspot fix):
    signature becomes `deliver(ctx, tenantID, to, cc, body)`. Primary

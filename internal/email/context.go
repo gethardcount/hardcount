@@ -5,7 +5,7 @@ import (
 )
 
 // correlationKey carries the email_outbox row id from the dispatcher to the
-// transport so the MIME builders can stamp it as provider metadata
+// transport so the message builder can stamp it as provider metadata
 // (X-PM-Metadata-*). Ctx-value plumbing mirrors the established
 // livemode-on-ctx convention (Dispatcher.handle pins postgres.WithLivemode
 // the same way) — the alternative was threading an outbox_id parameter
@@ -13,7 +13,7 @@ import (
 type correlationKey struct{}
 
 // WithCorrelation returns a ctx carrying the outbox row id of the email
-// being sent. Set by Dispatcher.handle; read by the MIME builders.
+// being sent. Set by Dispatcher.handle; read by buildMessage.
 func WithCorrelation(ctx context.Context, outboxID string) context.Context {
 	return context.WithValue(ctx, correlationKey{}, outboxID)
 }
@@ -34,19 +34,21 @@ const CorrelationMetadataKey = "vlx-outbox-id"
 // could disagree with the row's).
 const correlationHeaderName = "X-PM-Metadata-" + CorrelationMetadataKey
 
-// correlationHeader renders the full header line ("Name: value\r\n") for
-// the ctx's outbox id, or "" when the ctx carries none (direct Sender use
-// outside the dispatcher) — the header is then absent, never empty-valued.
-// The value is our own generated 'vlx_emob_'+hex id, but it is validated
-// anyway: anything outside the id alphabet (which can never contain CR/LF)
-// or over Postmark's 80-char value cap drops the header rather than risk
-// header injection or silent provider-side truncation.
-func correlationHeader(ctx context.Context) string {
+// correlationID returns the ctx's outbox id for the correlation header,
+// or "" when the ctx carries none (direct Sender use outside the
+// dispatcher) — the header is then absent, never empty-valued. The value
+// is our own generated 'vlx_emob_'+hex id, but it is validated anyway:
+// anything outside the id alphabet (which can never contain CR/LF) or
+// over Postmark's 80-char value cap drops the header rather than risk
+// header injection or silent provider-side truncation. buildMessage
+// writes it verbatim, so this check is the only thing between the value
+// and the wire.
+func correlationID(ctx context.Context) string {
 	id, _ := ctx.Value(correlationKey{}).(string)
 	if id == "" || len(id) > 80 || !safeMetadataValue(id) {
 		return ""
 	}
-	return correlationHeaderName + ": " + id + "\r\n"
+	return id
 }
 
 func safeMetadataValue(s string) bool {

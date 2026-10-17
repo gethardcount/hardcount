@@ -68,6 +68,8 @@ Before you go live, set up your sending domain at your provider, so emails are t
 
 Each provider has step-by-step DNS instructions. You do this once per sending domain.
 
+Velox does its part in each email. Every email has the `Date` and `Message-ID` headers that spam filters check for, and the Message-ID ends in your `SMTP_FROM` domain. The text is encoded so that accented letters arrive intact and no line is too long for a mail server.
+
 ## What breaks when a setting is missing
 
 Velox starts without any of these. It logs one warning at start-up for each one that is missing:

@@ -7,18 +7,17 @@ import (
 )
 
 // TestCorrelationHeader_CtxRoundTrip pins the ctx→header contract: the
-// header renders iff the ctx carries a well-formed outbox id, and a
-// malformed value (injection attempt, oversize) drops the header rather
-// than emitting anything.
+// id is used iff the ctx carries a well-formed outbox id, and a malformed
+// value (injection attempt, oversize) drops the header rather than
+// emitting anything.
 func TestCorrelationHeader_CtxRoundTrip(t *testing.T) {
-	if got := correlationHeader(context.Background()); got != "" {
-		t.Errorf("no ctx id: want empty header, got %q", got)
+	if got := correlationID(context.Background()); got != "" {
+		t.Errorf("no ctx id: want no header, got %q", got)
 	}
 
 	ctx := WithCorrelation(context.Background(), "vlx_emob_00112233445566778899aabb")
-	want := "X-PM-Metadata-vlx-outbox-id: vlx_emob_00112233445566778899aabb\r\n"
-	if got := correlationHeader(ctx); got != want {
-		t.Errorf("header: got %q, want %q", got, want)
+	if got := correlationID(ctx); got != "vlx_emob_00112233445566778899aabb" {
+		t.Errorf("id: got %q", got)
 	}
 
 	for name, bad := range map[string]string{
@@ -27,16 +26,29 @@ func TestCorrelationHeader_CtxRoundTrip(t *testing.T) {
 		"oversize":       strings.Repeat("a", 81),
 		"empty":          "",
 	} {
-		if got := correlationHeader(WithCorrelation(context.Background(), bad)); got != "" {
+		if got := correlationID(WithCorrelation(context.Background(), bad)); got != "" {
 			t.Errorf("%s: want dropped header, got %q", name, got)
+		}
+		// On the wire too: the send goes out without the header.
+		srv := newScriptedSMTP(t)
+		s := newCCTestSender(t, srv)
+		if err := s.SendTestEmail(WithCorrelation(context.Background(), bad), "", "op@acme.test"); err != nil {
+			t.Fatalf("%s: send: %v", name, err)
+		}
+		msg, _ := readWire(t, srv.lastData())
+		if v, ok := msg.Header[correlationHeaderName]; ok {
+			t.Errorf("%s: header reached the wire: %q", name, v)
+		}
+		if _, ok := msg.Header["Bcc"]; ok {
+			t.Errorf("%s: Bcc smuggled through the correlation header", name)
 		}
 	}
 }
 
 // TestCorrelationHeader_OnTheWire proves the stamped header actually
-// reaches the SMTP DATA payload — for both MIME builders — exactly once,
-// and is absent when the ctx carries no id (direct Sender use outside
-// the dispatcher).
+// reaches the SMTP DATA payload — rich and plain emails alike — exactly
+// once, on one unfolded line, and is absent when the ctx carries no id
+// (direct Sender use outside the dispatcher).
 func TestCorrelationHeader_OnTheWire(t *testing.T) {
 	srv := newScriptedSMTP(t)
 	s := newCCTestSender(t, srv)

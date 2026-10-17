@@ -121,7 +121,9 @@ func (s *scriptedSMTP) session(conn net.Conn) {
 				if strings.TrimRight(dl, "\r\n") == "." {
 					break
 				}
-				b.WriteString(dl)
+				// Undo the client's dot-stuffing (RFC 5321 §4.5.2) so tests
+				// see the message bytes exactly as the builder wrote them.
+				b.WriteString(strings.TrimPrefix(dl, "."))
 			}
 			s.mu.Lock()
 			s.data = append(s.data, b.String())

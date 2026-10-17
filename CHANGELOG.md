@@ -20,6 +20,10 @@ Older entries keep their original text.
 - **Decision recorded: migrations will run on plain golang-migrate (2026-10-17).** Nothing changes yet. A later release drops `MIGRATION_LOCK_TIMEOUT` (each new file sets 5 seconds), and installs with several copies run `velox migrate` once before starting them. [ADR-124](docs/adr/124-plain-golang-migrate-each-file-sets-its-lock-limit.md) also corrects ADR-073's deadlock claim.
 - **The README shows before it tells (2026-10-17).** The pictures come first, then a small diagram of how Velox works and one example usage event, then the quick start. The gaps table is shorter, and the volume line now uses the €6.49-a-month server test.
 
+### Fixed
+
+- **Emails now meet the mail standards spam filters check (2026-10-17).** Every email has a `Date` and a `Message-ID` on your `SMTP_FROM` domain. Accented text is encoded instead of sent raw under a wrong label. No line passes 76 characters; a long setup-link note used to make one of about 1,800, over the 1,000 mail servers accept. No action needed. See [email setup](docs/ops/email-setup.md#keep-email-out-of-spam).
+
 ## [0.8.1] - 2026-10-17
 
 Safer upgrades: a repair command for a database upgrade that stopped midway, and a 5-second limit on how long a migration waits for a table lock. Also a faster invoice list, and the Compose stack passes the Postmark webhook login and `VELOX_API_BASE_URL`. No database migrations.
