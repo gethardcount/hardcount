@@ -11,7 +11,7 @@ Velox moves money, so these are the rules the code is built to. Each one links t
 
 ## Simplicity
 
-- **One Postgres.** All billing data lives there; Redis is used for rate limiting only. No queue broker, warehouse or workflow engine until a measurement says Postgres is not enough. [Will it take our volume?](scale.md)
+- **One Postgres.** All billing data lives there; Redis is used for rate limiting only. No queue broker, warehouse or workflow engine until a measurement says Postgres is not enough. [How much traffic Velox handles](scale.md)
 - **Prefer one path for each job.** Here, a second path for the same job is where bugs have hidden; ADR-074 to ADR-077 removed one. [Decision records](adr/README.md)
 - **The smallest correct change first.** An extra mechanism needs a reason: the defect it prevents, written in its ADR or PR. [Decision records](adr/README.md)
 

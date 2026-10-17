@@ -191,19 +191,13 @@ These close a period at once, with no grace: an immediate cancel, `POST /v1/subs
 
 ## How much load it takes
 
-Measured on AWS, counting usage events stored per second, with every event checked against Postgres afterwards:
+On AWS, one database took **1,000 usage events per second** on a
+`db.m7g.2xlarge` (32 GB memory) and **12,000 per second** on a
+`db.m7g.4xlarge` (64 GB memory). The database ran out first, never the Velox
+process. One small VM takes far less.
 
-- **1,000 events per second**, held for five 10-minute runs, on a `db.m7g.2xlarge` database (10 events per request). All five runs passed.
-- **15,000 events per second** on a `db.m7g.4xlarge` (100 events per request). Four of five runs passed.
-
-The database ran out of memory first, then disk write speed. The Velox process was never the limit. The method and every caveat: [sustained throughput](benchmarks/sustained-throughput.md).
-
-One small VM will take far less. To raise the limit, in this order:
-
-1. Send events in batches. One request can carry up to 1,000 events.
-2. Give the database more memory.
-3. Give the database faster disks.
-4. Split the `usage_events` table by month.
+The measured runs, and what to do when you need more, are in
+[How much traffic Velox handles](scale.md).
 
 ## What to watch
 

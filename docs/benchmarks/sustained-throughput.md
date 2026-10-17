@@ -1,5 +1,10 @@
 # Sustained throughput
 
+> **Record of runs on 2026-08-16 and 2026-08-17, kept as measured (status checked
+> 2026-10-17).** The code has changed since, and the runs have not been repeated.
+> Of the issues named below, #818 is fixed, and #819 and #823 are still open. The
+> short version of these figures is [How much traffic Velox handles](../scale.md).
+
 **Result.** The test ran on `db.m7g.4xlarge` with the #818 hot-row fix. On
 stock settings, Velox sustained **12,000 events/s at batch 10 (p99 22.6 ms)**
 and **15,000 events/s at batch 100 (p99 43.8 ms)** in 4 of 5 ten-minute

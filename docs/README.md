@@ -25,8 +25,8 @@ plain meanings first.
 1. [How Velox works](how-velox-works.md): one picture and six steps, from
    a usage event to a paid invoice.
 2. [Glossary](glossary.md): the words you will meet, plain meaning first.
-3. [Will it take our volume?](scale.md): what was measured, and where one
-   Postgres stops being enough.
+3. [How much traffic Velox handles](scale.md): what was measured, and
+   where one Postgres stops being enough.
 4. [How Velox is engineered](ENGINEERING.md): the principles, one page,
    and [the evidence behind them](engineering-evidence.md).
 5. The measured runs in full:

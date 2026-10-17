@@ -1,5 +1,11 @@
 # Correctness under failure
 
+> **Record of a 2026-08-15 run, kept as measured (status checked 2026-10-17).** Since
+> [ADR-115](../adr/115-one-closer-for-the-billing-period.md) (2026-08-30), every
+> period close also locks the subscription row and checks its period first, so the
+> unique index below is now the second guard, not the only one. The negative
+> control has not been re-run on that code. `velox-doctor` now has 30 checks, not 28.
+
 What happens to your invoices when the billing process dies mid-run.
 
 **Result.** We killed the billing process with `SIGKILL` mid-run, sweeping the
@@ -10,7 +16,7 @@ negative control is the same race with the unique index removed. One run billed
 $2,575.00 instead of $1,000.00 (a second billed $3,225.00), and every leader
 reported success.
 
-**Date:** 2026-08-15 · **Commit:** see `git log` for `test/track-a-exactly-once`
+**Date:** 2026-08-15 · **Commit:** `cde68ede` (#798)
 · **Hardware:** developer laptop, Postgres 16 in Docker, single node.
 
 We publish this benchmark first because a billing system most needs evidence
@@ -184,8 +190,8 @@ We state the limits plainly, because a benchmark that hides its limits is what
 this document argues against.
 
 - **This is a correctness result, not a scale result.** 40 subscriptions on one
-  laptop. It says nothing about throughput; that is a separate track and it is
-  not finished.
+  laptop. It says nothing about throughput, which is measured in
+  [sustained throughput](sustained-throughput.md).
 - **Single-node Postgres.** No replication, no failover of the database itself.
   A leader dying is not the same event as Postgres dying, and only the first is
   measured here.
