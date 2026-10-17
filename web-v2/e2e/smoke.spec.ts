@@ -41,7 +41,7 @@ const routes: Route[] = [
   { name: 'test clock detail', path: s => `/test-clocks/${s.clock.id}`, heading: s => s.clock.name },
   { name: 'audit log', path: () => '/audit-log', heading: () => 'Audit Log' },
   { name: 'settings', path: () => '/settings', heading: () => 'Settings' },
-  { name: 'hosted invoice (public)', path: s => `/invoice/${s.invoice.public_token}`, heading: () => 'Invoice', public: true },
+  { name: 'hosted invoice (public)', path: s => `/invoice/${s.invoice.public_token}`, heading: s => `Invoice ${s.invoice.invoice_number}`, public: true },
 ]
 
 // API calls that may answer 404 on a healthy page, because 404 is how the API

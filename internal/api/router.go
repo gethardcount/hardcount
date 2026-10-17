@@ -569,6 +569,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		Settings:    settingsStore,
 		CreditNotes: &creditNoteListerAdapter{svc: creditNoteSvc},
 		Stripe:      hostedInvoiceStripe,
+		StripeReady: stripeClients,
 		BaseURL:     strings.TrimSpace(os.Getenv("HOSTED_INVOICE_BASE_URL")),
 	})
 

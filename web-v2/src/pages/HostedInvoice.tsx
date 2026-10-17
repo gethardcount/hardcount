@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { formatCents, formatRate, formatDate, formatTaxRate } from '@/lib/api'
 import { invoiceLineRate } from '@/lib/priceDisplay'
 import { invoiceAmountLabel } from '@/lib/invoiceTerminal'
+import { hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy } from '@/lib/hostedInvoice'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -15,7 +16,7 @@ import {
   Loader2,
   ShieldCheck,
   XCircle,
-  Clock,
+  FileQuestion,
 } from 'lucide-react'
 
 // Shape mirrors internal/hostedinvoice/handler.go:hostedInvoicePayload.
@@ -90,10 +91,23 @@ interface HostedInvoicePayload {
     support_url?: string
   }
   pay_enabled: boolean
+  // "online_payment_unavailable" when the invoice is owed but the seller
+  // has no payment provider connected.
+  pay_unavailable_reason?: string
   livemode: boolean
 }
 
 const apiBase = import.meta.env.VITE_API_URL || ''
+
+// LoadFailure carries the HTTP status of a failed invoice fetch, so the
+// page can pick customer copy without reading the server's message.
+class LoadFailure extends Error {
+  status: number
+  constructor(status: number) {
+    super(`invoice load failed (${status})`)
+    this.status = status
+  }
+}
 
 // isHexColor guards against tenants writing unexpected values into
 // brand_color. The server already validates on save (^#[0-9a-f]{6}$) but
@@ -150,8 +164,9 @@ export default function HostedInvoicePage() {
     queryFn: async (): Promise<HostedInvoicePayload> => {
       const res = await fetch(`${apiBase}/v1/public/invoices/${encodeURIComponent(token)}`)
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body?.error?.message || 'This invoice link has expired or is invalid.')
+        // Never show the server's message ("invoice not found") to a
+        // customer: the status picks customer copy (loadErrorCopy).
+        throw new LoadFailure(res.status)
       }
       return (await res.json()) as HostedInvoicePayload
     },
@@ -163,15 +178,14 @@ export default function HostedInvoicePage() {
     },
   })
   const data = invoiceQuery.data ?? null
-  usePageTitle(data?.invoice?.invoice_number ?? 'Invoice')
+  const seller = data?.branding.company_name?.trim() ?? ''
+  usePageTitle(data ? `Invoice ${data.invoice.invoice_number}${seller ? ` from ${seller}` : ''}` : 'Invoice')
   const loading = !!token && invoiceQuery.isLoading
-  const error = !token
-    ? 'Invoice link is missing.'
-    : invoiceQuery.error instanceof Error
-      ? invoiceQuery.error.message
-      : invoiceQuery.error
-        ? 'This invoice link has expired or is invalid.'
-        : ''
+  const loadError = !token
+    ? loadErrorCopy(404)
+    : invoiceQuery.error
+      ? loadErrorCopy(invoiceQuery.error instanceof LoadFailure ? invoiceQuery.error.status : 0)
+      : null
 
   const brandColor = useMemo(() => {
     const c = data?.branding.brand_color
@@ -189,14 +203,17 @@ export default function HostedInvoicePage() {
       )
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        throw new Error(body?.error?.message || 'Unable to start payment. Please try again.')
+        setPayingStatus('idle')
+        // Customer-safe copy keyed on the code, never the server message.
+        setPayError(payErrorCopy(body?.error?.code, seller, res.status))
+        return
       }
       const { url } = (await res.json()) as { url: string }
       setPayingStatus('redirecting')
       window.location.href = url
-    } catch (err) {
+    } catch {
       setPayingStatus('idle')
-      setPayError(err instanceof Error ? err.message : 'Unable to start payment.')
+      setPayError(payErrorCopy(undefined, seller))
     }
   }
 
@@ -215,21 +232,17 @@ export default function HostedInvoicePage() {
     )
   }
 
-  if (error || !data) {
+  if (loadError || !data) {
+    const copy = loadError ?? loadErrorCopy(0)
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardContent className="p-8 text-center space-y-4">
-            <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mx-auto">
-              <Clock size={24} className="text-destructive/70" aria-hidden="true" />
+            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mx-auto">
+              <FileQuestion size={24} className="text-muted-foreground" aria-hidden="true" />
             </div>
-            <h1 className="text-base font-semibold text-foreground">Invoice unavailable</h1>
-            <p className="text-sm text-muted-foreground">
-              {error || 'This invoice link has expired or is invalid.'}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Please contact your billing provider for a new link.
-            </p>
+            <h1 className="text-base font-semibold text-foreground">{copy.title}</h1>
+            <p className="text-sm text-muted-foreground">{copy.body}</p>
           </CardContent>
         </Card>
       </div>
@@ -237,6 +250,7 @@ export default function HostedInvoicePage() {
   }
 
   const { invoice, line_items, bill_to, branding } = data
+  const totalRows = hostedTotalRows(invoice)
   const companyAddress = formatAddress([
     branding.company_address_line1,
     branding.company_address_line2,
@@ -245,6 +259,8 @@ export default function HostedInvoicePage() {
       .join(', '),
     branding.company_country,
   ])
+  // An empty "From" heading read as a broken page; show it only with content.
+  const hasFrom = !!seller || !!branding.company_email || companyAddress.length > 0
   const billToAddress = formatAddress([
     bill_to.address_line1,
     bill_to.address_line2,
@@ -356,6 +372,7 @@ export default function HostedInvoicePage() {
     <div className="min-h-screen bg-muted/30">
       <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 lg:p-8">
         {/* Header: tenant branding */}
+        {(branding.logo_url || seller || branding.support_url) && (
         <header className="flex items-center gap-3 pb-6">
           {branding.logo_url ? (
             <img
@@ -371,9 +388,9 @@ export default function HostedInvoicePage() {
             />
           ) : null}
           <div className="flex-1">
-            <h1 className="text-lg font-semibold text-foreground leading-tight">
-              {branding.company_name || 'Invoice'}
-            </h1>
+            {seller && (
+              <p className="text-lg font-semibold text-foreground leading-tight">{seller}</p>
+            )}
             {branding.support_url && (
               <a
                 href={branding.support_url}
@@ -386,6 +403,7 @@ export default function HostedInvoicePage() {
             )}
           </div>
         </header>
+        )}
 
         {/* Optional tenant accent bar — only rendered if brand_color set */}
         {brandColor && (
@@ -419,10 +437,12 @@ export default function HostedInvoicePage() {
             {/* Title row */}
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">Invoice</p>
-                <h2 className="text-xl font-semibold text-foreground font-mono">
-                  {invoice.invoice_number}
-                </h2>
+                {/* The page's one h1: "Invoice" + number. The seller name
+                    above is optional, so it can't carry the heading. */}
+                <h1 className="flex flex-col">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider">Invoice</span>{' '}
+                  <span className="text-xl font-semibold text-foreground font-mono">{invoice.invoice_number}</span>
+                </h1>
               </div>
               <div className="text-right">
                 {/* Second label for the same figure — the totals block below
@@ -448,7 +468,7 @@ export default function HostedInvoicePage() {
             </div>
 
             {/* Two-column meta: Bill to / From */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className={hasFrom ? 'grid grid-cols-1 sm:grid-cols-2 gap-6' : 'grid grid-cols-1 gap-6'}>
               <section>
                 <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
                   Bill to
@@ -463,6 +483,7 @@ export default function HostedInvoicePage() {
                   <p key={i} className="text-sm text-muted-foreground">{line}</p>
                 ))}
               </section>
+              {hasFrom && (
               <section>
                 <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
                   From
@@ -477,6 +498,7 @@ export default function HostedInvoicePage() {
                   <p key={i} className="text-sm text-muted-foreground">{line}</p>
                 ))}
               </section>
+              )}
             </div>
 
             {/* Line items */}
@@ -517,13 +539,15 @@ export default function HostedInvoicePage() {
             {/* Totals */}
             <section className="flex justify-end">
               <dl className="w-full sm:w-80 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">Subtotal</dt>
-                  <dd className="text-foreground tabular-nums">
-                    {formatCents(invoice.subtotal_cents, invoice.currency)}
-                  </dd>
-                </div>
-                {invoice.discount_cents > 0 && (
+                {totalRows.includes('subtotal') && (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Subtotal</dt>
+                    <dd className="text-foreground tabular-nums">
+                      {formatCents(invoice.subtotal_cents, invoice.currency)}
+                    </dd>
+                  </div>
+                )}
+                {totalRows.includes('discount') && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Discount</dt>
                     <dd className="text-foreground tabular-nums">
@@ -531,7 +555,7 @@ export default function HostedInvoicePage() {
                     </dd>
                   </div>
                 )}
-                {invoice.tax_amount_cents > 0 && (
+                {totalRows.includes('tax') && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">
                       {invoice.tax_name || 'Tax'}
@@ -556,7 +580,15 @@ export default function HostedInvoicePage() {
                     Tax-exempt — {invoice.tax_exempt_reason}
                   </p>
                 )}
-                {invoice.credits_applied_cents > 0 && (
+                {totalRows.includes('total') && (
+                  <div className="flex justify-between pt-2 border-t font-medium">
+                    <dt className="text-foreground">Total</dt>
+                    <dd className="text-foreground tabular-nums">
+                      {formatCents(invoice.total_amount_cents, invoice.currency)}
+                    </dd>
+                  </div>
+                )}
+                {totalRows.includes('credits') && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Credits applied</dt>
                     <dd className="text-foreground tabular-nums">
@@ -564,17 +596,11 @@ export default function HostedInvoicePage() {
                     </dd>
                   </div>
                 )}
-                <div className="flex justify-between pt-2 border-t font-semibold">
-                  <dt className="text-foreground">Total</dt>
-                  <dd className="text-foreground tabular-nums">
-                    {formatCents(invoice.total_amount_cents, invoice.currency)}
-                  </dd>
-                </div>
-                {invoice.amount_paid_cents > 0 && (
+                {totalRows.includes('paid') && (
                   <div className="flex justify-between text-muted-foreground">
                     <dt>Paid</dt>
                     <dd className="tabular-nums">
-                      {formatCents(invoice.amount_paid_cents, invoice.currency)}
+                      −{formatCents(invoice.amount_paid_cents, invoice.currency)}
                     </dd>
                   </div>
                 )}
@@ -594,9 +620,9 @@ export default function HostedInvoicePage() {
             </section>
 
             {invoice.memo && (
-              <section aria-labelledby="memo-heading" className="text-sm text-muted-foreground">
-                <h3 id="memo-heading" className="sr-only">Memo</h3>
-                <p className="whitespace-pre-wrap">{invoice.memo}</p>
+              <section aria-labelledby="memo-heading" className="text-sm">
+                <h3 id="memo-heading" className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Memo</h3>
+                <p className="whitespace-pre-wrap text-foreground">{invoice.memo}</p>
               </section>
             )}
 
@@ -627,13 +653,24 @@ export default function HostedInvoicePage() {
                 </div>
               )}
 
+            {/* Owed, but the seller has no payment provider connected: say so
+                instead of offering a Pay button that can only fail. */}
+            {data.pay_unavailable_reason === 'online_payment_unavailable' && (
+              <div role="status" className="rounded-lg bg-muted px-4 py-3 text-sm text-foreground">
+                {payUnavailableCopy(seller)}
+              </div>
+            )}
+
             <section className="flex flex-col sm:flex-row gap-3 pt-2">
               {data.pay_enabled && !isPaymentSettling(data) ? (
                 <Button
                   onClick={handlePay}
                   disabled={payingStatus !== 'idle'}
                   size="lg"
-                  className="flex-1"
+                  // sm:flex-1, not flex-1: in the mobile column layout flex-1
+                  // set flex-basis 0 on the column axis and squashed the
+                  // button to ~20px tall.
+                  className="sm:flex-1"
                   // Inline style override so the Pay button carries the
                   // tenant's brand color when set. Falls through to the
                   // theme primary if brand_color is empty.
@@ -662,7 +699,7 @@ export default function HostedInvoicePage() {
                 render={<a href={pdfHref} target="_blank" rel="noopener noreferrer" />}
                 variant="outline"
                 size="lg"
-                className={data.pay_enabled ? '' : 'flex-1'}
+                className={data.pay_enabled ? '' : 'sm:flex-1'}
               >
                 <Download size={16} className="mr-2" aria-hidden="true" />
                 Download PDF

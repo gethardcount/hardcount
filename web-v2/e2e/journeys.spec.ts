@@ -27,8 +27,19 @@ test.describe('signed out', () => {
   test('hosted invoice page shows the invoice to the customer', async ({ page }) => {
     const { invoice } = JSON.parse(fs.readFileSync(seedFile, 'utf8')) as Seed
     await page.goto(`/invoice/${invoice.public_token}`)
-    await expect(page.getByText(invoice.invoice_number)).toBeVisible()
-    await expect(page.getByText('Total', { exact: true }).locator('..')).toContainText(usd(invoice.total_amount_cents))
+    await expect(page.getByRole('heading', { level: 1, name: `Invoice ${invoice.invoice_number}` })).toBeVisible()
+    await expect(page.getByRole('term').filter({ hasText: /^Amount due$/i }).locator('..')).toContainText(usd(invoice.amount_due_cents))
+    // No tax, discount, credit or payment: one amount line, not three equal ones.
+    await expect(page.getByRole('term').filter({ hasText: /^(Subtotal|Total)$/ })).toHaveCount(0)
+    // The e2e tenant has no Stripe keys: no Pay button, and the page says who to contact.
+    await expect(page.getByText(/Online payment isn.t set up for this invoice\. Contact /)).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Pay/ })).toHaveCount(0)
+  })
+
+  test('a bad hosted invoice link reads as an invalid link', async ({ page }) => {
+    await page.goto('/invoice/vlx_pinv_does_not_exist')
+    await expect(page.getByRole('heading', { level: 1, name: 'This link isn’t valid' })).toBeVisible()
+    await expect(page.getByText('invoice not found')).toHaveCount(0)
   })
 
   test('sign-in follows dark mode; the hosted invoice stays light', async ({ page }) => {
