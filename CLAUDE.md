@@ -88,8 +88,8 @@ Two or more Claude Code sessions may work this repo at the same time. Rules:
   - No 2FA in v1.
 - **Email:** single delivery path.
   - `Sender` returns `ErrSMTPNotConfigured` when `SMTP_HOST` is unset. There is no stdout fallback. The producer always wires the real adapter.
-  - Boot logs a WARN when SMTP is not configured, or when `HOSTED_INVOICE_BASE_URL` or `PAYMENT_UPDATE_URL` is unset.
-  - `DASHBOARD_BASE_URL` has no boot WARN. When it is unset, password-reset emails are not sent (an error log) and invites are refused.
+  - Boot logs a WARN when SMTP is not configured, and one for each unset email-link env: `HOSTED_INVOICE_BASE_URL`, `PAYMENT_UPDATE_URL`, `DASHBOARD_BASE_URL`.
+  - Without `DASHBOARD_BASE_URL`, password-reset emails are not sent (an error log) and invites are refused.
 - **Stripe:** PaymentIntent-only pattern (no Stripe Billing/Invoices to avoid its percentage fee).
 - **Background work:** no Temporal dependency in v1.
   - Background work runs as simple goroutine loops. Each loop is a leader-leased singleton role (`internal/platform/leader`, ADR-114).
