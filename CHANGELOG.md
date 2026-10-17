@@ -15,7 +15,7 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-10-18
+## [0.8.0] - 2026-10-17
 
 LiteLLM usage for an unknown customer is held instead of lost, new accounts retry failed payments, Settings → Email with a test send, and dates that follow the billing timezone. Three database migrations (0178, 0179, 0180).
 
