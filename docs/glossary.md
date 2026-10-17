@@ -9,8 +9,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
 ## Accounts and access
 
 - **tenant**: One business account in Velox, with its own customers, data,
-  dashboard users and API keys. The dashboard calls it your account. One
-  Velox install can hold many tenants, and each sees only its own data.
+  dashboard users and API keys. One Velox install can hold many tenants, and each sees only its own data.
   Dashboard users can belong to several tenants. [More](self-host.md)
 - **operator**: Has two meanings. Usually the business that runs Velox to
   bill its customers, or its staff who sign in to the dashboard. In
