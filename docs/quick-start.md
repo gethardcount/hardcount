@@ -93,7 +93,7 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    whole run takes about two minutes.
 
 The demo checks every step. If one fails, it stops there with a ✗ line that
-says what went wrong. So a finished run means each step below worked. IDs (the `vlx_…` values) differ on every run.
+says what went wrong. So a finished run means each step below worked. The IDs (the `vlx_…` values), dates and PDF size differ on every run.
 
 ### What each demo step does
 
@@ -158,7 +158,7 @@ says what went wrong. So a finished run means each step below worked. IDs (the `
        Tokens (claude-sonnet-4.5 · input)  → $1.20
        Tokens (claude-sonnet-4.5 · output)  → $2.62
        Tokens (claude-sonnet-4.5 · cache_read)  → $0.06
-   ✓ One invoice line per model and token type, and the PDF renders (34278 bytes)
+   ✓ One invoice line per model and token type, and the PDF renders (34417 bytes)
    ```
 
    The lines are 400,000 input tokens at $3.00 per million, 175,000 output
