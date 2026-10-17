@@ -104,7 +104,7 @@ export default function TestClocksPage() {
             <EmptyState
               icon={ClockIcon}
               title="No test clocks yet"
-              description="A test clock freezes 'now' for the subscriptions you pin to it. Advance the clock to fast-forward billing without waiting for real time to pass."
+              description="A test clock is a pretend clock for test customers. Create a clock, add a new customer on it, then move the clock forward to see renewals, invoices and payment retries happen in minutes."
               action={{
                 label: 'New test clock',
                 icon: Plus,
@@ -198,8 +198,8 @@ function CreateClockDialog({ onClose }: { onClose: () => void }) {
         <DialogHeader>
           <DialogTitle>New test clock</DialogTitle>
           <DialogDescription>
-            Pick the initial time for this simulator. Subscriptions you pin
-            here will see this as "now" until you advance the clock.
+            Pick the time this clock starts at. Customers you create on this
+            clock see it as "now" until you move the clock forward.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -226,7 +226,7 @@ function CreateClockDialog({ onClose }: { onClose: () => void }) {
                 onTimeChange={(t) => { setTimePart(t); setPickerError('') }}
               />
               <p className="text-xs text-muted-foreground">
-                Times are in your tenant timezone ({tz}). The clock starts here; use Advance from the detail page to move it forward.
+                Times are in your account's timezone ({tz}). The clock starts here; use Advance from the detail page to move it forward.
               </p>
               {pickerError && <p className="text-xs text-destructive">{pickerError}</p>}
             </div>

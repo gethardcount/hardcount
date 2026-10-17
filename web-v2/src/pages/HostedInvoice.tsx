@@ -6,6 +6,8 @@ import { formatCents, formatRate, formatDate, formatTaxRate } from '@/lib/api'
 import { invoiceLineRate } from '@/lib/priceDisplay'
 import { invoiceAmountLabel } from '@/lib/invoiceTerminal'
 import { hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy } from '@/lib/hostedInvoice'
+import { sellerContact } from '@/lib/sellerContact'
+import { SellerContactLink } from '@/components/SellerContactLink'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -319,8 +321,9 @@ export default function HostedInvoicePage() {
           <div className="text-sm">
             <p className="font-medium text-foreground">This invoice is closed</p>
             <p className="text-muted-foreground">
-              Online payment is no longer available for this invoice. Please
-              contact support to settle it or restore service.
+              Online payment is no longer available for this invoice. Contact{' '}
+              <SellerContactLink contact={sellerContact(branding)} /> to settle it or
+              restore service.
             </p>
           </div>
         </div>

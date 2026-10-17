@@ -107,9 +107,12 @@ type tokenValidateResponse struct {
 // and kills the recovery (audit: fe-operator + fe-enduser dupe).
 type publicUpdateBranding struct {
 	CompanyName string `json:"company_name,omitempty"`
-	LogoURL     string `json:"logo_url,omitempty"`
-	BrandColor  string `json:"brand_color,omitempty"`
-	SupportURL  string `json:"support_url,omitempty"`
+	// CompanyEmail lets the page say who to contact when the account has
+	// no support URL (the hosted invoice exposes it too).
+	CompanyEmail string `json:"company_email,omitempty"`
+	LogoURL      string `json:"logo_url,omitempty"`
+	BrandColor   string `json:"brand_color,omitempty"`
+	SupportURL   string `json:"support_url,omitempty"`
 }
 
 func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Request) {
@@ -185,9 +188,9 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 	// renders the neutral fallback header.
 	var branding publicUpdateBranding
 	_ = tx.QueryRowContext(scopedCtx, `
-		SELECT COALESCE(company_name,''), COALESCE(logo_url,''), COALESCE(brand_color,''), COALESCE(support_url,'')
+		SELECT COALESCE(company_name,''), COALESCE(company_email,''), COALESCE(logo_url,''), COALESCE(brand_color,''), COALESCE(support_url,'')
 		FROM tenant_settings WHERE tenant_id = $1
-	`, token.TenantID).Scan(&branding.CompanyName, &branding.LogoURL, &branding.BrandColor, &branding.SupportURL)
+	`, token.TenantID).Scan(&branding.CompanyName, &branding.CompanyEmail, &branding.LogoURL, &branding.BrandColor, &branding.SupportURL)
 
 	respond.JSON(w, r, http.StatusOK, tokenValidateResponse{
 		CustomerName:   cust.DisplayName,

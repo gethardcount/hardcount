@@ -4,6 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { formatCents } from '@/lib/api'
 import { isTerminalInvoiceStatus, invoiceAmountLabel } from '@/lib/invoiceTerminal'
+import { sellerContact } from '@/lib/sellerContact'
+import { checkoutErrorCopy, linkErrorCopy } from '@/lib/updatePayment'
+import { SellerContactLink } from '@/components/SellerContactLink'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -48,7 +51,8 @@ const TERMINAL_INVOICE_COPY: Record<string, { title: string; body: string }> = {
   },
   uncollectible: {
     title: 'This invoice is closed',
-    body: 'Online payment for this invoice is no longer available — please contact support to settle it. You can still add a payment method so future invoices are collected automatically.',
+    // The page adds "Contact <company> to settle it." under this body.
+    body: 'Online payment for this invoice is no longer available. You can still add a payment method so future invoices are collected automatically.',
   },
 }
 
@@ -63,9 +67,20 @@ interface TokenData {
   currency: string
   branding?: {
     company_name?: string
+    company_email?: string
     logo_url?: string
     brand_color?: string
     support_url?: string
+  }
+}
+
+// LinkCheckFailure carries the HTTP status of a failed link check, so the
+// page picks customer copy by status instead of showing the server message.
+class LinkCheckFailure extends Error {
+  readonly status: number
+  constructor(status: number) {
+    super(`link check failed: ${status}`)
+    this.status = status
   }
 }
 
@@ -97,10 +112,7 @@ export default function UpdatePaymentPage() {
     queryFn: async (): Promise<TokenData> => {
       const apiBase = import.meta.env.VITE_API_URL || ''
       const res = await fetch(`${apiBase}/v1/public/payment-updates/${encodeURIComponent(token)}`)
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body?.error?.message || 'This link has expired or is invalid')
-      }
+      if (!res.ok) throw new LinkCheckFailure(res.status)
       return res.json()
     },
     enabled: !!token,
@@ -108,13 +120,12 @@ export default function UpdatePaymentPage() {
   })
   const data = tokenQuery.data ?? null
   const loading = !!token && tokenQuery.isLoading
-  const error = !token
-    ? 'No payment update token provided'
-    : tokenQuery.error instanceof Error
-      ? tokenQuery.error.message
-      : tokenQuery.error
-        ? 'This link has expired or is invalid'
-        : ''
+  const linkError = !token
+    ? linkErrorCopy('missing')
+    : tokenQuery.error
+      ? linkErrorCopy(tokenQuery.error instanceof LinkCheckFailure ? tokenQuery.error.status : 0)
+      : null
+  const contact = sellerContact(data?.branding)
 
   // Update Payment Method click. The validate endpoint above only
   // resolves invoice context — it does not mint a Stripe Checkout
@@ -137,13 +148,15 @@ export default function UpdatePaymentPage() {
       )
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        throw new Error(body?.error?.message || 'We could not start the payment update. Please try again or contact your billing administrator.')
+        setSubmitError(checkoutErrorCopy(body?.error?.code, contact.name))
+        setRedirecting(false)
+        return
       }
       const { url } = await res.json() as { url?: string }
-      if (!url) throw new Error('Payment update could not be started — no checkout URL returned.')
+      if (!url) throw new Error('no checkout url')
       window.location.href = url
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Unexpected error starting the payment update.')
+    } catch {
+      setSubmitError(checkoutErrorCopy(undefined, contact.name))
       setRedirecting(false)
     }
   }
@@ -183,14 +196,18 @@ export default function UpdatePaymentPage() {
                 <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
                 <p className="text-sm text-muted-foreground mt-4">Verifying your link...</p>
               </div>
-            ) : error ? (
+            ) : linkError ? (
               <div className="p-8 text-center">
                 <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
                   <Clock size={24} className="text-destructive/60" />
                 </div>
-                <p className="text-sm font-medium text-foreground">Link expired or invalid</p>
-                <p className="text-sm text-muted-foreground mt-2">{error}</p>
-                <p className="text-xs text-muted-foreground mt-4">Please contact your billing provider for a new link.</p>
+                <p className="text-sm font-medium text-foreground">{linkError.title}</p>
+                <p className="text-sm text-muted-foreground mt-2">{linkError.body}</p>
+                {/* A dead link carries no account, so the company can't be
+                    named here; the customer knows who emailed them. */}
+                {linkError.askForNewLink && (
+                  <p className="text-xs text-muted-foreground mt-4">Ask the company that sent you this link for a new one.</p>
+                )}
               </div>
             ) : data ? (
               <>
@@ -208,6 +225,11 @@ export default function UpdatePaymentPage() {
                         <p className="text-xs text-muted-foreground mt-1">
                           {TERMINAL_INVOICE_COPY[data.invoice_status ?? ''].body}
                         </p>
+                        {data.invoice_status === 'uncollectible' && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Contact <SellerContactLink contact={contact} /> to settle it.
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>

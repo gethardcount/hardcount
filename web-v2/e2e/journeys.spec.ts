@@ -3,7 +3,7 @@ import { test, expect, type Locator } from '@playwright/test'
 import { env, seedFile } from './fixtures/env'
 import { api, usd, uniq } from './fixtures/api'
 import {
-  createCustomer, createPlan, createSubscription, subscribedCustomer, invoicesFor,
+  billedCustomer, createClock, createCustomer, createPlan, createSubscription, subscribedCustomer, invoicesFor,
   type Customer, type Invoice, type Seed, type Subscription,
 } from './fixtures/seed'
 
@@ -40,6 +40,29 @@ test.describe('signed out', () => {
     await page.goto('/invoice/vlx_pinv_does_not_exist')
     await expect(page.getByRole('heading', { level: 1, name: 'This link isn’t valid' })).toBeVisible()
     await expect(page.getByText('invoice not found')).toHaveCount(0)
+  })
+
+  test('a written-off invoice tells the customer who to contact', async ({ page }) => {
+    const { invoice } = await billedCustomer()
+    await api('POST', `/invoices/${invoice.id}/mark-uncollectible`)
+    await page.goto(`/invoice/${invoice.public_token}`)
+    await expect(page.getByText('This invoice is closed')).toBeVisible()
+    await expect(page.getByText(/Contact .+ to settle it or restore service\./)).toBeVisible()
+    await expect(page.getByText(/contact support/i)).toHaveCount(0)
+  })
+
+  test('an update-payment link with no code says to open it from the email', async ({ page }) => {
+    await page.goto('/update-payment')
+    await expect(page.getByText('This link is incomplete', { exact: true })).toBeVisible()
+    await expect(page.getByText('Open it again from your email.')).toBeVisible()
+    await expect(page.getByText(/token|billing provider/i)).toHaveCount(0)
+  })
+
+  test('a dead update-payment link asks for a new one, in plain words', async ({ page }) => {
+    await page.goto('/update-payment?token=vlx_put_does_not_exist')
+    await expect(page.getByText('This link has expired or was already used', { exact: true })).toBeVisible()
+    await expect(page.getByText('Ask the company that sent you this link for a new one.')).toBeVisible()
+    await expect(page.getByText(/token|billing provider/i)).toHaveCount(0)
   })
 
   test('sign-in follows dark mode; the hosted invoice stays light', async ({ page }) => {
@@ -97,7 +120,8 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   await dialog.getByRole('button', { name: '+1mo' }).click()
   await dialog.getByRole('button', { name: 'Advance clock' }).click()
   await expect(dialog).toBeHidden()
-  // The page shows the outcome once the billing catchup has finished.
+  await expect(page.getByText('Moving the clock forward. Billing the skipped days…')).toBeVisible()
+  // The page shows the outcome once billing the skipped days has finished.
   await expect(page.getByText('Last advance results')).toBeVisible({ timeout: 30_000 })
 
   const invoices = await invoicesFor(customer.id)
@@ -116,6 +140,14 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
   await expect(page.getByText('Subtotal', { exact: true }).locator('..')).toContainText(usd(invoice.subtotal_cents))
   await expect(page.getByText('Amount Due', { exact: true }).locator('..')).toContainText(usd(invoice.amount_due_cents))
+})
+
+test('a new test clock says customers, not subscriptions, go on it', async ({ page }) => {
+  const clock = await createClock()
+  await page.goto(`/test-clocks/${clock.id}`)
+  await expect(page.getByText('No customers on this clock yet')).toBeVisible()
+  await expect(page.getByText(/To add one, create a new customer and pick this clock\./)).toBeVisible()
+  await expect(page.getByText(/catchup/i)).toHaveCount(0)
 })
 
 test('a draft invoice reads as a draft and shows its memo', async ({ page }) => {
