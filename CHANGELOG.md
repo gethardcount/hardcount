@@ -15,6 +15,10 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Changed
+
+- **The README's "What it looks like" is two labelled pictures (2026-10-17).** The invoice your customer gets, then your margin per model, each with one line saying what it shows. The text copy of the same numbers is gone.
+
 ## [0.8.0] - 2026-10-17
 
 LiteLLM usage for an unknown customer is held instead of lost, new accounts retry failed payments, Settings → Email with a test send, and dates that follow the billing timezone. Three database migrations (0178, 0179, 0180).

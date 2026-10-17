@@ -33,33 +33,21 @@ Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Ev
 
 ## What it looks like
 
-One month of token usage on two models for one customer, from the demo below:
+One month of AI usage for one customer, straight from the [demo](#quick-start).
 
-```text
-ACME Corp — VLX-000001                                   $5.73
-──────────────────────────────────────────────────────────────
-Tokens (claude-sonnet-4.5 · input)       400,000    →    $1.20
-Tokens (claude-sonnet-4.5 · output)      175,000    →    $2.62
-Tokens (claude-sonnet-4.5 · cache_read)  200,000    →    $0.06
-Tokens (claude-haiku-4.5 · input)        600,000    →    $0.60
-Tokens (claude-haiku-4.5 · output)       250,000    →    $1.25
-──────────────────────────────────────────────────────────────
-Margin (billed $5.73 vs provider cost $2.76)             51.9%
-  claude-sonnet-4.5  (billed $3.88 vs cost $1.28)        67.1%
-  claude-haiku-4.5   (billed $1.85 vs cost $1.48)        20.0%
-```
+**1. The invoice your customer gets.** One line per model and token type, priced per million tokens.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-invoice-dark.png">
   <img alt="The demo invoice VLX-000001 in the Velox dashboard: input, output and cache_read lines for claude-sonnet-4.5 and input and output lines for claude-haiku-4.5, priced per 1M tokens, $5.73 due, with the activity timeline below." src="docs/assets/readme-invoice-light.png" width="100%">
 </picture>
 
+**2. Your margin, per model.** What each model earned you: Sonnet 67.1%, Haiku 20.0%. Velox records what each request cost you, from your provider price table or LiteLLM's reported cost.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-margin-dark.png">
   <img alt="The customer's margin card for the last invoiced period: $5.73 usage billed, $2.76 provider cost, 51.9% margin, and one row per model: claude-sonnet-4.5 billed $3.88 at $1.28 cost, 67.1% margin; claude-haiku-4.5 billed $1.85 at $1.48 cost, 20.0% margin." src="docs/assets/readme-margin-light.png" width="100%">
 </picture>
-
-One meter carries every token type, prices are stored exactly ($3.00 per 1M tokens), and the margin comes from the provider cost recorded on each event, so you see it for each model.
 
 ---
 
