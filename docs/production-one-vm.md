@@ -25,12 +25,12 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.7.0`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.7.0`.
+A release is a tested version with a number, such as `v0.8.0`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.0`.
 
 1. Get the files for that release.
 
    ```bash
-   VELOX_VERSION=v0.7.0
+   VELOX_VERSION=v0.8.0
    sudo git clone --branch "$VELOX_VERSION" https://github.com/getvelox/velox.git /opt/velox
    sudo chown -R "$USER" /opt/velox
    cd /opt/velox/deploy/compose
@@ -74,7 +74,7 @@ A release is a tested version with a number, such as `v0.7.0`. Production runs a
    docker compose exec velox-api /usr/local/bin/velox version
    ```
 
-   **You see:** five containers start, then `velox v0.7.0`.
+   **You see:** five containers start, then `velox v0.8.0`.
 
 4. Check that it is healthy.
 
@@ -192,7 +192,7 @@ Velox sends invoices, receipts, payment reminders, password resets and team invi
 
    **You see:** the reset email arrives within a few minutes, and its link opens `https://billing.example.com/reset-password`. If it does not arrive, check spam, then `docker compose logs velox-api`.
 
-Releases after v0.7.0 also have **Settings → Email**. It shows whether each email setting is in place and has a **Send test email** button.
+Releases from v0.8.0 on also have **Settings → Email**. It shows whether each email setting is in place and has a **Send test email** button.
 
 Settings for each provider, sender-domain setup (SPF and DKIM) and bounce handling are in [Email setup](ops/email-setup.md).
 

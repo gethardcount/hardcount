@@ -6,6 +6,10 @@ invoice PDF. Use Stripe test mode only. See [How we test](../testing.md).
 The checks write Stripe-linked test data into the database the server uses,
 so point it at a fresh or dedicated database if you want to keep yours clean.
 
+The last two sections check the published images, so run them after the tag
+has built them: [Fresh install and upgrade](#fresh-install-and-upgrade) and
+[First invoice tutorial](#first-invoice-tutorial).
+
 ## Setup
 
 - `cp .env.example .env`, then `make up` (Postgres, Redis, Mailpit), `make bootstrap` (prints the sign-in and the test keys), `make dev` (API on :8080) and `cd web-v2 && npm run dev` (dashboard on :5173).
@@ -39,3 +43,31 @@ so point it at a fresh or dedicated database if you want to keep yours clean.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
+
+## Fresh install and upgrade
+
+Run these after the tag's image build has pushed the release images, and before you publish the release notes. They prove that the images the quick start pulls work, and that an existing install can move to them. Use a machine that has Docker but no Velox containers or volumes, for example a new VM.
+
+### Fresh install
+
+- [ ] Clone the release tag, then run `./quickstart.sh` in `deploy/compose`. The output names the new release ("Starting Velox v0.X.Y from the published images.") and ends with a login and a test key.
+- [ ] `docker compose exec velox-api /usr/local/bin/velox version` prints the new release.
+- [ ] `./quickstart.sh demo` ends with links to a finalized invoice and its customer, and both open in the dashboard.
+
+### Upgrade drill
+
+1. Run `./quickstart.sh destroy` to start from an empty install. Check out the previous release tag and run `./quickstart.sh`, then `./quickstart.sh demo`.
+   **You see:** the demo's invoice link. Open it and note the invoice number, total and line amounts. Download its PDF.
+2. Check out the new release tag. In `deploy/compose/.env`, change the tag on the `VELOX_IMAGE` and `VELOX_DASHBOARD_IMAGE` lines to the new release. Run `docker compose up -d --no-build`.
+   **You see:** `velox-api` is recreated, and `velox version` prints the new release.
+3. Check the migrations: `docker compose logs velox-api | grep migrations`.
+   **You see:** `migrations applied`, with `version` set to the new release's last migration number, and no error.
+4. Open the invoice from step 1.
+   **You see:** the same number, total and line amounts, and its PDF matches the one you downloaded.
+5. Run `./quickstart.sh demo` again.
+   **You see:** a second finalized invoice for a new demo customer.
+6. Run `./quickstart.sh destroy` when you are done.
+
+## First invoice tutorial
+
+- [ ] Run [docs/first-invoice.md](../first-invoice.md) end to end against the quick-start stack from the fresh install. Every command works as written, and each output matches its "You see:" line. When a step differs, fix the page on `main` before you publish the release notes.

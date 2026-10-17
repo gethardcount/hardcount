@@ -4,8 +4,11 @@ What changed lately, and what is being worked on next. Every change, with its da
 
 ## Shipped recently
 
-October 2026 (v0.6.1 and v0.7.0):
+October 2026 (v0.6.1, v0.7.0 and v0.8.0):
 
+- **LiteLLM usage for a customer that does not exist yet is kept.** Velox holds it and shows it on the Usage page. Create the customer, then release it once.
+- **New accounts retry failed payments.** Each new account starts with a "Default retries" policy.
+- **Settings → Email** shows whether this server can send email, with a test send.
 - **Try it with Docker only.** `deploy/compose/quickstart.sh` starts Velox from the published images and prints a login, and `./quickstart.sh demo` runs AI token usage through to an invoice.
 - **Late usage is billed.** An invoice is built an hour after its period ends (`INVOICE_GRACE_PERIOD`), so usage that arrives a little late still counts.
 - **Issued invoices do not change.** An invoice or credit note keeps the customer and company details it was issued with.
@@ -30,7 +33,6 @@ July to September 2026:
 ## Next
 
 - **Safer upgrades.** A repair command for a database upgrade that stopped halfway ([#967](https://github.com/getvelox/velox/issues/967)), and checks that a database upgrade cannot lock tables for long ([#987](https://github.com/getvelox/velox/issues/987)).
-- **LiteLLM usage for a customer that does not exist yet** is skipped today. Make it visible, and decide whether to keep it ([#1044](https://github.com/getvelox/velox/issues/1044)).
 
 ## Not planned for now
 

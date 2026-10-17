@@ -56,7 +56,7 @@ Velox sends at most 60 emails a minute (5 every 5 seconds), and you cannot chang
 
    **You see:** "Sent to" and your address. The email arrives within a few minutes. If it does not, check spam and the server log.
 
-Settings → Email is new after v0.7.0. On v0.7.0, test with a password reset instead: sign out, click **Forgot password?**, and enter your email.
+Settings → Email is new in v0.8.0. On v0.7.0 and earlier, test with a password reset instead: sign out, click **Forgot password?**, and enter your email.
 
 ## Keep email out of spam
 

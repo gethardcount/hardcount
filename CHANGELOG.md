@@ -15,17 +15,23 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-18
+
+LiteLLM usage for an unknown customer is held instead of lost, new accounts retry failed payments, Settings → Email with a test send, and dates that follow the billing timezone. Three database migrations (0178, 0179, 0180).
+
+**Before upgrading:**
+
+- **New accounts start with a "Default retries" dunning policy; existing accounts do not get one (#1152).** An account with no default policy still retries nothing after the upgrade. Create a policy if you want retries.
+- **LiteLLM usage for a customer or meter that does not exist yet is held, not dropped (#1044).** The callback still answers 200, with a new `held` count. Create the customer, then release the held usage from the Usage page.
+- **Email actions answer 409 `email_not_configured` when `SMTP_HOST` is not set.** This covers sending an invoice or credit note, sending a payment-method setup link and inviting a teammate.
+- **A charge Stripe never answered returns `payment_outcome_unknown`**, not `provider_error`. Add the new code if you branch on it.
+- **Many messages were reworded; codes are unchanged.** Match on `reason` and `code`, not on the text.
+
 ### Added
 
 - **LiteLLM usage for an unknown customer is held, not lost (2026-10-17, #1044).** Usage for a `user` or meter that does not exist yet was answered 200 and dropped. Velox now keeps it, counts it in `held`, and shows it on the Usage page. Create the customer, then click Release to record each row once. Usage before the subscription started, or on a meter the plan does not price, is stored but not invoiced, and the release says how many rows that is. Discarded rows stay unbilled even if LiteLLM sends them again. See [LiteLLM](docs/integrations/litellm.md#usage-for-a-customer-velox-does-not-know-yet).
 - **Settings → Email shows whether this server can send email (2026-10-17).** A new Email tab lists the SMTP server, the from address and each email-link variable, says what fails while one is missing, and sends a test email to your own address with the mail server's real answer. Team's "Invites are off" notice links to it. API: `GET /v1/settings/email`, `POST /v1/settings/email/test` (dashboard sign-in only), and whoami gains `smtp_configured`.
 - **Browser tests for the dashboard (2026-10-16).** Contributors: `npm run test:e2e` in `web-v2` runs Playwright against a real API. It opens every page at desktop and phone width and fails on console errors, failed API calls or a page that scrolls sideways, plus five key journeys. CI runs it as the `e2e` job. See [web-v2/e2e/README.md](web-v2/e2e/README.md).
-
-### Fixed
-
-- **Subscription dates agree, and the upcoming invoice says what it is (2026-10-17).** A canceled subscription no longer shows "Renews": the page and the list's "Next bill" column read "Ended <date>". Every page uses "access through Nov 15 · doesn't renew Nov 16". The Upcoming invoice card shows its period and "estimate as of", $0.00 when nothing is billed yet, and Retry when it fails to load. A trialing subscription without a card names its first charge. The Pause button reads "Pause collection…".
-- **Usage Export CSV holds every filtered row (2026-10-17).** The Usage page's export stopped at 50,000 rows. It now downloads from the server with the page's customer, meter and dimension filters and no row limit, and the file carries event ids. One file covers up to 365 days; a longer window or All time exports the last 365 and says so. A half-typed dimension filter shows a hint instead of an error page. API: `GET /v1/exports/usage-events.csv` takes `customer_id`, `meter_id` and `dimensions`.
-- **Usage totals follow each meter's aggregation (2026-10-16).** The Usage page summed every reading, so a Maximum meter with 140, 210 and 120 GB showed 470 GB. Each meter now shows its value in its own unit, with a daily line. "Total Units", which added tokens, calls and GB, is gone. The mode comes from the meter's pricing rules, as billing does; a meter whose rules count in different ways, or a Maximum or Latest meter billed in several parts, says so and shows the plain sum. API: `GET /v1/usage-events/aggregate` rows gain `value`, `aggregation` (`mixed` when the rules differ), `events`, `customers`, `peak` and `daily`, and it takes `tz`.
 
 ### Changed
 
@@ -69,9 +75,6 @@ Older entries keep their original text.
 - **"Price" everywhere a price was called a rule (2026-10-15).** The Pricing tab "Rules" is now "Prices", and the meter page says "Default price" and "Prices for specific values". Its trash icon reads "Remove … from this meter?": it unlinks the price from the meter, and the price stays on the Prices tab.
 - **Pricing, recipe and archive refusals read plainly (2026-10-15).** API: the plan-locked, meter-has-no-price, last-price, recipe-conflict and customer-archive messages were reworded; they name subscriptions and meters, not API paths, fields or ids. Error codes are unchanged; match on `code`, not the text.
 - **Dashboard and Usage notes match the data (2026-10-15).** In test mode with test clocks, the Dashboard says its totals leave out test-clock customers. Usage shows "Set up a meter" only when no meter exists, and quantities read "12,500 tokens". A hidden setup checklist can be shown again from the account menu. The unused `/onboarding` page is removed.
-
-- **Stripe key errors say what happened (2026-10-15).** A failed key check showed Stripe's whole error as JSON. The Payments card now says "Stripe didn't accept these keys" or "Couldn't check keys with Stripe", with Stripe's sentence under Details. API: `last_verified_error` holds Stripe's sentence; new `last_verified_error_kind` (`rejected`, `unavailable`). Migration 0178.
-
 - **Stripe key errors say what happened (2026-10-15).** A failed key check showed Stripe's whole error as JSON. The Payments card now says "Stripe didn't accept these keys" or "Couldn't check keys with Stripe" (amber: the keys were saved but not tested), with Stripe's sentence under "Stripe's response" only when Stripe refused the key. API: `last_verified_error` holds Stripe's sentence; new `last_verified_error_kind` (`rejected`, `unavailable`). Migration 0178.
 - **Settings and sign-in messages match what Velox does (2026-10-15).** The webhook signing secret shows "Saved", not "Verified". The rotate, replace-secret and disconnect dialogs no longer describe changes at Stripe that Velox doesn't make. Sign-in pages say "Couldn't reach the server…", and Forgot password states the 3-per-hour limit.
 - **Team invites say when they can't be sent (2026-10-15).** With email or `DASHBOARD_BASE_URL` unset, the Team tab shows "Invites are off" and disables the form. API: `GET /v1/whoami` gains `can_send_invites`; the 409 message no longer names the setting.
@@ -80,6 +83,9 @@ Older entries keep their original text.
 
 ### Fixed
 
+- **Subscription dates agree, and the upcoming invoice says what it is (2026-10-17).** A canceled subscription no longer shows "Renews": the page and the list's "Next bill" column read "Ended <date>". Every page uses "access through Nov 15 · doesn't renew Nov 16". The Upcoming invoice card shows its period and "estimate as of", $0.00 when nothing is billed yet, and Retry when it fails to load. A trialing subscription without a card names its first charge. The Pause button reads "Pause collection…".
+- **Usage Export CSV holds every filtered row (2026-10-17).** The Usage page's export stopped at 50,000 rows. It now downloads from the server with the page's customer, meter and dimension filters and no row limit, and the file carries event ids. One file covers up to 365 days; a longer window or All time exports the last 365 and says so. A half-typed dimension filter shows a hint instead of an error page. API: `GET /v1/exports/usage-events.csv` takes `customer_id`, `meter_id` and `dimensions`.
+- **Usage totals follow each meter's aggregation (2026-10-16).** The Usage page summed every reading, so a Maximum meter with 140, 210 and 120 GB showed 470 GB. Each meter now shows its value in its own unit, with a daily line. "Total Units", which added tokens, calls and GB, is gone. The mode comes from the meter's pricing rules, as billing does; a meter whose rules count in different ways, or a Maximum or Latest meter billed in several parts, says so and shows the plain sum. API: `GET /v1/usage-events/aggregate` rows gain `value`, `aggregation` (`mixed` when the rules differ), `events`, `customers`, `peak` and `daily`, and it takes `tz`.
 - **The customer payment page no longer offers a Pay button that can't work (2026-10-17).** Without Stripe keys it says online payment isn't set up and who to contact; it showed Pay, then "failed to create checkout session". Errors and bad links use customer wording. Pay is full height on phones, and empty sections and repeated totals are gone. API: the public invoice adds `pay_unavailable_reason`.
 - **Customer and plan pages show their own subscriptions (2026-10-16).** Both pages took the first 50 subscriptions of the whole tenant and kept the matching ones, so with more than 50 a customer could show "Subscriptions (0)". They now ask the API for that customer's or plan's subscriptions. The count is the full number; the list shows the first 100 and says so when there are more.
 - **Pages fit a phone screen (2026-10-16).** On a 390px-wide phone, the Customers, Subscriptions, Invoices, Settings and customer credit pages were wider than the screen, so buttons such as Add Subscription sat off to the side. Their headers and filters now wrap, and the Settings tabs drop their icons on a phone.
@@ -111,10 +117,8 @@ Older entries keep their original text.
 - **Margin no longer reads 100% when no provider cost is known (2026-10-16).** With no provider cost on the window's usage, the customer page's Margin card showed cost $0.0000 and a 100.0% margin. It now shows "—" and says whether no rates are set up or none matched, with a link to Provider costs. No margin is shown either while some usage has no provider cost, since part of the cost is unknown. API: `margin_bps` is omitted in both cases; new `costed_events` and `cost_rates_configured`.
 - **A customer's figures use the customer's currency (2026-10-16).** On the customer page, the credit balance, the usage total, the margin and the New invoice dialog fell back to the workspace currency. A customer on a EUR plan read $0.00. They now use the currency the next invoice will use: the billing profile's, then the live plan's, then the latest invoice's. Until it is known, or if it cannot be read, they show "—" and New invoice waits.
 - **Usage event log values have thousands separators (2026-10-15).** "+35000" now reads "+35,000", matching the totals above it; the value is formatted as text, so no digit is lost.
-
 - **Setting a plan's base price to 0 no longer reads "Plan updated" when nothing changed (2026-10-15).** The server keeps the old price when sent 0, so Edit plan now says the price can't go back to 0 and disables Save. The meter page's plan list shows each plan's base price in its own currency.
 - **The customer Activity card's total no longer adds up different currencies or calls quantities "events" (2026-10-15).** It showed one sum of every currency's usage in the first currency, and a count that was really billed quantity in mixed units. It now shows billed usage per currency; each meter row gives its own quantity and unit.
-
 - **A meter's row in Activity no longer reads "0 tokens · 0 rules" when its usage has no price (2026-10-15).** It now says both numbers, as in "0 tokens billed · 12,400 tokens not billed · no price matched", matching the notice above it.
 - **Activity's 7d, 30d and 90d windows include the latest usage (2026-10-15).** The window ended exactly at "now" and left out events stamped at that instant, which is every event sent without a timestamp to a customer on a test clock. The 30d view showed $0.00 while the Cycle view showed the usage. The Margin card had the same gap.
 - **Long emails and IDs no longer run over their labels (2026-10-15).** On a phone, the customer Details card and the subscription Properties card put each value under its label and wrap long values.
@@ -122,7 +126,6 @@ Older entries keep their original text.
 - **Customer and subscription stats fit a phone (2026-10-15).** At 390px wide, Billing cycle, Trial period and Outstanding were clipped; the cells now stack.
 - **Cancel immediately says it bills a final invoice (2026-10-15).** It said "Stops billing right now"; time and usage so far are billed on a final invoice. The archived-customer notice no longer says "All data is read-only", since unpaid invoices are still collected. Pause collection says drafts made while paused stay drafts after the resume ("finalize them to collect"); it read as if they were charged on resume. Change plan, Change quantity and Remove item say "charged or credited now" only on advance-billed plans; on arrears-billed plans the period is billed at its end. A trial set to cancel at trial end no longer shows "No payment method".
 - **An invoice link that matches nothing says "Invoice not found" (2026-10-15).** It showed the server's raw text with a Retry button that could never work.
-
 - **Charge now on an invoice paid entirely from credit now ends its dunning run (2026-10-15).** The invoice was marked paid, but its run stayed active at $0.00 until the next retry date, often days away, and kept counting in the Dashboard and the sidebar badge. The run now closes as payment recovered, as it does for a card payment.
 - **After logging in, the dashboard opens the page you were trying to reach (2026-10-14).** Opening a link to an invoice or customer while logged out went to login, then to the home page. It now returns to the linked page. Only paths inside the dashboard are followed.
 - **The "No payment method" notice no longer promises an email that cannot be sent (2026-10-14).** It said Velox emails the customer a setup link; without email set up (as in the quickstart) nothing is sent. It now says when email sending isn't set up and offers the customer page instead of Resend.
@@ -5025,7 +5028,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/getvelox/velox/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/getvelox/velox/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/getvelox/velox/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/getvelox/velox/compare/v0.5.0...v0.6.0
