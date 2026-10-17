@@ -192,8 +192,8 @@ At the end, the demo prints two links:
 
 1. Open the **Invoice** link.
 
-   **You see:** invoice VLX-000001 with status Finalized and the three token
-   lines. To see the PDF, open the **⋯** menu at the top right and choose
+   **You see:** invoice VLX-000001 for ACME Corp, with the three token lines
+   and the $3.88 total. To see the PDF, open the **⋯** menu at the top right and choose
    **Preview PDF** or **Download PDF**.
 
 2. Open the **Customer** link.
