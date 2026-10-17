@@ -6,13 +6,16 @@
 //
 // Noto Sans is the default family. The EMBEDDED subset covers:
 //   - Latin (basic + extended), Greek, Cyrillic, IPA
-//   - Currency symbols ($, €, £, ₹, ¥, ฿, ₩, …)
+//   - Currency symbols ($, €, £, ₹, ¥, ₩, ₱, ₫, …)
 //   - Basic punctuation including em/en dash, bullet (•), middle dot (·)
 //
 // What it does NOT cover (verified 2026-05-25 via fontTools):
 //   - Arrows block (→ U+2192, ↳ U+21B3, etc.)
 //   - Checkmarks (✓ U+2713, ✗ U+2717)
 //   - Devanagari / Arabic / Hebrew / Thai / CJK scripts
+//   - The baht sign (฿ U+0E3F), which sits in the Thai block, so THB
+//     amounts print as "THB 1,234.00" (checked 2026-10-17 with gopdf's
+//     IsCurrFontContainGlyph; the renderers' symbol tests pin it)
 //
 // PDF renderers MUST use ASCII-safe glyphs for layout chrome (use "to"
 // instead of "→", drop arrow prefixes, etc.). Customer-facing content
