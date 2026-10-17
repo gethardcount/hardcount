@@ -210,7 +210,7 @@ restore_drill() {
     PG_DUMP="docker run --rm -i --network host $POSTGRES16_IMAGE pg_dump" \
     "$ROOT/scripts/backup.sh"
   local backup
-  backup=$(ls "$WORK"/backups/*.dump)
+  backup=$(find "$WORK/backups" -type f -name 'velox_*.dump' | head -1) # not the latest.dump link
   head_velox "$url" migrate
   before=$(versions "$c" compose)
   DATABASE_URL="$url" VELOX_RESTORE_CONFIRM=yes \
