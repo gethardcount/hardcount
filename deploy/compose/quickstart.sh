@@ -126,10 +126,17 @@ show_login() {
   say "  Password    $(json_field owner_password)"
   say "  Test key    $(json_field secret_key_test)"
   say ""
+  say "Open the dashboard address in your browser and sign in with this email and"
+  say "password. The password is shown only once. The dashboard opens in test mode,"
+  say "where no real money moves."
+  say ""
   say "These are also saved in deploy/compose/${CREDS}. Keep that file private:"
   say "it also holds a live key, which can charge real cards once Stripe is connected."
   say ""
-  say "Next: ./quickstart.sh demo    (records token usage and produces a first invoice)"
+  say "Next: ./quickstart.sh demo"
+  say "  It bills a demo customer for one month of AI token usage in about two"
+  say "  minutes, then prints links to the invoice and the customer."
+  say "  What each demo step does: docs/quick-start.md"
 }
 
 cmd_up() {
@@ -140,6 +147,7 @@ cmd_up() {
     docker compose up -d --build
   else
     say "Starting Velox ${VELOX_VERSION} from the published images."
+    say "The first start downloads them, which can take a few minutes."
     docker compose up -d --no-build
   fi || fail "Docker could not start the stack. If the message above says a port is already in use, run './quickstart.sh destroy', then 'VELOX_PORT=9000 ./quickstart.sh'."
   say "Waiting for Velox to be ready..."

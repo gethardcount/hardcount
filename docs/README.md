@@ -18,11 +18,10 @@ docs in the order listed. Words you may not know are in the
 
 ## Try it on your machine
 
-1. [Quick start](../README.md#quick-start): Velox and its dashboard on
-   localhost, with only Docker installed.
-2. [`scripts/demo.sh`](../scripts/demo.sh): the full flow from usage events
-   to a finalized invoice, its PDF and a margin report.
-3. [AI pricing in code](ai-pricing.md): one meter, a prepaid commit and a
+1. [Quick start](quick-start.md): start Velox on your computer with only
+   Docker, run the demo, and see one month of token usage become an
+   invoice, its PDF and a margin report. Each step says what you see.
+2. [AI pricing in code](ai-pricing.md): one meter, a prepaid commit and a
    margin read, in five steps.
 
 ## Connect your product

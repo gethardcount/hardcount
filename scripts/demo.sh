@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Velox demo — the AI billing golden path, end to end in ~30 seconds:
+# Velox demo: one month of AI token billing for a demo customer, end to end.
 #
-#   recipe → customer on a test clock → LiteLLM-shaped token usage
-#   → provider cost rates → simulated month → invoice with per-model
-#   lines + PDF → per-customer margin.
+#   ready-made token prices → a demo customer on a test clock (a pretend
+#   clock for test customers) → token usage sent the way a LiteLLM proxy
+#   sends it → what the AI provider charges you → one month passes on the
+#   clock → an invoice and its PDF → your margin on that customer.
+#
+# What each step does, and what to open in the dashboard: docs/quick-start.md
 #
 # Usage:
-#   make bootstrap        # prints the secret-test key this script needs
-#   make dev              # API on :8080 (separate terminal)
-#   ./scripts/demo.sh <vlx_secret_test_...>
+#   Started Velox with the quick start (deploy/compose/quickstart.sh)?
+#     ./quickstart.sh demo          # in deploy/compose; it passes the key for you
+#   Working on Velox itself?
+#     make bootstrap                # prints the test secret key this script needs
+#     make dev                      # API on :8080 (separate terminal)
+#     ./scripts/demo.sh <vlx_secret_test_...>
 #
 # Every call is checked — the script fails loudly at the first API
 # mismatch instead of printing a success banner over broken output.
@@ -21,7 +27,10 @@ BASE="${VELOX_BASE:-http://localhost:8080}"
 if [ -z "$API_KEY" ]; then
   echo "Usage: ./scripts/demo.sh <vlx_secret_test_...>"
   echo ""
-  echo "Run 'make bootstrap' first to get a key."
+  echo "This needs a test secret key (it starts with vlx_secret_test_)."
+  echo "  Started Velox with the quick start? Run './quickstart.sh demo' in"
+  echo "  deploy/compose instead. It finds the key for you."
+  echo "  Working on Velox itself? 'make bootstrap' prints the key."
   exit 1
 fi
 
@@ -56,11 +65,17 @@ req() {
   echo "$out"
 }
 
-step "1. Health check"
-curl -sf "$BASE/health" >/dev/null || { echo "✗ API not reachable at $BASE — run 'make dev' first"; exit 1; }
-green "✓ API is up at ${VELOX_PUBLIC_URL:-$BASE}"
+step "1. Check that Velox is running"
+curl -sf "$BASE/health" >/dev/null || {
+  echo "✗ Velox is not reachable at $BASE."
+  echo "  Started Velox with the quick start? Run ./quickstart.sh in deploy/compose,"
+  echo "  then ./quickstart.sh demo."
+  echo "  Working on Velox itself? Run 'make dev' first."
+  exit 1
+}
+green "✓ Velox is up at ${VELOX_PUBLIC_URL:-$BASE}"
 
-step "2. Install Anthropic-style pricing (one call)"
+step "2. Load ready-made prices for Claude tokens (one call)"
 # One recipe = the tokens meter + a per-{model, token_type} price matrix
 # (input / output / cache_read, sub-cent decimal rates) + a monthly plan.
 # Rerun-friendly: apply is idempotent (ADR-085) — a re-run returns the
@@ -75,9 +90,9 @@ else
   echo "✗ recipe instantiate → HTTP $INST_STATUS"; echo "$INST" | jq . 2>/dev/null || echo "$INST"; exit 1
 fi
 [ -n "$PLAN_ID" ] && [ "$PLAN_ID" != "null" ] || { echo "✗ no plan found for the recipe"; exit 1; }
-green "✓ Recipe live: tokens meter + per-model rates + plan $PLAN_ID"
+green "✓ Prices loaded: a tokens meter, a price for each model and token type, and plan $PLAN_ID"
 
-step "3. Test clock + customer"
+step "3. Create a test clock and a demo customer on it"
 # The clock lets us simulate a whole billing month in seconds.
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # RUN makes this run's ids unique: customer external_id, subscription code
@@ -94,9 +109,9 @@ CUST=$(req POST "/v1/customers" "{
 }")
 CUST_ID=$(echo "$CUST" | jq -r '.id')
 [ "$CUST_ID" != "null" ] || { echo "✗ customer create failed"; echo "$CUST" | jq .; exit 1; }
-green "✓ Customer $CUST_ID pinned to test clock $CLOCK_ID"
+green "✓ Customer ACME Corp ($CUST_ID) is on test clock $CLOCK_ID"
 
-step "4. Subscribe ACME to the plan"
+step "4. Put ACME Corp on the plan"
 SUB=$(req POST "/v1/subscriptions" "{
   \"code\": \"acme-tokens-$RUN\",
   \"display_name\": \"ACME — usage\",
@@ -109,16 +124,16 @@ SUB_ID=$(echo "$SUB" | jq -r '.id')
 [ "$SUB_ID" != "null" ] || { echo "✗ subscription create failed"; echo "$SUB" | jq .; exit 1; }
 green "✓ Subscription $SUB_ID, status $(echo "$SUB" | jq -r '.status')"
 
-step "5. Tell Velox what YOU pay Anthropic (provider cost table)"
+step "5. Save what the AI provider charges you per token"
 for rate in \
   '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "input",      "cost_per_token": "0.0000012"}' \
   '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "output",     "cost_per_token": "0.0000045"}' \
   '{"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "cache_read", "cost_per_token": "0.00000005"}' ; do
   req PUT "/v1/provider-costs" "$rate" >/dev/null
 done
-green "✓ 3 provider rates saved — every new event gets its COGS stamped at ingest"
+green "✓ Saved 3 costs. Velox now records your cost on each new usage record."
 
-step "6. Usage arrives straight from a LiteLLM proxy (no SDK)"
+step "6. Send token usage, the way a LiteLLM proxy sends it"
 # One LiteLLM StandardLoggingPayload = one API call by ACME's end user.
 # Velox splits it into input / cache_read / output token events with
 # {model, token_type} dimensions and dedupes replays by call id.
@@ -138,9 +153,9 @@ for i in 1 2 3 4 5; do
 done
 EVENTS=$(req GET "/v1/usage-events?customer_id=$CUST_ID&limit=100" | jq '.data | length')
 [ "$EVENTS" -ge 15 ] || { echo "✗ expected ≥15 token events (5 calls × 3 roles), got $EVENTS"; exit 1; }
-green "✓ 5 proxy calls → $EVENTS dimensioned token events (input / cache_read / output per call)"
+green "✓ 5 AI calls became $EVENTS usage records: input, cache_read and output for each call"
 
-step "7. Simulate a month: advance the test clock past period end"
+step "7. Move the test clock forward one month"
 ADV_TO=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
 req POST "/v1/test-clocks/$CLOCK_ID/advance" "{\"frozen_time\": \"$ADV_TO\"}" >/dev/null
 # The advance runs billing catchup; poll the clock back to ready.
@@ -151,9 +166,9 @@ for i in $(seq 1 30); do
   sleep 1
 done
 [ "$STATUS" = "ready" ] || { echo "✗ clock stuck in status '$STATUS'"; exit 1; }
-green "✓ Clock at $ADV_TO — billing ran during the advance"
+green "✓ The clock now reads $ADV_TO. Velox billed ACME Corp's month while the clock moved."
 
-step "8. The invoice"
+step "8. The invoice ACME Corp receives"
 INVOICES=$(req GET "/v1/invoices?customer_id=$CUST_ID")
 INV_ID=$(echo "$INVOICES" | jq -r '.data[0].id // empty')
 [ -n "$INV_ID" ] || { echo "✗ no invoice generated"; echo "$INVOICES" | jq .; exit 1; }
@@ -171,9 +186,9 @@ echo "$INV" | jq -e '.invoice.subtotal_cents > 0 and .invoice.subtotal_cents == 
 SUBTOTAL=$(echo "$INV" | jq '.invoice.subtotal_cents')
 PDF_BYTES=$(curl -sf "$BASE/v1/invoices/$INV_ID/pdf" -H "Authorization: Bearer $API_KEY" | wc -c | tr -d ' ')
 [ "$PDF_BYTES" -gt 5000 ] || { echo "✗ PDF looks empty ($PDF_BYTES bytes)"; exit 1; }
-green "✓ Invoice with per-(model, token_type) lines — PDF renders ($PDF_BYTES bytes)"
+green "✓ One invoice line per model and token type, and the PDF renders ($PDF_BYTES bytes)"
 
-step "9. Margin: what you billed against what the provider cost you"
+step "9. Your margin: what you billed against what the provider charged you (only you see this)"
 MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW&to=$ADV_TO")
 echo "$MARGIN" | jq -r "$USD"'"  billed  \(.revenue_cents | usd)\n  cost    \(.cost_micros | usd_micros)\n  margin  \((.margin_bps // 0) | pct1)"'
 echo "$MARGIN" | jq -r "$USD"'.by_model[] | "    \(.model): cost \(.cost_micros | usd_micros)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" else "" end)'
@@ -183,21 +198,23 @@ echo "$MARGIN" | jq -e '.cost_micros == 1277500' >/dev/null \
   || { echo "✗ provider cost is $(echo "$MARGIN" | jq '.cost_micros') micros, expected 1277500"; exit 1; }
 echo "$MARGIN" | jq -e --argjson s "$SUBTOTAL" '.revenue_cents == $s' >/dev/null \
   || { echo "✗ margin says billed $(echo "$MARGIN" | jq '.revenue_cents') cents but the invoice subtotal is $SUBTOTAL"; exit 1; }
-green "✓ Per-customer margin from stamped COGS vs rated revenue"
+green "✓ Checked: the cost matches your rates and usage, and the billed amount matches the invoice"
 
 echo ""
-blue "━━━ Demo complete — everything above actually ran ━━━"
+blue "━━━ Done: every step above ran and was checked ━━━"
 echo ""
-echo "  ✓ One-call Anthropic-style price matrix (recipe)"
-echo "  ✓ LiteLLM proxy → dimensioned token events, no SDK"
-echo "  ✓ Provider cost table → COGS stamped per event at ingest"
-echo "  ✓ Simulated month via test clock → real invoice + PDF"
-echo "  ✓ Per-customer margin (billed vs provider cost, by model)"
+echo "  ✓ One call loaded a price for each model and token type"
+echo "  ✓ LiteLLM-shaped calls became usage records, with no SDK"
+echo "  ✓ Velox recorded what each usage record cost you"
+echo "  ✓ A test clock moved one month, and Velox made the invoice and its PDF"
+echo "  ✓ Your margin on this customer, by model"
 echo ""
 DASH="${VELOX_DASHBOARD_URL:-http://localhost:5173}"
-echo "  See it in the dashboard (it opens in test mode, where the demo ran):"
+echo "  Open these links to see it in the dashboard (sign in first; it opens"
+echo "  in test mode, where the demo ran):"
 echo "    Invoice:  $DASH/invoices/$INV_ID"
 echo "    Customer: $DASH/customers/$CUST_ID"
 echo ""
-echo "  The home page totals leave out customers on a test clock, so they"
-echo "  still read \$0 after the demo. Open the links above instead."
+echo "  Home leaves out customers on a test clock, so its totals still read"
+echo "  \$0 after the demo. Use the links above instead."
+echo "  What each step did: docs/quick-start.md"

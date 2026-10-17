@@ -93,9 +93,9 @@ The demo fills Velox with an example, so you can watch one month of billing in a
 
 The demo checks each step and stops if one fails, so a finished run means it all worked.
 
-**You see:** nine numbered steps, each ending in a green ✓ line. Step 8 prints the invoice total and its lines, and step 9 prints your margin. Then "Demo complete — everything above actually ran", and two links: one to the invoice and one to the customer.
+**You see:** nine numbered steps, each ending in a green ✓ line. Step 8 prints the invoice total and its lines, and step 9 prints your margin. Then "Done: every step above ran and was checked", and two links: one to the invoice and one to the customer.
 
-Open the links to see the customer, the usage, the invoice and its PDF. You can run the demo again: each run makes a new demo customer.
+Open the links to see the customer, the usage, the invoice and its PDF. You can run the demo again: each run makes a new demo customer. [What each demo step does, and where to click](docs/quick-start.md).
 
 Home still reads $0 after the demo. That is expected: the Home totals leave out customers on a test clock, and the demo customer is on one. Use the two links instead.
 
