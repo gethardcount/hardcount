@@ -245,7 +245,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	usageSvc := usage.NewService(usageStore)
 	usageH := usage.NewHandler(usageSvc, customerStore, pricingSvc)
 	usageH.SetMeterLister(pricingSvc)
-	usageH.SetHeldDeps(customerStore, subStore)
+	usageH.SetHeldDeps(customerStore, subStore, pricingSvc)
 	customerUsageSvc := usage.NewCustomerUsageService(usageSvc, customerStore, subStore, pricingSvc)
 	customerUsageH := usage.NewCustomerUsageHandler(customerUsageSvc)
 	// Provider cost rates + margin (ADR-079).

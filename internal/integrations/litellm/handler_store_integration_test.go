@@ -116,7 +116,7 @@ func TestSpend_HeldThenReleasedOnce_RealStore(t *testing.T) {
 	res, err := svc.Release(ctx, tenantID, usage.ReleaseInput{
 		ExternalCustomerID: "cus_not_yet", CustomerID: customerID,
 		MeterIDs: map[string]string{MeterKeyTokens: meterID},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -128,5 +128,70 @@ func TestSpend_HeldThenReleasedOnce_RealStore(t *testing.T) {
 	}
 	if n := count(t); n != 2 {
 		t.Fatalf("usage_events rows = %d, want 2 (input + output, once)", n)
+	}
+}
+
+// Review finding (#1151), through the LiteLLM door: the operator discards
+// held rows, then creates the customer, then LiteLLM resends the batch. The
+// resend is counted as deduplicated and nothing reaches usage_events.
+// Before the fix the resend found the customer and billed the rows.
+func TestSpend_DiscardedRowsStayUnbilledOnResend_RealStore(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "LiteLLM Discarded")
+
+	svc := usage.NewService(usage.NewPostgresStore(db))
+	h := New(customer.NewPostgresStore(db), pricing.NewService(pricing.NewPostgresStore(db)), svc, svc)
+	payload := spendPayload("discard-1")
+	payload.User = "cus_discarded"
+
+	spend := func(t *testing.T) SpendResponse {
+		t.Helper()
+		code, body := postSpendWithCtx(t, h, ctx, tenantID, payload)
+		if code != http.StatusOK {
+			t.Fatalf("status %d body %s", code, body)
+		}
+		var r SpendResponse
+		if err := json.Unmarshal([]byte(body), &r); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return r
+	}
+
+	if r := spend(t); r.Held != 2 {
+		t.Fatalf("first delivery = %+v, want 2 held", r)
+	}
+	if n, err := svc.Discard(ctx, tenantID, "cus_discarded", ""); err != nil || n != 2 {
+		t.Fatalf("discard = %d (%v), want 2", n, err)
+	}
+
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ($1, $2, 'cus_discarded', 'Gone', 'gone@example.com')`, postgres.NewID("vlx_cus"), tenantID); err != nil {
+		t.Fatalf("customer: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO meters (id, tenant_id, name, key, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, postgres.NewID("vlx_mtr"), tenantID); err != nil {
+		t.Fatalf("meter: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	if r := spend(t); r.Accepted != 0 || r.Deduplicated != 2 || len(r.Errors) != 0 {
+		t.Fatalf("resend after discard = %+v, want 2 deduplicated", r)
+	}
+	tx, err = db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_events WHERE idempotency_key LIKE 'discard-1:%'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("usage_events rows = %d, want 0: discarded rows were billed", n)
 	}
 }

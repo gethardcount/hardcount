@@ -23,7 +23,7 @@ import {
 } from '@/lib/gen/queries.gen'
 import { formatDateTime } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
-import { canRelease, groupHeldByCustomer, heldLine, heldNextStep, releaseSummary, type HeldCustomer } from '@/lib/heldUsage'
+import { canRelease, groupHeldByCustomer, heldLine, heldNextStep, heldUnlisted, releaseSummary, type HeldCustomer } from '@/lib/heldUsage'
 
 // HeldUsageNotice shows usage the LiteLLM integration kept because its
 // customer or meter did not exist yet (#1044). Before, those rows were lost
@@ -61,7 +61,10 @@ export function HeldUsageNotice({ className, onReleased }: { className?: string;
 
   if (groups.length === 0) return null
   const customers = groupHeldByCustomer(groups)
-  const total = customers.reduce((n, c) => n + c.rows, 0)
+  // The list is capped at the 200 customers held most recently; the totals
+  // count every held row.
+  const total = data?.total_rows ?? customers.reduce((n, c) => n + c.rows, 0)
+  const unlisted = heldUnlisted(customers, data?.total_customers ?? customers.length, total)
 
   return (
     <>
@@ -82,6 +85,7 @@ export function HeldUsageNotice({ className, onReleased }: { className?: string;
           {total.toLocaleString('en-US')} usage {total === 1 ? 'row is' : 'rows are'} held because the customer or
           meter does not exist yet. They are not billed until you release them.
         </p>
+        {unlisted && <p className="mt-1 text-xs text-muted-foreground">{unlisted}</p>}
         <ul className="mt-2 space-y-2" aria-label="Held usage">
           {customers.map(c => (
             <li key={c.externalId} className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

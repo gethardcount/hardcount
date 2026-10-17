@@ -2566,8 +2566,10 @@ export interface paths {
          * @description Usage rows the LiteLLM integration received for a customer or meter
          *     that did not exist yet. They are kept with their idempotency keys,
          *     not billed, until you release or discard them. Grouped by external
-         *     customer ID, meter key and reason; at most 200 groups, most recent
-         *     arrival first. Requires usage read permission.
+         *     customer ID, meter key and reason, most recent arrival first. Lists
+         *     the 200 external customer IDs with the most recent arrivals, with
+         *     every group for each; `total_customers` and `total_rows` count all
+         *     held rows, listed or not. Requires usage read permission.
          */
         get: operations["listHeldUsage"];
         put?: never;
@@ -2596,7 +2598,9 @@ export interface paths {
          *     twice writes nothing the second time.
          *
          *     Rows whose meter still does not exist, or whose time is after the
-         *     customer's current time, stay held. A released row counts toward
+         *     customer's current time, stay held. One call releases at most 5,000
+         *     rows; `more_to_release` counts the rest, and another call takes
+         *     them. A released row counts toward
          *     the billing period its time falls in only if that period's invoice
          *     has not been built yet; Velox does not move it onto a later
          *     invoice. Writes an audit log entry. Requires usage write permission.
@@ -8062,13 +8066,28 @@ export interface components {
              */
             deduplicated: number;
             /**
-             * @description Rows for this external ID still held: their meter does not
-             *     exist yet, or their time is after the customer's current time
-             *     (a customer on a test clock).
+             * @description Rows for this external ID still held that a release cannot take
+             *     yet: their meter does not exist yet, or their time is after the
+             *     customer's current time (a customer on a test clock).
              */
             still_held: number;
-            /** @description Released rows inside an active subscription's current billing period. That period's invoice counts them. */
+            /**
+             * @description Rows for this external ID still held only because one release
+             *     takes at most 5,000 rows. Release again to take them.
+             */
+            more_to_release: number;
+            /**
+             * @description Released rows inside an active subscription's current billing
+             *     period whose meter the subscription's plan prices. That period's
+             *     invoice counts them.
+             */
             in_open_period: number;
+            /**
+             * @description Released rows inside an active subscription's current billing
+             *     period whose meter no plan on that subscription prices. No
+             *     invoice charges them.
+             */
+            not_on_plan: number;
             /**
              * @description Released rows outside every current billing period: before the
              *     subscription started, or in an earlier period. A subscription
@@ -10838,6 +10857,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["HeldUsageGroup"][];
+                        /** @description External customer IDs with rows held, including those not listed in `data`. */
+                        total_customers: number;
+                        /** @description Rows held, including those not listed in `data`. */
+                        total_rows: number;
                     };
                 };
             };

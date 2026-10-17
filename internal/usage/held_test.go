@@ -16,35 +16,55 @@ import (
 // A released row is "in an open period" only inside an active or trialing
 // subscription's CURRENT period. Before the subscription started, or in an
 // earlier period whose invoice is built, it is outside: Velox never re-times
-// usage onto a later invoice (ADR-120).
+// usage onto a later invoice (ADR-120). Inside the period it is invoiced
+// only when a plan on the subscription prices its meter; otherwise it is
+// not_on_plan, and no invoice charges it.
 func TestClassifyByOpenPeriod(t *testing.T) {
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	active := domain.Subscription{Status: domain.SubscriptionActive, CurrentBillingPeriodStart: &start, CurrentBillingPeriodEnd: &end}
+	plans := map[string]domain.Plan{
+		"pln_tokens": {ID: "pln_tokens", MeterIDs: []string{"mtr_tokens"}},
+		"pln_seats":  {ID: "pln_seats", MeterIDs: []string{"mtr_seats"}},
+	}
+	active := domain.Subscription{
+		Status: domain.SubscriptionActive, CurrentBillingPeriodStart: &start, CurrentBillingPeriodEnd: &end,
+		Items: []domain.SubscriptionItem{{PlanID: "pln_tokens"}},
+	}
+	seatsOnly := active
+	seatsOnly.Items = []domain.SubscriptionItem{{PlanID: "pln_seats"}}
 	canceled := active
 	canceled.Status = domain.SubscriptionCanceled
 
-	times := []time.Time{
-		start.Add(-time.Hour),     // before the subscription: outside
-		start,                     // period start is inside [start, end)
-		end.Add(-time.Nanosecond), // last instant inside
-		end,                       // end is exclusive: outside
+	at := func(ts time.Time) ReleasedUsage { return ReleasedUsage{At: ts, MeterID: "mtr_tokens"} }
+	rows := []ReleasedUsage{
+		at(start.Add(-time.Hour)),     // before the subscription: outside
+		at(start),                     // period start is inside [start, end)
+		at(end.Add(-time.Nanosecond)), // last instant inside
+		at(end),                       // end is exclusive: outside
 	}
 	cases := []struct {
-		name        string
-		subs        []domain.Subscription
-		wantIn, out int
+		name                  string
+		subs                  []domain.Subscription
+		wantIn, wantNot, wOut int
 	}{
-		{"active", []domain.Subscription{active}, 2, 2},
-		{"no subscription", nil, 0, 4},
-		{"canceled only", []domain.Subscription{canceled}, 0, 4},
-		{"no period", []domain.Subscription{{Status: domain.SubscriptionActive}}, 0, 4},
+		{"active, plan prices the meter", []domain.Subscription{active}, 2, 0, 2},
+		// Review finding (#1151): a plan without the meter used to count
+		// these as "will be invoiced".
+		{"active, plan does not price the meter", []domain.Subscription{seatsOnly}, 0, 2, 2},
+		{"two subscriptions, one prices it", []domain.Subscription{seatsOnly, active}, 2, 0, 2},
+		{"no subscription", nil, 0, 0, 4},
+		{"canceled only", []domain.Subscription{canceled}, 0, 0, 4},
+		{"no period", []domain.Subscription{{Status: domain.SubscriptionActive, Items: active.Items}}, 0, 0, 4},
 	}
 	for _, tc := range cases {
-		in, out := ClassifyByOpenPeriod(times, tc.subs)
-		if in != tc.wantIn || out != tc.out {
-			t.Errorf("%s: in=%d out=%d, want %d/%d", tc.name, in, out, tc.wantIn, tc.out)
+		in, not, out := ClassifyByOpenPeriod(rows, tc.subs, plans)
+		if in != tc.wantIn || not != tc.wantNot || out != tc.wOut {
+			t.Errorf("%s: in=%d not_on_plan=%d out=%d, want %d/%d/%d", tc.name, in, not, out, tc.wantIn, tc.wantNot, tc.wOut)
 		}
+	}
+	// A plan the caller could not supply prices nothing.
+	if in, not, _ := ClassifyByOpenPeriod(rows, []domain.Subscription{active}, nil); in != 0 || not != 2 {
+		t.Errorf("no plans: in=%d not_on_plan=%d, want 0/2", in, not)
 	}
 }
 
@@ -59,8 +79,8 @@ func (h *heldMemStore) Hold(_ context.Context, _ string, ev domain.HeldUsageEven
 	h.held = append(h.held, ev)
 	return ev, nil
 }
-func (h *heldMemStore) ListHeldSummary(context.Context, string) ([]HeldUsageGroup, error) {
-	return nil, nil
+func (h *heldMemStore) ListHeldSummary(context.Context, string) (HeldSummary, error) {
+	return HeldSummary{}, nil
 }
 func (h *heldMemStore) HeldFor(context.Context, string, string) ([]string, int, error) {
 	return nil, 0, nil
@@ -70,6 +90,9 @@ func (h *heldMemStore) ReleaseHeld(context.Context, string, ReleaseHeldInput, fu
 }
 func (h *heldMemStore) DiscardHeld(context.Context, string, string, string, func(*sql.Tx, int) error) (int, error) {
 	return 0, nil
+}
+func (h *heldMemStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent) (domain.UsageEvent, error) {
+	return h.Ingest(ctx, tenantID, ev)
 }
 
 // Hold refuses what a release could not ingest: no key, bad dimensions, a

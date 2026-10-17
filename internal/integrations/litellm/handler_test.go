@@ -41,7 +41,7 @@ type fakeIngester struct {
 	calls int
 }
 
-func (f *fakeIngester) Ingest(_ context.Context, _ string, _ usage.IngestInput) (domain.UsageEvent, error) {
+func (f *fakeIngester) IngestResolvingHeld(_ context.Context, _ string, _ usage.IngestInput) (domain.UsageEvent, error) {
 	i := f.calls
 	f.calls++
 	if i < len(f.errs) && f.errs[i] != nil {

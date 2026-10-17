@@ -3620,8 +3620,19 @@ type HeldUsageReleaseResult struct {
 	// released, not written again.
 	Deduplicated int `json:"deduplicated"`
 
-	// InOpenPeriod Released rows inside an active subscription's current billing period. That period's invoice counts them.
+	// InOpenPeriod Released rows inside an active subscription's current billing
+	// period whose meter the subscription's plan prices. That period's
+	// invoice counts them.
 	InOpenPeriod int `json:"in_open_period"`
+
+	// MoreToRelease Rows for this external ID still held only because one release
+	// takes at most 5,000 rows. Release again to take them.
+	MoreToRelease int `json:"more_to_release"`
+
+	// NotOnPlan Released rows inside an active subscription's current billing
+	// period whose meter no plan on that subscription prices. No
+	// invoice charges them.
+	NotOnPlan int `json:"not_on_plan"`
 
 	// OutsideOpenPeriod Released rows outside every current billing period: before the
 	// subscription started, or in an earlier period. A subscription
@@ -3633,9 +3644,9 @@ type HeldUsageReleaseResult struct {
 	// Released Rows newly written as usage events.
 	Released int `json:"released"`
 
-	// StillHeld Rows for this external ID still held: their meter does not
-	// exist yet, or their time is after the customer's current time
-	// (a customer on a test clock).
+	// StillHeld Rows for this external ID still held that a release cannot take
+	// yet: their meter does not exist yet, or their time is after the
+	// customer's current time (a customer on a test clock).
 	StillHeld int `json:"still_held"`
 }
 

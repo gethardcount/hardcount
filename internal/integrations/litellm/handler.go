@@ -33,9 +33,12 @@ type MeterLookup interface {
 }
 
 // Ingester is the narrow surface the adapter calls to actually
-// persist resolved events. Implemented by *usage.Service.
+// persist resolved events. Implemented by *usage.Service. It refuses a row
+// whose key was held and then discarded (errs.ErrDuplicateKey), so a
+// LiteLLM resend after the customer exists cannot bill a discarded row, and
+// it marks a row whose key is still held released (#1044).
 type Ingester interface {
-	Ingest(ctx context.Context, tenantID string, input usage.IngestInput) (domain.UsageEvent, error)
+	IngestResolvingHeld(ctx context.Context, tenantID string, input usage.IngestInput) (domain.UsageEvent, error)
 }
 
 // Holder keeps a row whose customer or meter does not exist yet, so it is
@@ -257,7 +260,7 @@ func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalInge
 		ObservedCostMicros: ing.ObservedCostMicros,
 	}
 
-	if _, err := h.ingester.Ingest(ctx, tenantID, input); err != nil {
+	if _, err := h.ingester.IngestResolvingHeld(ctx, tenantID, input); err != nil {
 		// Idempotency replay is silent success: the usage store returns
 		// ErrDuplicateKey on the (tenant_id, livemode, idempotency_key) UNIQUE — a
 		// LiteLLM network-retry redelivering an already-ingested batch is

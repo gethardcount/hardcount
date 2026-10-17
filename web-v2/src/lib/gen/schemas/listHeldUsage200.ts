@@ -11,4 +11,8 @@ import type { HeldUsageGroup } from './heldUsageGroup';
 
 export type ListHeldUsage200 = {
   data: HeldUsageGroup[];
+  /** External customer IDs with rows held, including those not listed in `data`. */
+  total_customers: number;
+  /** Rows held, including those not listed in `data`. */
+  total_rows: number;
 };

@@ -95,7 +95,7 @@ func (f heldFixture) release(t *testing.T, ext, customerID, meterID string) usag
 		ExternalCustomerID: ext,
 		CustomerID:         customerID,
 		MeterIDs:           map[string]string{"tokens": meterID},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -117,9 +117,13 @@ func TestHeld_HoldThenReleaseWritesExactlyOnce(t *testing.T) {
 		t.Fatalf("re-hold: err %v, want ErrDuplicateKey", err)
 	}
 
-	groups, err := f.svc.ListHeld(f.ctx, f.tenantID)
+	summary, err := f.svc.ListHeld(f.ctx, f.tenantID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
+	}
+	groups := summary.Groups
+	if summary.TotalRows != 2 || summary.TotalCustomers != 1 {
+		t.Fatalf("totals = %d rows / %d customers, want 2 / 1", summary.TotalRows, summary.TotalCustomers)
 	}
 	if len(groups) != 1 || groups[0].Rows != 2 || groups[0].ExternalCustomerID != "cus_late" ||
 		!groups[0].TotalQuantity.Equal(decimal.NewFromInt(200)) || !groups[0].FirstEventAt.Equal(at) {
@@ -156,8 +160,8 @@ func TestHeld_HoldThenReleaseWritesExactlyOnce(t *testing.T) {
 	if n := f.countEvents(t, "call-1:input", "call-1:output"); n != 2 {
 		t.Fatalf("usage_events rows after second release = %d, want 2", n)
 	}
-	if groups, _ := f.svc.ListHeld(f.ctx, f.tenantID); len(groups) != 0 {
-		t.Fatalf("summary after release = %+v, want empty", groups)
+	if summary, _ := f.svc.ListHeld(f.ctx, f.tenantID); len(summary.Groups) != 0 || summary.TotalRows != 0 {
+		t.Fatalf("summary after release = %+v, want empty", summary)
 	}
 }
 
@@ -226,7 +230,7 @@ func TestHeld_ConcurrentReleasesWriteOnce(t *testing.T) {
 			results[i], errsOut[i] = f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 				ExternalCustomerID: "cus_conc", CustomerID: customerID,
 				MeterIDs: map[string]string{"tokens": meterID},
-			}, nil)
+			}, nil, nil)
 		}(i)
 	}
 	close(start)
@@ -256,12 +260,12 @@ func TestHeld_TenantAndModeIsolation(t *testing.T) {
 	}
 
 	live := postgres.WithLivemode(context.Background(), true)
-	if groups, err := f.svc.ListHeld(live, f.tenantID); err != nil || len(groups) != 0 {
-		t.Fatalf("live mode sees test-mode held rows: %+v (%v)", groups, err)
+	if summary, err := f.svc.ListHeld(live, f.tenantID); err != nil || len(summary.Groups) != 0 || summary.TotalRows != 0 {
+		t.Fatalf("live mode sees test-mode held rows: %+v (%v)", summary, err)
 	}
 	other := testutil.CreateTestTenant(t, f.db, "Held Other Tenant")
-	if groups, err := f.svc.ListHeld(f.ctx, other); err != nil || len(groups) != 0 {
-		t.Fatalf("another tenant sees held rows: %+v (%v)", groups, err)
+	if summary, err := f.svc.ListHeld(f.ctx, other); err != nil || len(summary.Groups) != 0 || summary.TotalRows != 0 {
+		t.Fatalf("another tenant sees held rows: %+v (%v)", summary, err)
 	}
 	// The same key may be held in another tenant: keys are per tenant.
 	if _, err := f.svc.Hold(f.ctx, other, usage.HoldInput{
@@ -312,7 +316,7 @@ func TestHeld_MissingMeterStaysHeld(t *testing.T) {
 	res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 		ExternalCustomerID: "cus_meter", CustomerID: customerID,
 		MeterIDs: map[string]string{"other_key": other},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -362,7 +366,7 @@ func TestHeld_ReleaseIsAudited(t *testing.T) {
 	if _, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 		ExternalCustomerID: "cus_audit", CustomerID: customerID,
 		MeterIDs: map[string]string{"tokens": meterID},
-	}, nil); err == nil {
+	}, nil, nil); err == nil {
 		t.Fatal("release with a failing audit emitter succeeded")
 	}
 	if status, _ := f.heldStatus(t, "audit-1:input"); status != "held" {
@@ -383,5 +387,159 @@ func TestHeld_ReleaseIsAudited(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Metadata["action"] != "held_usage_released" || rows[0].Metadata["customer_id"] != customerID {
 		t.Fatalf("audit rows = %+v, want one held_usage_released row", rows)
+	}
+}
+
+// Review finding (#1151): a discarded row stays unbilled when LiteLLM
+// resends it after the customer exists. Before the fix the resend found the
+// customer, skipped the held table and wrote the row to usage_events.
+// Mutation-verify: drop the discarded check in
+// PostgresStore.IngestResolvingHeld → the resend is written and this fails
+// on the usage_events count.
+func TestHeld_ResendAfterDiscardIsNotBilled(t *testing.T) {
+	f := newHeldFixture(t, "Held Discard Resend")
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if err := f.hold(t, "cus_gone", "gone-1:input", at); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if n, err := f.svc.Discard(f.ctx, f.tenantID, "cus_gone", ""); err != nil || n != 1 {
+		t.Fatalf("discard = %d (%v), want 1", n, err)
+	}
+	customerID := insertTestCustomer(t, f.db, f.tenantID, "cus_gone")
+	meterID := insertTestMeter(t, f.db, f.tenantID, "Tokens", "tokens")
+
+	_, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, usage.IngestInput{
+		CustomerID: customerID, MeterID: meterID, Quantity: decimal.NewFromInt(100),
+		IdempotencyKey: "gone-1:input", Timestamp: &at,
+	})
+	if !errors.Is(err, errs.ErrDuplicateKey) {
+		t.Fatalf("resend after discard: err %v, want ErrDuplicateKey", err)
+	}
+	if n := f.countEvents(t, "gone-1:input"); n != 0 {
+		t.Fatalf("usage_events rows = %d, want 0: a discarded row was billed", n)
+	}
+	if status, _ := f.heldStatus(t, "gone-1:input"); status != "discarded" {
+		t.Fatalf("status = %s, want discarded", status)
+	}
+}
+
+// A LiteLLM resend after the customer exists writes the row and marks its
+// held row released, in one transaction. A later discard then finds nothing
+// to discard, so the held table never says "discarded" for usage that is in
+// usage_events, and a later release writes nothing.
+func TestHeld_ResendWhileHeldResolvesTheHeldRow(t *testing.T) {
+	f := newHeldFixture(t, "Held Resend Resolves")
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if err := f.hold(t, "cus_back", "back-1:input", at); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	customerID := insertTestCustomer(t, f.db, f.tenantID, "cus_back")
+	meterID := insertTestMeter(t, f.db, f.tenantID, "Tokens", "tokens")
+
+	evt, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, usage.IngestInput{
+		CustomerID: customerID, MeterID: meterID, Quantity: decimal.NewFromInt(100),
+		IdempotencyKey: "back-1:input", Timestamp: &at,
+	})
+	if err != nil {
+		t.Fatalf("resend: %v", err)
+	}
+	if status, id := f.heldStatus(t, "back-1:input"); status != "released" || id == nil || *id != evt.ID {
+		t.Fatalf("held row = %s/%v, want released with event id %s", status, id, evt.ID)
+	}
+	if n, err := f.svc.Discard(f.ctx, f.tenantID, "cus_back", ""); err != nil || n != 0 {
+		t.Fatalf("discard after resend = %d (%v), want 0", n, err)
+	}
+	if res := f.release(t, "cus_back", customerID, meterID); res.Released != 0 || res.Deduplicated != 0 {
+		t.Fatalf("release after resend = %+v, want nothing", res)
+	}
+	if n := f.countEvents(t, "back-1:input"); n != 1 {
+		t.Fatalf("usage_events rows = %d, want 1", n)
+	}
+	// A second resend is a plain duplicate.
+	if _, err := f.svc.IngestResolvingHeld(f.ctx, f.tenantID, usage.IngestInput{
+		CustomerID: customerID, MeterID: meterID, Quantity: decimal.NewFromInt(100),
+		IdempotencyKey: "back-1:input", Timestamp: &at,
+	}); !errors.Is(err, errs.ErrDuplicateKey) {
+		t.Fatalf("second resend: err %v, want ErrDuplicateKey", err)
+	}
+}
+
+// Review finding (#1151): rows left only because one release stops at its
+// limit are reported as more_to_release, not as still_held (which says a
+// meter is missing or the time is in the customer's future).
+func TestHeld_ReleaseLimitIsReportedApart(t *testing.T) {
+	f := newHeldFixture(t, "Held Limit")
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	for i := 0; i < 3; i++ {
+		if err := f.hold(t, "cus_many", fmt.Sprintf("many-%d:input", i), at.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatalf("hold %d: %v", i, err)
+		}
+	}
+	// One row whose meter does not exist: still held, for a real reason.
+	if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
+		ExternalCustomerID: "cus_many", MeterKey: "no_such_meter", Quantity: decimal.NewFromInt(1),
+		IdempotencyKey: "many-x:input", EventAt: &at, Reason: domain.HeldReasonMeterNotFound,
+	}); err != nil {
+		t.Fatalf("hold missing meter: %v", err)
+	}
+	customerID := insertTestCustomer(t, f.db, f.tenantID, "cus_many")
+	meterID := insertTestMeter(t, f.db, f.tenantID, "Tokens", "tokens")
+	in := usage.ReleaseHeldInput{
+		ExternalCustomerID: "cus_many", CustomerID: customerID,
+		MeterIDs: map[string]string{"tokens": meterID},
+		NotAfter: time.Now().UTC(), Limit: 2,
+	}
+	res, err := f.store.ReleaseHeld(f.ctx, f.tenantID, in, nil)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if len(res.Rows) != 2 || res.MoreToRelease != 1 || res.StillHeld != 1 {
+		t.Fatalf("release = %d rows / more %d / still %d, want 2 / 1 / 1", len(res.Rows), res.MoreToRelease, res.StillHeld)
+	}
+	res, err = f.store.ReleaseHeld(f.ctx, f.tenantID, in, nil)
+	if err != nil {
+		t.Fatalf("second release: %v", err)
+	}
+	if len(res.Rows) != 1 || res.MoreToRelease != 0 || res.StillHeld != 1 {
+		t.Fatalf("second release = %d rows / more %d / still %d, want 1 / 0 / 1", len(res.Rows), res.MoreToRelease, res.StillHeld)
+	}
+}
+
+// Review finding (#1151): the held list is cut at HeldListCustomers
+// external ids, and its totals still count every held row, so the
+// dashboard can say the list is cut instead of undercounting. A listed id
+// carries all its groups.
+func TestHeld_ListTotalsCountPastTheCap(t *testing.T) {
+	f := newHeldFixture(t, "Held List Cap")
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	n := usage.HeldListCustomers + 2
+	for i := 0; i < n; i++ {
+		if err := f.hold(t, fmt.Sprintf("cus_cap_%03d", i), fmt.Sprintf("cap-%d:input", i), at); err != nil {
+			t.Fatalf("hold %d: %v", i, err)
+		}
+	}
+	// The newest id has two meters: both groups are listed.
+	if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
+		ExternalCustomerID: fmt.Sprintf("cus_cap_%03d", n-1), MeterKey: "other", Quantity: decimal.NewFromInt(1),
+		IdempotencyKey: "cap-extra:input", EventAt: &at, Reason: domain.HeldReasonCustomerNotFound,
+	}); err != nil {
+		t.Fatalf("hold extra: %v", err)
+	}
+	summary, err := f.svc.ListHeld(f.ctx, f.tenantID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	listed := map[string]int{}
+	for _, g := range summary.Groups {
+		listed[g.ExternalCustomerID]++
+	}
+	if len(listed) != usage.HeldListCustomers {
+		t.Fatalf("listed %d customers, want %d", len(listed), usage.HeldListCustomers)
+	}
+	if summary.TotalCustomers != n || summary.TotalRows != n+1 {
+		t.Fatalf("totals = %d customers / %d rows, want %d / %d", summary.TotalCustomers, summary.TotalRows, n, n+1)
+	}
+	if got := listed[fmt.Sprintf("cus_cap_%03d", n-1)]; got != 2 {
+		t.Fatalf("newest customer has %d groups listed, want 2", got)
 	}
 }

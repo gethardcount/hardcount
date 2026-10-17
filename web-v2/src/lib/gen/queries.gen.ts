@@ -7223,8 +7223,10 @@ export const getListHeldUsageUrl = () => {
  * Usage rows the LiteLLM integration received for a customer or meter
  * that did not exist yet. They are kept with their idempotency keys,
  * not billed, until you release or discard them. Grouped by external
- * customer ID, meter key and reason; at most 200 groups, most recent
- * arrival first. Requires usage read permission.
+ * customer ID, meter key and reason, most recent arrival first. Lists
+ * the 200 external customer IDs with the most recent arrivals, with
+ * every group for each; `total_customers` and `total_rows` count all
+ * held rows, listed or not. Requires usage read permission.
  * @summary List held usage
  */
 export const listHeldUsage = async ( options?: RequestInit): Promise<ListHeldUsage200> => {
@@ -7333,7 +7335,9 @@ export const getReleaseHeldUsageUrl = () => {
  * twice writes nothing the second time.
  *
  * Rows whose meter still does not exist, or whose time is after the
- * customer's current time, stay held. A released row counts toward
+ * customer's current time, stay held. One call releases at most 5,000
+ * rows; `more_to_release` counts the rest, and another call takes
+ * them. A released row counts toward
  * the billing period its time falls in only if that period's invoice
  * has not been built yet; Velox does not move it onto a later
  * invoice. Writes an audit log entry. Requires usage write permission.

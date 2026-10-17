@@ -20,13 +20,28 @@ export interface HeldUsageReleaseResult {
      */
   deduplicated: number;
   /**
-     * Rows for this external ID still held: their meter does not
-     * exist yet, or their time is after the customer's current time
-     * (a customer on a test clock).
+     * Rows for this external ID still held that a release cannot take
+     * yet: their meter does not exist yet, or their time is after the
+     * customer's current time (a customer on a test clock).
      */
   still_held: number;
-  /** Released rows inside an active subscription's current billing period. That period's invoice counts them. */
+  /**
+     * Rows for this external ID still held only because one release
+     * takes at most 5,000 rows. Release again to take them.
+     */
+  more_to_release: number;
+  /**
+     * Released rows inside an active subscription's current billing
+     * period whose meter the subscription's plan prices. That period's
+     * invoice counts them.
+     */
   in_open_period: number;
+  /**
+     * Released rows inside an active subscription's current billing
+     * period whose meter no plan on that subscription prices. No
+     * invoice charges them.
+     */
+  not_on_plan: number;
   /**
      * Released rows outside every current billing period: before the
      * subscription started, or in an earlier period. A subscription

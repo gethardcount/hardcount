@@ -79,7 +79,10 @@ release it once with an honest statement of what it will bill.
    error and is not held.
 2. **Show.** `GET /v1/usage-events/held` groups the held rows by external id,
    meter key and reason, with whether a matching customer and meter exist
-   now. The Usage page shows them in a notice with Release and Discard.
+   now. It lists the 200 external ids held most recently, each with all its
+   groups, and returns `total_customers` and `total_rows` over every held
+   row so the notice can say when the list is cut. The Usage page shows
+   them in a notice with Release and Discard.
 3. **Release once.** `POST /v1/usage-events/held/release` runs one
    transaction:
    - claim the rows with `UPDATE … SET status='released' WHERE status='held'
@@ -89,14 +92,26 @@ release it once with an honest statement of what it will bill.
    - record the event id, write one audit row, and commit. If `usage_events` already has the key (LiteLLM resent
    after the customer existed), the held row is marked released and nothing
    is written. Rows whose meter is still missing, or whose time is after the
-   customer's current time (a test clock in the past), stay held.
+   customer's current time (a test clock in the past), stay held
+   (`still_held`). One release claims at most 5,000 rows; the rest it could
+   have taken are counted apart (`more_to_release`), and another release
+   takes them.
 4. **Never re-time.** The release response counts released rows inside an
-   active subscription's current period (`in_open_period`) and outside it
-   (`outside_open_period`). The second kind is not billed by a subscription
+   active subscription's current period on a meter its plan prices
+   (`in_open_period`), inside that period on a meter no plan on it prices
+   (`not_on_plan`, never invoiced), and outside it
+   (`outside_open_period`). The plan check reads each item's current plan,
+   so a row from before a mid-period plan change is judged by the new plan. The second kind is not billed by a subscription
    invoice unless that period's invoice is not built yet; the operator bills
    it with a one-off invoice, as for any late usage (ADR-120).
 5. **Discard.** `POST /v1/usage-events/held/discard` marks rows discarded.
    They are kept as a record and never billed. Audited.
+6. **A resend after the customer exists.** The LiteLLM door ingests through
+   `IngestResolvingHeld`: in one transaction it locks the held row with the
+   same key (`SELECT … FOR UPDATE`, the lock release and discard take).
+   A `discarded` row means nothing is written and the resend counts as
+   deduplicated, so discard stays final. A `held` row is written and marked
+   released, so a later discard cannot mark usage that is already billed.
 
 ## Why this design
 

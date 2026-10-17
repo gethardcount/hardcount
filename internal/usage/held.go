@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
+	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -125,12 +126,33 @@ func (s *Service) Hold(ctx context.Context, tenantID string, in HoldInput) (doma
 	return out, err
 }
 
-// ListHeld returns the rows still held, grouped.
-func (s *Service) ListHeld(ctx context.Context, tenantID string) ([]HeldUsageGroup, error) {
+// ListHeld returns the rows still held, grouped, with totals.
+func (s *Service) ListHeld(ctx context.Context, tenantID string) (HeldSummary, error) {
 	if s.held == nil {
-		return []HeldUsageGroup{}, nil
+		return HeldSummary{Groups: []HeldUsageGroup{}}, nil
 	}
 	return s.held.ListHeldSummary(ctx, tenantID)
+}
+
+// IngestResolvingHeld is Ingest for the LiteLLM callback. A row whose key
+// was held and then discarded is not written (errs.ErrDuplicateKey, so the
+// callback counts it as deduplicated), and a row whose key is still held is
+// written and its held row marked released. See
+// PostgresStore.IngestResolvingHeld. Without a held store no row can be
+// held, so it is a plain Ingest.
+func (s *Service) IngestResolvingHeld(ctx context.Context, tenantID string, input IngestInput) (domain.UsageEvent, error) {
+	if s.held == nil {
+		return s.Ingest(ctx, tenantID, input)
+	}
+	prepared, err := s.prepare(ctx, tenantID, input, domain.UsageOriginAPI)
+	if err != nil {
+		return domain.UsageEvent{}, err
+	}
+	event, err := s.held.IngestResolvingHeld(ctx, tenantID, prepared)
+	if err == nil {
+		mw.RecordUsageIngested(1)
+	}
+	return event, err
 }
 
 // HeldFor returns the meter keys and row count still held for one external
@@ -159,13 +181,21 @@ type ReleaseResult struct {
 	// (LiteLLM resent the call after the customer existed). Marked released,
 	// not written again.
 	Deduplicated int `json:"deduplicated"`
-	// StillHeld counts rows for this external id left held: their meter
-	// does not exist, or their time is after the customer's current time.
+	// StillHeld counts rows for this external id left held that a release
+	// cannot take yet: their meter does not exist, or their time is after
+	// the customer's current time.
 	StillHeld int `json:"still_held"`
+	// MoreToRelease counts rows left held only because one release takes at
+	// most 5,000 rows. Release again to take them.
+	MoreToRelease int `json:"more_to_release"`
 	// InOpenPeriod counts released rows whose time falls in an active
-	// subscription's current billing period: that period's invoice counts
-	// them.
+	// subscription's current billing period and whose meter that
+	// subscription's plan prices: that period's invoice counts them.
 	InOpenPeriod int `json:"in_open_period"`
+	// NotOnPlan counts released rows whose time falls in an active
+	// subscription's current billing period, but whose meter no plan on that
+	// subscription prices: no invoice charges them.
+	NotOnPlan int `json:"not_on_plan"`
 	// OutsideOpenPeriod counts released rows outside every current billing
 	// period: before the subscription started, or in a period whose invoice
 	// is already built. A subscription invoice does not count them (unless
@@ -178,9 +208,10 @@ type ReleaseResult struct {
 // Release ingests the held rows for one external customer id into the
 // given customer, at most once per idempotency key (see
 // PostgresStore.ReleaseHeld). Rows stamped after the customer's current
-// time stay held. subs are the customer's subscriptions, used only to say
-// which released rows fall in an open billing period.
-func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput, subs []domain.Subscription) (ReleaseResult, error) {
+// time stay held. subs are the customer's subscriptions and plans their
+// items' plans by id, used only to say which released rows an open
+// billing period's invoice charges.
+func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput, subs []domain.Subscription, plans map[string]domain.Plan) (ReleaseResult, error) {
 	if s.held == nil {
 		return ReleaseResult{}, ErrHoldUnavailable
 	}
@@ -200,18 +231,18 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput,
 	if err != nil {
 		return ReleaseResult{}, err
 	}
-	out := ReleaseResult{CustomerID: in.CustomerID, StillHeld: res.StillHeld}
-	var written []time.Time
+	out := ReleaseResult{CustomerID: in.CustomerID, StillHeld: res.StillHeld, MoreToRelease: res.MoreToRelease}
+	var written []ReleasedUsage
 	for _, r := range res.Rows {
 		if r.Deduplicated {
 			out.Deduplicated++
 			continue
 		}
 		out.Released++
-		written = append(written, r.EventAt)
+		written = append(written, ReleasedUsage{At: r.EventAt, MeterID: in.MeterIDs[r.MeterKey]})
 	}
 	if out.Released > 0 {
-		out.InOpenPeriod, out.OutsideOpenPeriod = ClassifyByOpenPeriod(written, subs)
+		out.InOpenPeriod, out.NotOnPlan, out.OutsideOpenPeriod = ClassifyByOpenPeriod(written, subs, plans)
 	}
 	return out, nil
 }
@@ -286,13 +317,28 @@ func (s *Service) Discard(ctx context.Context, tenantID, externalCustomerID, met
 	return s.held.DiscardHeld(ctx, tenantID, externalCustomerID, meterKey, emit)
 }
 
-// ClassifyByOpenPeriod splits event times into those inside an active or
-// trialing subscription's current billing period [start, end) and the
-// rest. It reads only the current period: Velox never re-opens a built
-// invoice, so a time in an earlier period is "outside" (ADR-120).
-func ClassifyByOpenPeriod(times []time.Time, subs []domain.Subscription) (inOpen, outside int) {
-	for _, t := range times {
-		hit := false
+// ReleasedUsage is one released row, for ClassifyByOpenPeriod.
+type ReleasedUsage struct {
+	At      time.Time
+	MeterID string
+}
+
+// ClassifyByOpenPeriod splits released rows three ways:
+//
+//   - inOpen: the time falls in an active or trialing subscription's
+//     current billing period [start, end), and a plan on one of that
+//     subscription's items prices the row's meter. That period's invoice
+//     charges it.
+//   - notOnPlan: the time falls in such a period, but no plan on the
+//     subscription prices the meter. No invoice charges it.
+//   - outside: the time falls in no current period. It reads only the
+//     current period: Velox never re-opens a built invoice, so a time in an
+//     earlier period is outside (ADR-120).
+//
+// plans maps plan id to plan; a plan missing from it prices nothing.
+func ClassifyByOpenPeriod(rows []ReleasedUsage, subs []domain.Subscription, plans map[string]domain.Plan) (inOpen, notOnPlan, outside int) {
+	for _, row := range rows {
+		inPeriod, priced := false, false
 		for _, sub := range subs {
 			if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
 				continue
@@ -300,16 +346,34 @@ func ClassifyByOpenPeriod(times []time.Time, subs []domain.Subscription) (inOpen
 			if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 				continue
 			}
-			if !t.Before(*sub.CurrentBillingPeriodStart) && t.Before(*sub.CurrentBillingPeriodEnd) {
-				hit = true
+			if row.At.Before(*sub.CurrentBillingPeriodStart) || !row.At.Before(*sub.CurrentBillingPeriodEnd) {
+				continue
+			}
+			inPeriod = true
+			if subPricesMeter(sub, plans, row.MeterID) {
+				priced = true
 				break
 			}
 		}
-		if hit {
+		switch {
+		case priced:
 			inOpen++
-		} else {
+		case inPeriod:
+			notOnPlan++
+		default:
 			outside++
 		}
 	}
-	return inOpen, outside
+	return inOpen, notOnPlan, outside
+}
+
+func subPricesMeter(sub domain.Subscription, plans map[string]domain.Plan, meterID string) bool {
+	for _, it := range sub.Items {
+		for _, id := range plans[it.PlanID].MeterIDs {
+			if id == meterID {
+				return true
+			}
+		}
+	}
+	return false
 }

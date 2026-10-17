@@ -263,26 +263,39 @@ exist, Velox holds the call's events instead of billing them:
   key and time, so a call LiteLLM sent again after you created the
   customer is not counted twice. Releasing twice adds nothing. If the
   `user` value had a typo, pass `"customer_id":"vlx_cus_…"` to release
-  into the right customer.
+  into the right customer. One release takes at most 5,000 events;
+  `more_to_release` counts the rest, and releasing again takes them.
+- **Resent after the customer exists.** If LiteLLM sends a held call again
+  after you create the customer, Velox records it then and marks the held
+  events released. There is nothing left to release for that call.
 - **Discarded, if wrong.** **Discard** (or `POST
   /v1/usage-events/held/discard`) marks the events as never to be billed.
-  Velox keeps them as a record.
+  Velox keeps them as a record. If LiteLLM sends a discarded call again,
+  even after you create the customer, it is counted as `deduplicated` and
+  not billed.
 
 **What a release bills.** A released event counts toward the billing
 period its time falls in, the same rule as any late usage (see
 [ADR-120](../adr/120-invoice-grace-period-for-late-usage.md)):
 
-- Inside the customer's current billing period: the next invoice for that
-  period includes it.
+- Inside the customer's current billing period, on a meter the
+  subscription's plan prices: the next invoice for that period includes it.
+- Inside the current billing period, on a meter the plan does not price:
+  no invoice charges it. Add the meter to the plan if it should be charged.
 - Before the subscription started, or in a period whose invoice is already
   built: stored, but no subscription invoice includes it. For a customer
   created after the calls, this is the usual case. Bill it with a one-off
   invoice if it should be charged.
 
-The release answer counts both kinds (`in_open_period`,
+The release answer counts each kind (`in_open_period`, `not_on_plan`,
 `outside_open_period`). Events whose meter still does not exist, or whose
 time is after the customer's current time (a customer on a test clock set
 in the past), stay held, counted in `still_held`.
+
+The Usage page lists the 200 customers whose usage was held most recently.
+When more are held, the notice says how many it does not list. `GET
+/v1/usage-events/held` returns `total_customers` and `total_rows` for all
+of them.
 
 ## Things to know
 

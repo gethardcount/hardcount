@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -15,13 +16,20 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
+// PlanReader reads a plan by id. Implemented by *pricing.Service.
+type PlanReader interface {
+	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
+}
+
 // SetHeldDeps wires what the held-usage routes read besides the usage
-// store: a customer by id (to check a release target) and the customer's
-// subscriptions (to say which released rows fall in an open billing
-// period). Wired in router.go with the customer and subscription stores.
-func (h *Handler) SetHeldDeps(customers CustomerLookup, subs SubscriptionLister) {
+// store: a customer by id (to check a release target), the customer's
+// subscriptions and their plans (to say which released rows an open billing
+// period's invoice charges). Wired in router.go with the customer and
+// subscription stores and the pricing service.
+func (h *Handler) SetHeldDeps(customers CustomerLookup, subs SubscriptionLister, plans PlanReader) {
 	h.heldCustomers = customers
 	h.heldSubs = subs
+	h.heldPlans = plans
 }
 
 // listHeld serves GET /v1/usage-events/held: the rows still held, grouped
@@ -29,12 +37,13 @@ func (h *Handler) SetHeldDeps(customers CustomerLookup, subs SubscriptionLister)
 // customer and meter exist now so the dashboard can offer Release.
 func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	groups, err := h.svc.ListHeld(r.Context(), tenantID)
+	summary, err := h.svc.ListHeld(r.Context(), tenantID)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list held usage", "error", err)
 		return
 	}
+	groups := summary.Groups
 	custIDs := map[string]string{}
 	meterOK := map[string]bool{}
 	for i := range groups {
@@ -64,7 +73,13 @@ func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) {
 		}
 		g.MeterExists = exists
 	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": groups})
+	// data lists at most HeldListCustomers external ids; the totals count
+	// them all, so the dashboard can say when the list is cut.
+	respond.JSON(w, r, http.StatusOK, map[string]any{
+		"data":            groups,
+		"total_customers": summary.TotalCustomers,
+		"total_rows":      summary.TotalRows,
+	})
 }
 
 type releaseHeldRequest struct {
@@ -140,12 +155,31 @@ func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var subs []domain.Subscription
+	plans := map[string]domain.Plan{}
 	if h.heldSubs != nil {
 		subs, _, err = h.heldSubs.List(r.Context(), subscription.ListFilter{TenantID: tenantID, CustomerID: customerID, Limit: 100})
 		if err != nil {
 			respond.InternalError(w, r)
 			slog.ErrorContext(r.Context(), "release held usage: list subscriptions", "error", err)
 			return
+		}
+	}
+	// The plans say which meters each subscription prices: a released row
+	// whose meter its subscription does not price is not invoiced.
+	if h.heldPlans != nil {
+		for _, sub := range subs {
+			for _, it := range sub.Items {
+				if _, ok := plans[it.PlanID]; ok || it.PlanID == "" {
+					continue
+				}
+				p, err := h.heldPlans.GetPlan(r.Context(), tenantID, it.PlanID)
+				if err != nil {
+					respond.InternalError(w, r)
+					slog.ErrorContext(r.Context(), "release held usage: get plan", "error", err)
+					return
+				}
+				plans[it.PlanID] = p
+			}
 		}
 	}
 
@@ -156,7 +190,7 @@ func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 			ExternalCustomerID: ext,
 			CustomerID:         customerID,
 			MeterIDs:           meterIDs,
-		}, subs)
+		}, subs, plans)
 		if err != nil {
 			respond.FromError(w, r, err, "usage_event")
 			return

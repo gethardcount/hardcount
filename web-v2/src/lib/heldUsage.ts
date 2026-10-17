@@ -72,6 +72,17 @@ export function canRelease(c: HeldCustomer, groups: HeldUsageGroup[]): boolean {
   return groups.some(g => g.external_customer_id === c.externalId && g.meter_exists)
 }
 
+// heldUnlisted says how much the notice does not show: the server lists the
+// customers held most recently (200), and its totals count all of them.
+// Returns '' when everything is listed.
+export function heldUnlisted(listed: HeldCustomer[], totalCustomers: number, totalRows: number): string {
+  const hidden = totalCustomers - listed.length
+  if (hidden <= 0) return ''
+  const shownRows = listed.reduce((n, c) => n + c.rows, 0)
+  const hiddenRows = Math.max(totalRows - shownRows, 0)
+  return `Showing the ${listed.length.toLocaleString('en-US')} customers held most recently. ${rowsWord(hiddenRows)} for ${hidden.toLocaleString('en-US')} more ${hidden === 1 ? 'customer' : 'customers'} ${hiddenRows === 1 ? 'is' : 'are'} held too; release or discard these to see them.`
+}
+
 // releaseSummary is the toast after a release. It says plainly which rows a
 // subscription invoice will count, because rows from before the customer
 // existed usually fall before any billing period.
@@ -82,10 +93,14 @@ export function releaseSummary(r: HeldUsageReleaseResult): { title: string; desc
     : `Released ${rowsWord(recorded)}`
   const parts: string[] = []
   if (r.in_open_period > 0) parts.push(`${r.in_open_period.toLocaleString('en-US')} fall in the current billing period and will be invoiced.`)
+  if (r.not_on_plan > 0) {
+    parts.push(`${r.not_on_plan.toLocaleString('en-US')} fall in the current billing period, but the subscription's plan has no price for their meter, so no invoice charges them.`)
+  }
   if (r.outside_open_period > 0) {
     parts.push(`${r.outside_open_period.toLocaleString('en-US')} fall outside the current billing period, so no subscription invoice includes them unless that period's invoice is not built yet. Bill them with a one-off invoice if needed.`)
   }
   if (r.deduplicated > 0) parts.push(`${r.deduplicated.toLocaleString('en-US')} were already recorded and were not added again.`)
+  if (r.more_to_release > 0) parts.push(`${rowsWord(r.more_to_release)} more are ready. One release takes at most 5,000 rows; release again to record them.`)
   if (r.still_held > 0) parts.push(`${rowsWord(r.still_held)} still held: a meter is missing or the time is after the customer's current time.`)
   return { title, description: parts.join(' ') }
 }
