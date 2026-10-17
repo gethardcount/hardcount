@@ -689,13 +689,19 @@ func readMigrationBody(version uint, direction string) ([]byte, error) {
 	return nil, fmt.Errorf("no %s migration for version %04d", suffix, version)
 }
 
-// embeddedUpVersions returns all up-migration versions in ascending order.
-func embeddedUpVersions() ([]uint, error) {
+// upFile is one embedded .up.sql migration.
+type upFile struct {
+	version uint
+	name    string
+}
+
+// embeddedUpFiles returns all up-migration files in ascending version order.
+func embeddedUpFiles() ([]upFile, error) {
 	entries, err := sqlFS.ReadDir("sql")
 	if err != nil {
 		return nil, fmt.Errorf("read embedded migrations: %w", err)
 	}
-	var versions []uint
+	var files []upFile
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -708,9 +714,22 @@ func embeddedUpVersions() ([]uint, error) {
 		if err != nil {
 			continue
 		}
-		versions = append(versions, uint(v))
+		files = append(files, upFile{version: uint(v), name: e.Name()})
 	}
-	sort.Slice(versions, func(i, j int) bool { return versions[i] < versions[j] })
+	sort.Slice(files, func(i, j int) bool { return files[i].version < files[j].version })
+	return files, nil
+}
+
+// embeddedUpVersions returns all up-migration versions in ascending order.
+func embeddedUpVersions() ([]uint, error) {
+	files, err := embeddedUpFiles()
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]uint, 0, len(files))
+	for _, f := range files {
+		versions = append(versions, f.version)
+	}
 	return versions, nil
 }
 
@@ -879,7 +898,8 @@ func stripLeadingComments(s string) string {
 
 // Status reports the current database migration version. Returns (0, false,
 // nil) for a fresh database with no schema_migrations table. Opens and closes
-// its own short-lived connection pool.
+// its own short-lived connection pool. ReadPlan adds what `velox migrate`
+// would apply.
 func Status(dsn string) (uint, bool, error) {
 	db, err := openMigrationPool(dsn)
 	if err != nil {

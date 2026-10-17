@@ -157,7 +157,8 @@ A migration is a versioned script that changes the database schema. Velox ships 
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every version between yours and the new one.
 2. Take a backup. See [backups](ops/backup-considerations.md).
-3. Start the new version. With `RUN_MIGRATIONS_ON_BOOT=true`, it applies the database upgrades as it starts.
+3. Run the new version's `velox migrate status`. It lists the database upgrades (migrations) the new version will apply, or says `state: up to date`.
+4. Start the new version. With `RUN_MIGRATIONS_ON_BOOT=true`, it applies the database upgrades as it starts.
 
    **You see:** `/health/ready` answers 200 again.
 

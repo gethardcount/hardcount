@@ -69,5 +69,5 @@ migration runs outside a transaction and may be partly applied. Follow
 
 ## Verify
 
-- `velox migrate status` prints `dirty: false` and the latest version.
+- `velox migrate status` prints `state: up to date, nothing to apply`.
 - Velox starts, and `/health/ready` answers 200.

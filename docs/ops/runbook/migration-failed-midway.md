@@ -13,7 +13,7 @@ refuse too. The log says:
 schema_migrations is dirty at version 180 (0180_dunning_policy_seeded.up.sql): a migration started and did not finish ...
 ```
 
-`velox migrate status` prints `dirty: true`.
+`velox migrate status` prints `state: dirty`.
 
 ## Why
 
@@ -45,8 +45,10 @@ partly applied.
    velox migrate status
    ```
 
-   **You see:** `version: 180, dirty: true`, the migration's file name,
-   and the two commands that can repair it.
+   **You see:** `database: 180 (dirty)` and `state: dirty`, then the
+   migration's file name and the two commands that can repair it.
+   Releases up to v0.8.1 print `version: 180, dirty: true` in place of the
+   first lines.
 
 3. Find the first error. Search the log of the start that failed for
    `run migrations` or `migration failed`. Fix the cause first, for example
@@ -100,5 +102,5 @@ before the upgrade and try the upgrade again.
 
 ## Verify
 
-- `velox migrate status` prints `dirty: false` and the latest version.
+- `velox migrate status` prints `state: up to date, nothing to apply`.
 - Velox starts (with Docker Compose: `docker compose up -d velox-api`), and `/health/ready` answers 200.

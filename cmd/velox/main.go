@@ -425,20 +425,53 @@ func runMigrate() {
 }
 
 func runMigrateStatus() {
-	v, dirty, err := migrate.Status(loadDSN())
+	p, err := migrate.ReadPlan(loadDSN())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "status failed: %v\n", err)
 		os.Exit(1)
 	}
-	if v == 0 {
-		fmt.Println("no migrations applied")
-		return
+	fmt.Print(formatPlan(p, version.Version))
+}
+
+// formatPlan renders `velox migrate status`: the database's version, this
+// binary's latest, the state, and the files `velox migrate` would apply.
+// Operators run it with the new release before an upgrade, so the output
+// is the upgrade plan; docs quote its lines ("state: behind").
+func formatPlan(p migrate.Plan, release string) string {
+	var b strings.Builder
+	switch {
+	case p.Database == 0 && !p.Dirty:
+		b.WriteString("database: none applied\n")
+	case p.Dirty:
+		fmt.Fprintf(&b, "database: %d (dirty)\n", p.Database)
+	default:
+		fmt.Fprintf(&b, "database: %d\n", p.Database)
 	}
-	fmt.Printf("version: %d, dirty: %v\n", v, dirty)
-	if dirty {
-		fmt.Println()
-		fmt.Println((&migrate.DirtyError{Version: v}).Error())
+	fmt.Fprintf(&b, "this release: %d (velox %s)\n", p.Latest, release)
+
+	switch p.State {
+	case migrate.PlanUpToDate:
+		b.WriteString("state: up to date, nothing to apply\n")
+	case migrate.PlanBehind:
+		noun := "migrations"
+		if len(p.Pending) == 1 {
+			noun = "migration"
+		}
+		fmt.Fprintf(&b, "state: behind, %d %s to apply\n", len(p.Pending), noun)
+		for _, name := range p.Pending {
+			fmt.Fprintf(&b, "  %s\n", name)
+		}
+		b.WriteString(`next: take a backup, then run "velox migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.` + "\n")
+	case migrate.PlanAhead:
+		b.WriteString("state: ahead, the database has migrations this release does not ship\n")
+		b.WriteString("next: this release's code may not work with the newer schema. To go back to an older release, restore the backup you took before the upgrade.\n")
+	case migrate.PlanDirty:
+		b.WriteString("state: dirty, a migration started and did not finish\n\n")
+		b.WriteString((&migrate.DirtyError{Version: p.Database}).Error() + "\n")
+	case migrate.PlanUnknown:
+		fmt.Fprintf(&b, "state: unknown, this release does not ship migration %d, so \"velox migrate\" cannot continue from it\n", p.Database)
 	}
+	return b.String()
 }
 
 const migrateForceUsage = `usage: velox migrate force <version>
@@ -499,7 +532,7 @@ func printUsage() {
 Commands:
   serve                Start the API server (default)
   migrate              Apply pending migrations
-  migrate status       Show current migration version
+  migrate status       Show the database version and the migrations still to apply
   migrate rollback     Rollback the latest migration
   migrate force N      Repair after a failed migration: clear the dirty mark and
                        record version N. Check the schema first; see

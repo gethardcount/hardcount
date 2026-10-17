@@ -140,7 +140,7 @@ VELOX_BASE=http://localhost VELOX_DASHBOARD_URL=http://localhost ./scripts/demo.
 | Upgrade, published release image | See [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release) |
 | Stop, keeping data | `docker compose stop` |
 | Stop and delete all data | `docker compose down -v` |
-| See which database upgrades have run | `docker compose run --rm velox-api migrate status` |
+| See the database version and the upgrades still to apply | `docker compose run --rm velox-api migrate status` |
 | Open a database shell | `docker compose exec postgres psql -U velox -d velox` |
 
 Read the upgrade notes in the [changelog](../../CHANGELOG.md) before upgrading.

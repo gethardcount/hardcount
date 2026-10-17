@@ -381,10 +381,25 @@ Velox is down while the new version starts. Database changes (migrations) run by
 
    **You see:** `HEAD is now at …` from git.
 
-4. Pull and start the new images.
+4. Pull the new images and see what the upgrade changes in the database. The old release keeps running while you check.
 
    ```bash
    docker compose pull
+   docker compose run --rm velox-api migrate status
+   ```
+
+   **You see:** a few `Container … Running` lines, then `database:` with your database's version, `this release:` with the newest version the release ships, and a `state:` line:
+
+   - `state: behind, 3 migrations to apply`, then their file names. The next step applies them.
+   - `state: up to date, nothing to apply`. The release does not change the database.
+   - `state: ahead`. The image is older than your database. Check the version you set in step 3.
+   - `state: dirty`. An earlier upgrade stopped midway. Repair it first: [A database upgrade failed midway](ops/runbook/migration-failed-midway.md).
+
+   Releases up to v0.8.1 print only `version: 180, dirty: false`.
+
+5. Start the new images.
+
+   ```bash
    docker compose up -d
    docker compose exec velox-api /usr/local/bin/velox version
    ```
