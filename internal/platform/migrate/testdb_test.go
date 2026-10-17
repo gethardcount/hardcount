@@ -194,7 +194,7 @@ func fingerprint(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var rels, sm, goose sql.NullString
 	if err := db.QueryRow(`
-		SELECT string_agg(n.nspname || '.' || c.relname || ':' || c.relkind || ':' || coalesce(obj_description(c.oid, 'pg_class'), ''), ',' ORDER BY n.nspname, c.relname)
+		SELECT string_agg(n.nspname || '.' || c.relname || ':' || c.relkind::text || ':' || coalesce(obj_description(c.oid, 'pg_class'), ''), ',' ORDER BY n.nspname, c.relname)
 		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 		WHERE n.nspname IN ('public', 'other')`).Scan(&rels); err != nil {
 		t.Fatal(err)
