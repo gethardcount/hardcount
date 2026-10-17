@@ -16,6 +16,7 @@ October 2026 (v0.6.1 and v0.7.0):
 - **Login works in Safari when Velox runs on localhost.**
 - **Security fixes.** Endpoints refuse ids from another account, webhooks check the address they connect to, and `/metrics` needs a token in production.
 - **Release images for ARM and Intel/AMD**, signed with cosign.
+- **API reference for every route you call** ([`api/openapi.yaml`](../api/openapi.yaml)).
 
 July to September 2026:
 
@@ -28,7 +29,6 @@ July to September 2026:
 
 ## Next
 
-- **API reference** covering every route the server answers ([#962](https://github.com/getvelox/velox/issues/962)).
 - **Safer upgrades.** A repair command for a database upgrade that stopped halfway ([#967](https://github.com/getvelox/velox/issues/967)), and checks that a database upgrade cannot lock tables for long ([#987](https://github.com/getvelox/velox/issues/987)).
 - **LiteLLM usage for a customer that does not exist yet** is skipped today. Make it visible, and decide whether to keep it ([#1044](https://github.com/getvelox/velox/issues/1044)).
 
