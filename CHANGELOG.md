@@ -15,6 +15,10 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Compose stack passes the Postmark webhook login and `VELOX_API_BASE_URL` to Velox (2026-10-17).** Set `POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS` and `VELOX_API_BASE_URL` in `.env`; editing `docker-compose.yml` or adding an override file is no longer needed (#1150).
+
 ### Changed
 
 - **Sizing for one small server, measured (2026-10-17).** A €6.49/month Hetzner CX23 took about 1 million events a day with 0 errors; its disk fills in about two months ([scale](docs/scale.md#what-one-small-server-handles)). The [one-VM production guide](docs/production-one-vm.md) gets a Docker install link, no duplicate `.env` keys, a health check that waits, a start-up warnings table and a private backup folder.

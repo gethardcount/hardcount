@@ -122,11 +122,17 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-billing@example.com}
+      # Optional — Basic-auth pair for the Postmark bounce webhook
+      # (POST /v1/webhooks/postmark). Unset: Velox rejects every post.
+      POSTMARK_WEBHOOK_USER: ${POSTMARK_WEBHOOK_USER:-}
+      POSTMARK_WEBHOOK_PASS: ${POSTMARK_WEBHOOK_PASS:-}
       # Optional — public URLs the engine renders into invoice emails / portal redirects
       HOSTED_INVOICE_BASE_URL: ${HOSTED_INVOICE_BASE_URL:-}
       PAYMENT_UPDATE_URL: ${PAYMENT_UPDATE_URL:-}
       PAYMENT_UPDATE_RETURN_URL: ${PAYMENT_UPDATE_RETURN_URL:-}
       CUSTOMER_PORTAL_URL: ${CUSTOMER_PORTAL_URL:-}
+      # Optional — public API origin for shareable cost-dashboard links
+      VELOX_API_BASE_URL: ${VELOX_API_BASE_URL:-}
       # Optional — dashboard origin for password-reset email links
       DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-}
       # Optional — cookie domain for dashboard sessions in production

@@ -187,7 +187,7 @@ docker compose logs velox-api | grep '"level":"WARN"'
 | `VELOX_EMAIL_BIDX_KEY not set` | Velox cannot find a customer by email address, so it cannot stop emailing an address that bounced. | Yes, before your first customer. See below. |
 | `POSTMARK_WEBHOOK_USER/POSTMARK_WEBHOOK_PASS not set` | Velox turns away Postmark's reports of late bounces. | Only if you send email through Postmark. See [Email setup](ops/email-setup.md#when-postmark-reports-a-bounce-later). |
 | `METRICS_TOKEN not set` | `/metrics` answers 401 to everyone. | Only if you collect metrics with Prometheus. See [What to watch](self-host.md#what-to-watch). |
-| `VELOX_API_BASE_URL NOT SET` | The link you copy to share a customer's cost dashboard (a page of their usage and charges) is a path, not a full address. | Only if you share cost dashboards. The Compose stack does not pass this setting to Velox yet, so set it in a `docker-compose.override.yml`. |
+| `VELOX_API_BASE_URL NOT SET` | The link you copy to share a customer's cost dashboard (a page of their usage and charges) is a path, not a full address. | Only if you share cost dashboards. Set it in `.env` to your HTTPS address. |
 | `RUN_MIGRATIONS_ON_BOOT=true in production` | Velox updates its database as it starts. | No. On one VM this is how upgrades apply. The warning is for setups with several copies of Velox. |
 
 To set `VELOX_EMAIL_BIDX_KEY`, add a random key and restart. Set it before you add customers: Velox indexes a customer's email only when the customer is created or edited.

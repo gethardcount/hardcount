@@ -274,7 +274,7 @@ Some bounces arrive later: the provider accepts the email, and the recipient's m
    POSTMARK_WEBHOOK_PASS=$(openssl rand -hex 24)
    ```
 
-   The Compose stack does not pass these two settings to the API yet. On that stack, add them under `velox-api` → `environment` in `docker-compose.yml`.
+   On the Compose stack, put them in `.env`.
 2. Restart Velox.
 
    **You see:** no `POSTMARK_WEBHOOK_USER/POSTMARK_WEBHOOK_PASS not set` warning at start-up.
