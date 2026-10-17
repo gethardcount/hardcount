@@ -11,6 +11,8 @@
 **Why it exists:**
 
 - **AI prices are hard to bill.** Each model, and each kind of token (input, output, cached), has its own price. Velox prices them all with one meter (a counter for one kind of usage).
+- **No Stripe Billing fee.** Velox does the billing itself and asks Stripe only to charge the card, so Stripe Billing's 0.7% fee on billing volume does not apply ([Stripe's price](https://stripe.com/billing/pricing), checked 2026-10-17). On $100,000 billed a month, that is $700 a month. Stripe still charges its normal card fee, and Stripe Tax's fee if you use Stripe Tax.
+- **Small enough to run yourself.** One server program plus Postgres and Redis, with a web dashboard. You can try it on your laptop in about five minutes.
 - **Customers can pay up front.** You can sell prepaid credit (a prepaid commit), and later usage draws it down.
 - **You see your margin.** Velox shows what you billed each customer next to what your AI provider charged you for their usage.
 
