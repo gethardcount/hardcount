@@ -1,8 +1,8 @@
 # How we test Velox
 
-This page is for anyone changing Velox. It says which test to write for a
-change, how to run each kind of test, and what is checked by hand before a
-release. Every change ships with a test at the right layer.
+Every change ships with a test at the right layer. This page says which test
+to write for a change, how to run each kind, and what is checked by hand
+before a release.
 
 ## The four layers
 
@@ -29,13 +29,13 @@ Most tests belong in layer 1. Layers 3 and 4 stay small on purpose.
 A Playwright test checks that the screen shows what the API returned.
 Arithmetic stays in Go tests.
 
-A lint waiver names the linter and says why, on the same line, for example
-`//nolint:forbidigo // wall-clock: <reason>` or
-`//nolint:forbidigo // single-invoice-ok: <reason>`. A bare `//nolint` fails
-the lint. The first rule bans a bare `time.Now()` in packages whose time can
-come from a test clock. The second bans looking up one invoice for a billing
-period in `internal/subscription` and `internal/billing`, because several
-invoices can pay for one period.
+A lint waiver names the linter and says why, on the same line. A bare
+`//nolint` fails the lint. For example:
+
+| Waiver | The rule it waives |
+|---|---|
+| `//nolint:forbidigo // wall-clock: <reason>` | No bare `time.Now()` in packages whose time can come from a test clock |
+| `//nolint:forbidigo // single-invoice-ok: <reason>` | No lookup of one invoice for a billing period in `internal/subscription` and `internal/billing`, because several invoices can pay for one period |
 
 One source test in `internal/arch` checks dates: a calendar date must be
 formatted in an explicit time zone (`.In(loc)`), or carry a same-line

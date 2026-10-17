@@ -1,12 +1,13 @@
 # Architecture
 
-Velox is one Go binary on one PostgreSQL database. The code is split into one
-package per billing domain (customers, pricing, usage, invoices, payments and
-so on), and each package owns its store, service and HTTP handler. This page
-is for contributors: it shows how a usage event becomes a paid invoice, which
-package does each part, and what runs in the background. The same flow
-without code is in [How Velox works](how-velox-works.md). The decisions behind
-this layout live in the [ADRs](adr/).
+Velox is one Go binary on one PostgreSQL database. The code has one package
+per billing domain (customers, pricing, usage, invoices, payments and so on),
+and each package owns its store, service and HTTP handler.
+
+This page is for contributors. It shows how a usage event becomes a paid
+invoice, which package does each part, and what runs in the background. The
+same flow without code is in [How Velox works](how-velox-works.md). The
+decisions behind this layout are in the [ADRs](adr/).
 
 ## The life of a usage event
 
@@ -57,6 +58,19 @@ your app → usage → billing → invoice → payment → paid
 Along the way, each step queues webhook events (such as an invoice being
 finalized or paid) and emails for the background senders below.
 
+### How an invoice ends
+
+An invoice ends in one of three states:
+
+- **paid**: the money arrived: by card, from credits, or recorded by hand.
+- **voided**: the invoice was cancelled before it was paid. A voided invoice
+  never changes again.
+- **uncollectible**: the invoice was written off, by an operator or by a
+  dunning policy. It stays in your reports, and it can still move to `paid`
+  if the customer pays later.
+
+A paid invoice cannot be voided or written off; issue a credit note instead.
+
 ## Design rules
 
 - **Per-domain packages.** Each domain owns its store, service, and handler. No peer domain touches another's internals. The imports that legitimately cross domains are listed edge by edge in an allowlist, enforced by an [architecture test](../internal/arch/boundaries_test.go).
@@ -93,17 +107,6 @@ internal/                     (abridged — one package per domain)
 
 web-v2/                     — operator dashboard (React 19 + TypeScript + Tailwind)
 ```
-
-An invoice ends in one of three states:
-
-- **paid**: the money arrived: by card, from credits, or recorded by hand.
-- **voided**: the invoice was cancelled before it was paid. A voided invoice
-  never changes again.
-- **uncollectible**: the invoice was written off, by an operator or by a
-  dunning policy. It stays in your reports, and it can still move to `paid`
-  if the customer pays later.
-
-A paid invoice cannot be voided or written off; issue a credit note instead.
 
 ## Background work
 
@@ -164,13 +167,24 @@ Tax is calculated by one of three providers in `internal/tax`: `none`, `manual` 
 
 ### Failure: defer, never guess
 
-`stripe_tax` fails with one of three reasons: `no_country` (the customer has no country), `no_client_for_mode` (no Stripe client for the request's mode) or `api_error` (Stripe Tax returned an error). In every case the error propagates, the engine defers the invoice to `tax_status=pending`, and a scheduled retry runs `Calculate` again. `block` is the only `OnFailure` value; the `fallback_manual` policy was removed (see [ADR-041](adr/041-tax-fallback-manual-removed.md)).
+When `stripe_tax` fails, the error propagates, the engine defers the invoice to `tax_status=pending`, and a scheduled retry runs `Calculate` again. It never guesses a rate. The three failure reasons:
 
-An earlier design fell back to the tenant's manual rate during a Stripe Tax outage. It traded correctness for availability and was cut. An invoice at a guessed tax rate is a compliance risk: a wrong rate exposes regulated marketplaces and tenants registered for EU VAT under OIDAR. Deferring with a retry is safe, the pile of deferred invoices is itself the alert, and a short outage clears on the next tick.
+| Reason | Meaning |
+|---|---|
+| `no_country` | The customer has no country |
+| `no_client_for_mode` | No Stripe client for the request's mode |
+| `api_error` | Stripe Tax returned an error |
 
 Each failure increments `velox_tax_outcome_total{outcome="deferred", reason}` and logs a `warn`. Successful calculations are not counted.
 
-A test-mode invoice resolves to the test Stripe client and a live-mode invoice to the live client. That matters for two reasons. Test-mode keys have their own rate limits, so a test-mode load test cannot use up a tenant's live quota. And calling Tax on the wrong account is wrong accounting: a calculation leaves nothing behind at Stripe, but `Commit` does. If only one mode has a key, calculations in the other mode defer with `no_client_for_mode`.
+`block` is the only `OnFailure` value. The `fallback_manual` policy, which used the tenant's manual rate during a Stripe Tax outage, was removed (see [ADR-041](adr/041-tax-fallback-manual-removed.md)). It traded correctness for availability. An invoice at a guessed tax rate is a compliance risk: a wrong rate exposes regulated marketplaces and tenants registered for EU VAT under OIDAR. Deferring with a retry is safe, the pile of deferred invoices is itself the alert, and a short outage clears on the next tick.
+
+A test-mode invoice resolves to the test Stripe client and a live-mode invoice to the live client, for two reasons:
+
+- Test-mode keys have their own rate limits, so a test-mode load test cannot use up a tenant's live quota.
+- Calling Tax on the wrong account is wrong accounting: a calculation leaves nothing behind at Stripe, but `Commit` does.
+
+If only one mode has a key, calculations in the other mode defer with `no_client_for_mode`.
 
 ### What is saved on the invoice
 

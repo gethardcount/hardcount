@@ -1,51 +1,57 @@
-# Money-Path Robustness Playbook
+# Money-path robustness playbook
 
-A runbook for building and reviewing any change that touches money or a state
-machine: invoices, payments, credits, dunning (automated payment-failure
-follow-up), subscriptions and tax. It is written for anyone who builds or
-reviews Velox's billing code, with or without prior context.
+How to build and review a change that touches money or a state machine, so
+that it never charges twice, never loses an effect, and never leaves a record
+stuck. Every rule below points at real Velox code: copy the pattern, do not
+reinvent it. Guard the money invariants, and do not over-engineer past them.
 
-**What this asks of you:**
+## Use this when
 
-- In the PR description, list the complete site-set of the state you touch
-  (§2).
-- Before you open the PR, pass every gate in the implementation checklist
-  (§3).
-- Lock concurrency, money-invariant and crash-between-writes behavior with an
-  automated test. Follow the §5 patterns: collision, real Postgres,
-  concurrent-resolver fake, mutation-verify. Skip it only where §5 allows a
-  hand check or the test would repeat a proven pattern.
+Your change writes, reacts to, or branches on the state of an invoice, a
+payment, a credit, a dunning run (the automatic retries after a failed
+payment), a subscription or a tax record.
 
-**Why it exists.** These bugs do not show up when you read only the path where
-everything succeeds (the happy-path read). They live in *sibling* call sites,
-in *concurrent* interleavings, and in *crash windows*. A crash window is the
-gap between two writes where a process can die with half the work done.
+## The five steps
 
-**The motivating lesson (PR #325).** A dunning resolve change was reviewed four
-times. Each round caught a *different* instance of the *same* root problem, and
-each fix exposed the next. The lesson was not "review harder". The failure was
-reasoning *locally*, about the function in the diff. The real surface was the
-whole state machine:
+1. **List the site-set before you write code.** The site-set is every code
+   place that touches the state: each writer, effect-firer, gated reader,
+   caller and callee, and crash point. Check each one against grep output,
+   and put the list in the PR description. See [§2](#2-the-meta-practice-complete-site-set-enumeration).
+2. **Choose the dedup primitive and place each effect at design time.** Name
+   the key that makes a repeat collide. Put each coupled effect in the same
+   transaction, or in the outbox. See gates 1 to 3 in
+   [§3](#3-implementation-checklist--gates-before-opening-a-money-path-pr).
+3. **Pass every implementation gate in §3** before you open the PR. A "no"
+   blocks the PR.
+4. **Review by class with the §4 questions.** Run the greps yourself, and
+   re-derive each invariant. Do not accept "none of X can Y".
+5. **Lock the behavior with an automated test.** Concurrency always needs
+   one. Money invariants and crash-between-writes need one unless the test
+   would repeat a proven pattern. Use the [§5](#5-test-lock-doctrine)
+   patterns: collision, real Postgres, concurrent-resolver fake,
+   mutation-verify.
 
-- every writer of the state;
-- every effect-firer (code that triggers an email, a Stripe call, or a webhook
-  off the transition);
-- every gated reader (code whose behavior branches on the state);
-- every crash point.
+The terms are defined in the [§1 table](#1-the-failure-class-map) and the
+[glossary](../glossary.md).
 
-This playbook makes that enumeration a checklist instead of a four-round
-discovery.
+## Why it exists
 
-When the design or review stage runs as a multi-agent panel or workflow
-(several AI agents prompted in parallel), prompt the agents per
-[docs/records/agent-prompting-standards.md](../records/agent-prompting-standards.md). It covers
-grounded claims, sending the reasoning along with each request
+These bugs do not show on the path where everything succeeds. They live in
+sibling call sites, in concurrent interleavings and in crash windows. A crash
+window is the gap between two writes where a process can die with half the
+work done.
+
+In PR #325, a dunning resolve change went through four review rounds. Each
+round found a different instance of the same root problem, because each
+reasoned about the function in the diff, not the whole state machine. Step 1
+turns that four-round discovery into one checklist.
+
+When the design or review runs as a panel of AI agents prompted in parallel,
+prompt them per
+[docs/records/agent-prompting-standards.md](../records/agent-prompting-standards.md).
+It covers grounded claims, the reasoning sent with each request
 (reason-with-request), effort routing, and the optional mid-build
 spec-conformance verifier.
-
-Pre-launch posture: **guard the money invariants; do not over-engineer beyond
-that.** Every rule below is anchored to real Velox code. Copy the
-pattern; do not reinvent it.
 
 ---
 
@@ -103,9 +109,8 @@ Terms the tables lean on:
 
 **Never reason locally about a money or state change. Enumerate its complete
 site-set: every code site that writes, reacts to, or gates on the state. Prove
-each element is covered before you write a line.** This one discipline
-collapses PR #325's four rounds into a single pass. The racing firer, the
-clobbering write, and the stale-gated action all live in sibling branches and
+each element is covered before you write a line.** The racing firer, the
+clobbering write and the stale-gated action all live in sibling branches and
 callees that a diff-scoped read never opens.
 
 The unit of proof is the **state value** (`'resolved'`, `SubscriptionActive`,
