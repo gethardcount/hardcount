@@ -233,13 +233,17 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The audit row and the session row record the same address: the one
+	// TrustedRealIP resolved, never a forwarding header the client wrote.
+	ip := audit.ExtractClientIP(r)
+
 	// Accept happens pre-auth, so stamp the accepting user as the actor
 	// and livemode=false (the mode the fresh session starts in — without
 	// it the audit writer's TxTenant refuses to open; same pattern as
 	// the auth handler's audit).
 	if h.audit != nil {
 		actx := auth.WithUserID(ctx, res.UserID)
-		actx = audit.WithClientIP(actx, audit.ExtractClientIP(r))
+		actx = audit.WithClientIP(actx, ip)
 		actx = postgres.WithLivemode(actx, false)
 		// resource_id IS the new member's user id; the reader resolves the address from
 		// the (erasable) users row. Storing it would make it permanent.
@@ -263,7 +267,7 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 			TenantID:  res.TenantID,
 			Livemode:  false, // dashboard sessions start in test mode, same as login
 			UserAgent: r.UserAgent(),
-			IP:        session.ClientIP(r),
+			IP:        ip,
 		})
 		if err != nil {
 			// The membership is committed — the account works; only the

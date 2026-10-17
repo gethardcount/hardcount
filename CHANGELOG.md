@@ -32,6 +32,10 @@ original text.
 - **Every email now has a `Date` and a `Message-ID`, and its text is encoded the standard way (2026-10-18).** Mail servers and spam filters expect both headers. Accented names and long lines, such as a long note on a setup link, now travel as quoted-printable in short lines. The Message-ID uses your `SMTP_FROM` domain. The wording is unchanged (#1187).
 - **Webhook endpoints with a private IPv6 address are refused when you save them (2026-10-18).** Before, a URL such as `https://[fd00::1]/` was saved, then every delivery to it failed. Saving now uses the same address check as sending. An endpoint saved earlier with such a URL still fails; change its URL ([webhooks](docs/webhooks.md#managing-endpoints), #1199).
 
+### Security
+
+- **Dashboard sign-ins record the real client address (2026-10-18).** A login or invite accept stored the first `X-Forwarded-For` entry, which any client can write, in `dashboard_sessions.ip`. It now stores the address `TRUST_PROXY` resolves, the same one the audit log and rate limits use. Nothing reads this column yet. ([#1203](https://github.com/getvelox/velox/pull/1203))
+
 ## [0.8.1] - 2026-10-17
 
 Safer upgrades: a repair command for a database upgrade that stopped midway, and a 5-second limit on how long a migration waits for a table lock. Also a faster invoice list, and the Compose stack passes the Postmark webhook login and `VELOX_API_BASE_URL`. No database migrations.

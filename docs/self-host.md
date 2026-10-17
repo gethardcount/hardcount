@@ -177,7 +177,7 @@ Velox reads its settings from environment variables. The tables below list the m
 | `REDIS_URL` | Redis, for rate limiting. Required in `production`. |
 | `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward. Use `none` if there is no proxy. Required in `production`. Velox refuses to start if an entry is not an IP address or CIDR. |
 
-Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit.
+Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit. The audit log and dashboard sign-in records would also show the load balancer's address.
 
 **Read once, when creating the first tenant** (by `make bootstrap`, not by the server)
 

@@ -118,7 +118,8 @@ func ClientIP(ctx context.Context) string {
 	return ""
 }
 
-// ExtractClientIP returns the source IP recorded on audit rows: the host of
+// ExtractClientIP returns the source IP recorded on audit rows and on the
+// dashboard session rows that login and invite accept write: the host of
 // r.RemoteAddr, which the global TrustedRealIP middleware has already resolved
 // from X-Forwarded-For / X-Real-IP — but ONLY when the immediate peer is a
 // configured trusted proxy. It deliberately does NOT re-read those headers

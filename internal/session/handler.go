@@ -101,17 +101,3 @@ func isLoopbackHost(h string) bool {
 	ip := net.ParseIP(h)
 	return ip != nil && ip.IsLoopback()
 }
-
-// ClientIP pulls the caller's IP, preferring X-Forwarded-For (set by
-// the RealIP middleware upstream). The stored value is informational
-// — session validation isn't bound to IP for usability reasons (mobile
-// network switching, VPN flips, etc.).
-func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if comma := strings.IndexByte(xff, ','); comma > 0 {
-			return strings.TrimSpace(xff[:comma])
-		}
-		return strings.TrimSpace(xff)
-	}
-	return r.RemoteAddr
-}

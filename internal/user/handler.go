@@ -181,6 +181,9 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The address TrustedRealIP resolved. The failed-login log, the session
+	// row and the audit row all record this one value; none of them reads a
+	// forwarding header the client could have written.
 	ip := audit.ExtractClientIP(r)
 
 	u, tenants, err := h.users.Authenticate(r.Context(), req.Email, req.Password)
@@ -209,7 +212,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		TenantID:  tenant.TenantID,
 		Livemode:  false, // dashboard sessions default to test mode; bearer for live
 		UserAgent: r.UserAgent(),
-		IP:        session.ClientIP(r),
+		IP:        ip,
 	})
 	if err != nil {
 		slog.Error("session: issue failed", "err", err, "user_id", u.ID)
