@@ -517,7 +517,7 @@ export function Layout({ children }: { children: ReactNode }) {
             >
               <AlertTriangle size={14} aria-hidden="true" />
               <span>
-                <strong className="font-semibold">LIVE</strong> mode but no Stripe live credentials — real charges will fail.
+                <strong className="font-semibold">Live mode:</strong> Stripe isn't connected for live payments, so charges will fail.
               </span>
               <Link
                 to="/settings?tab=payments"

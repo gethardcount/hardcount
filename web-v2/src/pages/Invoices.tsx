@@ -245,7 +245,7 @@ export default function InvoicesPage() {
           <h1 className="text-2xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
             <span>
-              Track invoices, payments, and billing history
+              The bills Velox makes for your customers, with what each one owes and whether it's paid
               {statusFilter ? ` · Showing ${statusTabLabel(statusFilter).toLowerCase()}` : overdueFilter ? ' · Showing past due' : !paymentStatusFilter && !customerFilter && total > 0 ? ` · ${total} total` : ''}
             </span>
             {paymentStatusFilter && (
@@ -378,7 +378,7 @@ export default function InvoicesPage() {
                 title="No invoices yet"
                 description="Invoices are generated when a billing cycle runs for an active subscription."
                 action={{
-                  label: 'View Subscriptions',
+                  label: 'View subscriptions',
                   to: '/subscriptions',
                   variant: 'outline',
                 }}
@@ -403,7 +403,7 @@ export default function InvoicesPage() {
                     <SortableHead label="Status" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                     <SortableHead label="Payment" sortKey="payment_status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                     <SortableHead label="Period" sortKey="billing_period_start" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                    <SortableHead label="Amount Due" sortKey="amount_due_cents" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="text-right" />
+                    <SortableHead label="Amount due" sortKey="amount_due_cents" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="text-right" />
                     <TableHead className="text-xs font-medium text-right">PDF</TableHead>
                   </TableRow>
                 </TableHeader>

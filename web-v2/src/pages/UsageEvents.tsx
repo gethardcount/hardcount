@@ -258,8 +258,8 @@ export default function UsageEventsPage() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Usage Events</h1>
-          <p className="text-sm text-muted-foreground mt-1">Track and analyze usage across customers and meters</p>
+          <h1 className="text-2xl font-semibold text-foreground">Usage</h1>
+          <p className="text-sm text-muted-foreground mt-1">What each customer used, as your app reported it. Velox adds it up and prices it on their invoices.</p>
         </div>
         {total > 0 && (
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
@@ -395,7 +395,7 @@ export default function UsageEventsPage() {
           {/* Events table */}
           <Card className="mt-6">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Event Log</CardTitle>
+              <CardTitle className="text-sm">Event log</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <Table>

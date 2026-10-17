@@ -194,7 +194,7 @@ export default function SubscriptionsPage() {
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Subscriptions</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage subscriptions and billing cycles{total > 0 ? ` · ${total} total` : ''}</p>
+          <p className="text-sm text-muted-foreground mt-1">A subscription puts a customer on a plan, and Velox bills them for it every period{total > 0 ? ` · ${total} total` : ''}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {total > 0 && (
@@ -230,7 +230,7 @@ export default function SubscriptionsPage() {
           )}
           <Button size="sm" onClick={() => setShowCreate(true)}>
             <Plus size={16} className="mr-2" />
-            Add Subscription
+            Add subscription
           </Button>
         </div>
       </div>
@@ -282,7 +282,7 @@ export default function SubscriptionsPage() {
                 title="No subscriptions yet"
                 description="Create a subscription to start billing a customer."
                 action={{
-                  label: 'Add Subscription',
+                  label: 'Add subscription',
                   icon: Plus,
                   onClick: () => setShowCreate(true),
                 }}

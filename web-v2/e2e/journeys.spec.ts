@@ -19,7 +19,7 @@ test.describe('signed out', () => {
     await expect(page).toHaveURL(/\/login$/)
     await page.getByLabel('Email').fill(env.email)
     await page.getByLabel('Password', { exact: true }).fill(env.password)
-    await page.getByRole('button', { name: 'Sign In' }).click()
+    await page.getByRole('button', { name: 'Sign in' }).click()
     // Sign-in returns the operator to the page they asked for.
     await expect(page.getByRole('heading', { level: 1, name: 'Customers', exact: true })).toBeVisible()
   })
@@ -80,12 +80,12 @@ test('create a customer', async ({ page }) => {
   const id = uniq()
   const name = `UI Customer ${id}`
   await page.goto('/customers')
-  await page.getByRole('button', { name: 'Add Customer' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Create Customer' })
-  await dialog.getByLabel('Display Name').fill(name)
+  await page.getByRole('button', { name: 'Add customer' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create customer' })
+  await dialog.getByLabel('Display name').fill(name)
   await dialog.getByLabel('External ID').fill(`ui_${id}`)
   await dialog.getByLabel('Email').fill(`ui-${id}@example.com`)
-  await dialog.getByRole('button', { name: 'Create Customer' }).click()
+  await dialog.getByRole('button', { name: 'Create customer' }).click()
   await expect(dialog).toBeHidden()
 
   const found = await api<{ data: Customer[] }>('GET', `/customers?search=ui_${id}`)
@@ -99,12 +99,12 @@ test('create a subscription for a customer', async ({ page }) => {
   const customer = await createCustomer()
   const id = uniq()
   await page.goto(`/customers/${customer.id}`)
-  await page.getByRole('button', { name: 'Create Subscription' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Create Subscription' })
-  await dialog.getByLabel('Display Name').fill(`UI Subscription ${id}`)
+  await page.getByRole('button', { name: 'Create subscription' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create subscription' })
+  await dialog.getByLabel('Display name').fill(`UI Subscription ${id}`)
   await dialog.getByLabel('Code').fill(`ui-sub-${id}`)
   await dialog.getByLabel('Plan', { exact: true }).selectOption({ label: plan.name })
-  await dialog.getByRole('button', { name: 'Create Subscription' }).click()
+  await dialog.getByRole('button', { name: 'Create subscription' }).click()
   await expect(dialog).toBeHidden()
 
   const subs = await api<{ data: Subscription[] }>('GET', `/subscriptions?customer_id=${customer.id}`)
@@ -139,7 +139,7 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   await page.getByRole('link', { name: invoice.invoice_number, exact: true }).click()
   await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
   await expect(page.getByText('Subtotal', { exact: true }).locator('..')).toContainText(usd(invoice.subtotal_cents))
-  await expect(page.getByText('Amount Due', { exact: true }).locator('..')).toContainText(usd(invoice.amount_due_cents))
+  await expect(page.getByText('Amount due', { exact: true }).locator('..')).toContainText(usd(invoice.amount_due_cents))
 })
 
 test('a new test clock says customers, not subscriptions, go on it', async ({ page }) => {
@@ -234,7 +234,7 @@ test('the Usage page shows a Maximum meter as its peak per customer, not the sum
   }
 
   await page.goto(`/usage?meter=${meter.id}`)
-  await expect(page.getByRole('heading', { level: 1, name: 'Usage Events', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Usage', exact: true })).toBeVisible()
   const row = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: meter.name, exact: true }) })
   // 140 (A's peak) + 210 (B's peak), never 140 + 210 + 120 = 470.
   await expect(row).toContainText('350 GB')
@@ -262,7 +262,7 @@ test('Usage: a half-typed dimension shows a hint, and Export CSV holds only the 
   await box.fill('model')
   await expect(page.getByText('"model" needs a value: use key=value, for example model=gpt-4o')).toBeVisible()
   // The page stays up; the half-typed filter never reached the server.
-  await expect(page.getByRole('heading', { level: 1, name: 'Usage Events', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Usage', exact: true })).toBeVisible()
   await expect(page).not.toHaveURL(/dim=/)
 
   await box.fill('model=gpt-4o')
@@ -376,15 +376,15 @@ for (const width of [1440, 390]) {
     const other = await createPlan()
     await page.setViewportSize({ width, height: 844 })
     await page.goto(`/subscriptions/${subscription.id}`)
-    await page.getByRole('button', { name: 'Change Plan', exact: true }).click()
-    const dialog = page.getByRole('dialog', { name: 'Change Plan' })
+    await page.getByRole('button', { name: 'Change plan', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Change plan' })
     await dialog.getByRole('button', { name: 'Select a plan...' }).click()
     await page.getByRole('option', { name: new RegExp(other.code) }).click()
     await expect(dialog.getByRole('button', { name: new RegExp(other.code) })).toBeVisible()
     // Nothing in the dialog is wider than the dialog, and both actions are
     // fully inside it and on screen.
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    for (const name of ['Change Plan', 'Cancel']) {
+    for (const name of ['Change plan', 'Cancel']) {
       const button = dialog.getByRole('button', { name, exact: true })
       expect(await boxInside(button, dialog)).toBe(true)
       expect(await boxInside(button)).toBe(true)
@@ -457,19 +457,19 @@ test('Escape closes the mobile menu', async ({ page }) => {
 test('grant credits and see the balance', async ({ page }) => {
   const customer = await createCustomer()
   await page.goto(`/customers/${customer.id}`)
-  await page.getByRole('link', { name: /Credit Balance/ }).click()
+  await page.getByRole('link', { name: /Credit balance/ }).click()
   await expect(page.getByRole('heading', { level: 1, name: customer.display_name, exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Grant', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Grant credits' })
   await dialog.getByLabel(/^Amount/).fill('25.00')
   await dialog.getByLabel('Description').fill('E2E goodwill credit')
-  await dialog.getByRole('button', { name: 'Grant Credits' }).click()
-  await page.getByRole('alertdialog', { name: 'Confirm Credit Grant' }).getByRole('button', { name: 'Grant Credits' }).click()
+  await dialog.getByRole('button', { name: 'Grant credits' }).click()
+  await page.getByRole('alertdialog', { name: 'Confirm credit grant' }).getByRole('button', { name: 'Grant credits' }).click()
   await expect(page.getByRole('row').filter({ hasText: 'E2E goodwill credit' })).toBeVisible()
 
   const balance = await api<{ balance_cents: number }>('GET', `/credits/balance/${customer.id}`)
   expect(balance.balance_cents).toBe(2500)
-  await expect(page.getByText('Credit Balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
+  await expect(page.getByText('Credit balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
 })
 
 test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => {
@@ -485,7 +485,7 @@ test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => 
   const held = new Promise<void>(r => { release = r })
   await page.route(/\/v1\/plans(\?|$)/, async route => { await held; await route.continue() })
   await page.goto(`/customers/${customer.id}`)
-  const balance = page.getByRole('link', { name: /Credit Balance/ })
+  const balance = page.getByRole('link', { name: /Credit balance/ })
   const newInvoice = page.getByRole('button', { name: 'New invoice' })
   await expect(newInvoice).toBeDisabled()
   await expect(balance).toContainText('—')
@@ -522,8 +522,8 @@ test('grant credits from the customer page', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Grant credits' })
   await dialog.getByLabel(/^Amount/).fill('25.00')
   await dialog.getByLabel('Description').fill('E2E customer-page credit')
-  await dialog.getByRole('button', { name: 'Grant Credits' }).click()
-  await page.getByRole('alertdialog', { name: 'Confirm Credit Grant' }).getByRole('button', { name: 'Grant Credits' }).click()
+  await dialog.getByRole('button', { name: 'Grant credits' }).click()
+  await page.getByRole('alertdialog', { name: 'Confirm credit grant' }).getByRole('button', { name: 'Grant credits' }).click()
 
   // The section refreshes in place: the grant row, then the balance and the
   // totals match what the API holds.
@@ -593,4 +593,26 @@ test('a new account: Home welcomes the operator and the setup checklist opens on
 test('Home defines MRR on its card', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('Monthly recurring revenue: the base fees of active subscriptions, per month.', { exact: false })).toBeVisible()
+})
+
+test('a promotional grant explains commit and promotional credit', async ({ page }) => {
+  const customer = await createCustomer()
+  await api('POST', '/credits/grant', { customer_id: customer.id, amount_cents: 1000, description: 'E2E promo credit', grant_kind: 'promotional' })
+  await page.goto(`/customers/${customer.id}`)
+  const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
+  await expect(credits.getByRole('row').filter({ hasText: 'E2E promo credit' })).toBeVisible()
+  await expect(credits.getByText('Commit credit was paid for on an invoice. Promotional credit is free and is used up first.')).toBeVisible()
+})
+
+test('list pages say what each one is for', async ({ page }) => {
+  const pages: [string, string][] = [
+    ['/credit-notes', 'A credit note takes money off an invoice.'],
+    ['/webhooks', 'Velox calls a URL in your app when something happens'],
+    ['/api-keys', 'Keys your app uses to call the Velox API'],
+    ['/settings', 'Your business details, invoice defaults, tax and payment setup'],
+  ]
+  for (const [path, text] of pages) {
+    await page.goto(path)
+    await expect(page.getByText(text)).toBeVisible()
+  }
 })

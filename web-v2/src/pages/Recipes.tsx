@@ -50,9 +50,9 @@ export default function RecipesPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Pricing recipes</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Recipes</h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Set up billing for a common AI usage model in one click. Each recipe creates the usage meter, prices, and a plan you need — pre-filled with a provider's public rates so you go from zero to a working setup in seconds, then tune the numbers to your own pricing.
+            Ready-made pricing for common AI products. One click creates the meter, prices and plan, filled in with a provider's public rates; change the numbers after.
           </p>
         </div>
       </div>

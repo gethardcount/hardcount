@@ -17,7 +17,7 @@ setup('sign in through the login page', async ({ page }) => {
   await page.goto('/login')
   await page.getByLabel('Email').fill(env.email)
   await page.getByLabel('Password', { exact: true }).fill(env.password)
-  await page.getByRole('button', { name: 'Sign In' }).click()
+  await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toBeVisible()
   await page.context().storageState({ path: authFile })
 })

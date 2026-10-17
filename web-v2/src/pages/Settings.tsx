@@ -351,7 +351,7 @@ export default function SettingsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
-          <p className="text-sm text-muted-foreground mt-1">Configure your billing tenant</p>
+          <p className="text-sm text-muted-foreground mt-1">Your business details, invoice defaults, tax and payment setup</p>
         </div>
         {!hasChanges && !loading && (
           <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 rounded-lg">
@@ -538,7 +538,7 @@ export default function SettingsPage() {
               <CardContent className="p-6">
                 <div className="mb-5">
                   <h2 className="text-sm font-semibold text-foreground">Preferences</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Tenant-wide display and date conventions</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Timezone for your whole account</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
@@ -637,7 +637,7 @@ export default function SettingsPage() {
                     </div>
                     {formErrors.credit_balance_low_threshold
                       ? <p className="text-xs text-destructive mt-1">{formErrors.credit_balance_low_threshold.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1.5">Sends a webhook when a customer's credit balance drops below this amount. Leave blank to turn off. Empty and depleted balances always send their own events.</p>}
+                      : <p className="text-xs text-muted-foreground mt-1.5">Velox tells your app (by webhook) when a customer's credit balance drops below this amount. Leave blank to turn off. A balance that runs out always sends its own message.</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-invoice-footer">Invoice footer</Label>
@@ -739,7 +739,7 @@ export default function SettingsPage() {
                         Stripe Tax
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">AUTO</span>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1">Jurisdiction-aware rates, reverse-charge, tax transactions. Requires Stripe in Payments tab.</div>
+                      <div className="text-xs text-muted-foreground mt-1">Stripe works out the right tax for each customer's country or state. Connect Stripe in the Payments tab first.</div>
                     </button>
                   </div>
                 </div>
@@ -801,7 +801,7 @@ export default function SettingsPage() {
                       <div>
                         <Label className="font-medium text-foreground">Tax-inclusive pricing</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          When on, plan and usage prices already include tax. Velox carves tax out of the sticker price.
+                          When on, your plan and usage prices already include tax, and Velox shows the tax part inside them.
                           When off (default), tax is added on top of the subtotal.
                         </p>
                       </div>
@@ -821,7 +821,7 @@ export default function SettingsPage() {
                           <Info size={14} className="shrink-0 mt-0.5" aria-hidden />
                           {form.tax_inclusive ? (
                             <span>
-                              Example: {ex.base} sticker price includes {form.tax_name || 'tax'} at {formatTaxRate(form.tax_rate)}%.
+                              Example: a {ex.base} price includes {form.tax_name || 'tax'} at {formatTaxRate(form.tax_rate)}%.
                               Net subtotal = <strong className="text-foreground">{ex.net}</strong>.
                               Customer pays <strong className="text-foreground">{ex.total}</strong>.
                             </span>
@@ -861,7 +861,7 @@ export default function SettingsPage() {
                       <div>
                         <Label className="font-medium text-foreground">Tax-inclusive pricing</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          When on, plan prices already include tax. Stripe Tax carves tax out of the gross amount.
+                          When on, your plan prices already include tax, and Stripe Tax works out the tax part inside them.
                         </p>
                       </div>
                       <Switch
@@ -875,8 +875,8 @@ export default function SettingsPage() {
                         <AlertCircle size={14} className="shrink-0 mt-0.5" />
                         <span>
                           Tax is calculated per invoice via Stripe. If a calculation fails, the invoice stays in draft until it
-                          resolves. Requires Stripe Tax enabled in your Stripe dashboard; registrations control which
-                          jurisdictions collect tax.
+                          resolves. Turn on Stripe Tax in your Stripe dashboard first; tax is collected only in the
+                          places where you add a tax registration there.
                         </span>
                       </p>
                     </div>
@@ -932,7 +932,7 @@ export default function SettingsPage() {
                   </AlertDialogContent>
                 </AlertDialog>
                 <Button onClick={() => handleSave()} disabled={saving}>
-                  {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Save Changes'}
+                  {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Save changes'}
                 </Button>
               </div>
             </div>

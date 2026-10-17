@@ -735,7 +735,7 @@ export default function SubscriptionDetailPage() {
             <CardTitle className="text-sm">Items ({items.length})</CardTitle>
             {sub.status === 'active' && plansData && (
               <Button size="sm" variant="outline" onClick={() => setItemDialog({ kind: 'add' })}>
-                <Plus size={14} className="mr-1" /> Add Item
+                <Plus size={14} className="mr-1" /> Add item
               </Button>
             )}
           </div>
@@ -751,7 +751,7 @@ export default function SubscriptionDetailPage() {
                 <TableRow>
                   <TableHead>Plan</TableHead>
                   <TableHead className="text-right">Quantity</TableHead>
-                  <TableHead>Pending Change</TableHead>
+                  <TableHead>Pending change</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -805,10 +805,10 @@ export default function SubscriptionDetailPage() {
                         {sub.status === 'active' && (
                           <div className="flex items-center gap-2 justify-end">
                             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setItemDialog({ kind: 'change-quantity', item })}>
-                              Change Qty
+                              Change quantity
                             </Button>
                             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setItemDialog({ kind: 'change-plan', item })}>
-                              Change Plan
+                              Change plan
                             </Button>
                             <Button size="sm" variant="outline" className="h-7 text-xs border-destructive text-destructive hover:bg-destructive/10" onClick={() => setItemDialog({ kind: 'remove', item })}>
                               Remove
@@ -944,7 +944,7 @@ export default function SubscriptionDetailPage() {
               </DetailRow>
             )}
             {sub.usage_cap_units != null && (
-              <DetailRow label="Usage Cap" labelClassName="sm:w-40">
+              <DetailRow label="Usage cap" labelClassName="sm:w-40">
                 <span>{sub.usage_cap_units.toLocaleString()} units / period</span>
                 <span className="text-xs text-muted-foreground">({sub.overage_action === 'block' ? 'hard cap' : 'charge overage'})</span>
               </DetailRow>
@@ -1351,7 +1351,7 @@ export default function SubscriptionDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Item */}
+      {/* Add item */}
       {itemDialog?.kind === 'add' && plansData && (
         <AddItemDialog
           subscription={sub}
@@ -1405,7 +1405,7 @@ export default function SubscriptionDetailPage() {
         />
       )}
 
-      {/* Remove Item */}
+      {/* Remove item */}
       {itemDialog?.kind === 'remove' && (
         <RemoveItemConfirm
           subscriptionID={sub.id}
@@ -1513,7 +1513,7 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Item</DialogTitle>
+          <DialogTitle>Add item</DialogTitle>
           <DialogDescription>
             Add a plan to this subscription. Added mid-period, it's billed only for the rest of the period.
           </DialogDescription>
@@ -1553,7 +1553,7 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
             <Button type="submit" disabled={submitting || !selectedPlan}>
               {submitting ? (
                 <><Loader2 size={14} className="animate-spin mr-2" />Adding...</>
-              ) : 'Add Item'}
+              ) : 'Add item'}
             </Button>
           </DialogFooter>
         </form>
@@ -1619,7 +1619,7 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Change Plan</DialogTitle>
+          <DialogTitle>Change plan</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div>
@@ -1630,7 +1630,7 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
           </div>
 
           <div className="space-y-2">
-            <Label>New Plan</Label>
+            <Label>New plan</Label>
             <Combobox
               value={selectedPlan}
               onChange={setSelectedPlan}
@@ -1673,7 +1673,7 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
             <Button type="submit" disabled={submitting || !selectedPlan}>
               {submitting ? (
                 <><Loader2 size={14} className="animate-spin mr-2" />Changing...</>
-              ) : 'Change Plan'}
+              ) : 'Change plan'}
             </Button>
           </DialogFooter>
         </form>
@@ -1726,7 +1726,7 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Change Quantity</DialogTitle>
+          <DialogTitle>Change quantity</DialogTitle>
           <DialogDescription>
             {changeQuantityText(plan?.base_bill_timing)}
           </DialogDescription>
@@ -1800,7 +1800,7 @@ function RemoveItemConfirm({ subscriptionID, item, plan, onClose, onRemoved, onF
         <AlertDialogFooter>
           <AlertDialogCancel disabled={submitting}>Cancel</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={handleConfirm} disabled={submitting}>
-            {submitting ? 'Removing...' : 'Remove Item'}
+            {submitting ? 'Removing...' : 'Remove item'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

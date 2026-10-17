@@ -525,7 +525,7 @@ export default function CustomerDetailPage() {
                       })
                     }}
                   >
-                    Archive Customer
+                    Archive customer
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -586,7 +586,7 @@ export default function CustomerDetailPage() {
               // A plain cell while the fetch has failed: the retry button
               // cannot sit inside the link to the ledger.
               <div className="flex-1 min-w-0 px-6 py-4">
-                <p className="text-sm text-muted-foreground">Credit Balance</p>
+                <p className="text-sm text-muted-foreground">Credit balance</p>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-sm font-medium text-foreground" title="Couldn't load the credit balance">—</p>
                   <Button variant="outline" size="xs" onClick={() => refetchBalance()}>Retry</Button>
@@ -594,7 +594,7 @@ export default function CustomerDetailPage() {
               </div>
             ) : (
               <Link to={`/credits?customer=${id}`} className="flex-1 min-w-0 px-6 py-4 hover:bg-accent/50 transition-colors">
-                <p className="text-sm text-muted-foreground">Credit Balance</p>
+                <p className="text-sm text-muted-foreground">Credit balance</p>
                 <p className={cn('text-sm font-medium mt-1', (balance ?? 0) > 0 ? 'text-emerald-600' : 'text-foreground')}>
                   {balance === undefined ? '—' : creditMoney(balance)}
                 </p>
@@ -608,7 +608,7 @@ export default function CustomerDetailPage() {
             {/* Outstanding balance — accounts-receivable exposure for
                 this customer (Stripe / Lago / Chargebee / Recurly all
                 surface this on the customer page). Distinct from
-                Credit Balance (positive credit owed TO the customer);
+                Credit balance (positive credit owed TO the customer);
                 this is unpaid invoices owed BY the customer. Links to
                 invoices filtered to their unpaid list so the operator
                 can drill into resolution. Hidden when there's no
@@ -675,13 +675,13 @@ export default function CustomerDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Billing Profile */}
+      {/* Billing profile */}
       <Card className="mt-6">
         {profileCard === 'profile' && billingProfile ? (
           <>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Billing Profile</CardTitle>
+                <CardTitle className="text-sm">Billing profile</CardTitle>
                 {!isArchived && (
                   <Button variant="outline" size="sm" onClick={() => setShowEditBilling(true)}>
                     <Pencil size={12} className="mr-1.5" />
@@ -696,7 +696,7 @@ export default function CustomerDetailPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Contact</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                   <div>
-                    <p className="text-xs text-muted-foreground">Legal Name</p>
+                    <p className="text-xs text-muted-foreground">Legal name</p>
                     <p className="text-sm text-foreground mt-1">{billingProfile.legal_name || '—'}</p>
                   </div>
                   <div>
@@ -749,12 +749,12 @@ export default function CustomerDetailPage() {
                   </div>
                 ) : billingProfile.tax_status === 'reverse_charge' ? (
                   <p className="text-sm text-muted-foreground">
-                    B2B reverse charge — tax is zero on the invoice; the buyer self-accounts for VAT/GST in their jurisdiction.
+                    Reverse charge: no tax on the invoice; the business customer pays the VAT/GST themselves.
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                     <div>
-                      <p className="text-xs text-muted-foreground">Tax ID Type</p>
+                      <p className="text-xs text-muted-foreground">Tax ID type</p>
                       <p className="text-sm text-foreground mt-1 uppercase">{billingProfile.tax_id_type || '—'}</p>
                     </div>
                     <div>
@@ -773,7 +773,7 @@ export default function CustomerDetailPage() {
                 <p className="text-sm text-foreground">
                   {billingProfile.currency
                     ? billingProfile.currency.toUpperCase()
-                    : <span className="text-muted-foreground">Use tenant default</span>}
+                    : <span className="text-muted-foreground">Use account default</span>}
                 </p>
               </section>
             </CardContent>
@@ -783,7 +783,7 @@ export default function CustomerDetailPage() {
           // neither Set Up nor Edit is offered.
           <>
             <CardHeader>
-              <CardTitle className="text-sm">Billing Profile</CardTitle>
+              <CardTitle className="text-sm">Billing profile</CardTitle>
             </CardHeader>
             <CardContent className="text-center py-8">
               {profileCard === 'error' ? (
@@ -799,7 +799,7 @@ export default function CustomerDetailPage() {
         ) : (
           <>
             <CardHeader>
-              <CardTitle className="text-sm">Billing Profile</CardTitle>
+              <CardTitle className="text-sm">Billing profile</CardTitle>
             </CardHeader>
             <CardContent className="text-center py-8">
               <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mx-auto mb-3">
@@ -809,7 +809,7 @@ export default function CustomerDetailPage() {
               <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">Set up billing details to enable invoicing and payments for this customer</p>
               {!isArchived && (
                 <Button size="sm" className="mt-4" onClick={() => setShowEditBilling(true)}>
-                  Set Up Billing Profile
+                  Set up billing profile
                 </Button>
               )}
             </CardContent>
@@ -839,7 +839,7 @@ export default function CustomerDetailPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-foreground">{effectiveDunningPolicy.name || 'Default'}</span>
                   {!assignedDunningPolicy && (
-                    <Badge variant="outline">tenant default</Badge>
+                    <Badge variant="outline">account default</Badge>
                   )}
                 </div>
               </div>
@@ -1032,7 +1032,7 @@ export default function CustomerDetailPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">Subscriptions ({subsTotal})</CardTitle>
-              {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create Subscription</Button>}
+              {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -1088,10 +1088,10 @@ export default function CustomerDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Recent Invoices */}
+        {/* Recent invoices */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Recent Invoices</CardTitle>
+            <CardTitle className="text-sm">Recent invoices</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border">
@@ -1191,7 +1191,7 @@ export default function CustomerDetailPage() {
         </Card>
       </div>
 
-      {/* Edit Customer Dialog */}
+      {/* Edit customer Dialog */}
       {showEditCustomer && (
         <EditCustomerDialog
           customer={customer}
@@ -1208,7 +1208,7 @@ export default function CustomerDetailPage() {
         />
       )}
 
-      {/* Create Subscription Dialog — shared with the Subscriptions
+      {/* Create subscription Dialog — shared with the Subscriptions
           page; locked to this customer so the picker is hidden and
           the customer_id is pre-filled. */}
       {plans && customer && (
@@ -1226,7 +1226,7 @@ export default function CustomerDetailPage() {
         />
       )}
 
-      {/* Edit Billing Profile Dialog */}
+      {/* Edit billing profile Dialog */}
       {showEditBilling && id && customer && (
         <EditBillingProfileDialog
           customerId={id}
@@ -1285,7 +1285,7 @@ export default function CustomerDetailPage() {
   )
 }
 
-/* ─── Edit Customer ──────────────────────────────────────────── */
+/* ─── Edit customer ──────────────────────────────────────────── */
 
 function EditCustomerDialog({ customer, onClose, onSaved }: {
   customer: Customer; onClose: () => void; onSaved: () => void
@@ -1318,11 +1318,11 @@ function EditCustomerDialog({ customer, onClose, onSaved }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Customer</DialogTitle>
+          <DialogTitle>Edit customer</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="display_name">Display Name</Label>
+            <Label htmlFor="display_name">Display name</Label>
             <Input id="display_name" maxLength={255} {...register('display_name')} />
             {errors.display_name && <p className="text-xs text-destructive">{errors.display_name.message}</p>}
           </div>
@@ -1352,7 +1352,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: {
 }
 
 
-/* ─── Edit Billing Profile ───────────────────────────────────── */
+/* ─── Edit billing profile ───────────────────────────────────── */
 
 function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSaved }: {
   customerId: string
@@ -1415,7 +1415,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
     : null
 
   const currencyOptions = [
-    { value: '', label: 'Use tenant default', keywords: ['default', 'tenant', 'inherit'] },
+    { value: '', label: 'Use account default', keywords: ['default', 'tenant', 'inherit'] },
     ...GEO_CURRENCIES.map(c => ({
       value: c.code.toLowerCase(),
       label: `${c.code} — ${c.label}`,
@@ -1431,7 +1431,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
       {/* eslint-disable-next-line no-restricted-syntax -- DialogContent scrolls as ONE box including its own close button, so a content mask would fade that button. Giving dialogs a scrolling BODY inside a fixed shell is a redesign of every dialog; tracked, not bundled here. */}
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{profile ? 'Edit Billing Profile' : 'Set Up Billing Profile'}</DialogTitle>
+          <DialogTitle>{profile ? 'Edit billing profile' : 'Set up billing profile'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} noValidate className="space-y-6">
 
@@ -1455,7 +1455,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
           <div className="space-y-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Contact</p>
             <div className="space-y-2">
-              <Label>Legal Name</Label>
+              <Label>Legal name</Label>
               <Input maxLength={255} placeholder="Acme Corporation Inc." {...register('legal_name')} />
             </div>
             <div className="space-y-2">
@@ -1484,7 +1484,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
               />
             </div>
             <div className="space-y-2">
-              <Label>Street Address</Label>
+              <Label>Street address</Label>
               <Input maxLength={200} placeholder="123 Main Street" {...register('address_line1')} />
             </div>
             <div className="space-y-2">
@@ -1511,7 +1511,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 )}
               </div>
               <div className="space-y-2">
-                <Label>Postal Code</Label>
+                <Label>Postal code</Label>
                 <Input placeholder={postalPlaceholder} maxLength={20} {...register('postal_code')} />
               </div>
             </div>
@@ -1534,7 +1534,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                     <SelectContent>
                       <SelectItem value="standard">Standard — tax applied per provider rules</SelectItem>
                       <SelectItem value="exempt">Exempt — no tax (certificate, non-profit, etc.)</SelectItem>
-                      <SelectItem value="reverse_charge">Reverse charge — B2B buyer self-accounts</SelectItem>
+                      <SelectItem value="reverse_charge">Reverse charge — the business customer pays the VAT/GST</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -1543,7 +1543,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 {form.tax_status === 'exempt'
                   ? 'Forces zero tax with the exempt reason printed on the PDF audit trail. Use for a certificate or non-profit the tax provider can\'t see.'
                   : form.tax_status === 'reverse_charge'
-                    ? 'Forces zero tax with the reverse-charge legend (buyer self-assesses). For most B2B customers, prefer Standard + a Tax ID — reverse charge is then applied automatically only where it\'s valid. It never applies to a buyer in your own country.'
+                    ? 'No tax on the invoice, which notes that the business customer pays the VAT/GST themselves. For most business customers, pick Standard and add their tax ID instead: reverse charge then applies automatically, only where it\'s allowed. It never applies to a customer in your own country.'
                     : 'Tax is calculated by your provider. For a B2B customer, add their Tax ID below — reverse charge is then applied automatically where it applies (cross-border).'}
               </p>
             </div>
@@ -1565,7 +1565,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
             {form.tax_status !== 'exempt' && (
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Tax ID Type</Label>
+                  <Label>Tax ID type</Label>
                   <Combobox
                     value={form.tax_id_type}
                     onChange={(val) => setValue('tax_id_type', val, { shouldDirty: true })}
@@ -1610,7 +1610,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 options={currencyOptions}
                 placeholder="Select currency..."
               />
-              <p className="text-xs text-muted-foreground">Overrides the tenant default for invoices on this customer.</p>
+              <p className="text-xs text-muted-foreground">Overrides the account default for invoices on this customer.</p>
             </div>
           </div>
 
@@ -1681,7 +1681,7 @@ function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onCl
               value={selected}
               onChange={(val) => setSelected(val ?? '__default__')}
               options={[
-                { value: '__default__', label: defaultPolicy ? `Tenant default (${defaultPolicy.name || 'Default'})` : 'Tenant default' },
+                { value: '__default__', label: defaultPolicy ? `Account default (${defaultPolicy.name || 'Default'})` : 'Account default' },
                 ...policies.filter(p => !p.is_default).map(p => ({ value: p.id, label: p.name || '(unnamed policy)' })),
               ]}
               emptyMessage="No policy matches that search."
@@ -2196,7 +2196,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Amounts are in cents (e.g. 2500 = {formatCents(2500, currency)}). Tax is applied per the tenant's tax provider when the invoice finalizes.
+              Amounts are in cents (e.g. 2500 = {formatCents(2500, currency)}). Tax is worked out from your tax settings when the invoice is finalized.
             </p>
           </div>
 

@@ -277,7 +277,7 @@ export default function CreditsPage() {
                 View customer
               </Link>
             </div>
-            <p className="text-sm text-muted-foreground mt-0.5">Credit Balance</p>
+            <p className="text-sm text-muted-foreground mt-0.5">Credit balance</p>
             <p className={cn('text-3xl font-semibold mt-1', (selectedBalance?.balance_cents || 0) > 0 ? 'text-emerald-600' : 'text-muted-foreground')}>
               {formatCents(selectedBalance?.balance_cents || 0)}
             </p>
@@ -292,12 +292,12 @@ export default function CreditsPage() {
           </div>
         </div>
 
-        {/* Transaction History */}
+        {/* Transaction history */}
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-3">
             <CardTitle className="text-sm">
               <span className="inline-flex items-center gap-2">
-                Transaction History
+                Transaction history
                 {/* Ledger dates on a clock-pinned customer are simulated —
                     one badge covers the card, same pattern as the detail
                     pages (clock-design review 2026-07-21). */}
@@ -505,12 +505,12 @@ export default function CreditsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Credits</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage prepaid credit balances{customersWithCredits.length > 0 ? ` · ${formatCents(totalOutstanding)} across ${customersWithCredits.length} customer${customersWithCredits.length !== 1 ? 's' : ''}` : ''}
+            Balance a customer can spend. Velox uses it to pay their invoices before charging their card{customersWithCredits.length > 0 ? ` · ${formatCents(totalOutstanding)} across ${customersWithCredits.length} customer${customersWithCredits.length !== 1 ? 's' : ''}` : ''}
           </p>
         </div>
         {customersWithCredits.length > 0 && (
           <Button size="sm" onClick={() => { setModalCustomerId(''); setShowGrant(true) }}>
-            <Plus size={16} className="mr-2" /> Grant Credits
+            <Plus size={16} className="mr-2" /> Grant credits
           </Button>
         )}
       </div>
@@ -526,9 +526,9 @@ export default function CreditsPage() {
             <EmptyState
               icon={Coins}
               title="No credit activity"
-              description="Grant credits to a customer to get started."
+              description="Give a customer credit, for example a prepaid top-up or a goodwill credit."
               action={{
-                label: 'Grant Credits',
+                label: 'Grant credits',
                 icon: Plus,
                 onClick: () => { setModalCustomerId(''); setShowGrant(true) },
               }}
@@ -788,7 +788,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   name="expiresAt"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Expires At</FormLabel>
+                      <FormLabel>Expires at</FormLabel>
                       <DatePicker
                         value={field.value}
                         onChange={field.onChange}
@@ -832,7 +832,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                       <Loader2 size={14} className="animate-spin mr-2" />
                       Processing...
                     </>
-                  ) : isDeduct ? 'Deduct Credits' : 'Grant Credits'}
+                  ) : isDeduct ? 'Deduct credits' : 'Grant credits'}
                 </Button>
               </DialogFooter>
             </form>
@@ -843,7 +843,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
       <AlertDialog open={showConfirm} onOpenChange={(open) => { if (!open) setShowConfirm(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{isDeduct ? 'Confirm Deduction' : 'Confirm Credit Grant'}</AlertDialogTitle>
+            <AlertDialogTitle>{isDeduct ? 'Confirm deduction' : 'Confirm credit grant'}</AlertDialogTitle>
             <AlertDialogDescription>
               {isDeduct ? 'Deduct' : 'Grant'} {formatCents(confirmCents, currency)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
             </AlertDialogDescription>
@@ -854,7 +854,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
               onClick={handleConfirm}
               className={cn(isDeduct && 'bg-destructive text-destructive-foreground hover:bg-destructive/90')}
             >
-              {isDeduct ? 'Deduct' : 'Grant Credits'}
+              {isDeduct ? 'Deduct' : 'Grant credits'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

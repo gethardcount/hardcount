@@ -146,7 +146,7 @@ export default function LoginPage() {
 
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
-              {loading ? 'Signing in…' : 'Sign In'}
+              {loading ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
         </CardContent>

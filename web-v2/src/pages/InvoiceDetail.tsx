@@ -86,7 +86,7 @@ function TaxReversedLine({ cn, currency }: { cn: CreditNote; currency: string })
 }
 
 const LINE_TYPE_LABELS: Record<string, string> = {
-  base_fee: 'Base Fee',
+  base_fee: 'Base fee',
   usage: 'Usage',
   add_on: 'Add-On',
   discount: 'Discount',
@@ -340,7 +340,7 @@ export default function InvoiceDetailPage() {
 
   // Payment-method snapshot serves two purposes on this page:
   //   1. The success-state card on paid invoices (brand •••• last4).
-  //   2. The Collect Payment button's disabled state — when no PM is
+  //   2. The Collect payment button's disabled state — when no PM is
   //      ready, charging will fail, so the button gates on
   //      paymentSetup.setup_status === 'ready'. Mirrors the disable-
   //      with-tooltip pattern Velox uses for Finalize-on-tax-failure.
@@ -657,7 +657,7 @@ export default function InvoiceDetailPage() {
             else. Replaces the prior 8-10 buttons flowing across the
             header which crowded the page and obscured the next action.
 
-            Draft is the exception: Add Line Item is an inline EDIT
+            Draft is the exception: Add line item is an inline EDIT
             action (mutating the line items table just below); keeping
             it as a flat header button preserves the "you're editing
             this draft" affordance. Everything else sits in the
@@ -670,7 +670,7 @@ export default function InvoiceDetailPage() {
           </Button>
           {invoice.status === 'draft' && (
             <Button variant="outline" size="sm" onClick={() => setShowAddLineItem(true)} disabled={acting}>
-              Add Line Item
+              Add line item
             </Button>
           )}
 
@@ -691,7 +691,7 @@ export default function InvoiceDetailPage() {
               )
             }
             const reason = invoice.tax_status === 'pending'
-              ? 'Tax calculation is still pending — retry in progress. Finalize unblocks once tax_status = ok.'
+              ? 'Tax is still being calculated, and Velox keeps retrying. You can finalize once it\'s done.'
               : 'Tax calculation has failed after retries. Resolve the customer billing profile or retry tax before finalizing.'
             return (
               <Tooltip>
@@ -712,7 +712,7 @@ export default function InvoiceDetailPage() {
               null
             ) : (
               <Button size="sm" onClick={() => collectMutation.mutate()} disabled={acting}>
-                {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect Payment'}
+                {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect payment'}
               </Button>
             )
           )}
@@ -735,7 +735,7 @@ export default function InvoiceDetailPage() {
               convention for destructive actions in menus).
 
               Items are grouped by intent:
-                1. Recovery / state-change (Record Payment, Mark
+                1. Recovery / state-change (Record payment, Mark
                    Uncollectible) — operator drives the invoice
                    toward a terminal state.
                 2. Customer-facing (Email, Copy Link, Rotate) —
@@ -1077,7 +1077,7 @@ export default function InvoiceDetailPage() {
               )}
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Bill To</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Bill to</p>
               {/* An issued invoice shows the buyer it was issued to (ADR-109);
                   a draft or a pre-copy invoice shows the current customer.
                   Both print the display name, so finalizing does not change
@@ -1178,7 +1178,7 @@ export default function InvoiceDetailPage() {
                 <TableRow>
                   <TableHead className="w-[50%]">Item</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-right">Unit price</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1206,7 +1206,7 @@ export default function InvoiceDetailPage() {
                                 {item.description}
                               </TooltipTrigger>
                               <TooltipContent className="max-w-xs">
-                                {`Subscription started mid-cycle. Charge covers ${prorationMatch[1]} of ${prorationMatch[2]} days in the period. Period boundaries snap to start-of-day in tenant timezone (signup day inclusive).`}
+                                {`Started mid-period, so this charge covers ${prorationMatch[1]} of ${prorationMatch[2]} days. Days count in your account's timezone, including the start day.`}
                               </TooltipContent>
                             </Tooltip>
                           ) : (
@@ -1335,7 +1335,7 @@ export default function InvoiceDetailPage() {
                 <>
                   <Separator />
                   <div className="flex justify-between text-sm font-semibold">
-                    <span>Amount Due</span>
+                    <span>Amount due</span>
                     <span className="font-mono tabular-nums">$0.00</span>
                   </div>
                 </>
@@ -1368,21 +1368,21 @@ export default function InvoiceDetailPage() {
 
                     {invoice.credits_applied_cents > 0 && (
                       <div className="flex justify-between text-sm text-emerald-600">
-                        <span>Credits Applied</span>
+                        <span>Credits applied</span>
                         <span className="font-mono tabular-nums">-{formatCents(invoice.credits_applied_cents, invoice.currency)}</span>
                       </div>
                     )}
 
                     {invoice.amount_paid_cents > 0 && (
                       <div className="flex justify-between text-sm text-muted-foreground">
-                        <span>Amount Paid</span>
+                        <span>Amount paid</span>
                         <span className="font-mono tabular-nums">-{formatCents(invoice.amount_paid_cents, invoice.currency)}</span>
                       </div>
                     )}
 
                     <Separator />
                     <div className="flex justify-between font-semibold text-base pt-1">
-                      <span>Amount Due</span>
+                      <span>Amount due</span>
                       <span className="font-mono tabular-nums">{formatCents(invoice.amount_due_cents, invoice.currency)}</span>
                     </div>
 
@@ -1610,7 +1610,7 @@ export default function InvoiceDetailPage() {
       <TypedConfirmDialog
         open={showMarkUncollectibleConfirm}
         onOpenChange={setShowMarkUncollectibleConfirm}
-        title="Mark Invoice Uncollectible"
+        title="Mark invoice uncollectible"
         description="Records this invoice as bad debt. The invoice stays on the books for audit, but dunning automation halts and no further collection is attempted. If the payment provider later confirms the charge did go through, the invoice still settles as paid on its own."
         confirmWord="WRITE OFF"
         confirmLabel="Mark Uncollectible"
@@ -1658,7 +1658,7 @@ export default function InvoiceDetailPage() {
         loading={rotatePublicTokenMutation.isPending}
       />
 
-      {/* Record Payment Dialog — Stripe-parity operator path for
+      {/* Record payment Dialog — Stripe-parity operator path for
           out-of-band collection. Amount is implicit (full amount_due);
           the optional note captures the operator's recording method
           (cheque #, wire reference, etc) for the audit trail. */}
@@ -1708,7 +1708,7 @@ export default function InvoiceDetailPage() {
             <DialogFooter>
               <Button variant="outline" onClick={() => { setShowRecordPaymentDialog(false); setRecordPaymentNote('') }} disabled={recordPaymentMutation.isPending}>Cancel</Button>
               <Button onClick={() => recordPaymentMutation.mutate()} disabled={recordPaymentMutation.isPending}>
-                {recordPaymentMutation.isPending ? 'Recording…' : 'Record Payment'}
+                {recordPaymentMutation.isPending ? 'Recording…' : 'Record payment'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1736,7 +1736,7 @@ export default function InvoiceDetailPage() {
         />
       )}
 
-      {/* Add Line Item Modal */}
+      {/* Add line item Modal */}
       {showAddLineItem && (
         <AddLineItemDialog
           invoiceId={invoice.id}
@@ -1761,7 +1761,7 @@ export default function InvoiceDetailPage() {
                 Close
               </Button>
             </div>
-            <iframe src={pdfPreviewUrl} className="w-full flex-1 min-h-0" title="Invoice PDF Preview" />
+            <iframe src={pdfPreviewUrl} className="w-full flex-1 min-h-0" title="Invoice PDF preview" />
           </div>
         </div>
       )}
@@ -1939,7 +1939,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Line Item</DialogTitle>
+          <DialogTitle>Add line item</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
@@ -1970,7 +1970,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
               <Input id="quantity" type="number" min={1} value={quantity} onChange={e => setQuantity(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="unitAmount">Unit Price ({getCurrencySymbol(currency)})</Label>
+              <Label htmlFor="unitAmount">Unit price ({getCurrencySymbol(currency)})</Label>
               <Input id="unitAmount" type="number" step="0.01" min={0.01} value={unitAmount} onChange={e => { setUnitAmount(e.target.value); setAmountError('') }} placeholder="10.00" />
               {amountError && <p className="text-xs text-destructive">{amountError}</p>}
             </div>
@@ -1985,7 +1985,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
-              {saving ? <><Loader2 size={14} className="animate-spin mr-2" />Adding...</> : 'Add Line Item'}
+              {saving ? <><Loader2 size={14} className="animate-spin mr-2" />Adding...</> : 'Add line item'}
             </Button>
           </DialogFooter>
         </form>
@@ -2019,11 +2019,11 @@ function EmailInvoiceDialog({ invoiceId, defaultEmail, defaultCc, onClose, onSen
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Email Invoice</DialogTitle>
+          <DialogTitle>Email invoice</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="email">Recipient Email</Label>
+            <Label htmlFor="email">Recipient email</Label>
             <Input id="email" type="email" placeholder="customer@example.com" maxLength={254} {...register('email')} />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
           </div>
@@ -2036,7 +2036,7 @@ function EmailInvoiceDialog({ invoiceId, defaultEmail, defaultCc, onClose, onSen
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? <><Loader2 size={14} className="animate-spin mr-2" />Sending...</> : 'Send Email'}
+              {isSubmitting ? <><Loader2 size={14} className="animate-spin mr-2" />Sending...</> : 'Send email'}
             </Button>
           </DialogFooter>
         </form>

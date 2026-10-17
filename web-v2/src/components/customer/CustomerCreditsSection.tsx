@@ -94,6 +94,11 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
         {(split.active.length > 0 || split.finished.length > 0) && (
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">Grants</p>
+            {shown.some(g => g.grant_kind === 'commit' || g.grant_kind === 'promotional') && (
+              <p className="mb-2 text-xs text-muted-foreground">
+                Commit credit was paid for on an invoice. Promotional credit is free and is used up first.
+              </p>
+            )}
             {shown.length > 0 && (
               <div className="overflow-x-auto">
                 <Table>

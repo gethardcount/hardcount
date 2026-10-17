@@ -36,7 +36,7 @@ test('collectible states are NOT terminal — the negative control', () => {
   // every assertion above.
   for (const s of ['finalized', 'draft']) {
     assert.equal(isTerminalInvoiceStatus(s), false, `${s} is still collectible`)
-    assert.equal(invoiceAmountLabel(s), 'Amount Due', `${s} must still say Amount Due`)
+    assert.equal(invoiceAmountLabel(s), 'Amount due', `${s} must still say Amount due`)
   }
 })
 
@@ -46,7 +46,7 @@ test('absent / unknown status is treated as collectible, not terminal', () => {
   // expensive direction of this mistake.
   for (const s of [undefined, null, '', 'some_future_status']) {
     assert.equal(isTerminalInvoiceStatus(s), false)
-    assert.equal(invoiceAmountLabel(s), 'Amount Due')
+    assert.equal(invoiceAmountLabel(s), 'Amount due')
   }
 })
 
