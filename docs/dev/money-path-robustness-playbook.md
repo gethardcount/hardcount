@@ -25,11 +25,12 @@ payment), a subscription or a tax record.
    blocks the PR.
 4. **Review by class with the §4 questions.** Run the greps yourself, and
    re-derive each invariant. Do not accept "none of X can Y".
-5. **Lock the behavior with an automated test.** Concurrency always needs
-   one. Money invariants and crash-between-writes need one unless the test
-   would repeat a proven pattern. Use the [§5](#5-test-lock-doctrine)
-   patterns: collision, real Postgres, concurrent-resolver fake,
-   mutation-verify.
+5. **Lock the behavior with an automated test.** Concurrency and
+   crash-between-writes always need one. A money invariant needs one unless
+   the test would repeat a proven pattern. Use the six
+   [§5](#5-test-lock-doctrine) patterns: collision, real Postgres,
+   concurrent-resolver fake, mutation-verify, one advance across many
+   boundaries, and the invoice row locked first.
 
 The terms are defined in the [§1 table](#1-the-failure-class-map) and the
 [glossary](../glossary.md).
@@ -284,7 +285,7 @@ proof land on the table.
 [release checklist](release-checklist.md) (live-Stripe exactly-once
 stays manual). Dashboard screens get a Playwright test.
 
-Five non-negotiable patterns:
+Six non-negotiable patterns:
 
 1. **Collision, not happy-path.** Fire the same mutation twice, both
    concurrently and serially. Assert exactly-one effect + the specific dedup
