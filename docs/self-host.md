@@ -8,8 +8,10 @@ Velox is one Go program that talks to Postgres. In production it also needs Redi
 
 | | Good for | What you run |
 |---|---|---|
-| **One VM with Docker Compose** | Trying Velox, or a small install where a few minutes of downtime during a restart is fine | Five containers on one machine |
-| **Two or more copies behind a load balancer** | Production, where a restart must not cause downtime | Two or more `velox-api` copies, a managed Postgres, a managed Redis |
+| **One VM with Docker Compose** | Trying Velox, and production for a small team where a few minutes of downtime during a restart is fine | Five containers on one machine |
+| **Two or more copies behind a load balancer** | High availability: production where a restart or a crashed copy must not cause downtime | Two or more `velox-api` copies, a managed Postgres, a managed Redis |
+
+Both are supported for production. Start with one VM; move to two or more copies when downtime during a restart is no longer acceptable.
 
 A Helm chart and a Terraform module are not written yet. They will be when an early customer tells us which platform they run.
 
@@ -35,7 +37,7 @@ That gives you a working [tenant](glossary.md): one business account with its ow
 
 ## Two or more copies behind a load balancer
 
-This is the supported production setup:
+This is the high-availability setup:
 
 - Two or more `velox-api` copies behind a load balancer.
 - A managed Postgres with automatic failover and point-in-time restore.
@@ -87,9 +89,9 @@ cd web-v2 && npm install && npm run dev
 
 The Compose stack ships Postgres 16 with default settings, which is enough for trying Velox. For your own Postgres:
 
-- **Version:** 16.
+- **Version:** 16 is the version CI tests and the Compose stack runs. Postgres 14 is the oldest that should work, but it is not tested. See [Postgres requirements](ops/postgres-requirements.md#versions).
 - **Extensions:** `pgcrypto`, `citext` and `btree_gist`. Velox creates them during database upgrades, so the role that runs upgrades needs permission to create extensions. If your managed Postgres forbids that, create them first: [Postgres requirements](ops/postgres-requirements.md).
-- **Backups:** take regular `pg_dump` snapshots. How often depends on how much data you can afford to lose. See [backups](ops/backup-considerations.md).
+- **Backups:** point-in-time restore (most managed Postgres offer it) is best. A nightly `pg_dump`, which `scripts/backup.sh` takes, also works, but you lose what was written since the last dump. Back up `VELOX_ENCRYPTION_KEY` too, separately: without it, the encrypted data in a backup (customer details, Stripe keys, webhook secrets) cannot be read. See [backups](ops/backup-considerations.md).
 
 ### The two database users
 
@@ -193,7 +195,9 @@ One small VM will take far less. To raise the limit, in this order:
 
 ## What to watch
 
-Velox serves Prometheus metrics at `/metrics` and writes structured logs to standard output. Connect both to the monitoring you already run. Velox does not ship dashboards or alert rules.
+Velox serves Prometheus metrics at `/metrics` and writes structured logs to standard output. Connect both to the monitoring you already run.
+
+Velox ships one Grafana dashboard, [`ops/grafana-dashboard.json`](ops/grafana-dashboard.json). Import it into Grafana and point it at the Prometheus that scrapes `/metrics`. It shows HTTP traffic, billing runs, payments, payment retries, the email and webhook queues, and tax. Velox does not ship alert rules.
 
 In `production`, set `METRICS_TOKEN` and have Prometheus send it as a bearer token. Without it, `/metrics` answers 401. At most three scrapes run at once; a fourth gets a 503.
 

@@ -1,5 +1,11 @@
 # HA readiness — SPOF register and the multi-replica plan (2026-07-06)
 
+> **Amendment 2026-10-17.** One VM with the Compose stack is also a
+> supported production setup, for a small team that can accept a few
+> minutes of downtime during a restart. Two or more replicas is the
+> high-availability setup. [docs/self-host.md](../self-host.md) is the
+> current answer.
+
 > **Amendment 2026-08-30 — the premise below is retired.** The supported
 > production posture is now **N ≥ 2 `velox-api` replicas behind a load
 > balancer, on managed Postgres with failover + PITR and managed Redis,

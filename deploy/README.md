@@ -5,13 +5,14 @@ One install shape ships in this directory. The canonical landing page is
 
 | Path | Use when |
 |---|---|
-| [`compose/`](compose/) | Single-VM eval, dev/staging, low-volume production. Reference deploy. |
+| [`compose/`](compose/) | One VM: trying Velox, staging, or production for a small team that can accept a few minutes of downtime during a restart. |
 
-Kubernetes (Helm) and Terraform paths are deliberately not shipped in
-v1. They land when a design partner (an early production adopter) names
-the flavour they actually run. See the "Operational posture" section of
-`docs/self-host.md`. The reason: shipping three deployment paths ahead of
-demand produced surface area nobody was running.
+For no downtime during restarts (high availability), run two or more
+copies behind a load balancer: see [Scaling](#scaling) below and
+[Self-host](../docs/self-host.md#two-or-more-copies-behind-a-load-balancer).
+
+A Helm chart and a Terraform module are not written yet. They will be
+when an early customer tells us which platform they run.
 
 ## Local development
 
@@ -54,9 +55,10 @@ install:
 | `VELOX_ENCRYPTION_KEY` | 64 hex chars (32 bytes). Production refuses to start without it (`config.validateFatal`). |
 | `VELOX_BOOTSTRAP_TOKEN` | Authorises the one-shot `POST /v1/bootstrap` that creates the first tenant. |
 
-Per-tenant Stripe API keys live in the database (see migration 0032),
-not in env vars. The optional `STRIPE_WEBHOOK_SECRET` env var only
-gates inbound Stripe webhook signature verification.
+Stripe is not set with env vars. Each tenant connects its own Stripe
+account in the dashboard, under Settings → Payments: the API keys and
+the webhook signing secret (`whsec_…`) are stored per tenant in the
+database.
 
 ## Health checks
 
@@ -109,10 +111,10 @@ rolling: Kubernetes `Recreate`, or `maxSurge: 0, maxUnavailable: 100%`.
   The complete verified list is
   [docs/dev/ha-readiness-2026-07-06.md](../docs/dev/ha-readiness-2026-07-06.md).
   It covers what breaks at N=2, what's already safe, and the scoped build
-  plan. As of 2026-08-30, N ≥ 2 behind a load balancer is the supported
-  production posture. The remaining items are being built (see the
-  HA-readiness doc's dated header). The reference compose stack stays
-  single-replica for evaluation.
+  plan. Two or more copies behind a load balancer is the supported
+  high-availability setup. One VM with the compose stack is a supported
+  production setup too, for a small team that can accept a few minutes
+  of downtime during a restart; the compose stack runs one copy.
 - **Rolling deploys and shutdown:** on SIGTERM a replica first flips
   readiness so the balancer stops routing to it (while still accepting
   connections), then drains in three bounded stages.

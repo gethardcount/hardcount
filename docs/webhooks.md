@@ -113,7 +113,7 @@ Anything else retries on this ladder:
 Six total attempts over ~26.5 hours, then the delivery is marked failed.
 Failed deliveries stay visible in the dashboard (per-endpoint success
 rate, per-event delivery timeline) and any event can be **replayed**
-manually (`POST /v1/webhook-endpoints/events/{id}/replay`).
+manually (`POST /v1/webhook_events/{id}/replay`).
 
 ## Delivery contract
 

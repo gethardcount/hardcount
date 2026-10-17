@@ -14,11 +14,12 @@ Velox sends all customer-facing email through SMTP:
 You plug in your existing email service provider (ESP) through env
 vars. Swapping providers needs no code changes.
 
-This doc covers production-ready SMTP configuration. Bounce and
-complaint webhooks are out of scope for v1. These would be per-ESP
-webhook receivers that feed `email_status` back into Velox
-(`email_status` is Velox's per-customer deliverability field). Instead,
-configure suppressions (do-not-send lists) on the ESP side.
+This doc covers production-ready SMTP configuration, and how Velox
+learns that an email bounced. With Postmark, Velox can also receive
+bounce, spam-complaint and delivery reports through a webhook: see
+[Bounce and complaint handling](#bounce-and-complaint-handling). For
+other providers, set up suppressions (do-not-send lists) on the
+provider's side.
 
 ## Quickstart
 
@@ -39,7 +40,7 @@ customer-facing emails:
 ```bash
 HOSTED_INVOICE_BASE_URL=https://billing.example.com    # email "View & pay invoice" / "View receipt" CTA target → /invoice/<public_token>
 CUSTOMER_PORTAL_URL=https://billing.example.com        # SPA base for the Stripe payment-method-setup return URL
-PAYMENT_UPDATE_URL=https://billing.example.com/update-payment   # payment-update-request emails (no-PM-at-finalize, charge-failure)
+PAYMENT_UPDATE_URL=https://billing.example.com/update-payment   # link in the "add a payment method" email, sent when an invoice has no payment method on file
 ```
 
 Restart Velox. The next email queued in `email_outbox` then goes out
@@ -56,10 +57,7 @@ misconfiguration is therefore easy to see, and it does not stop startup:
 | `HOSTED_INVOICE_BASE_URL` | `HOSTED_INVOICE_BASE_URL NOT SET — …` | Invoice / receipt / dunning / payment-failed emails render with **no link** in the CTA button. |
 | `CUSTOMER_PORTAL_URL` | `CUSTOMER_PORTAL_URL NOT SET — …` | Not a customer email variable. It is the dashboard address Stripe returns a customer to after they save a card. Unset → the return address is `http://localhost:5173`; the card is still saved. |
 | `DASHBOARD_BASE_URL` | `DASHBOARD_BASE_URL NOT SET — …` | Password-reset emails are not sent. Team invites fail because the accept link cannot be built. |
-| `PAYMENT_UPDATE_URL` | `PAYMENT_UPDATE_URL NOT SET — …` | Payment-update-request emails (no-PM-at-finalize, charge-failure) skipped at send time. |
-
-("No-PM-at-finalize" above = an invoice reached finalization with no
-payment method on file for the customer.)
+| `PAYMENT_UPDATE_URL` | `PAYMENT_UPDATE_URL NOT SET — …` | The "add a payment method" email is not sent. Velox sends that email when an invoice has no payment method on file, and when you click Resend setup link on an invoice. Payment-failed and dunning emails link to the hosted invoice page instead, so they do not need this. |
 
 For local dev, point Velox at the Mailpit container bundled in
 `docker-compose.yml`. Mailpit is a local SMTP catcher with a web inbox.
@@ -266,11 +264,18 @@ How to read the result:
 - Status `pending` with attempts > 0 and a `last_error` means the ESP
   rejected it. Fix the cause the error message names.
 
-## Bounce + complaint handling (deferred)
+## Bounce and complaint handling
+
+Both ways below need `VELOX_EMAIL_BIDX_KEY` set (64 hex characters,
+`openssl rand -hex 32`). Velox uses it to find the customer by email
+address. Without it, Velox cannot mark a customer as bounced, and the
+server logs a WARN at boot.
+
+### When the SMTP server rejects the address
 
 When the SMTP server rejects the recipient, Velox marks the customer's
-`email_status` as `bounced` (via `bounceReporterAdapter` in
-`router.go`). A rejection is a 550, 551, 552 or 553 reply, or any 5xx
+`email_status` as `bounced`, and sends no more email to that address.
+A rejection is a 550, 551, 552 or 553 reply, or any 5xx
 reply whose status starts with 5.1 or 5.2. This catches synchronous
 failures.
 
@@ -280,18 +285,60 @@ authentication error (535), a policy rejection (a 5.7.x status such as
 timeout. A 550 to 553 reply with no 5.7.x status counts as a bounce at
 any stage of the conversation, including a rejected From address.
 
-Asynchronous bounces don't flow back through SMTP. In an asynchronous
-bounce, the ESP accepts the message but the recipient mailbox rejects
-it later. Each ESP has its own webhook format for these:
+### When the provider reports a bounce later (Postmark)
 
-- **SES**: SNS notifications → forward to a Velox webhook endpoint.
-- **SendGrid**: Event Webhook → POST to your endpoint.
-- **Postmark**: Webhooks → POST.
+Some bounces arrive later: the provider accepts the message, and the
+recipient's mailbox rejects it afterwards. These don't come back
+through SMTP. Velox receives them from **Postmark** through a webhook,
+`POST /v1/webhooks/postmark`:
 
-For v1, configure suppressions inside the ESP's dashboard. This stops
-repeat sends to bouncing addresses without a Velox-side integration.
-Per-ESP webhook receivers can be added later, when a
-[design partner](../glossary.md) (DP) needs them.
+1. Pick a user name and a password for the webhook, and set them on
+   the Velox server:
+
+   ```bash
+   POSTMARK_WEBHOOK_USER=velox-postmark
+   POSTMARK_WEBHOOK_PASS=$(openssl rand -hex 24)
+   ```
+
+   The Compose stack does not pass these two settings to the API yet.
+   On that stack, add them under `velox-api` → `environment` in
+   `docker-compose.yml`.
+2. Restart Velox.
+   **You see:** no `POSTMARK_WEBHOOK_USER/POSTMARK_WEBHOOK_PASS not set`
+   WARN line at boot.
+3. In Postmark, open your server, then **Webhooks**, and add this URL,
+   with **Delivery**, **Bounce** and **Spam Complaint** checked:
+
+   ```text
+   https://<user>:<pass>@your-api-host/v1/webhooks/postmark
+   ```
+
+   Postmark does not sign its webhooks, so the user name and password
+   in the URL are what prove a call comes from your Postmark account.
+4. Send a test invoice email.
+   **You see:** on the customer page, under **Sent emails**, the email's
+   status changes from `dispatched` to `delivered` once Postmark reports it.
+
+What Velox does with each report:
+
+- **Delivery**: marks the email `delivered`.
+- **Bounce**: a permanent bounce (Postmark calls it a hard bounce, or
+  has deactivated the address) marks the email `bounced` and the
+  customer `bounced`, so Velox sends no more email to that address. A
+  temporary bounce changes nothing; Postmark retries it.
+- **Spam Complaint**: shows the email as `marked as spam`, marks the
+  customer `complained`, and stops email to that address.
+
+Velox also sends the `customer.email_bounced` or
+`customer.email_complained` [webhook event](../webhooks.md) when it
+marks a customer.
+
+If the two settings are unset, the route answers 401 to every call, and
+emails stay in the state Velox last knew.
+
+**Other providers (SES, SendGrid, Mailgun, Resend):** Velox has no
+receiver for their bounce webhooks. Set up suppressions in the
+provider's dashboard, so it stops sending to addresses that bounce.
 
 ## When to consider an API-based backend
 
@@ -302,8 +349,8 @@ backend when:
 - You need per-message tracking (opens, clicks) inline in the Velox
   dashboard. SMTP doesn't carry these signals.
 - Volume justifies dedicated IPs (typically >100k emails/month).
-- Bounce/complaint webhooks need to feed back into Velox without a
-  separate IMAP listener.
+- Bounce and complaint reports from a provider other than Postmark
+  need to feed back into Velox.
 
 When you reach that point, add a backend selector that swaps the
 underlying transport: `EMAIL_PROVIDER=smtp` (default) or

@@ -8,10 +8,12 @@ handles that. This doc names what they need to know.
 
 ## Versions
 
-- **Minimum: Postgres 14.** Velox relies on `gen_random_bytes` from
-  the `pgcrypto` extension and standard SQL features through PG14.
-- **Tested: Postgres 16.** The `docker-compose.yml` shipped with
-  Velox uses `postgres:16-alpine` for local dev.
+- **Tested: Postgres 16.** CI runs every test against
+  `postgres:16-alpine`, and both Compose files (local development and
+  the one-VM install) run it too.
+- **Oldest that should work: Postgres 14.** Velox relies on
+  `gen_random_bytes` from the `pgcrypto` extension and standard SQL
+  features through PG14. Nothing tests 14 or 15, so prefer 16.
 - **Recommended for production: Postgres 16+.** No PG17-specific
   features in use; safe to upgrade ahead.
 
