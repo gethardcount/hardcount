@@ -91,7 +91,6 @@ func openPool(t *testing.T, url string) *sql.DB {
 	t.Helper()
 
 	// Use "pgx" driver (pgx stdlib adapter) — same as production.
-	// golang-migrate's postgres driver works with any database/sql driver.
 	pool, err := sql.Open("pgx", url)
 	if err != nil {
 		t.Fatalf("open db (%s): %v", url, err)
