@@ -162,9 +162,11 @@ func TestUpBaselineThenFileInOneUp(t *testing.T) {
 			t.Fatalf("version %d: %d rows, want 1", v, n)
 		}
 	}
+	// 0174's seed: five rows, each token from clock_timestamp() at install.
 	var leases int
-	if err := db.QueryRow(`SELECT count(DISTINCT holder_token) FROM leader_leases HAVING count(*) = 5`).Scan(&leases); err != nil || leases != 1 {
-		t.Fatalf("leader_leases: want 5 rows sharing one token (0174's seed), got %d distinct (%v)", leases, err)
+	var fresh bool
+	if err := db.QueryRow(`SELECT count(*), bool_and(abs(holder_token - (extract(epoch FROM now()) * 1000)::bigint) < 86400000) FROM leader_leases`).Scan(&leases, &fresh); err != nil || leases != 5 || !fresh {
+		t.Fatalf("leader_leases: want 5 rows with tokens from install time, got %d rows, fresh=%v (%v)", leases, fresh, err)
 	}
 	// A second run finds nothing to do.
 	if err := up(context.Background(), dsn, files(map[string]string{"00181_widgets.sql": widgetsFile})); err != nil {
