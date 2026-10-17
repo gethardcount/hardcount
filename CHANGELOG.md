@@ -25,6 +25,7 @@ Older entries keep their original text.
 
 ### Changed
 
+- **Docs have a first-time reader bar (2026-10-17).** Writers: [writing-style.md](docs/dev/writing-style.md#the-first-time-reader-bar) adds five rules for reader-facing pages, "You see:" after each task step, a list of words to keep out of UI text, and a before/after example.
 - **The README explains Velox and the quick start in plain words (2026-10-17).** A short "In plain words" summary sits at the top. The quick start is now three steps, and it says what each command does and what you see after it, including each step of the demo.
 - **Activity and Margin open on the billing period (2026-10-16).** On the customer page, Activity now opens on Cycle and Margin on "Current period", the window the invoice uses; Margin adds "Last invoiced period". A rolling 30 days never matched a period, so after the demo Margin read $0 beside a $3.88 invoice. An empty window now names the latest usage date (ADR-121).
 - **Dashboard unit tests run on Vitest (2026-10-16).** Contributors: `cd web-v2 && npm test` now runs `vitest run`, and `tsc -b` (part of `npm run build`) type-checks `web-v2/tests/`, so a type error in a test fails CI. The custom `node --test` alias loader is gone.
