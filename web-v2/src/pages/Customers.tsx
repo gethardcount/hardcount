@@ -213,7 +213,7 @@ export default function CustomersPage() {
     <Layout>
       {/* Page header. Wraps on a phone so the actions stay on screen. */}
       <div className="flex flex-wrap justify-between items-center gap-3">
-        <div>
+        <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Customers</h1>
           <p className="text-sm text-muted-foreground mt-1">The people and companies you bill. Open one to see their subscriptions, invoices and credits{total > 0 ? ` · ${total} total` : ''}</p>
         </div>

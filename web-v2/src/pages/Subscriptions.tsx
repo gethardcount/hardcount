@@ -192,7 +192,7 @@ export default function SubscriptionsPage() {
     <Layout>
       {/* Page header. Wraps on a phone so the actions stay on screen. */}
       <div className="flex flex-wrap justify-between items-center gap-3">
-        <div>
+        <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Subscriptions</h1>
           <p className="text-sm text-muted-foreground mt-1">A subscription puts a customer on a plan, and Velox bills them for it every period{total > 0 ? ` · ${total} total` : ''}</p>
         </div>

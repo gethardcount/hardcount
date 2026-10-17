@@ -502,7 +502,7 @@ export default function CreditsPage() {
   return (
     <Layout>
       <div className="flex flex-wrap justify-between items-center gap-3">
-        <div>
+        <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Credits</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Balance a customer can spend. Velox uses it to pay their invoices before charging their card{customersWithCredits.length > 0 ? ` · ${formatCents(totalOutstanding)} across ${customersWithCredits.length} customer${customersWithCredits.length !== 1 ? 's' : ''}` : ''}

@@ -141,7 +141,7 @@ export default function ApiKeysPage() {
   return (
     <Layout>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">API keys</h1>
           <p className="text-sm text-muted-foreground mt-1">Keys your app uses to call the Velox API{activeKeys.length > 0 ? ` · ${activeKeys.length} active` : ''}</p>
         </div>

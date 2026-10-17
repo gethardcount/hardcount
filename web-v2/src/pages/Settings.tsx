@@ -666,7 +666,7 @@ export default function SettingsPage() {
                 <div className="mb-5">
                   <h2 className="text-sm font-semibold text-foreground">Your tax identity</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    The tax ID you print on invoices. The seller's jurisdiction is your business address (set in General tab).
+                    The tax ID you print on invoices. Your tax country is the one in your business address (General tab).
                   </p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

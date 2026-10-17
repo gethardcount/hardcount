@@ -1451,7 +1451,7 @@ export default function InvoiceDetailPage() {
           {(invoice.tax_reverse_charge || invoice.tax_exempt_reason) && (
             <div className="mt-6 pt-4 border-t border-dashed border-border space-y-1.5 text-xs text-muted-foreground">
               {invoice.tax_reverse_charge && (
-                <p><span className="font-medium text-foreground">Reverse charge</span> — VAT to be accounted for by the recipient in their jurisdiction.</p>
+                <p><span className="font-medium text-foreground">Reverse charge</span> — no tax on this invoice; the business customer pays the VAT/GST themselves.</p>
               )}
               {invoice.tax_exempt_reason && !invoice.tax_reverse_charge && (
                 <p><span className="font-medium text-foreground">Tax-exempt</span> — {invoice.tax_exempt_reason}</p>
