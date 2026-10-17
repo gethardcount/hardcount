@@ -4,36 +4,36 @@
 
 **The open-source billing engine for AI and usage-heavy SaaS — runs in your own VPC.**
 
-**In plain words:** if you sell an AI product, Velox works out what each customer owes and bills them. It counts what each customer used, such as tokens. It applies your prices, makes the invoice and its PDF, and charges the card through Stripe. You run it on your own servers, so the billing data stays in your own database.
-
-**Who it is for:** teams that charge their customers by usage, most of all AI products that charge per token, and that want to keep their billing data on their own servers.
-
-**Why it exists: small AI teams kept falling into the same gaps.**
-
-| What small AI teams run into | What Velox does instead |
-|---|---|
-| **Stripe Billing takes a cut.** Its pay-as-you-go plan charges 0.7% of billing volume ([Stripe pricing](https://stripe.com/billing/pricing)). Its basic usage billing can't charge a different rate per model and token type on one meter. For that, Stripe points you to Metronome, its main usage-billing product ([Stripe docs](https://docs.stripe.com/billing/subscriptions/usage-based/compare-metronome)). | **No Stripe Billing fee.** Velox does the billing and asks Stripe only to charge the card. Stripe still charges its normal card fee, and Stripe Tax's fee if you use Stripe Tax. One meter carries model and token type. |
-| **Open-source billing engines hold back key parts behind a paid licence.** In Lago, automatic failed-payment retries and invoice previews need a premium licence. In Flexprice, the billing, invoice and subscription services sit under an enterprise licence. Kill Bill's usage aggregation and wallets are in its paid add-on, Aviate. ([Sources](docs/comparison.md)) | **One MIT licence, nothing held back.** Failed-payment retries, credit notes, refunds, invoice previews and the audit log are all in it. |
-| **They are heavy to run yourself.** Flexprice's default setup runs nine services, including Kafka, ClickHouse and Temporal. OpenMeter's runs eleven and calls itself "not a production topology". Across these projects, more than 30 people have reported a fresh install failing before the first invoice, often at sign-up (for example [lago#514](https://github.com/getlago/lago/issues/514) and [flexprice#819](https://github.com/flexprice/flexprice/issues/819)). | **Small enough to run yourself.** One server program plus Postgres and Redis, with a web dashboard. Try it on your laptop in about five minutes. |
-| **No way to fast-forward time to test a billing change.** We found no test clock in Lago or Flexprice. Kill Bill has one clock for the whole server. | **Test clocks for test customers.** Pin a test customer to a clock and move it forward up to a year at a time, so months of billing run in minutes. It works in test mode, on your normal install. |
-| **No idea which customers lose you money.** AI costs move with usage, so a customer can cost you more than they pay. | **Margin per customer.** Velox records what each request cost you, from your provider price table or LiteLLM's reported cost, next to what you billed. |
-
-Velox is young: pre-1.0, one maintainer, Stripe and cards only, no SDKs yet. [How it compares](docs/comparison.md) lists where the others are ahead.
-
-Velox owns the billing layer above the card charge: pricing, subscriptions, usage metering, invoicing, credits, and dunning (the automatic retry-and-escalate process that runs when a payment fails). Stripe still executes the card charge underneath, as a plain PaymentIntent. So Stripe Billing's percentage fee does not apply. Your usage and invoice records live in your own Postgres. Stripe sees each charge, and also the invoice lines if you use Stripe Tax. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid.
-
 [![CI](https://github.com/getvelox/velox/actions/workflows/ci.yml/badge.svg)](https://github.com/getvelox/velox/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Release](https://img.shields.io/github/v/tag/getvelox/velox?label=release)](CHANGELOG.md)
 
-**Pre-1.0.** The public API is stabilising but not yet frozen. Until 1.0.0, breaking changes land on MINOR releases ([versioning policy](CHANGELOG.md)).
+If you sell an AI product, Velox works out what each customer owes and bills them. It counts what each customer used, such as tokens, applies your prices, makes the invoice and its PDF, and charges the card through Stripe. You run it on your own servers, so your billing data stays in your own database.
+
+---
+
+## Why Velox
+
+Small AI teams kept running into the same gaps. Velox is built for them.
+
+| The gap | What Velox does |
+|---|---|
+| **Stripe Billing takes a cut.** Its pay-as-you-go plan charges 0.7% of billing volume, and its basic usage billing can't charge a different rate per model and token type on one meter. | **No Stripe Billing fee.** Velox does the billing and asks Stripe only to charge the card. One meter prices every model and token type. |
+| **Open-source engines hold back key parts behind a paid licence**, such as automatic failed-payment retries and invoice previews in Lago. | **One MIT licence, nothing held back.** Retries, credit notes, refunds, previews and the audit log are all included. |
+| **They are heavy to run.** Some default setups run nine or eleven services, including Kafka and ClickHouse. | **Three parts:** the Velox server, Postgres and Redis, plus a web dashboard. Try it on your laptop in about five minutes. |
+| **No way to fast-forward time** to test a billing change. | **Test clocks.** Move a test customer forward up to a year at a time, so months of billing run in minutes. |
+| **No idea which customers lose you money.** AI costs move with usage. | **Margin per customer:** what each request cost you, next to what you billed. |
+
+Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Every claim above has a source in [Why Velox exists](docs/why-velox.md), and [How it compares](docs/comparison.md) lists where the other projects are ahead.
+
+**Pre-1.0.** Velox is young: one maintainer, Stripe and cards only, no SDKs yet. Until 1.0.0, breaking API changes land on minor releases ([versioning policy](CHANGELOG.md)).
 
 ---
 
 ## What it looks like
 
-One meter with model and token type on each event, and the invoice it produced a month later. The invoice below is what [`scripts/demo.sh`](scripts/demo.sh) produces against a running Velox, laid out for reading. The script prints the same numbers in plain lines.
+One month of token usage for one customer, from the demo below:
 
 ```text
 ACME Corp — VLX-000001                                    $3.88
@@ -47,7 +47,7 @@ Margin (billed $3.88 vs provider cost $1.28)            67.1%
 
 ![The full Velox invoice page for a paid invoice: the document with one line per (model, token_type) and unit prices quoted per 1M tokens, and an activity timeline running from cycle close to an operator-recorded bank-transfer payment](docs/assets/invoice-token-lines.png)
 
-One meter carried every token type, prices are stored exactly ($3.00 per 1M tokens), and the margin line comes from provider cost stamped on each event.
+One meter carries every token type, prices are stored exactly ($3.00 per 1M tokens), and the margin comes from the provider cost recorded on each event.
 
 ---
 
@@ -55,7 +55,7 @@ One meter carried every token type, prices are stored exactly ($3.00 per 1M toke
 
 Try Velox on your own computer in about five minutes. Think of it as a demo car at a showroom: you drive it, you don't build it.
 
-You need git and Docker 24 or newer with the Compose plugin. You do not need Go, Node or a database. The script runs in bash, so it works as is on macOS and Linux. On Windows, run it inside WSL.
+You need git and Docker 24 or newer with the Compose plugin. On Windows, run it inside WSL.
 
 **1. Start Velox**
 
@@ -65,22 +65,9 @@ cd velox/deploy/compose
 ./quickstart.sh
 ```
 
-This downloads the latest release and starts it in Docker: the Velox server, its dashboard, Postgres and Redis. The first start takes longest, because Docker downloads the images.
+**You see:** "Velox is running.", then your dashboard address, email, password and a test API key. The password is shown only once; the script also saves all four in `deploy/compose/quickstart-credentials.json`.
 
-**You see:** "Velox is running.", then four lines:
-
-```text
-  Dashboard   http://localhost:8080
-  Email       <your login email>
-  Password    <your password>
-  Test key    vlx_secret_test_…
-```
-
-The password is shown only once. The script also saves all four in `deploy/compose/quickstart-credentials.json`. Keep that file private.
-
-Open `http://localhost:8080` and sign in with that email and password.
-
-**You see:** the dashboard, with a "Test mode" strip at the top: "You're viewing test data. No real money moves." Velox is empty at this point: there are no customers or invoices yet.
+Open `http://localhost:8080` and sign in. Velox opens in test mode, where no real money moves, and it is empty.
 
 **2. Run the demo**
 
@@ -88,80 +75,54 @@ Open `http://localhost:8080` and sign in with that email and password.
 ./quickstart.sh demo
 ```
 
-The demo fills Velox with an example, so you can watch one month of billing in about two minutes:
+In about two minutes, the demo sets up AI token prices, creates a customer and sends token usage the way a LiteLLM proxy would. Then it moves the customer's test clock (a pretend clock for test customers) to the end of the month, and Velox makes the invoice, its PDF and a margin report.
 
-1. It sets up prices for AI tokens, with one rate for each model and token type.
-2. It creates a demo customer with a subscription.
-3. It saves what the AI provider charges you per token, so Velox can work out your margin.
-4. It sends token usage for the customer, the way a LiteLLM proxy would.
-5. It moves the customer's clock to the end of the month. A test clock is a pretend clock for test customers, so you do not wait 30 days.
-6. Velox closes the month and makes the invoice, its PDF and a margin report.
-
-The demo checks each step and stops if one fails, so a finished run means it all worked.
-
-**You see:** nine numbered steps, each ending in a green ✓ line. Step 8 prints the invoice total and its lines, and step 9 prints your margin. Then "Done: every step above ran and was checked", and two links: one to the invoice and one to the customer.
-
-Open the links to see the customer, the usage, the invoice and its PDF. You can run the demo again: each run makes a new demo customer. [What each demo step does, and where to click](docs/quick-start.md).
-
-Home still reads $0 after the demo. That is expected: the Home totals leave out customers on a test clock, and the demo customer is on one. Use the two links instead.
+**You see:** nine steps, each ending in a green ✓, then links to the invoice and the customer. Home still reads $0, because its totals leave out test-clock customers; use the links instead. [Each demo step, and where to click](docs/quick-start.md)
 
 **3. Stop or remove it**
 
-- `./quickstart.sh stop` stops Velox and keeps its data. Run `./quickstart.sh` to start it again.
-  **You see:** "Stopped. Your data is kept."
-- `./quickstart.sh destroy` stops Velox and deletes its data. This cannot be undone.
-  **You see:** "Stopped, and the data of this quickstart install is deleted."
+`./quickstart.sh stop` keeps your data. `./quickstart.sh destroy` deletes it, and cannot be undone. If port 8080 is taken, start with `VELOX_PORT=9000 ./quickstart.sh`.
 
-If port 8080 is already in use, start it with `VELOX_PORT=9000 ./quickstart.sh`. The quick start runs the latest published release, so changes merged after that release are not in it yet.
-
-To change Velox itself, with Go and Node on your machine, see [Development setup](CONTRIBUTING.md#development-setup).
-
-To run it for real, on one VM with Docker Compose: [`docs/self-host.md`](docs/self-host.md).
+**Next:** [send your own usage and get a first invoice](docs/first-invoice.md) · [run it for real on one VM](docs/production-one-vm.md) · [change Velox itself](CONTRIBUTING.md#development-setup)
 
 ---
 
-## Why use it
+## Is Velox right for you?
 
-- **Price AI usage the way it is sold.** Model × token type on one meter, prepaid commits that usage draws down, and a base fee plus usage on one invoice. [AI pricing in code](docs/ai-pricing.md)
-- **Know your margin.** Set what your model provider charges you, and Velox stamps that cost on each token event that matches a rate. One API call then shows what a customer was billed against what they cost you. [What's in the box](docs/features.md)
-- **Run it yourself, simply.** One Go binary, Postgres, and Redis for rate limiting, plus a static dashboard. Background jobs run inside the binary and queue in Postgres, so there is no queue broker, warehouse or workflow engine to run. [Self-host](docs/self-host.md) · [How much traffic Velox handles](docs/scale.md)
-- **MIT, and nothing is gated.** No licence key, no paid tier, no telemetry. Dunning, credit notes, refunds and the audit log are all in the one edition. [What's in the box](docs/features.md#runs-on-your-own-servers)
-- **Test a billing change before it bills anyone.** In test mode, a test clock moves a test customer through months of billing without waiting for real time, up to a year per call. [What's in the box](docs/features.md#reliability)
-- **Built so the invoice is right.** Every period close locks the subscription and checks its period, and Postgres refuses a second period-end invoice for the same subscription and period. A voided invoice does not count. [How Velox is engineered](docs/ENGINEERING.md)
+**A good fit if:**
 
----
+- **You charge by usage,** most of all an AI product that prices per token, by model and token type.
+- **You want billing on your own servers.** Usage and invoice records stay in your own Postgres. Stripe sees each charge, and the invoice lines too if you use Stripe Tax.
+- **You are a small or mid-size team.** One engineer can run it, on one server or several.
+- **Your volume is up to about a million usage events a day.** That is roughly 400,000 AI requests, since each request sends two or three events (input, output, cache). In load tests, a mid-size Postgres (32 GB of memory) took a steady 1,000 events a second. Velox keeps every raw event, so plan about 15 to 20 GB of database disk per month at that volume. [How we measured](docs/scale.md)
 
-## Who it fits
-
-Velox fits a small or mid-size team that bills its customers by usage:
-
-- **You charge by usage**, most of all an AI product that prices per token, by model and token type.
-- **You want billing on your own servers.** Your usage and invoice data stay in your own Postgres. Stripe only charges the card.
-- **One engineer can run it.** There are three parts: the Velox server, Postgres, and Redis for rate limiting. There is no Kafka, no analytics database, and no queue or workflow service to run and upgrade.
-- **Your volume is up to about a million usage events a day.** That is roughly 400,000 AI requests, because each request sends two or three events (input, output, cache). In load tests, a mid-size Postgres (32 GB of memory) took a steady 1,000 events a second. Velox keeps every raw event, so plan about 15 to 20 GB of database disk per month at that volume. [How we measured](docs/scale.md)
-
----
-
-## What Velox is **not**
-
-Velox is the wrong choice if you need:
+**Not a fit if you need:**
 
 - **Simple per-seat pricing paid by card.** Stripe Billing already does that well.
-- **Automatic charging through a processor other than Stripe.** Stripe is the only one built in today. If you need another, [open an issue](https://github.com/getvelox/velox/issues) and tell us which one.
+- **Automatic charging through a processor other than Stripe.** Stripe is the only one built in today. [Tell us which one you need](https://github.com/getvelox/velox/issues).
 - **A marketplace that splits payouts** between sellers (Stripe Connect). Velox bills your own customers.
 - **Revenue recognition or accounting reports.** Export the data to your own warehouse.
 - **Quotes or multi-phase contracts** for sales-led deals.
 
 ---
 
+## What's inside
+
+- **Pricing:** flat, per-unit, graduated and package prices; rates per model and token type on one meter; a base fee plus usage on one invoice; prepaid commits that later usage draws down. [AI pricing](docs/ai-pricing.md)
+- **Billing you can trust:** each period close locks the subscription and checks its period, and Postgres refuses a second period-end invoice for the same subscription and period. [How Velox is engineered](docs/ENGINEERING.md)
+- **Getting paid:** cards through Stripe, with automatic retries and emails when a payment fails (dunning). Customers can also pay another way, such as a bank transfer, and you mark the invoice paid.
+- **Running it:** one Go program with its background jobs inside, Postgres and Redis. No telemetry and no licence check. [Self-host](docs/self-host.md)
+
+Every feature: [What's in the box](docs/features.md).
+
+---
+
 ## Docs
 
-[`docs/README.md`](docs/README.md) lists every doc by what you want to do: decide if Velox fits, try it, connect your product, run it in production, or contribute.
+[`docs/README.md`](docs/README.md) lists every doc by what you want to do: decide if Velox fits, try it, connect your product, run it in production, or contribute. Good places to start:
 
 - [How Velox works](docs/how-velox-works.md): from a usage event to a paid invoice, in one picture
 - [How it compares](docs/comparison.md) with Lago, OpenMeter, Flexprice and Kill Bill
-- [Why Velox exists](docs/why-velox.md)
-- [How Velox is engineered](docs/ENGINEERING.md)
 - [Roadmap](docs/roadmap.md) · [Changelog](CHANGELOG.md)
 
 ---
