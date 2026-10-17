@@ -268,7 +268,7 @@ func serve() {
 	// Shutdown is a published three-stage budget — 90s worst case, typically
 	// under two seconds — and every stage's bound abandons only work that is
 	// designed to be resumed. Configure the orchestrator's grace period at
-	// 120s (deploy/README.md 'Rolling deploys and shutdown'; compose sets
+	// 120s (docs/ops/high-availability.md 'What happens when a copy stops'; compose sets
 	// stop_grace_period). Docker's 10s default SIGKILLs mid-drain.
 	const (
 		shutdownHTTPDrain   = 30 * time.Second // stage 1: in-flight requests

@@ -42,7 +42,8 @@ docs in the order listed. Words you may not know are in the
 1. [Self-host](self-host.md): what you need and how the pieces fit.
 2. [Docker Compose on one VM](../deploy/compose/README.md): step-by-step
    install.
-3. [Deployment](../deploy/README.md): scaling, upgrades, and shutdown.
+3. [High availability](ops/high-availability.md): run two or more copies
+   behind a load balancer, with health checks, shutdown and rolling upgrades.
 4. [Postgres requirements](ops/postgres-requirements.md),
    [email setup](ops/email-setup.md),
    [backups](ops/backup-considerations.md) and

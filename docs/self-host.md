@@ -50,7 +50,7 @@ Things to know:
 - **Give each copy 120 seconds to shut down.** On a stop signal, a copy first tells the load balancer it is leaving, then finishes its work. The worst case is 90 seconds.
 - **A few features still assume one copy.** The live event stream in the dashboard is one. None of them touch money. The full list is in the [readiness review](dev/ha-readiness-2026-07-06.md).
 
-Rollouts, upgrades and scaling: [`deploy/README.md`](../deploy/README.md).
+Load balancer setup, health checks, shutdown and rolling upgrades: [High availability](ops/high-availability.md).
 
 ## Working on Velox locally
 
@@ -132,9 +132,19 @@ A migration is a versioned script that changes the database schema. Velox ships 
 - If several copies start at once, only one applies them and the others wait.
 - **Never roll back in production.** The "down" scripts exist for development. To undo a change in production, write a new migration.
 
+## Upgrading
+
+1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every version between yours and the new one.
+2. Take a backup. See [backups](ops/backup-considerations.md).
+3. Start the new version. With `RUN_MIGRATIONS_ON_BOOT=true`, it applies the database upgrades as it starts.
+
+   **You see:** `/health/ready` answers 200 again.
+
+On one VM there is one copy, so Velox is down while the new version starts. For the Compose commands, see [Day-to-day commands](../deploy/compose/README.md#day-to-day-commands). With two or more copies, see [Upgrades](ops/high-availability.md#upgrades).
+
 ## Settings
 
-Velox reads its settings from environment variables.
+Velox reads its settings from environment variables. The tables below list the main ones. More settings, each with a comment, are in the repository's [`.env.example`](../.env.example). The Compose stack reads its own [`deploy/compose/.env.example`](../deploy/compose/.env.example).
 
 **Required**
 
@@ -169,7 +179,7 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 | `METRICS_TOKEN` | unset | The bearer token a scraper must send to read `/metrics`. If unset, `/metrics` answers 401 in `production` and is open elsewhere. |
 | `INVOICE_GRACE_PERIOD` | `1h` | How long Velox waits after a billing period ends before it builds the invoice, so usage that arrives late but belongs to the period is billed. See below. A duration from `0` to `72h`, such as `30m` or `24h`. Any other value stops start-up. `0` builds the invoice as soon as the period ends. |
 
-Stripe is not set here. Each tenant connects its own Stripe account in the dashboard, under Settings.
+Stripe is not set here. Each tenant connects its own Stripe account in the dashboard, under Settings → Payments. The Stripe API keys and the webhook signing secret (`whsec_…`) are stored per tenant, in the database.
 
 **`INVOICE_GRACE_PERIOD` delays every period-end invoice**, not only invoices with usage. A subscription's period-end invoice, and the final invoice of a cancel scheduled for a date, is built on the first billing run after the period end plus the grace. The billing run is hourly, so with the default the invoice is built 1 to 2 hours after the period ends. Everything that follows the invoice moves with it: the `invoice.finalized` webhook, the tax record, credits applied, the charge, and the first payment-failure retry. The invoice's dates and amounts do not move: it is issued and dated at the period end. A cancel or a plan change scheduled for a date also takes effect at that close, up to the grace after its date: until then the subscription is still `active` on its old plan, and `subscription.canceled` is sent then. Its dates do not move: `canceled_at` is the scheduled date. A scheduled resume of paused collection that falls after a period end waits for that period's close too. A credit grant is retired up to the grace after its `expires_at`, and the balance shows it until then.
 

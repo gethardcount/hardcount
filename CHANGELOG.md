@@ -30,6 +30,7 @@ Older entries keep their original text.
 
 - **A "How Velox works" page, and a glossary in plain words (2026-10-17).** [docs/how-velox-works.md](docs/how-velox-works.md) shows the flow from a usage event to a paid invoice in one picture and six steps, each naming what you see in the dashboard. The [glossary](docs/glossary.md) starts each entry with a plain sentence; code and database words moved to a "For contributors" section at the bottom.
 - **A quick-start page walks through each demo step (2026-10-17).** [docs/quick-start.md](docs/quick-start.md) says what each of the nine steps does, what it prints, where to click in the dashboard and why Home reads $0. The demo prints plain step lines and ends with links to open. When Velox is not running, it now says what to run for the quick start, not only `make dev`.
+- **`deploy/README.md` is a three-row "which one do I want" table (2026-10-17).** Operators: load balancer setup, health checks, shutdown and rolling upgrades for two or more copies moved to [High availability](docs/ops/high-availability.md); upgrade steps and the settings pointers moved to [Self-host](docs/self-host.md). Contributors: the from-source and Docker-image recipes moved to [CONTRIBUTING](CONTRIBUTING.md#development-setup).
 - **Docs have a first-time reader bar (2026-10-17).** Writers: [writing-style.md](docs/dev/writing-style.md#the-first-time-reader-bar) adds five rules for reader-facing pages, "You see:" after each task step, a list of words to keep out of UI text, and a before/after example.
 - **The README says who Velox is for and what each quick-start step shows (2026-10-17).** A "Who it is for" line and a short "Why it exists" list sit at the top. Each quick-start step ends with "You see:" and the real output. It also says to use WSL on Windows and why Home reads $0 after the demo.
 - **Operator docs match the code (2026-10-17).** One VM is a supported production setup for a small team; two or more copies is the high-availability setup. The Postmark bounce webhook is documented with setup steps, `PAYMENT_UPDATE_URL` is described as only the "add a payment method" email, the Grafana dashboard is linked, the webhook replay route is `POST /v1/webhook_events/{id}/replay`, and the Postgres pages agree (16 tested, 14 the oldest that should work). The `STRIPE_WEBHOOK_SECRET` env var, which nothing reads, is gone from the docs.
@@ -310,7 +311,7 @@ The first release since August. It carries the September and October money-path 
 
 **Before upgrading from 0.3.2 or earlier:**
 
-- Do this one rollout as stop-all-then-start, not rolling. Steps: [Upgrading](deploy/README.md#upgrading).
+- Do this one rollout as stop-all-then-start, not rolling. Steps: [Upgrading](docs/ops/high-availability.md#upgrading-from-v032-or-older).
 - Production refuses to start without `REDIS_URL` and `TRUST_PROXY`. Set both first.
 - Dashboards keyed on the HTTP metrics' `path` label now see route patterns, not raw paths.
 

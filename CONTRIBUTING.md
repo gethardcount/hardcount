@@ -36,6 +36,37 @@ cd web-v2 && npm install && npm run dev   # dashboard on :5173, in a second term
 
 To try a release without Go or Node, use `deploy/compose/quickstart.sh` instead (see the README).
 
+### Without make
+
+These are the same steps as above without make. `make dev` reads `.env`, which sets `DATABASE_URL` and `RUN_MIGRATIONS_ON_BOOT=true`; here you set them on the command line:
+
+```bash
+docker compose up -d postgres
+DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" go run ./cmd/velox-bootstrap
+DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" RUN_MIGRATIONS_ON_BOOT=true go run ./cmd/velox
+```
+
+### Run your change in the Compose stack
+
+This builds the API image from your checkout and runs it in the same stack as a [one-VM install](deploy/compose/README.md):
+
+```bash
+docker build -t velox:local .        # from the repo root
+cd deploy/compose
+cp .env.example .env
+$EDITOR .env   # set POSTGRES_PASSWORD, VELOX_APP_DB_PASSWORD, VELOX_ENCRYPTION_KEY, VELOX_BOOTSTRAP_TOKEN
+VELOX_IMAGE=velox:local docker compose up -d
+```
+
+**You see:** `docker compose logs -f velox-api` prints `"listening" addr=:8080` when the API is ready.
+
+To build the image and run it on its own, against a Postgres you already have:
+
+```bash
+docker build -t velox:latest .
+docker run --rm -e DATABASE_URL="..." -p 8080:8080 velox:latest
+```
+
 ## Project Structure
 
 Each billing domain (invoice, credit, customer, and so on) is a
