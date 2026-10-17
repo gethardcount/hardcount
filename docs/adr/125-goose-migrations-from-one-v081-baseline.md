@@ -66,7 +66,7 @@ An INVALID index is one Postgres keeps but never uses.
 | Experiment | Result |
 |---|---|
 | E3 | golang-migrate's lock blocks (`pg_advisory_lock`). A second migrator that waits on it during a `CONCURRENTLY` build creates a deadlock. Postgres cancels one side (40P01). When it cancels the build, the index is INVALID and the version dirty. A lock that polls (`pg_try_advisory_lock`) showed no deadlock. |
-| E4, phase 1 | Two goose processes, with an older transaction open. One ran a no-transaction index file, all four statements on one connection. The other polled the lock, then found nothing to do. One version row; the index is valid. |
+| E4, phase 1 | Two goose processes, with an older transaction open. One ran a no-transaction index file, every statement on one connection, with `lock_timeout` going 2s, 0, 0, 2s. The other polled the lock, then found nothing to do. One version row; the index is valid. |
 | E4, phase 2 | A normal file stopped at its `lock_timeout` (55P03) after 2 seconds. goose wrote no version row, and a rerun needed no repair. |
 | E4, phase 3 | A no-transaction build failed on a duplicate key (23505) and left an INVALID index. It also left `lock_timeout = 0` on its connection, because `RESET` never ran. After the data was fixed, a rerun that drops the index first built it valid. |
 | E5 | A failed goose file leaves no table and no version row. The same file under golang-migrate leaves a dirty version that needs `force`. |
