@@ -6,6 +6,8 @@
 
 ## Summary
 
+Superseded by [ADR-125](125-goose-migrations-from-one-v081-baseline.md) on 2026-10-18, before it was built: Velox moves to goose instead. This ADR proposed the following.
+
 Velox applies database migrations with golang-migrate as it is, with no
 Velox runner around it. Every new migration file starts with
 `SET LOCAL lock_timeout = '5s';`. A file that cannot get a table lock in
