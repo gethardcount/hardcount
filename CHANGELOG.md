@@ -15,6 +15,10 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Changed
+
+- **The README shows before it tells (2026-10-17).** The pictures come first, then a small diagram of how Velox works and one example usage event, then the quick start. The gaps table is shorter, and the volume line now uses the €6.49-a-month server test.
+
 ## [0.8.1] - 2026-10-17
 
 Safer upgrades: a repair command for a database upgrade that stopped midway, and a 5-second limit on how long a migration waits for a table lock. Also a faster invoice list, and the Compose stack passes the Postmark webhook login and `VELOX_API_BASE_URL`. No database migrations.
