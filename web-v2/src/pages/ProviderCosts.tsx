@@ -128,7 +128,7 @@ export default function ProviderCostsPage() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Token type matches your usage events' <code>token_type</code> dimension:
+            Token type is the <code>token_type</code> value your usage events carry:
             input, output, or cache_read.
           </p>
         </CardContent>

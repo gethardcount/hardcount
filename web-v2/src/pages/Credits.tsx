@@ -501,7 +501,7 @@ export default function CreditsPage() {
 
   return (
     <Layout>
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Credits</h1>
           <p className="text-sm text-muted-foreground mt-1">

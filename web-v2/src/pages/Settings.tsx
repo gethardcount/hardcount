@@ -677,14 +677,14 @@ export default function SettingsPage() {
                       className={cn('mt-1 font-mono', formErrors.tax_id && 'border-destructive')} />
                     {formErrors.tax_id
                       ? <p className="text-xs text-destructive mt-1">{formErrors.tax_id.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1">Your VAT, EIN, GSTIN, or ABN — required on B2B invoices in most jurisdictions</p>}
+                      : <p className="text-xs text-muted-foreground mt-1">Your VAT, EIN, GSTIN, or ABN — required on business invoices in most countries</p>}
                   </div>
                   <div>
                     <Label>Seller country</Label>
                     <div className="mt-1 px-3 py-2 rounded-md border border-border bg-muted/30 text-sm text-muted-foreground">
                       {form.company_country ? (COUNTRY_NAME[form.company_country] || form.company_country) : 'Set business address in General tab'}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">Drives tax name/rate suggestions and cross-border VAT handling</p>
+                    <p className="text-xs text-muted-foreground mt-1">Used to suggest a tax name and rate, and to handle VAT for customers abroad</p>
                   </div>
                 </div>
               </CardContent>
