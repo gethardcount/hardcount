@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -62,10 +63,12 @@ func main() {
 			runMigrateStatus()
 		case "rollback":
 			runMigrateRollback()
+		case "force":
+			runMigrateForce(os.Args[3:])
 		case "":
 			runMigrate()
 		default:
-			fmt.Fprintf(os.Stderr, "unknown migrate subcommand: %s\navailable: status, rollback\n", subcmd)
+			fmt.Fprintf(os.Stderr, "unknown migrate subcommand: %s\navailable: status, rollback, force\n", subcmd)
 			os.Exit(1)
 		}
 	case "version":
@@ -432,6 +435,53 @@ func runMigrateStatus() {
 		return
 	}
 	fmt.Printf("version: %d, dirty: %v\n", v, dirty)
+	if dirty {
+		fmt.Println()
+		fmt.Println((&migrate.DirtyError{Version: v}).Error())
+	}
+}
+
+const migrateForceUsage = `usage: velox migrate force <version>
+
+Clears the dirty mark a failed migration leaves in schema_migrations and
+records <version> as applied. It does not change the schema.
+
+Check the schema first. If none of the failed migration's changes are in
+the database, force the version before it, then run "velox migrate". If
+all of them are, force the failed version. If only some are, undo them by
+hand first. "velox migrate status" names the migration.
+
+Refuses while a migration is running, when nothing is dirty, and for a
+version that is not next to the dirty one.
+Steps: ` + migrate.RunbookPath
+
+// parseForceVersion reads the single <version> argument of `migrate force`.
+func parseForceVersion(args []string) (uint, error) {
+	if len(args) != 1 {
+		return 0, errors.New("expected exactly one <version>")
+	}
+	v, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("version %q is not a non-negative number", args[0])
+	}
+	return uint(v), nil
+}
+
+func runMigrateForce(args []string) {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Println(migrateForceUsage)
+		return
+	}
+	v, err := parseForceVersion(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n\n%s\n", err, migrateForceUsage)
+		os.Exit(2)
+	}
+	if err := migrate.Force(loadDSN(), v); err != nil {
+		fmt.Fprintf(os.Stderr, "force failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("recorded version %d as applied; the dirty mark is cleared\nnext: run \"velox migrate\" to apply any later migrations\n", v)
 }
 
 func runMigrateRollback() {
@@ -451,6 +501,9 @@ Commands:
   migrate              Apply pending migrations
   migrate status       Show current migration version
   migrate rollback     Rollback the latest migration
+  migrate force N      Repair after a failed migration: clear the dirty mark and
+                       record version N. Check the schema first; see
+                       velox migrate force --help
   version              Print version
   help                 Show this help
 

@@ -180,7 +180,7 @@ func Up(dsn string) error {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("apply migrations: %w", err)
+			return fmt.Errorf("apply migrations: %w", asDirtyError(err))
 		}
 
 		v, _, _ := m.Version()
@@ -298,7 +298,7 @@ func upHybrid(dsn string, noTxVersions map[uint]struct{}) error {
 			return fmt.Errorf("read schema_migrations: %w", err)
 		}
 		if dirty {
-			return fmt.Errorf("schema_migrations is dirty at version %d — refuse to step forward", curVer)
+			return &DirtyError{Version: curVer}
 		}
 		if v <= curVer {
 			continue
@@ -376,7 +376,7 @@ func stepOneViaLibrary(dsn string, direction int) error {
 		if errors.Is(err, migrate.ErrNoChange) {
 			return nil
 		}
-		return err
+		return asDirtyError(err)
 	}
 	return nil
 }
@@ -876,7 +876,7 @@ func Rollback(dsn string, steps int) (uint, error) {
 		defer closeMigrator(m)
 
 		if err := m.Steps(-steps); err != nil {
-			return 0, fmt.Errorf("rollback %d step(s): %w", steps, err)
+			return 0, fmt.Errorf("rollback %d step(s): %w", steps, asDirtyError(err))
 		}
 		v, _, _ := m.Version()
 		return v, nil
@@ -914,7 +914,7 @@ func rollbackHybrid(dsn string, steps int, noTxDown map[uint]struct{}) (uint, er
 			return lastVer, fmt.Errorf("read schema_migrations: %w", err)
 		}
 		if dirty {
-			return curVer, fmt.Errorf("schema_migrations is dirty at version %d — refuse to step backward", curVer)
+			return curVer, &DirtyError{Version: curVer}
 		}
 		if curVer == 0 {
 			break
@@ -1022,9 +1022,20 @@ func EmbeddedLatestVersion() (uint, error) {
 // connections and prepares source drivers for no reason if we just want
 // to read a version number).
 func DatabaseVersion(db *sql.DB) (uint, bool, error) {
+	return readVersion(context.Background(), db)
+}
+
+// rowQuerier is the one method readVersion needs, so it can read through a
+// pool (*sql.DB) or a held connection (*sql.Conn, used by Force while it
+// holds the migration locks on that same connection).
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func readVersion(ctx context.Context, q rowQuerier) (uint, bool, error) {
 	var version int64
 	var dirty bool
-	err := db.QueryRow(`SELECT version, dirty FROM schema_migrations LIMIT 1`).Scan(&version, &dirty)
+	err := q.QueryRowContext(ctx, `SELECT version, dirty FROM schema_migrations LIMIT 1`).Scan(&version, &dirty)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -1045,7 +1056,8 @@ func DatabaseVersion(db *sql.DB) (uint, bool, error) {
 // CheckSchemaReady verifies the database schema matches what this binary
 // expects. It returns an error if:
 //   - The database is in a dirty migration state (previous migration failed
-//     mid-way; a human needs to decide whether to rollback or fix-forward).
+//     mid-way). Returns *DirtyError, whose message names the migration and
+//     the `velox migrate force` repair; a human checks the schema first.
 //   - The database schema version is behind the embedded latest version
 //     (the app would return 500s on any query touching new columns/tables).
 //
@@ -1065,7 +1077,7 @@ func CheckSchemaReady(db *sql.DB) error {
 	}
 
 	if dirty {
-		return fmt.Errorf("database at version %d is in a dirty migration state — prior migration failed; run `velox migrate status` and fix before restarting", dbVer)
+		return &DirtyError{Version: dbVer}
 	}
 
 	if dbVer < embedded {

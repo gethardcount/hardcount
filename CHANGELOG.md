@@ -15,6 +15,10 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+### Added
+
+- **`velox migrate force <version>` repairs an upgrade that stopped midway (2026-10-17, #967).** Velox still refuses to start while `schema_migrations` is dirty, but the error now names the migration and the exact commands. Force refuses while a migration runs. Steps: [runbook](docs/ops/runbook/migration-failed-midway.md).
+
 ### Fixed
 
 - **The Compose stack passes the Postmark webhook login and `VELOX_API_BASE_URL` to Velox (2026-10-17).** Set `POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS` and `VELOX_API_BASE_URL` in `.env`; editing `docker-compose.yml` or adding an override file is no longer needed (#1150).

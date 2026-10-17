@@ -150,6 +150,7 @@ A migration is a versioned script that changes the database schema. Velox ships 
 - Set `RUN_MIGRATIONS_ON_BOOT=true` and Velox applies any new ones when it starts. The Compose stack and the local `.env.example` both set it. The default is `false`.
 - If several copies start at once, only one applies them and the others wait.
 - **Never roll back in production.** The "down" scripts exist for development. To undo a change in production, write a new migration.
+- **If an upgrade stops midway,** Velox refuses to start and says `schema_migrations is dirty`. Check the schema, then repair with `velox migrate force <version>`. See [A database upgrade failed midway](ops/runbook/migration-failed-midway.md).
 
 ## Upgrading
 

@@ -53,6 +53,7 @@ row-level-security role you see only one tenant's rows, or none.
 | A tenant sees another tenant's data | [Data leak between tenants suspected](rls-leak-suspected.md) |
 | LiteLLM spend 503s, or Velox spend short of LiteLLM's | [LiteLLM spend gap after an outage](litellm-spend-gap.md) |
 | A replica will not boot and names Redis | [A replica will not start](replica-will-not-start.md) |
+| Velox will not start and says `schema_migrations is dirty` | [A database upgrade failed midway](migration-failed-midway.md) |
 | `velox_parked_invoices` above zero | [Parked invoices](parked-invoices.md) |
 | `velox_creditnote_pending_issue_drafts` growing over days | [Clawback drafts not issuing](clawback-drafts-not-issuing.md) |
 | `velox_audit_write_errors_total` rising | [Audit write errors](audit-write-errors.md) |

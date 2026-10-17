@@ -393,6 +393,8 @@ Velox is down while the new version starts. Database changes (migrations) run by
 
 Never roll the database back. If a release goes wrong, restore the backup from step 2 and start the old release.
 
+If the API will not start and its log says `schema_migrations is dirty`, a database change stopped midway. Follow [A database upgrade failed midway](ops/runbook/migration-failed-midway.md).
+
 ## Related
 
 - [Install on one VM](../deploy/compose/README.md): each install step explained, and fixes for start-up errors.

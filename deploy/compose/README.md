@@ -182,6 +182,9 @@ If the user does not exist at all, create it with the SQL in [Self-host, "The tw
 **The API exits with `role can BYPASS row-level security`.**
 `APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `velox_app`.
 
+**The API exits with `schema_migrations is dirty`.**
+A database upgrade stopped midway. Check the schema, then repair it with `docker compose run --rm velox-api migrate force <version>`. The steps are in [A database upgrade failed midway](../../docs/ops/runbook/migration-failed-midway.md).
+
 **`/health/ready` shows `scheduler: degraded`.**
 The API is up and still answers 200 here, but its background jobs have stopped running. Check the API logs. To see which copy last ran each job, run `SELECT * FROM leader_status;` in the database shell.
 
