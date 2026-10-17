@@ -27,12 +27,12 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.8.0`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.0`.
+A release is a tested version with a number, such as `v0.8.1`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.1`.
 
 1. Get the files for that release.
 
    ```bash
-   VELOX_VERSION=v0.8.0
+   VELOX_VERSION=v0.8.1
    sudo git clone --branch "$VELOX_VERSION" https://github.com/getvelox/velox.git /opt/velox
    sudo chown -R "$USER" /opt/velox
    cd /opt/velox/deploy/compose
@@ -78,7 +78,7 @@ A release is a tested version with a number, such as `v0.8.0`. Production runs a
    docker compose exec velox-api /usr/local/bin/velox version
    ```
 
-   **You see:** five containers start, then `velox v0.8.0`.
+   **You see:** five containers start, then `velox v0.8.1`.
 
 4. Check that it is healthy. On the first start Velox sets up its database (runs its migrations), which takes about 10 seconds. Until then the check fails with a 502, so this command retries every 2 seconds and gives up after 2 minutes.
 
@@ -368,10 +368,10 @@ Velox is down while the new version starts. Database changes (migrations) run by
 
    **You see:** `Verified:  yes`.
 
-3. Get the new release's files and point `.env` at its images. This example moves to `v0.8.0`.
+3. Get the new release's files and point `.env` at its images. This example moves to `v0.8.1`.
 
    ```bash
-   VELOX_VERSION=v0.8.0
+   VELOX_VERSION=v0.8.1
    cd /opt/velox
    git fetch --tags
    git checkout "$VELOX_VERSION"
@@ -389,7 +389,7 @@ Velox is down while the new version starts. Database changes (migrations) run by
    docker compose exec velox-api /usr/local/bin/velox version
    ```
 
-   **You see:** `velox v0.8.0`, and `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again.
+   **You see:** `velox v0.8.1`, and `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again.
 
 Never roll the database back. If a release goes wrong, restore the backup from step 2 and start the old release.
 

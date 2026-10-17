@@ -15,20 +15,30 @@ Older entries keep their original text.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-17
+
+Safer upgrades: a repair command for a database upgrade that stopped midway, and a 5-second limit on how long a migration waits for a table lock. Also a faster invoice list, and the Compose stack passes the Postmark webhook login and `VELOX_API_BASE_URL`. No database migrations.
+
+**Before upgrading:**
+
+- **A migration that cannot get a table lock within 5 seconds now stops (#987).** Velox exits with an error that says how to retry or repair. Set `MIGRATION_LOCK_TIMEOUT` (for example `30s`, or `0` for no limit) to change the wait. See [the runbook](docs/ops/runbook/migration-lock-timeout.md).
+- **A dirty `schema_migrations` now has a named error and a repair command (#967).** Velox still refuses to start, and the error names the migration and the `velox migrate force <version>` commands to run. See [the runbook](docs/ops/runbook/migration-failed-midway.md).
+- **The Compose stack now passes `POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS`, `VELOX_API_BASE_URL` and `MIGRATION_LOCK_TIMEOUT` from `.env` (#1150).** If you added them with an override file or by editing `docker-compose.yml`, move them to `.env`.
+
 ### Added
 
 - **`velox migrate force <version>` repairs an upgrade that stopped midway (2026-10-17, #967).** Velox still refuses to start while `schema_migrations` is dirty, but the error now names the migration and the exact commands. Force refuses while a migration runs. Steps: [runbook](docs/ops/runbook/migration-failed-midway.md).
+
+### Changed
+
+- **Sizing for one small server, measured (2026-10-17).** A €6.49/month Hetzner CX23 took about 1 million events a day with 0 errors; its disk fills in about two months ([scale](docs/scale.md#what-one-small-server-handles)). The [one-VM production guide](docs/production-one-vm.md) gets a Docker install link, no duplicate `.env` keys, a health check that waits, a start-up warnings table and a private backup folder.
+- **The README's "What it looks like" is two labelled pictures (2026-10-17).** The invoice your customer gets, then your margin per model, each with one line saying what it shows. The text copy of the same numbers is gone.
 
 ### Fixed
 
 - **Database upgrades no longer wait on a table lock without limit (2026-10-17, #987).** A migration that cannot get its lock within 5 seconds stops, leaves nothing behind and says how to retry; `MIGRATION_LOCK_TIMEOUT` changes the limit. New migrations that build an index or add a constraint the write-blocking way now fail CI ([runbook](docs/ops/runbook/migration-lock-timeout.md)).
 - **The invoice list costs the same few database reads whatever the page size (2026-10-17).** Each row used to read its own banner facts (card on file, Stripe connection, dunning, pause, payment page), so 25 rows took about 110 ms. A page now reads each fact once. Banners are unchanged (#1142).
 - **The Compose stack passes the Postmark webhook login and `VELOX_API_BASE_URL` to Velox (2026-10-17).** Set `POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS` and `VELOX_API_BASE_URL` in `.env`; editing `docker-compose.yml` or adding an override file is no longer needed (#1150).
-
-### Changed
-
-- **Sizing for one small server, measured (2026-10-17).** A €6.49/month Hetzner CX23 took about 1 million events a day with 0 errors; its disk fills in about two months ([scale](docs/scale.md#what-one-small-server-handles)). The [one-VM production guide](docs/production-one-vm.md) gets a Docker install link, no duplicate `.env` keys, a health check that waits, a start-up warnings table and a private backup folder.
-- **The README's "What it looks like" is two labelled pictures (2026-10-17).** The invoice your customer gets, then your margin per model, each with one line saying what it shows. The text copy of the same numbers is gone.
 
 ## [0.8.0] - 2026-10-17
 
@@ -5044,7 +5054,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/getvelox/velox/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/getvelox/velox/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/getvelox/velox/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/getvelox/velox/compare/v0.6.0...v0.6.1
