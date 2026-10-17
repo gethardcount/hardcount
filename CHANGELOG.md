@@ -26,6 +26,7 @@ LiteLLM usage for an unknown customer is held instead of lost, new accounts retr
 - **Email actions answer 409 `email_not_configured` when `SMTP_HOST` is not set.** This covers sending an invoice or credit note, sending a payment-method setup link and inviting a teammate.
 - **A charge Stripe never answered returns `payment_outcome_unknown`**, not `provider_error`. Add the new code if you branch on it.
 - **Many messages were reworded; codes are unchanged.** Match on `reason` and `code`, not on the text.
+- **Set your company name if you have not (Settings → Business details).** With none set, PDFs no longer print "Velox" as the seller, and that includes already-issued invoices, because PDFs are rendered when opened (#1093). Totals and lines do not change.
 
 ### Added
 

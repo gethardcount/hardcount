@@ -31,7 +31,7 @@ has built them: [Fresh install and upgrade](#fresh-install-and-upgrade) and
 
 ## Money walk across a renewal
 
-- On the Dunning policies page, "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). When its retries run out it changes nothing: final actions none and none.
+- On the Dunning policies page, "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). When its retries run out it changes nothing: final actions none and none. If you ran the demo first, its recipe's "AI default retry" is the default instead, and "Default retries" stays listed.
 - [ ] Mint a test clock, create a customer with an email, pinned to the clock, and subscribe it to a plan with a base fee (plans bill in arrears by default).
 - [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
 - [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run (automatic retries for a failed payment) starts.
@@ -63,7 +63,8 @@ Run these after the tag's image build has pushed the release images, and before 
 3. Check the migrations: `docker compose logs velox-api | grep migrations`.
    **You see:** `migrations applied`, with `version` set to the new release's last migration number, and no error.
 4. Open the invoice from step 1.
-   **You see:** the same number, total and line amounts, and its PDF matches the one you downloaded.
+   **You see:** the same number, total and line amounts. Its PDF has the same lines and amounts as the one you downloaded. The "Generated on" time at the bottom differs, because each PDF is made when you open it. A release that changes what the PDF prints says so in its notes.
+   On the Dunning policies page, the policies are the same as before the upgrade: an upgrade never adds or changes a retry policy on an existing account.
 5. Run `./quickstart.sh demo` again.
    **You see:** a second finalized invoice for a new demo customer.
 6. Run `./quickstart.sh destroy` when you are done.
