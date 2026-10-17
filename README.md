@@ -138,7 +138,7 @@ Velox fits a small or mid-size team that bills its customers by usage:
 - **You charge by usage**, most of all an AI product that prices per token, by model and token type.
 - **You want billing on your own servers.** Your usage and invoice data stay in your own Postgres. Stripe only charges the card.
 - **One engineer can run it.** There are three parts: the Velox server, Postgres, and Redis for rate limiting. There is no Kafka, no analytics database, and no queue or workflow service to run and upgrade.
-- **Your volume is up to about a million usage events a day.** That is roughly 400,000 AI requests, because each request sends two or three events (input, output, cache). In load tests, a mid-size Postgres (32 GB of memory) took a steady 1,000 events a second. Velox keeps every raw event, so plan about 15 GB of database disk per month at that volume. [How we measured](docs/scale.md)
+- **Your volume is up to about a million usage events a day.** That is roughly 400,000 AI requests, because each request sends two or three events (input, output, cache). In load tests, a mid-size Postgres (32 GB of memory) took a steady 1,000 events a second. Velox keeps every raw event, so plan about 15 to 20 GB of database disk per month at that volume. [How we measured](docs/scale.md)
 
 ---
 
