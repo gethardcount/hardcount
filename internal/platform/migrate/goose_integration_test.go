@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -544,8 +545,11 @@ func TestReadPlanIsReadOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = holder.Close() }()
+			if _, err := holder.ExecContext(ctx, `SELECT pg_advisory_lock(4097083626)`); err != nil {
+				t.Fatal(err)
+			}
 			var pid int
-			if err := holder.QueryRowContext(ctx, `SELECT pg_backend_pid() FROM (SELECT pg_advisory_lock(4097083626)) l`).Scan(&pid); err != nil {
+			if err := holder.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
 				t.Fatal(err)
 			}
 			pool, err := openPool(dsn)
@@ -560,7 +564,7 @@ func TestReadPlanIsReadOnly(t *testing.T) {
 			if p.State != tc.state {
 				t.Fatalf("state %q, want %q", p.State, tc.state)
 			}
-			if !strings.Contains(p.Running, "pid ") {
+			if !strings.Contains(p.Running, fmt.Sprintf("pid %d", pid)) {
 				t.Fatalf("running now = %q, want the holder (pid %d)", p.Running, pid)
 			}
 			if tableExists(t, db, versionTable) {
