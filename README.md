@@ -56,7 +56,7 @@ Margin (billed $5.73 vs provider cost $2.76)             51.9%
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-margin-dark.png">
-  <img alt="The customer's margin card for the last invoiced period: $5.73 usage billed, $2.76 provider cost, 51.9% margin, and one row per model: claude-haiku-4.5 billed $1.85 at $1.48 cost, claude-sonnet-4.5 billed $3.88 at $1.28 cost." src="docs/assets/readme-margin-light.png" width="100%">
+  <img alt="The customer's margin card for the last invoiced period: $5.73 usage billed, $2.76 provider cost, 51.9% margin, and one row per model: claude-sonnet-4.5 billed $3.88 at $1.28 cost, 67.1% margin; claude-haiku-4.5 billed $1.85 at $1.48 cost, 20.0% margin." src="docs/assets/readme-margin-light.png" width="100%">
 </picture>
 
 One meter carries every token type, prices are stored exactly ($3.00 per 1M tokens), and the margin comes from the provider cost recorded on each event, so you see it for each model.

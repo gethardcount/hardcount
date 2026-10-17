@@ -213,7 +213,7 @@ At the end, the demo prints two links:
    follow the test clock." at the top. Below are the subscription, the
    recent invoices and a **Margin** card. The Margin card starts on the
    current period, which is the new, empty month. Choose **Last invoiced
-   period** in it to see the demo month, with a row for each model.
+   period** in it to see the demo month, with a row for each model and its margin.
 
 3. Look around in the left menu.
 
