@@ -124,21 +124,25 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
    **You see:** `✓ Subscription vlx_sub_…, status active`
 
 5. **Save what the AI provider charges you per token.** These are made-up
-   costs for Claude Sonnet 4.5: $1.20 per million input tokens, $4.50 per
-   million output tokens and $0.05 per million cache-read tokens. From now
-   on, Velox records your cost on each usage record that arrives. Usage that
-   arrived earlier stays without a cost.
+   costs for two models. Claude Sonnet 4.5 costs $1.20 per million input
+   tokens, $4.50 per million output tokens and $0.05 per million cache-read
+   tokens. Claude Haiku 4.5 costs $0.80 per million input tokens and $4.00
+   per million output tokens, closer to its price, so it earns you less.
+   From now on, Velox records your cost on each usage record that arrives.
+   Usage that arrived earlier stays without a cost.
 
-   **You see:** `✓ Saved 3 costs. Velox now records your cost on each new usage record.`
+   **You see:** `✓ Saved 5 costs for two models. Velox now records your cost on each new usage record.`
 
 6. **Send token usage, the way a LiteLLM proxy sends it.** LiteLLM is a
-   proxy that sits between your app and AI providers. The demo sends five AI
-   calls to the same Velox address that LiteLLM reports to. Each call used
-   120,000 prompt tokens (40,000 of them read from the cache) and 35,000
-   output tokens. Velox splits each call into three usage records: 80,000
-   input, 40,000 cache read and 35,000 output.
+   proxy that sits between your app and AI providers. The demo sends ten AI
+   calls to the same Velox address that LiteLLM reports to. Five go to
+   Claude Sonnet 4.5. Each used 120,000 prompt tokens (40,000 of them read
+   from the cache) and 35,000 output tokens. Velox splits it into three
+   usage records: 80,000 input, 40,000 cache read and 35,000 output. Five go
+   to Claude Haiku 4.5. Each used 120,000 prompt tokens and 50,000 output
+   tokens, so Velox splits it into two usage records.
 
-   **You see:** `✓ 5 AI calls became 15 usage records: input, cache_read and output for each call`
+   **You see:** `✓ 10 AI calls became 25 usage records, one for each token type in each call`
 
 7. **Move the test clock forward one month.** The demo moves the clock 32
    days ahead, past the end of ACME Corp's first month. While the clock
@@ -155,28 +159,34 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
    **You see:**
 
    ```text
-     VLX-000001  total $3.88 USD  status finalized
+     VLX-000001  total $5.73 USD  status finalized
        Tokens (claude-sonnet-4.5 · input)  → $1.20
        Tokens (claude-sonnet-4.5 · output)  → $2.62
        Tokens (claude-sonnet-4.5 · cache_read)  → $0.06
+       Tokens (claude-haiku-4.5 · input)  → $0.60
+       Tokens (claude-haiku-4.5 · output)  → $1.25
    ✓ One invoice line per model and token type, and the PDF renders (34417 bytes)
    ```
 
-   The lines are 400,000 input tokens at $3.00 per million, 175,000 output
-   tokens at $15.00 per million, and 200,000 cache-read tokens at $0.30 per
-   million. Half a cent rounds to the nearest even cent, so $2.625 is $2.62.
+   The Sonnet lines are 400,000 input tokens at $3.00 per million, 175,000
+   output tokens at $15.00 per million, and 200,000 cache-read tokens at
+   $0.30 per million. The Haiku lines are 600,000 input tokens at $1.00 per
+   million and 250,000 output tokens at $5.00 per million. Half a cent
+   rounds to the nearest even cent, so $2.625 is $2.62.
    The invoice number goes up by one on each run.
 
 9. **Show your margin on ACME Corp.** Only you see this, never the customer.
-   It is what you billed ($3.88) against what the usage cost you ($1.28).
+   It is what you billed ($5.73) against what the usage cost you ($2.76),
+   in total and for each model.
 
    **You see:**
 
    ```text
-     billed  $3.88
-     cost    $1.28
-     margin  67.1%
-       claude-sonnet-4.5: cost $1.28  billed $3.88
+     billed  $5.73
+     cost    $2.76
+     margin  51.9%
+       claude-haiku-4.5: cost $1.48  billed $1.85  margin 20.0%
+       claude-sonnet-4.5: cost $1.28  billed $3.88  margin 67.1%
    ✓ Checked: the cost matches your rates and usage, and the billed amount matches the invoice
    ```
 
@@ -193,8 +203,8 @@ At the end, the demo prints two links:
 
 1. Open the **Invoice** link.
 
-   **You see:** invoice VLX-000001 for ACME Corp, with the three token lines
-   and the $3.88 total. To see the PDF, open the **⋯** menu at the top right and choose
+   **You see:** invoice VLX-000001 for ACME Corp, with the five token lines
+   and the $5.73 total. To see the PDF, open the **⋯** menu at the top right and choose
    **Preview PDF** or **Download PDF**.
 
 2. Open the **Customer** link.
@@ -203,14 +213,14 @@ At the end, the demo prints two links:
    follow the test clock." at the top. Below are the subscription, the
    recent invoices and a **Margin** card. The Margin card starts on the
    current period, which is the new, empty month. Choose **Last invoiced
-   period** in it to see the demo month.
+   period** in it to see the demo month, with a row for each model.
 
 3. Look around in the left menu.
 
    **You see:**
-   - **Usage**: the 15 usage records.
+   - **Usage**: the 25 usage records.
    - **Pricing**: the Tokens meter and the AI API plan.
-   - **Provider costs**: the three costs from step 5.
+   - **Provider costs**: the five costs from step 5.
    - **Test clocks**: the clock named "demo".
 
 ### Why Home still reads $0
