@@ -12,7 +12,7 @@ import {
 import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
 import { formatCivilPeriod } from '@/lib/dates'
 import { marginCardView } from '@/lib/actionOutcomes'
-import { marginCostNote, marginCostState } from '@/lib/marginCost'
+import { formatMarginBps, marginCostNote, marginCostState } from '@/lib/marginCost'
 import {
   DEFAULT_MARGIN_PRESET, MARGIN_PRESETS, isOutsideWindow, marginWindowFor, marginWindowIsEmpty, rangeIncluding, type MarginPreset,
 } from '@/lib/usageWindow'
@@ -180,7 +180,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Margin</p>
                 <p className="text-lg font-semibold text-foreground mt-0.5">
-                  {rep.margin_bps != null ? `${(rep.margin_bps / 100).toFixed(1)}%` : '—'}
+                  {formatMarginBps(rep.margin_bps)}
                 </p>
               </div>
             </div>
@@ -214,24 +214,29 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
                     <TableHead>Model</TableHead>
                     <TableHead className="text-right">Billed</TableHead>
                     <TableHead className="text-right">Cost</TableHead>
+                    <TableHead className="text-right">Margin</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rep.by_model.map(m => (
                     <TableRow key={m.model}>
-                      <TableCell className="text-sm font-mono">{m.model}</TableCell>
+                      {/* Wraps only when a phone is too narrow for the name,
+                          so the four columns still fit at 390px. */}
+                      <TableCell className="text-sm font-mono whitespace-normal [overflow-wrap:anywhere]">{m.model}</TableCell>
                       <TableCell className="text-sm text-right">
                         {m.attributed
                           ? billed(m.revenue_cents ?? 0)
                           : <Badge variant="outline">not model-priced</Badge>}
                       </TableCell>
                       <TableCell className="text-sm text-right">{cost(m.cost_micros)}</TableCell>
+                      <TableCell className="text-sm text-right">{formatMarginBps(m.margin_bps)}</TableCell>
                     </TableRow>
                   ))}
                   {rep.unattributed_revenue_cents > 0 && (
                     <TableRow>
                       <TableCell className="text-sm text-muted-foreground">Not model-attributed</TableCell>
                       <TableCell className="text-sm text-right">{billed(rep.unattributed_revenue_cents)}</TableCell>
+                      <TableCell className="text-sm text-right text-muted-foreground">—</TableCell>
                       <TableCell className="text-sm text-right text-muted-foreground">—</TableCell>
                     </TableRow>
                   )}

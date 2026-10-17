@@ -210,15 +210,17 @@ green "✓ One invoice line per model and token type, and the PDF renders ($PDF_
 step "9. Your margin: what you billed against what the provider charged you (only you see this)"
 MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW&to=$ADV_TO")
 echo "$MARGIN" | jq -r "$USD"'"  billed  \(.revenue_cents | usd)\n  cost    \(.cost_micros | usd_micros)\n  margin  \((.margin_bps // 0) | pct1)"'
-# Per model: billed, cost, and the margin on that model (the same formula as
-# the total: billed minus cost, over billed).
-echo "$MARGIN" | jq -r "$USD"'.by_model | sort_by(.model) | .[] | "    \(.model): cost \(.cost_micros | usd_micros)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" + (if (.revenue_cents // 0) > 0 then "  margin \(((.revenue_cents - .cost_micros / 10000) / .revenue_cents * 10000) | round | pct1)" else "" end) else "" end)'
+# Per model: billed, cost, and the margin on that model. The server works
+# each model's margin out with the same formula as the total.
+echo "$MARGIN" | jq -r "$USD"'.by_model | sort_by(.model) | .[] | "    \(.model): cost \(.cost_micros | usd_micros)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" else "" end) + (if .margin_bps != null then "  margin \(.margin_bps | pct1)" else "" end)'
 # The cost follows from this script's own inputs (the token counts in step 6
 # and the rates in step 5), and the billed amount must match the invoice.
 echo "$MARGIN" | jq -e '.cost_micros == 2757500' >/dev/null \
   || { echo "✗ provider cost is $(echo "$MARGIN" | jq '.cost_micros') micros, expected 2757500"; exit 1; }
 echo "$MARGIN" | jq -e '([.by_model[] | {(.model): .cost_micros}] | add) == {"claude-sonnet-4.5": 1277500, "claude-haiku-4.5": 1480000}' >/dev/null \
   || { echo "✗ cost by model is $(echo "$MARGIN" | jq -c '[.by_model[] | {(.model): .cost_micros}] | add'), expected Sonnet 1277500 and Haiku 1480000 micros"; exit 1; }
+echo "$MARGIN" | jq -e '[.by_model[] | select(.margin_bps == null)] | length == 0' >/dev/null \
+  || { echo "✗ a model has no margin: $(echo "$MARGIN" | jq -c '[.by_model[] | {model, margin_bps}]')"; exit 1; }
 echo "$MARGIN" | jq -e --argjson s "$SUBTOTAL" '.revenue_cents == $s' >/dev/null \
   || { echo "✗ margin says billed $(echo "$MARGIN" | jq '.revenue_cents') cents but the invoice subtotal is $SUBTOTAL"; exit 1; }
 green "✓ Checked: the cost matches your rates and usage, and the billed amount matches the invoice"

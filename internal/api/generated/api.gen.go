@@ -4101,8 +4101,11 @@ type LitellmSpendResult struct {
 type MarginReport struct {
 	ByModel []struct {
 		// Attributed True only when a pricing rule pins this model — margin is never heuristically allocated.
-		Attributed   bool   `json:"attributed"`
-		CostMicros   int64  `json:"cost_micros"`
+		Attributed bool  `json:"attributed"`
+		CostMicros int64 `json:"cost_micros"`
+
+		// MarginBps This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
+		MarginBps    int64  `json:"margin_bps,omitempty"`
 		Model        string `json:"model"`
 		RevenueCents int64  `json:"revenue_cents,omitempty"`
 	} `json:"by_model"`

@@ -1213,6 +1213,10 @@ components:
               attributed:
                 type: boolean
                 description: True only when a pricing rule pins this model — margin is never heuristically allocated.
+              margin_bps:
+                type: integer
+                format: int64
+                description: This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
         unattributed_revenue_cents:
           type: integer
           format: int64

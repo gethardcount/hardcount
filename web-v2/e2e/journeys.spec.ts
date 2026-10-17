@@ -497,7 +497,7 @@ test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => 
   await expect(page.getByRole('dialog').getByLabel('Currency')).toContainText('EUR')
 })
 
-test('Margin shows no margin when no provider cost is known', async ({ page }) => {
+test("Margin shows no margin without a provider cost, and each model's margin with one", async ({ page }) => {
   // The card used to read "Provider cost $0.0000" here instead of a dash.
   // The "not configured" sentence needs a workspace with no provider cost
   // rate at all; check that first so a rate left in the database fails here
@@ -511,6 +511,43 @@ test('Margin shows no margin when no provider cost is known', async ({ page }) =
   await expect(card.getByRole('link', { name: 'Set up provider costs' })).toHaveAttribute('href', '/provider-costs')
   await expect(card.getByText('Provider cost', { exact: true }).locator('..')).toContainText('—')
   await expect(card.getByText('Margin', { exact: true }).locator('..').last()).not.toContainText('%')
+
+  // With a provider cost for the model, its row shows its own margin: the
+  // number the server worked out, in the same form as the headline. The rate
+  // is deleted at the end, so the check above still holds on the next run.
+  const recipe = await api<{ created_objects: { plan_ids: string[] } }>('POST', '/recipes/anthropic_style/instantiate', {})
+  const clock = await createClock()
+  const priced = await createCustomer(clock.id)
+  await createSubscription(priced.id, recipe.created_objects.plan_ids[0])
+  const saved: { id: string }[] = []
+  try {
+    for (const [tokenType, cost] of [['input', '0.0000008'], ['output', '0.000004']]) {
+      saved.push(await api<{ id: string }>('PUT', '/provider-costs', {
+        provider: 'anthropic', model: 'claude-haiku-4.5', token_type: tokenType, cost_per_token: cost,
+      }))
+    }
+    await api('POST', '/integrations/litellm/spend', {
+      id: `chatcmpl-e2e-${uniq()}`,
+      call_type: 'completion',
+      model: 'claude-haiku-4-5-20251001',
+      custom_llm_provider: 'anthropic',
+      user: priced.external_id,
+      usage: { prompt_tokens: 120000, completion_tokens: 50000 },
+    })
+  } finally {
+    for (const r of saved) await api('DELETE', `/provider-costs/${r.id}`)
+  }
+  const from = new Date(new Date(clock.frozen_time).getTime() - 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z')
+  const to = new Date(new Date(clock.frozen_time).getTime() + 40 * 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z')
+  type Margin = { by_model: { model: string; margin_bps?: number }[] }
+  const report = await api<Margin>('GET', `/customers/${priced.id}/margin?from=${from}&to=${to}`)
+  const haiku = report.by_model.find(m => m.model === 'claude-haiku-4.5')
+  expect(haiku?.margin_bps, 'the API gives the haiku row a margin').toBeDefined()
+  await page.goto(`/customers/${priced.id}`)
+  const pricedCard = page.locator('[data-slot="card"]').filter({ has: page.getByText('Usage billing vs your provider costs') })
+  const row = pricedCard.getByRole('row').filter({ hasText: 'claude-haiku-4.5' })
+  await expect(row.getByRole('cell').last()).toHaveText(`${(haiku!.margin_bps! / 100).toFixed(1)}%`)
+  await expect(pricedCard.getByRole('columnheader', { name: 'Margin' })).toBeVisible()
 })
 
 test('grant credits from the customer page', async ({ page }) => {

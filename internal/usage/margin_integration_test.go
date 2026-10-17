@@ -110,6 +110,11 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	if sonnet.CostMicros != 4000 {
 		t.Errorf("sonnet cost = %d, want 4000", sonnet.CostMicros)
 	}
+	// The row's own margin, by the headline's formula: 0.4c of cost on
+	// $30 → 9998.67 bps → 9999.
+	if sonnet.MarginBps == nil || *sonnet.MarginBps != 9999 {
+		t.Errorf("sonnet margin_bps = %v, want 9999", sonnet.MarginBps)
+	}
 	if rep.UnattributedRevenueCents == 0 {
 		t.Error("unattributed revenue = 0, want >0 (the flat-rule revenue must NOT be allocated per model)")
 	}
@@ -146,6 +151,13 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	}
 	if rep.MarginBps != nil {
 		t.Errorf("margin_bps = %d, want none: one event's cost is unknown", *rep.MarginBps)
+	}
+	// No row shows a margin the headline cannot: with part of the cost
+	// unknown, a row would read as measured next to a total that is not.
+	for _, m := range rep.ByModel {
+		if m.MarginBps != nil {
+			t.Errorf("%s margin_bps = %d, want none while an event's cost is unknown", m.Model, *m.MarginBps)
+		}
 	}
 }
 

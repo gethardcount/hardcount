@@ -34,3 +34,12 @@ export function marginCostNote(state: MarginCostState): string | null {
     case 'no-usage': return null
   }
 }
+
+// formatMarginBps renders a margin the server worked out (the report's
+// headline or one model's row) as a percent with one decimal, or "—" when
+// the server gave none: no revenue, cost unknown or incomplete, two
+// currencies, or a model whose revenue no pricing rule pins. The card never
+// computes a margin itself, so a row and the total share one formula.
+export function formatMarginBps(bps: number | null | undefined): string {
+  return bps == null ? '—' : `${(bps / 100).toFixed(1)}%`
+}

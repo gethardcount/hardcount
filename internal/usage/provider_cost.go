@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -254,6 +255,26 @@ type MarginModelRow struct {
 	CostMicros   int64  `json:"cost_micros"`
 	RevenueCents int64  `json:"revenue_cents,omitempty"`
 	Attributed   bool   `json:"attributed"`
+	// MarginBps is this model's margin, by the same formula as the
+	// report's headline (marginBps). Omitted whenever the headline is
+	// (currency, unresolved cost) and also when the row has no attributed
+	// revenue or no stamped cost of its own: either way it is a margin
+	// nobody measured.
+	MarginBps *int64 `json:"margin_bps,omitempty"`
+}
+
+// marginBps is (revenue − cost) / revenue in basis points, rounded half
+// away from zero. Cost is micro-dollars, revenue cents. Nil when there is
+// no revenue to divide by. The headline and every per-model row use it, so
+// a row and the total can never disagree on the arithmetic.
+func marginBps(revenueCents, costMicros int64) *int64 {
+	if revenueCents <= 0 {
+		return nil
+	}
+	costCents := decimal.NewFromInt(costMicros).Div(decimal.NewFromInt(10000)) // micros → cents (1e4)
+	revCents := decimal.NewFromInt(revenueCents)
+	bps := revCents.Sub(costCents).Div(revCents).Mul(decimal.NewFromInt(10000)).Round(0).IntPart()
+	return &bps
 }
 
 type MarginReport struct {
@@ -369,6 +390,11 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		}
 	}
 
+	// A margin needs revenue and cost in one currency and every event's
+	// cost known. A row also needs its own revenue and its own stamped cost
+	// (every byModel entry has one: the query keeps only costed events).
+	measurable := rep.RevenueCurrency == rep.CostCurrency && rep.UnresolvedEvents == 0
+
 	seen := map[string]bool{}
 	for _, c := range byModel {
 		rep.CostMicros += c.CostMicros
@@ -376,6 +402,9 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		row := MarginModelRow{Model: c.Model, CostMicros: c.CostMicros}
 		if rev, ok := revenueByModel[c.Model]; ok {
 			row.RevenueCents, row.Attributed = rev, true
+			if measurable {
+				row.MarginBps = marginBps(rev, c.CostMicros)
+			}
 		}
 		rep.ByModel = append(rep.ByModel, row)
 		seen[c.Model] = true
@@ -387,11 +416,20 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		}
 	}
 
-	if rep.RevenueCents > 0 && rep.RevenueCurrency == rep.CostCurrency && rep.CostedEvents > 0 && rep.UnresolvedEvents == 0 {
-		costCents := decimal.NewFromInt(rep.CostMicros).Div(decimal.NewFromInt(10000)) // micros → cents (1e4)
-		revCents := decimal.NewFromInt(rep.RevenueCents)
-		bps := revCents.Sub(costCents).Div(revCents).Mul(decimal.NewFromInt(10000)).Round(0).IntPart()
-		rep.MarginBps = &bps
+	// Largest bill first; the map walk above has no order of its own.
+	sort.SliceStable(rep.ByModel, func(i, j int) bool {
+		a, b := rep.ByModel[i], rep.ByModel[j]
+		if a.RevenueCents != b.RevenueCents {
+			return a.RevenueCents > b.RevenueCents
+		}
+		if a.CostMicros != b.CostMicros {
+			return a.CostMicros > b.CostMicros
+		}
+		return a.Model < b.Model
+	})
+
+	if measurable && rep.CostedEvents > 0 {
+		rep.MarginBps = marginBps(rep.RevenueCents, rep.CostMicros)
 	}
 	return rep, nil
 }
