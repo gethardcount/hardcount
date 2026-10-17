@@ -2,9 +2,14 @@ package dunning_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -152,6 +157,38 @@ func TestSeedDefaultPolicies_HandsOverDefault(t *testing.T) {
 		}
 	})
 
+	// A policy created turned off (the API's enabled defaults to false; the
+	// dashboard's switch can be off for a draft) must not take the default:
+	// a disabled default starts no dunning, so every unassigned customer
+	// would silently stop being retried. The next enabled create still takes
+	// over. Mutation check: drop the p.Enabled guard on the demote.
+	t.Run("a disabled policy leaves the seed as default", func(t *testing.T) {
+		tenantID := testutil.CreateTestTenant(t, db, "Seed Disabled Create")
+		seedAccount(t, db, svc, tenantID)
+		seed := onlySeed(t, svc, tenantID, false)
+
+		draft := operatorPolicy("draft")
+		draft.Enabled = false
+		created, err := svc.UpsertPolicy(testCtx, tenantID, draft)
+		if err != nil {
+			t.Fatalf("create disabled: %v", err)
+		}
+		if created.IsDefault {
+			t.Fatal("a disabled policy must not take the default from the enabled seed")
+		}
+		if def := defaultOf(t, svc, tenantID, false); def.ID != seed.ID || !def.Enabled || !def.Seeded {
+			t.Fatalf("default = %s (enabled=%v seeded=%v), want the enabled seed %s still seeded", def.ID, def.Enabled, def.Seeded, seed.ID)
+		}
+
+		mine, err := svc.UpsertPolicy(testCtx, tenantID, operatorPolicy("mine"))
+		if err != nil {
+			t.Fatalf("create enabled: %v", err)
+		}
+		if !mine.IsDefault {
+			t.Fatal("the first enabled policy must still take over after a disabled one was created")
+		}
+	})
+
 	t.Run("an edited seed keeps the default", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Seed Edited")
 		seedAccount(t, db, svc, tenantID)
@@ -277,5 +314,77 @@ func TestSeedDefaultPolicies_ExistingAccountsUntouched(t *testing.T) {
 		if ps := listPolicies(t, svc, tenantID, live); len(ps) != 0 {
 			t.Fatalf("livemode=%v: an existing account gained %d policies", live, len(ps))
 		}
+	}
+}
+
+type recordingAudit struct {
+	mu   sync.Mutex
+	rows []map[string]any
+}
+
+func (a *recordingAudit) Log(_ context.Context, _, action, resourceType, resourceID, _ string, metadata map[string]any) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.rows = append(a.rows, map[string]any{"action": action, "type": resourceType, "id": resourceID, "metadata": metadata})
+	return nil
+}
+
+// TestCreatePolicyRoute_DefaultTakeover drives POST /policies on a seeded
+// account the way an integrator does. A body without "enabled" (so false)
+// must leave the seed as the default; an enabled create takes the default,
+// and its audit row says so, because the seed's demotion writes no row of
+// its own and the audit log would otherwise not show why the default moved.
+//
+// Mutation checks: drop the p.Enabled guard on the demote (the first
+// request's policy comes back is_default=true); drop the became_default
+// metadata (the audit assertion fails).
+func TestCreatePolicyRoute_DefaultTakeover(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	svc := dunning.NewService(dunning.NewPostgresStore(db), nil, nil)
+	tenantID := testutil.CreateTestTenant(t, db, "Seed Create Route")
+	seedAccount(t, db, svc, tenantID)
+	seed := onlySeed(t, svc, tenantID, false)
+
+	h := dunning.NewHandler(svc)
+	rec := &recordingAudit{}
+	h.SetAuditLogger(rec)
+	routes := h.Routes()
+
+	post := func(body string) domain.DunningPolicy {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/policies", strings.NewReader(body))
+		req = req.WithContext(postgres.WithLivemode(auth.WithTenantID(context.Background(), tenantID), false))
+		w := httptest.NewRecorder()
+		routes.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+		}
+		var p domain.DunningPolicy
+		if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return p
+	}
+
+	// No "enabled" key: Go's zero value makes this a disabled policy.
+	draft := post(`{"name":"Enterprise","max_retry_attempts":2,"grace_period_days":1,"retry_schedule":["24h"],"final_subscription_action":"pause","final_invoice_action":"none"}`)
+	if draft.Enabled || draft.IsDefault {
+		t.Fatalf("draft enabled=%v is_default=%v, want a disabled non-default policy", draft.Enabled, draft.IsDefault)
+	}
+	if def := defaultOf(t, svc, tenantID, false); def.ID != seed.ID {
+		t.Fatalf("default = %s after a disabled create, want the seed %s", def.ID, seed.ID)
+	}
+	if md, _ := rec.rows[len(rec.rows)-1]["metadata"].(map[string]any); len(md) != 0 {
+		t.Errorf("audit metadata for a non-default create = %v, want none", md)
+	}
+
+	active := post(`{"name":"Active","enabled":true,"max_retry_attempts":2,"grace_period_days":1,"retry_schedule":["24h"],"final_subscription_action":"pause","final_invoice_action":"none"}`)
+	if !active.IsDefault {
+		t.Fatal("the first enabled create must take the default from the seed")
+	}
+	last := rec.rows[len(rec.rows)-1]
+	md, _ := last["metadata"].(map[string]any)
+	if last["id"] != active.ID || md["became_default"] != true {
+		t.Fatalf("audit row = %v, want the create of %s with became_default=true", last, active.ID)
 	}
 }

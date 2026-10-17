@@ -9,8 +9,8 @@ Every new account gets one dunning policy per mode, "Default retries", as
 the default. It retries a failed payment on day 3, 7 and 14, sends the
 usual warning and final emails when email is set up, and then leaves the
 subscription and the invoice as they are. The policy is marked `seeded`.
-While it is, the first policy anyone creates (by hand or from a recipe)
-takes over the default. Editing it or making it the default clears the
+While it is, the first enabled policy anyone creates (by hand or from a
+recipe) takes over the default. Editing it or making it the default clears the
 mark, and from then on it is an ordinary policy. Existing accounts get
 nothing: a policy appearing on a running account would start retrying old
 failed invoices.
@@ -72,8 +72,15 @@ subscription or write-off action the account did not choose.
   log, with `action` `bootstrap_provisioned` or `tenant_provisioned`.
 - **Handing over the default.** Migration 0180 adds
   `dunning_policies.seeded` (default false). In `upsertPolicyTx`, an insert
-  first runs `UPDATE dunning_policies SET is_default = false WHERE
-  is_default AND seeded`, then keeps the existing first-policy rule. An
+  of an enabled policy first runs `UPDATE dunning_policies SET is_default =
+  false WHERE is_default AND seeded`, then keeps the existing first-policy
+  rule. A policy created turned off skips the demote and is born
+  non-default: the API's `enabled` defaults to false, and handing the slot
+  to a disabled policy would stop retries for every unassigned customer
+  without anyone choosing that. The create dialog says before saving that
+  the new policy will replace the seed as default, and the create's audit
+  row carries `became_default: true`, since the demotion writes no row of
+  its own. An
   update sets `seeded = false`, and so does `SetDefaultPolicy` on the
   promoted row. The demoted seed stays, so a customer assigned to it keeps
   it.
@@ -83,7 +90,7 @@ subscription or write-off action the account did not choose.
 
 ## Why this design
 
-The first policy anyone creates still becomes the default, exactly as
+The first enabled policy anyone creates still becomes the default, as
 before; the seed only fills the gap until then. That keeps recipes working
 without a special case for them, and an operator who has touched the seed
 keeps their choice. Leaving the subscription and invoice alone is the one
@@ -115,7 +122,9 @@ seed knows nothing about.
 
 - A failed payment on a new account is retried from day one, in both
   modes.
-- Recipes and an operator's first policy behave as before.
+- Recipes and an operator's first enabled policy behave as before. A
+  policy created turned off on a new account no longer takes the default,
+  so a draft cannot switch retries off.
 
 ### Risks / open items
 

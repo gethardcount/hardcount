@@ -3403,8 +3403,8 @@ type DunningPolicy struct {
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
-	// true, the next policy you create (by hand or from a recipe)
-	// becomes the default instead. Ignored in request bodies.
+	// true, the next enabled policy you create (by hand or from a
+	// recipe) becomes the default instead. Ignored in request bodies.
 	Seeded    bool      `json:"seeded"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -3464,8 +3464,8 @@ type DunningPolicyListItem struct {
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
-	// true, the next policy you create (by hand or from a recipe)
-	// becomes the default instead. Ignored in request bodies.
+	// true, the next enabled policy you create (by hand or from a
+	// recipe) becomes the default instead. Ignored in request bodies.
 	Seeded    bool      `json:"seeded"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

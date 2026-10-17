@@ -273,10 +273,19 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		// slot. A concurrent edit of the seeded row holds its row lock;
 		// READ COMMITTED re-checks "seeded" after the wait, so an edit that
 		// commits first keeps the default.
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE dunning_policies SET is_default = false, updated_at = $1 WHERE is_default AND seeded`, now,
-		); err != nil {
-			return domain.DunningPolicy{}, fmt.Errorf("hand over seeded default: %w", err)
+		//
+		// Only an enabled policy takes over. A disabled default starts no
+		// dunning, so handing the slot to a policy created turned off (the
+		// API's enabled defaults to false; the dashboard switch can be off
+		// for a draft) would silently stop retries for every customer
+		// without an assigned policy. The seed keeps the slot instead, and
+		// the NOT EXISTS below makes the disabled policy non-default.
+		if p.Enabled {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE dunning_policies SET is_default = false, updated_at = $1 WHERE is_default AND seeded`, now,
+			); err != nil {
+				return domain.DunningPolicy{}, fmt.Errorf("hand over seeded default: %w", err)
+			}
 		}
 		newID := postgres.NewID("vlx_dpol")
 		row := tx.QueryRowContext(ctx, `

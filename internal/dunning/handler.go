@@ -220,7 +220,15 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionCreate, "dunning_policy", result.ID, result.Name, nil)
+		// A create can take the default (the first policy, or the first
+		// enabled one after the account's seeded policy, ADR-123). The old
+		// default's demotion writes no row of its own, so this row is the
+		// only record of why the default moved.
+		var metadata map[string]any
+		if result.IsDefault {
+			metadata = map[string]any{"became_default": true}
+		}
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionCreate, "dunning_policy", result.ID, result.Name, metadata)
 	}
 	respond.JSON(w, r, http.StatusCreated, result)
 }

@@ -3,7 +3,7 @@
 // whether its policy will take over the default.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { recipeRetryNote, retriesOffNotice } from '../src/lib/dunningCoverage.ts'
+import { newPolicyDefaultNote, recipeRetryNote, retriesOffNotice } from '../src/lib/dunningCoverage.ts'
 
 const seed = { name: 'Default retries', enabled: true, is_default: true, seeded: true }
 const mine = { name: 'Net 30', enabled: true, is_default: true, seeded: false }
@@ -29,4 +29,16 @@ test('recipe preview: what happens to the default', () => {
   assert.equal(recipeRetryNote([]), 'becomes your default')
   assert.equal(recipeRetryNote([seed]), 'becomes your default, replacing Default retries')
   assert.equal(recipeRetryNote([mine]), 'added next to your default, Net 30')
+})
+
+test('create dialog: says when saving replaces the seeded default', () => {
+  assert.equal(
+    newPolicyDefaultNote([seed], true),
+    'Saving makes this your default: every customer without their own policy uses it instead of Default retries.',
+  )
+  // A policy created turned off does not take over (ADR-123).
+  assert.equal(newPolicyDefaultNote([seed], false), 'Default retries stays your default while this policy is turned off.')
+  // Only the seeded default hands over; an operator's own default stays.
+  assert.equal(newPolicyDefaultNote([mine], true), null)
+  assert.equal(newPolicyDefaultNote([mine, { ...seed, is_default: false }], true), null)
 })

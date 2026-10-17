@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { finalActionSummary } from '@/lib/dunningActions'
-import { retriesOffNotice, SEEDED_POLICY_NOTE } from '@/lib/dunningCoverage'
+import { newPolicyDefaultNote, retriesOffNotice, SEEDED_POLICY_NOTE } from '@/lib/dunningCoverage'
 import { Callout } from '@/components/Callout'
 import {
   Select,
@@ -220,8 +220,13 @@ export default function DunningPoliciesPage() {
       {showCreate && (
         <PolicyDialog
           mode="create"
+          policies={policies}
           onClose={() => setShowCreate(false)}
-          onSaved={() => { setShowCreate(false); invalidate(); toast.success('Policy created') }}
+          onSaved={(p) => {
+            setShowCreate(false)
+            invalidate()
+            toast.success(p?.is_default ? 'Policy created and made your default' : 'Policy created')
+          }}
         />
       )}
       {editingPolicy && (
@@ -250,11 +255,12 @@ export default function DunningPoliciesPage() {
   )
 }
 
-function PolicyDialog({ mode, initial, onClose, onSaved }: {
+function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
   mode: 'create' | 'edit'
   initial?: DunningPolicy
+  policies?: DunningPolicy[]
   onClose: () => void
-  onSaved: () => void
+  onSaved: (saved?: DunningPolicy) => void
 }) {
   const [form, setForm] = useState({
     name: initial?.name ?? '',
@@ -285,12 +291,13 @@ function PolicyDialog({ mode, initial, onClose, onSaved }: {
         final_subscription_action: form.final_subscription_action,
         final_invoice_action: form.final_invoice_action,
       }
+      let saved: DunningPolicy | undefined
       if (mode === 'create') {
-        await api.createDunningPolicy(payload)
+        saved = await api.createDunningPolicy(payload)
       } else if (initial) {
-        await api.updateDunningPolicy(initial.id, payload)
+        saved = await api.updateDunningPolicy(initial.id, payload)
       }
-      onSaved()
+      onSaved(saved)
     } catch (err) {
       showApiError(err, mode === 'create' ? 'Failed to create' : 'Failed to save')
     } finally {
@@ -301,6 +308,9 @@ function PolicyDialog({ mode, initial, onClose, onSaved }: {
   const scheduleEntries = parseSchedule(form.retry_schedule)
   const max = parseInt(form.max_retry_attempts, 10) || 0
   const scheduleShortage = max - 1 - scheduleEntries.length
+  // Saving a new policy can replace the account's seeded default (ADR-123);
+  // say so before the operator saves, not only on the seed's card.
+  const defaultNote = mode === 'create' ? newPolicyDefaultNote(policies, form.enabled) : null
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -318,6 +328,9 @@ function PolicyDialog({ mode, initial, onClose, onSaved }: {
             <Label>Enabled</Label>
             <Switch checked={form.enabled} onCheckedChange={(val) => setForm(f => ({ ...f, enabled: val }))} />
           </div>
+          {defaultNote && (
+            <p className="text-xs text-muted-foreground" role="status">{defaultNote}</p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label>Max retry attempts</Label>
