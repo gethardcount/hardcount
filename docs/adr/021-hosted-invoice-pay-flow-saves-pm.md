@@ -1,7 +1,11 @@
 # ADR-021: Hosted-invoice Pay flow saves the card to the customer's Stripe customer
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-11)
 **Date:** 2026-05-03
+
+## Summary
+
+Paying on the hosted invoice page saves the card for later off-session charges. The Stripe Checkout session names the customer's Stripe customer (created on first use) and sets `setup_future_usage=off_session`, so future invoices can charge the card without the customer present. Amended 2026-10-11: Velox also records that card in its own `payment_methods`, through `Stripe.RecordCheckoutCard`, from the webhook or the reconciler's hosted sweep. The card becomes the default only when the customer had no card on file. Status: active, amended.
 
 ## Context
 

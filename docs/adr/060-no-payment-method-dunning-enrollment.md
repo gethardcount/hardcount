@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted — 2026-06-23.
+Accepted — 2026-06-23 (amended 2026-10-08).
+
+## Summary
+
+An unpaid invoice whose customer has no usable card enters dunning (the retry-and-escalate process), like a declined charge. Without this, the subscription stayed active and kept billing with no path to a final decision. The retries count as failed attempts, so the run ends in the policy's final actions, and adding a card mid-run lets the collector charge the invoice. Amended 2026-10-08: the auto-charge collector starts the run itself when money is still owed and no card exists ([ADR-116](116-collection-intent-at-finalize-one-collector.md)), and the separate enrollment sweeps were deleted. Status: active, amended; tenants with dunning disabled are skipped.
 
 ## Context
 

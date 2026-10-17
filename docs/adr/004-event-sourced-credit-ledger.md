@@ -9,6 +9,10 @@ Accepted
 ## Date
 2026-04-14
 
+## Summary
+
+Credits live in an append-only ledger, `customer_credit_ledger`: every grant, use, adjustment and expiry is a new row, so any balance can be traced to its causes. Entry amounts are never edited, though a grant row keeps a `consumed_cents` counter of how much of it has been used. Each row records `balance_after`, and the balance read sums the rows. Writers for one customer are serialized by a per-customer transaction advisory lock, which replaced the `SELECT ... FOR UPDATE` below because that lock missed a customer's first entry; since [ADR-078](078-prepaid-commits-phase-1.md) every balance writer takes it. Status: active.
+
 ## Context
 Velox supports customer credits — prepaid balances that reduce invoice amounts before payment collection. Credits can be granted (sales incentives, refunds-as-credit), applied to invoices, adjusted, expired, and reversed (when an invoice is voided). A mutable balance field (`UPDATE credits SET balance = balance - 100`) would be simple but makes it impossible to answer "why does this customer have $47.23 in credits?" without external audit logs.
 

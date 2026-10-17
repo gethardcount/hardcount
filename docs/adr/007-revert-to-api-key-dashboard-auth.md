@@ -9,6 +9,10 @@ Superseded by [ADR-011](./011-email-password-auth-and-clean-api-keys.md) — the
 ## Date
 2026-04-29
 
+## Summary
+
+Superseded by [ADR-011](011-email-password-auth-and-clean-api-keys.md) on 2026-05-01. This ADR made the dashboard log in with a pasted `vlx_secret_…` API key, kept in `localStorage` and sent as a Bearer header, and removed user accounts. The dashboard now signs in with email and password and an httpOnly session cookie, and API keys serve only SDK and curl callers. This file records why the API-key login was tried and then dropped.
+
 ## Context
 
 Velox's `project_auth_decision.md` and `CLAUDE.md` always recorded the v1 auth plan as: *"API keys custom-built; user auth via WorkOS/Clerk later; no premature session/password infrastructure."* The intent was that the dashboard, like the public HTTP API, would be authenticated by the operator's API key — one shared secret per tenant, no user accounts in v1.

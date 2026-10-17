@@ -1,10 +1,14 @@
 # ADR-040: Outbox is the only path (webhook + email)
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-08-30)
 **Date:** 2026-05-30
 **Supersedes:** the boot-time fallback contract introduced when
 the webhook/email outboxes shipped (the `VELOX_WEBHOOK_OUTBOX_ENABLED`
 and `VELOX_EMAIL_OUTBOX_ENABLED` env flags).
+
+## Summary
+
+Webhooks and emails always go through their outbox tables, and a background dispatcher delivers each row with retries and a dead-letter queue. The `VELOX_WEBHOOK_OUTBOX_ENABLED` and `VELOX_EMAIL_OUTBOX_ENABLED` flags were removed, because the direct-send path they enabled lost messages on any transient failure. Amended 2026-08-30: the four money emails (payment receipt, payment failed, dunning warning, dunning escalation) are now queued inside their state change's transaction; other emails are queued after commit. To pause a dispatcher, run `SELECT leader_pause('email_outbox', who, why)` or the `webhook_outbox` equivalent ([runbook](../ops/runbook/background-job-stuck.md)); the advisory locks named below were retired by [ADR-114](114-leader-leases-tick-scoped-fencing.md). Status: active, amended.
 
 ## Context
 

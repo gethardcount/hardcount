@@ -3,6 +3,10 @@
 **Date:** 2026-06-17
 **Status:** Accepted
 
+## Summary
+
+Velox decides which card to charge and names it on every PaymentIntent; Stripe never picks one. The card is the customer's default in Velox's `payment_methods` table, and the same lookup both allows the charge and selects the card. Stripe's `invoice_settings.default_payment_method` is only a display copy, and with no card ID the charge fails loudly instead of guessing. Detaching the default card promotes the newest remaining card in the same transaction, then copies it to Stripe for display (follow-up, 2026-06-17). Status: active.
+
 ## Context
 
 Auto-charging an invoice resolves *which saved card to charge* in two independent places that have to agree:

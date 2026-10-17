@@ -8,6 +8,10 @@ precedent of ADR-042 (tax rate `bigint` bp → `NUMERIC`).
 migration 0001, and the single-rule-only usage-billing path in
 `billing.billOnePeriod`.
 
+## Summary
+
+Per-unit price rates (`flat_amount_cents`, graduated-tier `unit_amount_cents`, `overage_unit_amount_cents`, and the same fields on customer price overrides) are arbitrary-precision decimals. They are stored as `NUMERIC` and sent as JSON strings such as `"0.0003"`, so sub-cent prices such as $3 per million tokens can be expressed. Fixed fees and every invoice amount stay whole `int64` cents, and the charge is rounded to a whole cent once. The cycle close also prices multi-dimension meters through their pricing rules, the same path the preview uses. Status: active; showing a sub-cent unit price on invoice lines came later ([ADR-054](054-effective-unit-price-decimal-display.md)).
+
 ## Context
 
 ADR-044 made the AI wedge a one-meter / N-rule model: a `tokens` meter

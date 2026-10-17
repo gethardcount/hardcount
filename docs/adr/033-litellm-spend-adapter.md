@@ -1,8 +1,12 @@
 # ADR-033: LiteLLM spend adapter — wedge integration
 
-**Status:** Accepted
+**Status:** Accepted (corrected 2026-07-06, amended 2026-08-30)
 **Date:** 2026-05-14
 **Related**: ADR-031 (per-plan bill_timing), `project_positioning_wedge.md`
+
+## Summary
+
+LiteLLM pushes each call's spend log to `POST /v1/integrations/litellm/spend`, authenticated with a Velox API key, and Velox records it as usage events on the `tokens` meter. Each call becomes one event per token role (`input`, `output`, and `cache_read` when present), keyed `<id>:<token_type>` so a resend is deduplicated ([ADR-044](044-canonical-ai-token-metering-model.md)). LiteLLM's `user` must be the Velox customer's external ID, Velox never creates meters, and LiteLLM's cost figures are kept as metadata only. Row problems return 200 with per-row results, and since 2026-08-30 a store failure returns `503 ingest_unavailable` so a retry-configured LiteLLM resends the batch. Status: active, amended; rows for an unknown customer or meter are now held for release ([ADR-122](122-hold-and-release-usage-for-unknown-customers.md)).
 
 ## Context
 

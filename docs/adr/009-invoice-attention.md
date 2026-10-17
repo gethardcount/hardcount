@@ -9,6 +9,10 @@ Accepted
 ## Date
 2026-04-30
 
+## Summary
+
+Every invoice in an API response carries one `attention` field that says whether the operator needs to act, and why. It holds a severity, a typed `reason`, an open dotted `code`, a message safe to show, and a short list of prescribed `actions`. The server computes it from the invoice's stored fields on each read, never stores it, and omits it when there is nothing to act on. The reason list has grown since: the current set is in `internal/domain/invoice_attention.go` (`overdue` is no longer one), and `doc_url` stays empty until error pages are published. Status: active.
+
 ## Context
 
 When an invoice gets stuck — tax calculation failed, payment declined, payment outcome ambiguous, past due — the operator's first question is *"why, and what do I do about it?"*. Until now, Velox surfaced these signals piecemeal:

@@ -3,6 +3,10 @@
 **Status:** Accepted
 **Date:** 2026-05-04
 
+## Summary
+
+When tax calculation fails, the invoice stays a draft and a background job retries the tax. It waits 5 min, 15 min, 1 h, 4 h, 12 h, 1 day, 2 days and 4 days (±10% jitter), then stops after 8 attempts and leaves the error showing. Only `provider_outage`, `unknown` and, since 2026-07-29, `provider_not_configured` are retried; the other codes need an operator action. When a retry succeeds on an invoice the engine made (`billing_reason` is not `manual`), the invoice is finalized automatically, and manual drafts stay drafts. Status: active.
+
 ## Context
 
 When tax calculation fails during invoice finalize, the engine

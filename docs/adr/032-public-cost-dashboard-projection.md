@@ -1,8 +1,12 @@
 # ADR-032: Public cost-dashboard projection — token shape + sanitization contract
 
-**Status:** Accepted
+**Status:** Accepted (corrected 2026-08-03, amended 2026-10-12)
 **Date:** 2026-05-14
 **Related**: ADR-021 (hosted-invoice public token shape), ADR-031 (per-plan bill_timing)
+
+## Summary
+
+`GET /v1/public/cost-dashboard/{token}` returns one customer's current-period usage and cost as sanitized JSON that a partner can show in its own app. The `vlx_pcd_` token is the only credential: rotating it ends the old URL at once, and an invalid or rotated token gets the same 401. Fields come from an explicit allowlist, so email, names, billing profile and metadata never leak, and the endpoint shares the hosted invoice page's 60-per-minute-per-IP limit. The token is stored only as a SHA-256 hash (migration 0172) and is shown once, when it is rotated. Status: active, amended 2026-10-12: the response also carries the customer's credit position, including an estimate of what remains after this period's usage.
 
 ## Context
 

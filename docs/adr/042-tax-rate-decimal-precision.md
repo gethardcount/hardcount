@@ -1,10 +1,14 @@
 # ADR-042: Tax-rate decimal precision + proration integer day-ratio
 
-**Status:** Accepted
+**Status:** Accepted (partly superseded by [ADR-043](043-drop-tax-rate-bp.md) on 2026-05-31: the `tax_rate_bp` transition)
 **Date:** 2026-05-31
 **Supersedes:** the `tax_rate_bp bigint` storage shape (introduced
 migration 0001, widened in 0014) AND the `prorationFactor float64`
 math in `internal/subscription/handler.go`.
+
+## Summary
+
+Tax rates are stored as `tax_rate NUMERIC(7,4)`, four decimal places as Stripe Tax returns them, so rates such as 8.875% are kept exactly. Stripe's `percentage_decimal` string is parsed without float truncation. Mid-period proration uses whole days, `money.RoundHalfToEven(amount × remaining_days, total_days)`, instead of a float factor, so the result is exact and the same on every machine. The plan to keep the old `tax_rate_bp` column during a transition was dropped by [ADR-043](043-drop-tax-rate-bp.md), which removed the column at once. Status: active, partly superseded by ADR-043.
 
 ## Context
 

@@ -3,6 +3,10 @@
 **Date:** 2026-06-19
 **Status:** Accepted
 
+## Summary
+
+An immediate plan swap across billing intervals (for example monthly to yearly) restructures the cycle in one transaction. The plan change, the period close, the relief for the unused old period ([ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md)) and the new period's first invoice commit together, or none do. Calls to Stripe, such as the new invoice's tax commit and charge, run after commit. This closed a silent revenue loss: a tax failure on the new invoice used to leave the cycle moved forward with nothing billed. Status: active; the refund double-credit deferred below was fixed on 2026-07-05.
+
 ## Context
 
 An adversarial audit of the proration/billing write paths (2026-06-18) found the immediate **cross-interval** plan swap (e.g. monthly→yearly "upgrade to annual", same cadence) ran as **four non-atomic writes across two domain stores** in `applyCrossIntervalPlanSwap`:

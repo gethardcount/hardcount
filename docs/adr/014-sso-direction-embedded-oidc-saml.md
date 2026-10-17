@@ -9,6 +9,10 @@ Accepted
 ## Date
 2026-05-02
 
+## Summary
+
+Not built yet: this ADR records the direction for when a design partner asks for SSO. Velox will embed OIDC and SAML client libraries (`github.com/zitadel/oidc/v3`, `github.com/zitadel/saml`) in the binary and point each tenant at its own identity provider. It will not use a SaaS auth vendor (WorkOS, Auth0, Clerk) or require a separate identity server, because self-hosted and air-gapped installs must work without outside calls. Password login stays homegrown ([ADR-011](011-email-password-auth-and-clean-api-keys.md)), team members have no enforced roles today ([ADR-081](081-minimal-team-invites.md)), and the MFA design is [ADR-095](095-login-security-roadmap-and-mfa.md). Status: active as a direction.
+
 ## Context
 
 ADR-011 ships homegrown email+password for the dashboard and Bearer keys
