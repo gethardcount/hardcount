@@ -146,7 +146,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [104](104-one-activity-lane-entity-calendar.md) | 2026-07-29 | Accepted | Test clocks & simulated time | Activity is one list ordered by the entity's own time, with the real time as a subline |
 | [105](105-charge-idempotency-key-seed.md) | 2026-07-30 | Accepted | Payments | Seed the Stripe idempotency key from a per-invoice attempt counter, not `updated_at` |
 | [106](106-charge-intent-ledger.md) | 2026-07-30 | Parked | Payments | Record each charge before calling Stripe, so an unnamed charge can be replayed safely |
-| [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted | Payments | A charge Stripe cannot name stays unknown until a webhook or a human resolves it |
+| [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted (amended) | Payments | A charge Stripe cannot name stays unknown until a webhook or a human resolves it |
 | [108](108-parked-invoices-search-and-adopt.md) | 2026-08-02 | Accepted | Payments | Resolve unknown charges by searching Stripe, and act only on a payment actually found |
 | [109](109-issued-document-snapshot.md) | 2026-08-05 | Accepted (amended 2026-10-14) | Invoices | Copy bill-to and supplier details onto the invoice when it leaves draft; render from the copy |
 | [110](110-written-off-invoices-close-self-service-payment.md) | 2026-08-05 | Accepted | Invoices | A written-off invoice can no longer be paid online by the customer; its pages point to support |
@@ -163,7 +163,8 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [121](121-customer-usage-cards-open-on-the-billing-period.md) | 2026-10-16 | Accepted | Pricing & usage | The customer page's Activity and Margin cards open on the current billing period; Margin adds Last invoiced period; an empty window names the latest usage |
 | [122](122-hold-and-release-usage-for-unknown-customers.md) | 2026-10-17 | Accepted | Pricing & usage | LiteLLM usage for an unknown customer or meter is held, shown, and released once by its idempotency key; released rows are never moved onto a later invoice |
 | [123](123-new-accounts-start-with-a-default-dunning-policy.md) | 2026-10-17 | Accepted | Dunning | Every new account starts with a "Default retries" policy per mode that retries three times and changes nothing; the first enabled policy anyone creates takes the default from it |
-| [124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md) | 2026-10-17 | Proposed | Platform & ops | Run migrations with plain golang-migrate, no Velox runner; each new file sets a 5 s lock limit, and one process migrates at a time |
+| [124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md) | 2026-10-17 | Superseded by ADR-125 | Platform & ops | Run migrations with plain golang-migrate, no Velox runner; each new file sets a 5 s lock limit, and one process migrates at a time |
+| [125](125-goose-migrations-from-one-v081-baseline.md) | 2026-10-18 | Proposed | Platform & ops | Run migrations with goose from one baseline at version 180. A database from v0.8 is taken over with no table change, and a failed file leaves nothing to repair |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.

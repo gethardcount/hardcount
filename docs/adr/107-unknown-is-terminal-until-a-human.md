@@ -1,6 +1,6 @@
 # ADR-107: An unnameable charge attempt parks the invoice; it is never settled failed
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-18)
 **Date:** 2026-07-31
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) as the answer to this
 problem. ADR-106's charge-intent ledger is **parked, not deleted** — see
@@ -340,3 +340,12 @@ cutover — whichever comes first. Resume it **on top of** this ADR, where its t
 worst round-3 criticals (the give-up gate un-gating, and the reconciler treating
 a never-sent request as proof of nothing) are unreachable code, because there is
 no give-up write left to un-gate.
+
+## Amendment 2026-10-18 — migration 0009's rollback stops shipping
+
+[ADR-125](125-goose-migrations-from-one-v081-baseline.md) replaces the 178
+migration files with one baseline at version 180, from v0.9.0. From that
+release, `0009_payment_unknown.down.sql` is no longer in the binary.
+`velox migrate rollback` runs only when `APP_ENV` is `local`, and it never
+goes below version 180. So the warning under "What ships with it" applies
+only to v0.8.1 and older binaries. The invariant itself does not change.

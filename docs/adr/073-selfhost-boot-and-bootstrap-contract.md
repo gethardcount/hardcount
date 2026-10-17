@@ -1,7 +1,7 @@
 # ADR-073: Self-host boot contract — one bootstrap writer, honored APP_DATABASE_URL, serialized hybrid migrations
 
 **Date:** 2026-07-03
-**Status:** Accepted (shipped in P7; design amended by a 2-lens adversarial panel — both SHIP-WITH-FIXES; amended 2026-08-30 and 2026-10-17). Decision 3, the migration runner, is being replaced by [ADR-124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md).
+**Status:** Accepted (shipped in P7; design amended by a 2-lens adversarial panel — both SHIP-WITH-FIXES; amended 2026-08-30, 2026-10-17 and 2026-10-18). Decision 3, the migration runner, is being replaced by [ADR-125](125-goose-migrations-from-one-v081-baseline.md), which superseded ADR-124.
 
 ## Summary
 
@@ -20,7 +20,9 @@ detect the wait between a migrator blocked on the migration lock and a
 (SQLSTATE 40P01) after about one second and cancels one side. When it
 cancels the index build, the index is left INVALID and the version
 dirty. The polling lock in decision 3 still avoids that wait, and it is
-what the code runs until ADR-124's runner-deletion PR merges.
+what the code runs until ADR-125's cut-over PR merges. ADR-125 then
+replaces the runner with goose, whose own lock also polls (amendment
+2026-10-18).
 
 ## Context
 
@@ -214,5 +216,20 @@ replaces the runner from decision 3. Velox will run golang-migrate as it
 is. Each new migration file sets its own lock limit, and one process
 applies migrations at a time, so no second migrator waits on the lock
 during an index build. Until the PR that deletes the runner merges,
+decision 3 describes the code.
+
+## Amendment 2026-10-18 — ADR-125 replaces the runner with goose
+
+ADR-124 was superseded before it was built.
+[ADR-125](125-goose-migrations-from-one-v081-baseline.md) replaces
+decision 3 instead. From v0.9.0, goose applies migrations, starting from
+one baseline at version 180.
+
+goose's own session lock polls `pg_try_advisory_lock`, as decision 3's
+lock does. So copies that start together still take turns, and a waiting
+copy cannot deadlock against a `CREATE INDEX CONCURRENTLY`. The library
+now keeps that guarantee, and Velox no longer needs the
+one-migrator rule that ADR-124 planned. The 2026-10-17 correction of the
+deadlock claim still stands. Until ADR-125's cut-over PR merges,
 decision 3 describes the code.
 
