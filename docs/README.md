@@ -63,8 +63,8 @@ plain meanings first.
    [email setup](ops/email-setup.md),
    [backups](ops/backup-considerations.md) and
    [tax calculation](ops/tax-calculation.md).
-6. When something breaks: the [operations runbook](ops/runbook.md), the
-   [leader-lease runbook](ops/runbook-leader-leases.md) and the
+6. When something breaks: the [operations runbook](ops/runbook/index.md)
+   (find what you see, then follow its steps) and the
    [failure-mode catalog](failure-modes/README.md).
 
 ## Contribute

@@ -206,7 +206,7 @@ SELECT count(*) FROM invoice_dunning_runs
   WHERE state = 'active' AND next_action_at < now();
 ```
 
-If they do not fall, the background jobs are not running. See the [runbook](runbook.md).
+If they do not fall, the background jobs are not running. See the [runbook](runbook/background-job-stuck.md).
 
 ### 6. Payments made during the gap
 

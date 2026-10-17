@@ -65,7 +65,7 @@ On a stop signal (SIGTERM), a copy first tells the load balancer it is leaving: 
 |---|---|---|
 | Readiness drain | `/health/ready` answers `503 {"status":"draining"}`; `/health` stays 200. The copy keeps listening, so the load balancer has time to stop sending it requests. | `SHUTDOWN_DRAIN_DELAY` (default 5s outside `local`) |
 | 1. Requests in progress | The dashboard's live webhook stream is closed first, so it cannot hold this stage open. | Up to 30s |
-| 2. A test-clock advance in progress | Stopped at the limit. The clock stays `advancing` until a copy restarts. See [Test-clock advance hung](runbook.md#6-test-clock-advance-hung). | Up to 30s |
+| 2. A test-clock advance in progress | Stopped at the limit. The clock stays `advancing` until a copy restarts. See [Test-clock advance hung](runbook/test-clock-advance-hung.md). | Up to 30s |
 | 3. Background jobs | | Up to 30s |
 
 The worst case is 90 seconds. Usually it takes under 2 seconds.
@@ -93,5 +93,5 @@ Why: v0.4.0 changed how copies agree on who runs each job. An old copy and a new
 ## Related
 
 - [Self-host](../self-host.md): settings, Postgres and monitoring.
-- [Leader leases runbook](runbook-leader-leases.md): what to do when a background job seems stuck.
+- [A background job is stuck](runbook/background-job-stuck.md): what to do when a background job seems stuck.
 - [HA readiness review](../records/ha-readiness-2026-07-06.md): the dated record of what was checked for two or more copies, and why.

@@ -1861,7 +1861,7 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 		// 200, because pulling this replica from the balancer does not restart
 		// the tick and on a single replica it would take the API down too.
 		// Alert on velox_scheduler_last_run_timestamp_seconds and
-		// velox_leader_last_tick_age_seconds instead (docs/ops/runbook.md).
+		// velox_leader_last_tick_age_seconds instead (docs/ops/runbook/monitoring.md).
 		schedulerMu.RLock()
 		lastRun := schedulerLastRun
 		interval := schedulerInterval

@@ -234,7 +234,7 @@ The metrics worth an alert:
 | `velox_audit_uncovered_mutation_total` | Changes made with no audit log entry. Should stay at zero. |
 | `velox_stripe_breaker_state` | Whether Velox has paused calls to Stripe after repeated failures. 0 is normal, 2 is paused. |
 
-What to do when one fires: the [operations runbook](ops/runbook.md).
+What to do when one fires: the [operations runbook](ops/runbook/index.md).
 
 ## Related
 

@@ -91,4 +91,4 @@ They are warnings, not errors, because nothing is lost: the invoice waits and is
 ## Related
 
 - [How the tax providers work inside Velox](../architecture.md#tax-providers): the provider methods, what is saved on each invoice, and why a failure waits instead of guessing.
-- [Operations runbook](runbook.md): alerts on billing runs, including tax.
+- [Operations runbook](runbook/monitoring.md): alerts on billing runs, including tax.

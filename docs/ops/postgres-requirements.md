@@ -154,6 +154,6 @@ Velox's migrations create the indexes its queries need. Check `pg_stat_user_inde
 
 ## Related
 
-- [Background jobs on two or more copies](runbook-leader-leases.md): how copies share billing and other background work, and what to do when a job looks stuck.
+- [Background jobs on two or more copies](runbook/background-job-stuck.md): how copies share billing and other background work, and what to do when a job looks stuck.
 - [Backups](backup-considerations.md).
 - Why it works this way: [ADR-114](../adr/114-leader-leases-tick-scoped-fencing.md) (background jobs and poolers) and [ADR-115](../adr/115-one-closer-for-the-billing-period.md) (the subscription row lock).

@@ -319,7 +319,7 @@ func serve() {
 	// → *email.Sender. Each tick is one leader lease (ADR-114) so multi-
 	// replica deploys drain from one replica at a time. Operators pause a
 	// role with `SELECT leader_pause('webhook_outbox', 'oncall', 'why')` (docs/ops/
-	// runbook-leader-leases.md); restart isn't required.
+	// runbook/background-job-stuck.md); restart isn't required.
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
@@ -380,7 +380,7 @@ func serve() {
 	// ha-9. (Was CatchupTimeout = 10 min, which blew every orchestrator
 	// grace period.)
 	if !catchupWorker.Stop(shutdownCatchupWait) {
-		slog.Warn("test-clock catchup worker still busy — abandoning the in-flight advance; the clock stays 'advancing' until a replica restarts (docs/ops/runbook.md, test clocks)")
+		slog.Warn("test-clock catchup worker still busy — abandoning the in-flight advance; the clock stays 'advancing' until a replica restarts (docs/ops/runbook/test-clock-advance-hung.md)")
 	}
 
 	// Stage 3 (≤ 30s): scheduler + dispatchers. Their ticks run on ctx

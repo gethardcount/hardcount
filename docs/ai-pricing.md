@@ -161,7 +161,7 @@ Lago, Metronome and Orb do. You see it in four places:
 
 To bill it, add a rule or a default price. Invoices not made yet then
 include it. For a period that is already invoiced, bill it with a one-off
-invoice ([runbook](ops/runbook.md#16-usage-with-no-price)). Velox refuses
+invoice ([runbook](ops/runbook/usage-with-no-price.md)). Velox refuses
 (409) to remove a meter's last price while a plan with a live subscription
 uses the meter.
 

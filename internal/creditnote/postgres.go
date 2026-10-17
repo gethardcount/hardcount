@@ -290,7 +290,7 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 // produce NO error logs by design (the prior claim here that
 // repeated ERROR logs surface them was false). The
 // velox_creditnote_pending_issue_drafts gauge is the surface: alert on
-// sustained growth/age (see docs/ops/runbook.md), not presence.
+// sustained growth/age (see docs/ops/runbook/clawback-drafts-not-issuing.md), not presence.
 func (s *PostgresStore) ListPendingClawbackDrafts(ctx context.Context, batch int, livemode bool) ([]domain.CreditNote, error) {
 	if batch <= 0 {
 		batch = 50

@@ -131,7 +131,7 @@ for that clock's customers, so a month of renewals and retries takes
 seconds.
 
 More on each term: [glossary](glossary.md#running-velox). When a job is
-stuck: [runbook](ops/runbook.md).
+stuck: [A background job is stuck](ops/runbook/background-job-stuck.md).
 
 ## Tech stack
 
