@@ -4,6 +4,8 @@ This guide takes you from a fresh VM to a working Velox with a dashboard login a
 
 Just trying Velox on your own machine? Run `./quickstart.sh` in this directory instead. It does steps 1 to 4 for you, on port 8080, with the published images. This guide explains each of those steps, for a server you will keep.
 
+Going to production? [Production on one VM](../../docs/production-one-vm.md) does the same install with a pinned release, then adds HTTPS, email, Stripe, nightly backups and a go-live checklist.
+
 You get five containers: Postgres, Redis, the Velox API, the dashboard, and nginx in front of them on port 80.
 
 ## Before you start
@@ -134,7 +136,8 @@ VELOX_BASE=http://localhost VELOX_DASHBOARD_URL=http://localhost ./scripts/demo.
 |---|---|
 | See logs | `docker compose logs -f` |
 | Restart the API | `docker compose restart velox-api` |
-| Upgrade | `git pull`, then `docker compose up -d --build` |
+| Upgrade, built from source | `git pull`, then `docker compose up -d --build` |
+| Upgrade, published release image | See [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release) |
 | Stop, keeping data | `docker compose stop` |
 | Stop and delete all data | `docker compose down -v` |
 | See which database upgrades have run | `docker compose run --rm velox-api migrate status` |
@@ -148,6 +151,8 @@ This stack serves plain HTTP. Before real use, put TLS in front of it. Two commo
 
 - **A managed load balancer**, such as AWS ALB or Cloudflare. It handles TLS and forwards to port 80 on this VM over a private network.
 - **nginx and certbot on the VM**, outside this stack. It handles TLS and forwards to `localhost:80`.
+
+[Production on one VM](../../docs/production-one-vm.md#3-add-https-with-caddy) has a copy-paste example with Caddy, a web server that gets and renews the certificate by itself.
 
 Keep `APP_ENV=production`, the default. It marks cookies as secure and turns on HSTS.
 
@@ -191,6 +196,7 @@ You opened the dashboard over plain HTTP at an address other than localhost. See
 
 ## Next
 
+- [Production on one VM](../../docs/production-one-vm.md): HTTPS, email, Stripe, backups and a go-live checklist.
 - [Self-host](../../docs/self-host.md): settings, Postgres, production setup, and what to monitor.
 - [Backups](../../docs/ops/backup-considerations.md).
 

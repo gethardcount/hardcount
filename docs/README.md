@@ -42,17 +42,17 @@ docs in the order listed. Words you may not know are in the
 1. [Self-host](self-host.md): what you need and how the pieces fit.
 2. [Docker Compose on one VM](../deploy/compose/README.md): step-by-step
    install.
-3. [High availability](ops/high-availability.md): run two or more copies
+3. [Production on one VM](production-one-vm.md): HTTPS, email, Stripe,
+   nightly backups, a go-live checklist and upgrades, for a small team.
+4. [High availability](ops/high-availability.md): run two or more copies
    behind a load balancer, with health checks, shutdown and rolling upgrades.
-4. [Postgres requirements](ops/postgres-requirements.md),
+5. [Postgres requirements](ops/postgres-requirements.md),
    [email setup](ops/email-setup.md),
    [backups](ops/backup-considerations.md) and
    [tax calculation](ops/tax-calculation.md).
-5. When something breaks: the [operations runbook](ops/runbook.md), the
+6. When something breaks: the [operations runbook](ops/runbook.md), the
    [leader-lease runbook](ops/runbook-leader-leases.md) and the
    [failure-mode catalog](failure-modes/README.md).
-6. [Stripe end-to-end test](ops/stripe-end-to-end-test.md): check a real
-   Stripe account before go-live.
 
 ## Contribute
 
@@ -62,8 +62,10 @@ docs in the order listed. Words you may not know are in the
    required for any change to invoices, payments, credits, dunning,
    subscriptions or tax.
 4. [How we test](testing.md): which test to write, and how to run it.
-   The [release checklist](ops/release-checklist.md) holds the live checks
-   run by hand before each release.
+   The [release checklist](dev/release-checklist.md) holds the live checks
+   run by hand before each release, and the
+   [Stripe end-to-end test](dev/stripe-end-to-end-test.md) has the
+   step-by-step Stripe commands.
 5. [OpenAPI workflow](dev/openapi-workflow.md): changing the API contract.
 6. [Writing style](dev/writing-style.md): how to write docs here.
 7. AI coding agents start at [CLAUDE.md](../CLAUDE.md), then

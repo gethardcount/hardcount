@@ -27,6 +27,8 @@ In short:
 
 That gives you a working [tenant](glossary.md): one business account with its own data, dashboard users and API keys.
 
+To run it for real customers, follow [Production on one VM](production-one-vm.md). It adds HTTPS, the web address settings, email, Stripe, nightly backups with a restore test, a go-live checklist and upgrade steps.
+
 **Signing in before you add TLS.** The stack serves plain HTTP on port 80. Until you put TLS in front, sign in to the dashboard at `http://localhost/` on the server, or through an SSH tunnel. Sign-in does not work at `http://<server-ip>/`. The [compose guide](../deploy/compose/README.md#tls) covers both.
 
 **What to expect from one VM:**
@@ -226,5 +228,5 @@ What to do when one fires: the [operations runbook](ops/runbook.md).
 ## Related
 
 - [Tax calculation](ops/tax-calculation.md): tax providers and what happens when one fails.
-- [Stripe end-to-end test](ops/stripe-end-to-end-test.md): check a real Stripe account before going live.
+- [Stripe end-to-end test](dev/stripe-end-to-end-test.md): check a real Stripe account before going live.
 - [Decision records](adr/README.md): why Velox is built this way. The ones behind this page are the in-process scheduler (ADR-006), tenant isolation (ADR-003), the limited database user (ADR-073) and how copies share background jobs (ADR-114).

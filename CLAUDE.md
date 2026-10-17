@@ -105,14 +105,14 @@ How we test, which test to write for which change, and how to run each layer:
 
 - Every change ships with a test at the right layer. Money and state changes get a Go integration test against real Postgres.
 - UI changes are checked with Playwright (`cd web-v2 && npm run test:e2e`) and by looking at a screenshot of the screen. Text and DOM checks cannot see layout bugs.
-- Live Stripe, email, LiteLLM and PDF checks run by hand before each release: [docs/ops/release-checklist.md](docs/ops/release-checklist.md).
+- Live Stripe, email, LiteLLM and PDF checks run by hand before each release: [docs/dev/release-checklist.md](docs/dev/release-checklist.md).
 
 ## Documentation discipline
 
 Every user-visible ship updates the docs that describe it, in the same PR:
 
 - `CHANGELOG.md` (Keep-a-Changelog) — what shipped, dated.
-- `docs/ops/release-checklist.md` if the change alters what a live Stripe, email or PDF check should see.
+- `docs/dev/release-checklist.md` if the change alters what a live Stripe, email or PDF check should see.
 - `docs/adr/` if the change is a decision worth re-litigating later.
 - `README.md` "Roadmap" section ("Recently shipped" / "Explicitly deferred") — keep aligned with reality; if a "Roadmap" item is silently descoped, edit the README first, then act.
 

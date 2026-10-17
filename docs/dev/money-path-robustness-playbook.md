@@ -276,7 +276,7 @@ proof land on the table.
 - (iii) **partial-failure / crash-between-writes.**
 
 **A hand check** is only for live external services, in the
-[release checklist](../ops/release-checklist.md) (live-Stripe exactly-once
+[release checklist](release-checklist.md) (live-Stripe exactly-once
 stays manual). Dashboard screens get a Playwright test.
 
 Five non-negotiable patterns:

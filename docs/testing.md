@@ -11,7 +11,7 @@ release. Every change ships with a test at the right layer.
 | 1. Logic and money | `go test`: unit tests (`-short`) and integration tests against a real Postgres (`internal/testutil`) | All money math, state changes, Row-Level Security (RLS), migrations, API contracts and architecture rules (the source tests in `internal/arch`) |
 | 2. Static checks | golangci-lint, eslint, `tsc -b`, codegen drift (`make gen`) | Code rules. A rule we can check by reading the code becomes a linter rule or a Go test, not a script |
 | 3. Dashboard end to end | Playwright (`@playwright/test`) | A smoke test over every page, plus a few key user journeys, against a real API with seeded data |
-| 4. Live services | [Release checklist](ops/release-checklist.md), run by hand | Real Stripe test mode, real email, the LiteLLM callback and the invoice PDF. Run before each release tag |
+| 4. Live services | [Release checklist](dev/release-checklist.md), run by hand | Real Stripe test mode, real email, the LiteLLM callback and the invoice PDF. Run before each release tag |
 
 Most tests belong in layer 1. Layers 3 and 4 stay small on purpose.
 
@@ -24,7 +24,7 @@ Most tests belong in layer 1. Layers 3 and 4 stay small on purpose.
 | An API endpoint | A Go test that calls the handler and checks the status code and body |
 | A rule about how code may be written | A golangci-lint rule in `.golangci.yml`, or a source test in `internal/arch` |
 | A dashboard page or a user journey | A Playwright spec in `web-v2/e2e/`. New pages are added to the smoke list |
-| Stripe, email or PDF behavior that a fake cannot prove | A line in the [release checklist](ops/release-checklist.md), plus a Go test for the logic around it |
+| Stripe, email or PDF behavior that a fake cannot prove | A line in the [release checklist](dev/release-checklist.md), plus a Go test for the logic around it |
 
 A Playwright test checks that the screen shows what the API returned.
 Arithmetic stays in Go tests.
@@ -110,7 +110,7 @@ habits have caught real bugs here:
 
 ## Before a release
 
-Run the [release checklist](ops/release-checklist.md). It covers what only a
+Run the [release checklist](dev/release-checklist.md). It covers what only a
 real provider can show: a Stripe charge, refund and webhook, an email you
 open and read, the LiteLLM callback, and the invoice PDF.
 

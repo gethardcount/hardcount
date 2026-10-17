@@ -264,7 +264,7 @@ stripe listen --api-key $STRIPE_SK \
 There is no platform-level webhook URL.
 
 The CLI will print a temporary webhook secret. Paste it into the Velox dashboard
-under **Settings → Stripe → Webhook secret** (or via
+under **Settings → Payments**, step 2 "Deliver Stripe events to Velox" (or via
 `PATCH /v1/settings/stripe/test/webhook`). All subsequent test-mode events flow
 through the CLI tunnel.
 
@@ -383,7 +383,7 @@ response header.
   the design-partner cutover playbook, maintained in the internal `velox-ops`
   repo.
 - **Tax:** Stripe Tax integration is exercised separately. See
-  `docs/ops/tax-calculation.md`.
+  [Tax calculation](../ops/tax-calculation.md).
 - **Payouts / balance:** Velox does not surface Stripe payouts. The operator's
   Stripe dashboard is canonical for that.
 

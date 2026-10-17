@@ -143,7 +143,7 @@ the same-PR rule is failing.
 
 ### B5. Fresh-tenant smoke ritual *(no build — a rule)*
 
-The [release checklist](../ops/release-checklist.md) and the Playwright suite
+The [release checklist](release-checklist.md) and the Playwright suite
 on a **fresh tenant** before any DP-facing (design-partner-facing) milestone.
 (Until October 2026 this was S1/S2, the MANUAL_TEST.md smoke flows.)
 Fresh-tenant walks found 3 seam bugs that aged-tenant walks structurally
