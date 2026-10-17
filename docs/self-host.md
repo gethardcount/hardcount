@@ -108,7 +108,7 @@ standard Velox server issues none.
 
 The Compose stack ships Postgres 16 with default settings, which is enough for trying Velox. For your own Postgres:
 
-- **Version:** 16 is the version CI tests and the Compose stack runs. Postgres 14 is the oldest that should work, but it is not tested. See [Postgres requirements](ops/postgres-requirements.md#versions).
+- **Version:** 16 is the version CI tests and the Compose stack runs. Postgres 14 is the oldest that should work: CI applies the migrations on it, but the tests run only on 16. See [Postgres requirements](ops/postgres-requirements.md#versions).
 - **Extensions:** `pgcrypto`, `citext` and `btree_gist`. Velox creates them during database upgrades, so the role that runs upgrades needs permission to create extensions. If your managed Postgres forbids that, create them first: [Postgres requirements](ops/postgres-requirements.md).
 - **Backups:** point-in-time restore (most managed Postgres offer it) is best. A nightly `pg_dump`, which `scripts/backup.sh` takes, also works, but you lose what was written since the last dump. Back up `VELOX_ENCRYPTION_KEY` too, separately: without it, the encrypted data in a backup (customer details, Stripe keys, webhook secrets) cannot be read. See [backups](ops/backup-considerations.md).
 
