@@ -1,7 +1,26 @@
 # ADR-073: Self-host boot contract — one bootstrap writer, honored APP_DATABASE_URL, serialized hybrid migrations
 
 **Date:** 2026-07-03
-**Status:** Accepted (shipped in P7; design amended by a 2-lens adversarial panel — both SHIP-WITH-FIXES)
+**Status:** Accepted (shipped in P7; design amended by a 2-lens adversarial panel — both SHIP-WITH-FIXES; amended 2026-08-30 and 2026-10-17). Decision 3, the migration runner, is being replaced by [ADR-124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md).
+
+## Summary
+
+One function, `tenant.RunBootstrap`, creates a tenant, its keys and its
+owner user in one transaction; the CLI and `POST /v1/bootstrap` both call
+it. The app's database pool uses `APP_DATABASE_URL` as given. Outside
+local development, Velox refuses to start when it is unset, when its
+password is empty, `velox_app` or the user name, or when it connects as
+a role that can bypass Row-Level Security.
+Production also refuses to start without a reachable Redis (amendment
+2026-08-30).
+
+Decision 3 is corrected (amendment 2026-10-17). It says Postgres cannot
+detect the wait between a migrator blocked on the migration lock and a
+`CREATE INDEX CONCURRENTLY`. It can: it reports `deadlock detected`
+(SQLSTATE 40P01) after about one second and cancels one side. When it
+cancels the index build, the index is left INVALID and the version
+dirty. The polling lock in decision 3 still avoids that wait, and it is
+what the code runs until ADR-124's runner-deletion PR merges.
 
 ## Context
 
@@ -164,4 +183,36 @@ to start in production on an invalid or unreachable one. Other
 environments warn and run fail-open. The config warning that said the
 opposite ("rate limiting will fail open") is corrected. `APP_ENV` is
 case-normalised so `Production` cannot slip past either fatal.
+
+## Amendment 2026-10-17 — Postgres detects the migration deadlock; ADR-124 replaces the runner
+
+Decision 3 says a migrator blocked in `pg_advisory_lock` and another
+migrator's `CREATE INDEX CONCURRENTLY` wait on each other in a way
+"Postgres cannot detect (advisory waits aren't in its deadlock graph)".
+That is wrong. An experiment on 2026-10-17 (E3, Postgres 16,
+[CI run 39047170196](https://github.com/getvelox/velox/actions/runs/39047170196))
+showed what happens:
+
+- The index build waits on the blocked call's transaction (a `virtualxid`
+  lock). The blocked call waits on the advisory lock. Both are ordinary
+  lock waits, so Postgres's deadlock check sees the cycle.
+- After `deadlock_timeout` (1 s by default), Postgres reports
+  `deadlock detected` (SQLSTATE 40P01) and cancels one of the two
+  statements.
+- Either side can be cancelled. When the blocked lock call was cancelled,
+  the build finished and the index was valid. When the build was
+  cancelled, the index was left INVALID and `schema_migrations` dirty.
+- A lock that polls (`pg_try_advisory_lock`) holds nothing between
+  tries, and E3 showed no deadlock with it.
+
+So the hazard decision 3 guards against is real, but the result is a
+cancelled statement, not a deploy that hangs forever. The polling lock
+in decision 3 was the right fix for it.
+
+[ADR-124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md)
+replaces the runner from decision 3. Velox will run golang-migrate as it
+is. Each new migration file sets its own lock limit, and one process
+applies migrations at a time, so no second migrator waits on the lock
+during an index build. Until the PR that deletes the runner merges,
+decision 3 describes the code.
 

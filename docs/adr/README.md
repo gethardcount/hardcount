@@ -113,7 +113,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [070](070-price-change-semantics.md) | 2026-07-02 | Accepted (amended) | Pricing & usage | Customer price overrides follow the rule across versions; a period keeps its opening price |
 | [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry |
 | [072](072-transport-lease-model.md) | 2026-07-03 | Accepted | Platform & ops | Outbox workers claim rows with a time-limited lease; budgets and lease lengths are derived |
-| [073](073-selfhost-boot-and-bootstrap-contract.md) | 2026-07-03 | Accepted | Platform & ops | One bootstrap path creates a tenant in one transaction; migrations run one at a time |
+| [073](073-selfhost-boot-and-bootstrap-contract.md) | 2026-07-03 | Accepted (amended) | Platform & ops | One bootstrap path creates a tenant in one transaction; migrations run one at a time |
 | [074](074-subscription-billing-timezone-snapshot.md) | 2026-07-04 | Superseded by ADR-077 | Timezones | Each subscription snapshots its billing timezone at creation |
 | [075](075-canonical-utc-api-timestamps.md) | 2026-07-04 | Accepted | Timezones | The process runs in UTC, so every API timestamp is the same whatever the host zone |
 | [076](076-enforcing-the-timezone-invariant.md) | 2026-07-04 | Accepted | Timezones | A CI lint and typed helpers enforce that dates render in an explicit timezone |
@@ -163,6 +163,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [121](121-customer-usage-cards-open-on-the-billing-period.md) | 2026-10-16 | Accepted | Pricing & usage | The customer page's Activity and Margin cards open on the current billing period; Margin adds Last invoiced period; an empty window names the latest usage |
 | [122](122-hold-and-release-usage-for-unknown-customers.md) | 2026-10-17 | Accepted | Pricing & usage | LiteLLM usage for an unknown customer or meter is held, shown, and released once by its idempotency key; released rows are never moved onto a later invoice |
 | [123](123-new-accounts-start-with-a-default-dunning-policy.md) | 2026-10-17 | Accepted | Dunning | Every new account starts with a "Default retries" policy per mode that retries three times and changes nothing; the first enabled policy anyone creates takes the default from it |
+| [124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md) | 2026-10-17 | Proposed | Platform & ops | Run migrations with plain golang-migrate, no Velox runner; each new file sets a 5 s lock limit, and one process migrates at a time |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.

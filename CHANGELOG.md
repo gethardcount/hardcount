@@ -17,6 +17,7 @@ Older entries keep their original text.
 
 ### Changed
 
+- **Decision recorded: migrations will run on plain golang-migrate (2026-10-17).** Nothing changes yet. A later release drops `MIGRATION_LOCK_TIMEOUT` (each new file sets 5 seconds), and installs with several copies run `velox migrate` once before starting them. [ADR-124](docs/adr/124-plain-golang-migrate-each-file-sets-its-lock-limit.md) also corrects ADR-073's deadlock claim.
 - **The README shows before it tells (2026-10-17).** The pictures come first, then a small diagram of how Velox works and one example usage event, then the quick start. The gaps table is shorter, and the volume line now uses the €6.49-a-month server test.
 
 ## [0.8.1] - 2026-10-17
