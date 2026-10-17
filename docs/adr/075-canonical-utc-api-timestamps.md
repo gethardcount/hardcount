@@ -3,6 +3,10 @@
 **Date:** 2026-07-04
 **Status:** Accepted
 
+## Summary
+
+The `velox` binary sets `time.Local = time.UTC` as the first statement of `main()`, so timestamps read back from Postgres are UTC and every API timestamp is a canonical `…Z` string on any host. Only the text form changed; billing date math never reads `time.Local` because it uses explicit timezones. Invoice and credit-note PDFs, the hosted invoice page and the dunning retry email render dates in the invoice's stored billing timezone, or UTC when none is stored. A CI lint checks that the pin is present ([ADR-076](076-enforcing-the-timezone-invariant.md)), and the test database helper sets it too. Status: active; the billing timezone is now one org setting ([ADR-077](077-org-level-billing-timezone.md)), not the per-subscription zone named below.
+
 ## Context
 
 Velox serializes `time.Time` fields (`created_at`, `billing_period_start/end`,

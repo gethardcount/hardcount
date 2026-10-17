@@ -7,6 +7,10 @@ Design basis: docs/design/commit-cn-relief.md (3-lens divergent panel +
 adversarial judge; the cap arithmetic was mechanically verified against
 `internal/platform/money/round.go` before acceptance).
 
+## Summary
+
+A paid prepaid-commit invoice (credits bought up front, sometimes at a discount) can be refunded partly or fully with a relief credit note: a `commit_relief` block on `POST /v1/credit-notes`. The operator names how many credits to retire, and the cash follows the price paid per credit, so a $9,000 commit worth $10,000 refunds $5,400 for $6,000 unused. One function, `commitReliefCash`, computes that cash cumulatively, so any series of partial refunds adds up to no more than was paid. The note is created and issued, and the credits retired, in one transaction; only the Stripe refund and the tax reversal run after commit, with retry. Status: active; ordinary credit notes on a commit invoice are refused and point to relief, and relief never pays into the credit balance.
+
 ## Context
 
 ADR-078 shipped commit invoices as cash instruments with NO unwind for the

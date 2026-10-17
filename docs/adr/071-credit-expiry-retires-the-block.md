@@ -3,6 +3,10 @@
 **Date:** 2026-07-03
 **Status:** Accepted (shipped in P14; designed by the P14 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.4)
 
+## Summary
+
+When a credit grant expires, one transaction writes the expiry entry for the unused amount and marks the grant fully used (`consumed_cents = amount_cents`), so expired credit can never be spent again. The step, `ExpireGrantAtomic`, re-reads the unused amount under the same row lock that spending credit takes, so a concurrent spend cannot make it expire more than is left. Once expiry commits, a backdated apply draws nothing from that grant; there is no un-expire. A clawback (taking credit back) that unexpired credit cannot cover now fails instead of driving the ledger negative, and positive adjustments carry the same $1M cap as grants. Status: active.
+
 ## Context
 
 The credit ledger uses Orb's block model: positive entries (grants,

@@ -1,7 +1,11 @@
 # ADR-066: Threshold money semantics — prorated reset base, atomic fire→reset, $0 auto-pay, max/last deferral
 
 **Date:** 2026-07-02
-**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c)
+**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11)
+
+## Summary
+
+A usage threshold (a spend cap) bills an early invoice mid-period, and the cycle close and an immediate cancel skip what that invoice already billed. With `reset_billing_cycle=true`, the fire bills the base fee prorated by days over the plan's full interval, and the invoice and the cycle reset commit in one transaction. With `false`, the default when the field is omitted, peak and last-value usage stays off the fire and is billed once at period end. Amended 2026-10-11: under `false`, graduated and package tiers continue across the fire instead of restarting, so the whole period is priced on one ladder. Status: active, amended 2026-10-11; a threshold or cycle invoice that totals $0 is marked paid at once.
 
 ## Context
 

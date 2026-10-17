@@ -1,11 +1,15 @@
 # ADR-088: Customer credit balance applies to every invoice at finalize, card charged the remainder
 
-**Status:** Accepted (2026-07-11)
+**Status:** Accepted (2026-07-11; amended 2026-10-08)
 **Context:** ADR-087 recorded credit-apply presence as a per-site product
 decision (census D2, trap R1) rather than a refactor side-effect. This ADR is
 that decision, grounded in a 103-agent adversarially-verified survey of
 primary vendor docs (Stripe, Chargebee, Lago, Orb, Metronome — all claims
 3-0 verified, 2026-07-11).
+
+## Summary
+
+A customer's credit balance applies automatically to every invoice when it is finalized: cycle close, threshold fires, a subscription's first invoice, the final invoice on cancel, and one-off manual invoices. The card is charged only what is left, and an invoice the balance fully covers is marked paid with no charge. There is no per-invoice or per-type opt-out, which matches Stripe, and no vendor surveyed skips a subscription's first or final invoice. Amended 2026-10-08: the per-site code described below is gone, and every finalize collects through one collector (`processAutoCharge`, [ADR-116](116-collection-intent-at-finalize-one-collector.md)) that applies credits before any charge. Status: active, amended; prepaid commits ([ADR-078](078-prepaid-commits-phase-1.md)) keep their own rules.
 
 ## Decision
 

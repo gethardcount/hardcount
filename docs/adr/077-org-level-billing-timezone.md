@@ -7,6 +7,10 @@ UTC wire) and [ADR-076](076-enforcing-the-timezone-invariant.md) (lint-tz + FE
 required-zone types) unchanged. Refines [ADR-058](058-billing-date-math-tenant-timezone.md):
 the zone billing math anchors in is the ORG timezone, not a per-sub one.
 
+## Summary
+
+Each account has one billing timezone, `tenant_settings.timezone` (default UTC), and subscriptions carry no timezone of their own. Billing date math, such as period boundaries and proration days, reads this zone when it runs, and each invoice keeps the zone it was issued in so its printed dates never move. The per-subscription zone of [ADR-074](074-subscription-billing-timezone-snapshot.md) modelled a case no customer or peer needs, and its two disagreeing zones caused about eight wrong-day display bugs, so its column was dropped. A later change of the org zone never overbills: [ADR-091](091-org-timezone-change-seam-absorb.md) absorbs or prorates the short period it creates, and splitting billing from display timezone ([ADR-092](092-split-billing-timezone-from-display.md)) is designed but deferred. Status: active.
+
 ## Context
 
 A billing calendar anchors its date-math in a timezone (ADR-058): period

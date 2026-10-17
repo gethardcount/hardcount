@@ -3,6 +3,10 @@
 **Date:** 2026-07-04
 **Status:** Accepted
 
+## Summary
+
+Every calendar date shown to a person, such as an invoice date or a billing period, must be rendered in a named timezone. Code review alone let about eight wrong-day bugs through, so automatic checks enforce the rule. In Go, the `internal/arch` test `TestCivilDayFormat_UsesExplicitZone` fails CI on a date-only `.Format` call with no `.In(loc)`; a genuine UTC or filename case carries a `//tz:ok` comment. In the dashboard, `formatCivilDate` and `formatCivilPeriod` require a timezone argument, so TypeScript rejects a call that leaves it out. Status: active; on 2026-10-16 the `make lint-tz` script described below became this Go test, and a second test checks the UTC pin in `cmd/velox/main.go`.
+
 ## Context
 
 ADR-058/074/075 established a correct timezone *model*:

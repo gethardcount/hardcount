@@ -1,7 +1,11 @@
 # ADR-070: Price-change semantics — overrides follow rule_key, periods pin at open
 
 **Date:** 2026-07-02 (decisions locked Day 1); **amended 2026-07-03 at ship time** — §4 resolver mechanics and §Consequences updated to what shipped (implementation = migration 0128 + resolveRatedRule)
-**Status:** Accepted & shipped (designed by the P4 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in plan §4.4)
+**Status:** Accepted & shipped (designed by the P4 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in plan §4.4) (amended 2026-07-03, and on 2026-07-26 by [ADR-100](100-currency-coherence-guard-ring.md))
+
+## Summary
+
+The rating-rule version in force when a billing period opened prices that whole period, so a price change never reprices usage already metered. New rule versions and changes to customer price overrides take effect at the next period open, and overrides are keyed by `rule_key`, so a negotiated price survives a new version. A failed price or override lookup stops the close or preview with an error; it never bills list price instead. A republish that changes a rule's currency is refused while active overrides use the rule or a plan in another currency bills it. Status: active, amended 2026-07-03 and 2026-07-26 ([ADR-100](100-currency-coherence-guard-ring.md) added the plan check).
 
 ## Context
 

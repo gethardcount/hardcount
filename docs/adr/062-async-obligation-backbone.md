@@ -1,7 +1,7 @@
 # ADR-062: Async obligation backbone — extend the outbox, not Temporal/River/pgx (build deferred)
 
 **Date:** 2026-06-25
-**Status:** Decided (design + build-vs-buy). **Build deferred** to a named trigger.
+**Status:** Decided (design + build-vs-buy). **Build deferred** to a named trigger. Amended 2026-06-25, 2026-07-06 and 2026-08-30.
 
 This ADR records a decision we are deliberately **not building yet**, so the
 next session inherits the verdict instead of re-litigating Temporal vs River vs

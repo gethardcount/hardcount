@@ -6,6 +6,10 @@ Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-
 Original status: Accepted. The **guard + loud-log** below is IMPLEMENTED in this PR. The fuller "durable marker + critical banner + metering-only flag" design (from the design panel) is **deferred** — see *Deferred* — because live-doc verification showed it has no industry precedent and the guard already fixes the real defect.
 Relates: ADR-070 (no-silent-fallbacks in billing — this extends its fail-LOUD mandate to the finalize path), ADR-044 (multi-dim `{model,token_type}` rating — the meters this most affects), ADR-034 (plan immutability — the guard runs after it).
 
+## Summary
+
+A plan can attach a usage meter only if the meter has a price: a default rating rule or at least one meter pricing rule. Without this check, a meter that only looked priced billed its usage at $0 with no signal. Amended 2026-10-14: removing a meter's last price is refused with 409 `invalid_state` while a plan using the meter has a draft, trialing or active subscription. Usage that still matches no price is left off the invoice and never billed later; each invoice that leaves such usage out logs a WARN and adds the quantity to `velox_usage_unpriced_quantity_total`. Status: active, amended 2026-10-14.
+
 ## Context
 
 A MANUAL_TEST FLOW S1 walkthrough surfaced a **silent under-bill**: when a plan attaches a usage meter that has **no rating rule** — neither a `meter_pricing_rules` binding nor a default `meters.rating_rule_version_id` — the billing engine drops that meter's usage at cycle-close finalize and charges the customer **$0** for it, with no signal. Reproduced live: a $29 plan + 1,000 metered events that should have added $10.00 finalized and **auto-charged** base+tax only. The events aggregated correctly (1,000 units); they were simply never rated.

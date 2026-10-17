@@ -3,6 +3,8 @@
 **Status:** Accepted (2026-08-30) — cutover shipped in PR-D of this arc; PR-E added the PgBouncer transaction-mode CI job and the measured failover numbers (SIGKILL 9.5 s, severed link 9 s — `docs/benchmarks/failure-correctness.md` §5)
 **Date:** 2026-08-30
 **Amended:** 2026-08-30 — migration 0175 adds `not_before` (cooldown after a lost tick) so `last_tick_*` means completed ticks only (sweep S5)
+**Amended:** 2026-10-08 (a panicked tick is released as not completed).
+**Partly superseded:** by [ADR-115](115-one-closer-for-the-billing-period.md) on 2026-08-30 (the billing-period watermark compare-and-swap).
 **Amends:** ADR-006 (background scheduler; the leader gate it assumed), ADR-072 (transport lease model — unchanged, now composed with a leader fence), ADR-073 (boot contract — `VerifyAdvisoryLockTopology` retired)
 **Plan of record:** [docs/records/ha-readiness-2026-07-06.md](../records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
 

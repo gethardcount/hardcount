@@ -1,7 +1,11 @@
 # ADR-068: Checkout session dedup — claim-first ledger, choke-point closes, loud anomaly settlement
 
 **Date:** 2026-07-02
-**Status:** Accepted (shipped in P2b-a; two build-time adversarial panels — 3 lenses each — amended the plan's sketch, see plan §4.2)
+**Status:** Accepted (shipped in P2b-a; two build-time adversarial panels — 3 lenses each — amended the plan's sketch, see plan §4.2; amended by [ADR-100](100-currency-coherence-guard-ring.md) on 2026-07-26 and on 2026-10-11)
+
+## Summary
+
+Velox records a hosted Stripe Checkout session (the customer's payment page) in `checkout_sessions` before creating it, so an invoice has at most one open session. The Stripe call uses an idempotency key from that record and a 1-hour expiry, and paying, voiding or reducing the amount due closes the record in the same transaction. A second charge on a paid invoice, a captured amount that differs from the amount due, or a payment on a voided invoice raises a critical alert; the operator does any refund. Amended 2026-10-11: a hosted session and a Velox charge (auto-charge, dunning retry or Collect) now exclude each other, and a reconciler sweep records how each session ended. Status: active, amended 2026-10-11; [ADR-100](100-currency-coherence-guard-ring.md) added a currency-mismatch alert at settle.
 
 ## Context
 

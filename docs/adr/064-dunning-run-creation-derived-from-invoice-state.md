@@ -3,6 +3,10 @@
 **Date:** 2026-07-02
 **Status:** Accepted
 
+## Summary
+
+When a charge fails, Velox starts the invoice's dunning run (its schedule of payment retries) at once, and a background sweep creates any run that was missed. Both paths call `StartDunning`, which creates at most one run per invoice, so the sweep safely repairs the gap a crash leaves between marking the invoice failed and starting dunning. The retry schedule is anchored on the invoice's own timestamps, so a run the sweep creates late is the same as one created at once. Storing the retry date as a column on the invoice, as Stripe does, is rejected for good: dunning is its own domain, and test-clock invoices still need the inline path. Status: active.
+
 ## Context
 
 When a payment fails, Velox creates a `dunning_run` — a stateful collection

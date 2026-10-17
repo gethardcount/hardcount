@@ -1,7 +1,7 @@
 # ADR-085: A recipe is an idempotent, additive provisioning event — one verb, no uninstall
 
 **Date:** 2026-07-08
-**Status:** Accepted
+**Status:** Accepted (amended 2026-07-26)
 
 ## Summary
 

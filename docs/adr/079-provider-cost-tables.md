@@ -1,9 +1,13 @@
 # ADR-079: Provider cost tables + per-customer margin (COGS)
 
-**Status:** Accepted (2026-07-05)
+**Status:** Accepted (2026-07-05; amended 2026-10-14)
 **Context:** `docs/design/cost-tables.md` (locked design — 4-platform
 quote-verified sweep + 5-lens adversarial panel; this ADR records the
 decisions, the design doc holds the evidence).
+
+## Summary
+
+Velox records what the operator pays LLM providers per token and reports usage margin per customer at `GET /v1/customers/{id}/margin`. Each usage event gets its cost stamped once, at ingest, in `provider_cost_micros`, so a later rate edit never changes past events and nothing recomputes history. Since 2026-08-06, LiteLLM usage carries LiteLLM's own cost for that event's tokens when it reports one; otherwise the cost comes from the operator's rate table. Revenue is split by model only where a price names the model, and the rest goes to `unattributed_revenue_cents` rather than a guessed split. Status: active, amended 2026-10-14: cache reads are now taken out of LiteLLM's input cost, so they are not counted twice.
 
 ## Decision
 

@@ -1,6 +1,6 @@
 # ADR-116: Finalize records the collection intent; one collector does the work
 
-**Status:** Accepted (2026-10-08)
+**Status:** Accepted (2026-10-08; amended 2026-10-08, 2026-10-10)
 **Supersedes:** [ADR-087](087-collect-after-finalize-pipeline.md)'s per-site collection (the shared pipeline, the per-site gates, and §3's flag-on-decline analysis).
 **Closes:** [ADR-115](115-one-closer-for-the-billing-period.md)'s "named crash-point loss" (the born-$0 / fully-credited `MarkPaid` window).
 

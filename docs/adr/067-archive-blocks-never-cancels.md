@@ -1,7 +1,11 @@
 # ADR-067: Archive blocks new business — it never cancels, and it never lies
 
 **Date:** 2026-07-02
-**Status:** Accepted (shipped in P2a)
+**Status:** Accepted (shipped in P2a; amended by [ADR-100](100-currency-coherence-guard-ring.md) on 2026-07-26: the billing-profile currency guard)
+
+## Summary
+
+Archiving a customer is refused with 409 while any of their subscriptions still bills (active or trialing, including one with a scheduled cancel); archive never cancels anything. Auto-cancel would run the immediate-cancel path, which issues a final invoice and charges the saved card, so "archive to stop billing" would itself charge cards. Archived customers and archived plans accept no new subscriptions, while existing unpaid invoices stay collectible and dunning continues. The checker that finds billing subscriptions also refuses a billing-profile currency that differs from their plan currency, and since [ADR-100](100-currency-coherence-guard-ring.md) that currency check counts draft subscriptions too. Status: active, amended 2026-07-26 by ADR-100.
 
 ## Context
 

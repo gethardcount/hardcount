@@ -3,6 +3,10 @@
 **Status:** Accepted (2026-07-14). Keeps [ADR-077](077-org-level-billing-timezone.md) (one org-level billing timezone) and [ADR-058](058-billing-date-math-tenant-timezone.md) (civil-midnight DST-exact anchoring). The full billing/display decouple is the deferred root fix — [ADR-092](092-split-billing-timezone-from-display.md), triggered by a design partner needing multi-timezone billing.
 **Context:** money-path review of the ADR-058 + ADR-077 interaction. Reproduced live on the dev server; the anniversary/yearly case found by a 15-agent adversarial review.
 
+## Summary
+
+Changing the org timezone never makes a subscription pay a full base fee for a short "seam" period. The next period boundary is re-read in the new zone, which can create a short period before the next anchor, and an in-advance plan used to bill a full fee for it. A period under one day now gets no in-advance base fee, as in-arrears billing already did. An anniversary or yearly period that starts off its anchor day is prorated against one normal calendar interval, so a one-day seam on a $30 monthly plan costs about $1. Status: active; the one org-level billing timezone ([ADR-077](077-org-level-billing-timezone.md)) stays, and splitting billing from display timezone is deferred ([ADR-092](092-split-billing-timezone-from-display.md)).
+
 ## The defect
 
 Billing period boundaries are re-resolved each roll against the one org timezone

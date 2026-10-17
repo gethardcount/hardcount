@@ -1,7 +1,11 @@
 # ADR-063: Refund status is reconciled from Stripe webhooks (async truth)
 
 **Date:** 2026-06-28
-**Status:** Accepted
+**Status:** Accepted (amended 2026-08-04)
+
+## Summary
+
+Stripe webhooks decide a refund's final status, because Stripe refunds settle later and a `pending` refund can still fail. Velox records the status Stripe returns at creation, and the refund webhooks then move it to `succeeded` or `failed`; Stripe's `canceled` counts as `failed`. A late `pending` never overwrites a final status, and the dashboard flags a refund that failed or has been pending over 72 hours. Amended 2026-08-04: because Stripe idempotency keys expire after about 24 hours, a retry first looks the refund up at Stripe and creates a new one only when none is live. Status: active, amended 2026-08-04; refunds are retried only by the operator.
 
 ## Context
 

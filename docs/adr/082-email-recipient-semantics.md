@@ -1,13 +1,17 @@
 # ADR-082: Email recipient semantics — additional_emails + CC coverage matrix
 
 Date: 2026-07-06
-Status: Accepted
+Status: Accepted (amended 2026-07-19 by [ADR-098](098-postmark-delivery-webhook-ingestion.md))
 Design basis: docs/design/cc-emails.md (two-lens divergent panel +
 adversarial judge; plumbing claims verified against the code before
 acceptance).
 Register items: "Invoice/receipt/dunning emails go to exactly one
 recipient" (fix-now) + the promoted `POST /v1/credit-notes/{id}/send`
 hours-slice.
+
+## Summary
+
+A customer can hold up to 10 extra email addresses (`additional_emails`, encrypted like the main address), so billing emails reach more than one contact. They go in a visible `Cc:` on one message, for six email types: invoice, payment receipt, payment failed, both dunning emails and credit note, now sent with `POST /v1/credit-notes/{id}/send`. The two payment-setup emails, password reset and member invite are never copied, because each carries a personal link; their send functions take no CC list. A bounce on a copied address never marks the main address as bounced, and a suppressed main address blocks the whole send. Status: active, amended 2026-07-19: [ADR-098](098-postmark-delivery-webhook-ingestion.md) adds Postmark delivery, bounce and spam-complaint reports.
 
 ## Context
 

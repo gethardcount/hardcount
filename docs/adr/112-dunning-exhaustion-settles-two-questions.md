@@ -1,6 +1,6 @@
 # ADR-112: Dunning exhaustion settles two questions, not one
 
-**Status:** Accepted (2026-08-05)
+**Status:** Accepted (2026-08-05; amended 2026-10-08)
 **Amends:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns —
 `final_action` and its 2026-05-16 four-value enum)
 **Relates to:** [ADR-110](110-written-off-invoices-close-self-service-payment.md)
@@ -14,11 +14,12 @@ independent settings now decide what happens: `final_subscription_action`
 (`none`, `pause`, `cancel`) and `final_invoice_action` (`none`,
 `mark_uncollectible`). They replace the single `final_action` enum, which
 could not express cancel plus write-off. Three of its four values also left
-the unpaid invoice open forever without telling the operator. The default
-stays `(pause, none)`, because a write-off is an accounting decision the
+the unpaid invoice open forever without telling the operator. A policy created
+without these fields gets `(pause, none)`, because a write-off is an accounting decision the
 platform should not make unasked, and the policy form now says the invoice
 stays open. Automatic void is refused, and every entry point rejects the old
-`final_action` key by name.
+`final_action` key by name. The policy every new account starts with changes
+nothing ([ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md)).
 
 ## Context
 

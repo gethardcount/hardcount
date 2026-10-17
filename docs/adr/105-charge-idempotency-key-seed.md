@@ -7,6 +7,10 @@ money-path playbook's gate #2 wording that blessed it.
 **Builds on:** ADR-029 (disjoint wall/clock charge flows), ADR-049
 (payment reconciler), ADR-059 (in-flight invoice guards).
 
+## Summary
+
+Each Stripe charge sends the idempotency key `velox_inv_<invoice_id>_<charge_attempt_seq>`, with a `_dunning_retry` suffix on dunning retries. Every write that records a PaymentIntent id on the invoice bumps the counter `charge_attempt_seq`, and no other write does. The old seed, `updated_at`, also moved on unrelated writes such as a tax commit, so a retry after a lost response could create a second PaymentIntent and charge twice. A Stripe idempotency conflict now counts as an unknown outcome, not a decline, because it proves an earlier attempt reached Stripe. Status: active; the case it left open, an unclear result with no PaymentIntent id, is now handled by [ADR-107](107-unknown-is-terminal-until-a-human.md) and [ADR-108](108-parked-invoices-search-and-adopt.md).
+
 ## Context
 
 Every Stripe charge carries an idempotency key. Stripe's contract:

@@ -1,6 +1,6 @@
 # ADR-078: Prepaid commits + drawdown, phase 1
 
-**Status:** Accepted (2026-07-05)
+**Status:** Accepted (2026-07-05; amended 2026-08-04; supplemented by [ADR-080](080-paid-commit-cn-relief.md) on 2026-07-06)
 **Context:** `docs/design/prepaid-commits.md` (the locked design — peer-swept
 across Metronome/Lago/Stripe/AI-infra with adversarial quote-verification,
 then a 6-lens adversarial design panel; this ADR records the decisions, the
@@ -13,8 +13,10 @@ down. Velox grants it as a `customer_credit_ledger` block with
 `grant_kind='commit'` in the same transaction that finalizes the invoice, so
 the credit is spendable from the day the invoice is issued. Voiding the
 invoice retires the unused balance, but uncollectible, dunning pause and
-cancel do not. Customer credit never pays a commit invoice, credit notes are
-blocked on it, and drawdown spends promotional credit first. Amended
+cancel do not. Customer credit never pays a commit invoice, ordinary credit notes are
+refused on it, and drawdown spends promotional credit first. Unused credit on a
+paid commit is refunded at the price paid through a relief credit note
+([ADR-080](080-paid-commit-cn-relief.md)). Amended
 2026-08-04: the attention dashboard flags an unpaid commit invoice whose
 credit is still live (`commit_exposure`), and holding credit until payment
 stays deferred until a self-serve or auto-top-up build exists.

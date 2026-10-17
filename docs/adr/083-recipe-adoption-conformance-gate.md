@@ -3,6 +3,10 @@
 **Date:** 2026-07-07
 **Status:** Superseded by ADR-085 (2026-07-08) — plans are never adopted by code anymore (each apply mints a fresh born-unique plan), so the conformance gate this ADR built has nothing left to gate
 
+## Summary
+
+A recipe is a ready-made pricing setup applied in one call. This ADR made an apply refuse with 409 when an existing plan or meter with the recipe's code or key had different money settings, instead of silently reusing it. [ADR-085](085-recipe-idempotent-apply.md) replaced it on 2026-07-08: a first apply always creates a new plan and a repeat apply creates nothing, so no plan is ever reused and the plan check is gone. The meter check (the aggregation must match) carried over into ADR-085, which since 2026-07-26 also checks a reused rating rule's money fields. Status: superseded by [ADR-085](085-recipe-idempotent-apply.md).
+
 ## Context
 
 `recipe.Service.Instantiate` builds a billing graph (rating rules → meters → pricing rules → plan → dunning → webhook). To stay idempotent and to not clobber an operator's live config, it **adopts** an existing object when one already carries the recipe's key/code: rating rules by `rule_key`, meters by `meter_key`, plans by `code`. Adoption keyed purely on the natural key, with **no check that the adopted object matches what the recipe declares**.

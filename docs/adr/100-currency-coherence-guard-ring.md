@@ -3,6 +3,10 @@
 **Date:** 2026-07-26
 **Status:** Accepted
 
+## Summary
+
+Velox refuses mismatched currencies at every write that could create them (rule republishes, plans, meter prices, subscriptions and recipes), so the billing engine never needs to convert. A customer's subscriptions, their plans, the meters' prices and the billing profile share one currency, so selling in two currencies needs separate meters, plans and customers. Zero-decimal currencies (JPY, KRW, VND, CLP) are refused, because Velox amounts are cents and those charges would be 100 times too large. A settled Stripe charge in a currency other than the invoice's raises a `payment.currency_mismatch` anomaly. Status: active; multi-currency catalogs, zero-decimal support, a currency on the credit ledger and locks against concurrent writes are deferred.
+
 ## Context
 
 Velox amounts are unit-less minor-unit cents; every currency LABEL is attached downstream of the math. The billing engine resolves ONE invoice currency (billing profile > first item's plan > tenant settings > USD) and stamps it over rule-computed cents **without conversion or comparison** — its own comment called mismatches "a pricing config error, not a billing problem to solve here." A full site-set enumeration (money-path playbook, 2026-07-26; six parallel readers over every currency writer/reader) found that config error was *writable from eight directions*, three of them wrong-money paths that reach a Stripe PaymentIntent:

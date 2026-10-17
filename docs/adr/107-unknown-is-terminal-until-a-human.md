@@ -1,6 +1,6 @@
 # ADR-107: An unnameable charge attempt parks the invoice; it is never settled failed
 
-**Status:** Accepted (amended 2026-10-18)
+**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18)
 **Date:** 2026-07-31
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) as the answer to this
 problem. ADR-106's charge-intent ledger is **parked, not deleted** — see

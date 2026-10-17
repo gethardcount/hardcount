@@ -4,6 +4,10 @@ Date: 2026-07-16
 Status: Accepted
 Relates: ADR-011 (email+password sessions — the httpOnly cookie this protects), ADR-075/077 (unrelated; billing TZ)
 
+## Summary
+
+Velox blocks cross-site request forgery (CSRF: another website making an operator's browser send a request that carries the session cookie) by checking where each request comes from. One middleware, `CSRFGuard`, wraps `/v1/auth` and the `/v1` group and refuses a cross-site POST, PUT, PATCH or DELETE with 403. It trusts the browser's `Sec-Fetch-Site` header first, then `Origin` matched against `CORS_ALLOWED_ORIGINS`; a request with neither header (a script) or a Bearer-key request with no session cookie passes. Header checks replace CSRF tokens because the dashboard is a first-party app that no other site embeds, so no token handling or frontend change is needed. Status: active.
+
 ## Context
 
 The dashboard authenticates with an httpOnly `velox_session` cookie (ADR-011);

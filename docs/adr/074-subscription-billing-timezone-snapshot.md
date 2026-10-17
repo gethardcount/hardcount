@@ -9,6 +9,10 @@ panel (see "Process") is what surfaced the flaw — no peer bills each
 subscription in its own frozen zone, and the snapshot's display divergence was
 the sole source of a ~8-bug render class. Kept for history; do not build on it.
 
+## Summary
+
+This record froze a billing timezone on each subscription at creation, so that changing the org timezone would not re-time live subscriptions. It was reversed the same day: [ADR-077](077-org-level-billing-timezone.md) made the billing timezone one org-level setting (default UTC) and dropped the `subscriptions.billing_timezone` column. Its invoice change survives: each invoice stores the timezone it was issued in (`invoices.billing_timezone`), so its printed dates do not move later. Status: superseded by [ADR-077](077-org-level-billing-timezone.md).
+
 ## Context
 
 Billing calendar date-math is anchored in a timezone (ADR-058): period

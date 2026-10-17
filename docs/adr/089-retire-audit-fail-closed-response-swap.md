@@ -4,6 +4,10 @@ Date: 2026-07-13
 Status: Accepted
 Supersedes: the fail-closed half of the AuditLog middleware contract (no prior ADR covered it)
 
+## Summary
+
+A failed audit-log write never changes the API response: the handler's response is served as is, and the failure is logged and counted in `velox_audit_write_errors_total`. The per-tenant `audit_fail_closed` setting, which swapped a committed response for `503 audit_error`, is removed, and migration 0149 dropped its column. That 503 reported a failure for a change that had already committed, the idempotency layer cached it for 24 hours, and a retry with a new key could repeat the change. Writing audit rows inside the business transaction ([ADR-090](090-audit-in-tx-emission.md)) replaces fail-closed where it is in place, because the change and its row commit or roll back together. Status: active.
+
 ## Context
 
 The AuditLog middleware records every successful mutating `/v1` request to the

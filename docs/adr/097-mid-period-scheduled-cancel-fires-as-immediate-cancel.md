@@ -1,7 +1,11 @@
 # ADR-097: A due mid-period `cancel_at` fires as an immediate cancel at that instant
 
-**Status**: Accepted 2026-07-18
+**Status**: Accepted 2026-07-18 (amended by [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) on 2026-10-12 and [ADR-120](120-invoice-grace-period-for-late-usage.md) on 2026-10-14)
 **Context**: FLOW TC8 walkthrough live-find; fixes the stranded-cancel money bug.
+
+## Summary
+
+A scheduled cancel whose `cancel_at` falls inside a billing period fires as an immediate cancel at that instant. Before this, the billing scans looked only at period ends, so such a subscription renewed past its own cancel date. One transaction cancels it, bills usage and any in-arrears base fee up to `cancel_at`, and writes relief for the unused prepaid part, never as a cash refund. `canceled_at` and the final invoice's period end are the `cancel_at` instant, even when the fire runs late. Status: active, amended: all relief is written in the cancel transaction ([ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md)), and wall-clock runs fire after the invoice grace period ([ADR-120](120-invoice-grace-period-for-late-usage.md)).
 
 ## The bug
 

@@ -4,8 +4,8 @@ This directory holds Velox's Architecture Decision Records (ADRs) —
 short docs capturing one architectural decision each. Format follows
 [Michael Nygard's 2011 convention](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions):
 Title / Date / Status / Context / Decision / Alternatives / Consequences.
-New ADRs also open with a short **Summary**, so a reader learns the
-current rule without reading the whole record.
+Every ADR also opens with a short **Summary**, so a reader learns the
+current rule and status without reading the whole record.
 
 ADRs are written when a decision is **worth re-litigating later** —
 either because reasonable alternatives exist, because the constraints
@@ -44,15 +44,15 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [001](001-paymentintent-only-stripe.md) | 2026-04-15 | Accepted | Payments | Charge through Stripe PaymentIntents only; Velox owns invoices, dunning and payment status |
 | [002](002-per-domain-package-architecture.md) | 2026-04-15 | Accepted | Platform & ops | Each domain package owns its store, service and handler; peer domains never import each other |
 | [003](003-postgresql-rls-multi-tenancy.md) | 2026-04-15 | Accepted | Auth & security | Every table carries `tenant_id`; Postgres Row-Level Security enforces tenant isolation |
-| [004](004-event-sourced-credit-ledger.md) | 2026-04-15 | Accepted | Credits | Credits live in an append-only ledger; each entry records the running balance, and nothing edits an entry's amount |
+| [004](004-event-sourced-credit-ledger.md) | 2026-04-15 | Accepted | Credits | Append-only credit ledger: each entry carries the running balance; no entry's amount is ever edited |
 | [005](005-integer-cents-for-money.md) | 2026-04-15 | Accepted (amended) | Billing | Store and compute money as integer cents; per-unit rates later became decimals (ADR-045) |
-| [006](006-background-scheduler-vs-message-queue.md) | 2026-04-15 | Accepted (amended) | Platform & ops | Run billing and dunning on an in-process ticker; a leader lease lets one replica run each loop (ADR-114) |
+| [006](006-background-scheduler-vs-message-queue.md) | 2026-04-15 | Accepted (amended) | Platform & ops | Run billing and dunning on an in-process ticker; one replica runs each loop (ADR-114) |
 | [007](007-revert-to-api-key-dashboard-auth.md) | 2026-04-29 | Superseded by ADR-011 | Auth & security | The dashboard logs in with a pasted API key kept in browser storage |
 | [008](008-session-from-api-key.md) | 2026-04-29 | Superseded by ADR-011 | Auth & security | Dashboard sessions are httpOnly cookies minted from a validated API key |
 | [009](009-invoice-attention.md) | 2026-04-30 | Accepted | Invoices | Every invoice payload carries one server-computed attention field: severity, reason, actions |
 | [010](010-tenant-timezone-model.md) | 2026-05-01 | Accepted (amended) | Timezones | Store and send instants in UTC; show dates in the tenant's display timezone |
-| [011](011-email-password-auth-and-clean-api-keys.md) | 2026-05-01 | Accepted (amended) | Auth & security | The dashboard signs in with email and password; API keys serve only SDK and curl callers |
-| [012](012-day-grade-calendar-billing.md) | 2026-05-01 | Accepted (amended) | Billing | Billing periods start and end at midnight in the tenant timezone; a day is the smallest unit |
+| [011](011-email-password-auth-and-clean-api-keys.md) | 2026-05-01 | Accepted (amended) | Auth & security | Dashboard signs in with email and password; API keys serve only SDK and curl callers |
+| [012](012-day-grade-calendar-billing.md) | 2026-05-01 | Accepted (amended) | Billing | Billing periods start and end at tenant-timezone midnight; a day is the smallest unit |
 | [013](013-invoice-attention-collection-state.md) | 2026-05-01 | Accepted | Invoices | Attention reports a missing payment method apart from an invoice that is awaiting payment |
 | [014](014-sso-direction-embedded-oidc-saml.md) | 2026-05-02 | Accepted | Auth & security | When SSO is needed, embed OIDC and SAML libraries in-process; keep passwords homegrown |
 | [015](015-test-clock-async-catchup.md) | 2026-05-04 | Accepted | Test clocks & simulated time | Advancing a test clock returns at once; a background worker runs the catch-up |
@@ -63,7 +63,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [020](020-invoice-timeline-coalesce-and-card-detail.md) | 2026-05-04 | Accepted (partly superseded) | Invoices | The server drops redundant provider rows from the invoice timeline and shows the charged card |
 | [021](021-hosted-invoice-pay-flow-saves-pm.md) | 2026-05-03 | Accepted (amended) | Payments | Paying a hosted invoice saves the card to the customer for later off-session charges |
 | [022](022-contextual-checkout-return-urls.md) | 2026-05-04 | Accepted | Payments | Stripe Checkout returns the operator to the page they started from, not a fixed URL |
-| [023](023-post-decline-rendering-cleanup.md) | 2026-05-05 | Accepted (amended) | Payments | After a decline, show one banner and one email per moment; no email during on-page payment |
+| [023](023-post-decline-rendering-cleanup.md) | 2026-05-05 | Accepted (amended) | Payments | After a decline, one banner and one email per moment; no email during on-page payment |
 | [024](024-activity-timeline-design-deferred.md) | 2026-05-05 | Accepted | Invoices | Keep building the timeline from several sources; add new primitives only on a named trigger |
 | [025](025-attention-detail-vs-provider-response.md) | 2026-05-05 | Accepted | Invoices | Attention keeps Velox's own explanation apart from the raw text a provider returned |
 | [026](026-error-boundary-sanitization.md) | 2026-05-05 | Accepted (amended) | Platform & ops | One function turns errors into HTTP responses; only typed, safe messages pass through |
@@ -71,7 +71,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [028](028-billing-engine-period-loop-and-disjoint-flows.md) | 2026-05-05 | Accepted | Billing | Bill every due period in one call; cron and test-clock catch-up bill separate subscriptions |
 | [029](029-fully-disjoint-test-clock-flows.md) | 2026-05-08 | Accepted | Test clocks & simulated time | Every time-driven job has separate wall-clock and per-test-clock flows |
 | [030](030-simulated-time-everywhere-on-clock-pinned-entities.md) | 2026-05-08 | Accepted | Test clocks & simulated time | Every action on a clock-pinned entity runs on the clock's simulated time |
-| [031](031-per-plan-base-bill-timing.md) | 2026-05-14 | Accepted (amended) | Pricing & usage | Each plan bills its base fee in advance or in arrears; usage always bills in arrears |
+| [031](031-per-plan-base-bill-timing.md) | 2026-05-14 | Accepted (amended) | Pricing & usage | Each plan bills its base fee in advance or arrears; usage always bills in arrears |
 | [032](032-public-cost-dashboard-projection.md) | 2026-05-14 | Accepted (amended) | Integrations | A token-protected public JSON endpoint shows one customer's costs, with sanitized fields |
 | [033](033-litellm-spend-adapter.md) | 2026-05-14 | Accepted (amended) | Integrations | LiteLLM pushes each call's spend to a Velox endpoint, which records it as usage events |
 | [034](034-plan-billing-field-immutability.md) | 2026-05-15 | Accepted | Pricing & usage | A plan's billing fields freeze once a live subscription uses it; names stay editable |
@@ -84,17 +84,17 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [041](041-tax-fallback-manual-removed.md) | 2026-05-30 | Accepted | Tax | If tax calculation fails, block the invoice; there is no fallback to manual tax |
 | [042](042-tax-rate-decimal-precision.md) | 2026-05-31 | Accepted (partly superseded) | Tax | Store tax rates as `NUMERIC(7,4)` and prorate with a whole-day ratio |
 | [043](043-drop-tax-rate-bp.md) | 2026-05-31 | Accepted | Tax | Drop the basis-point tax rate column at once; the decimal rate is the only storage |
-| [044](044-canonical-ai-token-metering-model.md) | 2026-06-01 | Accepted | Pricing & usage | Meter all AI tokens on one `tokens` meter, with token type, model and provider as dimensions |
+| [044](044-canonical-ai-token-metering-model.md) | 2026-06-01 | Accepted | Pricing & usage | Meter all AI tokens on one `tokens` meter; token type, model and provider are dimensions |
 | [045](045-decimal-per-unit-pricing-rates.md) | 2026-06-01 | Accepted | Pricing & usage | Per-unit price rates are arbitrary-precision decimals; invoice amounts stay integer cents |
 | [046](046-manual-tax-largest-remainder-apportionment.md) | 2026-06-03 | Accepted | Tax | Manual tax rounds the document total once and spreads the cents by largest remainder |
-| [047](047-invoice-tax-rate-displays-statutory-not-effective.md) | 2026-06-05 | Accepted | Tax | The invoice shows the statutory tax rate when taxed lines share one; else the effective rate |
+| [047](047-invoice-tax-rate-displays-statutory-not-effective.md) | 2026-06-05 | Accepted | Tax | Invoices show the statutory tax rate when taxed lines share one; else the effective rate |
 | [048](048-credit-clawback-tax-reversal.md) | 2026-06-06 | Accepted | Credits | Credit clawbacks go through a credit note, so the proportional tax is reversed too |
-| [049](049-payment-settlement-primitive.md) | 2026-06-07 | Accepted | Payments | One idempotent settle step owns every Stripe charge's paid or failed outcome and its side effects |
-| [050](050-unpaid-source-proration-policy.md) | 2026-06-08 | Accepted (amended) | Subscriptions | While the period invoice is unpaid, block a change that charges more; adjust one that credits |
+| [049](049-payment-settlement-primitive.md) | 2026-06-07 | Accepted | Payments | One idempotent settle step owns each Stripe charge's paid or failed outcome and side effects |
+| [050](050-unpaid-source-proration-policy.md) | 2026-06-08 | Accepted (amended) | Subscriptions | While the period invoice is unpaid, block changes that charge more; adjust ones that credit |
 | [051](051-remove-customer-self-serve-portal.md) | 2026-06-09 | Accepted | Product scope | Remove the customer self-serve portal; it is a B2C pattern our users do not need |
 | [052](052-customer-tax-status-engine-determined-vs-override.md) | 2026-06-15 | Accepted | Tax | The tax engine decides tax status by default; manual reverse-charge or exempt overrides it |
 | [053](053-explicit-payment-method-at-charge.md) | 2026-06-17 | Accepted | Payments | Velox picks the card to charge and names it on the charge; Stripe never chooses |
-| [054](054-effective-unit-price-decimal-display.md) | 2026-06-17 | Accepted | Invoices | Show per-unit prices at full precision; one backend function picks the billed or the effective rate |
+| [054](054-effective-unit-price-decimal-display.md) | 2026-06-17 | Accepted | Invoices | Show per-unit prices at full precision; one backend function picks the billed or effective rate |
 | [055](055-anniversary-month-end-anchor.md) | 2026-06-18 | Accepted | Billing | Anniversary billing keeps the original day of month, clamped to each month's last day |
 | [056](056-atomic-cross-interval-plan-swap.md) | 2026-06-19 | Accepted | Subscriptions | A plan swap across billing intervals restructures the cycle in one transaction |
 | [057](057-atomic-recoverable-downgrade-clawback.md) | 2026-06-20 | Accepted | Credits | A downgrade's clawback credit note is created in the change transaction and issued with retry |
@@ -102,69 +102,69 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [059](059-guard-invoice-mutations-while-payment-in-flight.md) | 2026-06-22 | Accepted | Payments | In-flight payments block void, offline payment and write-off (parked excepted); clawbacks wait |
 | [060](060-no-payment-method-dunning-enrollment.md) | 2026-06-23 | Accepted (amended) | Dunning | Invoices with no payment method enter dunning, like declined charges |
 | [061](061-credit-note-issue-atomicity.md) | 2026-06-24 | Accepted (amended) | Credits | Issuing a credit note commits internal effects in one transaction; external effects retry |
-| [062](062-async-obligation-backbone.md) | 2026-06-25 | Accepted | Platform & ops | Move the retry sweeps onto one separate in-database obligations queue; the build is deferred |
-| [063](063-refund-status-webhook-reconciliation.md) | 2026-06-28 | Accepted | Payments | Stripe webhooks decide refund status; the status at creation is recorded as Stripe returned it |
-| [064](064-dunning-run-creation-derived-from-invoice-state.md) | 2026-07-02 | Accepted | Dunning | A decline starts a dunning run at once; a background sweep creates any run that was missed |
-| [065](065-threshold-scan-boundary-fire-once-drain.md) | 2026-07-02 | Accepted | Billing | A usage threshold fires at most once per scan, never at the period end, and drains fully |
-| [066](066-threshold-money-semantics.md) | 2026-07-02 | Accepted | Billing | A threshold fire bills a prorated base and resets the cycle in the same transaction |
-| [067](067-archive-blocks-never-cancels.md) | 2026-07-02 | Accepted | Subscriptions | Archiving a customer is refused while a subscription still bills; it never cancels anything |
-| [068](068-checkout-session-dedup.md) | 2026-07-02 | Accepted | Payments | Record a checkout session before creating it in Stripe, so an invoice has one live session |
-| [069](069-trial-cancel-semantics.md) | 2026-07-02 | Accepted | Subscriptions | Cancelling in a trial is free at trial end; SQL guards enforce it at every activation |
+| [062](062-async-obligation-backbone.md) | 2026-06-25 | Accepted (amended) | Platform & ops | Move the retry sweeps onto one separate in-database obligations queue; the build is deferred |
+| [063](063-refund-status-webhook-reconciliation.md) | 2026-06-28 | Accepted (amended) | Payments | Stripe webhooks decide refund status; a retry looks the refund up before creating one |
+| [064](064-dunning-run-creation-derived-from-invoice-state.md) | 2026-07-02 | Accepted | Dunning | A decline starts dunning at once; a background sweep creates any missed run |
+| [065](065-threshold-scan-boundary-fire-once-drain.md) | 2026-07-02 | Accepted (amended) | Billing | The threshold scan skips ended periods, fires once per cycle and checks every subscription |
+| [066](066-threshold-money-semantics.md) | 2026-07-02 | Accepted (amended) | Billing | Threshold fires prorate a reset's base; tiers continue across a fire that keeps the cycle |
+| [067](067-archive-blocks-never-cancels.md) | 2026-07-02 | Accepted (amended) | Subscriptions | Archiving a customer is refused while a subscription still bills; it never cancels anything |
+| [068](068-checkout-session-dedup.md) | 2026-07-02 | Accepted (amended) | Payments | One open checkout session per invoice; hosted payment and Velox charges exclude each other |
+| [069](069-trial-cancel-semantics.md) | 2026-07-02 | Accepted | Subscriptions | Cancelling a trial is free at trial end; SQL guards enforce it at every activation |
 | [070](070-price-change-semantics.md) | 2026-07-02 | Accepted (amended) | Pricing & usage | Customer price overrides follow the rule across versions; a period keeps its opening price |
 | [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry |
-| [072](072-transport-lease-model.md) | 2026-07-03 | Accepted | Platform & ops | Outbox workers claim rows with a time-limited lease; budgets and lease lengths are derived |
+| [072](072-transport-lease-model.md) | 2026-07-03 | Accepted (amended) | Platform & ops | Outbox workers claim rows with a time-limited lease; budgets and lease lengths are derived |
 | [073](073-selfhost-boot-and-bootstrap-contract.md) | 2026-07-03 | Accepted (amended) | Platform & ops | One bootstrap path creates a tenant in one transaction; migrations run one at a time |
 | [074](074-subscription-billing-timezone-snapshot.md) | 2026-07-04 | Superseded by ADR-077 | Timezones | Each subscription snapshots its billing timezone at creation |
-| [075](075-canonical-utc-api-timestamps.md) | 2026-07-04 | Accepted | Timezones | The process runs in UTC, so every API timestamp is the same whatever the host zone |
-| [076](076-enforcing-the-timezone-invariant.md) | 2026-07-04 | Accepted | Timezones | A CI lint and typed helpers enforce that dates render in an explicit timezone |
-| [077](077-org-level-billing-timezone.md) | 2026-07-04 | Accepted | Timezones | The billing timezone is one org-level setting; subscriptions carry no timezone of their own |
-| [078](078-prepaid-commits-phase-1.md) | 2026-07-05 | Accepted | Credits | A prepaid commit is a credit grant funded when its invoice finalizes and retired on void |
-| [079](079-provider-cost-tables.md) | 2026-07-05 | Accepted | Pricing & usage | Record what the operator pays LLM providers per token and report margin per customer |
-| [080](080-paid-commit-cn-relief.md) | 2026-07-06 | Accepted | Credits | A refund of unused paid commit credits is capped by the price paid per credit |
-| [081](081-minimal-team-invites.md) | 2026-07-06 | Accepted | Auth & security | Invite teammates by single-use email link; removal revokes sessions; roles are not enforced |
-| [082](082-email-recipient-semantics.md) | 2026-07-06 | Accepted | Platform & ops | Customers can hold extra encrypted email addresses; a fixed matrix decides who is CC'd |
-| [083](083-recipe-adoption-conformance-gate.md) | 2026-07-07 | Superseded by ADR-085 | Pricing & usage | A recipe adopts an existing plan or meter only if its billing config matches; else it refuses |
-| [085](085-recipe-idempotent-apply.md) | 2026-07-08 | Accepted | Pricing & usage | Applying a recipe is additive: a first apply makes a new plan, a repeat creates nothing, no uninstall |
-| [086](086-simulated-data-lifecycle.md) | 2026-07-09 | Accepted (amended) | Test clocks & simulated time | Money sweeps skip simulated invoices; deleting a clock deletes its customers' rows, not the audit log |
-| [087](087-collect-after-finalize-pipeline.md) | 2026-07-11 | Superseded by 116 | Payments | One method collects payment after every engine finalize; each site keeps its own checks |
-| [088](088-credit-balance-applies-to-all-invoices.md) | 2026-07-11 | Accepted | Credits | The credit balance applies to every invoice at finalize; the card is charged the remainder |
+| [075](075-canonical-utc-api-timestamps.md) | 2026-07-04 | Accepted | Timezones | The process runs in UTC, so API timestamps are the same on any host |
+| [076](076-enforcing-the-timezone-invariant.md) | 2026-07-04 | Accepted | Timezones | A Go test and typed dashboard helpers make every shown date name its timezone |
+| [077](077-org-level-billing-timezone.md) | 2026-07-04 | Accepted | Timezones | One org-level billing timezone; subscriptions have none, and each invoice keeps its issue zone |
+| [078](078-prepaid-commits-phase-1.md) | 2026-07-05 | Accepted (amended) | Credits | A prepaid commit is a credit grant funded at invoice finalize and retired on void |
+| [079](079-provider-cost-tables.md) | 2026-07-05 | Accepted (amended) | Pricing & usage | Stamp each usage event's provider cost at ingest; report usage margin per customer |
+| [080](080-paid-commit-cn-relief.md) | 2026-07-06 | Accepted | Credits | Refund unused paid commit credits at the price paid per credit, in one transaction |
+| [081](081-minimal-team-invites.md) | 2026-07-06 | Accepted | Auth & security | Invite teammates by single-use email link; removal ends sessions; roles are not enforced |
+| [082](082-email-recipient-semantics.md) | 2026-07-06 | Accepted (amended) | Platform & ops | Up to 10 extra addresses are CC'd on six email types, never on credential emails |
+| [083](083-recipe-adoption-conformance-gate.md) | 2026-07-07 | Superseded by ADR-085 | Pricing & usage | A recipe reuses an existing plan or meter only if its money settings match |
+| [085](085-recipe-idempotent-apply.md) | 2026-07-08 | Accepted (amended) | Pricing & usage | Applying a recipe only adds: a first apply creates a new plan; repeats create nothing |
+| [086](086-simulated-data-lifecycle.md) | 2026-07-09 | Accepted (amended) | Test clocks & simulated time | Money sweeps skip simulated invoices; deleting a clock deletes its data except the audit log |
+| [087](087-collect-after-finalize-pipeline.md) | 2026-07-11 | Superseded by ADR-116 | Payments | One method collects payment after every engine finalize; each site keeps its own checks |
+| [088](088-credit-balance-applies-to-all-invoices.md) | 2026-07-11 | Accepted (amended) | Credits | The credit balance applies to every invoice at finalize; the card is charged the remainder |
 | [089](089-retire-audit-fail-closed-response-swap.md) | 2026-07-13 | Accepted | Audit | A failed audit write never changes the API response; it is logged and counted |
-| [090](090-audit-in-tx-emission.md) | 2026-07-13 | Accepted | Audit | Target: audit rows commit in the business transaction; only some writers do, most still write after commit |
-| [091](091-org-timezone-change-seam-absorb.md) | 2026-07-14 | Accepted | Timezones | Changing the org timezone never overbills; the period gap it creates is absorbed or prorated |
+| [090](090-audit-in-tx-emission.md) | 2026-07-13 | Accepted | Audit | Audit rows should commit in the business transaction; most writers still write after commit |
+| [091](091-org-timezone-change-seam-absorb.md) | 2026-07-14 | Accepted | Timezones | Changing the org timezone never bills a full fee for the short period it creates |
 | [092](092-split-billing-timezone-from-display.md) | 2026-07-14 | Proposed | Timezones | Split the billing timezone from the display timezone; deferred until a partner needs it |
 | [093](093-csrf-origin-verification.md) | 2026-07-16 | Accepted | Auth & security | State-changing cookie requests must come from the same site, checked by origin headers |
 | [094](094-login-brute-force-throttle.md) | 2026-07-17 | Accepted (amended) | Auth & security | v1 has no login lockout; a throttle, MFA and breached-password check are designed, deferred |
-| [095](095-login-security-roadmap-and-mfa.md) | 2026-07-17 | Accepted (amended) | Auth & security | Ship TOTP MFA and an offline breached-password check before first deployment |
-| [096](096-unpriced-meter-plan-attach-guard.md) | 2026-07-18 | Accepted (amended) | Pricing & usage | Refuse to attach an unpriced meter to a plan, or to remove a live plan's last price; log and count usage left unpriced |
-| [097](097-mid-period-scheduled-cancel-fires-as-immediate-cancel.md) | 2026-07-18 | Accepted | Subscriptions | A scheduled cancel that falls mid-period fires as an immediate cancel at that time |
+| [095](095-login-security-roadmap-and-mfa.md) | 2026-07-17 | Accepted (amended) | Auth & security | TOTP MFA and an offline breached-password check must ship before first deployment; neither is built |
+| [096](096-unpriced-meter-plan-attach-guard.md) | 2026-07-18 | Accepted (amended) | Pricing & usage | Plans attach only priced meters; a billing meter's last price cannot be removed |
+| [097](097-mid-period-scheduled-cancel-fires-as-immediate-cancel.md) | 2026-07-18 | Accepted (amended) | Subscriptions | A scheduled cancel that falls mid-period fires as an immediate cancel at that time |
 | [098](098-postmark-delivery-webhook-ingestion.md) | 2026-07-19 | Accepted | Integrations | Ingest Postmark delivery, bounce and spam-complaint webhooks; ignore opens and clicks |
-| [099](099-simulated-time-disclosure-policy.md) | 2026-07-21 | Accepted | Test clocks & simulated time | Mark simulated data once per scope with the word "Simulated": a page banner or a list chip |
+| [099](099-simulated-time-disclosure-policy.md) | 2026-07-21 | Accepted (amended) | Test clocks & simulated time | Say "Simulated" once per scope: one page banner, or one chip per list row |
 | [100](100-currency-coherence-guard-ring.md) | 2026-07-26 | Accepted | Pricing & usage | Reject mismatched currencies at every write; the engine never converts |
 | [101](101-billing-intervals.md) | 2026-07-27 | Accepted | Subscriptions | Store each item's billable date ranges on change; billing intersects them with the period |
-| [102](102-invoice-charge-attempts.md) | 2026-07-28 | Accepted | Payments | Record each charge attempt as a row, updated by PaymentIntent id as Stripe reports |
+| [102](102-invoice-charge-attempts.md) | 2026-07-28 | Accepted (partly superseded) | Payments | Record each charge attempt as a row, updated by PaymentIntent id as Stripe reports |
 | [103](103-single-payment-source.md) | 2026-07-28 | Accepted | Payments | The invoice timeline shows payments only from charge-attempt rows, not from the webhook table |
-| [104](104-one-activity-lane-entity-calendar.md) | 2026-07-29 | Accepted | Test clocks & simulated time | Activity is one list ordered by the entity's own time, with the real time as a subline |
+| [104](104-one-activity-lane-entity-calendar.md) | 2026-07-29 | Accepted (amended) | Test clocks & simulated time | One invoice timeline ordered by the entity's own clock; the real time shows beneath |
 | [105](105-charge-idempotency-key-seed.md) | 2026-07-30 | Accepted | Payments | Seed the Stripe idempotency key from a per-invoice attempt counter, not `updated_at` |
 | [106](106-charge-intent-ledger.md) | 2026-07-30 | Parked | Payments | Record each charge before calling Stripe, so an unnamed charge can be replayed safely |
-| [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted (amended) | Payments | A charge Stripe cannot name stays unknown until a webhook or a human resolves it |
+| [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted (amended) | Payments | An unclear charge parks the invoice; a webhook, Stripe search or a human resolves it |
 | [108](108-parked-invoices-search-and-adopt.md) | 2026-08-02 | Accepted | Payments | Resolve unknown charges by searching Stripe, and act only on a payment actually found |
-| [109](109-issued-document-snapshot.md) | 2026-08-05 | Accepted (amended 2026-10-14) | Invoices | Copy bill-to and supplier details onto the invoice when it leaves draft; render from the copy |
-| [110](110-written-off-invoices-close-self-service-payment.md) | 2026-08-05 | Accepted | Invoices | A written-off invoice can no longer be paid online by the customer; its pages point to support |
+| [109](109-issued-document-snapshot.md) | 2026-08-05 | Accepted (amended) | Invoices | Issued documents print bill-to and supplier details from a copy taken at issue |
+| [110](110-written-off-invoices-close-self-service-payment.md) | 2026-08-05 | Accepted (partly superseded) | Invoices | Customers cannot pay a written-off invoice online; its public pages point to support |
 | [111](111-a-write-off-has-no-tax-leg.md) | 2026-08-05 | Accepted | Tax | Writing off an invoice does not reverse its tax; voids and credit notes still do |
-| [112](112-dunning-exhaustion-settles-two-questions.md) | 2026-08-05 | Accepted | Dunning | When dunning ends, decide the subscription's outcome and the invoice's outcome separately |
-| [113](113-nothing-charges-a-written-off-invoice.md) | 2026-08-06 | Accepted | Invoices | Nothing charges a written-off invoice; it settles only by a recorded payment or a found charge |
-| [114](114-leader-leases-tick-scoped-fencing.md) | 2026-08-30 | Accepted | Platform & ops | Leader election is a database row per role, with a fencing token checked by every claim |
+| [112](112-dunning-exhaustion-settles-two-questions.md) | 2026-08-05 | Accepted (amended) | Dunning | When dunning ends, decide the subscription's outcome and the invoice's outcome separately |
+| [113](113-nothing-charges-a-written-off-invoice.md) | 2026-08-06 | Accepted | Invoices | Nothing charges a written-off invoice; only a recorded payment or a found charge settles it |
+| [114](114-leader-leases-tick-scoped-fencing.md) | 2026-08-30 | Accepted (partly superseded) | Platform & ops | Leader election is one database row per job, with a fencing token on every claim |
 | [115](115-one-closer-for-the-billing-period.md) | 2026-08-30 | Accepted | Billing | Every period write locks the subscription and rechecks its period snapshot first |
-| [116](116-collection-intent-at-finalize-one-collector.md) | 2026-10-08 | Accepted | Payments | Finalize queues the invoice in its own write; one collector charges it, and a nudge runs it right away |
-| [117](117-one-payment-intent-per-invoice-deferred.md) | 2026-10-11 | Proposed | Payments | One PaymentIntent per invoice (Stripe Billing's model) considered and deferred: per-attempt PaymentIntents stay, with triggers to reopen |
-| [118](118-cancel-and-swap-relief-in-the-change-transaction.md) | 2026-10-12 | Accepted | Credits | Cancel and plan-swap relief (credit notes, or a void of an unused unpaid invoice) is written in the change's transaction; the post-commit fallbacks are deleted |
-| [119](119-billing-failure-record-keyed-to-the-due-instant.md) | 2026-10-12 | Accepted | Billing | A failed billing attempt is saved on the subscription, keyed to the due instant it failed on; attempts wait on a ladder and park after eight; an operator retry clears it |
-| [120](120-invoice-grace-period-for-late-usage.md) | 2026-10-14 | Accepted | Billing | A period's invoice is built `INVOICE_GRACE_PERIOD` (default 1h) after it ends, so late usage inside the grace is billed; usage arriving after the invoice is stored and billed nowhere automatically |
-| [121](121-customer-usage-cards-open-on-the-billing-period.md) | 2026-10-16 | Accepted | Pricing & usage | The customer page's Activity and Margin cards open on the current billing period; Margin adds Last invoiced period; an empty window names the latest usage |
-| [122](122-hold-and-release-usage-for-unknown-customers.md) | 2026-10-17 | Accepted | Pricing & usage | LiteLLM usage for an unknown customer or meter is held, shown, and released once by its idempotency key; released rows are never moved onto a later invoice |
-| [123](123-new-accounts-start-with-a-default-dunning-policy.md) | 2026-10-17 | Accepted | Dunning | Every new account starts with a "Default retries" policy per mode that retries three times and changes nothing; the first enabled policy anyone creates takes the default from it |
-| [124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md) | 2026-10-17 | Superseded by ADR-125 | Platform & ops | Run migrations with plain golang-migrate, no Velox runner; each new file sets a 5 s lock limit, and one process migrates at a time |
-| [125](125-goose-migrations-from-one-v081-baseline.md) | 2026-10-18 | Proposed | Platform & ops | Run migrations with goose from one baseline at version 180. A database from v0.8 is taken over with no table change, and a failed file leaves nothing to repair |
+| [116](116-collection-intent-at-finalize-one-collector.md) | 2026-10-08 | Accepted (amended) | Payments | Finalize queues the invoice in the same write; one collector charges every queued invoice |
+| [117](117-one-payment-intent-per-invoice-deferred.md) | 2026-10-11 | Proposed | Payments | One PaymentIntent per invoice considered and deferred; Velox keeps one per charge attempt |
+| [118](118-cancel-and-swap-relief-in-the-change-transaction.md) | 2026-10-12 | Accepted | Credits | Credit for unused time on cancel or plan swap is written in the same transaction |
+| [119](119-billing-failure-record-keyed-to-the-due-instant.md) | 2026-10-12 | Accepted | Billing | Billing failures are saved on the subscription; retries back off and park after eight |
+| [120](120-invoice-grace-period-for-late-usage.md) | 2026-10-14 | Accepted | Billing | Invoices are built after a grace period (default 1h); later usage is not billed automatically |
+| [121](121-customer-usage-cards-open-on-the-billing-period.md) | 2026-10-16 | Accepted | Pricing & usage | The customer page's Activity and Margin cards open on the current billing period |
+| [122](122-hold-and-release-usage-for-unknown-customers.md) | 2026-10-17 | Accepted | Pricing & usage | LiteLLM usage for an unknown customer or meter is held until an operator releases it |
+| [123](123-new-accounts-start-with-a-default-dunning-policy.md) | 2026-10-17 | Accepted | Dunning | New accounts start with a default dunning policy that retries three times and changes nothing |
+| [124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md) | 2026-10-17 | Superseded by ADR-125 | Platform & ops | Run migrations with plain golang-migrate and a 5-second lock limit per file; never built |
+| [125](125-goose-migrations-from-one-v081-baseline.md) | 2026-10-18 | Proposed | Platform & ops | From v0.9.0, run migrations with goose from one baseline; v0.8 databases need no change |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.
