@@ -31,9 +31,15 @@ partly applied.
 ## Check
 
 1. Make sure no migration is still running. Only one copy of Velox should
-   be trying to start. Stop the others.
+   be trying to start. Stop the others. With Docker Compose, stop the API
+   too, because it restarts every few seconds while it refuses to start:
+
+   ```bash
+   docker compose stop velox-api
+   ```
 2. See which migration failed. With Docker Compose, use
-   `docker compose run --rm velox-api` in place of `velox`:
+   `docker compose run --rm velox-api` in place of `velox`. It prints a few
+   "Container … Running" lines before the answer:
 
    ```bash
    velox migrate status
@@ -95,4 +101,4 @@ before the upgrade and try the upgrade again.
 ## Verify
 
 - `velox migrate status` prints `dirty: false` and the latest version.
-- Velox starts, and `/health/ready` answers 200.
+- Velox starts (with Docker Compose: `docker compose up -d velox-api`), and `/health/ready` answers 200.
