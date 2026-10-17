@@ -30,6 +30,7 @@ original text.
 - **Long invoice and credit-note PDFs now go onto more pages (2026-10-17).** Before, rows after about the 30th and the totals were drawn below the page edge, out of sight. Later pages repeat the table header and are numbered "Page N of M", and the totals stay together on the last page. Amounts are unchanged.
 - **Thai baht amounts on PDFs show their currency (2026-10-17).** The PDF font has no ฿ sign, so THB amounts printed with no currency mark. They now print as `THB 1,234.00`, like AED and SAR.
 - **Every email now has a `Date` and a `Message-ID`, and its text is encoded the standard way (2026-10-18).** Mail servers and spam filters expect both headers. Accented names and long lines, such as a long note on a setup link, now travel as quoted-printable in short lines. The Message-ID uses your `SMTP_FROM` domain. The wording is unchanged (#1187).
+- **Webhook endpoints with a private IPv6 address are refused when you save them (2026-10-18).** Before, a URL such as `https://[fd00::1]/` was saved, then every delivery to it failed. Saving now uses the same address check as sending. An endpoint saved earlier with such a URL still fails; change its URL ([webhooks](docs/webhooks.md#managing-endpoints), #1199).
 
 ## [0.8.1] - 2026-10-17
 

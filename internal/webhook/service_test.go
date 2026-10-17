@@ -1700,6 +1700,88 @@ func TestIsBlockedIP(t *testing.T) {
 	}
 }
 
+// TestValidateWebhookURL_JudgesAddressesLikeTheDialer pins audit finding A3
+// (2026-10-17). Create and update checked a URL's addresses against an
+// IPv4-only range table, so an IPv6 private address (fd00::1, or the AWS
+// IPv6 metadata address fd00:ec2::254), a link-local one (fe80::1, with or
+// without a zone) or the unspecified :: was saved, and then every delivery
+// to it was refused by the dialer. The rule from the Service doc is that
+// what create accepts, delivery can reach, so for each address the create
+// check and the dial pre-check must give the same answer in both modes.
+func TestValidateWebhookURL_JudgesAddressesLikeTheDialer(t *testing.T) {
+	cases := []struct{ url, host string }{
+		{"https://[fd00::1]/hook", "fd00::1"},
+		{"https://[fd00:ec2::254]/hook", "fd00:ec2::254"},
+		{"https://[fe80::1]/hook", "fe80::1"},
+		{"https://[fe80::1%25eth0]/hook", "fe80::1%eth0"},
+		{"https://[::]/hook", "::"},
+		{"https://[::1]/hook", "::1"},
+		{"https://[::ffff:127.0.0.1]/hook", "::ffff:127.0.0.1"},
+		{"https://[::ffff:10.0.0.1]/hook", "::ffff:10.0.0.1"},
+		{"https://10.0.0.1/hook", "10.0.0.1"},
+		{"https://169.254.169.254/hook", "169.254.169.254"},
+		{"https://127.0.0.1/hook", "127.0.0.1"},
+		// Negative controls: public addresses pass both checks.
+		{"https://[2606:4700:4700::1111]/hook", "2606:4700:4700::1111"},
+		{"https://[2001:4860:4860::8888]/hook", "2001:4860:4860::8888"},
+		{"https://[::ffff:8.8.8.8]/hook", "::ffff:8.8.8.8"},
+		{"https://8.8.8.8/hook", "8.8.8.8"},
+	}
+	for _, allowLoopback := range []bool{false, true} {
+		for _, c := range cases {
+			createErr := validateWebhookURL(c.url, allowLoopback)
+			dialErr := assertDialAddrAllowed(c.host, allowLoopback)
+			if (createErr == nil) != (dialErr == nil) {
+				t.Errorf("allowLoopback=%v %s: create err = %v, dial err = %v; create must refuse exactly what delivery refuses",
+					allowLoopback, c.url, createErr, dialErr)
+			}
+		}
+	}
+}
+
+// TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses runs the A3
+// addresses through both write paths and checks the reason the caller sees.
+// A public IPv6 address is the negative control.
+func TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses(t *testing.T) {
+	svc := NewService(newMemStore(), nil)
+	ctx := context.Background()
+
+	existing, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: "https://[2606:4700:4700::1111]/hook"})
+	if err != nil {
+		t.Fatalf("create with a public IPv6 address = %v, want allowed", err)
+	}
+
+	refused := []struct{ url, shown string }{
+		{"https://[fd00::1]/hook", "fd00::1"},
+		{"https://[fd00:ec2::254]/hook", "fd00:ec2::254"},
+		{"https://[fe80::1]/hook", "fe80::1"},
+		{"https://[fe80::1%25eth0]/hook", "fe80::1"},
+		{"https://[::]/hook", "::"},
+	}
+	for _, c := range refused {
+		want := "points to a private network address (" + c.shown + "). Use a public address"
+
+		_, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: c.url})
+		if err == nil || err.Error() != want {
+			t.Errorf("create %s = %v, want %q", c.url, err, want)
+		}
+
+		u := c.url
+		_, err = svc.UpdateEndpoint(ctx, "t1", existing.Endpoint.ID, UpdateEndpointInput{URL: &u})
+		if err == nil || err.Error() != want {
+			t.Errorf("update to %s = %v, want %q", c.url, err, want)
+		}
+	}
+
+	ep, err := svc.store.GetEndpoint(ctx, "t1", existing.Endpoint.ID)
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if ep.URL != "https://[2606:4700:4700::1111]/hook" {
+		t.Errorf("a refused update changed the stored URL to %q", ep.URL)
+	}
+}
+
 // Event-name validation (2026-07-05): endpoint create/update rejects
 // subscriptions to event types the engine never emits — pre-fix any string
 // was accepted and matchesEvent silently never fired (Velox's own recipes

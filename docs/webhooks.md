@@ -220,9 +220,12 @@ the [API reference](api-surface.md#the-full-reference)):
   that starts with it.
 - An event name Velox never sends is refused with `422`, so a typo cannot
   leave you waiting for messages that never come.
-- On a server (`APP_ENV=production`), the URL must start with `https://`
-  and must not point to `localhost` or a private network address. In local
-  development, `localhost` is allowed.
+- The URL must start with `https://` and must not point to a private
+  network address, IPv4 or IPv6, such as `10.0.0.1`, `169.254.169.254`,
+  `fd00::1` or `fe80::1`. Velox checks the address when you save the URL
+  and again each time it sends.
+- On a server (`APP_ENV=production`), `localhost` is refused too. In local
+  development, `localhost` is allowed, over `http://` as well.
 
 ## Retries
 

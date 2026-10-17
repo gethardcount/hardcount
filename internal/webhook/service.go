@@ -183,16 +183,17 @@ func dialControl(allowLoopback bool) func(network, address string, _ syscall.Raw
 	}
 }
 
-// lookupIP is the resolver behind the host-name pre-check. It is a variable
-// so a test can make the pre-check see a different answer than the dial does.
+// lookupIP is the resolver behind the host-name checks: create-time URL
+// validation and the dial pre-check. It is a variable so a test can make the
+// pre-check see a different answer than the dial does.
 var lookupIP = net.LookupIP
 
 // assertDialAddrAllowed resolves host (an IP literal or hostname) and returns
 // an error if any resolved address is a blocked private/internal IP. A
 // hostname that resolves to multiple addresses is rejected if ANY of them is
 // blocked — a partially-poisoned DNS answer must not slip an internal hop
-// through. Reuses the same isBlockedIP predicate that the CreateEndpoint
-// validation path relies on.
+// through. It uses the same resolver and isBlockedIP predicate as
+// validateWebhookURL, the create and update check.
 //
 // allowLoopback carves out exactly ONE class in development: an address whose
 // every resolution is loopback. Private/link-local/metadata ranges stay
@@ -227,12 +228,21 @@ func assertDialAddrAllowed(host string, allowLoopback bool) error {
 // otherwise reserved — covering both the IPv4 privateRanges table and the
 // IPv6 equivalents (::1, fe80::/10, fc00::/7) that the IPv4-only table misses.
 // An IPv4-mapped IPv6 address (::ffff:a.b.c.d) is judged as its IPv4 address.
+// It is the only address predicate: create-time validation, the dial
+// pre-check and dialControl all call it. The range table is not exposed on
+// its own because create once used it alone and accepted IPv6 private
+// addresses that every delivery then refused (audit finding A3).
 func isBlockedIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsPrivate() || ip.IsUnspecified() {
 		return true
 	}
-	return isPrivateIP(ip)
+	for _, r := range privateRanges {
+		if r.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // EventBus exposes the in-memory pub/sub backing the SSE stream. The
@@ -283,16 +293,6 @@ func parseCIDR(s string) net.IPNet {
 	return *ipNet
 }
 
-// isPrivateIP returns true if the IP falls within a blocked private/reserved range.
-func isPrivateIP(ip net.IP) bool {
-	for _, r := range privateRanges {
-		if r.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
 // isLoopbackHost reports whether host names the local machine: the literal
 // "localhost" or a loopback IP (127.0.0.0/8, ::1). Exact semantics matter —
 // the previous check was strings.HasPrefix(host, "localhost"), which waved
@@ -333,18 +333,15 @@ func validateWebhookURL(rawURL string, allowLoopback bool) error {
 		return errs.Invalid("url", "must start with https://")
 	}
 
-	// Resolve hostname and check all IPs against blocked ranges.
-	ips, err := net.LookupHost(host)
+	// Resolve the host and judge every address with the dialer's own
+	// predicate, so create refuses exactly what delivery would refuse.
+	ips, err := lookupIP(host)
 	if err != nil {
 		return errs.Invalid("url", fmt.Sprintf("can't be reached: no address was found for %s", host))
 	}
-	for _, ipStr := range ips {
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			continue
-		}
-		if isPrivateIP(ip) {
-			return errs.Invalid("url", fmt.Sprintf("points to a private network address (%s). Use a public address", ipStr))
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			return errs.Invalid("url", fmt.Sprintf("points to a private network address (%s). Use a public address", ip))
 		}
 	}
 
