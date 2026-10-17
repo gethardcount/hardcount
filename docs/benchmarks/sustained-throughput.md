@@ -5,40 +5,95 @@
 > Of the issues named below, #818 is fixed, and #819 and #823 are still open. The
 > short version of these figures is [How much traffic Velox handles](../scale.md).
 
-**Result.** The test ran on `db.m7g.4xlarge` with the #818 hot-row fix. On
-stock settings, Velox sustained **12,000 events/s at batch 10 (p99 22.6 ms)**
-and **15,000 events/s at batch 100 (p99 43.8 ms)** in 4 of 5 ten-minute
-repeats. With the
-WAL pool sized, both passed 5 of 5 (12k: worst 10-s p99 52 ms; 15k: p99
-40.2–42.8 ms). Conditions: AWS `ap-south-1`,
-everything in one availability zone, open-loop load, one tenant.
+## Result
 
-Every figure was measured on named hardware, with the configuration and the
-cost stated. The protocol refuses to publish a run it cannot reconcile. The two
-product bottlenecks it found are stated as plainly as the numbers.
+The test ran on `db.m7g.4xlarge` with the #818 hot-row fix. On stock
+settings, Velox sustained **12,000 events/s at batch 10 (p99 22.6 ms)** and
+**15,000 events/s at batch 100 (p99 43.8 ms)** in 4 of 5 ten-minute repeats.
+With the WAL pool sized, both passed 5 of 5 (12k: worst 10-s p99 52 ms; 15k:
+p99 40.2–42.8 ms).
 
-**Dates:** 2026-08-16 (`db.m7g.2xlarge`) and 2026-08-16/17 (`db.m7g.4xlarge`,
-with the fix for #818, the hot-row wall described below). Both supersede the
-2026-08-15 figures, which are kept in Appendix B for the record.
-**Region:** `ap-south-1`, everything in one availability zone.
-**Reproduce:** `scripts/bench-rig/`. Run `./run.sh`, or go step by step below.
+- **Conditions:** AWS `ap-south-1`, everything in one availability zone,
+  open-loop load (requests sent at a fixed rate whether or not the server
+  keeps up), one tenant.
+- **Dates:** 2026-08-16 (`db.m7g.2xlarge`) and 2026-08-16/17
+  (`db.m7g.4xlarge`, with the fix for #818). Both supersede the 2026-08-15
+  figures, which are kept in [Appendix B](#appendix-b--superseded-figures).
+- **Method:** every figure names its hardware, configuration and cost, and a
+  run that cannot be reconciled is not published. See
+  [Method](#method-and-the-gates--stated-once).
+- **Issues named on this page:** #818 is the hot-row wall (fixed), #819 is
+  the linear-scan usage summary (open), and #823 is the WAL written per
+  event (filed, not built here).
 
-**At a glance.** Every row is open-loop: requests are sent at a fixed rate
-whether or not the server keeps up. Each row is 5 × 10 min, and every event
-was reconciled. The full tables and the evidence for each row are below.
+### At a glance
+
+The rate rows are open-loop and 5 × 10 min, and every event was reconciled.
+The closed-loop and `pgbench` rows are ceilings, not service levels. The full
+tables and the evidence for each row are in
+[Appendix A](#appendix-a--the-run-journal).
 
 | what a self-hoster can plan on | on `db.m7g.2xlarge` (32 GB) | on `db.m7g.4xlarge` (64 GB), #818 fixed |
 |---|---|---|
 | single events, 200 ev/s | p99 **4.9 ms** | — |
 | batch 10, the recommended client shape | 1,000 ev/s at p99 **8.2 ms** (5/5), and a wall at ~570 req/s (#818) | **12,000 ev/s** (1,200 req/s) at p99 **22.6 ms** (4/5) stock. **5/5, worst 10-s p99 52 ms with the WAL pool sized** (third run) |
-| batch 100 | 5,000 ev/s until the table outgrew RAM (~60M rows) | **15,000 ev/s** at p99 **43.8 ms** (4/5) stock. **p99 40.2–42.8 ms, 5/5 with the WAL pool sized** (third run). 25,000 ev/s: 2/5 stock with drops. With a 16 GB pool: **4/5, p50 36 ms, p99 49–120 ms, 0 drops**; the sampler shows that pool is still one size too small at that rate. 10,000 at p99 47.3 ms (4/5) on a table growing 61M → 85M rows |
+| batch 100 | 5,000 ev/s until the table outgrew RAM (~60M rows) | **15,000 ev/s** at p99 **43.8 ms** (4/5) stock. **p99 40.2–42.8 ms, 5/5 with the WAL pool sized** (third run) |
+| batch 100 at 10,000 ev/s | 0/2, a knee | p99 47.3 ms (4/5) on a table growing 61M → 85M rows |
+| batch 100 at 25,000 ev/s | — | 2/5 stock with drops. With a 16 GB pool: **4/5, p50 36 ms, p99 49–120 ms, 0 drops**; the sampler shows that pool is still one size too small at that rate |
 | what stops it | RAM (index working set falls out of cache) | At 15–25k: the 100 GB gp3 volume (3,000 IOPS / 125 MiB/s). At any rate after a lull: RDS's default WAL segment pool (third run; one parameter fixes it). The app was never the limit (RDS CPU ≤ 67 %, app node ≥ 75 % idle) |
 | closed-loop maximum, batch 500 (not a service level) | 25,424 ev/s | **41,172 ev/s** (p50 187 / p99 226 ms) |
 | the database's own floor for this row shape (`pgbench`, 16 clients) | 6,840 one-row commits/s | 7,184 one-row commits/s. **52,713 rows/s at batch 500.** Velox's closed loop is **78 % of that, and 101 % of the same with the RLS protocol** |
 | reads under load | list endpoints 2–9 ms at every rate; per-customer usage summary is a linear scan, ~2.7 µs/event (#819) | same |
 
-Issue labels used on this page: #818 is the hot-row wall (fixed), #819 is the
-linear-scan usage summary (open), and #823 is the WAL written per event (filed, not built here).
+## Reproducing
+
+```bash
+cd scripts/bench-rig
+./run.sh                 # the whole thing: calibrate -> clean-check -> provision
+                         # -> watchdog -> bringup -> seed 20M -> SUSTAINED protocol
+                         # -> closed-loop ceiling -> pgbench denominator -> teardown.
+                         # Stops at the first step that fails; one log in
+                         # ~/.velox-bench-rig/run-<timestamp>.log, readable while
+                         # it runs. KEEP=1 leaves the rig up (billing).
+```
+
+`run.sh` only sequences the scripts below. Each is runnable on its own, and
+that is how a failed step is re-run:
+
+```bash
+./calibrate/calibrate.sh          # 0. instrument: must print CALIBRATED (six cases)
+./teardown.sh --check             #    account: exit 0 = clean; 2 = COULD NOT LOOK
+./provision.sh --yes              # 1. hardware — billing starts here
+( nohup ./watchdog.sh 240 >/tmp/velox-rig-watchdog.log 2>&1 & )
+./bringup.sh                      # 2. running, seeded (live mode, 200 customers), verified
+TARGET=aws ./seed-history.sh 20000000            # 3. history, into the fixtures' partition
+TARGET=aws SUSTAINED=1 CONFIGS="single:200:1 batched:1000:10" PROBE_RATE=5 ./measure.sh
+TARGET=aws K6_MODE=max VUS=16 CONFIGS="ceiling:0:500" DURATION=90s ./measure.sh
+TARGET=aws BATCH=500 VELOX_EVS=<ceiling ev/s> ./db-ceiling.sh   # 5. denominator
+./teardown.sh                     # 6. must end CLEAN
+```
+
+What each script guards:
+
+- **`db-ceiling.sh`** is the control every Velox throughput figure had been
+  missing. A headline "events per second" has no denominator without the
+  database's own ceiling for the same row shape. Both legs verify their row
+  count in the intended livemode partition, and the script refuses to run
+  against fixtures seeded in the other mode.
+- **`measure.sh`** exits non-zero if **any repeat of any configuration**
+  fails its gate. A configuration is only reported as held at a rate when
+  every repeat passed.
+- **`bringup.sh`** exists because provisioning hardware is not the same as
+  having something to measure. It refuses to continue on any of the failures
+  that used to be silent:
+  - a cross-AZ RDS;
+  - a dirty schema;
+  - an app role that cannot read the tables the migration just created;
+  - a server that fell back to the **admin** pool, which would measure a
+    configuration with no RLS on the request path (nobody self-hosts that);
+  - a `201` that wrote no row.
+
+Before a run, read [Traps that cost time](#traps-that-cost-time-and-will-cost-yours).
 
 ---
 
@@ -304,55 +359,6 @@ ev/s ingest held and the summary missed its budget, and both are true.
   third run adds, per series, the 5-second DB sampler, 1-second Enhanced
   Monitoring and Performance Insights pulls, and the Postgres log. Every claim
   on this page was read from those files, not from a console.
-
-## Reproducing
-
-```bash
-cd scripts/bench-rig
-./run.sh                 # the whole thing: calibrate -> clean-check -> provision
-                         # -> watchdog -> bringup -> seed 20M -> SUSTAINED protocol
-                         # -> closed-loop ceiling -> pgbench denominator -> teardown.
-                         # Stops at the first step that fails; one log in
-                         # ~/.velox-bench-rig/run-<timestamp>.log, readable while
-                         # it runs. KEEP=1 leaves the rig up (billing).
-```
-
-`run.sh` only sequences the scripts below. Each is runnable on its own, and
-that is how a failed step is re-run:
-
-```bash
-./calibrate/calibrate.sh          # 0. instrument: must print CALIBRATED (six cases)
-./teardown.sh --check             #    account: exit 0 = clean; 2 = COULD NOT LOOK
-./provision.sh --yes              # 1. hardware — billing starts here
-( nohup ./watchdog.sh 240 >/tmp/velox-rig-watchdog.log 2>&1 & )
-./bringup.sh                      # 2. running, seeded (live mode, 200 customers), verified
-TARGET=aws ./seed-history.sh 20000000            # 3. history, into the fixtures' partition
-TARGET=aws SUSTAINED=1 CONFIGS="single:200:1 batched:1000:10" PROBE_RATE=5 ./measure.sh
-TARGET=aws K6_MODE=max VUS=16 CONFIGS="ceiling:0:500" DURATION=90s ./measure.sh
-TARGET=aws BATCH=500 VELOX_EVS=<ceiling ev/s> ./db-ceiling.sh   # 5. denominator
-./teardown.sh                     # 6. must end CLEAN
-```
-
-`db-ceiling.sh` is the control every Velox throughput figure had been missing.
-A headline "events per second" has no denominator without the database's own
-ceiling for the same row shape. Both legs verify their row count in the
-intended livemode partition, and the script refuses to run against fixtures
-seeded in the other mode.
-
-`measure.sh` exits non-zero if **any repeat of any configuration** fails its
-gate. A configuration is only reported as held at a rate when every repeat
-passed.
-
-`bringup.sh` exists because provisioning hardware is not the same as having
-something to measure. It refuses to continue on any of the failures that used
-to be silent:
-
-- a cross-AZ RDS;
-- a dirty schema;
-- an app role that cannot read the tables the migration just created;
-- a server that fell back to the **admin** pool, which would measure a
-  configuration with no RLS on the request path (nobody self-hosts that);
-- a `201` that wrote no row.
 
 ## Measuring responsiveness, not just throughput
 
