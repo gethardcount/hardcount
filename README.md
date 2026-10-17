@@ -45,7 +45,15 @@ Tokens (claude-sonnet-4.5 · cache_read)  200,000    →   $0.06
 Margin (billed $3.88 vs provider cost $1.28)            67.1%
 ```
 
-![The full Velox invoice page for a paid invoice: the document with one line per (model, token_type) and unit prices quoted per 1M tokens, and an activity timeline running from cycle close to an operator-recorded bank-transfer payment](docs/assets/invoice-token-lines.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-invoice-dark.png">
+  <img alt="The demo invoice VLX-000001 in the Velox dashboard: one line each for input, output and cache_read tokens of claude-sonnet-4.5, priced per 1M tokens, $3.88 due, with the activity timeline below." src="docs/assets/readme-invoice-light.png" width="100%">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-margin-dark.png">
+  <img alt="The customer's margin card for the last invoiced period: $3.88 usage billed, $1.28 provider cost, 67.1% margin, with claude-sonnet-4.5 as the one model." src="docs/assets/readme-margin-light.png" width="100%">
+</picture>
 
 One meter carries every token type, prices are stored exactly ($3.00 per 1M tokens), and the margin comes from the provider cost recorded on each event.
 
