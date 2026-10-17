@@ -3,7 +3,7 @@
 This page lists what Velox does, grouped by job, with what each feature does
 for you and where to read more. Everything below ships in the one MIT
 edition: there is no paid tier. For what Velox does not cover, see
-[What Velox is not](../README.md#what-velox-is-not).
+[What Velox is not](../README.md#is-velox-right-for-you).
 
 **Who it is for:** anyone checking whether a feature they need exists.
 
@@ -51,7 +51,7 @@ Good to know: check "nothing is locked" against whatever else you are
 evaluating. For example, Lago's automatic dunning is a
 [premium add-on](https://getlago.com/docs/guide/dunning/automatic-dunning).
 Velox has no SSO or role-based access to lock (see
-[What Velox is not](../README.md#what-velox-is-not)).
+[What Velox is not](../README.md#is-velox-right-for-you)).
 
 ## Subscriptions and invoices
 

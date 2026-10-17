@@ -13,7 +13,7 @@ plain meanings first.
 2. [Quick start](quick-start.md): start Velox on your computer with only
    Docker, run the demo, and see one month of token usage become an
    invoice, its PDF and a margin report. Each step says what you see.
-3. [What Velox is not](../README.md#what-velox-is-not): the cases where
+3. [Is Velox right for you?](../README.md#is-velox-right-for-you): who it fits, and the cases where
    another tool is the better choice.
 4. [What's in the box](features.md): every feature, with what it does for you.
 5. [How Velox compares](comparison.md) with four open-source billing

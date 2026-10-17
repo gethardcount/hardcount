@@ -12,7 +12,7 @@ billing system is judged on.
 | 3. Keep billing records on your own servers | Stores usage and invoices on Stripe's servers | Usage and invoices stay in your own Postgres |
 | 4. Answer "why is my bill this much?" | Not compared: every billing system needs this | Keeps every raw event and the exact price used |
 
-If none of these match you, see [What Velox is not](../README.md#what-velox-is-not).
+If none of these match you, see [What Velox is not](../README.md#is-velox-right-for-you).
 
 ## The gaps that made us build it
 
