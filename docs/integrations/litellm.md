@@ -15,8 +15,9 @@ first invoice](../first-invoice.md).
 
 ## Before you start
 
-You need all of these before LiteLLM sends its first call. Usage that
-arrives before them is not billed.
+Set these up before LiteLLM sends its first call. Usage that arrives
+before the customer or the meter exists is held, not billed: see
+[Usage for a customer Velox does not know yet](#usage-for-a-customer-velox-does-not-know-yet).
 
 1. **Velox running, and a secret API key.** A publishable key cannot send
    usage. The commands below use the variables from [the first invoice
@@ -35,9 +36,11 @@ arrives before them is not billed.
    shows both calls.
 
 > **Create the customer first.** If LiteLLM sends usage for a `user` that
-> Velox does not know, Velox answers with an error row and does not keep
-> that usage. LiteLLM does not send it again. Create the customer, then
-> send the usage again yourself.
+> Velox does not know, Velox holds that usage: it keeps it, does not bill
+> it, and shows it on the **Usage** page. After you create the customer,
+> you release it. Usage from before the customer's subscription started
+> is stored but not invoiced, so creating customers first is still the
+> way to bill every call.
 
 ## 1. Load prices for your models
 
@@ -200,37 +203,28 @@ the dashboard.
 
 `POST /v1/integrations/litellm/spend` answers 200 with counts, plus an
 `errors` list when some rows were refused. For a call whose `user` is not a
-Velox customer, you see one error row for each event of that call:
+Velox customer yet, both of its events are held:
 
 ```json
 {
   "accepted": 0,
   "deduplicated": 0,
-  "skipped": 0,
-  "errors": [
-    {
-      "id": "litellm_call_xyz",
-      "error": "customer \"acme-unknown\" not found (set user=<external_customer_id> on the LiteLLM call)"
-    },
-    {
-      "id": "litellm_call_xyz",
-      "error": "customer \"acme-unknown\" not found (set user=<external_customer_id> on the LiteLLM call)"
-    }
-  ]
+  "held": 2,
+  "skipped": 0
 }
 ```
 
 | Field | Meaning |
 |---|---|
 | `accepted` | New events Velox saved. |
-| `deduplicated` | Events Velox already had, from an earlier send of the same call. |
+| `deduplicated` | Events Velox already had, or already held, from an earlier send of the same call. |
+| `held` | Events Velox kept but did not bill, because the customer or the `tokens` meter does not exist yet. See the next section. |
 | `skipped` | Calls with no tokens to bill, such as image generation, moderation, or a failed call with zero tokens. |
-| `errors` | Rows Velox refused: an unknown `user`, a missing `tokens` meter, or a record that is not valid. |
+| `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
 
-A refused row does not fail the batch, and Velox does not keep it. LiteLLM
-sees a 200 and treats the batch as delivered. So watch `errors`: usage for
-a customer that does not exist yet is lost unless you send it again after
-you create the customer.
+A refused row does not fail the batch. LiteLLM sees a 200 and treats the
+batch as delivered, and does not send it again. So a row in `errors` is
+lost unless you fix the call and send it again.
 
 The status code answers a different question: could Velox save the batch
 at all?
@@ -244,6 +238,51 @@ at all?
 When you send a batch again, rows that were saved before the failure come
 back as `deduplicated`. With `max_retries` set as in step 2, LiteLLM does
 this for you.
+
+## Usage for a customer Velox does not know yet
+
+When a call's `user` matches no customer, or the `tokens` meter does not
+exist, Velox holds the call's events instead of billing them:
+
+- **Kept.** Each event is stored with its idempotency key, quantity,
+  labels and time. Nothing is lost.
+- **Shown.** The **Usage** page shows a notice such as "2 usage rows held:
+  customer 'acme-2' does not exist yet", with what to do.
+  `GET /v1/usage-events/held` returns the same list.
+- **Released once.** Create the customer (or the meter), then click
+  **Release** on the notice, or call:
+
+  ```bash
+  curl -s -X POST "$VELOX/v1/usage-events/held/release" \
+    -H "Authorization: Bearer $VELOX_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"external_customer_id":"acme-2"}'
+  ```
+
+  Each held event becomes a usage event under its original idempotency
+  key and time, so a call LiteLLM sent again after you created the
+  customer is not counted twice. Releasing twice adds nothing. If the
+  `user` value had a typo, pass `"customer_id":"vlx_cus_…"` to release
+  into the right customer.
+- **Discarded, if wrong.** **Discard** (or `POST
+  /v1/usage-events/held/discard`) marks the events as never to be billed.
+  Velox keeps them as a record.
+
+**What a release bills.** A released event counts toward the billing
+period its time falls in, the same rule as any late usage (see
+[ADR-120](../adr/120-invoice-grace-period-for-late-usage.md)):
+
+- Inside the customer's current billing period: the next invoice for that
+  period includes it.
+- Before the subscription started, or in a period whose invoice is already
+  built: stored, but no subscription invoice includes it. For a customer
+  created after the calls, this is the usual case. Bill it with a one-off
+  invoice if it should be charged.
+
+The release answer counts both kinds (`in_open_period`,
+`outside_open_period`). Events whose meter still does not exist, or whose
+time is after the customer's current time (a customer on a test clock set
+in the past), stay held, counted in `still_held`.
 
 ## Things to know
 
@@ -267,8 +306,9 @@ this for you.
   not `anthropic`. Provider costs match on provider, so add costs for
   `bedrock` or `vertex_ai` too. Without them, those events have no cost,
   and the margin report counts them as unresolved.
-- **The `tokens` meter must exist.** Without it, each event comes back as
-  a row in `errors`, the same as an unknown `user`.
+- **The `tokens` meter must exist.** Without it, each event is held, the
+  same as for an unknown `user`, until you create the meter and release
+  it.
 - **One Velox account for each API key.** Each key belongs to one tenant
   (one separate billing account in Velox). A LiteLLM proxy that serves
   several tenants must send each tenant's usage with that tenant's key. A

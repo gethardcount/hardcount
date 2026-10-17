@@ -3194,16 +3194,92 @@ components:
             `team_id` and `request_tags` become event dimensions;
             `usage_object` is read for token counts; other keys are ignored.
 
+    HeldUsageGroup:
+      type: object
+      description: The usage rows still held for one external customer ID, meter key and reason.
+      required: [external_customer_id, meter_key, reason, rows, total_quantity, first_event_at, last_event_at, last_received_at, customer_id, meter_exists]
+      properties:
+        external_customer_id:
+          type: string
+          description: The LiteLLM `user` value the rows carried.
+        meter_key:
+          type: string
+        reason:
+          type: string
+          enum: [customer_not_found, meter_not_found]
+          description: What was missing when the rows arrived.
+        rows:
+          type: integer
+        total_quantity:
+          type: string
+          description: Sum of the held quantities, as a decimal string.
+        first_event_at:
+          type: string
+          format: date-time
+        last_event_at:
+          type: string
+          format: date-time
+        last_received_at:
+          type: string
+          format: date-time
+          description: When Velox last received a row for this group.
+        customer_id:
+          type: string
+          description: The customer whose external ID now matches, or empty when none does yet.
+        meter_exists:
+          type: boolean
+          description: Whether a meter with this key exists now.
+
+    HeldUsageReleaseResult:
+      type: object
+      required: [customer_id, released, deduplicated, still_held, in_open_period, outside_open_period]
+      properties:
+        customer_id:
+          type: string
+          description: The customer the rows were ingested for.
+        released:
+          type: integer
+          description: Rows newly written as usage events.
+        deduplicated:
+          type: integer
+          description: |
+            Rows that were already usage events under the same idempotency
+            key (LiteLLM resent the call after the customer existed). Marked
+            released, not written again.
+        still_held:
+          type: integer
+          description: |
+            Rows for this external ID still held: their meter does not
+            exist yet, or their time is after the customer's current time
+            (a customer on a test clock).
+        in_open_period:
+          type: integer
+          description: Released rows inside an active subscription's current billing period. That period's invoice counts them.
+        outside_open_period:
+          type: integer
+          description: |
+            Released rows outside every current billing period: before the
+            subscription started, or in an earlier period. A subscription
+            invoice does not count them unless that period's invoice has not
+            been built yet. Bill them with a one-off invoice if they should
+            be charged.
+
     LitellmSpendResult:
       type: object
-      required: [accepted, deduplicated, skipped]
+      required: [accepted, deduplicated, held, skipped]
       properties:
         accepted:
           type: integer
           description: Usage events newly recorded.
         deduplicated:
           type: integer
-          description: Usage events already recorded by an earlier delivery.
+          description: Usage events already recorded, or already held, by an earlier delivery.
+        held:
+          type: integer
+          description: |
+            Usage events kept because their customer or meter does not
+            exist yet. Not billed until released with
+            `POST /v1/usage-events/held/release`.
         skipped:
           type: integer
           description: Records that carry no billable tokens.
@@ -7256,6 +7332,120 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/usage-events/held:
+    get:
+      tags: [Usage]
+      summary: List held usage
+      description: |
+        Usage rows the LiteLLM integration received for a customer or meter
+        that did not exist yet. They are kept with their idempotency keys,
+        not billed, until you release or discard them. Grouped by external
+        customer ID, meter key and reason; at most 200 groups, most recent
+        arrival first. Requires usage read permission.
+      operationId: listHeldUsage
+      responses:
+        "200":
+          description: Held groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HeldUsageGroup"
+
+  /v1/usage-events/held/release:
+    post:
+      tags: [Usage]
+      summary: Release held usage
+      description: |
+        Writes the held rows for one external customer ID as usage events
+        for a customer, each under its original idempotency key and time,
+        marked `origin: backfill`, in one transaction. A row that is already
+        a usage event under the same key is not written again. Releasing
+        twice writes nothing the second time.
+
+        Rows whose meter still does not exist, or whose time is after the
+        customer's current time, stay held. A released row counts toward
+        the billing period its time falls in only if that period's invoice
+        has not been built yet; Velox does not move it onto a later
+        invoice. Writes an audit log entry. Requires usage write permission.
+      operationId: releaseHeldUsage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_customer_id]
+              properties:
+                external_customer_id:
+                  type: string
+                  description: The external ID the rows were held under.
+                customer_id:
+                  type: string
+                  description: |
+                    Release into this customer (a `vlx_cus_` id) instead of
+                    the one whose external ID matches, for a `user` value
+                    that had a typo.
+      responses:
+        "200":
+          description: Release result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HeldUsageReleaseResult"
+        "422":
+          description: "`validation_error`: no customer has that external ID yet and no `customer_id` was given, or `customer_id` was not found."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/usage-events/held/discard:
+    post:
+      tags: [Usage]
+      summary: Discard held usage
+      description: |
+        Marks the held rows for one external customer ID (and one meter
+        key, when given) as discarded. They are never billed. The rows stay
+        stored as a record. Writes an audit log entry. Requires usage write
+        permission.
+      operationId: discardHeldUsage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_customer_id]
+              properties:
+                external_customer_id:
+                  type: string
+                meter_key:
+                  type: string
+                  description: Discard only this meter's rows. Omit for all.
+      responses:
+        "200":
+          description: Rows discarded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [discarded]
+                properties:
+                  discarded:
+                    type: integer
+        "422":
+          description: "`validation_error`: `external_customer_id` is missing."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/usage-events/aggregate:
     get:
       tags: [Usage]
@@ -10593,11 +10783,14 @@ paths:
         `id` plus the token type, so a resent record is counted as
         `deduplicated`, not billed twice.
 
-        A problem with one record (no customer, unknown customer or meter,
-        invalid event) is listed in `errors` and the rest of the batch
-        still goes in, with status 200. If the usage store cannot be
-        reached, the whole request fails with 503 so LiteLLM retries it.
-        Requires usage write permission.
+        A token row whose customer or meter does not exist yet is held,
+        not billed and not lost: it is counted in `held` and listed by
+        `GET /v1/usage-events/held` until you release or discard it. A
+        resent row that is already held is counted as `deduplicated`. A
+        record with no `user` or no `id`, or an invalid event, is listed in
+        `errors` and the rest of the batch still goes in, with status 200.
+        If the usage store cannot be reached, the whole request fails with
+        503 so LiteLLM retries it. Requires usage write permission.
       operationId: ingestLitellmSpend
       requestBody:
         required: true

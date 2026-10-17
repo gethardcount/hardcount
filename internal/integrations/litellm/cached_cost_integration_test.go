@@ -50,7 +50,8 @@ func TestSpend_CachedCallCostOnRealStore(t *testing.T) {
 		}
 	}
 
-	h := New(customer.NewPostgresStore(db), pricing.NewService(prices), usage.NewService(store))
+	svc := usage.NewService(store)
+	h := New(customer.NewPostgresStore(db), pricing.NewService(prices), svc, svc)
 	stamped := func(t *testing.T, id string) (int64, map[string]string) {
 		t.Helper()
 		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)

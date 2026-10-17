@@ -616,3 +616,64 @@ test('list pages say what each one is for', async ({ page }) => {
     await expect(page.getByText(text)).toBeVisible()
   }
 })
+
+// #1044: LiteLLM usage for a customer that does not exist yet is held, not
+// lost. The Usage page says so in plain words, and once the customer exists
+// a Release records each row once.
+test('held LiteLLM usage is shown on the Usage page and released once', async ({ page }) => {
+  // The LiteLLM mapper writes to the `tokens` meter. Create it if this
+  // database has none; a parallel creator winning the race is fine.
+  const meters = await api<{ data: { key: string }[] }>('GET', '/meters')
+  if (!meters.data.some(m => m.key === 'tokens')) {
+    try {
+      await api('POST', '/meters', { key: 'tokens', name: 'Tokens', unit: 'token', aggregation: 'sum' })
+    } catch (e) {
+      const again = await api<{ data: { key: string }[] }>('GET', '/meters')
+      if (!again.data.some(m => m.key === 'tokens')) throw e
+    }
+  }
+
+  const id = uniq()
+  const ext = `held_${id}`
+  const spend = await api<{ held: number; accepted: number }>('POST', '/integrations/litellm/spend', {
+    id: `e2e-held-${id}`,
+    call_type: 'completion',
+    model: 'gpt-4o',
+    custom_llm_provider: 'openai',
+    user: ext,
+    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    endTime: Math.floor(Date.now() / 1000) - 60,
+  })
+  expect(spend).toMatchObject({ held: 2, accepted: 0 })
+
+  await page.goto('/usage')
+  const notice = page.getByRole('status').filter({ hasText: 'Usage held, not billed' })
+  await expect(notice.getByText(`2 usage rows held: customer '${ext}' does not exist yet`)).toBeVisible()
+  await expect(notice.getByText(`Create a customer with external ID '${ext}'`)).toBeVisible()
+  await expect(notice.getByRole('button', { name: `Release held usage for ${ext}` })).toHaveCount(0)
+
+  const customer = await api<Customer>('POST', '/customers', {
+    external_id: ext,
+    display_name: `E2E Held ${id}`,
+    email: `held-${id}@example.com`,
+  })
+  await page.reload()
+  await expect(notice.getByText(`2 usage rows held for customer '${ext}'`)).toBeVisible()
+  await notice.getByRole('button', { name: `Release held usage for ${ext}` }).click()
+  await expect(page.getByText('Released 2 usage rows')).toBeVisible()
+  await expect(page.getByText(`held for customer '${ext}'`)).toHaveCount(0)
+
+  const events = await api<{ data: unknown[]; total: number }>('GET', `/usage-events?customer_id=${customer.id}`)
+  expect(events.total).toBe(2)
+  // A LiteLLM resend after the release is not billed again.
+  const resend = await api<{ deduplicated: number; accepted: number }>('POST', '/integrations/litellm/spend', {
+    id: `e2e-held-${id}`,
+    call_type: 'completion',
+    model: 'gpt-4o',
+    custom_llm_provider: 'openai',
+    user: ext,
+    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    endTime: Math.floor(Date.now() / 1000) - 60,
+  })
+  expect(resend).toMatchObject({ deduplicated: 2, accepted: 0 })
+})

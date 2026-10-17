@@ -387,7 +387,8 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"usage backfill [external_customer_id]", "POST", fixed("/v1/usage-events/backfill"), func(o, f scopeRefs) any {
 			return map[string]any{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1, "timestamp": "2026-02-01T00:00:00Z", "idempotency_key": "scope-backfill-ext-" + f.ext}
 		}, 422, "", 201},
-		// LiteLLM reports an unmapped customer per row inside a 200.
+		// LiteLLM holds an unmapped customer's rows inside a 200 (#1044): the
+		// other tenant's customer is never matched.
 		{"litellm spend [user]", "POST", fixed("/v1/integrations/litellm/spend"), func(_, f scopeRefs) any {
 			return map[string]any{
 				"id": "req-" + f.ext, "call_type": "acompletion", "model": "gpt-4o", "custom_llm_provider": "openai", "user": f.ext,

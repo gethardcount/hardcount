@@ -130,7 +130,7 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 		"endTime":%d
 	}`, eventTS)
 
-	handler := litellm.New(customerStore, pricingSvc, usageSvc)
+	handler := litellm.New(customerStore, pricingSvc, usageSvc, usageSvc)
 	req := httptest.NewRequest(http.MethodPost, "/spend", strings.NewReader(body)).WithContext(authCtx)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

@@ -245,6 +245,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	usageSvc := usage.NewService(usageStore)
 	usageH := usage.NewHandler(usageSvc, customerStore, pricingSvc)
 	usageH.SetMeterLister(pricingSvc)
+	usageH.SetHeldDeps(customerStore, subStore)
 	customerUsageSvc := usage.NewCustomerUsageService(usageSvc, customerStore, subStore, pricingSvc)
 	customerUsageH := usage.NewCustomerUsageHandler(customerUsageSvc)
 	// Provider cost rates + margin (ADR-079).
@@ -1754,7 +1755,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// usage events on behalf of the partner." See ADR-033 +
 		// docs/integrations/litellm.md.
 		r.With(auth.Require(auth.PermUsageWrite)).Mount("/integrations/litellm",
-			litellm.New(customerStore, pricingSvc, usageSvc).Routes())
+			litellm.New(customerStore, pricingSvc, usageSvc, usageSvc).Routes())
 		// create_preview must mount BEFORE /invoices because chi tries
 		// patterns in registration order — once /invoices is mounted with
 		// /{id}/... children, "create_preview" would be claimed as an

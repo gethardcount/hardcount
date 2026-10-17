@@ -17,6 +17,7 @@ Older entries keep their original text.
 
 ### Added
 
+- **LiteLLM usage for an unknown customer is held, not lost (2026-10-17, #1044).** Usage for a `user` or meter that does not exist yet was answered 200 and dropped. Velox now keeps it, counts it in `held`, and shows it on the Usage page. Create the customer, then click Release to record each row once. Usage before the subscription started is stored but not invoiced. See [LiteLLM](docs/integrations/litellm.md#usage-for-a-customer-velox-does-not-know-yet).
 - **Settings → Email shows whether this server can send email (2026-10-17).** A new Email tab lists the SMTP server, the from address and each email-link variable, says what fails while one is missing, and sends a test email to your own address with the mail server's real answer. Team's "Invites are off" notice links to it. API: `GET /v1/settings/email`, `POST /v1/settings/email/test` (dashboard sign-in only), and whoami gains `smtp_configured`.
 - **Browser tests for the dashboard (2026-10-16).** Contributors: `npm run test:e2e` in `web-v2` runs Playwright against a real API. It opens every page at desktop and phone width and fails on console errors, failed API calls or a page that scrolls sideways, plus five key journeys. CI runs it as the `e2e` job. See [web-v2/e2e/README.md](web-v2/e2e/README.md).
 

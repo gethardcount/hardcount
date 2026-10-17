@@ -58,6 +58,9 @@ client, or generate a client from the OpenAPI file.
 | `POST` | `/v1/usage-events` | Send one usage event, with dimensions (labels) and a decimal value |
 | `POST` | `/v1/usage-events/batch` | Send up to 1000 events in one call |
 | `POST` | `/v1/usage-events/backfill` | Send one past event (`timestamp` required) |
+| `GET` | `/v1/usage-events/held` | LiteLLM usage held because its customer or meter did not exist yet |
+| `POST` | `/v1/usage-events/held/release` | Record held usage for a customer, once per idempotency key |
+| `POST` | `/v1/usage-events/held/discard` | Mark held usage as never to be billed |
 | `GET` | `/v1/customers/{id}/usage` | A customer's usage for the period, grouped by dimension |
 
 Before you send usage, read [the retry rules](#sending-usage-safely).

@@ -179,7 +179,12 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	// path. Inserting backdated usage changes what a customer is billed for a
 	// period that may already have closed — nothing like the machine metering
 	// above. usage.Service.Backfill emits on the ingest tx (ADR-090).
-	{"POST", "/v1/usage-events/backfill"}:      explicit("usage.Service.Backfill → IngestAudited (in-tx): action=create/usage_event, metadata.action=usage_backfilled with the backdated timestamp."),
+	{"POST", "/v1/usage-events/backfill"}: explicit("usage.Service.Backfill → IngestAudited (in-tx): action=create/usage_event, metadata.action=usage_backfilled with the backdated timestamp."),
+	// Held usage (#1044, ADR-122): operator actions on rows the LiteLLM
+	// callback could not ingest. Release changes what a customer is billed,
+	// exactly like backfill; discard decides that usage will never bill.
+	{"POST", "/v1/usage-events/held/release"}:  explicit("usage.Service.Release → PostgresStore.ReleaseHeld (in-tx): action=create/usage_event, metadata.action=held_usage_released with the counts and the event time range. A call that changed no row calls audit.MarkSkip."),
+	{"POST", "/v1/usage-events/held/discard"}:  explicit("usage.Service.Discard → PostgresStore.DiscardHeld (in-tx): action=delete/usage_event, metadata.action=held_usage_discarded with the row count. A call that changed no row calls audit.MarkSkip."),
 	{"POST", "/v1/integrations/litellm/spend"}: exempt(reasonMachineIngest, "LiteLLM proxy spend callback — one POST per LLM call, funnels into the same usage_events writer. Same accepted loss."),
 
 	// --- non-mutating previews ------------------------------------------

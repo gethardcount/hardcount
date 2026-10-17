@@ -672,6 +672,24 @@ func (e DunningRunEventState) Valid() bool {
 	}
 }
 
+// Defines values for HeldUsageGroupReason.
+const (
+	CustomerNotFound HeldUsageGroupReason = "customer_not_found"
+	MeterNotFound    HeldUsageGroupReason = "meter_not_found"
+)
+
+// Valid indicates whether the value is a known member of the HeldUsageGroupReason enum.
+func (e HeldUsageGroupReason) Valid() bool {
+	switch e {
+	case CustomerNotFound:
+		return true
+	case MeterNotFound:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InvoiceBillingReason.
 const (
 	InvoiceBillingReasonManual             InvoiceBillingReason = "manual"
@@ -3564,6 +3582,63 @@ type Error struct {
 	} `json:"error,omitempty"`
 }
 
+// HeldUsageGroup The usage rows still held for one external customer ID, meter key and reason.
+type HeldUsageGroup struct {
+	// CustomerId The customer whose external ID now matches, or empty when none does yet.
+	CustomerId string `json:"customer_id"`
+
+	// ExternalCustomerId The LiteLLM `user` value the rows carried.
+	ExternalCustomerId string    `json:"external_customer_id"`
+	FirstEventAt       time.Time `json:"first_event_at"`
+	LastEventAt        time.Time `json:"last_event_at"`
+
+	// LastReceivedAt When Velox last received a row for this group.
+	LastReceivedAt time.Time `json:"last_received_at"`
+
+	// MeterExists Whether a meter with this key exists now.
+	MeterExists bool   `json:"meter_exists"`
+	MeterKey    string `json:"meter_key"`
+
+	// Reason What was missing when the rows arrived.
+	Reason HeldUsageGroupReason `json:"reason"`
+	Rows   int                  `json:"rows"`
+
+	// TotalQuantity Sum of the held quantities, as a decimal string.
+	TotalQuantity string `json:"total_quantity"`
+}
+
+// HeldUsageGroupReason What was missing when the rows arrived.
+type HeldUsageGroupReason string
+
+// HeldUsageReleaseResult defines model for HeldUsageReleaseResult.
+type HeldUsageReleaseResult struct {
+	// CustomerId The customer the rows were ingested for.
+	CustomerId string `json:"customer_id"`
+
+	// Deduplicated Rows that were already usage events under the same idempotency
+	// key (LiteLLM resent the call after the customer existed). Marked
+	// released, not written again.
+	Deduplicated int `json:"deduplicated"`
+
+	// InOpenPeriod Released rows inside an active subscription's current billing period. That period's invoice counts them.
+	InOpenPeriod int `json:"in_open_period"`
+
+	// OutsideOpenPeriod Released rows outside every current billing period: before the
+	// subscription started, or in an earlier period. A subscription
+	// invoice does not count them unless that period's invoice has not
+	// been built yet. Bill them with a one-off invoice if they should
+	// be charged.
+	OutsideOpenPeriod int `json:"outside_open_period"`
+
+	// Released Rows newly written as usage events.
+	Released int `json:"released"`
+
+	// StillHeld Rows for this external ID still held: their meter does not
+	// exist yet, or their time is after the customer's current time
+	// (a customer on a test clock).
+	StillHeld int `json:"still_held"`
+}
+
 // Invoice A Velox invoice. Returned from create, finalize, void, list, get,
 // rotate-public-token, and collect-payment endpoints.
 type Invoice struct {
@@ -3979,7 +4054,7 @@ type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
 
-	// Deduplicated Usage events already recorded by an earlier delivery.
+	// Deduplicated Usage events already recorded, or already held, by an earlier delivery.
 	Deduplicated int `json:"deduplicated"`
 
 	// Errors One entry per event or record that was not recorded. A record can appear more than once.
@@ -3989,6 +4064,11 @@ type LitellmSpendResult struct {
 		// Id The LiteLLM record id.
 		Id string `json:"id"`
 	} `json:"errors,omitempty"`
+
+	// Held Usage events kept because their customer or meter does not
+	// exist yet. Not billed until released with
+	// `POST /v1/usage-events/held/release`.
+	Held int `json:"held"`
 
 	// Skipped Records that carry no billable tokens.
 	Skipped int `json:"skipped"`
@@ -6157,6 +6237,25 @@ type PostV1UsageEventsBatchJSONBody_Quantity struct {
 	union json.RawMessage
 }
 
+// DiscardHeldUsageJSONBody defines parameters for DiscardHeldUsage.
+type DiscardHeldUsageJSONBody struct {
+	ExternalCustomerId string `json:"external_customer_id"`
+
+	// MeterKey Discard only this meter's rows. Omit for all.
+	MeterKey string `json:"meter_key,omitempty"`
+}
+
+// ReleaseHeldUsageJSONBody defines parameters for ReleaseHeldUsage.
+type ReleaseHeldUsageJSONBody struct {
+	// CustomerId Release into this customer (a `vlx_cus_` id) instead of
+	// the one whose external ID matches, for a `user` value
+	// that had a typo.
+	CustomerId string `json:"customer_id,omitempty"`
+
+	// ExternalCustomerId The external ID the rows were held under.
+	ExternalCustomerId string `json:"external_customer_id"`
+}
+
 // GetUsageSummaryParams defines parameters for GetUsageSummary.
 type GetUsageSummaryParams struct {
 	// From Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
@@ -6348,6 +6447,12 @@ type BackfillUsageEventJSONRequestBody BackfillUsageEventJSONBody
 
 // PostV1UsageEventsBatchJSONRequestBody defines body for PostV1UsageEventsBatch for application/json ContentType.
 type PostV1UsageEventsBatchJSONRequestBody = PostV1UsageEventsBatchJSONBody
+
+// DiscardHeldUsageJSONRequestBody defines body for DiscardHeldUsage for application/json ContentType.
+type DiscardHeldUsageJSONRequestBody DiscardHeldUsageJSONBody
+
+// ReleaseHeldUsageJSONRequestBody defines body for ReleaseHeldUsage for application/json ContentType.
+type ReleaseHeldUsageJSONRequestBody ReleaseHeldUsageJSONBody
 
 // PostV1WebhookEndpointsEndpointsJSONRequestBody defines body for PostV1WebhookEndpointsEndpoints for application/json ContentType.
 type PostV1WebhookEndpointsEndpointsJSONRequestBody PostV1WebhookEndpointsEndpointsJSONBody
@@ -7120,6 +7225,15 @@ type ServerInterface interface {
 	// Batch ingest usage events (max 1000, all-or-nothing)
 	// (POST /v1/usage-events/batch)
 	PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request)
+	// List held usage
+	// (GET /v1/usage-events/held)
+	ListHeldUsage(w http.ResponseWriter, r *http.Request)
+	// Discard held usage
+	// (POST /v1/usage-events/held/discard)
+	DiscardHeldUsage(w http.ResponseWriter, r *http.Request)
+	// Release held usage
+	// (POST /v1/usage-events/held/release)
+	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request)
 	// Customer usage summary
 	// (GET /v1/usage-summary/{customer_id})
 	GetUsageSummary(w http.ResponseWriter, r *http.Request, customerId string, params GetUsageSummaryParams)
@@ -8143,6 +8257,24 @@ func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request
 // Batch ingest usage events (max 1000, all-or-nothing)
 // (POST /v1/usage-events/batch)
 func (_ Unimplemented) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List held usage
+// (GET /v1/usage-events/held)
+func (_ Unimplemented) ListHeldUsage(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Discard held usage
+// (POST /v1/usage-events/held/discard)
+func (_ Unimplemented) DiscardHeldUsage(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Release held usage
+// (POST /v1/usage-events/held/release)
+func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14098,6 +14230,66 @@ func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
+// ListHeldUsage operation middleware
+func (siw *ServerInterfaceWrapper) ListHeldUsage(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListHeldUsage(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DiscardHeldUsage operation middleware
+func (siw *ServerInterfaceWrapper) DiscardHeldUsage(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DiscardHeldUsage(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleaseHeldUsage operation middleware
+func (siw *ServerInterfaceWrapper) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleaseHeldUsage(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetUsageSummary operation middleware
 func (siw *ServerInterfaceWrapper) GetUsageSummary(w http.ResponseWriter, r *http.Request) {
 
@@ -15113,6 +15305,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/usage-events/batch", wrapper.PostV1UsageEventsBatch)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/usage-events/held", wrapper.ListHeldUsage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/usage-events/held/discard", wrapper.DiscardHeldUsage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/usage-events/held/release", wrapper.ReleaseHeldUsage)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/usage-summary/{customer_id}", wrapper.GetUsageSummary)

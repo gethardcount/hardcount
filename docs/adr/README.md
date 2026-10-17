@@ -161,6 +161,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [119](119-billing-failure-record-keyed-to-the-due-instant.md) | 2026-10-12 | Accepted | Billing | A failed billing attempt is saved on the subscription, keyed to the due instant it failed on; attempts wait on a ladder and park after eight; an operator retry clears it |
 | [120](120-invoice-grace-period-for-late-usage.md) | 2026-10-14 | Accepted | Billing | A period's invoice is built `INVOICE_GRACE_PERIOD` (default 1h) after it ends, so late usage inside the grace is billed; usage arriving after the invoice is stored and billed nowhere automatically |
 | [121](121-customer-usage-cards-open-on-the-billing-period.md) | 2026-10-16 | Accepted | Pricing & usage | The customer page's Activity and Margin cards open on the current billing period; Margin adds Last invoiced period; an empty window names the latest usage |
+| [122](122-hold-and-release-usage-for-unknown-customers.md) | 2026-10-17 | Accepted | Pricing & usage | LiteLLM usage for an unknown customer or meter is held, shown, and released once by its idempotency key; released rows are never moved onto a later invoice |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.

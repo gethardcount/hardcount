@@ -184,10 +184,10 @@ variable into the JSON for you.
        -d @-
    ```
 
-   **You see:** `{"accepted":2,"deduplicated":0,"skipped":0}`. That is two
+   **You see:** `{"accepted":2,"deduplicated":0,"held":0,"skipped":0}`. That is two
    new events: input and output.
 
-   Did 5a first? Then you see `{"accepted":0,"deduplicated":2,"skipped":0}`.
+   Did 5a first? Then you see `{"accepted":0,"deduplicated":2,"held":0,"skipped":0}`.
    Both ways use the same idempotency keys, so Velox counts the tokens once.
 
    In the dashboard, the **Usage** page lists both events.
@@ -272,7 +272,7 @@ That is expected: open the customer from **Customers** instead.
 | What you see | What to do |
 |---|---|
 | A step prints `null` | The request failed. Run the same command without the last `jq` part to see the error message. |
-| `customer "acme-1" not found` | Step 3 did not run, or `CUSTOMER_REF` is not set in this terminal. Velox does not keep usage for a customer it does not know, so create the customer first. |
+| `customer "acme-1" not found`, or `"held":2` in step 5b | Step 3 did not run, or `CUSTOMER_REF` is not set in this terminal. Step 5a refuses usage for a customer Velox does not know. Step 5b holds it instead: create the customer, then release it from the notice on the **Usage** page. |
 | `customer with external_id "acme-1" already exists` | You ran this page before. In step 3, change `acme-1` to `acme-2`, then run steps 2 to 8 again. |
 | `INVOICE_ID` is `null`, or the invoice has no token lines | The usage went to another customer, or was sent after the clock moved. Run steps 2 to 8 again with a new name in step 3. |
 

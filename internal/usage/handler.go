@@ -47,6 +47,9 @@ type Handler struct {
 	customers  CustomerResolver
 	meters     MeterResolver
 	meterModes MeterLister
+	// Held-usage routes only (#1044); see SetHeldDeps.
+	heldCustomers CustomerLookup
+	heldSubs      SubscriptionLister
 }
 
 // SetMeterLister wires the meter list the aggregate endpoint reads modes
@@ -69,6 +72,12 @@ func (h *Handler) Routes() chi.Router {
 	// semantics match the list query exactly. See internal/usage/store.go
 	// (Aggregate type) for the response shape.
 	r.Get("/aggregate", h.aggregate)
+	// Held usage (#1044, ADR-122): rows the LiteLLM callback could not
+	// ingest because their customer or meter did not exist. GET needs
+	// usage read, the POSTs usage write (RequireMethod in router.go).
+	r.Get("/held", h.listHeld)
+	r.Post("/held/release", h.releaseHeld)
+	r.Post("/held/discard", h.discardHeld)
 	return r
 }
 

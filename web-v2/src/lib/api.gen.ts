@@ -2554,6 +2554,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/usage-events/held": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List held usage
+         * @description Usage rows the LiteLLM integration received for a customer or meter
+         *     that did not exist yet. They are kept with their idempotency keys,
+         *     not billed, until you release or discard them. Grouped by external
+         *     customer ID, meter key and reason; at most 200 groups, most recent
+         *     arrival first. Requires usage read permission.
+         */
+        get: operations["listHeldUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/usage-events/held/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release held usage
+         * @description Writes the held rows for one external customer ID as usage events
+         *     for a customer, each under its original idempotency key and time,
+         *     marked `origin: backfill`, in one transaction. A row that is already
+         *     a usage event under the same key is not written again. Releasing
+         *     twice writes nothing the second time.
+         *
+         *     Rows whose meter still does not exist, or whose time is after the
+         *     customer's current time, stay held. A released row counts toward
+         *     the billing period its time falls in only if that period's invoice
+         *     has not been built yet; Velox does not move it onto a later
+         *     invoice. Writes an audit log entry. Requires usage write permission.
+         */
+        post: operations["releaseHeldUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/usage-events/held/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard held usage
+         * @description Marks the held rows for one external customer ID (and one meter
+         *     key, when given) as discarded. They are never billed. The rows stay
+         *     stored as a record. Writes an audit log entry. Requires usage write
+         *     permission.
+         */
+        post: operations["discardHeldUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage-events/aggregate": {
         parameters: {
             query?: never;
@@ -5506,11 +5583,14 @@ export interface paths {
          *     `id` plus the token type, so a resent record is counted as
          *     `deduplicated`, not billed twice.
          *
-         *     A problem with one record (no customer, unknown customer or meter,
-         *     invalid event) is listed in `errors` and the rest of the batch
-         *     still goes in, with status 200. If the usage store cannot be
-         *     reached, the whole request fails with 503 so LiteLLM retries it.
-         *     Requires usage write permission.
+         *     A token row whose customer or meter does not exist yet is held,
+         *     not billed and not lost: it is counted in `held` and listed by
+         *     `GET /v1/usage-events/held` until you release or discard it. A
+         *     resent row that is already held is counted as `deduplicated`. A
+         *     record with no `user` or no `id`, or an invalid event, is listed in
+         *     `errors` and the rest of the batch still goes in, with status 200.
+         *     If the usage store cannot be reached, the whole request fails with
+         *     503 so LiteLLM retries it. Requires usage write permission.
          */
         post: operations["ingestLitellmSpend"];
         delete?: never;
@@ -7943,11 +8023,72 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** @description The usage rows still held for one external customer ID, meter key and reason. */
+        HeldUsageGroup: {
+            /** @description The LiteLLM `user` value the rows carried. */
+            external_customer_id: string;
+            meter_key: string;
+            /**
+             * @description What was missing when the rows arrived.
+             * @enum {string}
+             */
+            reason: "customer_not_found" | "meter_not_found";
+            rows: number;
+            /** @description Sum of the held quantities, as a decimal string. */
+            total_quantity: string;
+            /** Format: date-time */
+            first_event_at: string;
+            /** Format: date-time */
+            last_event_at: string;
+            /**
+             * Format: date-time
+             * @description When Velox last received a row for this group.
+             */
+            last_received_at: string;
+            /** @description The customer whose external ID now matches, or empty when none does yet. */
+            customer_id: string;
+            /** @description Whether a meter with this key exists now. */
+            meter_exists: boolean;
+        };
+        HeldUsageReleaseResult: {
+            /** @description The customer the rows were ingested for. */
+            customer_id: string;
+            /** @description Rows newly written as usage events. */
+            released: number;
+            /**
+             * @description Rows that were already usage events under the same idempotency
+             *     key (LiteLLM resent the call after the customer existed). Marked
+             *     released, not written again.
+             */
+            deduplicated: number;
+            /**
+             * @description Rows for this external ID still held: their meter does not
+             *     exist yet, or their time is after the customer's current time
+             *     (a customer on a test clock).
+             */
+            still_held: number;
+            /** @description Released rows inside an active subscription's current billing period. That period's invoice counts them. */
+            in_open_period: number;
+            /**
+             * @description Released rows outside every current billing period: before the
+             *     subscription started, or in an earlier period. A subscription
+             *     invoice does not count them unless that period's invoice has not
+             *     been built yet. Bill them with a one-off invoice if they should
+             *     be charged.
+             */
+            outside_open_period: number;
+        };
         LitellmSpendResult: {
             /** @description Usage events newly recorded. */
             accepted: number;
-            /** @description Usage events already recorded by an earlier delivery. */
+            /** @description Usage events already recorded, or already held, by an earlier delivery. */
             deduplicated: number;
+            /**
+             * @description Usage events kept because their customer or meter does not
+             *     exist yet. Not billed until released with
+             *     `POST /v1/usage-events/held/release`.
+             */
+            held: number;
             /** @description Records that carry no billable tokens. */
             skipped: number;
             /** @description One entry per event or record that was not recorded. A record can appear more than once. */
@@ -10671,6 +10812,109 @@ export interface operations {
              *     answered. Nothing was recorded; retry.
              */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listHeldUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Held groups */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["HeldUsageGroup"][];
+                    };
+                };
+            };
+        };
+    };
+    releaseHeldUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The external ID the rows were held under. */
+                    external_customer_id: string;
+                    /**
+                     * @description Release into this customer (a `vlx_cus_` id) instead of
+                     *     the one whose external ID matches, for a `user` value
+                     *     that had a typo.
+                     */
+                    customer_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Release result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeldUsageReleaseResult"];
+                };
+            };
+            /** @description `validation_error`: no customer has that external ID yet and no `customer_id` was given, or `customer_id` was not found. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    discardHeldUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    external_customer_id: string;
+                    /** @description Discard only this meter's rows. Omit for all. */
+                    meter_key?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Rows discarded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        discarded: number;
+                    };
+                };
+            };
+            /** @description `validation_error`: `external_customer_id` is missing. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

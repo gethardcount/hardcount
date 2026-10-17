@@ -59,6 +59,8 @@ import type {
   CustomerUsage,
   DeleteDunningPolicy200,
   DeletePriceOverride200,
+  DiscardHeldUsage200,
+  DiscardHeldUsageBody,
   DunningPolicy,
   DunningPolicyInput,
   DunningRun,
@@ -98,6 +100,7 @@ import type {
   GetV1UsageEventsParams,
   GetV1Whoami200,
   GetWebhookEndpointStats200,
+  HeldUsageReleaseResult,
   IngestLitellmSpendBody,
   InstantiateRecipeBody,
   InviteMemberBody,
@@ -124,6 +127,7 @@ import type {
   ListDunningPolicies200,
   ListDunningRuns200,
   ListDunningRunsParams,
+  ListHeldUsage200,
   ListMembers200,
   ListMeterPricingRules200,
   ListPriceOverrides200,
@@ -186,6 +190,7 @@ import type {
   RecipePreviewResult,
   RecordInvoicePaymentBody,
   RefundInvoiceBody,
+  ReleaseHeldUsageBody,
   ResendInvoiceSetupLink200,
   ResolveDunningRunBody,
   RotateApiKeyBody,
@@ -7204,6 +7209,269 @@ export const useBackfillUsageEvent = <TError = Error,
         TContext
       > => {
       return useMutation(getBackfillUsageEventMutationOptions(options), queryClient);
+    }
+
+export const getListHeldUsageUrl = () => {
+
+
+
+
+  return `/v1/usage-events/held`
+}
+
+/**
+ * Usage rows the LiteLLM integration received for a customer or meter
+ * that did not exist yet. They are kept with their idempotency keys,
+ * not billed, until you release or discard them. Grouped by external
+ * customer ID, meter key and reason; at most 200 groups, most recent
+ * arrival first. Requires usage read permission.
+ * @summary List held usage
+ */
+export const listHeldUsage = async ( options?: RequestInit): Promise<ListHeldUsage200> => {
+
+  return orvalClient<ListHeldUsage200>(getListHeldUsageUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListHeldUsageQueryKey = () => {
+    return [
+    `/v1/usage-events/held`
+    ] as const;
+    }
+
+
+export const getListHeldUsageQueryOptions = <TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListHeldUsageQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listHeldUsage>>> = () => listHeldUsage(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListHeldUsageQueryResult = NonNullable<Awaited<ReturnType<typeof listHeldUsage>>>
+export type ListHeldUsageQueryError = unknown
+
+
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listHeldUsage>>,
+          TError,
+          Awaited<ReturnType<typeof listHeldUsage>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listHeldUsage>>,
+          TError,
+          Awaited<ReturnType<typeof listHeldUsage>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List held usage
+ */
+
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListHeldUsageQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReleaseHeldUsageUrl = () => {
+
+
+
+
+  return `/v1/usage-events/held/release`
+}
+
+/**
+ * Writes the held rows for one external customer ID as usage events
+ * for a customer, each under its original idempotency key and time,
+ * marked `origin: backfill`, in one transaction. A row that is already
+ * a usage event under the same key is not written again. Releasing
+ * twice writes nothing the second time.
+ *
+ * Rows whose meter still does not exist, or whose time is after the
+ * customer's current time, stay held. A released row counts toward
+ * the billing period its time falls in only if that period's invoice
+ * has not been built yet; Velox does not move it onto a later
+ * invoice. Writes an audit log entry. Requires usage write permission.
+ * @summary Release held usage
+ */
+export const releaseHeldUsage = async (releaseHeldUsageBody: ReleaseHeldUsageBody, options?: RequestInit): Promise<HeldUsageReleaseResult> => {
+
+  return orvalClient<HeldUsageReleaseResult>(getReleaseHeldUsageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(releaseHeldUsageBody)
+  }
+);}
+
+
+
+
+
+export const getReleaseHeldUsageMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext> => {
+
+const mutationKey = ['releaseHeldUsage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof releaseHeldUsage>>, {data: ReleaseHeldUsageBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  releaseHeldUsage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReleaseHeldUsageMutationResult = NonNullable<Awaited<ReturnType<typeof releaseHeldUsage>>>
+    export type ReleaseHeldUsageMutationBody = ReleaseHeldUsageBody
+    export type ReleaseHeldUsageMutationError = Error
+
+    /**
+ * @summary Release held usage
+ */
+export const useReleaseHeldUsage = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof releaseHeldUsage>>,
+        TError,
+        {data: ReleaseHeldUsageBody},
+        TContext
+      > => {
+      return useMutation(getReleaseHeldUsageMutationOptions(options), queryClient);
+    }
+
+export const getDiscardHeldUsageUrl = () => {
+
+
+
+
+  return `/v1/usage-events/held/discard`
+}
+
+/**
+ * Marks the held rows for one external customer ID (and one meter
+ * key, when given) as discarded. They are never billed. The rows stay
+ * stored as a record. Writes an audit log entry. Requires usage write
+ * permission.
+ * @summary Discard held usage
+ */
+export const discardHeldUsage = async (discardHeldUsageBody: DiscardHeldUsageBody, options?: RequestInit): Promise<DiscardHeldUsage200> => {
+
+  return orvalClient<DiscardHeldUsage200>(getDiscardHeldUsageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(discardHeldUsageBody)
+  }
+);}
+
+
+
+
+
+export const getDiscardHeldUsageMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext> => {
+
+const mutationKey = ['discardHeldUsage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof discardHeldUsage>>, {data: DiscardHeldUsageBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  discardHeldUsage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DiscardHeldUsageMutationResult = NonNullable<Awaited<ReturnType<typeof discardHeldUsage>>>
+    export type DiscardHeldUsageMutationBody = DiscardHeldUsageBody
+    export type DiscardHeldUsageMutationError = Error
+
+    /**
+ * @summary Discard held usage
+ */
+export const useDiscardHeldUsage = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof discardHeldUsage>>,
+        TError,
+        {data: DiscardHeldUsageBody},
+        TContext
+      > => {
+      return useMutation(getDiscardHeldUsageMutationOptions(options), queryClient);
     }
 
 export const getAggregateUsageEventsUrl = (params?: AggregateUsageEventsParams,) => {
@@ -14802,11 +15070,14 @@ export const getIngestLitellmSpendUrl = () => {
  * `id` plus the token type, so a resent record is counted as
  * `deduplicated`, not billed twice.
  *
- * A problem with one record (no customer, unknown customer or meter,
- * invalid event) is listed in `errors` and the rest of the batch
- * still goes in, with status 200. If the usage store cannot be
- * reached, the whole request fails with 503 so LiteLLM retries it.
- * Requires usage write permission.
+ * A token row whose customer or meter does not exist yet is held,
+ * not billed and not lost: it is counted in `held` and listed by
+ * `GET /v1/usage-events/held` until you release or discard it. A
+ * resent row that is already held is counted as `deduplicated`. A
+ * record with no `user` or no `id`, or an invalid event, is listed in
+ * `errors` and the rest of the batch still goes in, with status 200.
+ * If the usage store cannot be reached, the whole request fails with
+ * 503 so LiteLLM retries it. Requires usage write permission.
  * @summary Ingest LiteLLM spend logs
  */
 export const ingestLitellmSpend = async (ingestLitellmSpendBody: IngestLitellmSpendBody, options?: RequestInit): Promise<LitellmSpendResult> => {

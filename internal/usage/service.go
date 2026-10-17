@@ -25,10 +25,17 @@ type Service struct {
 	store    Store
 	resolver clock.Resolver
 	audit    AuditEmitter
+	// held keeps usage rows that could not be ingested yet (#1044). Taken
+	// from the store when it implements HeldStore (PostgresStore does).
+	held HeldStore
 }
 
 func NewService(store Store) *Service {
-	return &Service{store: store}
+	s := &Service{store: store}
+	if h, ok := store.(HeldStore); ok {
+		s.held = h
+	}
+	return s
 }
 
 // SetAuditLogger wires in-tx audit emission for BACKFILL. Live ingest stays

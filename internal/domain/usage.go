@@ -82,3 +82,44 @@ type ProviderCostRate struct {
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 }
+
+// HeldUsageReason says why a usage row was held instead of ingested.
+type HeldUsageReason string
+
+const (
+	HeldReasonCustomerNotFound HeldUsageReason = "customer_not_found"
+	HeldReasonMeterNotFound    HeldUsageReason = "meter_not_found"
+)
+
+// HeldUsageStatus is a held row's state. It moves held -> released or
+// held -> discarded, never back.
+type HeldUsageStatus string
+
+const (
+	HeldStatusHeld      HeldUsageStatus = "held"
+	HeldStatusReleased  HeldUsageStatus = "released"
+	HeldStatusDiscarded HeldUsageStatus = "discarded"
+)
+
+// HeldUsageSourceLiteLLM is the only source that holds rows today: the
+// LiteLLM callback, which must answer 200 for a row it cannot ingest.
+const HeldUsageSourceLiteLLM = "litellm"
+
+// HeldUsageEvent is a usage row Velox received but could not ingest yet,
+// because its customer or meter did not exist (#1044, ADR-122). It keeps
+// the idempotency key the row would have had in usage_events, so a release
+// writes it at most once.
+type HeldUsageEvent struct {
+	ID                 string          `json:"id"`
+	Source             string          `json:"source"`
+	ExternalCustomerID string          `json:"external_customer_id"`
+	MeterKey           string          `json:"meter_key"`
+	Quantity           decimal.Decimal `json:"quantity"`
+	Dimensions         map[string]any  `json:"dimensions,omitempty"`
+	IdempotencyKey     string          `json:"idempotency_key"`
+	EventAt            time.Time       `json:"event_at"`
+	ObservedCostMicros *int64          `json:"observed_cost_micros,omitempty"`
+	Reason             HeldUsageReason `json:"reason"`
+	ReceivedAt         time.Time       `json:"received_at"`
+	Status             HeldUsageStatus `json:"status"`
+}
