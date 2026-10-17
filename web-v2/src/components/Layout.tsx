@@ -25,7 +25,7 @@ import {
 import { CommandPalette } from '@/components/CommandPalette'
 import { isNavActive, isTestMode, SETTINGS_NAV, visibleNav } from '@/lib/navigation'
 import { VeloxLogo } from '@/components/VeloxLogo'
-import { OnboardingLauncher } from '@/components/OnboardingLauncher'
+import { OnboardingLauncher, SetupChecklistPanel } from '@/components/OnboardingLauncher'
 import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
@@ -371,7 +371,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <div className="space-y-0.5 border-t border-border p-2">
         {/* Setup progress lives here, not as a floating pill: the pill sat
             over page content (buttons, last table rows) on every page. */}
-        <OnboardingLauncher />
+        <OnboardingLauncher onOpen={closeSidebar} />
         <NavLink item={SETTINGS_NAV} pathname={location.pathname} onClick={closeSidebar} />
         {user && (
           <DropdownMenu>
@@ -467,6 +467,9 @@ export function Layout({ children }: { children: ReactNode }) {
           onClick={closeSidebar}
         />
       )}
+
+      {/* The setup checklist panel: one copy, outside both sidebars. */}
+      <SetupChecklistPanel />
 
       {/* Sidebar - desktop */}
       <aside className="hidden md:flex w-60 bg-card border-r border-border flex-col shrink-0">

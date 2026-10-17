@@ -455,7 +455,7 @@ export default function PlanDetailPage() {
       <Dialog open={showAttachMeter} onOpenChange={setShowAttachMeter}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Attach Meter</DialogTitle>
+            <DialogTitle>Attach meter</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground mb-4">Select a meter to attach to this plan.</p>
           {unattachedMeters.length > 0 ? (
@@ -570,7 +570,7 @@ function EditPlanDialog({ plan, liveSubscriptions, onClose, onSaved }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Plan</DialogTitle>
+          <DialogTitle>Edit plan</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} noValidate className="space-y-4">
           <div className="bg-muted rounded-lg px-4 py-3 flex items-center justify-between">

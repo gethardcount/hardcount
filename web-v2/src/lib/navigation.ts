@@ -51,6 +51,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Revenue',
     items: [
       { to: '/dunning', label: 'Dunning', icon: AlertTriangle, hint: 'Failed-payment recovery' },
+      { to: '/dunning-policies', label: 'Dunning policies', icon: ListChecks, hint: 'Retry schedules for failed payments' },
       { to: '/credits', label: 'Credits', icon: Wallet, hint: 'Customer credit balances' },
       { to: '/credit-notes', label: 'Credit notes', icon: Receipt, hint: 'Refunds and adjustments' },
     ],
@@ -61,7 +62,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/pricing', label: 'Pricing', icon: Tag, hint: 'Plans, meters and prices', owns: ['/plans/', '/meters/'] },
       { to: '/recipes', label: 'Recipes', icon: Sparkles, hint: 'Ready-made pricing setups' },
       { to: '/provider-costs', label: 'Provider costs', icon: Coins, hint: 'What providers charge you, for margin' },
-      { to: '/dunning-policies', label: 'Dunning policies', icon: ListChecks, hint: 'Retry schedules for failed payments' },
     ],
   },
   {

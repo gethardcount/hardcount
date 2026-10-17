@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { setupChecklistState } from '@/lib/homeNotices'
 
 export interface OnboardingStep {
-  key: 'stripe' | 'plan' | 'customer' | 'subscription' | 'webhook'
+  key: 'stripe' | 'plan' | 'customer' | 'subscription' | 'usage' | 'webhook'
   label: string
   desc: string
   to: string
@@ -37,6 +37,35 @@ function subscribeDismissed(onChange: () => void): () => void {
   return () => {
     window.removeEventListener(DISMISS_EVENT, onChange)
     window.removeEventListener('storage', onChange)
+  }
+}
+
+// The checklist panel is rendered once by Layout; the sidebar row and the
+// Home welcome card open it with this event.
+const OPEN_EVENT = 'velox:open-setup-checklist'
+
+export function openSetupChecklist() {
+  window.dispatchEvent(new Event(OPEN_EVENT))
+}
+
+export function onOpenSetupChecklist(handler: () => void): () => void {
+  window.addEventListener(OPEN_EVENT, handler)
+  return () => window.removeEventListener(OPEN_EVENT, handler)
+}
+
+// Home opens the checklist by itself once per user, the first time a new
+// account (no subscriptions yet) lands there. Once is remembered in this
+// browser. When storage can't be read we say "already shown": a checklist
+// that pops open on every visit is worse than one that never does.
+const autoOpenedKey = (userID: string) => `velox:setup-checklist-auto-opened:${userID}`
+
+export function claimChecklistAutoOpen(userID: string): boolean {
+  try {
+    if (localStorage.getItem(autoOpenedKey(userID)) === '1') return false
+    localStorage.setItem(autoOpenedKey(userID), '1')
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -85,6 +114,26 @@ export function useOnboardingSteps() {
     queryFn: () => api.listWebhookEndpoints(),
     enabled,
   })
+  // Any subscription at all, in any state and on any customer (test-clock
+  // ones too). The overview's active_subscriptions leaves out trialing and
+  // test-clock subscriptions, so a first subscription made either way left
+  // the step undone. Home's welcome card reads the same answer.
+  const { data: anySubscription } = useQuery({
+    queryKey: ['onboarding-any-subscription'],
+    queryFn: () => api.listSubscriptions('limit=1'),
+    enabled,
+  })
+  // Usage: the overview already counts events in the last 30 days. Only when
+  // that is 0 do we ask whether any event exists at all, so a busy account
+  // never pays for the second request. Same key and question as the Usage
+  // page's empty state.
+  const usageInWindow = overview?.usage_events ?? 0
+  const { data: anyUsageEver, isError: anyUsageFailed } = useQuery({
+    queryKey: ['usage-events-any-ever'],
+    queryFn: async () => ((await api.listUsageEvents('limit=1')).data ?? []).length > 0,
+    enabled: enabled && !!overview && usageInWindow === 0,
+    retry: false,
+  })
 
   const hasAnyStripe = (stripeCreds?.data?.length ?? 0) > 0
   // Tri-state: undefined = still loading. Callers (live-mode blocker strip)
@@ -95,7 +144,11 @@ export function useOnboardingSteps() {
   const hasPlans = (plansList?.data?.length ?? 0) > 0
   const hasWebhook = (webhookEndpoints?.data?.length ?? 0) > 0
   const hasCustomer = (overview?.active_customers ?? 0) > 0
-  const hasSubscription = (overview?.active_subscriptions ?? 0) > 0
+  const hasSubscription = (anySubscription?.data?.length ?? 0) > 0
+  const hasUsage = usageInWindow > 0 || anyUsageEver === true
+  // undefined while loading: Home must not flash the welcome card at an
+  // account that has subscriptions.
+  const newAccount: boolean | undefined = anySubscription ? !hasSubscription : undefined
 
   const steps: OnboardingStep[] = [
     {
@@ -131,6 +184,14 @@ export function useOnboardingSteps() {
       done: hasSubscription,
     },
     {
+      key: 'usage',
+      label: 'Send a usage event',
+      desc: 'Your app reports what each customer used; Velox prices it.',
+      to: '/usage',
+      cta: 'Go to Usage',
+      done: hasUsage,
+    },
+    {
       key: 'webhook',
       label: 'Set up a webhook endpoint',
       desc: 'Let your app hear about invoices and subscriptions',
@@ -144,7 +205,10 @@ export function useOnboardingSteps() {
   const total = steps.length
   // Don't flash the launcher before queries settle — avoids "0 of 5" pills
   // flickering for users who've actually completed everything.
-  const loaded = !!overview && !!plansList && !!stripeCreds && !!webhookEndpoints
+  // A failed "any usage ever" check counts as settled (step not done) so it
+  // can't hold the whole checklist back.
+  const usageSettled = usageInWindow > 0 || anyUsageEver !== undefined || anyUsageFailed
+  const loaded = !!overview && !!plansList && !!stripeCreds && !!webhookEndpoints && !!anySubscription && usageSettled
   const { showPill: show, offerShowAgain } = setupChecklistState(dismissed, loaded, complete, total)
 
   return {
@@ -156,5 +220,6 @@ export function useOnboardingSteps() {
     show,
     offerShowAgain,
     hasLiveStripe,
+    newAccount,
   }
 }

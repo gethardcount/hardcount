@@ -61,3 +61,9 @@ test('the Ctrl+K palette builds its pages from the shared config', () => {
   const layout = readFileSync(new URL('../src/components/Layout.tsx', import.meta.url), 'utf8')
   assert.ok(layout.includes('visibleNav('), 'Layout must render the sidebar from lib/navigation')
 })
+
+test('Dunning policies sit directly under Dunning', () => {
+  const items = allNavItems(true)
+  const dunning = items.findIndex(i => i.to === '/dunning')
+  assert.equal(items[dunning + 1]?.to, '/dunning-policies')
+})

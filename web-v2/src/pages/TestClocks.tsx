@@ -78,7 +78,7 @@ export default function TestClocksPage() {
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Test Clocks</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Simulate time-bound billing without waiting for real days to pass.
+            A pretend clock for test customers, so you can see months of billing in minutes.
             Test mode only.
           </p>
         </div>

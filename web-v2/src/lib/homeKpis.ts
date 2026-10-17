@@ -25,6 +25,12 @@ export interface Trend {
 export const CUSTOMERS_DEFINITION =
   'Customers with an active or trialing subscription. Test-clock customers are not counted.'
 
+// currentMRR (internal/analytics/overview.go): plan base fee × quantity of
+// each active subscription, a yearly plan divided by 12, in the default
+// currency, test-clock subscriptions left out. Usage is not in it.
+export const MRR_DEFINITION =
+  'Monthly recurring revenue: the base fees of active subscriptions, per month. Usage is not included. ARR is the same × 12.'
+
 export const FAILED_PAYMENTS_DEFINITION =
   'Invoices created in this period whose payment failed.'
 

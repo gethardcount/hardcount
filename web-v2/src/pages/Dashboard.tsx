@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -10,7 +10,7 @@ import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useEffectiveNowResolver, useTestClocks } from '@/hooks/useClockFrozenMap'
 import { useAuth } from '@/contexts/AuthContext'
 import { NoticeRow } from '@/components/NoticeRow'
-import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
+import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
 import { SIMULATED_TOTALS_SENTENCE, SIMULATED_TOTALS_TITLE, showSimulatedTotalsNote } from '@/lib/homeNotices'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
@@ -18,7 +18,9 @@ import { FeedSkeleton } from '@/components/ui/TableSkeleton'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
-import { AlertTriangle, FlaskConical, Info } from 'lucide-react'
+import { AlertTriangle, FlaskConical, Info, ListChecks } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { claimChecklistAutoOpen, openSetupChecklist, useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -84,6 +86,14 @@ export default function DashboardPage() {
   const { data: clocks } = useTestClocks()
   const simulatedNote = showSimulatedTotalsNote(user?.livemode ?? false, clocks?.data?.length ?? 0)
 
+  // First run: an account with no subscriptions yet gets a welcome card, and
+  // the setup checklist opens by itself once per user.
+  const { newAccount, show: checklistShown, dismissed: checklistHidden, setDismissed: setChecklistHidden } = useOnboardingSteps()
+  useEffect(() => {
+    if (!user || newAccount !== true || !checklistShown) return
+    if (claimChecklistAutoOpen(user.user_id)) openSetupChecklist()
+  }, [user, newAccount, checklistShown])
+
   const chartData = useMemo(() => chartRes?.data ?? [], [chartRes])
   // The server returns only buckets with revenue; the chart plots every bucket
   // in the window, zero where nothing was paid, so a gap reads as a gap. The
@@ -111,7 +121,7 @@ export default function DashboardPage() {
     if (overview.dunning_active > 0) {
       items.push({
         severity: 'warning',
-        text: `${overview.dunning_active} active dunning ${overview.dunning_active === 1 ? 'run' : 'runs'}`,
+        text: `${overview.dunning_active} ${overview.dunning_active === 1 ? 'invoice' : 'invoices'} in payment retry`,
         to: '/dunning',
       })
     }
@@ -157,6 +167,33 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {newAccount === true && (
+        <Card className="mt-6" role="region" aria-label="Welcome">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <ListChecks size={18} aria-hidden />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Welcome to Velox</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Velox counts usage, works out each bill, makes the invoice and charges the card through Stripe.
+                Follow the setup checklist to bill your first {user?.livemode ? 'customer' : 'test customer'}.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              className="shrink-0 self-start sm:self-center"
+              onClick={() => {
+                if (checklistHidden) setChecklistHidden(false)
+                openSetupChecklist()
+              }}
+            >
+              Open setup checklist
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {errorObj ? (
         <Card className="mt-6">
           <CardContent className="p-0">
@@ -197,6 +234,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
             <TrendCard
               label="MRR"
+              definition={MRR_DEFINITION}
               value={formatCents(overview.mrr, overview.currency)}
               current={overview.mrr}
               previous={overview.mrr_prev}
