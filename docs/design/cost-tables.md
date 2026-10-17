@@ -1,6 +1,8 @@
 # Design — Provider cost tables + margin (LOCKED)
 
-> **Status: shipped. Design written 2026-07-05.** The current rules are [ADR-079](../adr/079-provider-cost-tables.md). Where this page and the code disagree, the code wins.
+> - **Decided:** you save what each AI provider charges you per token (`/v1/provider-costs`). Velox stamps that cost on each usage event when it arrives, and `GET /v1/customers/{id}/margin` shows usage revenue against it.
+> - **Shipped:** v0.1.0, in [#373](https://github.com/getvelox/velox/pull/373) (migration `0137_provider_cost_rates`). Design written 2026-07-05.
+> - **Current docs:** [See your margin](../ai-pricing.md#see-your-margin) in the AI pricing reference. The current rules are [ADR-079](../adr/079-provider-cost-tables.md). Where this page and the code disagree, the code wins.
 
 **Status:** LOCKED for build (2026-07-05) after a 4-platform quote-verified
 sweep (workflow run wf_2edadfc3: 37/40 claims) and a 5-lens adversarial panel

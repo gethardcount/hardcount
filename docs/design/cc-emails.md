@@ -1,6 +1,8 @@
 # Design: additional_emails + CC coverage — multi-recipient billing emails
 
-> **Status: shipped. Design written 2026-07-06.** The current rules are [ADR-082](../adr/082-email-recipient-semantics.md). Where this page and the code disagree, the code wins.
+> - **Decided:** a customer can have up to 10 more addresses (`additional_emails`), stored with the same encryption as the primary email. Invoice, receipt, failed-payment, payment-retry and credit-note emails copy them in a visible `Cc:` header; password, invite and payment-setup emails never do. A new `POST /v1/credit-notes/{id}/send` emails a credit note.
+> - **Shipped:** v0.2.0, in [#393](https://github.com/getvelox/velox/pull/393) (migration `0140_customer_additional_emails`). Design written 2026-07-06.
+> - **Current docs:** no guide covers it yet. The current rules are [ADR-082](../adr/082-email-recipient-semantics.md) and `additional_emails` on the customer and send routes in [`api/openapi.yaml`](../../api/openapi.yaml). Where this page and the code disagree, the code wins.
 
 Settled 2026-07-06 by a divergent design panel (independent designs
 argued from competing lenses — peer parity vs plumbing simplicity —

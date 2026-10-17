@@ -1,6 +1,15 @@
 # Design: paid-commit credit-note relief (ADR-078 phase 2)
 
-> **Status: shipped. Design written 2026-07-06.** The current rules are [ADR-080](../adr/080-paid-commit-cn-relief.md). Where this page and the code disagree, the code wins.
+> - **Decided:** a paid prepaid-commit invoice can be refunded with a credit note that retires its unused credits and refunds their cash at the purchase rate, not at face value. One cumulative rounding anchor makes any series of partial refunds add up exactly.
+> - **Shipped:** v0.2.0, in [#391](https://github.com/getvelox/velox/pull/391) (migration `0138_commit_cn_relief`). Design written 2026-07-06.
+> - **Current docs:** no guide covers it yet. The current rules are [ADR-080](../adr/080-paid-commit-cn-relief.md) and the `commit_relief` block of `POST /v1/credit-notes` in [`api/openapi.yaml`](../../api/openapi.yaml). Where this page and the code disagree, the code wins.
+
+> **Where the body is out of date** (checked against code 2026-10-18):
+>
+> 1. The route is `POST /v1/credit-notes`, not `/v1/credit_notes`.
+> 2. To retire all remaining credits, send `retire_all: true`. `retire_cents` takes a number only, not `"remaining"`.
+> 3. `refund_amount_cents` and `out_of_band_amount_cents` sit directly in `commit_relief`. There is no `allocation` object.
+> 4. Validation failures return `422 validation_error`, not 400. That includes a slice that rounds to zero cash, which the body answers with 409.
 
 Status: **panel-settled 2026-07-06** (a 3-lens divergent panel — independent designs argued from different lenses, then adversarially judged — workflow wf_bf1f8e30-0cf). This doc is the build spec; ADR-080 records the decisions. Implement exactly this — the cap formula was mechanically verified against `internal/platform/money/round.go`.
 

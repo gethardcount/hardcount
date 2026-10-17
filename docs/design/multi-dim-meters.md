@@ -1,6 +1,8 @@
 # Multi-Dimensional Meters — Technical Design
 
-> **Status: shipped. Design written 2026-04-25.** The current rules are [ADR-044](../adr/044-canonical-ai-token-metering-model.md), [ADR-045](../adr/045-decimal-per-unit-pricing-rates.md) and [ADR-070](../adr/070-price-change-semantics.md). Where this page and the code disagree, the code wins.
+> - **Decided:** one meter takes usage events with dimension labels, such as `model`. Pricing rules match sets of labels, and the highest-priority matching rule claims each event, so no event is priced twice.
+> - **Shipped:** v0.1.0, in [#20](https://github.com/getvelox/velox/pull/20) (migration `0054_multi_dim_meters`).
+> - **Current docs:** [How Velox picks the price for an event](../ai-pricing.md#how-velox-picks-the-price-for-an-event) in the AI pricing reference. The decisions made since are listed below. Where this page and the code disagree, the code wins.
 
 > **Design document from 2026-04-25** (the proposal as reviewed before building). It is not kept current.
 >

@@ -1,6 +1,8 @@
 # Customer Usage Endpoint — Technical Design
 
-> **Status: shipped. Design written 2026-04-26.** No ADR decided this endpoint, so the code is the current record. Where this page and the code disagree, the code wins.
+> - **Decided:** add `GET /v1/customers/{id}/usage`. One call returns a customer's usage and its cost, per meter and per pricing rule, matched to rules the same way the cycle close does. It covers the current billing period unless you pass `from` and `to`.
+> - **Shipped:** v0.1.0, in [#26](https://github.com/getvelox/velox/pull/26); the dashboard view came in [#27](https://github.com/getvelox/velox/pull/27).
+> - **Current docs:** the [usage routes](../api-surface.md#usage) in The Velox API, and `/v1/customers/{id}/usage` in [`api/openapi.yaml`](../../api/openapi.yaml). Where this page and the code disagree, the code wins.
 
 > **Design document, written 2026-04-26 before the build.** The endpoint (`GET /v1/customers/{id}/usage`) has shipped; no ADR decided it, so the code is the current record: `internal/usage/customer_usage.go` and `customer_usage_handler.go`, with the dashboard in `web-v2/src/components/CostDashboard.tsx`.
 > Later decisions that changed it: [ADR-032](../adr/032-public-cost-dashboard-projection.md) added the public, token-protected cost-dashboard view of this data; [ADR-044](../adr/044-canonical-ai-token-metering-model.md) made one `token_type` dimension the canonical token shape (the example response already uses it; leftover names like `gpt4_input_uncached` predate it); [ADR-045](../adr/045-decimal-per-unit-pricing-rates.md) made per-unit rates decimal; [ADR-054](../adr/054-effective-unit-price-decimal-display.md) added the full-precision per-unit price to each rule row; [ADR-070](../adr/070-price-change-semantics.md) prices each rule (and any customer override) at the version in force at the start of the window, the same way invoices do.

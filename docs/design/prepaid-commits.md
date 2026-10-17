@@ -1,6 +1,8 @@
 # Design — Prepaid commits + drawdown (LOCKED)
 
-> **Status: shipped. Design written 2026-07-05.** The current rules are [ADR-078](../adr/078-prepaid-commits-phase-1.md). Where this page and the code disagree, the code wins.
+> - **Decided:** a prepaid commit (credit a customer pays for up front, then uses up) is a line on a manual invoice. Finalizing that invoice grants the credit in the same transaction, and voiding it retires what is left. Customer credit never pays a commit invoice, and promotional credit is spent first.
+> - **Shipped:** v0.1.0, in [#371](https://github.com/getvelox/velox/pull/371) (migration `0136_prepaid_commits`), with the dashboard in [#372](https://github.com/getvelox/velox/pull/372). Design written 2026-07-05.
+> - **Current docs:** [Sell prepaid credit](../ai-pricing.md#sell-prepaid-credit-a-prepaid-commit) in the AI pricing reference. The current rules are [ADR-078](../adr/078-prepaid-commits-phase-1.md). Where this page and the code disagree, the code wins.
 
 **Status:** LOCKED for build (2026-07-05) after (1) Orb 3-0 adversarial
 verification, (2) a 4-platform peer sweep (Metronome/Lago/Stripe/AI-infra

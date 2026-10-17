@@ -1,8 +1,10 @@
 # Billing Thresholds — Technical Design
 
-> **Status: shipped. Design written 2026-04-26.** The current rules are [ADR-065](../adr/065-threshold-scan-boundary-fire-once-drain.md) and [ADR-066](../adr/066-threshold-money-semantics.md). Where this page and the code disagree, the code wins.
+> - **Decided:** a subscription can carry a spend cap (`amount_gte`) or per-item usage caps (`usage_gte`). When the period's total reaches one, Velox invoices early, can reset the billing cycle, and sends `subscription.threshold_crossed`.
+> - **Shipped:** v0.1.0, in [#29](https://github.com/getvelox/velox/pull/29) (migration `0056_subscription_billing_thresholds`).
+> - **Current docs:** [Billing thresholds](../features.md#subscriptions-and-invoices) in the feature list and the [threshold event](../webhooks.md#subscriptions). The decisions made since are listed below. Where this page and the code disagree, the code wins.
 
-> **Design document, last revised 2026-04-26** (the pre-build RFC; shipped with migration `0056_subscription_billing_thresholds`). The body below is kept as written and is not the current design.
+> **Design document, last revised 2026-04-26** (the pre-build RFC). The body below is kept as written and is not the current design.
 >
 > **Current design:** [ADR-065](../adr/065-threshold-scan-boundary-fire-once-drain.md) (scan kernel: boundary-skip, fire-once probe, full drain), [ADR-066](../adr/066-threshold-money-semantics.md) (money semantics: prorated reset base, atomic fire-then-reset), [ADR-115](../adr/115-one-closer-for-the-billing-period.md) (a threshold fire and the cycle close cannot both bill one period), and [ADR-029](../adr/029-fully-disjoint-test-clock-flows.md) section 2 (the threshold scan skips test-clock subscriptions; they are scanned when the clock is advanced). Code: `internal/billing/threshold_scan.go`, `internal/subscription/`.
 >
