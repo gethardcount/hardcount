@@ -382,7 +382,7 @@ export default function SubscriptionsPage() {
                           />
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                      <TableCell className="text-sm text-muted-foreground whitespace-normal min-w-[9rem]">
                         {(() => {
                           // Same dates as the subscription page: a canceled
                           // row reads "Ended …", never a renewal date.
