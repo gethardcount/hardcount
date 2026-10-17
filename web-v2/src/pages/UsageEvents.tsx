@@ -272,7 +272,9 @@ export default function UsageEventsPage() {
       {/* Filter bar */}
       {/* Wraps: 'custom' adds two date pickers, and six controls overflow a
           1440px viewport, clipping the dimension field. */}
-      <div className="flex flex-wrap items-center gap-3 mt-6">
+      {/* items-start: the dimension hint grows its own column only, so the
+          other filters stay put when it appears. */}
+      <div className="flex flex-wrap items-start gap-3 mt-6">
         <div className="w-52">
           <CustomerCombobox
             value={filterCustomer}
