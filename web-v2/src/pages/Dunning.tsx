@@ -113,11 +113,12 @@ export default function DunningPage() {
         <div className="max-w-3xl">
           <h1 className="text-2xl font-semibold text-foreground">Dunning</h1>
           {/* Final actions: domain.DunningSubscriptionAction (none, pause,
-              cancel) and DunningInvoiceAction (none, mark_uncollectible). */}
+              cancel) and DunningInvoiceAction (none, mark_uncollectible).
+              No enabled policy = StartDunning skips the invoice. */}
           <p className="text-sm text-muted-foreground mt-1">
-            When a card payment fails, Velox retries it on a schedule and, if email is set up, emails the customer.
-            If every retry fails, it does what your policy says: pause or cancel the subscription, write off the
-            invoice, or leave them for you to handle.
+            When a payment fails, Velox retries it on the schedule in your dunning policy and, if email is set up,
+            emails the customer. If every retry fails, it does what the policy says: pause or cancel the subscription,
+            write off the invoice, or leave them for you to handle. With no policy, nothing is retried.
           </p>
         </div>
         <Link to="/dunning-policies" className="shrink-0 self-start">
@@ -297,7 +298,7 @@ function RunsTab() {
                 <>
                   <p className="text-sm font-medium text-foreground">No failed payments to retry</p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    An invoice shows up here when its card payment fails and Velox starts retrying it.
+                    An invoice shows up here when its payment fails and Velox starts retrying it.
                   </p>
                   <Link to="/dunning-policies" className="inline-block mt-4">
                     <Button variant="outline" size="sm">Set up a retry policy</Button>
