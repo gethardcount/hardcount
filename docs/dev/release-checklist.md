@@ -1,14 +1,19 @@
 # Release checklist: live services
 
-Run this by hand before each release tag. It covers what automated tests
-cannot prove because they fake the provider: Stripe, email, LiteLLM and the
-invoice PDF. Use Stripe test mode only. See [How we test](../testing.md).
-The checks write Stripe-linked test data into the database the server uses,
-so point it at a fresh or dedicated database if you want to keep yours clean.
+Run this by hand for each release. It covers what automated tests cannot
+prove, because they fake the provider: Stripe, email, LiteLLM and the invoice
+PDF. Use Stripe test mode only. See [How we test](../testing.md).
 
-The last two sections check the published images, so run them after the tag
-has built them: [Fresh install and upgrade](#fresh-install-and-upgrade) and
-[First invoice tutorial](#first-invoice-tutorial).
+**When to run each part:**
+
+| Part | When |
+|---|---|
+| [Setup](#setup) to [Email, PDF, LiteLLM](#email-pdf-litellm) | Before you tag the release |
+| [Fresh install and upgrade](#fresh-install-and-upgrade) and [First invoice tutorial](#first-invoice-tutorial) | After the tag's image build has pushed the release images, and before you publish the release notes |
+
+The checks write Stripe-linked test data into the database the server uses.
+Point the server at a fresh or dedicated database if you want to keep yours
+clean.
 
 ## Setup
 
@@ -31,10 +36,12 @@ has built them: [Fresh install and upgrade](#fresh-install-and-upgrade) and
 
 ## Money walk across a renewal
 
-- On the Dunning policies page, "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). When its retries run out it changes nothing: final actions none and none. If you ran the demo first, its recipe's "AI default retry" is the default instead, and "Default retries" stays listed.
+A dunning run is the automatic retries after a failed payment.
+
+- [ ] Dunning policies page: "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). When its retries run out it changes nothing: final actions none and none. If you ran the demo first, its recipe's "AI default retry" is the default instead, and "Default retries" stays listed.
 - [ ] Mint a test clock, create a customer with an email, pinned to the clock, and subscribe it to a plan with a base fee (plans bill in arrears by default).
 - [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
-- [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run (automatic retries for a failed payment) starts.
+- [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run starts.
 - [ ] Open the invoice link in the payment-failed email and pay with `4242` → the invoice is paid, and the dunning run shows recovered.
 
 ## Email, PDF, LiteLLM
@@ -46,7 +53,7 @@ has built them: [Fresh install and upgrade](#fresh-install-and-upgrade) and
 
 ## Fresh install and upgrade
 
-Run these after the tag's image build has pushed the release images, and before you publish the release notes. They prove that the images the quick start pulls work, and that an existing install can move to them. Use a machine that has Docker but no Velox containers or volumes, for example a new VM.
+These prove that the images the quick start pulls work, and that an existing install can move to them. Use a machine that has Docker but no Velox containers or volumes, for example a new VM.
 
 ### Fresh install
 
@@ -64,10 +71,11 @@ Run these after the tag's image build has pushed the release images, and before 
    **You see:** `migrations applied`, with `version` set to the new release's last migration number, and no error.
 4. Open the invoice from step 1.
    **You see:** the same number, total and line amounts. Its PDF has the same lines and amounts as the one you downloaded. The "Generated on" time at the bottom differs, because each PDF is made when you open it. A release that changes what the PDF prints says so in its notes.
-   On the Dunning policies page, the policies are the same as before the upgrade: an upgrade never adds or changes a retry policy on an existing account.
-5. Run `./quickstart.sh demo` again.
+5. Open the Dunning policies page.
+   **You see:** the same policies as before the upgrade. An upgrade never adds or changes a retry policy on an existing account.
+6. Run `./quickstart.sh demo` again.
    **You see:** a second finalized invoice for a new demo customer.
-6. Run `./quickstart.sh destroy` when you are done.
+7. Run `./quickstart.sh destroy` when you are done.
 
 ## First invoice tutorial
 
