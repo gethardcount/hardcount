@@ -2,18 +2,20 @@
 
 Start here to find the right doc. Pick what you want to do, then read the
 docs in the order listed. Words you may not know are in the
-[glossary](glossary.md).
+[glossary](glossary.md), with plain meanings first.
 
 ## Decide if Velox fits
 
 1. [README](../README.md): what Velox is, who it is for, and a demo.
-2. [What Velox is not](../README.md#what-velox-is-not): the cases where
+2. [How Velox works](how-velox-works.md): one picture and six steps, from
+   a usage event to a paid invoice.
+3. [What Velox is not](../README.md#what-velox-is-not): the cases where
    another tool is the better choice.
-3. [What's in the box](features.md): every feature, in one list.
-4. [How Velox compares](comparison.md) with four open-source billing
+4. [What's in the box](features.md): every feature, in one list.
+5. [How Velox compares](comparison.md) with four open-source billing
    engines, with sources, and [why Velox exists](why-velox.md).
-5. [How Velox is engineered](ENGINEERING.md): the principles, one page.
-6. [Will it take our volume?](scale.md): what was measured, and where one
+6. [How Velox is engineered](ENGINEERING.md): the principles, one page.
+7. [Will it take our volume?](scale.md): what was measured, and where one
    Postgres stops being enough.
 
 ## Try it on your machine

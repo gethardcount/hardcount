@@ -141,6 +141,7 @@ Velox is the wrong choice if you need:
 
 [`docs/README.md`](docs/README.md) lists every doc by what you want to do: decide if Velox fits, try it, connect your product, run it in production, or contribute.
 
+- [How Velox works](docs/how-velox-works.md): from a usage event to a paid invoice, in one picture
 - [How it compares](docs/comparison.md) with Lago, OpenMeter, Flexprice and Kill Bill
 - [Why Velox exists](docs/why-velox.md)
 - [How Velox is engineered](docs/ENGINEERING.md)

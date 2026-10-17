@@ -28,6 +28,7 @@ Older entries keep their original text.
 
 ### Changed
 
+- **A "How Velox works" page, and a glossary in plain words (2026-10-17).** [docs/how-velox-works.md](docs/how-velox-works.md) shows the flow from a usage event to a paid invoice in one picture and six steps, each naming what you see in the dashboard. The [glossary](docs/glossary.md) starts each entry with a plain sentence; code and database words moved to a "For contributors" section at the bottom.
 - **A quick-start page walks through each demo step (2026-10-17).** [docs/quick-start.md](docs/quick-start.md) says what each of the nine steps does, what it prints, where to click in the dashboard and why Home reads $0. The demo prints plain step lines and ends with links to open. When Velox is not running, it now says what to run for the quick start, not only `make dev`.
 - **Docs have a first-time reader bar (2026-10-17).** Writers: [writing-style.md](docs/dev/writing-style.md#the-first-time-reader-bar) adds five rules for reader-facing pages, "You see:" after each task step, a list of words to keep out of UI text, and a before/after example.
 - **The README says who Velox is for and what each quick-start step shows (2026-10-17).** A "Who it is for" line and a short "Why it exists" list sit at the top. Each quick-start step ends with "You see:" and the real output. It also says to use WSL on Windows and why Home reads $0 after the demo.
