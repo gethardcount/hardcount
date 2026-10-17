@@ -1674,19 +1674,6 @@ export interface EndpointDelivery {
   next_retry_at: string | null
 }
 
-export interface WebhookEvent {
-  id: string
-  event_type: string
-  payload: Record<string, unknown>
-  created_at: string
-  // Week 6: replay-tree pivot. Original events leave this nil; replay
-  // clones point at the root original (single-pivot rule — the chain is
-  // collapsed at create time so it's always one hop). Optional in the TS
-  // type because legacy events written before migration 0058 don't carry
-  // it.
-  replay_of_event_id?: string | null
-}
-
 // SSE-shaped projection of a webhook event the live tail consumes via
 // EventSource on /v1/webhook_events/stream. Snake_case keys pinned by
 // TestWireShape_WebhookEventsStream_SnakeCase.
@@ -1877,7 +1864,7 @@ export async function downloadCreditNotePDF(creditNoteId: string, creditNoteNumb
 
 // Money formatting lives in lib/money (dependency-free, so the unit tests can
 // import it); re-exported here so every existing call site keeps working.
-export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, amountsByCurrencyText, atRiskText, prorationText } from './money'
+export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, amountsByCurrencyText, prorationText } from './money'
 
 // formatTaxRate renders a tax-rate percent (without the % sign) at up to 4
 // decimal places, trailing zeros trimmed: 8.875 → "8.875", 18 → "18",

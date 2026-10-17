@@ -203,7 +203,7 @@ secrets.
 | `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs velox-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/velox-doctor` |
 | `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, and `govulncheck` | `make lint`, then `govulncheck ./...` |
 | `codegen-drift` | Generated Go and TypeScript match `api/openapi.yaml` | `make gen && git diff --exit-code` |
-| `frontend` | Dashboard build (`tsc -b` and Vite), unit tests and eslint | `cd web-v2 && npm run build && npm test && npm run lint` |
+| `frontend` | Dashboard build (`tsc -b` and Vite), unit tests, eslint, and knip (unused files, exports and dependencies) | `cd web-v2 && npm run build && npm test && npm run lint` |
 
 **Also run, not required to merge.**
 

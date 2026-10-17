@@ -67,8 +67,6 @@ export const STRIPE_TAX_ID_TYPES: ReadonlyArray<TaxIdTypeOption> = [
   { value: 'za_vat', label: 'South Africa VAT', country: 'ZA' },
 ] as const
 
-export type StripeTaxIdType = typeof STRIPE_TAX_ID_TYPES[number]['value']
-
 // Hint text printed under the tax-ID input for the codes Velox knows how to
 // format-validate. Other codes pass through silently — Stripe / downstream
 // tax engines apply any format rules.

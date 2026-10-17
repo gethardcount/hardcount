@@ -554,7 +554,8 @@ jobs:
       # no --max-warnings): they surface in the log only. First wired
       # 2026-07-19 after the 10 react-hooks errors blocking a green run
       # were fixed — before that, eslint.config.js claimed to be a CI
-      # gate while lint ran nowhere.
+      # gate while lint ran nowhere. After eslint, knip fails on unused
+      # files, exports and dependencies (web-v2/knip.jsonc).
       - name: Frontend lint
         run: cd web-v2 && npm run lint
 

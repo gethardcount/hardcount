@@ -62,11 +62,12 @@ export default defineConfig({
         },
       },
       prettier: false,
-      // No `clean` — the gen/ subdirectory is the only writable
-      // surface and orval's per-file rewrite covers drift on its own.
-      // `clean: true` would recursively delete the parent of `target`
-      // (src/lib/), which would nuke api.ts and every other
-      // hand-written sibling.
+      // No `clean` — `clean: true` would recursively delete the parent
+      // of `target` (src/lib/), which would nuke api.ts and every other
+      // hand-written sibling. Instead `npm run gen` deletes src/lib/gen/
+      // before orval runs: orval only rewrites the files it generates,
+      // so a schema whose route left the spec would otherwise stay
+      // behind.
     },
   },
 })

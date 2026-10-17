@@ -417,7 +417,6 @@ export default function CustomerDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-usage', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-payment-methods', id] })
-    queryClient.invalidateQueries({ queryKey: ['customer-dunning-override', id] })
     queryClient.invalidateQueries({ queryKey: ['customers'] })
     // Actions on this page can move money (a subscription created or
     // changed here may bill and draw on credit): refresh every surface that

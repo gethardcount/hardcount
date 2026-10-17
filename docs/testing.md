@@ -53,7 +53,7 @@ go test -p 1 ./... -short=false      # unit + integration; test databases are cr
 # Layer 2: static checks
 make lint                            # golangci-lint
 make gen && git diff --exit-code     # generated code matches api/openapi.yaml
-cd web-v2 && npx tsc -b && npx eslint .
+cd web-v2 && npx tsc -b && npm run lint   # eslint, then knip (unused code)
 
 # Dashboard unit tests (Vitest, web-v2/tests/*.test.ts)
 cd web-v2 && npm test

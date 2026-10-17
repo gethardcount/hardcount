@@ -284,6 +284,12 @@ export default function InvoiceDetailPage() {
     enabled: !!id && invoice?.status !== 'draft',
     refetchInterval: pollIntervalForInvoice(invoice as ApiInvoice | undefined),
   })
+  // ONE lane (ADR-104). Every row's primary timestamp is on the
+  // invoice's own calendar — simulated when clock-pinned, since every
+  // fact is anchored at write time (outbox sim anchor for emails,
+  // ADR-102 dual stamps for attempts, entity-derived stamps for the
+  // rest). Rows whose two calendars differ carry recorded_at and render
+  // a "Recorded <wall>" subline (operator contract, Invariant A).
   const timeline = timelineData?.events ?? []
   // Lane-degradation disclosure: the server names any side-source
   // (credit notes, emails, payment events, payment recovery) whose
@@ -291,52 +297,6 @@ export default function InvoiceDetailPage() {
   // rows is indistinguishable from an invoice that never saw dunning.
   const timelineDegraded = timelineData?.degraded ?? []
   const timelineTruncated = timelineData?.truncated ?? false
-  // Two time-domains must NOT be interleaved in one chronological list:
-  // billing rows ride the customer's (possibly simulated) timeline, while
-  // wall-clock external events (notification emails; Stripe payment-processor
-  // outcomes) happen in real time. Sorting them together makes a real-time row
-  // sort by its wall-clock instant and land out of place among simulated
-  // billing rows — e.g. a "receipt sent" or "payment failed" at today's date
-  // before a finalize at the simulated future cycle date.
-  //
-  // Routing:
-  //   - email rows → always the external lane (a notification log reads
-  //     cleanly on its own; matches Stripe's "email log" placement).
-  //   - stripe rows → external lane ONLY when the invoice is simulated, where
-  //     their wall-clock occurred_at would mis-sort. On a normal (one-clock)
-  //     invoice they stay in Activity, where operators expect payment outcomes
-  //     in the billing story. (Most stripe rows are already folded into the
-  //     simulated paid/dunning rows upstream; only standalone failed/canceled
-  //     events without a dunning twin reach here.)
-  //   - credit_note rows → external lane ONLY when the CN itself is
-  //     wall-clock (operator-issued via HTTP). Engine clawbacks
-  //     (downgrade/cancel proration) issue under the clock-pinned sub's
-  //     bound time → e.is_simulated → they belong in Activity, sorted with
-  //     the other simulated rows. Routing them externally showed a
-  //     simulated timestamp in the wall-clock lane (the bug this fixes).
-  //   - charge-attempt rows (ADR-102) → routed by their OWN axis: a
-  //     sim-stamped attempt is a billing fact and belongs in Activity;
-  //     a wall-stamped attempt on a simulated invoice (interactive
-  //     checkout, webhook-resolved) joins the wall-clock lane.
-  //
-  // The second lane exists for ONE reason: to stop two time domains from
-  // interleaving. A wall-clock invoice has exactly one clock, so there is
-  // nothing to separate — emails sort into Activity with everything else
-  // and the operator reads one chronological story instead of checking two
-  // cards. Splitting there would separate CONTENT TYPES, a distinction the
-  // page never claimed to make, and it made the lane caption promise
-  // payment events that structurally never appear on a live invoice
-  // (2026-07-28 review). So: the whole external lane is gated on
-  // is_simulated.
-  // ONE lane (ADR-104). Every row's primary timestamp is on the
-  // invoice's own calendar — simulated when clock-pinned, since every
-  // fact is anchored at write time (outbox sim anchor for emails,
-  // ADR-102 dual stamps for attempts, entity-derived stamps for the
-  // rest). Rows whose two calendars differ carry recorded_at and render
-  // a "Recorded <wall>" subline (operator contract, Invariant A) — the
-  // second "Real-time activity" card this replaced was a residue of
-  // emails lacking a billing anchor, not a design.
-  const billingTimeline = timeline
 
   // Payment-method snapshot serves two purposes on this page:
   //   1. The success-state card on paid invoices (brand •••• last4).
@@ -1502,7 +1462,7 @@ export default function InvoiceDetailPage() {
           Replaces the older "Payment Activity" framing now that
           lifecycle anchors (created, finalized, scheduled) sit
           alongside Stripe + dunning events. */}
-      {(billingTimeline.length > 0 || timelineDegraded.length > 0) && invoice.status !== 'draft' && (
+      {(timeline.length > 0 || timelineDegraded.length > 0) && invoice.status !== 'draft' && (
         <Card className={cn('mt-6', invoice.status === 'voided' && 'opacity-60')}>
           <CardHeader>
             <CardTitle className="text-sm">Activity</CardTitle>
@@ -1520,7 +1480,7 @@ export default function InvoiceDetailPage() {
               </p>
             )}
             <div className="relative">
-              {billingTimeline.map((event, i) => {
+              {timeline.map((event, i) => {
                 return (
                 <div key={event.id ?? `${event.source}:${event.event_type}:${event.timestamp}:${event.payment_intent_id ?? ''}`} className="flex gap-4 pb-2 last:pb-0">
                   <div className="flex flex-col items-center">
@@ -1532,7 +1492,7 @@ export default function InvoiceDetailPage() {
                       event.status === 'escalated' ? 'bg-violet-500' :
                       'bg-amber-500'
                     )} />
-                    {i < billingTimeline.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
+                    {i < timeline.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">

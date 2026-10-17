@@ -49,5 +49,3 @@ export const orvalClient = async <T>(
   }
   return apiRequest<T>(method, path, body)
 }
-
-export default orvalClient

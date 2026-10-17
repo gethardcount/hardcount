@@ -127,4 +127,6 @@ They regenerate from the same spec on `make gen`, and they do different jobs:
   the parent of `target` recursively. Pointed at `src/lib/queries.gen.ts`, it
   would delete every hand-written file in `src/lib/` on the next regen. The
   `gen/` subdirectory limits the damage even if `clean` is ever turned back
-  on.
+  on. `npm run gen` deletes `src/lib/gen/` before orval runs, because orval
+  only rewrites the files it generates: a schema whose route left the spec
+  would otherwise stay behind.
