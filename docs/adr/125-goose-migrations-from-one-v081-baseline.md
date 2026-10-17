@@ -1,7 +1,7 @@
 # ADR-125: Run migrations with goose from one v0.8.1 baseline
 
 **Date:** 2026-10-18
-**Status:** Proposed. Approved 2026-10-18; becomes Accepted when the cut-over PR merges, and ships in v0.9.0. Until then the code runs the ADR-073 runner.
+**Status:** Accepted (2026-10-18). The cut-over is built; it ships in v0.9.0.
 **Supersedes:** [ADR-124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md), which was never built
 **Amends:** [ADR-073](073-selfhost-boot-and-bootstrap-contract.md) (decision 3, the migration runner, is replaced) and [ADR-107](107-unknown-is-terminal-until-a-human.md) (migration 0009's rollback stops shipping)
 
@@ -235,9 +235,12 @@ An INVALID index is one Postgres keeps but never uses.
 - **The proof runs on every PR, not once.** The baseline's edits cannot
   drift, because the `migrations` job compares a new install with an
   upgraded one each time.
-- **No other module moves.** goose v3.27.0 raises none of the modules in
-  Velox's build. Its provider, lock and Postgres code is the same as in
-  v3.29.0.
+- **Almost no other module moves.** goose v3.27.0 raises one module in
+  Velox's Linux build: `prometheus/procfs`, 0.16.1 to 0.19.2, which the
+  Prometheus client uses to read process metrics from `/proc` (the first
+  count was taken on macOS, where that module is not built; corrected
+  2026-10-18 in the cut-over PR). Its provider, lock and Postgres code is
+  the same as in v3.29.0.
 
 ## Alternatives considered
 
