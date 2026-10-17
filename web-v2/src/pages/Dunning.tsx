@@ -109,7 +109,7 @@ export default function DunningPage() {
   usePageTitle('Dunning')
   return (
     <Layout>
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-3xl">
           <h1 className="text-2xl font-semibold text-foreground">Dunning</h1>
           {/* Final actions: domain.DunningSubscriptionAction (none, pause,
@@ -120,7 +120,7 @@ export default function DunningPage() {
             invoice, or leave them for you to handle.
           </p>
         </div>
-        <Link to="/dunning-policies">
+        <Link to="/dunning-policies" className="shrink-0 self-start">
           <Button variant="outline" size="sm">Manage policies</Button>
         </Link>
       </div>

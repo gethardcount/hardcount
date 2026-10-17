@@ -170,7 +170,7 @@ export default function DashboardPage() {
       {newAccount === true && (
         <Card className="mt-6" role="region" aria-label="Welcome">
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
               <ListChecks size={18} aria-hidden />
             </div>
             <div className="min-w-0 flex-1">

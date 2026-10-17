@@ -179,7 +179,7 @@ export default function PricingPage() {
 
   return (
     <Layout>
-      <div className="flex justify-between items-start gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-3xl">
           <h1 className="text-2xl font-semibold text-foreground">Pricing</h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -193,7 +193,7 @@ export default function PricingPage() {
           </p>
         </div>
         {showAdd && (
-          <Button size="sm" onClick={() => setCreateFor(tab)}>
+          <Button size="sm" className="shrink-0 self-start" onClick={() => setCreateFor(tab)}>
             <Plus size={16} className="mr-2" />
             {tab === 'plans' ? 'Add Plan' : tab === 'meters' ? 'Add Meter' : 'Add Price'}
           </Button>
