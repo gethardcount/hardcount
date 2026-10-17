@@ -611,3 +611,60 @@ func TestService_Instantiate_RefusesCrossCurrencyMeterAdoption(t *testing.T) {
 		t.Fatalf("USD install over USD meter must pass: %v", err)
 	}
 }
+
+// TestService_Instantiate_TakesOverSeededDefault: every new account starts
+// with a seeded "Default retries" policy per mode (ADR-123). A recipe
+// applied afterwards must still govern dunning — its policy becomes the
+// default and the seed is demoted, not left as a second, unused policy.
+// Mutation check: remove the seeded-default demote in upsertPolicyTx and
+// the recipe policy is created non-default.
+func TestService_Instantiate_TakesOverSeededDefault(t *testing.T) {
+	f := newRecipeFixture(t)
+	tenantID := testutil.CreateTestTenant(t, f.db, "seeded then recipe")
+	liveCtx := postgres.WithLivemode(context.Background(), true)
+	tx, err := f.db.BeginTx(liveCtx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := f.dunningSvc.SeedDefaultPoliciesTx(liveCtx, tx, tenantID, nil); err != nil {
+		postgres.Rollback(tx)
+		t.Fatalf("seed: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit seed: %v", err)
+	}
+
+	ctx := postgres.WithLivemode(context.Background(), false)
+	inst, err := f.svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{CreatedBy: "operator@example.com"})
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	def, err := f.dunningSvc.GetDefaultPolicy(ctx, tenantID)
+	if err != nil {
+		t.Fatalf("default: %v", err)
+	}
+	if def.ID != inst.CreatedObjects.DunningPolicyID {
+		t.Fatalf("default = %s (%q), want the recipe's policy %s", def.ID, def.Name, inst.CreatedObjects.DunningPolicyID)
+	}
+	policies, err := f.dunningSvc.ListPolicies(ctx, tenantID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	defaults := 0
+	for _, p := range policies {
+		if p.IsDefault {
+			defaults++
+		}
+	}
+	if len(policies) != 2 || defaults != 1 {
+		t.Fatalf("test mode has %d policies and %d defaults, want the demoted seed + the recipe's, one default", len(policies), defaults)
+	}
+	// Live mode keeps its seed as default: the recipe was applied in test mode.
+	liveDef, err := f.dunningSvc.GetDefaultPolicy(liveCtx, tenantID)
+	if err != nil {
+		t.Fatalf("live default: %v", err)
+	}
+	if !liveDef.Seeded {
+		t.Fatalf("live default = %q, want the untouched live seed", liveDef.Name)
+	}
+}

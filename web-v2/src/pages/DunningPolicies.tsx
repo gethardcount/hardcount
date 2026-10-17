@@ -19,6 +19,8 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { finalActionSummary } from '@/lib/dunningActions'
+import { retriesOffNotice, SEEDED_POLICY_NOTE } from '@/lib/dunningCoverage'
+import { Callout } from '@/components/Callout'
 import {
   Select,
   SelectContent,
@@ -90,6 +92,8 @@ export default function DunningPoliciesPage() {
     queryFn: () => api.listDunningPolicies(),
   })
   const policies = policiesData?.data ?? []
+  // With no policies the empty state below already says nothing is retried.
+  const retriesOff = !isLoading && !policiesError && policies.length > 0 ? retriesOffNotice(policies) : null
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['dunning-policies'] })
 
@@ -143,6 +147,12 @@ export default function DunningPoliciesPage() {
           </Button>
         </div>
 
+        {retriesOff && (
+          <Callout tone="amber" title={retriesOff.title} role="status">
+            {retriesOff.body}
+          </Callout>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Policies ({policies.length})</CardTitle>
@@ -156,7 +166,7 @@ export default function DunningPoliciesPage() {
               <EmptyState
                 icon={AlertTriangle}
                 title="No dunning policies yet"
-                description="A dunning policy decides how failed payments are retried and when customers are emailed. Create one to start recovering failed payments automatically."
+                description="A dunning policy decides how failed payments are retried and when customers are emailed. Until you create one, failed payments are not retried."
                 action={{ label: 'New policy', onClick: () => setShowCreate(true), icon: Plus }}
               />
             )}
@@ -176,6 +186,9 @@ export default function DunningPoliciesPage() {
                       <span>Schedule: <span className="text-foreground">{p.retry_schedule.join(' · ') || '—'}</span></span>
                       <span>On exhaustion: <span className="text-foreground">{finalActionSummary(p)}</span></span>
                     </div>
+                    {p.seeded && (
+                      <p className="mt-2 text-xs text-muted-foreground max-w-prose">{SEEDED_POLICY_NOTE}</p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {!p.is_default && (

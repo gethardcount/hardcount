@@ -13,6 +13,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/config"
+	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/platform/migrate"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenant"
@@ -69,6 +70,9 @@ func main() {
 	result, err := tenant.RunBootstrap(ctx, db, tenant.BootstrapDeps{
 		HashPassword: user.HashPassword,
 		CreateUserTx: userStore.CreateInTx,
+		// Same default dunning policies as the HTTP route (ADR-123).
+		// Seeding needs only the store, so no retrier or clock is wired.
+		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
 		// Same provisioning rows as the HTTP bootstrap route (ADR-090): the
 		// CLI path must not be the one that mints a live key unrecorded.
 		Audit: audit.NewLogger(db),

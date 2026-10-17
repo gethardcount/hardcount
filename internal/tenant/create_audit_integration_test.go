@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenant"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -32,10 +33,12 @@ func TestTenantCreate_AuditSharedFate(t *testing.T) {
 
 	store := tenant.NewPostgresStore(db)
 	logger := audit.NewLogger(db)
+	seeder := dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx
 
 	t.Run("create lands tenant and audit row together, in the new tenant's log", func(t *testing.T) {
 		svc := tenant.NewService(store)
 		svc.SetAuditLogger(logger)
+		svc.SetDunningSeeder(seeder)
 
 		created, err := svc.Create(ctx, tenant.CreateInput{Name: "Audit Trail Co"})
 		if err != nil {
@@ -60,6 +63,7 @@ func TestTenantCreate_AuditSharedFate(t *testing.T) {
 	t.Run("audit failure rolls the tenant creation back", func(t *testing.T) {
 		svc := tenant.NewService(store)
 		svc.SetAuditLogger(failingEmitter{})
+		svc.SetDunningSeeder(seeder)
 
 		_, err := svc.Create(ctx, tenant.CreateInput{Name: "Never Provisioned Co"})
 		if err == nil {

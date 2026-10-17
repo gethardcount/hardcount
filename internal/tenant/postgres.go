@@ -56,7 +56,7 @@ func (s *PostgresStore) CreateAudited(ctx context.Context, t domain.Tenant, emit
 	}
 	if emit != nil {
 		if err := emit(tx, t); err != nil {
-			return domain.Tenant{}, fmt.Errorf("audit emission: %w", err)
+			return domain.Tenant{}, fmt.Errorf("provision in tx: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {

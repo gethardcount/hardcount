@@ -48,7 +48,7 @@ func scanPolicy(row interface {
 }) (domain.DunningPolicy, error) {
 	var p domain.DunningPolicy
 	var scheduleJSON []byte
-	if err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Enabled, &p.IsDefault, &scheduleJSON,
+	if err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Enabled, &p.IsDefault, &p.Seeded, &scheduleJSON,
 		&p.MaxRetryAttempts, &p.FinalSubscriptionAction, &p.FinalInvoiceAction,
 		&p.GracePeriodDays, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return domain.DunningPolicy{}, err
@@ -62,7 +62,7 @@ func scanPolicy(row interface {
 	return p, nil
 }
 
-const policyColumns = `id, tenant_id, name, enabled, is_default, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, created_at, updated_at`
+const policyColumns = `id, tenant_id, name, enabled, is_default, seeded, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, created_at, updated_at`
 
 // GetPolicyByID looks up a single policy by its id within the tenant.
 func (s *PostgresStore) GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error) {
@@ -174,7 +174,10 @@ func (s *PostgresStore) SetDefaultPolicy(ctx context.Context, tenantID, id strin
 	if _, err := tx.ExecContext(ctx, `UPDATE dunning_policies SET is_default = false WHERE is_default`); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE dunning_policies SET is_default = true, updated_at = NOW() WHERE id = $1`, id)
+	// Choosing a policy as the default is the operator taking ownership of
+	// it, so a seeded policy stops being seeded here: the next policy
+	// created must not take the default away from it (ADR-123).
+	res, err := tx.ExecContext(ctx, `UPDATE dunning_policies SET is_default = true, seeded = false, updated_at = NOW() WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
@@ -258,6 +261,23 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		// gets a clean 23505, never two defaults) — no savepoint-retry belt is
 		// built (creates are serial pre-launch; add the retry when a named
 		// concurrency need appears).
+		//
+		// The policy an account was created with (seeded = true, ADR-123)
+		// only holds the default until someone creates a policy of their
+		// own. Demote it first, so the NOT EXISTS below sees no default and
+		// this insert takes the slot, exactly as the first policy did before
+		// accounts had one. Without this, a recipe's policy (or the
+		// operator's first one) would be created non-default and assigned
+		// to nobody, so it would never govern a run. A seeded policy that
+		// was edited or chosen as default has seeded = false and keeps the
+		// slot. A concurrent edit of the seeded row holds its row lock;
+		// READ COMMITTED re-checks "seeded" after the wait, so an edit that
+		// commits first keeps the default.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE dunning_policies SET is_default = false, updated_at = $1 WHERE is_default AND seeded`, now,
+		); err != nil {
+			return domain.DunningPolicy{}, fmt.Errorf("hand over seeded default: %w", err)
+		}
 		newID := postgres.NewID("vlx_dpol")
 		row := tx.QueryRowContext(ctx, `
 			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default,
@@ -271,10 +291,11 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		return scanPolicy(row)
 	}
 	// UPDATE existing policy. is_default is preserved (callers use
-	// SetDefaultPolicy to flip).
+	// SetDefaultPolicy to flip). seeded is cleared: an edited policy is the
+	// operator's own, and a later create must not take its default (ADR-123).
 	row := tx.QueryRowContext(ctx, `
 		UPDATE dunning_policies
-		SET name = $2, enabled = $3, retry_schedule = $4,
+		SET name = $2, enabled = $3, retry_schedule = $4, seeded = false,
 			max_retry_attempts = $5, final_subscription_action = $6,
 			final_invoice_action = $7, grace_period_days = $8,
 			updated_at = $9
@@ -290,6 +311,60 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		return domain.DunningPolicy{}, errs.ErrNotFound
 	}
 	return stored, err
+}
+
+// SeedDefaultPoliciesTx inserts p once per mode (test, then live) as that
+// mode's default, marked seeded, on the caller's account-creation tx
+// (ADR-123). Each insert runs with app.livemode set to its mode, so the
+// livemode trigger stamps the row and the RLS check passes; onSeeded runs
+// in the same mode, so an audit row lands in the matching log. The
+// caller's app.livemode is restored before returning.
+//
+// is_default is written true outright instead of using upsertPolicyTx's
+// NOT EXISTS rule: account creation may run on a bypass-RLS tx, where that
+// subquery would see every other account's defaults. On a brand-new
+// account there is no default to collide with; if one somehow exists, the
+// partial unique index rejects the insert and the account is not created.
+func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
+	var prevMode sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT current_setting('app.livemode', true)`).Scan(&prevMode); err != nil {
+		return fmt.Errorf("read livemode: %w", err)
+	}
+	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write (ADR-030 addendum), never frozen_time
+	scheduleJSON, err := json.Marshal(p.RetrySchedule)
+	if err != nil {
+		return fmt.Errorf("encode retry_schedule: %w", err)
+	}
+	for _, livemode := range []bool{false, true} {
+		mode := "off"
+		if livemode {
+			mode = "on"
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, mode); err != nil {
+			return fmt.Errorf("set livemode: %w", err)
+		}
+		stored, err := scanPolicy(tx.QueryRowContext(ctx, `
+			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, seeded,
+				retry_schedule, max_retry_attempts, final_subscription_action,
+				final_invoice_action, grace_period_days, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,true,true,$5,$6,$7,$8,$9,$10,$10)
+			RETURNING `+policyColumns,
+			postgres.NewID("vlx_dpol"), tenantID, p.Name, p.Enabled, scheduleJSON, p.MaxRetryAttempts,
+			p.FinalSubscriptionAction, p.FinalInvoiceAction, p.GracePeriodDays, now,
+		))
+		if err != nil {
+			return fmt.Errorf("seed %s-mode dunning policy: %w", mode, err)
+		}
+		if onSeeded != nil {
+			if err := onSeeded(stored, livemode); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, prevMode.String); err != nil {
+		return fmt.Errorf("restore livemode: %w", err)
+	}
+	return nil
 }
 
 // CreateRun inserts a run row and nothing else. Production starts a run with

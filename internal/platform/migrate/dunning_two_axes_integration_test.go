@@ -105,13 +105,14 @@ func TestMigration0171_DunningActionMapping(t *testing.T) {
 	// correct only while 0171 was the newest migration and broke the moment
 	// 0172 landed (it rolled back to 0171 and read a column that migration
 	// had just dropped). The sibling no-tx test already carries this lesson.
-	latest, err := migrate.EmbeddedLatestVersion()
-	if err != nil {
-		t.Fatalf("EmbeddedLatestVersion: %v", err)
-	}
-	stepsTo0170 := max(int(latest)-170, 1)
-	if _, err := migrate.Rollback(scratchURL, stepsTo0170); err != nil {
-		t.Fatalf("rollback %d step(s) to 0170: %v", stepsTo0170, err)
+	// Step one migration at a time instead of subtracting version numbers:
+	// a step is one file, and the numbers have gaps when parallel branches
+	// each claim one (0179 was held by another branch when 0180 merged), so
+	// latest-170 steps would overshoot.
+	for v := readVersion(t, scratchURL); v > 170; v = readVersion(t, scratchURL) {
+		if _, err := migrate.Rollback(scratchURL, 1); err != nil {
+			t.Fatalf("rollback one step from %d toward 0170: %v", v, err)
+		}
 	}
 	// Assert we landed where we meant to. Without this a future off-by-one
 	// silently tests the wrong schema instead of failing.

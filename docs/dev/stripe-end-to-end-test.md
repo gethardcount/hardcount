@@ -288,15 +288,16 @@ curl -s "http://localhost:8080/v1/dunning/runs?customer_id=<vlx_cus_...>" \
   -b /tmp/velox-cookies.txt | jq
 ```
 
-**Expected:** a [dunning run](../glossary.md) appears **only if a dunning policy is configured
-and set default**. Bootstrap deliberately seeds none (ADR-036 amendment).
-So on a fresh tenant the failed payment skips enrollment with a
-"dunning not configured" WARN, and the runs list stays empty.
+**Expected:** a [dunning run](../glossary.md) appears, on the "Default retries"
+policy that bootstrap creates in each mode (ADR-123). Its first retry is due
+three days after the failure.
 
-1. Create a policy first: dashboard → Dunning policies, or `POST /v1/dunning/policies` +
-   `set-default`.
-2. Retries then follow that policy's grace period and `retry_schedule`.
-3. Each retry is a fresh PaymentIntent. On the Stripe dashboard's Payments page,
+1. Retries follow the default policy's grace period and `retry_schedule`:
+   day 3, 7 and 14 for "Default retries". An account created before
+   ADR-123 has no policy, so the failed payment is skipped with a
+   "dunning not configured" WARN and the runs list stays empty; create a
+   policy first (dashboard → Dunning policies, or `POST /v1/dunning/policies`).
+2. Each retry is a fresh PaymentIntent. On the Stripe dashboard's Payments page,
    confirm that the PI (PaymentIntent) ID changes per attempt.
 
 To recover the customer, swap the card via step 2b with `4242`. Then wait

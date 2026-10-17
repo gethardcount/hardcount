@@ -1493,6 +1493,10 @@ export interface DunningPolicy {
   name: string
   enabled: boolean
   is_default: boolean
+  // True for the "Default retries" policy the account was created with,
+  // until it is edited or made the default (ADR-123). While true, the next
+  // policy created takes over the default.
+  seeded: boolean
   retry_schedule: string[]
   max_retry_attempts: number
   // The two terminal decisions (ADR-112): 'none' | 'pause' | 'cancel' and

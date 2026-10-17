@@ -188,7 +188,9 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   A failed charge or a missing payment method starts it. It retries the
   charge on a schedule and sends reminders. When the retries run out, the
   dunning policy can pause or cancel the subscription, write off the
-  invoice, both, or neither. [More](how-velox-works.md)
+  invoice, both, or neither. A new account starts with one policy,
+  "Default retries", which retries three times and then does neither.
+  [More](how-velox-works.md)
 - **dunning run**: One dunning process for one unpaid invoice (at most one
   per invoice). It records the policy, the number of tries, when the next
   action is due, whether it is paused, and its state: active, resolved or

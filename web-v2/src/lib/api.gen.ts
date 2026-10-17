@@ -5440,9 +5440,12 @@ export interface paths {
         /**
          * Create dunning policy
          * @description A dunning policy decides how failed payments are retried and what
-         *     happens when the retries run out. The first policy created in a
-         *     tenant and mode becomes the default; later ones do not (use
-         *     set-default). Customers without an assigned policy use the default.
+         *     happens when the retries run out. Every account starts with one
+         *     policy per mode, "Default retries", as the default. The first
+         *     policy you create in a mode takes the default from it, unless you
+         *     have edited it or made it the default yourself; later ones do not
+         *     (use set-default). Customers without an assigned policy use the
+         *     default.
          *
          *     `enabled` defaults to false. A disabled policy starts no dunning, so
          *     send `enabled: true` for the policy to take effect.
@@ -7869,6 +7872,13 @@ export interface components {
             enabled: boolean;
             /** @description Customers without an assigned policy use the default. */
             is_default: boolean;
+            /**
+             * @description True for the "Default retries" policy the account was created
+             *     with, until you edit it or make it the default. While it is
+             *     true, the next policy you create (by hand or from a recipe)
+             *     becomes the default instead. Ignored in request bodies.
+             */
+            seeded: boolean;
             retry_schedule: string[] | null;
             max_retry_attempts: number;
             /** @enum {string} */

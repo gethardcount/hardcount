@@ -124,6 +124,21 @@ func (m *memStore) UpsertPolicyTx(ctx context.Context, _ *sql.Tx, tenantID strin
 	return m.UpsertPolicy(ctx, tenantID, p)
 }
 
+// SeedDefaultPoliciesTx records the policy it was handed (one mode only —
+// the in-memory store has no modes) so a unit test can check what the
+// service passed down; the per-mode writes are pinned against Postgres.
+func (m *memStore) SeedDefaultPoliciesTx(_ context.Context, _ *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(domain.DunningPolicy, bool) error) error {
+	p.ID = fmt.Sprintf("dpol_%d", len(m.policies)+1)
+	p.TenantID = tenantID
+	p.IsDefault = true
+	p.Seeded = true
+	m.policies[p.ID] = p
+	if onSeeded != nil {
+		return onSeeded(p, false)
+	}
+	return nil
+}
+
 func (m *memStore) CreateRun(_ context.Context, tenantID string, run domain.InvoiceDunningRun) (domain.InvoiceDunningRun, error) {
 	run.ID = fmt.Sprintf("drun_%d", len(m.runs)+1)
 	run.TenantID = tenantID

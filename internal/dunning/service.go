@@ -1508,6 +1508,43 @@ func (s *Service) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID strin
 	return s.store.UpsertPolicyTx(ctx, tx, tenantID, policy)
 }
 
+// DefaultSeedPolicy is the policy every new account starts with, once per
+// mode (ADR-123, #1152). Three retries on day 3, 7 and 14 after the failed
+// payment: Stripe's recommended two-week window, and its limit of three
+// retries on a custom schedule. When retries run out it changes nothing:
+// the subscription keeps billing and the invoice stays open and due
+// (Stripe's "leave the subscription overdue"). A machine should not pause,
+// cancel or write off on an account's behalf before the operator has chosen
+// to. Both final actions are written explicitly, because an empty value
+// normalizes to pause.
+func DefaultSeedPolicy() domain.DunningPolicy {
+	return domain.DunningPolicy{
+		Name:                    "Default retries",
+		Enabled:                 true,
+		MaxRetryAttempts:        3,
+		GracePeriodDays:         3,
+		RetrySchedule:           []string{"96h", "168h"},
+		FinalSubscriptionAction: domain.SubActionNone,
+		FinalInvoiceAction:      domain.InvActionNone,
+	}
+}
+
+// SeedDefaultPoliciesTx creates DefaultSeedPolicy in test and live mode on
+// the caller's account-creation tx, as each mode's default (ADR-123). It is
+// the one writer of seeded policies; both account-creation paths
+// (tenant.RunBootstrap and tenant.Service.Create) call it, so an account
+// that exists has retries on from its first failed payment. The policy goes
+// through the same normalize+validate as every other writer. onSeeded runs
+// after each insert in that insert's mode (the callers write an audit row
+// there); an error from it, or from either insert, fails account creation.
+func (s *Service) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
+	policy, err := normalizeAndValidatePolicy(DefaultSeedPolicy())
+	if err != nil {
+		return fmt.Errorf("default dunning policy: %w", err)
+	}
+	return s.store.SeedDefaultPoliciesTx(ctx, tx, tenantID, policy, onSeeded)
+}
+
 // normalizeAndValidatePolicy applies the save-time defaults and enforces the
 // policy invariants. The single chokepoint shared by UpsertPolicy and
 // UpsertPolicyTx so no writer can persist a policy another path would reject.

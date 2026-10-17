@@ -214,11 +214,15 @@ const (
 // the Lago / Recurly named-campaigns shape verified during the 2026-
 // 05-16 industry research.
 type DunningPolicy struct {
-	ID               string   `json:"id"`
-	TenantID         string   `json:"tenant_id,omitempty"`
-	Name             string   `json:"name"`
-	Enabled          bool     `json:"enabled"`
-	IsDefault        bool     `json:"is_default"`
+	ID        string `json:"id"`
+	TenantID  string `json:"tenant_id,omitempty"`
+	Name      string `json:"name"`
+	Enabled   bool   `json:"enabled"`
+	IsDefault bool   `json:"is_default"`
+	// Seeded is true for the policy the account was created with, until
+	// the operator edits it or makes it the default. While it is true, the
+	// next policy created takes over the default slot (ADR-123).
+	Seeded           bool     `json:"seeded"`
 	RetrySchedule    []string `json:"retry_schedule"`
 	MaxRetryAttempts int      `json:"max_retry_attempts"`
 	// The two terminal decisions (ADR-112). Both are always present; the

@@ -681,6 +681,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// /v1/tenants group mounts no catch-all); the create row now rides the
 	// tenants INSERT tx, landing in the NEW tenant's own log (panel Q6).
 	tenantSvc.SetAuditLogger(auditLogger)
+	// POST /v1/tenants creates accounts too; they get the same default
+	// dunning policies as a bootstrap (ADR-123). Create refuses without it.
+	tenantSvc.SetDunningSeeder(dunningSvc.SeedDefaultPoliciesTx)
 	// creditnote: Issue()/relief emit on their coordinator tx — one
 	// canonical credit_note.issued row for operator, engine, reconciler,
 	// and catchup paths; refund-webhook status flips emit on the store tx.
@@ -1490,7 +1493,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	bootstrapDeps := tenant.BootstrapDeps{
 		HashPassword: user.HashPassword,
 		CreateUserTx: user.NewPostgresStore(db).CreateInTx,
-		Audit:        auditLogger,
+		// Every new account starts with a default dunning policy per mode
+		// (ADR-123). RunBootstrap refuses to run when this is nil.
+		SeedDunningTx: dunningSvc.SeedDefaultPoliciesTx,
+		Audit:         auditLogger,
 	}
 	audit.MustWired(&bootstrapDeps)
 	bootstrapH := tenant.NewBootstrapHandler(db, bootstrapDeps)

@@ -27,7 +27,7 @@ so point it at a fresh or dedicated database if you want to keep yours clean.
 
 ## Money walk across a renewal
 
-- On the Dunning policies page, create a policy and leave it enabled. A plain bootstrap has none. A policy made through the API without `enabled` is disabled, and the first policy becomes the default.
+- On the Dunning policies page, "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). When its retries run out it changes nothing: final actions none and none.
 - [ ] Mint a test clock, create a customer with an email, pinned to the clock, and subscribe it to a plan with a base fee (plans bill in arrears by default).
 - [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
 - [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run (automatic retries for a failed payment) starts.

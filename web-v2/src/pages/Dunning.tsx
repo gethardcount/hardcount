@@ -17,6 +17,8 @@ import { Layout } from '@/components/Layout'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { showApiError } from '@/lib/formErrors'
 import { dunningReasonLabel } from '@/lib/dunningReasons'
+import { retriesOffNotice } from '@/lib/dunningCoverage'
+import { Callout } from '@/components/Callout'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { atRiskText, dunningAmountDue } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -107,6 +109,12 @@ function futureRelativeTime(dateStr: string, now: EffectiveNow): string {
 
 export default function DunningPage() {
   usePageTitle('Dunning')
+  // Same query key as the policies page, so the two share one fetch.
+  const { data: policiesData, isLoading: policiesLoading, error: policiesError } = useQuery({
+    queryKey: ['dunning-policies'],
+    queryFn: () => api.listDunningPolicies(),
+  })
+  const retriesOff = !policiesLoading && !policiesError ? retriesOffNotice(policiesData?.data ?? []) : null
   return (
     <Layout>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -125,6 +133,16 @@ export default function DunningPage() {
           <Button variant="outline" size="sm">Manage policies</Button>
         </Link>
       </div>
+      {retriesOff && (
+        <Callout
+          tone="amber"
+          title={retriesOff.title}
+          role="status"
+          className="mt-6"
+        >
+          {retriesOff.body}
+        </Callout>
+      )}
       <div className="mt-6">
         <RunsTab />
       </div>

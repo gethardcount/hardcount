@@ -315,7 +315,7 @@ Check each line before the first real customer.
 - [ ] You can sign in at `https://billing.example.com`.
 - [ ] A password-reset email arrived, and its link opens your `https://` address.
 - [ ] **Settings → Payments** reads **Connected** in test mode, and a test charge worked ([Stripe end-to-end test](dev/stripe-end-to-end-test.md)).
-- [ ] A dunning policy exists on the **Dunning policies** page. Dunning means retrying a failed card payment and emailing the customer. A new account has no policy, so without one a failed payment is not retried.
+- [ ] The **Dunning policies** page shows the policy you want as the default. Dunning means retrying a failed card payment and emailing the customer. A new account starts with "Default retries": three retries over two weeks, then the subscription keeps billing and the invoice stays open. Edit it, or create your own, if you want collection paused or the invoice written off instead.
 - [ ] `/var/log/velox-backup.log` shows a nightly backup, a copy is off the VM, and a restore test passed.
 - [ ] `.env` is stored somewhere safe, apart from the backups.
 - [ ] If you collect metrics: `METRICS_TOKEN` is set, and Prometheus sends it. See [What to watch](self-host.md#what-to-watch).

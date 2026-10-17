@@ -16,6 +16,13 @@ export interface DunningPolicy {
   enabled: boolean;
   /** Customers without an assigned policy use the default. */
   is_default: boolean;
+  /**
+     * True for the "Default retries" policy the account was created
+     * with, until you edit it or make it the default. While it is
+     * true, the next policy you create (by hand or from a recipe)
+     * becomes the default instead. Ignored in request bodies.
+     */
+  seeded: boolean;
   /** @nullable */
   retry_schedule: string[] | null;
   max_retry_attempts: number;

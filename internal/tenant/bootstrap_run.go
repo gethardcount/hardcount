@@ -26,6 +26,7 @@ import (
 //
 //	guards (first-tenant / owner-email uniqueness, authoritative under
 //	the lock) → tenant → tenant_settings seed → 3 API keys → owner user
+//	→ audit rows → default dunning policy per mode
 //
 // so a failure anywhere leaves ZERO rows behind. The half-bootstrap
 // shape this kills: tenant+keys committed, owner-user create fails on
@@ -53,6 +54,10 @@ type BootstrapDeps struct {
 	// CreateUserTx inserts the owner user + tenant attachment inside the
 	// bootstrap tx.
 	CreateUserTx func(ctx context.Context, tx *sql.Tx, email, passwordHash, tenantID, role string) (domain.User, error)
+	// SeedDunningTx writes the account's default dunning policy in each
+	// mode inside the bootstrap tx (ADR-123). Required: an account created
+	// without it would never retry a failed payment.
+	SeedDunningTx DunningSeedFunc
 	// Audit records the provisioning inside the bootstrap tx (ADR-090).
 	// Optional (nil => no rows), but the composition root always wires it:
 	// bootstrap mints a LIVE secret key and an owner account, and "where did
@@ -86,7 +91,7 @@ type BootstrapResult struct {
 }
 
 func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts BootstrapOpts) (BootstrapResult, error) {
-	if deps.HashPassword == nil || deps.CreateUserTx == nil {
+	if deps.HashPassword == nil || deps.CreateUserTx == nil || deps.SeedDunningTx == nil {
 		return BootstrapResult{}, fmt.Errorf("bootstrap deps not wired")
 	}
 
@@ -178,15 +183,6 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	`, tenantID); err != nil {
 		return BootstrapResult{}, fmt.Errorf("seed tenant settings: %w", err)
 	}
-
-	// DELIBERATELY no dunning policy is seeded here (ADR-036 amendment). A
-	// generic seeded default would be is_default=true and SHADOW a recipe's
-	// own policy (recipes create theirs via UpsertPolicy → auto-default-first;
-	// a pre-existing bootstrap default would win the unique-index slot and
-	// suppress it) — a silent wrong-policy bug. A genuinely zero-policy tenant
-	// is safe: StartDunning maps "no effective policy" to a deliberate skip, so
-	// the money-path enrollment sweep never errors. The operator's first policy
-	// (recipe or manual) auto-becomes the default. Do not "fix" this by seeding.
 
 	// Mint paired test + live secret keys plus a test publishable key.
 	// Per Stripe's pattern you can't mint cross-mode keys post-auth (a
@@ -303,6 +299,16 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		}); err != nil {
 			return BootstrapResult{}, fmt.Errorf("audit bootstrap owner: %w", err)
 		}
+	}
+
+	// The account's default dunning policy, one per mode (ADR-123): without
+	// it a failed payment is never retried until someone thinks to create a
+	// policy. Seeded last so app.tenant_id is already stamped for its audit
+	// rows. The seed only holds the default until the first policy anyone
+	// creates (a recipe's, or the operator's own) takes it over, so it does
+	// not shadow a recipe applied right after bootstrap.
+	if err := seedDunningPolicies(ctx, tx, deps.SeedDunningTx, deps.Audit, tenantID, "bootstrap_provisioned"); err != nil {
+		return BootstrapResult{}, err
 	}
 
 	if err := tx.Commit(); err != nil {

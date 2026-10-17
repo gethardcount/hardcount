@@ -3,6 +3,7 @@ package tenant
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
@@ -19,6 +20,7 @@ type AuditEmitter interface {
 type Service struct {
 	store       Store
 	auditLogger AuditEmitter
+	seedDunning DunningSeedFunc
 }
 
 func NewService(store Store) *Service {
@@ -31,6 +33,11 @@ func NewService(store Store) *Service {
 // and nothing wrote a row. The row lands in the NEW tenant's own log with
 // the platform credential as actor.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.auditLogger = a }
+
+// SetDunningSeeder wires the writer of a new account's default dunning
+// policies (ADR-123). Required: Create refuses to run without it, so this
+// path cannot create an account that never retries a failed payment.
+func (s *Service) SetDunningSeeder(f DunningSeedFunc) { s.seedDunning = f }
 
 type CreateInput struct {
 	Name string `json:"name"`
@@ -47,17 +54,26 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Tenant,
 	// routes carry none — a tenant create is not a test-mode action).
 	ctx = postgres.WithLivemode(ctx, true)
 
-	var emit func(tx *sql.Tx, out domain.Tenant) error
-	if s.auditLogger != nil {
-		emit = func(tx *sql.Tx, out domain.Tenant) error {
-			return s.auditLogger.LogInTx(ctx, tx, audit.Entry{
+	if s.seedDunning == nil {
+		return domain.Tenant{}, fmt.Errorf("tenant create: dunning seed not wired")
+	}
+
+	// Runs on the tenants INSERT tx: the audit row, then the account's
+	// default dunning policy per mode (ADR-123). Any failure creates no
+	// account.
+	emit := func(tx *sql.Tx, out domain.Tenant) error {
+		if s.auditLogger != nil {
+			if err := s.auditLogger.LogInTx(ctx, tx, audit.Entry{
 				Action:        domain.AuditActionCreate,
 				ResourceType:  "tenant",
 				ResourceID:    out.ID,
 				ResourceLabel: out.Name,
 				Metadata:      map[string]any{"name": out.Name},
-			})
+			}); err != nil {
+				return err
+			}
 		}
+		return seedDunningPolicies(ctx, tx, s.seedDunning, s.auditLogger, out.ID, "tenant_provisioned")
 	}
 	return s.store.CreateAudited(ctx, domain.Tenant{Name: name}, emit)
 }

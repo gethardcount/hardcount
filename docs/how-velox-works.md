@@ -79,7 +79,9 @@ flowchart LR
    both, or neither.
 
    **You see:** the invoice on the **Dunning** page while it is being
-   retried. The schedule is under **Dunning policies**.
+   retried. The schedule is under **Dunning policies**. A new account
+   starts with "Default retries": three retries over two weeks, after
+   which the subscription keeps billing and the invoice stays open.
 
 ## See it without waiting a month
 

@@ -3396,11 +3396,17 @@ type DunningPolicy struct {
 	Id                      string                               `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault        bool      `json:"is_default"`
-	MaxRetryAttempts int       `json:"max_retry_attempts"`
-	Name             string    `json:"name"`
-	RetrySchedule    []string  `json:"retry_schedule"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	IsDefault        bool     `json:"is_default"`
+	MaxRetryAttempts int      `json:"max_retry_attempts"`
+	Name             string   `json:"name"`
+	RetrySchedule    []string `json:"retry_schedule"`
+
+	// Seeded True for the "Default retries" policy the account was created
+	// with, until you edit it or make it the default. While it is
+	// true, the next policy you create (by hand or from a recipe)
+	// becomes the default instead. Ignored in request bodies.
+	Seeded    bool      `json:"seeded"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // DunningPolicyFinalInvoiceAction defines model for DunningPolicy.FinalInvoiceAction.
@@ -3451,11 +3457,17 @@ type DunningPolicyListItem struct {
 	Id                      string                                       `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault        bool      `json:"is_default"`
-	MaxRetryAttempts int       `json:"max_retry_attempts"`
-	Name             string    `json:"name"`
-	RetrySchedule    []string  `json:"retry_schedule"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	IsDefault        bool     `json:"is_default"`
+	MaxRetryAttempts int      `json:"max_retry_attempts"`
+	Name             string   `json:"name"`
+	RetrySchedule    []string `json:"retry_schedule"`
+
+	// Seeded True for the "Default retries" policy the account was created
+	// with, until you edit it or make it the default. While it is
+	// true, the next policy you create (by hand or from a recipe)
+	// becomes the default instead. Ignored in request bodies.
+	Seeded    bool      `json:"seeded"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // DunningPolicyListItemFinalInvoiceAction defines model for DunningPolicyListItem.FinalInvoiceAction.
