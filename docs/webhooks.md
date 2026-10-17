@@ -297,7 +297,8 @@ caused them, so a crash cannot drop them (rule 3).
 |---|---|
 | `customer.email_bounced` | An email to a customer bounced, and Velox stopped emailing that address |
 | `customer.email_complained` | A customer marked an email from Velox as spam, and Velox stopped emailing that address |
-| `dunning.started` / `.escalated` / `.resolved` | Payment retries started, ran out (the final action from your policy was taken), or ended early, for example because the invoice was paid or someone resolved it by hand |
+| `dunning.started` | Payment retries started for an invoice *(always sent)* |
+| `dunning.escalated` / `.resolved` | Payment retries ran out (the final action from your policy was taken), or ended early, for example because the invoice was paid or someone resolved it by hand |
 | `credit.balance_low` | The settled credit balance fell below your account's threshold. Carries `threshold_cents`. *(always sent)* |
 | `credit.balance_depleted` | The settled credit balance reached zero or less *(always sent)* |
 | `credit.balance_recovered` | The settled credit balance went above zero again *(always sent)* |
