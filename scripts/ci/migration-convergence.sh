@@ -133,11 +133,13 @@ dump() {
 
 versions() { q "$1" "$2" "SELECT string_agg(version_id::text, ',' ORDER BY version_id) FROM public.goose_db_version"; }
 
+# 0174's seed takes each row's token from clock_timestamp(), so the five
+# tokens can straddle a millisecond: they are checked for age, not equality.
 check_leases() {
   local c=$1 setup=$2 got
-  got=$(q "$c" "$setup" "SELECT count(*) || ',' || count(DISTINCT holder_token) || ',' ||
+  got=$(q "$c" "$setup" "SELECT count(*) || ',' ||
          bool_and(abs(holder_token - (extract(epoch FROM now()) * 1000)::bigint) < 86400000) FROM public.leader_leases")
-  [ "$got" = "5,1,true" ] || fail "$c: leader_leases want 5 rows sharing one token from the last day, got $got"
+  [ "$got" = "5,true" ] || fail "$c: leader_leases want 5 rows with tokens from the last day, got $got"
 }
 
 converge() {
