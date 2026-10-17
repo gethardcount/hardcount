@@ -14,6 +14,66 @@ billing system is judged on.
 
 If none of these match you, see [What Velox is not](../README.md#what-velox-is-not).
 
+## The gaps that made us build it
+
+Small AI teams kept falling into the same five gaps. Each one below names
+what we found, with its source, and what Velox does instead. Where another
+project is ahead, [How Velox compares](comparison.md) says so.
+
+1. **Stripe Billing takes a cut, and can't price by model on one meter.**
+   Its pay-as-you-go plan charges 0.7% of billing volume
+   ([Stripe pricing](https://stripe.com/billing/pricing), checked
+   2026-10-17). Its basic usage billing has no dimensional pricing, so a
+   different rate per model and token type needs a meter for each. For
+   that, Stripe points you to Metronome, its main usage-billing product
+   ([Stripe's comparison](https://docs.stripe.com/billing/subscriptions/usage-based/compare-metronome)).
+   **Velox instead:** does the billing itself and asks Stripe only to charge
+   the card, so there is no Stripe Billing fee. Stripe still charges its
+   card fee, and Stripe Tax's fee if you use Stripe Tax. One meter carries
+   model and token type.
+
+2. **Open-source engines hold back key parts behind a paid licence.** In
+   Lago, automatic failed-payment retries
+   ([docs](https://getlago.com/docs/guide/dunning/automatic-dunning)) and
+   invoice previews ([docs](https://getlago.com/docs/guide/invoicing/previews))
+   need a premium licence. In Flexprice, the billing, invoice and
+   subscription services sit under an
+   [enterprise licence](https://github.com/flexprice/flexprice/blob/1ede2d98c81e9e565c087cc373aaf18bfd6d8d4f/internal/ee/LICENSE).
+   Kill Bill's usage aggregation and wallets are in its paid add-on, Aviate
+   ([sources](comparison.md)).
+   **Velox instead:** one MIT licence with nothing held back. Failed-payment
+   retries, credit notes, refunds, invoice previews and the audit log are
+   all in it.
+
+3. **They are heavy to run yourself.** Flexprice's default setup runs nine
+   services, including Kafka, ClickHouse and Temporal
+   ([docker-compose.yml](https://github.com/flexprice/flexprice/blob/1ede2d98c81e9e565c087cc373aaf18bfd6d8d4f/docker-compose.yml)).
+   OpenMeter's runs eleven and calls itself "not a production topology"
+   ([sources](comparison.md)). Across these projects, more than 30 people
+   have reported a fresh install failing before the first invoice, often at
+   sign-up, for example [lago#514](https://github.com/getlago/lago/issues/514),
+   [lago#368](https://github.com/getlago/lago/issues/368) and
+   [flexprice#819](https://github.com/flexprice/flexprice/issues/819).
+   Kill Bill is the exception: it runs fewer services than Velox.
+   **Velox instead:** one server program plus Postgres and Redis, with a web
+   dashboard. You can try it on your laptop in about five minutes.
+
+4. **There is no way to fast-forward time to test a billing change.** We
+   found no test clock in Lago's or Flexprice's docs or source. Kill Bill
+   has one clock for the whole server ([sources](comparison.md)).
+   **Velox instead:** test clocks for test customers. Pin a test customer to
+   a clock and move it forward up to a year at a time, so months of billing
+   run in minutes, in test mode on your normal install.
+
+5. **You can't see which customers lose you money.** AI costs move with
+   usage, so a customer can cost you more than they pay.
+   **Velox instead:** margin per customer. Velox records what each request
+   cost you, from your provider price table or LiteLLM's reported cost,
+   next to what you billed.
+
+Velox is young: pre-1.0, one maintainer, Stripe and cards only, no SDKs
+yet.
+
 ## 1. AI products price each model and token type differently
 
 AI products charge a different price for each model, and for each kind of
