@@ -6,6 +6,14 @@
 
 **In plain words:** if you sell an AI product, Velox works out what each customer owes and bills them. It counts what each customer used, such as tokens. It applies your prices, makes the invoice and its PDF, and charges the card through Stripe. You run it on your own servers, so the billing data stays in your own database.
 
+**Who it is for:** teams that charge their customers by usage, most of all AI products that charge per token, and that want to keep their billing data on their own servers.
+
+**Why it exists:**
+
+- **AI prices are hard to bill.** Each model, and each kind of token (input, output, cached), has its own price. Velox prices them all with one meter (a counter for one kind of usage).
+- **Customers can pay up front.** You can sell prepaid credit (a prepaid commit), and later usage draws it down.
+- **You see your margin.** Velox shows what you billed each customer next to what your AI provider charged you for their usage.
+
 Velox owns the billing layer above the card charge: pricing, subscriptions, usage metering, invoicing, credits, and dunning (the automatic retry-and-escalate process that runs when a payment fails). Stripe still executes the card charge underneath, as a plain PaymentIntent. So Stripe Billing's percentage fee does not apply. Your usage and invoice records live in your own Postgres. Stripe sees each charge, and also the invoice lines if you use Stripe Tax. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid.
 
 [![CI](https://github.com/getvelox/velox/actions/workflows/ci.yml/badge.svg)](https://github.com/getvelox/velox/actions/workflows/ci.yml)
@@ -39,7 +47,9 @@ One meter carried every token type, prices are stored exactly ($3.00 per 1M toke
 
 ## Quick start
 
-Try Velox on your own computer in about five minutes. You need git and Docker 24 or newer with the Compose plugin. You do not need Go, Node or a database.
+Try Velox on your own computer in about five minutes. Think of it as a demo car at a showroom: you drive it, you don't build it.
+
+You need git and Docker 24 or newer with the Compose plugin. You do not need Go, Node or a database. The script runs in bash, so it works as is on macOS and Linux. On Windows, run it inside WSL.
 
 **1. Start Velox**
 
@@ -49,13 +59,22 @@ cd velox/deploy/compose
 ./quickstart.sh
 ```
 
-This downloads the latest release and starts it in Docker: the Velox server, its dashboard, Postgres and Redis. When it is ready, it prints:
+This downloads the latest release and starts it in Docker: the Velox server, its dashboard, Postgres and Redis. The first start takes longest, because Docker downloads the images.
 
-- the dashboard address, `http://localhost:8080`
-- your login, an email and a password. The password is shown only once, and it is also saved in `quickstart-credentials.json`.
-- a test API key, for calling the API yourself
+**You see:** "Velox is running.", then four lines:
 
-Open the dashboard and sign in. Velox is empty at this point: there are no customers or invoices yet.
+```text
+  Dashboard   http://localhost:8080
+  Email       <your login email>
+  Password    <your password>
+  Test key    vlx_secret_test_…
+```
+
+The password is shown only once. The script also saves all four in `deploy/compose/quickstart-credentials.json`. Keep that file private.
+
+Open `http://localhost:8080` and sign in with that email and password.
+
+**You see:** the dashboard, with a "Test mode" strip at the top: "You're viewing test data. No real money moves." Velox is empty at this point: there are no customers or invoices yet.
 
 **2. Run the demo**
 
@@ -72,12 +91,20 @@ The demo fills Velox with an example, so you can watch one month of billing in a
 5. It moves the customer's clock to the end of the month. A test clock is a pretend clock for test customers, so you do not wait 30 days.
 6. Velox closes the month and makes the invoice, its PDF and a margin report.
 
-The demo checks each step and stops if one fails, so a finished run means it all worked. Then open the dashboard to see the customer, the usage, the invoice and its PDF. You can run the demo again: each run makes a new demo customer.
+The demo checks each step and stops if one fails, so a finished run means it all worked.
+
+**You see:** nine numbered steps, each ending in a green ✓ line. Step 8 prints the invoice total and its lines, and step 9 prints your margin. Then "Demo complete — everything above actually ran", and two links: one to the invoice and one to the customer.
+
+Open the links to see the customer, the usage, the invoice and its PDF. You can run the demo again: each run makes a new demo customer.
+
+Home still reads $0 after the demo. That is expected: the Home totals leave out customers on a test clock, and the demo customer is on one. Use the two links instead.
 
 **3. Stop or remove it**
 
 - `./quickstart.sh stop` stops Velox and keeps its data. Run `./quickstart.sh` to start it again.
-- `./quickstart.sh destroy` stops Velox and deletes its data.
+  **You see:** "Stopped. Your data is kept."
+- `./quickstart.sh destroy` stops Velox and deletes its data. This cannot be undone.
+  **You see:** "Stopped, and the data of this quickstart install is deleted."
 
 If port 8080 is already in use, start it with `VELOX_PORT=9000 ./quickstart.sh`. The quick start runs the latest published release, so changes merged after that release are not in it yet.
 
