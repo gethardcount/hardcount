@@ -4163,21 +4163,35 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 	return tx.Commit()
 }
 
-// PaymentPageLive reports whether the invoice has a hosted payment page that
-// may still take the customer's money, or a hosted payment not yet recorded:
-// the same domain.HostedCheckoutLiveSQL rule the charge claims refuse on, so
-// the banner and the refusal cannot disagree.
-func (s *PostgresStore) PaymentPageLive(ctx context.Context, tenantID, invoiceID string) (bool, error) {
+// PaymentPagesLive reports which of the invoices have a hosted payment page
+// that may still take the customer's money, or a hosted payment not yet
+// recorded: the same domain.HostedCheckoutLiveSQL rule the charge claims
+// refuse on, so the banner and the refusal cannot disagree. One read for a
+// whole list page (issue #1142); invoices without a live page are absent.
+func (s *PostgresStore) PaymentPagesLive(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(invoiceIDs))
+	if len(invoiceIDs) == 0 {
+		return out, nil
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer postgres.Rollback(tx)
-	var live bool
-	if err := tx.QueryRowContext(ctx, `SELECT `+domain.HostedCheckoutLiveSQL("$1"), invoiceID).Scan(&live); err != nil {
-		return false, fmt.Errorf("payment page live: %w", err)
+	rows, err := tx.QueryContext(ctx, `SELECT q.id FROM unnest($1::text[]) AS q(id) WHERE `+
+		domain.HostedCheckoutLiveSQL("q.id"), postgres.StringArray(invoiceIDs))
+	if err != nil {
+		return nil, fmt.Errorf("payment pages live: %w", err)
 	}
-	return live, nil
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
 }
 
 // ListChargeAttemptsByInvoice returns the invoice's charge attempts,

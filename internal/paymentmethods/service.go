@@ -135,6 +135,12 @@ func (s *Service) List(ctx context.Context, tenantID, customerID string) ([]Paym
 	return s.store.List(ctx, tenantID, customerID)
 }
 
+// CustomersWithDefault reports which of customerIDs have an active default
+// payment method, in one read (see Store.CustomersWithDefault).
+func (s *Service) CustomersWithDefault(ctx context.Context, tenantID string, customerIDs []string) (map[string]bool, error) {
+	return s.store.CustomersWithDefault(ctx, tenantID, customerIDs)
+}
+
 // CreateSetupIntent returns the client_secret a browser needs to run
 // stripe.confirmCardSetup(). The actual payment_methods row is written by
 // the webhook handler once Stripe confirms the setup — we don't trust

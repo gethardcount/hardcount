@@ -247,6 +247,39 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.Su
 	return sub, nil
 }
 
+// PauseCollections returns the collection-pause state of the given
+// subscriptions in one read, keyed by id; a subscription with no pause set
+// maps to nil and an id with no row is absent. The pause is composed by
+// scanSubRow, the same path Get takes, so both reads agree on it. Backs the
+// invoice list's attention banners (issue #1142), which need the pause of
+// many rows at once and none of the children Get hydrates.
+func (s *PostgresStore) PauseCollections(ctx context.Context, tenantID string, ids []string) (map[string]*domain.PauseCollection, error) {
+	out := make(map[string]*domain.PauseCollection, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+subCols+` FROM subscriptions WHERE id = ANY($1::text[])`, postgres.StringArray(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var sub domain.Subscription
+		if err := scanSubRow(rows, &sub); err != nil {
+			return nil, err
+		}
+		out[sub.ID] = sub.PauseCollection
+	}
+	return out, rows.Err()
+}
+
 func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.Subscription, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {

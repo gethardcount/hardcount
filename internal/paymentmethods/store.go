@@ -41,6 +41,12 @@ type Store interface {
 	// remained to promote). Idempotent: re-detaching an already-detached
 	// row promotes nothing (a detached row is never the default).
 	DetachAndRebalance(ctx context.Context, tenantID, customerID, pmID string) (PaymentMethod, *PaymentMethod, error)
+
+	// CustomersWithDefault reports, in one read, which of customerIDs have
+	// an active (not detached) default payment method — the same row List
+	// puts first and the payment-setup view calls ready. Customers without
+	// one are absent from the map.
+	CustomersWithDefault(ctx context.Context, tenantID string, customerIDs []string) (map[string]bool, error)
 }
 
 type PostgresStore struct {
@@ -92,6 +98,35 @@ func (s *PostgresStore) List(ctx context.Context, tenantID, customerID string) (
 		return nil, err
 	}
 	return out, tx.Commit()
+}
+
+func (s *PostgresStore) CustomersWithDefault(ctx context.Context, tenantID string, customerIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(customerIDs))
+	if len(customerIDs) == 0 {
+		return out, nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT customer_id FROM payment_methods
+		WHERE tenant_id = $1 AND customer_id = ANY($2::text[])
+		  AND is_default AND detached_at IS NULL`, tenantID, postgres.StringArray(customerIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
 }
 
 func (s *PostgresStore) Get(ctx context.Context, tenantID, pmID string) (PaymentMethod, error) {

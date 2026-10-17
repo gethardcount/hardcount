@@ -48,7 +48,7 @@ same data center sent the load through Caddy, over plain HTTP.
 | Memory | 765 MiB used at the peak, of 3,819 MiB (20%). Postgres used 128 MiB, Velox 15 MiB. |
 | CPU, during ingest | 12% of both cores on average, 25% at the peak |
 | Billing: 300 invoices | All finished in 32 s. CPU was about 70% busy while it ran. |
-| Dashboard | Most calls under 45 ms at p99. The invoice list is the slow one: 145 ms p50, 173 ms p99. |
+| Dashboard | Most calls under 45 ms at p99. The invoice list is the slow one: 145 ms p50, 173 ms p99. The cause, a few database reads per row, is fixed after v0.8.0 ([#1142](https://github.com/getvelox/velox/issues/1142)); not yet re-measured. |
 
 **Disk.** Each event takes about 570 bytes in the database, counting its
 indexes. At 1 million events a day that is about 17 GB a month. The system and

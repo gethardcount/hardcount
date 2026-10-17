@@ -227,6 +227,38 @@ func (s *PostgresStore) CreateAudited(ctx context.Context, tenantID string, c do
 	return c, nil
 }
 
+// customerFullCols is the column list Get and GetMany read: the whole
+// customer record, scanned by scanCustomerFull. One list, so a batch read
+// returns the same customer a single read does, field for field.
+const customerFullCols = `id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
+			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
+			COALESCE(test_clock_id, ''),
+			COALESCE(dunning_policy_id, ''),
+			COALESCE(stripe_customer_id, ''),
+			additional_emails,
+			created_at, updated_at`
+
+// scanCustomerFull scans one customerFullCols row and finishes it the way
+// every full read does: additional emails loaded, encrypted columns decrypted.
+func (s *PostgresStore) scanCustomerFull(row interface{ Scan(...any) error }) (domain.Customer, error) {
+	var c domain.Customer
+	var storedCC string
+	if err := row.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
+		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
+		&c.TestClockID,
+		&c.DunningPolicyID,
+		&c.StripeCustomerID,
+		&storedCC,
+		&c.CreatedAt, &c.UpdatedAt); err != nil {
+		return domain.Customer{}, err
+	}
+	var err error
+	if c.AdditionalEmails, err = s.additionalEmailsLoaded(storedCC); err != nil {
+		return domain.Customer{}, err
+	}
+	return s.decryptCustomer(c)
+}
+
 func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.Customer, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -234,35 +266,48 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.Cu
 	}
 	defer postgres.Rollback(tx)
 
-	var c domain.Customer
-	var storedCC string
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
-			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(test_clock_id, ''),
-			COALESCE(dunning_policy_id, ''),
-			COALESCE(stripe_customer_id, ''),
-			additional_emails,
-			created_at, updated_at
-		FROM customers WHERE id = $1
-	`, id).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
-		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.TestClockID,
-		&c.DunningPolicyID,
-		&c.StripeCustomerID,
-		&storedCC,
-		&c.CreatedAt, &c.UpdatedAt)
-
+	c, err := s.scanCustomerFull(tx.QueryRowContext(ctx,
+		`SELECT `+customerFullCols+` FROM customers WHERE id = $1`, id))
 	if err == sql.ErrNoRows {
 		return domain.Customer{}, errs.ErrNotFound
 	}
 	if err != nil {
 		return domain.Customer{}, err
 	}
-	if c.AdditionalEmails, err = s.additionalEmailsLoaded(storedCC); err != nil {
-		return domain.Customer{}, err
+	return c, nil
+}
+
+// GetMany reads the customers with the given ids in one query, each the same
+// record Get returns. Ids with no row in this tenant and mode are absent from
+// the result, not an error: a list page decorating many rows (issue #1142)
+// wants what exists, and treats a missing customer the way Get's ErrNotFound
+// is treated row by row. Order is unspecified.
+func (s *PostgresStore) GetMany(ctx context.Context, tenantID string, ids []string) ([]domain.Customer, error) {
+	if len(ids) == 0 {
+		return nil, nil
 	}
-	return s.decryptCustomer(c)
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+customerFullCols+` FROM customers WHERE id = ANY($1::text[])`, postgres.StringArray(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []domain.Customer
+	for rows.Next() {
+		c, err := s.scanCustomerFull(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // SetStripeCustomerID writes (or backfills) the Stripe Customer ID

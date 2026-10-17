@@ -88,6 +88,31 @@ func (a *compositePaymentSetupStore) GetPaymentSetup(ctx context.Context, tenant
 	return ps, nil
 }
 
+// PaymentReadyCustomers is GetPaymentSetup's readiness for many customers in
+// two reads instead of two per customer (issue #1142): ready means an active
+// default payment method (GetPaymentSetup's PaymentSetupReady) and a Stripe
+// customer to charge — the pair the invoice attention classifier asks for.
+func (a *compositePaymentSetupStore) PaymentReadyCustomers(ctx context.Context, tenantID string, customerIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(customerIDs))
+	if len(customerIDs) == 0 {
+		return out, nil
+	}
+	custs, err := a.customers.GetMany(ctx, tenantID, customerIDs)
+	if err != nil {
+		return nil, err
+	}
+	withDefault, err := a.pms.CustomersWithDefault(ctx, tenantID, customerIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range custs {
+		if withDefault[c.ID] && c.StripeCustomerID != "" {
+			out[c.ID] = true
+		}
+	}
+	return out, nil
+}
+
 func (a *compositePaymentSetupStore) UpsertPaymentSetup(ctx context.Context, tenantID string, ps domain.CustomerPaymentSetup) (domain.CustomerPaymentSetup, error) {
 	return a.UpsertPaymentSetupAudited(ctx, tenantID, ps, nil)
 }

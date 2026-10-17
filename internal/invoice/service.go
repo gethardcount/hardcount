@@ -89,11 +89,16 @@ type TaxRetrier interface {
 
 // PaymentMethodReader is the narrow lookup the attention classifier
 // uses to decide between no_payment_method (operator-actionable) and
-// awaiting_payment (engine race window). Satisfied by the existing
-// payment.PaymentSetupStore — kept as a local interface so this
+// awaiting_payment (engine race window). Satisfied by the api package's
+// composite payment-setup store — kept as a local interface so this
 // package doesn't import internal/payment.
+//
+// Batch-shaped so a list page reads every row's customer in one go (issue
+// #1142); a single invoice is a batch of one. A customer is ready when its
+// payment setup is ready (an active default payment method) AND it has a
+// Stripe customer to charge. Customers not ready are absent or false.
 type PaymentMethodReader interface {
-	GetPaymentSetup(ctx context.Context, tenantID, customerID string) (domain.CustomerPaymentSetup, error)
+	PaymentReadyCustomers(ctx context.Context, tenantID string, customerIDs []string) (map[string]bool, error)
 }
 
 // StripeChecker reports whether a tenant has Stripe credentials
@@ -123,9 +128,11 @@ type StripeChecker interface {
 //   - attachAttention reads the customer's email presence to pick the honest
 //     no_payment_method banner variant (emailed-a-link vs no-address).
 //
-// Satisfied by *customer.PostgresStore.
+// Satisfied by *customer.PostgresStore. GetMany is the attention read: one
+// query for a whole list page (issue #1142); ids with no row are absent.
 type CustomerReader interface {
 	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
+	GetMany(ctx context.Context, tenantID string, ids []string) ([]domain.Customer, error)
 }
 
 // TenantSettingsReader reads tenant settings so a manual invoice with no
@@ -351,10 +358,10 @@ func (s *Service) SetPaymentMethodReader(r PaymentMethodReader) {
 // payment-surfacing audit, P1-4): once automatic recovery has exhausted
 // and the policy's final action fired, the banner must stop implying
 // recovery is still running. Satisfied by *dunning.PostgresStore.
-// ErrNotFound (no run) is the common case and simply means "not
-// escalated".
+// No run is the common case and simply means "not escalated". One read
+// covers a list page (issue #1142); invoices without a run are absent.
 type DunningRunReader interface {
-	GetRunByInvoice(ctx context.Context, tenantID, invoiceID string) (domain.InvoiceDunningRun, error)
+	ListRunsByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) ([]domain.InvoiceDunningRun, error)
 }
 
 // SetDunningRunReader wires the dunning-run lookup (see DunningRunReader).
@@ -366,8 +373,12 @@ func (s *Service) SetDunningRunReader(r DunningRunReader) {
 // auto-finalize gate uses to honour `pause_collection`, and that Create uses
 // to confirm an operator-supplied subscription id is the caller's. The read
 // is tenant- and mode-scoped. Satisfied by *subscription.PostgresStore.
+// PauseCollections reads the pause of many subscriptions at once (nil = no
+// pause; an id with no row is absent), so a list page's banners cost one read
+// (issue #1142).
 type SubscriptionPauseReader interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Subscription, error)
+	PauseCollections(ctx context.Context, tenantID string, ids []string) (map[string]*domain.PauseCollection, error)
 }
 
 // SetSubscriptionPauseReader wires the pause lookup (see
@@ -404,9 +415,11 @@ func (s *Service) SetCommitGrantReader(r CommitGrantReader) {
 
 // PaymentPageReader reports whether an invoice has a hosted payment page that
 // may still take the customer's money (domain.HostedCheckoutLiveSQL, the rule
-// the charge claims refuse on). Satisfied by *PostgresStore.
+// the charge claims refuse on). Satisfied by *PostgresStore. Batch-shaped so
+// a list page costs one read (issue #1142); invoices without a live page are
+// absent or false.
 type PaymentPageReader interface {
-	PaymentPageLive(ctx context.Context, tenantID, invoiceID string) (bool, error)
+	PaymentPagesLive(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]bool, error)
 }
 
 // SetPaymentPageReader wires the payment-page lookup for the attention banner.
@@ -422,20 +435,33 @@ func (s *Service) SetPaymentPageReader(r PaymentPageReader) {
 // is returned: the auto-finalize gate must not issue and charge an invoice on a
 // guess that collection is not paused.
 func (s *Service) collectionPaused(ctx context.Context, tenantID, subscriptionID string) (bool, error) {
-	if s.subPauseReader == nil || subscriptionID == "" {
+	if subscriptionID == "" {
 		return false, nil
 	}
-	sub, err := s.subPauseReader.Get(ctx, tenantID, subscriptionID)
-	if errors.Is(err, errs.ErrNotFound) {
-		return false, nil
+	paused, err := s.collectionPausedMany(ctx, tenantID, []string{subscriptionID})
+	return paused[subscriptionID], err
+}
+
+// collectionPausedMany is collectionPaused for several subscriptions in one
+// read, keyed by id. Unwired reader → empty map; an id with no row is absent
+// (false). On a read error the map is empty and the error returned.
+func (s *Service) collectionPausedMany(ctx context.Context, tenantID string, subscriptionIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(subscriptionIDs))
+	if s.subPauseReader == nil || len(subscriptionIDs) == 0 {
+		return out, nil
 	}
+	pauses, err := s.subPauseReader.PauseCollections(ctx, tenantID, subscriptionIDs)
 	if err != nil {
-		return false, fmt.Errorf("read subscription pause state: %w", err)
+		return out, fmt.Errorf("read subscription pause state: %w", err)
 	}
 	// In force now, not merely set: a timed pause past resumes_at can stay on
 	// the row until the sub's paused periods are closed (see
 	// domain.PauseCollection.InForceAt).
-	return sub.PauseCollection.InForceAt(s.clock.Now(ctx)), nil
+	now := s.clock.Now(ctx)
+	for id, pc := range pauses {
+		out[id] = pc.InForceAt(now)
+	}
+	return out, nil
 }
 
 // SetCustomerReader wires the customer lookup used to (a) stamp is_simulated
@@ -820,86 +846,218 @@ func (s *Service) SetNoPMNotifiedAt(ctx context.Context, tenantID, id string, at
 // field. Keeps the derivation single-source so handlers, webhook
 // serializers, and hosted-invoice rendering all see the same shape.
 //
-// PaymentMethodReader is read at attach-time, not on the hot path —
-// dashboard reads dominate this code, and a PM lookup per invoice is
-// cheap. When the reader isn't wired (older test fixtures, isolated
-// unit tests), HasPaymentMethod defaults to false → no_payment_method
-// shows up — but that's safe: tests that exercise specific reasons
-// override the field anyway.
+// One invoice is a page of one: the same reads, the same classifier, as a
+// list page (attachAttentionAll). When a reader isn't wired (older test
+// fixtures, isolated unit tests), its fact stays false — HasPaymentMethod
+// false → no_payment_method shows up — but that's safe: tests that exercise
+// specific reasons override the field anyway.
 func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domain.Invoice {
+	return s.attachAttentionAll(ctx, []domain.Invoice{inv})[0]
+}
+
+// attentionFacts is what the attention classifier needs from outside the
+// invoice row, read for a whole page at once. Before issue #1142 every row
+// read its own facts — a payment-setup read (customer + payment methods), a
+// Stripe-credential read and, for unpaid rows, customer, dunning, pause and
+// payment-page reads — each its own transaction. A 25-row page cost ~75-175
+// transactions, ~110 ms. Batched, a page costs a fixed handful whatever its
+// size. The per-row guards below decide WHICH ids join each batch, so a row
+// pays for a read exactly when it did before.
+type attentionFacts struct {
+	stripeConnected bool
+	paymentReady    map[string]bool // customer id → ready payment method
+	hasEmail        map[string]bool // customer id → email on file
+	escalated       map[string]bool // invoice id → dunning run escalated
+	paused          map[string]bool // subscription id → pause_collection in force
+	pageLive        map[string]bool // invoice id → hosted payment page live
+}
+
+// attachAttentionAll decorates every invoice with its Attention, reading the
+// outside facts once per tenant rather than once per row. List rows share one
+// tenant; grouping keeps the reads tenant-scoped for any caller that doesn't.
+func (s *Service) attachAttentionAll(ctx context.Context, invs []domain.Invoice) []domain.Invoice {
+	byTenant := map[string][]int{}
+	var order []string
+	for i, inv := range invs {
+		if _, ok := byTenant[inv.TenantID]; !ok {
+			order = append(order, inv.TenantID)
+		}
+		byTenant[inv.TenantID] = append(byTenant[inv.TenantID], i)
+	}
+	for _, tenantID := range order {
+		idx := byTenant[tenantID]
+		page := make([]domain.Invoice, len(idx))
+		for j, i := range idx {
+			page[j] = invs[i]
+		}
+		facts := s.readAttentionFacts(ctx, tenantID, page)
+		var tenantLoc *time.Location // read once per tenant, only if a row needs it
+		for j, i := range idx {
+			invs[i] = s.decorateInvoice(ctx, page[j], facts, &tenantLoc)
+		}
+	}
+	return invs
+}
+
+// awaitsPaymentNoCard is the precondition of the classifier's no-card
+// branches: finalized, payment pending, no ready payment method.
+func awaitsPaymentNoCard(inv domain.Invoice, ready bool) bool {
+	return !ready && inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentPending
+}
+
+// readAttentionFacts reads one tenant's attention facts for a page of
+// invoices. Every read is display-only: a read error leaves its fact false
+// for the page, the same safe direction a per-row error took before.
+func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page []domain.Invoice) attentionFacts {
+	f := attentionFacts{}
+
+	if s.stripeChecker != nil && tenantID != "" {
+		// Livemode comes off ctx (auth middleware set it) — invoice
+		// rows don't carry the column on the domain struct since the
+		// DB trigger derives it from app.livemode at insert time. The
+		// request that's reading the invoice is already mode-scoped,
+		// so the ctx value matches the row's stored mode under RLS.
+		// Tenant- and mode-wide, so one read covers the page.
+		f.stripeConnected = s.stripeChecker.HasFor(ctx, tenantID, postgres.Livemode(ctx))
+	}
+
+	if s.paymentMethods != nil {
+		if ids := distinct(page, func(inv domain.Invoice) string { return inv.CustomerID }); len(ids) > 0 {
+			if ready, err := s.paymentMethods.PaymentReadyCustomers(ctx, tenantID, ids); err == nil {
+				f.paymentReady = ready
+			}
+		}
+	}
+
+	// Email presence drives the no_payment_method banner variant (the engine's
+	// setup-link email skips silently with no address, so the banner must not
+	// claim it was sent). Read only for the finalized-unpaid-no-PM invoices
+	// that actually reach that classifier branch. The guard is a cheap superset
+	// of the classifier's no_payment_method precondition; a rare over-fetch
+	// when a higher-priority reason (tax/payment failure) preempts it is
+	// harmless. On a read error CustomerHasEmail stays false: the classifier's
+	// false-branch copy states engine behavior rather than asserting the
+	// customer's email state, so the banner is honest even when undetermined.
+	if s.customerReader != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if awaitsPaymentNoCard(inv, f.paymentReady[inv.CustomerID]) {
+				return inv.CustomerID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			if custs, err := s.customerReader.GetMany(ctx, tenantID, ids); err == nil {
+				f.hasEmail = make(map[string]bool, len(custs))
+				for _, c := range custs {
+					f.hasEmail[c.ID] = c.Email != ""
+				}
+			}
+		}
+	}
+
+	// Same guard for the dunning-escalated signal (P1-4): only the
+	// finalized-unpaid-no-PM invoices that reach classifyNoPaymentMethod
+	// join the read. No run / read errors leave the zero-value (false) — the
+	// banner shows the normal pre-escalation copy, which is the safe
+	// direction of drift.
+	if s.dunningReader != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if awaitsPaymentNoCard(inv, f.paymentReady[inv.CustomerID]) {
+				return inv.ID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			if runs, err := s.dunningReader.ListRunsByInvoices(ctx, tenantID, ids); err == nil {
+				f.escalated = make(map[string]bool, len(runs))
+				for _, run := range runs {
+					f.escalated[run.InvoiceID] = run.State == domain.DunningEscalated
+				}
+			}
+		}
+	}
+
+	// Pause state for the queued-but-not-scheduled banner, gated on the exact
+	// precondition of the branch that reads it: QUEUED rows, and card-less
+	// rows, whose notice says "charged once the customer adds a card" — false
+	// while collection is paused (the sweep that charges on attach skips
+	// paused subscriptions). Healthy, paid, draft and failed rows skip it.
+	// Display-only: a read error shows the not-paused banner (logged); the
+	// collector itself refuses to charge a paused subscription.
+	subIDs := distinct(page, func(inv domain.Invoice) string {
+		ready := f.paymentReady[inv.CustomerID]
+		if (inv.AutoChargePending || !ready) && inv.Status == domain.InvoiceFinalized &&
+			inv.PaymentStatus == domain.PaymentPending {
+			return inv.SubscriptionID
+		}
+		return ""
+	})
+	if len(subIDs) > 0 {
+		paused, err := s.collectionPausedMany(ctx, tenantID, subIDs)
+		if err != nil {
+			slog.Warn("invoice: attention could not read pause state", "error", err,
+				"tenant_id", tenantID, "subscriptions", len(subIDs))
+		}
+		f.paused = paused
+	}
+
+	// A live hosted payment page holds every Velox charge (ADR-068). Only a
+	// finalized, unpaid invoice can have one that matters. A read error leaves
+	// it false: the banner then offers Retry, which a live page refuses with a
+	// clear message.
+	if s.paymentPages != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if inv.Status == domain.InvoiceFinalized &&
+				(inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed) {
+				return inv.ID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			if live, err := s.paymentPages.PaymentPagesLive(ctx, tenantID, ids); err == nil {
+				f.pageLive = live
+			}
+		}
+	}
+	return f
+}
+
+// distinct collects the non-empty keys key returns over the page, each once,
+// in first-seen order.
+func distinct(page []domain.Invoice, key func(domain.Invoice) string) []string {
+	seen := make(map[string]bool, len(page))
+	var out []string
+	for _, inv := range page {
+		k := key(inv)
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	return out
+}
+
+// decorateInvoice sets one invoice's Attention, RecoveryWarning and
+// BillingPeriodDisplay from its row and the page's facts. tenantLoc caches
+// the tenant timezone across the page.
+func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f attentionFacts, tenantLoc **time.Location) domain.Invoice {
 	// Wall-clock now ages the in-flight payment banner (Info → Warning past the
 	// expected-settle window). Deliberately NOT s.clock.Now(ctx): processing
 	// staleness is a real-world duration (the provider settles in wall-clock),
 	// and the classifier guards on !IsSimulated so a clock-pinned invoice never
 	// escalates on a wall-clock age it can't satisfy.
 	atc := domain.AttentionContext{Now: time.Now().UTC()} //nolint:forbidigo // wall-clock: processing-staleness is a real-world duration (provider settles in wall-clock); classifier guards on !IsSimulated
-	if s.paymentMethods != nil && inv.CustomerID != "" {
-		ps, err := s.paymentMethods.GetPaymentSetup(ctx, inv.TenantID, inv.CustomerID)
-		if err == nil && ps.SetupStatus == domain.PaymentSetupReady && ps.StripeCustomerID != "" {
-			atc.HasPaymentMethod = true
-		}
+	atc.HasPaymentMethod = inv.CustomerID != "" && f.paymentReady[inv.CustomerID]
+	if awaitsPaymentNoCard(inv, atc.HasPaymentMethod) {
+		atc.CustomerHasEmail = f.hasEmail[inv.CustomerID]
+		atc.DunningEscalated = f.escalated[inv.ID]
 	}
-	// Email presence drives the no_payment_method banner variant (the engine's
-	// setup-link email skips silently with no address, so the banner must not
-	// claim it was sent). Fetch lazily — only for the finalized-unpaid-no-PM
-	// invoices that actually reach that classifier branch — so list reads don't
-	// pay a customer lookup per row. The guard is a cheap superset of the
-	// classifier's no_payment_method precondition; a rare over-fetch when a
-	// higher-priority reason (tax/payment failure) preempts it is harmless.
-	// On a lookup error CustomerHasEmail stays false: the classifier's
-	// false-branch copy states engine behavior rather than asserting the
-	// customer's email state, so the banner is honest even when undetermined.
-	if !atc.HasPaymentMethod && inv.Status == domain.InvoiceFinalized &&
-		inv.PaymentStatus == domain.PaymentPending &&
-		s.customerReader != nil && inv.CustomerID != "" {
-		if cust, err := s.customerReader.Get(ctx, inv.TenantID, inv.CustomerID); err == nil {
-			atc.CustomerHasEmail = cust.Email != ""
-		}
-	}
-	// Same lazy guard for the dunning-escalated signal (P1-4): only the
-	// finalized-unpaid-no-PM invoices that reach classifyNoPaymentMethod
-	// pay the run lookup, so list reads stay cheap. ErrNotFound / read
-	// errors leave the zero-value (false) — the banner shows the normal
-	// pre-escalation copy, which is the safe direction of drift.
-	if !atc.HasPaymentMethod && inv.Status == domain.InvoiceFinalized &&
-		inv.PaymentStatus == domain.PaymentPending &&
-		s.dunningReader != nil && inv.ID != "" {
-		if run, err := s.dunningReader.GetRunByInvoice(ctx, inv.TenantID, inv.ID); err == nil {
-			atc.DunningEscalated = run.State == domain.DunningEscalated
-		}
-	}
-	// Pause state for the queued-but-not-scheduled banner, gated on the exact
-	// precondition of the branch that reads it. A list page still pays one
-	// primary-key subscription read per QUEUED row — healthy, paid, draft and
-	// failed rows skip it entirely, and a queued row is the only one whose
-	// banner can make the false promise. Same shape and cost profile as the
-	// dunning-run lookup above.
-	//
-	// Card-less invoices read it too: their notice says "charged once the
-	// customer adds a card", which is false while collection is paused (the
-	// sweep that charges on attach skips paused subscriptions). Same cost
-	// profile — the no-card rows already pay the customer and dunning reads.
 	if (inv.AutoChargePending || !atc.HasPaymentMethod) && inv.Status == domain.InvoiceFinalized &&
 		inv.PaymentStatus == domain.PaymentPending {
-		// Display-only: a read error shows the not-paused banner (logged);
-		// the collector itself refuses to charge a paused subscription.
-		paused, perr := s.collectionPaused(ctx, inv.TenantID, inv.SubscriptionID)
-		if perr != nil {
-			slog.Warn("invoice: attention could not read pause state", "error", perr,
-				"tenant_id", inv.TenantID, "invoice_id", inv.ID)
-		}
-		atc.CollectionPaused = paused
+		atc.CollectionPaused = f.paused[inv.SubscriptionID]
 	}
-	// A live hosted payment page holds every Velox charge (ADR-068). Only a
-	// finalized, unpaid invoice can have one that matters; one indexed EXISTS
-	// per such row. A read error leaves it false: the banner then offers Retry,
-	// which a live page refuses with a clear message.
-	if s.paymentPages != nil && inv.ID != "" && inv.Status == domain.InvoiceFinalized &&
-		(inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed) {
-		if live, err := s.paymentPages.PaymentPageLive(ctx, inv.TenantID, inv.ID); err == nil {
-			atc.PaymentPageOpen = live
-		}
-	}
+	atc.PaymentPageOpen = f.pageLive[inv.ID]
 	// A clock-pinned invoice's failure banner dates "since" from its latest
 	// failed charge's simulated instant. Simulated failed invoices only, so a
 	// live list page never pays this read.
@@ -914,8 +1072,8 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 		}
 	}
 	// Prepaid-commit exposure: credit this invoice already handed the customer
-	// while the cash never arrived (ADR-078 D3 fast-follow). Same lazy shape as
-	// the siblings above, with the tightest guard of any of them — commit lines
+	// while the cash never arrived (ADR-078 D3 fast-follow). Read per row, but
+	// behind the tightest guard of any attention read — commit lines
 	// are manual-invoice-only and funded at finalize (ADR-078 D2/D3), so a
 	// draft, a subscription-cycle invoice, or a paid one can never carry a live
 	// grant and never pays for the lookup. What remains is one hit on the
@@ -939,14 +1097,7 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 			atc.CommitGrantConsumedCents = consumed
 		}
 	}
-	if s.stripeChecker != nil && inv.TenantID != "" {
-		// Livemode comes off ctx (auth middleware set it) — invoice
-		// rows don't carry the column on the domain struct since the
-		// DB trigger derives it from app.livemode at insert time. The
-		// request that's reading the invoice is already mode-scoped,
-		// so the ctx value matches the row's stored mode under RLS.
-		atc.StripeConnected = s.stripeChecker.HasFor(ctx, inv.TenantID, postgres.Livemode(ctx))
-	}
+	atc.StripeConnected = f.stripeConnected
 	atc.SetupLinkEmailOff = s.setupLinkEmailOff
 	inv.Attention = domain.ClassifyInvoiceAttention(inv, atc)
 
@@ -977,7 +1128,7 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 	// creation), not the live tenant TZ — so the inclusive last-day step lands on
 	// the right civil date even after the tenant changes its timezone.
 	inv.BillingPeriodDisplay = domain.FormatInclusivePeriod(
-		inv.BillingPeriodStart, inv.BillingPeriodEnd, s.invoiceDisplayLoc(ctx, inv))
+		inv.BillingPeriodStart, inv.BillingPeriodEnd, s.invoiceDisplayLocCached(ctx, inv, tenantLoc))
 	return inv
 }
 
@@ -986,10 +1137,21 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 // ad-hoc/manual invoices with no owning subscription and legacy rows created
 // before the snapshot column existed (preserving their prior display exactly).
 func (s *Service) invoiceDisplayLoc(ctx context.Context, inv domain.Invoice) *time.Location {
+	var tenantLoc *time.Location
+	return s.invoiceDisplayLocCached(ctx, inv, &tenantLoc)
+}
+
+// invoiceDisplayLocCached is invoiceDisplayLoc reading the tenant TZ at most
+// once into *tenantLoc, so a list page of one tenant's invoices pays one
+// settings read, not one per row.
+func (s *Service) invoiceDisplayLocCached(ctx context.Context, inv domain.Invoice, tenantLoc **time.Location) *time.Location {
 	if inv.BillingTimezone != "" {
 		return domain.LoadLocationOrUTC(inv.BillingTimezone)
 	}
-	return s.invoiceLocation(ctx, inv.TenantID)
+	if *tenantLoc == nil {
+		*tenantLoc = s.invoiceLocation(ctx, inv.TenantID)
+	}
+	return *tenantLoc
 }
 
 // invoiceLocation resolves the tenant billing timezone for display math, UTC
@@ -1011,10 +1173,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice
 	if err != nil {
 		return nil, 0, err
 	}
-	for i := range invs {
-		invs[i] = s.attachAttention(ctx, invs[i])
-	}
-	return invs, total, nil
+	return s.attachAttentionAll(ctx, invs), total, nil
 }
 
 func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Invoice, error) {

@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/sagarsuperuser/velox/internal/platform/migrate"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -66,6 +67,24 @@ func SetupTestDB(t *testing.T) *postgres.DB {
 	})
 
 	return db
+}
+
+// OpenTracedDB opens a second app-user (RLS-enforced) connection to the test
+// database whose every statement passes through tracer. Call it after
+// SetupTestDB (which migrates and cleans). For tests that assert how many
+// queries or transactions a read path costs — an N+1 regression shows up as
+// a count that grows with the row count (issue #1142).
+func OpenTracedDB(t *testing.T, tracer pgx.QueryTracer) *postgres.DB {
+	t.Helper()
+	cfg, err := pgx.ParseConfig(envOr("TEST_DATABASE_URL", defaultAppDBURL))
+	if err != nil {
+		t.Fatalf("parse test db url: %v", err)
+	}
+	cfg.Tracer = tracer
+	pool := stdlib.OpenDB(*cfg)
+	pool.SetMaxOpenConns(5)
+	t.Cleanup(func() { _ = pool.Close() })
+	return postgres.NewDB(pool, 5*time.Second)
 }
 
 func openPool(t *testing.T, url string) *sql.DB {

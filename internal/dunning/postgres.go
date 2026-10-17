@@ -519,6 +519,46 @@ func (s *PostgresStore) GetRunByInvoice(ctx context.Context, tenantID, invoiceID
 	return run, err
 }
 
+// ListRunsByInvoices returns the dunning runs of the given invoices in one
+// read — at most one per invoice (idx_dunning_runs_one_per_invoice), the same
+// row GetRunByInvoice returns. Invoices with no run are simply absent. Backs
+// the invoice list's attention banners, which read the run of many rows at
+// once (issue #1142).
+func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) ([]domain.InvoiceDunningRun, error) {
+	if len(invoiceIDs) == 0 {
+		return nil, nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
+			COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
+			paused, resolved_at, COALESCE(resolution,''), created_at, updated_at
+		FROM invoice_dunning_runs
+		WHERE invoice_id = ANY($1::text[])
+	`, postgres.StringArray(invoiceIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []domain.InvoiceDunningRun
+	for rows.Next() {
+		var run domain.InvoiceDunningRun
+		if err := rows.Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
+			&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
+			&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
 func (s *PostgresStore) GetActiveRunByInvoice(ctx context.Context, tenantID, invoiceID string) (domain.InvoiceDunningRun, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

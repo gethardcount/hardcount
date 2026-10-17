@@ -22,6 +22,7 @@ Older entries keep their original text.
 ### Fixed
 
 - **Database upgrades no longer wait on a table lock without limit (2026-10-17, #987).** A migration that cannot get its lock within 5 seconds stops, leaves nothing behind and says how to retry; `MIGRATION_LOCK_TIMEOUT` changes the limit. New migrations that build an index or add a constraint the write-blocking way now fail CI ([runbook](docs/ops/runbook/migration-lock-timeout.md)).
+- **The invoice list costs the same few database reads whatever the page size (2026-10-17).** Each row used to read its own banner facts (card on file, Stripe connection, dunning, pause, payment page), so 25 rows took about 110 ms. A page now reads each fact once. Banners are unchanged (#1142).
 - **The Compose stack passes the Postmark webhook login and `VELOX_API_BASE_URL` to Velox (2026-10-17).** Set `POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS` and `VELOX_API_BASE_URL` in `.env`; editing `docker-compose.yml` or adding an override file is no longer needed (#1150).
 
 ### Changed
