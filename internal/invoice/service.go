@@ -1322,8 +1322,7 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// endpoint (actor = the operator, from ctx) AND the tax-retry
 	// auto-finalize chain (actor = system). The handler's own write was
 	// removed alongside this — two writers per action is the duplicate-row
-	// bug mark-uncollectible / record-payment had. The TTFI metric
-	// (ttfi_postgres.go) reads MIN(created_at) over these rows.
+	// bug mark-uncollectible / record-payment had.
 	if s.audit != nil {
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionFinalize, "invoice", finalized.ID, finalized.InvoiceNumber, map[string]any{
 			"invoice_number":     finalized.InvoiceNumber,

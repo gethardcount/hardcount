@@ -132,21 +132,6 @@ func InvalidState(message string) *DomainError {
 	}
 }
 
-// PreconditionFailed signals that an HTTP precondition — typically an
-// If-Match header carrying the caller's expected resource version — did
-// not match the current state. Maps to HTTP 412. The intended use is
-// optimistic concurrency: the client sends If-Match with the ETag it last
-// saw, and this error fires when a concurrent writer has bumped the
-// version in between.
-//
-//	return errs.PreconditionFailed("coupon has been modified, refresh and retry")
-func PreconditionFailed(message string) *DomainError {
-	return &DomainError{
-		Kind:    ErrPreconditionFailed,
-		Message: message,
-	}
-}
-
 // Forbidden marks an authorization denial — the caller is authenticated but
 // not permitted to perform this action (distinct from Invalid, which is bad
 // input, and from a missing-auth 401). Maps to HTTP 403. Use at the service

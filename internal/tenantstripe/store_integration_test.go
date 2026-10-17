@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/crypto"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
@@ -25,7 +26,7 @@ import (
 func TestStore_TenantAndModeScoping_RealPostgres(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
-	ctx, cancel := context.WithTimeout(testutil.TestCtx(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
 	defer cancel()
 
 	// The real AES-GCM encryptor, not the no-op default: the at-rest

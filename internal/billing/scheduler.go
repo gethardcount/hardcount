@@ -126,9 +126,6 @@ type Scheduler struct {
 	clock             clock.Clock
 }
 
-// Interval returns the configured scheduler interval.
-func (s *Scheduler) Interval() time.Duration { return s.interval }
-
 func NewScheduler(engine *Engine, interval time.Duration, batch int, dunning DunningProcessor, tenants TenantLister, clk clock.Clock, credits ...CreditExpirer) *Scheduler {
 	if interval <= 0 {
 		interval = 1 * time.Hour

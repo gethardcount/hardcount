@@ -236,7 +236,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	pricingSvc.SetSubscriptionPlanUsageReader(subStore)
 	pricingSvc.SetCustomerReader(customerStore)
 	customerSvc := customer.NewService(customerStore)
-	customerSvc.SetStripeSyncer(payment.NewStripeBillingSync(stripeClients), customerStore)
+	customerSvc.SetStripeSyncer(payment.NewStripeBillingSync(stripeClients))
 	customerH := customer.NewHandler(customerSvc)
 	pricingH := pricing.NewHandler(pricingSvc)
 	subSvc := subscription.NewService(subStore, clk)
@@ -282,7 +282,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	}
 
 	// Wire proration dependencies for plan change invoicing
-	subH.SetProrationDeps(pricingSvc, &prorationInvoiceCreatorAdapter{store: invoiceStore, numberer: settingsStore}, &prorationCreditGranterAdapter{svc: creditSvc})
+	subH.SetProrationDeps(pricingSvc, &prorationInvoiceCreatorAdapter{PostgresStore: invoiceStore, numberer: settingsStore}, &prorationCreditGranterAdapter{svc: creditSvc})
 
 	// Payment / webhook / checkout / refund handlers
 	stripeRefunder := payment.NewStripeRefunder(stripeClients)
@@ -495,9 +495,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		PaymentSetups:   paymentSetupStore,
 		PaymentCancel:   stripeAdapter,
 		Dunning:         dunningSvc,
-		WebhookEvents:   webhookStore,
 		DunningTimeline: &dunningTimelineAdapter{store: dunningStore},
-		Events:          eventDispatcher,
 		RefundIssuer:    &refundIssuerAdapter{svc: creditNoteSvc},
 	})
 	// Return URLs are passed per-request now (return_url body field)
@@ -790,7 +788,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// summary table.
 	paymentReadiness := &paymentReadinessAdapter{customers: customerStore, pms: paymentMethodsSvc}
 	engine := billing.NewEngine(subStore, usageStore, pricingSvc,
-		&invoiceWriterAdapter{store: invoiceStore}, creditSvc, settingsStore, paymentReadiness, stripeAdapter, clk, customerStore)
+		&invoiceWriterAdapter{PostgresStore: invoiceStore}, creditSvc, settingsStore, paymentReadiness, stripeAdapter, clk, customerStore)
 	// ADR-101 Phase 4 (2026-07-28): billing_intervals is the ONLY
 	// segment source — the legacy fact-log interpretation, the shadow
 	// comparator, and the VELOX_BILLING_INTERVALS_READER kill switches

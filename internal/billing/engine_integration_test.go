@@ -76,10 +76,6 @@ func (a *subStoreAdapter) ClearPauseCollection(ctx context.Context, tenantID, id
 	return a.store.ClearPauseCollection(ctx, tenantID, id)
 }
 
-func (a *subStoreAdapter) ActivateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error) {
-	return a.store.ActivateAfterTrial(ctx, tenantID, id, at)
-}
-
 func (a *subStoreAdapter) ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error) {
 	return a.store.ListWithThresholds(ctx, livemode, afterID, limit)
 }
@@ -126,10 +122,6 @@ type usageStoreAdapter struct {
 	store *usage.PostgresStore
 }
 
-func (a *usageStoreAdapter) AggregateForBillingPeriod(ctx context.Context, tenantID, subID string, meterIDs []string, from, to time.Time) (map[string]decimal.Decimal, error) {
-	return a.store.AggregateForBillingPeriod(ctx, tenantID, subID, meterIDs, from, to)
-}
-
 func (a *usageStoreAdapter) AggregateForBillingPeriodByAgg(ctx context.Context, tenantID, customerID string, meters map[string]string, from, to time.Time) (map[string]decimal.Decimal, error) {
 	return a.store.AggregateForBillingPeriodByAgg(ctx, tenantID, customerID, meters, from, to)
 }
@@ -141,14 +133,6 @@ func (a *usageStoreAdapter) AggregateByPricingRules(ctx context.Context, tenantI
 // invoiceStoreAdapter wraps invoice.PostgresStore to implement billing.InvoiceWriter
 type invoiceStoreAdapter struct {
 	store *invoice.PostgresStore
-}
-
-func (a *invoiceStoreAdapter) CreateInvoice(ctx context.Context, tenantID string, inv domain.Invoice) (domain.Invoice, error) {
-	return a.store.Create(ctx, tenantID, inv)
-}
-
-func (a *invoiceStoreAdapter) CreateLineItem(ctx context.Context, tenantID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, error) {
-	return a.store.CreateLineItem(ctx, tenantID, item)
 }
 
 func (a *invoiceStoreAdapter) GetInvoice(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
@@ -211,16 +195,8 @@ func (a *invoiceStoreAdapter) UpdateTaxAtomic(ctx context.Context, tenantID, inv
 	return a.store.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, lineItems)
 }
 
-func (a *invoiceStoreAdapter) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
-	return a.store.FindBaseInvoiceForPeriod(ctx, tenantID, subscriptionID, periodStart)
-}
-
 func (a *invoiceStoreAdapter) FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error) {
 	return a.store.FindFundingInvoicesForPeriod(ctx, tenantID, subscriptionID, periodStart, periodEnd)
-}
-
-func (a *invoiceStoreAdapter) LatestThresholdPeriodEnd(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error) {
-	return a.store.LatestThresholdPeriodEnd(ctx, tenantID, subscriptionID, periodStart, periodEnd)
 }
 
 func (a *invoiceStoreAdapter) GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {

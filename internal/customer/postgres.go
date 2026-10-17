@@ -1175,24 +1175,13 @@ func buildCustomerWhere(f ListFilter) (string, []any) {
 			args = append(args, id)
 			idx++
 		}
-		clauses = append(clauses, "id IN ("+join(placeholders, ",")+")")
+		clauses = append(clauses, "id IN ("+strings.Join(placeholders, ",")+")")
 	}
 
 	if len(clauses) == 0 {
 		return "", args
 	}
-	return " WHERE " + join(clauses, " AND "), args
-}
-
-func join(parts []string, sep string) string {
-	result := ""
-	for i, p := range parts {
-		if i > 0 {
-			result += sep
-		}
-		result += p
-	}
-	return result
+	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
 // StreamForExport walks EVERY customer in the date range in ONE snapshot

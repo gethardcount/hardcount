@@ -156,21 +156,6 @@ func cleanDBErr(pool *sql.DB) error {
 	return err
 }
 
-// TestCtx returns a context with livemode pinned to false (test mode)
-// — matching the partition every integration test fixture inserts
-// against. Tests that go through the auth middleware in production
-// would inherit livemode from the API key; tests that hit stores or
-// services directly need to pin it explicitly, otherwise BeginTx
-// trips the strict-mode panic ("TxTenant opened without ctx
-// livemode") and silently routes to live in non-strict builds.
-//
-// Default: livemode=false (test). For live-mode integration tests,
-// wrap context.Background() with postgres.WithLivemode(ctx, true)
-// directly — those are rare enough not to warrant a separate helper.
-func TestCtx() context.Context {
-	return postgres.WithLivemode(context.Background(), false)
-}
-
 // CreateTestTenant inserts a tenant via the app connection (bypass RLS).
 // Since tenants table has no RLS, this works directly.
 func CreateTestTenant(t *testing.T, db *postgres.DB, name string) string {

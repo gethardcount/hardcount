@@ -110,11 +110,6 @@ type DunningResolver interface {
 	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
 
-// WebhookEventLister lists webhook events for payment timeline.
-type WebhookEventLister interface {
-	ListByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.StripeWebhookEvent, error)
-}
-
 // DunningTimelineFetcher fetches dunning data for payment timeline.
 type DunningTimelineFetcher interface {
 	ListRunsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDunningRun, error)
@@ -226,10 +221,8 @@ type Handler struct {
 	paymentSetups   PaymentSetupGetter
 	paymentCancel   PaymentCanceler
 	dunning         DunningResolver
-	webhookEvents   WebhookEventLister
 	emailEvents     EmailEventLister
 	dunningTimeline DunningTimelineFetcher
-	events          domain.EventDispatcher
 	emailSender     EmailSender
 	refundIssuer    RefundIssuer
 	auditLogger     auditWriter
@@ -258,10 +251,8 @@ type HandlerDeps struct {
 	PaymentSetups   PaymentSetupGetter
 	PaymentCancel   PaymentCanceler
 	Dunning         DunningResolver
-	WebhookEvents   WebhookEventLister
 	EmailEvents     EmailEventLister
 	DunningTimeline DunningTimelineFetcher
-	Events          domain.EventDispatcher
 	RefundIssuer    RefundIssuer
 }
 
@@ -273,10 +264,8 @@ func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter,
 		h.paymentSetups = deps[0].PaymentSetups
 		h.paymentCancel = deps[0].PaymentCancel
 		h.dunning = deps[0].Dunning
-		h.webhookEvents = deps[0].WebhookEvents
 		h.emailEvents = deps[0].EmailEvents
 		h.dunningTimeline = deps[0].DunningTimeline
-		h.events = deps[0].Events
 		h.refundIssuer = deps[0].RefundIssuer
 	}
 	return h
@@ -308,7 +297,7 @@ func (h *Handler) SetCollector(c Collector) { h.collector = c }
 // SetEmailEvents wires the email_outbox lister used by the timeline
 // to surface customer-notification events. Optional — when nil, the
 // timeline omits the email rows but the rest of it (lifecycle,
-// stripe webhooks, dunning) renders unchanged.
+// charge attempts, credit notes, dunning) renders unchanged.
 func (h *Handler) SetEmailEvents(lister EmailEventLister) {
 	h.emailEvents = lister
 }
@@ -316,9 +305,6 @@ func (h *Handler) SetEmailEvents(lister EmailEventLister) {
 // SetAuditLogger configures audit logging for financial operations.
 func (h *Handler) SetAuditLogger(l auditWriter) { h.auditLogger = l }
 
-// fireEvent dispatches a webhook event. Synchronous: with the outbox
-// (RES-1) Dispatch is a short DB insert that must persist-before-return,
-// and logging any failure is preferred to silently losing the event.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)

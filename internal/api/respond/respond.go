@@ -70,18 +70,6 @@ func NotFound(w http.ResponseWriter, r *http.Request, resource string) {
 	Error(w, r, http.StatusNotFound, "invalid_request_error", "not_found", resource+" not found")
 }
 
-func Conflict(w http.ResponseWriter, r *http.Request, message string) {
-	errorField(w, r, http.StatusConflict, "invalid_request_error", "already_exists", "", message)
-}
-
-// ConflictField writes a 409 response with the offending field name in the
-// envelope's Param slot so the frontend can attach the message to the right
-// input. Use when a create/update fails because a user-supplied value
-// collides with an existing record (plan.code, coupon.code, etc.).
-func ConflictField(w http.ResponseWriter, r *http.Request, field, message string) {
-	errorField(w, r, http.StatusConflict, "invalid_request_error", "already_exists", field, message)
-}
-
 func Validation(w http.ResponseWriter, r *http.Request, message string) {
 	errorField(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "validation_error", "", message)
 }

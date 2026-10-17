@@ -65,7 +65,7 @@ func (erroringEngineAudit) LogInTx(context.Context, *sql.Tx, audit.Entry) error 
 
 // TestFinalizeAuditEmission pins the engine-side finalize-audit contract after
 // the ADR-090 migration: an engine-created FINALIZED invoice writes exactly one
-// finalize row, IN THE INVOICE'S TRANSACTION (the row the TTFI metric reads);
+// finalize row, IN THE INVOICE'S TRANSACTION;
 // drafts (tax-pending / pause-collection) are skipped — they get their row from
 // service.Finalize when the tax-retry chain finalizes them, and writing here too
 // would double-count; clock-pinned subs inherit the sim axis from ctx (ADR-030:

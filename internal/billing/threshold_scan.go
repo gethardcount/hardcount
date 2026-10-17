@@ -894,7 +894,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	}
 
 	// The finalize AUDIT row already committed inside the fire tx above (same
-	// finalize-row contract as the cycle path; feeds TTFI + the audit log). Here
+	// finalize-row contract as the cycle path). Here
 	// only the post-commit WEBHOOK fires.
 	e.dispatchInvoiceFinalized(ctx, sub, inv)
 

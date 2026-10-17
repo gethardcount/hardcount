@@ -34,14 +34,6 @@ type StripeSyncer interface {
 	SyncBillingProfile(ctx context.Context, stripeCustomerID, customerEmail string, bp domain.CustomerBillingProfile) error
 }
 
-// PaymentSetupReader — DEPRECATED. The 1:1 customer_payment_setups
-// summary was retired in migration 0097. The Stripe Customer ID lives
-// on customers.stripe_customer_id (read via store.Get) and PM details
-// live on payment_methods rows. Kept as a no-op interface so existing
-// callers compile during the transition; new code should depend on
-// customer.Service.Get and read cust.StripeCustomerID directly.
-type PaymentSetupReader interface{}
-
 // TestClockChecker validates a test_clock_id at customer-create time (Stripe
 // parity, ADR-027) and hands back that clock's simulated instant with it.
 // Implemented by *testclock.PostgresStore.
@@ -117,7 +109,6 @@ type AuditEmitter interface {
 type Service struct {
 	store         Store
 	stripeSyncer  StripeSyncer
-	paymentSetups PaymentSetupReader
 	clocks        TestClockChecker
 	taxFlusher    TaxFlusher
 	events        domain.EventDispatcher
@@ -196,9 +187,8 @@ func (s *Service) AuditCtx(ctx context.Context, tenantID, customerID string) con
 }
 
 // SetStripeSyncer configures Stripe sync (optional, breaks circular dep).
-func (s *Service) SetStripeSyncer(syncer StripeSyncer, setups PaymentSetupReader) {
+func (s *Service) SetStripeSyncer(syncer StripeSyncer) {
 	s.stripeSyncer = syncer
-	s.paymentSetups = setups
 }
 
 // SetSubscriptionChecker wires the archive/currency guard's subscription

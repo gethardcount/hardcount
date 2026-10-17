@@ -21,7 +21,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // Init sets up the global OpenTelemetry tracer provider.
@@ -87,9 +86,4 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 // Safe to call even when tracing is disabled (returns noop tracer).
 func Tracer(name string) trace.Tracer {
 	return otel.Tracer(name)
-}
-
-// NoopTracer returns a tracer that does nothing (for tests).
-func NoopTracer() trace.Tracer {
-	return noop.NewTracerProvider().Tracer("")
 }

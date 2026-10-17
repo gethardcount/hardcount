@@ -201,88 +201,28 @@ func (a *paymentReadinessAdapter) ResolveForCharge(ctx context.Context, tenantID
 	return cust.StripeCustomerID, "", nil
 }
 
+// invoiceWriterAdapter bridges invoice.PostgresStore → billing.InvoiceWriter.
+// The embedded store supplies every method whose name already matches the
+// engine's; the four below exist only because the engine names them
+// differently.
 type invoiceWriterAdapter struct {
-	store *invoice.PostgresStore
+	*invoice.PostgresStore
 }
 
 func (a *invoiceWriterAdapter) GetInvoice(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	return a.store.Get(ctx, tenantID, id)
-}
-
-func (a *invoiceWriterAdapter) MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error) {
-	return a.store.MarkPaid(ctx, tenantID, id, stripePaymentIntentID, paidAt)
+	return a.Get(ctx, tenantID, id)
 }
 
 func (a *invoiceWriterAdapter) CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.store.CreateWithLineItems(ctx, tenantID, inv, items)
+	return a.CreateWithLineItems(ctx, tenantID, inv, items)
 }
 
 func (a *invoiceWriterAdapter) CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
-	return a.store.CreateWithLineItemsAudited(ctx, tenantID, inv, items, emit)
+	return a.CreateWithLineItemsAudited(ctx, tenantID, inv, items, emit)
 }
 
 func (a *invoiceWriterAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.store.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
-}
-
-func (a *invoiceWriterAdapter) SetAutoChargePending(ctx context.Context, tenantID, id string, pending bool) error {
-	return a.store.SetAutoChargePending(ctx, tenantID, id, pending)
-}
-
-func (a *invoiceWriterAdapter) SetNoPMNotifiedAt(ctx context.Context, tenantID, invoiceID string, at time.Time) error {
-	return a.store.SetNoPMNotifiedAt(ctx, tenantID, invoiceID, at)
-}
-
-func (a *invoiceWriterAdapter) ClaimAutoCharge(ctx context.Context, tenantID, id string) (bool, error) {
-	return a.store.ClaimAutoCharge(ctx, tenantID, id)
-}
-
-func (a *invoiceWriterAdapter) ReleaseAutoChargeClaim(ctx context.Context, tenantID, id string) error {
-	return a.store.ReleaseAutoChargeClaim(ctx, tenantID, id)
-}
-
-func (a *invoiceWriterAdapter) ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
-	return a.store.ListAutoChargePending(ctx, after, limit)
-}
-
-func (a *invoiceWriterAdapter) ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
-	return a.store.ListAutoChargePendingForClock(ctx, tenantID, clockID, after, limit)
-}
-
-func (a *invoiceWriterAdapter) RecordChargeAttempt(ctx context.Context, tenantID string, att domain.InvoiceChargeAttempt) error {
-	return a.store.RecordChargeAttempt(ctx, tenantID, att)
-}
-
-func (a *invoiceWriterAdapter) ListFailedWithoutDunningRun(ctx context.Context, olderThan time.Time, limit int) ([]domain.Invoice, error) {
-	return a.store.ListFailedWithoutDunningRun(ctx, olderThan, limit)
-}
-
-func (a *invoiceWriterAdapter) SetTaxTransaction(ctx context.Context, tenantID, id string, taxTransactionID string) error {
-	return a.store.SetTaxTransaction(ctx, tenantID, id, taxTransactionID)
-}
-
-func (a *invoiceWriterAdapter) ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error) {
-	return a.store.ListLineItems(ctx, tenantID, invoiceID)
-}
-
-func (a *invoiceWriterAdapter) UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.store.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, lineItems)
-}
-
-func (a *invoiceWriterAdapter) FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error) {
-	return a.store.FindFundingInvoicesForPeriod(ctx, tenantID, subscriptionID, periodStart, periodEnd)
-}
-
-func (a *invoiceWriterAdapter) GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
-	return a.store.GetLatestThresholdInvoiceForCycle(ctx, tenantID, subscriptionID, periodStart, periodEnd)
-}
-
-func (a *invoiceWriterAdapter) GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
-	return a.store.GetLatestThresholdInvoiceForCycleTx(ctx, tx, tenantID, subscriptionID, periodStart, periodEnd)
-}
-
-func (a *invoiceWriterAdapter) GetInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
-	return a.store.GetInvoiceForPeriod(ctx, tenantID, subscriptionID, periodStart, periodEnd)
+	return a.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
 }
 
 // creditGrantAdapter bridges credit.Service → creditnote.CreditGranter.
@@ -900,29 +840,21 @@ func (a *prorationCreditGranterAdapter) GrantProrationTx(ctx context.Context, tx
 }
 
 // prorationInvoiceCreatorAdapter bridges invoice.PostgresStore + tenant.SettingsStore → subscription.ProrationInvoiceCreator.
+// The embedded store supplies the methods whose names already match
+// (GetByProrationSource, FindBaseInvoiceForPeriod, FindFundingInvoicesForPeriod,
+// SetAutoChargePending, SetAutoChargePendingTx); the methods below rename a
+// store method or route to the numberer.
 type prorationInvoiceCreatorAdapter struct {
-	store    *invoice.PostgresStore
+	*invoice.PostgresStore
 	numberer invoice.InvoiceNumberer
 }
 
 func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.store.CreateWithLineItems(ctx, tenantID, inv, items)
-}
-
-func (a *prorationInvoiceCreatorAdapter) GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error) {
-	return a.store.GetByProrationSource(ctx, tenantID, subscriptionID, subscriptionItemID, changeType, changeAt)
+	return a.CreateWithLineItems(ctx, tenantID, inv, items)
 }
 
 func (a *prorationInvoiceCreatorAdapter) NextInvoiceNumber(ctx context.Context, tenantID string) (string, error) {
 	return a.numberer.NextInvoiceNumber(ctx, tenantID)
-}
-
-func (a *prorationInvoiceCreatorAdapter) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
-	return a.store.FindBaseInvoiceForPeriod(ctx, tenantID, subscriptionID, periodStart)
-}
-
-func (a *prorationInvoiceCreatorAdapter) FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error) {
-	return a.store.FindFundingInvoicesForPeriod(ctx, tenantID, subscriptionID, periodStart, periodEnd)
 }
 
 // CreateInvoiceWithLineItemsTx + NextInvoiceNumberTx are the
@@ -931,24 +863,11 @@ func (a *prorationInvoiceCreatorAdapter) FindFundingInvoicesForPeriod(ctx contex
 // just forwards to the underlying store + numberer's Tx methods.
 // ADR-030 atomic-proration follow-through (2026-05-29).
 func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.store.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
+	return a.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
 }
 
 func (a *prorationInvoiceCreatorAdapter) NextInvoiceNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
 	return a.numberer.NextInvoiceNumberTx(ctx, tx, tenantID)
-}
-
-// SetAutoChargePending enrolls a finalized proration charge invoice into the
-// auto-charge sweep (forwards to the store's existing method — the same one the
-// engine's finalize path uses).
-func (a *prorationInvoiceCreatorAdapter) SetAutoChargePending(ctx context.Context, tenantID, id string, pending bool) error {
-	return a.store.SetAutoChargePending(ctx, tenantID, id, pending)
-}
-
-// SetAutoChargePendingTx forwards to the store's tx-aware variant so the atomic
-// proration path enrolls inside its own tx.
-func (a *prorationInvoiceCreatorAdapter) SetAutoChargePendingTx(ctx context.Context, tx *sql.Tx, tenantID, id string, pending bool) error {
-	return a.store.SetAutoChargePendingTx(ctx, tx, tenantID, id, pending)
 }
 
 // prorationTaxApplierAdapter bridges billing.Engine → subscription.ProrationTaxApplier.

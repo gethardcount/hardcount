@@ -162,9 +162,7 @@ func (e *Engine) dispatchEvent(ctx context.Context, tenantID, eventType string, 
 //
 // The operator HTTP path and the tax-retry auto-finalize get their row from
 // invoice.Service.Finalize; engine invoices never pass through Finalize — they
-// are born finalized — so without this they leave no audit trace at all, and the
-// TTFI metric (MIN(created_at) of finalize rows) reports nothing for tenants
-// whose first invoice is engine-generated (the normal path).
+// are born finalized — so without this they leave no audit trace at all.
 func finalizeAuditEntry(inv domain.Invoice) (audit.Entry, bool) {
 	if inv.Status != domain.InvoiceFinalized {
 		return audit.Entry{}, false

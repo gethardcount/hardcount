@@ -2981,11 +2981,6 @@ func (s *PostgresStore) ListItemChangesInPeriod(ctx context.Context, tenantID, s
 	return out, rows.Err()
 }
 
-// Subscription scan now includes PlanChangedAt on items, but the bytes
-// exchange via JSON. pgx returns bytea for JSONB by default; store/consume
-// raw bytes on the Metadata field so the caller owns the encoding policy.
-var _ = sql.ErrNoRows // retain import
-
 // ErrTrialCancelDue / ErrTrialCancelConflict live in domain (the billing
 // engine routes on them without a peer import); aliased here for the
 // package's own callers.
