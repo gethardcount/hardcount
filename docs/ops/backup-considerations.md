@@ -1,117 +1,149 @@
-# Backup Considerations
+# Back up Velox
 
-Velox-specific backup semantics: which data must survive, and how to
-prove a restore worked. Written for whoever operates Velox's Postgres
-database. The mechanics of taking and restoring a Postgres backup are
-your DBA (database administrator) team's call — pgbackrest, WAL-G, RDS
-PITR (point-in-time recovery), postgres-operator backups; pick what
-fits your infra. This doc names what you need to know **about Velox**
-to take a useful backup and validate a successful restore.
+Back up two things: the Postgres database and the encryption key. This page is for the engineer who runs Velox. It shows how to back up with the scripts in this repository, how to restore, and how to prove a restore works.
 
-## What's financial vs transient
+Think of the encryption key as the key to a safe, and the backup as the safe. A backup without its key cannot be opened, so the two must be kept apart, and both must be kept.
 
-Not every table in Velox carries equal weight. A backup that loses
-some tables is recoverable; losing others is a financial liability.
-Categorise by tier:
+On the one-VM Docker Compose install, follow [Production on one VM, step 7](../production-one-vm.md#7-back-up-every-night): it runs these scripts in a container, every night.
 
-### Tier 1 — Financial (never lose these)
+## 1. Keep the encryption key
 
-Loss of any row in these tables is unrecoverable financial harm.
-Backup MUST include them; restore MUST verify they match.
+`VELOX_ENCRYPTION_KEY` encrypts personal data (email, names, phone numbers, tax IDs), webhook signing secrets and each account's Stripe keys before Velox saves them. This is on top of any disk encryption your Postgres has.
 
-| Table | Why critical |
-|---|---|
-| `tenants` | Top-level isolation key; every other row references this |
-| `customers`, `customer_billing_profiles` | Customer identity + tax/PII |
-| `subscriptions`, `subscription_items` | Active billing relationships |
-| `plans`, `meters`, `rating_rule_versions` | Pricing config — invoice math depends on this |
-| `invoices`, `invoice_line_items` | Issued invoices — financial record |
-| `credit_notes`, `credit_note_line_items` | Refunds and adjustments — financial record |
-| `customer_credit_ledger` | Customer credit balance state (event-sourced; ALL entries are needed) |
-| `payment_methods`, `customers.stripe_customer_id` | Saved cards + the Stripe Customer mapping |
-| `dunning_policies` (+ `customers.dunning_policy_id`) | Operator-set dunning policy + per-customer assignment |
-| `invoice_dunning_runs`, `invoice_dunning_events` | Dunning state machine; loss can re-stack failed charges |
-| `tax_calculations` | Stripe Tax provider records — ties invoice to upstream tax_transaction |
-| `audit_log` | SOC 2 evidence — usually 7y retention required |
-| `coupons`, `customer_discounts`, `coupon_redemptions` | Discount config + assignments (coupons are cut pre-launch per ADR-039; tables remain in the schema) |
-| `users`, `user_tenants`, `password_reset_tokens` | Operator identities |
-| `api_keys` | Authentication credentials |
-| `tenant_settings`, `stripe_provider_credentials` | Tenant configuration including encrypted Stripe keys |
-| `webhook_endpoints` | Outbound webhook config + signing secrets |
-| `recipe_instances` | Installed pricing-recipe records |
-| `test_clocks`, `dashboard_sessions` | Active state; not financial but loss = operator UX disruption |
-| `schema_migrations` | Migration version state — required for app to boot |
+- Store the key in a secrets manager (such as AWS Secrets Manager, GCP Secret Manager or HashiCorp Vault), apart from the database backups.
+- Without the key, every encrypted column in a backup is unreadable. The rest of the backup cannot replace it.
+- Keep the same key. Velox has no tool to re-encrypt data with a new key, so changing it makes the old data unreadable.
 
-### Tier 2 — Reconstructable (can drop on restore in extremis)
+## 2. Pick how to back up the database
 
-These tables are useful for replay/audit but the application can
-function correctly without them. If restore time is critical and a
-sub-second-old backup is unavailable, **dropping these is acceptable
-and reduces restore complexity**.
-
-| Table | Loss impact | Why it's reconstructable |
+| Method | When to use it | What you can lose |
 |---|---|---|
-| `email_outbox` | Pending emails won't deliver | Producers re-fire on next state change; lost emails are a UX hit, not a financial one |
-| `webhook_outbox` | Pending webhooks won't deliver | Same — consumers should be idempotent; replay if needed |
-| `webhook_events` (Stripe inbound) | Reconciler loses some history | Stripe is the source of truth; can re-fetch events via API |
-| `stripe_webhook_events` | Same as above | Same |
+| **Point-in-time restore (PITR)**, recommended | Managed Postgres turns it on with a setting (RDS automated backups, Cloud SQL, Aurora). On your own Postgres, use pgbackrest or WAL-G. | Almost nothing: you can restore to any second within the retention period |
+| **Nightly dump** with `scripts/backup.sh` | One VM, or as a second copy you can restore anywhere | Everything written since the last dump |
 
-### Tier 3 — Cache / log (drop freely)
+Avoid these:
 
-| Table | Loss impact |
-|---|---|
-| `usage_events` (rows older than current open billing periods) | Already aggregated into invoices; aged data is for analytics only |
+- **Dumping table by table.** Velox adds tables often, and a list of tables goes out of date.
+- **Disk snapshots without the write-ahead log (WAL).** You lose everything since the last snapshot. Hourly snapshots still lose about 30 minutes on average.
 
-**Important caveat**: usage_events for the *current open billing
-period* are Tier-1. The cycle that hasn't been billed yet needs
-every event. Snapshot the cutover — the boundary between
-already-billed and not-yet-billed rows — carefully.
+On managed Postgres, the provider's snapshots and PITR are your main backup. Still run the [restore drill](#5-run-the-restore-drill) every few months: only the drill proves that Velox's money tables come back whole, and a dump shows your billing data is not tied to one cloud.
 
-## Backup strategy
+## 3. Take a backup
 
-### Recommended: full PITR (point-in-time recovery)
+`scripts/backup.sh` dumps the database with `pg_dump`, checks that the dump can be read, can upload it to S3, and deletes local dumps older than the retention period. It needs `pg_dump` and `pg_restore` on the machine that runs it.
 
-Most managed Postgres providers ship this by default — RDS automated
-backups + WAL (write-ahead log) archiving, Cloud SQL PITR, Aurora
-continuous backup. Self-managed: pgbackrest or WAL-G.
+1. Run it with the admin database URL.
 
-This is the safest pattern for Velox because every table is captured
-and you can restore to any second within retention.
+   ```bash
+   DATABASE_URL="postgres://velox:PASSWORD@db-host:5432/velox?sslmode=require" \
+     ./scripts/backup.sh
+   ```
 
-### Acceptable alternative: nightly logical dump
+   **You see:** timestamped lines from `Starting backup of database 'velox'...` to `Verification passed: archive contains N table entries.`, then a "Backup Summary" block with `Verified:  yes`.
 
-A logical dump exports the data itself, via SQL, rather than copying
-database files. Run `pg_dump --format=custom` nightly (`scripts/backup.sh`
-does this). WAL cannot be replayed onto a logical dump, so you lose writes
-made since the last dump. Velox's schema is small enough (a few dozen
-tables); a full dump completes quickly even at scale.
+2. Check the file.
 
-### Not recommended
+   ```bash
+   ls -l /var/backups/velox/
+   ```
 
-- **Per-table dumps** — easy to miss a table when a new one is
-  added. Velox adds tables every few weeks; per-table dumps drift
-  out of date.
-- **Snapshot-only without WAL** — guarantees data loss between
-  snapshot intervals. The shorter the interval, the more acceptable;
-  hourly snapshots without WAL are still ~30min average loss.
+   **You see:** `velox_<date>_<time>.dump`, and `latest.dump` pointing at the newest one.
 
-## Restore validation
+Options, all set as environment variables:
 
-After a restore, validate before resuming traffic. The checks below
-are the Velox-specific part — they establish that the restored
-database is functionally healthy.
+| Variable | Default | What it does |
+|---|---|---|
+| `BACKUP_DIR` | `/var/backups/velox` | Where dumps are written |
+| `BACKUP_S3_BUCKET` | unset | Also upload each dump to this S3 bucket. Needs the `aws` command; without it, the upload is skipped with a warning. |
+| `BACKUP_S3_PREFIX` | `logical-backups` | The folder inside the bucket |
+| `BACKUP_RETENTION_DAYS` | `30` | Local dumps older than this are deleted |
+| `PG_DUMP` | `pg_dump` | A different `pg_dump` to run, for example one in a container |
 
-### 1. Schema migration version matches application
+Exit codes: `0` success, `1` a setting is wrong, `2` `pg_dump` failed, `3` the dump could not be read back, `4` the S3 upload failed.
+
+**Use tools that match the server.** A `pg_dump` newer than the Postgres server writes a dump that server cannot restore, so the script stops. Run a matching one in a container:
+
+```bash
+PG_DUMP="docker run --rm -i --network host postgres:16-alpine pg_dump" ./scripts/backup.sh
+```
+
+The dump travels through standard output, so the container needs no mounted folders.
+
+## 4. Restore a backup
+
+`scripts/restore.sh` replaces the data in the target database with the backup, in one transaction: either all of it is restored, or nothing changes. It needs `pg_restore` and `psql` on the machine that runs it.
+
+1. On a new Postgres server, create the limited user first. Users belong to the server, not to the database, so a dump cannot carry them. Without it the restore fails, and the script stops before it starts.
+
+   ```sql
+   CREATE ROLE velox_app LOGIN PASSWORD '<your-password>';
+   ```
+
+2. Run the restore against the target database.
+
+   ```bash
+   DATABASE_URL="postgres://velox:PASSWORD@db-host:5432/velox?sslmode=require" \
+     ./scripts/restore.sh /var/backups/velox/latest.dump
+   ```
+
+   **You see:** a warning box naming the target and the backup, then `Type 'yes' to proceed:`. Type `yes`. To skip the question in a script, set `VELOX_RESTORE_CONFIRM=yes`.
+
+3. Wait for it to finish.
+
+   **You see:** `All critical tables present.`, a "Restore Summary" block, and `Restore complete. Verify application behavior before resuming traffic.`
+
+4. Run the [checks after a restore](#checks-after-a-restore), then start Velox.
+
+Exit codes: `0` success, `1` a setting or the file is wrong, `2` the restore failed and was rolled back, `3` a critical table is missing after the restore.
+
+The tool rule from step 3 applies here too: if `pg_restore` is newer than the target server, the script stops. Use `PG_RESTORE="docker run --rm -i --network host postgres:16-alpine pg_restore"`.
+
+## 5. Run the restore drill
+
+A backup counts only once you have restored it. `scripts/restore-drill.sh` does the whole loop on a throwaway Postgres container, without touching your database or your backup folder:
+
+1. It counts the rows in five key tables of the source database.
+2. It takes a backup with `backup.sh` into a temporary folder.
+3. It starts a Postgres container with the same major version as the source, on port 15432.
+4. It restores the backup there with `restore.sh`.
+5. It counts the same rows again, compares them, and removes the container.
+
+Run it every few months, and after every Postgres upgrade. It needs Docker, `pg_dump`, `pg_restore` and `psql` on the machine that runs it.
+
+```bash
+SOURCE_DATABASE_URL="postgres://velox:PASSWORD@db-host:5432/velox?sslmode=require" \
+  ./scripts/restore-drill.sh
+```
+
+**You see:** `OK` and a count for each table (`tenants`, `customers`, `subscriptions`, `invoices`, `customer_credit_ledger`), then a "Drill Summary" block with `Result:       PASS` and the backup and restore times.
+
+Each run adds one line to `~/.velox/drill.log`, so you can see how long backups and restores take over time. Compare the total with how long you can afford to be down.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `SOURCE_DATABASE_URL` | `DATABASE_URL` | The database to back up and compare |
+| `DRILL_PG_IMAGE` | the source's major, else `postgres:16-alpine` | The Postgres image for the throwaway container |
+| `DRILL_PG_PORT` | `15432` | The port of the throwaway container. The drill stops if it is in use. |
+| `DRILL_LOG` | `~/.velox/drill.log` | Where the result lines go |
+| `CRITICAL_TABLES` | the five tables above | The tables whose row counts must match |
+
+Exit codes: `0` passed, `1` a setting is wrong, `2` the backup failed, `3` the restore failed, `4` row counts differ, `5` the container did not start.
+
+After a drill passes, you can also start Velox against a restored copy, check that `/health/ready` answers 200, and run `go run ./cmd/velox-doctor` against it. It should report no problems.
+
+## Checks after a restore
+
+Run these before you let traffic back in.
+
+### 1. The schema version matches
 
 ```sql
 SELECT version, dirty FROM schema_migrations ORDER BY version DESC LIMIT 1;
 ```
 
-Should match the version the binary expects. `dirty=false` is
-required — a `dirty=true` row means a migration failed mid-way and
-the schema is in an unknown state. Resolve before booting.
+The version must match the one the Velox release expects, and `dirty` must be `false`. `dirty=true` means a database upgrade stopped halfway, so the schema is in an unknown state. Fix that before you start Velox.
 
-### 2. RLS policies intact
+### 2. Row-Level Security is on
 
 ```sql
 SELECT schemaname, tablename, rowsecurity
@@ -119,16 +151,11 @@ FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true
 ORDER BY tablename;
 ```
 
-RLS (Row-Level Security) is the Postgres feature Velox relies on to
-keep each tenant's rows isolated from every other tenant's. The query
-should list every tenant-scoped table (customers, invoices, etc).
-Missing entries = data isolation broken.
+Row-Level Security (RLS) is the Postgres feature that keeps each account's rows apart. The list must include every account-scoped table, such as `customers` and `invoices`. A missing table means its data is not kept apart.
 
-### 3. Tier-1 financial table sanity
+### 3. The money tables look right
 
 ```sql
--- Per tenant, recent invoice + credit note counts should match
--- pre-restore expectations.
 SELECT tenant_id, count(*) FROM invoices GROUP BY tenant_id;
 SELECT tenant_id, count(*) FROM credit_notes GROUP BY tenant_id;
 SELECT tenant_id, sum(total_amount_cents) FROM invoices
@@ -136,171 +163,119 @@ SELECT tenant_id, sum(total_amount_cents) FROM invoices
   GROUP BY tenant_id;
 ```
 
-Compare against pre-incident metrics (Grafana's retention window
-should still hold them).
+Compare the numbers with what you saw before the incident, for example in your metrics.
 
-### 4. Idempotency keys + outbox not duplicating work
+### 4. Queued emails and webhooks
 
-Velox queues outgoing email and webhooks in database outbox tables
-(the transactional-outbox pattern) for later delivery. After restore,
-the email + webhook outboxes will re-fire any `pending` rows. If you
-restored to a point before some emails were dispatched but webhooks
-were already delivered, you'll get duplicate deliveries. Mitigation:
+Velox queues outgoing emails and webhooks in two tables, `email_outbox` and `webhook_outbox`, and sends them later. After a restore, every `pending` row is sent again. If the backup is older than some sends, customers get those emails or webhooks twice.
+
+The safe default: leave the rows `pending` and accept a few duplicates. Webhook receivers should already handle the same event twice.
+
+If you are sure you want to skip them, mark them sent, and write down that you did:
 
 ```sql
--- Optionally mark all pending outbox rows as dispatched if you're
--- confident downstream consumers are idempotent and you want to
--- skip the re-fire. Document this in the restore log.
 UPDATE email_outbox SET status = 'dispatched', dispatched_at = now(),
   payload = payload - '{setup_url,update_url,password_reset_url,invite_url,public_token,pdf}'::text[]
   WHERE status = 'pending';
 UPDATE webhook_outbox SET status = 'dispatched', dispatched_at = now() WHERE status = 'pending';
 ```
 
-This is a judgment call. Default safer behaviour: leave them
-`pending` and accept some duplicate sends; consumers should be
-idempotent (receiving the same delivery twice must be harmless).
+The `payload - '{…}'` part removes the links and the PDF from the email rows, so they are not kept for emails that were never sent.
 
-### 5. Scheduler resumes cleanly
+### 5. Billing picks up where it stopped
 
-The billing scheduler is leader-elected per tick via a lease row in
-`leader_leases` (ADR-114) — one leader runs each
-tick, other replicas stand by, so a single instance or a multi-replica
-set both resume cleanly. On restart it picks up where it left off:
+Velox's background jobs resume by themselves after a restart, on one copy or on several:
 
-- `subscriptions.next_billing_at` is the cycle anchor — if a
-  subscription was due at the moment of failure but didn't bill, the
-  next scheduler tick (1h in production, 5m in local) picks it up.
-- `invoices.auto_charge_pending = true` rows get retried by the
-  scheduler.
-- `invoice_dunning_runs` with `next_action_at <= now()` get
-  processed (dunning is the automated follow-up on failed payments).
+- A subscription that was due but not billed is billed on the next billing run (hourly in production, every 5 minutes in local development).
+- Invoices waiting for an automatic charge are charged.
+- Payment retries (dunning) that are due run.
 
-After restart, verify:
+After the restart, these counts should fall to zero within a few minutes:
 
 ```sql
--- Subs that should have billed but didn't (next_billing_at in past)
+-- Subscriptions that should have billed
 SELECT count(*) FROM subscriptions
   WHERE status IN ('active', 'trialing') AND next_billing_at < now();
 
--- Pending auto-charges
+-- Invoices waiting for an automatic charge
 SELECT count(*) FROM invoices
   WHERE auto_charge_pending = true;
 
--- Dunning runs awaiting action
+-- Payment retries that are due
 SELECT count(*) FROM invoice_dunning_runs
   WHERE state = 'active' AND next_action_at < now();
 ```
 
-These counts should drain within a few minutes of normal scheduler
-operation. If they don't, the scheduler isn't running.
+If they do not fall, the background jobs are not running. See the [runbook](runbook.md).
 
-### 6. Stripe webhook reconciler catches up
+### 6. Payments made during the gap
 
-If you restored to a point hours behind the failure, Stripe webhook
-events fired during the gap won't be in `webhook_events`. The
-reconciler (Velox's background catch-up job) queries Stripe to resolve
-`payment_status='unknown'` invoices, but it won't auto-replay every
-webhook. If the gap is long:
+If the backup is hours older than the failure, Stripe events sent in between are missing. Velox's background check asks Stripe about invoices whose payment status is `unknown`, but it does not replay every event. List the invoices to check by hand:
 
 ```sql
--- Surface invoices that may have stale payment status
 SELECT id, payment_status, updated_at FROM invoices
   WHERE updated_at < now() - interval '4 hours'
     AND payment_status IN ('processing', 'unknown', 'pending');
 ```
 
-Operator may need to manually reconcile from the Stripe Dashboard
-or fire a webhook backfill via Stripe's API.
+Compare them with the Stripe dashboard, or resend the events from Stripe.
 
-## What you don't need to back up
+## What is in the database
 
-- **Application binaries** — rebuild from source.
-- **Container images** — rebuild or pull from registry.
-- **Static config** (env vars, secrets) — managed via your secrets
-  store; back up separately from Velox.
-- **Customer-facing PDFs** — regenerated on demand from invoice
-  data.
+Some tables matter more than others when you decide what a restore must bring back.
 
-## Encryption at rest
+### Money and setup: never lose these
 
-If `VELOX_ENCRYPTION_KEY` is set, Velox encrypts customer PII
-(personally identifiable information: email, names, phone, tax IDs),
-webhook signing secrets, and per-tenant Stripe credentials at the
-application layer (AES-256-GCM) before persistence. This is **in
-addition to** any disk-level encryption your Postgres provides (RDS
-encryption, GCP CMEK, LUKS, etc).
+| Table | Why it matters |
+|---|---|
+| `tenants` | Every other row belongs to an account |
+| `customers`, `customer_billing_profiles` | Who the customers are, with tax details and personal data |
+| `subscriptions`, `subscription_items` | What each customer is billed for |
+| `plans`, `meters`, `rating_rule_versions` | Prices. Invoice amounts depend on them. |
+| `invoices`, `invoice_line_items` | Issued invoices: a financial record |
+| `credit_notes`, `credit_note_line_items` | Refunds and adjustments: a financial record |
+| `customer_credit_ledger` | Customer credit balances. Every entry is needed to work out a balance. |
+| `payment_methods`, `customers.stripe_customer_id` | Saved cards, and the link to each Stripe customer |
+| `dunning_policies` (and `customers.dunning_policy_id`) | Payment-retry policies, and which customer uses which |
+| `invoice_dunning_runs`, `invoice_dunning_events` | Payment retries in progress. Losing them can charge a failed card again too soon. |
+| `tax_calculations` | Stripe Tax records that tie an invoice to Stripe's tax transaction |
+| `audit_log` | Who changed what. Audits such as SOC 2 often ask for 7 years. |
+| `coupons`, `customer_discounts`, `coupon_redemptions` | Discounts. Coupons are no longer offered, and the tables remain. |
+| `users`, `user_tenants`, `password_reset_tokens` | Dashboard users |
+| `api_keys` | API keys |
+| `tenant_settings`, `stripe_provider_credentials` | Account settings, including the encrypted Stripe keys |
+| `webhook_endpoints` | Where Velox sends webhooks, with their signing secrets |
+| `recipe_instances` | Installed pricing recipes |
+| `test_clocks`, `dashboard_sessions` | Not money, but losing them disrupts the people using the dashboard |
+| `schema_migrations` | The schema version. Velox does not start without it. |
 
-**Critical**: you must back up the `VELOX_ENCRYPTION_KEY` separately
-from the database. **A backup without the key is unrecoverable** —
-every encrypted column reads as garbage. Most teams store the key in
-a KMS (key management service) or secret manager (AWS Secrets Manager,
-GCP Secret Manager, HashiCorp Vault); the secret-store's own backup
-story applies.
+`usage_events` for billing periods that are still open belong here too: the next invoice needs every one of them.
 
-Document the key rotation procedure: re-encrypt-on-read isn't
-implemented, so a key change requires a full re-encrypt migration
-across affected tables. Defer until you have a real rotation
-trigger.
+### Queues: can be dropped in an emergency
 
-## Test the restore
+| Table | If lost | Why it can be rebuilt |
+|---|---|---|
+| `email_outbox` | Queued emails are not sent | Later changes send new emails. A lost email is an annoyance, not lost money. |
+| `webhook_outbox` | Queued webhooks are not sent | Receivers should handle replays; send events again if needed |
+| `webhook_events` (Stripe, incoming) | Some history is lost | Stripe holds the original events and its API returns them |
+| `stripe_webhook_events` | Same as above | Same |
 
-The only validated backup is a restore that booted Velox and passed
-the validation checks above. Schedule quarterly restore drills:
+### Old usage: can be dropped
 
-1. Pull the most recent backup.
-2. Restore to a non-production database.
-3. Run the validation queries.
-4. Boot Velox against the restored DB; hit `/health/ready`.
-5. Run `go run ./cmd/velox-doctor` against the restored DB and check it reports no problems.
+`usage_events` rows from billing periods that are already invoiced. Their totals are on the invoices; the rows are for analysis only.
 
-A backup you've never restored is hope, not a backup.
+### Not in the database
 
-### Managed Postgres (RDS, Aurora, Cloud SQL)
+These do not need a database backup:
 
-On managed Postgres the division of labor changes. The provider's native
-snapshots + point-in-time recovery are your PRIMARY mechanism: turn them on
-and set retention — they beat anything a dump script offers. Self-managed
-PITR tools such as pgbackrest or WAL-G do not apply (managed services don't
-expose that access). What this repo's tooling still gives you there, and why
-you still run the drill quarterly:
+- Velox itself and its container images: download or build them again.
+- Settings and secrets (the `.env` file or your secrets manager): back them up separately, together with the encryption key.
+- Invoice PDFs: Velox builds them again from the invoice.
 
-1. **App-level verification** — the provider proves snapshots exist; only the
-   drill proves Velox boots against a restore and the money tables
-   count-match.
-2. **Portability** — provider snapshots restore only into the same service; a
-   logical dump is your proof the billing data isn't cloud-locked.
-3. **The scripts' loud-fail checks (the guards) fire where managed setups
-   actually break** — managed servers run pinned major versions while
-   laptop/CI tools run newer (the exact mismatch the 2026-08-11 drill
-   caught), and a fresh managed instance has no `velox_app` role either.
+## Background
 
-### Fresh-cluster restores: provision roles first
-
-Postgres roles (login users and their permissions) are cluster-level;
-a database dump cannot carry them. On a fresh cluster — the
-disaster-recovery case — create the runtime role BEFORE restoring, or
-the archive's GRANT statements referencing the missing role roll the
-single-transaction restore back (restore.sh now refuses up front with
-this remedy):
-
-```sql
-CREATE ROLE velox_app LOGIN PASSWORD '<your-password>';
-```
-
-### Tool-version rule
-
-A `pg_dump`/`pg_restore` whose major version is newer than the server's
-produces archives the server's major can't restore (dump side) or emits
-client `SET` commands the target rejects (restore side). Both scripts
-(`scripts/backup.sh`, `scripts/restore.sh`) fail loudly on the
-mismatch; use matching tools, e.g. `PG_DUMP="docker run --rm -i --network host
-postgres:16-alpine pg_dump"` (archives travel via stdio, so wrapped
-binaries need no mounts).
-
-### Drill history
+The first restore drill, on 2026-08-11, failed and found four defects in the scripts. All four were fixed the same day, and the drill then passed.
 
 | Date | Result | Notes |
 |---|---|---|
 | 2026-08-11 | **FAIL → 4 defects → PASS** (7s total: backup 1s, restore 3s; 5 critical tables count-matched) | First-ever run. Found: (1) host `pg_dump` 18 vs server 16 → unrestorable archive; (2) host `pg_restore` 18 vs target 16 → client `SET transaction_timeout` rolled restore back; (3) fresh-cluster restore rolled back on missing `velox_app` role — the DR path had never worked; (4) restore.sh's validation query referenced a nonexistent column (`table_name` vs `relname`) — broken since birth. All four fixed same day; drill re-run green. |
-
