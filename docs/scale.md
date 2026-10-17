@@ -21,11 +21,64 @@ cars it carries before traffic slows, and which part wears out first.
 3. The database was the limit every time, never the Velox process: first its
    memory, then how fast its disk could write.
 
-One small VM takes far less than these figures.
+One small VM takes far less than these figures. The next section measures
+one.
 
 **Need more?** In this order: send events in batches (up to 1,000 per
 request), give the database more memory, then give it faster disks. The
 [full list](#if-you-need-more) has the later steps.
+
+## What one small server handles
+
+One €6.49-a-month server took about 1 million events a day for 20 minutes,
+with no errors and memory to spare. Disk space is what runs out first.
+
+The server was a Hetzner CX23: 2 shared vCPU, 4 GB memory and a 40 GB disk.
+Its list price was €6.49 a month before VAT, checked on 2026-10-17
+([Hetzner cloud prices](https://www.hetzner.com/cloud/)). It ran the whole
+stack from [Run Velox in production on one VM](production-one-vm.md), with the
+published v0.8.0 images and stock Postgres 16 settings. A second server in the
+same data center sent the load through Caddy, over plain HTTP.
+
+| What | Result |
+|---|---|
+| Ingest, steady: 12 events/s, about 1 million a day | p50 11.3 ms, p99 50.8 ms |
+| Ingest, bursts: 60 events/s | p50 11.3 ms, p99 52.9 ms |
+| Errors | 0 of 12,158 requests |
+| Memory | 765 MiB used at the peak, of 3,819 MiB (20%). Postgres used 128 MiB, Velox 15 MiB. |
+| CPU, during ingest | 12% of both cores on average, 25% at the peak |
+| Billing: 300 invoices | All finished in 32 s. CPU was about 70% busy while it ran. |
+| Dashboard | Most calls under 45 ms at p99. The invoice list is the slow one: 145 ms p50, 173 ms p99. |
+
+**Disk.** Each event takes about 570 bytes in the database, counting its
+indexes. At 1 million events a day that is about 17 GB a month. The system and
+the images already use about 3.5 GB, so the 40 GB disk fills in about two
+months. Before you go live, add a volume for the database or pick a server
+with a bigger disk. The nightly backups also sit on this disk until you copy
+them off.
+
+**How it was measured.** [k6](https://k6.io), a load-testing tool, sent a mix
+shaped like a LiteLLM proxy fleet, across 300 customers. Half the events came
+in batches of 10, a quarter as LiteLLM callbacks (3 events each) and a quarter
+one at a time. The 20 minutes alternated steady load and bursts at five times
+the rate: steady for 5 minutes, burst for 3, steady 5, burst 3, steady 4. Then
+a test clock (a pretend clock for test customers) moved 32 days forward to
+bill all 300 customers. Last, each of six dashboard calls ran 20 times, one at
+a time. The general rate limit was raised so that creating the 300 customers
+did not hit it; the ingest limit was left as shipped. CPU and memory were
+sampled every 5 seconds.
+
+**Not covered:**
+
+- HTTPS: there was no domain, so no certificate.
+- Stripe and email: no charges were made and no email was sent.
+- A year of history: the table held 30,000 events. Queries, vacuum and index
+  growth on a large table were not tested.
+- Long runs: one 20-minute run, with no soak or memory-leak test.
+- The real scheduler: billing ran through the test clock, not through the
+  scheduler that bills on the real date.
+- Shared vCPU: other customers of the host can slow it down. This was one run
+  on one server.
 
 ## Measured runs
 

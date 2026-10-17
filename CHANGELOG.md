@@ -17,6 +17,7 @@ Older entries keep their original text.
 
 ### Changed
 
+- **Sizing for one small server, measured (2026-10-17).** A €6.49/month Hetzner CX23 took about 1 million events a day with 0 errors; its disk fills in about two months ([scale](docs/scale.md#what-one-small-server-handles)). The [one-VM production guide](docs/production-one-vm.md) gets a Docker install link, no duplicate `.env` keys, a health check that waits, a start-up warnings table and a private backup folder.
 - **The README's "What it looks like" is two labelled pictures (2026-10-17).** The invoice your customer gets, then your margin per model, each with one line saying what it shows. The text copy of the same numbers is gone.
 
 ## [0.8.0] - 2026-10-17

@@ -4,6 +4,8 @@ This page takes a fresh Linux server to a Velox that bills real customers. It is
 
 One VM is a supported production setup. Velox is down while it restarts, for example during an upgrade. When that is no longer acceptable, run two or more copies: see [High availability](ops/high-availability.md).
 
+Tested on a €6.49/month Hetzner CX23; see [How much traffic Velox handles](scale.md#what-one-small-server-handles).
+
 Think of it as getting a car ready for the road. The [install guide](../deploy/compose/README.md) gives you a car that runs. This page adds the number plates (a web address with HTTPS), the lights (email), the fuel (Stripe) and the spare wheel (backups).
 
 At the end you have:
@@ -15,7 +17,7 @@ At the end you have:
 
 ## Before you start
 
-- A Linux VM with Docker 24 or newer and the Compose plugin. Check with `docker compose version`.
+- A Linux VM with Docker 24 or newer and the Compose plugin. Check with `docker compose version`. To install both on Ubuntu, follow [Docker's install guide](https://docs.docker.com/engine/install/ubuntu/). Its convenience script, `get.docker.com`, is quickest on a fresh server, but Docker does not recommend it for production.
 - A domain name for Velox, such as `billing.example.com`, with a DNS `A` record pointing at the VM.
 - Ports 80 and 443 open to the internet. Port 80 is needed to get the HTTPS certificate.
 - An account with an email provider that gives you SMTP settings, such as Postmark, SendGrid or AWS SES.
@@ -39,22 +41,24 @@ A release is a tested version with a number, such as `v0.8.0`. Production runs a
 
    **You see:** `Note: switching to '…'` from git. That is normal: you are on a release, not on a branch.
 
-2. Generate the four secrets, pin the release images and keep port 80 free for HTTPS.
+2. Generate the four secrets, pin the release images and keep port 80 free for HTTPS. These commands fill in the lines `.env` already has, so each setting appears once. Run them in the same shell as step 1, which set `VELOX_VERSION`.
 
    ```bash
-   cat >> .env <<EOF
-   POSTGRES_PASSWORD=$(openssl rand -hex 24)
-   VELOX_APP_DB_PASSWORD=$(openssl rand -hex 24)
-   VELOX_ENCRYPTION_KEY=$(openssl rand -hex 32)
-   VELOX_BOOTSTRAP_TOKEN=$(openssl rand -hex 32)
-   VELOX_IMAGE=ghcr.io/getvelox/velox:${VELOX_VERSION}
-   VELOX_DASHBOARD_IMAGE=ghcr.io/getvelox/velox-dashboard:${VELOX_VERSION}
-   EOF
-   sed -i 's/^NGINX_HTTP_PORT=.*/NGINX_HTTP_PORT=127.0.0.1:8080/' .env
+   sed -i \
+     -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" \
+     -e "s|^VELOX_APP_DB_PASSWORD=.*|VELOX_APP_DB_PASSWORD=$(openssl rand -hex 24)|" \
+     -e "s|^VELOX_ENCRYPTION_KEY=.*|VELOX_ENCRYPTION_KEY=$(openssl rand -hex 32)|" \
+     -e "s|^VELOX_BOOTSTRAP_TOKEN=.*|VELOX_BOOTSTRAP_TOKEN=$(openssl rand -hex 32)|" \
+     -e "s|^# VELOX_IMAGE=.*|VELOX_IMAGE=ghcr.io/getvelox/velox:${VELOX_VERSION}|" \
+     -e "s|^# VELOX_DASHBOARD_IMAGE=.*|VELOX_DASHBOARD_IMAGE=ghcr.io/getvelox/velox-dashboard:${VELOX_VERSION}|" \
+     -e "s|^NGINX_HTTP_PORT=.*|NGINX_HTTP_PORT=127.0.0.1:8080|" \
+     .env
    chmod 600 .env
+   grep -cE '^(POSTGRES_PASSWORD|VELOX_APP_DB_PASSWORD|VELOX_ENCRYPTION_KEY|VELOX_BOOTSTRAP_TOKEN|VELOX_IMAGE|VELOX_DASHBOARD_IMAGE)=.+' .env
+   grep NGINX_HTTP_PORT .env
    ```
 
-   **You see:** nothing. `tail -6 .env` shows the six new lines, and `grep NGINX_HTTP_PORT .env` shows `127.0.0.1:8080`.
+   **You see:** `6`, then `NGINX_HTTP_PORT=127.0.0.1:8080`.
 
    What each line is for:
 
@@ -76,13 +80,14 @@ A release is a tested version with a number, such as `v0.8.0`. Production runs a
 
    **You see:** five containers start, then `velox v0.8.0`.
 
-4. Check that it is healthy.
+4. Check that it is healthy. On the first start Velox sets up its database (runs its migrations), which takes about 10 seconds. Until then the check fails with a 502, so this command retries every 2 seconds and gives up after 2 minutes.
 
    ```bash
-   curl -fsS http://localhost:8080/health/ready
+   timeout 120 bash -c \
+     'until curl -fsS http://localhost:8080/health/ready; do sleep 2; done'
    ```
 
-   **You see:** `{"checks":{"api":"ok","database":"ok","scheduler":"..."},"status":"ok"}`.
+   **You see:** perhaps a few `curl: (22) The requested URL returned error: 502` lines, then `{"checks":{"api":"ok","database":"ok","scheduler":"..."},"status":"ok"}`. If the command ends with no `"status":"ok"`, see the fixes linked below.
 
 If a step fails, the [install guide](../deploy/compose/README.md#if-something-goes-wrong) lists each start-up error and its fix.
 
@@ -168,6 +173,34 @@ Emails and Stripe send people to pages in Velox: your customers to the invoice p
 
    **You see:** nothing. Each of these settings that is still missing logs a warning that starts with its name and `NOT SET`.
 
+### Other start-up warnings
+
+Velox logs a few more warnings when it starts. To list them all:
+
+```bash
+docker compose logs velox-api | grep '"level":"WARN"'
+```
+
+| Warning starts with | What it means | Do you need to act? |
+|---|---|---|
+| `SMTP NOT CONFIGURED` | No email is sent. | Yes. [Step 5](#5-connect-email) fixes it. |
+| `VELOX_EMAIL_BIDX_KEY not set` | Velox cannot find a customer by email address, so it cannot stop emailing an address that bounced. | Yes, before your first customer. See below. |
+| `POSTMARK_WEBHOOK_USER/POSTMARK_WEBHOOK_PASS not set` | Velox turns away Postmark's reports of late bounces. | Only if you send email through Postmark. See [Email setup](ops/email-setup.md#when-postmark-reports-a-bounce-later). |
+| `METRICS_TOKEN not set` | `/metrics` answers 401 to everyone. | Only if you collect metrics with Prometheus. See [What to watch](self-host.md#what-to-watch). |
+| `VELOX_API_BASE_URL NOT SET` | The link you copy to share a customer's cost dashboard (a page of their usage and charges) is a path, not a full address. | Only if you share cost dashboards. The Compose stack does not pass this setting to Velox yet, so set it in a `docker-compose.override.yml`. |
+| `RUN_MIGRATIONS_ON_BOOT=true in production` | Velox updates its database as it starts. | No. On one VM this is how upgrades apply. The warning is for setups with several copies of Velox. |
+
+To set `VELOX_EMAIL_BIDX_KEY`, add a random key and restart. Set it before you add customers: Velox indexes a customer's email only when the customer is created or edited.
+
+```bash
+echo "VELOX_EMAIL_BIDX_KEY=$(openssl rand -hex 32)" >> .env
+docker compose up -d
+sleep 10
+docker compose logs velox-api | grep "email blind index enabled"
+```
+
+**You see:** a line with `email blind index enabled`. Do not change this key later: a new key does not match the customers indexed with the old one.
+
 ## 5. Connect email
 
 Velox sends invoices, receipts, payment reminders, password resets and team invites through your email provider's SMTP server.
@@ -230,6 +263,7 @@ The repository ships `scripts/backup.sh`. It dumps the database, checks that the
 
    ```bash
    sudo mkdir -p /var/backups/velox
+   sudo chmod 700 /var/backups/velox
    sudo tee /usr/local/bin/velox-backup >/dev/null <<'EOF'
    #!/usr/bin/env bash
    set -euo pipefail
@@ -245,7 +279,7 @@ The repository ships `scripts/backup.sh`. It dumps the database, checks that the
    sudo chmod 755 /usr/local/bin/velox-backup
    ```
 
-   `--network "container:…"` puts the backup container next to the database, which has no port open on the VM.
+   `--network "container:…"` puts the backup container next to the database, which has no port open on the VM. `chmod 700` lets only root open the backup folder, because the dumps hold every customer's data.
 
 2. Run it once.
 
