@@ -1,14 +1,68 @@
 # Architecture
 
-One Go binary, one package per domain. Each domain owns its store, service,
-and handler. The decisions behind this layout live in the [ADRs](adr/).
+Velox is one Go binary on one PostgreSQL database. The code is split into one
+package per billing domain (customers, pricing, usage, invoices, payments and
+so on), and each package owns its store, service and HTTP handler. This page
+is for contributors: it shows how a usage event becomes a paid invoice, which
+package does each part, and what runs in the background. The same flow
+without code is in [How Velox works](how-velox-works.md). The decisions behind
+this layout live in the [ADRs](adr/).
+
+## The life of a usage event
+
+Think of a taxi meter: it counts the ride, the fare card sets the price, and
+at the end the driver gives you a receipt and charges your card. In Velox,
+`usage` counts, `pricing` holds the prices, `billing` works out the bill,
+`invoice` is the receipt and `payment` charges the card:
+
+```
+your app → usage → billing → invoice → payment → paid
+                                          │
+                                     card fails
+                                          ▼
+                                       dunning
+```
+
+1. **Your app sends a usage event.** `POST /v1/usage-events` (or `/batch`)
+   names the customer by `external_customer_id` and the meter by
+   `event_name`. A meter is a counter for one kind of usage, such as tokens.
+   The `usage` package stores the event and answers `201`.
+   **You see:** the event on the **Usage** page.
+2. **The billing period ends.** The billing scheduler runs every hour (every
+   5 minutes when `APP_ENV=local`). It closes a period on the first run after
+   the period end plus the invoice grace period (`INVOICE_GRACE_PERIOD`,
+   default 1 hour), so usage that arrives a little late still counts.
+3. **Billing prices the usage.** The `billing` engine asks `usage` for the
+   period's totals per meter and asks `pricing` for the rating rules (the
+   price for each meter). It adds the plan's flat fees and builds the
+   invoice through `invoice`.
+   **You see:** a new invoice on the **Invoices** page and on the customer.
+4. **The invoice is finalized.** Tax is worked out by the tenant's tax
+   provider (see [Tax providers](#tax-providers)). If tax cannot be worked
+   out yet, the invoice waits as a draft and a later run retries. Once
+   finalized, the invoice's amounts are fixed.
+5. **Velox charges the card.** Credits the customer holds are applied
+   first. For the rest, `payment` creates a Stripe PaymentIntent on the
+   customer's saved card. Stripe's answer, or its webhook, tells Velox the
+   result, and a paid invoice moves to `paid`.
+   **You see:** the invoice marked **Paid**, and the payment in your Stripe
+   dashboard.
+6. **A failed payment goes to dunning.** Dunning means retrying a failed
+   card payment on a schedule and emailing the customer. The `dunning`
+   package follows the tenant's dunning policy. If every retry fails, it
+   takes the policy's final action, for example cancel the subscription or
+   mark the invoice uncollectible.
+   **You see:** the invoice on the **Dunning** page, with each retry.
+
+Along the way, each step queues webhook events (such as an invoice being
+finalized or paid) and emails for the background senders below.
 
 ## Design rules
 
 - **Per-domain packages.** Each domain owns its store, service, and handler. No peer domain touches another's internals. The imports that legitimately cross domains are listed edge by edge in an allowlist, enforced by an [architecture test](../internal/arch/boundaries_test.go).
-- **Row-Level Security (RLS).** Every tenant-scoped query runs inside a transaction where Postgres enforces tenant isolation. Integration tests prove it.
+- **Row-Level Security (RLS).** Every tenant-scoped query runs inside a transaction where Postgres enforces tenant isolation. A tenant is one account's data in the shared database. Integration tests prove it.
 - **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Velox owns invoices end to end; Stripe executes the card charge.
-- **Billing engine as coordinator.** The engine orchestrates the domains through narrow interfaces. It is not one object that does everything.
+- **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
 - **Append-only records for money.** Credits, the audit log, and the outbound webhook outbox are written as append-only events.
 
 ## Package layout
@@ -18,24 +72,66 @@ cmd/velox/                  — single Go binary
 cmd/velox-doctor/           — read-only money-invariant sweep (see ENGINEERING.md)
 internal/                     (abridged — one package per domain)
   domain/                   — pure domain models, zero deps
-  auth/                     — API key auth (3 key types, 17 permissions)
+  auth/                     — API key auth (3 key types, per-route permissions)
   customer/                 — customer CRUD + billing profiles
   pricing/                  — meters, rating rules, plans, price overrides
   subscription/             — lifecycle (draft → trialing → active → canceled → archived)
   usage/                    — event ingestion + multi-dim aggregation
-  invoice/                  — state machine (draft → finalized → paid) + PDF
+  invoice/                  — lifecycle (draft → finalized → paid, or voided / uncollectible) + PDF
   billing/                  — billing engine + scheduler + preview
   payment/                  — Stripe PaymentIntent + webhook receiver
   dunning/                  — payment retry state machine
   credit/                   — event-sourced prepaid balance ledger
   creditnote/               — credit notes + refunds
   webhook/                  — outbound webhooks (HMAC-signed delivery)
+  email/                    — email outbox + sender
+  testclock/                — test clocks + the worker that bills skipped time
   audit/                    — immutable append-only audit log
+  platform/leader/          — leader leases for the background jobs
   platform/postgres/        — RLS-aware database layer
   platform/migrate/         — embedded SQL migrations
 
 web-v2/                     — operator dashboard (React 19 + TypeScript + Tailwind)
 ```
+
+An invoice ends in one of three states:
+
+- **paid**: the money arrived: by card, from credits, or recorded by hand.
+- **voided**: the invoice was cancelled before it was paid. A voided invoice
+  never changes again.
+- **uncollectible**: the invoice was written off, by an operator or by a
+  dunning policy. It stays in your reports, and it can still move to `paid`
+  if the customer pays later.
+
+A paid invoice cannot be voided or written off; issue a credit note instead.
+
+## Background work
+
+Every copy of Velox runs the same background loops. Jobs that must run once
+across all copies take a **leader lease** first: a row in the
+`leader_leases` table that lets exactly one copy run one tick of that job.
+The lease expires 10 seconds after its last renewal, so another copy takes
+over when a leader dies. The five leased jobs:
+
+| Job | What it does |
+|---|---|
+| `billing` | Runs each tick for live mode, then test mode. Retries stuck work (charges with an unclear result, tax). Charges invoices waiting for payment. Checks usage thresholds and ends trials. Closes billing periods into invoices. Resumes paused collection and expires credits |
+| `dunning` | Runs the payment retries that are due, queues their emails, and takes final actions |
+| `webhook_outbox` | Sends queued webhook events to your endpoints |
+| `email_outbox` | Sends queued emails |
+| `webhook_delivery` | Retries webhook deliveries that failed |
+
+An **outbox** is a database table of messages waiting to be sent
+(`webhook_outbox`, `email_outbox`). Most messages are written in the same
+transaction as the change that caused them, so a crash cannot lose them.
+
+A **test clock** is a pretend clock for test customers. When you move one
+forward, a worker in the copy that took the request bills the skipped time
+for that clock's customers, so a month of renewals and retries takes
+seconds.
+
+More on each term: [glossary](glossary.md#running-velox). When a job is
+stuck: [runbook](ops/runbook.md).
 
 ## Tech stack
 

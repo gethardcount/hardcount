@@ -32,7 +32,14 @@ Arithmetic stays in Go tests.
 A lint waiver names the linter and says why, on the same line, for example
 `//nolint:forbidigo // wall-clock: <reason>` or
 `//nolint:forbidigo // single-invoice-ok: <reason>`. A bare `//nolint` fails
-the lint.
+the lint. The first rule bans a bare `time.Now()` in packages whose time can
+come from a test clock. The second bans looking up one invoice for a billing
+period in `internal/subscription` and `internal/billing`, because several
+invoices can pay for one period.
+
+One source test in `internal/arch` checks dates: a calendar date must be
+formatted in an explicit time zone (`.In(loc)`), or carry a same-line
+`//tz:ok` comment that marks a real UTC case.
 
 ## Run each layer locally
 

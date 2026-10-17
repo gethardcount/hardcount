@@ -1,44 +1,95 @@
 # Contributing to Velox
 
-Thank you for your interest in contributing to Velox.
+Velox is a billing system you run yourself, written in Go on PostgreSQL. It
+counts what your customers use, works out each bill, makes the invoice, and
+charges the card through Stripe.
 
-This page is for anyone preparing a pull request. It covers how to set up a
-dev environment and how the code is organized. It also lists the checks CI
-runs against your change and the house rules that gate a merge.
+This page takes you from a fresh clone to a pull request that passes CI. It
+shows how to run Velox from source, where the code goes, and which checks CI
+runs on your change.
 
-## Development Setup
+## Development setup
+
+You need Go 1.26 or newer and Docker. Node 22 or newer is needed only for
+dashboard work, and `jq` only for `scripts/demo.sh`.
 
 ```bash
-# Prerequisites: Go 1.26+, Docker; Node 22+ only for dashboard work;
-# jq only for scripts/demo.sh
-
-# Clone
 git clone https://github.com/getvelox/velox.git
 cd velox
-
-# Start Postgres
-docker compose up -d postgres
-
-# Run migrations
-DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" go run ./cmd/velox migrate
-
-# Run tests
-go test ./... -race -short -count=1    # unit tests (CI runs -race too)
-go test -p 1 ./... -count=1 -short=false  # unit + integration tests
-
-# Run the API and the dashboard from source
 cp .env.example .env
-make bootstrap                            # prints the operator login and the API keys
-make dev                                  # API on :8080
-cd web-v2 && npm install && npm run dev   # dashboard on :5173, in a second terminal
-./scripts/demo.sh <vlx_secret_test_... from make bootstrap>
 ```
 
-To try a release without Go or Node, use `deploy/compose/quickstart.sh` instead (see the README).
+1. **Start Postgres.**
+
+   ```bash
+   docker compose up -d postgres
+   ```
+
+   **You see:** `docker compose ps` lists the `postgres` service as
+   `healthy` after a few seconds.
+
+2. **Create your first account and its keys.** This also runs the database
+   migrations.
+
+   ```bash
+   make bootstrap
+   ```
+
+   **You see:** a "Velox Bootstrap Complete" box with the dashboard sign-in
+   (email `admin@velox.local` unless you set `VELOX_BOOTSTRAP_EMAIL`), a
+   generated password, and three API keys. Save the password: it is shown
+   only once. Copy the key under "Secret Key — TEST mode"
+   (`vlx_secret_test_…`).
+
+3. **Start the API.** `make dev` reads `.env`, which points at the local
+   Postgres and runs migrations on boot.
+
+   ```bash
+   make dev
+   ```
+
+   **You see:** a JSON log line with `"msg":"listening"` and
+   `"addr":":8080"`. `curl http://localhost:8080/health` returns
+   `{"status":"ok"}`.
+
+4. **Start the dashboard**, in a second terminal.
+
+   ```bash
+   cd web-v2 && npm install && npm run dev
+   ```
+
+   **You see:** Vite prints `http://localhost:5173/`. Open
+   `http://localhost:5173/login` and sign in with the email and password
+   from step 2. The dashboard opens in test mode, where nothing charges real
+   money.
+
+5. **Bill a test customer end to end**, in a third terminal. This is the
+   golden path: the one flow CI also runs on every PR, from loading prices
+   to a finished invoice.
+
+   ```bash
+   ./scripts/demo.sh vlx_secret_test_...   # the key from step 2
+   ```
+
+   **You see:** nine numbered steps, each with a green `✓` line, then
+   "Done: every step above ran and was checked" and two dashboard links,
+   one to the invoice and one to the customer.
+
+Run the tests with Postgres still up:
+
+```bash
+go test ./... -race -short -count=1         # unit tests (CI runs -race too)
+go test -p 1 ./... -count=1 -short=false    # unit + integration tests
+```
+
+To try a release without Go or Node, use `deploy/compose/quickstart.sh`
+instead (see the [README](README.md)).
 
 ### Without make
 
-These are the same steps as above without make. `make dev` reads `.env`, which sets `DATABASE_URL` and `RUN_MIGRATIONS_ON_BOOT=true`; here you set them on the command line:
+These are the same steps without make. `make dev` reads `.env`, which sets
+`DATABASE_URL` and `RUN_MIGRATIONS_ON_BOOT=true`. Here you set them on the
+command line:
 
 ```bash
 docker compose up -d postgres
@@ -46,9 +97,16 @@ DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" go ru
 DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" RUN_MIGRATIONS_ON_BOOT=true go run ./cmd/velox
 ```
 
+To run only the migrations:
+
+```bash
+DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" go run ./cmd/velox migrate
+```
+
 ### Run your change in the Compose stack
 
-This builds the API image from your checkout and runs it in the same stack as a [one-VM install](deploy/compose/README.md):
+This builds the API image from your checkout and runs it in the same stack
+as a [one-VM install](deploy/compose/README.md):
 
 ```bash
 docker build -t velox:local .        # from the repo root
@@ -58,7 +116,8 @@ $EDITOR .env   # set POSTGRES_PASSWORD, VELOX_APP_DB_PASSWORD, VELOX_ENCRYPTION_
 VELOX_IMAGE=velox:local docker compose up -d
 ```
 
-**You see:** `docker compose logs -f velox-api` prints `"listening" addr=:8080` when the API is ready.
+**You see:** `docker compose logs -f velox-api` prints a log line with
+`"msg":"listening"` and `"addr":":8080"` when the API is ready.
 
 To build the image and run it on its own, against a Postgres you already have:
 
@@ -67,10 +126,11 @@ docker build -t velox:latest .
 docker run --rm -e DATABASE_URL="..." -p 8080:8080 velox:latest
 ```
 
-## Project Structure
+## Project structure
 
 Each billing domain (invoice, credit, customer, and so on) is a
-self-contained package under `internal/`:
+self-contained package under `internal/`. [Architecture](docs/architecture.md)
+shows how the packages work together.
 
 ```
 internal/{domain}/
@@ -82,28 +142,39 @@ internal/{domain}/
 ```
 
 **Rules:**
-- Peer domain packages never call each other's concrete `Service`/`Store` types. Cross-domain imports are limited to shared value types, cross-cutting infra, and the narrow interfaces of the `billing` coordinator. The allowlist in `internal/arch/boundaries_test.go` enforces this. A new cross-domain import fails the test until it is added there deliberately
-- Every handler uses `respond.JSON()` / `respond.FromError()` for responses
-- Every store method runs inside a transaction scoped to one tenant by Postgres Row-Level Security (RLS)
-- Tests use `testutil.SetupTestDB()` for integration tests
 
-## Adding a New Domain
+- One domain package never calls another domain's `Service` or `Store`
+  directly. A package may import shared value types, cross-cutting
+  infrastructure (`auth`, `audit`, `session`), and the small interfaces of
+  the `billing` coordinator. The allowlist in
+  `internal/arch/boundaries_test.go` enforces this: a new cross-domain
+  import fails the test until it is added there on purpose.
+- Every handler uses `respond.JSON()` / `respond.FromError()` for responses.
+- Every store method runs inside a transaction scoped to one tenant by
+  Postgres Row-Level Security (RLS). A tenant is one account's data in a
+  shared database; RLS hides every other tenant's rows.
+- Integration tests use `testutil.SetupTestDB()`.
 
-1. Create `internal/{domain}/store.go` with the store interface
-2. Create `internal/{domain}/postgres.go` implementing the store
-3. Create `internal/{domain}/service.go` with business logic
-4. Create `internal/{domain}/handler.go` with HTTP handlers using `respond` package
-5. Add SQL migration in `internal/platform/migrate/sql/`
-6. Wire into `internal/api/router.go`
-7. Write tests (both unit with in-memory store AND integration with Postgres)
+## Adding a new domain
 
-## Code Style
+1. Create `internal/{domain}/store.go` with the store interface.
+2. Create `internal/{domain}/postgres.go` implementing the store.
+3. Create `internal/{domain}/service.go` with business logic.
+4. Create `internal/{domain}/handler.go` with HTTP handlers using the
+   `respond` package.
+5. Add a SQL migration in `internal/platform/migrate/sql/`.
+6. Wire it into `internal/api/router.go`.
+7. Write tests at the layers [How we test](docs/testing.md#which-test-to-write)
+   names for your change.
 
-- `go fmt` and `go vet` must pass
-- No exported types without doc comments
-- Errors use `errs.DomainError` for domain-specific errors or `fmt.Errorf` for validation
-- JSON field names are `snake_case`
-- ID format: `vlx_{type}_{random_hex}` (e.g., `vlx_cus_abc123`)
+## Code style
+
+- `go fmt` and `go vet` must pass.
+- No exported types without doc comments.
+- Errors use `errs.DomainError` for domain-specific errors or `fmt.Errorf`
+  for validation.
+- JSON field names are `snake_case`.
+- ID format: `vlx_{type}_{random_hex}` (for example `vlx_cus_abc123`).
 
 ## Frontend (web-v2)
 
@@ -111,53 +182,76 @@ The dashboard is a React + TypeScript + Vite app. See
 [`web-v2/README.md`](web-v2/README.md) for setup, the dev server, and the
 directory's own CI checks. Two things often surprise first-time contributors:
 
-- `npm install` relies on `web-v2/.npmrc`. That file deliberately tolerates a
-  peer-dependency mismatch, so do not "fix" the mismatch.
+- `npm install` relies on `web-v2/.npmrc`. That file tolerates a
+  peer-dependency mismatch on purpose, so do not "fix" the mismatch.
 - Typechecking is `npx tsc -b`. Do not use `tsc --noEmit`: here it checks
   nothing and reports no error.
 
 ## What CI runs on your PR
 
-Every gate below runs on every PR. Run the ones relevant to your change
-locally before you push, so a failing CI build holds no surprises:
+CI runs every check below on every PR. Run the ones your change touches
+locally before you push. Fork PRs get the same run, because no check uses
+secrets.
 
-| Gate | Local command | Notes |
+**Required to merge.** A PR cannot merge until each of these passes.
+
+| CI job | What it checks | Local command |
 |---|---|---|
-| Unit tests + race detector | `go test ./... -race -short -count=1` | the `unit` job, with `go vet ./...`. Includes the source-rule tests in `internal/arch`, for example: a calendar date must be formatted in an explicit zone (`.In(loc)`), or carry a same-line `//tz:ok` |
-| Integration tests | `go test -p 1 ./... -count=1 -short=false` | needs `docker compose up -d postgres`; test DBs are auto-provisioned |
-| The same suite through a connection pooler | `scripts/pgbouncer-test.sh` | needs Docker; starts PgBouncer in transaction mode in front of the same Postgres |
-| Money-invariant sweep | `go run ./cmd/velox-doctor`, with `DATABASE_URL` set to the owner URL of the database you ran the golden path against | runs in CI after the golden-path demo, over the rows it wrote |
-| golangci-lint | `make lint` | config in `.golangci.yml`; much stricter than `go vet`. Also holds two Velox rules: no bare `time.Now()` in clock-pinned packages (waive with `//nolint:forbidigo // wall-clock: <reason>`), and no single-invoice period lookup in proration code (waive with `//nolint:forbidigo // single-invoice-ok: <reason>`) |
-| Codegen drift | `make gen` then `git diff --exit-code` | required whenever `api/openapi.yaml` changes |
-| Vulnerability scan | `govulncheck ./...` | can fail when a new Go CVE is published, even if your change is fine. Say so in the PR and we'll handle it |
-| Frontend | `cd web-v2 && npm run build && npm test && npm run lint` | only if you touched `web-v2/` |
-| Dashboard end to end | `cd web-v2 && npm run test:e2e` | Playwright against a running API and dashboard; see [How we test](docs/testing.md). Not a required check yet |
-| Golden path | `make bootstrap`, then `make dev`, then `scripts/demo.sh <secret test key>` | CI boots a real server and walks recipe → invoice end to end; the key is printed by `make bootstrap` |
-| Browser tests | `cd web-v2 && npm run test:e2e` | Playwright against a real API; setup in [`web-v2/e2e/README.md`](web-v2/e2e/README.md). Not a required check yet |
-| Links between docs | `lychee --offline --include-fragments '**/*.md'` | internal links and anchors only |
-| Docs style | `vale <changed .md files>` | advisory: it comments, it does not fail the build |
+| `unit` | Unit tests with the race detector, then `go vet`. Includes the source-rule tests in `internal/arch` | `go test ./... -race -short -count=1` |
+| `test` | Build, module checksums, and the integration tests against a real Postgres | `go test -p 1 ./... -count=1 -short=false` (needs `docker compose up -d postgres`; test databases are created for you) |
+| `test-pgbouncer` | The same suite through PgBouncer, a connection pooler, in transaction mode | `scripts/pgbouncer-test.sh` (needs Docker) |
+| `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs velox-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/velox-doctor` |
+| `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, and `govulncheck` | `make lint`, then `govulncheck ./...` |
+| `codegen-drift` | Generated Go and TypeScript match `api/openapi.yaml` | `make gen && git diff --exit-code` |
+| `frontend` | Dashboard build (`tsc -b` and Vite), unit tests and eslint | `cd web-v2 && npm run build && npm test && npm run lint` |
 
-Fork PRs get the identical CI run, because no gate uses secrets.
+**Also run, not required to merge.**
 
-## Pull Requests
+| CI job | What it checks | Local command |
+|---|---|---|
+| `e2e` | Playwright tests against a real API and dashboard. Setup: [`web-v2/e2e/README.md`](web-v2/e2e/README.md) | `cd web-v2 && npm run test:e2e` |
+| `doc-links` | Every internal Markdown link and `#anchor` resolves. It turns red on a broken link; fix it before merging | `lychee --offline --include-fragments '**/*.md'` |
+| `doc-style` | Vale prose lint on the lines your PR adds. It comments only and never fails | `vale <changed .md files>` |
 
-1. Fork the repo and create a feature branch
-2. Write tests for new functionality, at the layer [How we test](docs/testing.md) names for your change
-3. Run the gates above that your change touches (at minimum the two test commands)
-4. **Docs travel with the change, in the same PR:** any user-visible change
-   gets a `CHANGELOG.md` entry, and any UI change is covered by a
-   Playwright spec in `web-v2/e2e/`. This is a hard house rule — the bar
-   is "the doc doesn't lie."
-   For how to write docs, see the [writing style guide](docs/dev/writing-style.md).
-5. Submit a PR with a clear description of what and why
+Notes on three of them:
+
+- **velox-doctor** is a read-only command that scans a database for states
+  no correct code could produce, such as invoice totals that do not add up.
+  Point `DATABASE_URL` at the owner connection: under the app's RLS role it
+  sees no rows and reports clean.
+- **`govulncheck`** can fail when a new Go vulnerability is published, even
+  if your change is fine. Say so in the PR and we will handle it.
+- **Lint waivers and source rules** (the `//nolint:forbidigo` reasons and
+  the `//tz:ok` date rule) are described in
+  [How we test](docs/testing.md#which-test-to-write).
+
+## Pull requests
+
+1. Fork the repo and create a feature branch.
+2. Write tests for new behavior, at the layer
+   [How we test](docs/testing.md) names for your change.
+3. Run the checks above that your change touches (at least the two test
+   commands).
+4. Update the docs in the same PR. Every user-visible change gets a
+   `CHANGELOG.md` entry, and every UI change is covered by a Playwright
+   spec in `web-v2/e2e/`. A doc that no longer matches the code is a bug.
+   For how to write docs, see the
+   [writing style guide](docs/dev/writing-style.md).
+5. Open the PR with a clear description of what changed and why.
 
 **Touching money or a state machine?** This covers invoices, payments,
-credits, dunning (failed-payment retries), subscriptions and tax. Follow the
-[Money-Path Robustness Playbook](docs/dev/money-path-robustness-playbook.md):
+credits, dunning (retrying a failed card payment and emailing the
+customer), subscriptions and tax. Follow the
+[Money-path robustness playbook](docs/dev/money-path-robustness-playbook.md):
 
-- Before opening the PR, work through its implementation checklist (§3).
-- In the PR description, include the state's site-set enumeration (§2). That
-  is the list of every code site that can write or react to that state.
-- A guard for concurrency or a money invariant needs an automated test. The
-  test forces the race and is verified to fail once the guard is removed (a
-  collision + mutation-verified test, §5).
+- Before opening the PR, work through its implementation checklist
+  ([§3](docs/dev/money-path-robustness-playbook.md#3-implementation-checklist--gates-before-opening-a-money-path-pr)).
+- In the PR description, list the state's site-set
+  ([§2](docs/dev/money-path-robustness-playbook.md#2-the-meta-practice-complete-site-set-enumeration)):
+  every place in the code that writes that state or reacts to it.
+- A guard against a race or a broken money rule needs an automated test.
+  The test forces the race, and you show it fails once the guard is
+  removed ([§5](docs/dev/money-path-robustness-playbook.md#5-test-lock-doctrine)).
+
+Words used here that you have not met are in the
+[glossary](docs/glossary.md#for-contributors).
