@@ -4,6 +4,8 @@
 
 **The open-source billing engine for AI and usage-heavy SaaS — runs in your own VPC.**
 
+**In plain words:** if you sell an AI product, Velox works out what each customer owes and bills them. It counts what each customer used, such as tokens. It applies your prices, makes the invoice and its PDF, and charges the card through Stripe. You run it on your own servers, so the billing data stays in your own database.
+
 Velox owns the billing layer above the card charge: pricing, subscriptions, usage metering, invoicing, credits, and dunning (the automatic retry-and-escalate process that runs when a payment fails). Stripe still executes the card charge underneath, as a plain PaymentIntent. So Stripe Billing's percentage fee does not apply. Your usage and invoice records live in your own Postgres. Stripe sees each charge, and also the invoice lines if you use Stripe Tax. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid.
 
 [![CI](https://github.com/getvelox/velox/actions/workflows/ci.yml/badge.svg)](https://github.com/getvelox/velox/actions/workflows/ci.yml)
@@ -37,7 +39,9 @@ One meter carried every token type, prices are stored exactly ($3.00 per 1M toke
 
 ## Quick start
 
-You need git and Docker 24 or newer with the Compose plugin. It pulls the latest published release, so nothing is built. Changes merged after that release are not in it until the next release.
+Try Velox on your own computer in about five minutes. You need git and Docker 24 or newer with the Compose plugin. You do not need Go, Node or a database.
+
+**1. Start Velox**
 
 ```bash
 git clone https://github.com/getvelox/velox.git
@@ -45,13 +49,37 @@ cd velox/deploy/compose
 ./quickstart.sh
 ```
 
-It prints the dashboard address (`http://localhost:8080`), a login and a test API key. Then see the whole flow, from token usage to a finalized invoice with a PDF and a margin report:
+This downloads the latest release and starts it in Docker: the Velox server, its dashboard, Postgres and Redis. When it is ready, it prints:
+
+- the dashboard address, `http://localhost:8080`
+- your login, an email and a password. The password is shown only once, and it is also saved in `quickstart-credentials.json`.
+- a test API key, for calling the API yourself
+
+Open the dashboard and sign in. Velox is empty at this point: there are no customers or invoices yet.
+
+**2. Run the demo**
 
 ```bash
 ./quickstart.sh demo
 ```
 
-The demo checks each step and stops if anything goes wrong, so a finished run means it all worked. Each run creates a fresh demo customer on its own test clock, so you can rerun it. `./quickstart.sh stop` stops Velox and keeps its data; `./quickstart.sh destroy` deletes it.
+The demo fills Velox with an example, so you can watch one month of billing in about two minutes:
+
+1. It sets up prices for AI tokens, with one rate for each model and token type.
+2. It creates a demo customer with a subscription.
+3. It saves what the AI provider charges you per token, so Velox can work out your margin.
+4. It sends token usage for the customer, the way a LiteLLM proxy would.
+5. It moves the customer's clock to the end of the month. A test clock is a pretend clock for test customers, so you do not wait 30 days.
+6. Velox closes the month and makes the invoice, its PDF and a margin report.
+
+The demo checks each step and stops if one fails, so a finished run means it all worked. Then open the dashboard to see the customer, the usage, the invoice and its PDF. You can run the demo again: each run makes a new demo customer.
+
+**3. Stop or remove it**
+
+- `./quickstart.sh stop` stops Velox and keeps its data. Run `./quickstart.sh` to start it again.
+- `./quickstart.sh destroy` stops Velox and deletes its data.
+
+If port 8080 is already in use, start it with `VELOX_PORT=9000 ./quickstart.sh`. The quick start runs the latest published release, so changes merged after that release are not in it yet.
 
 To change Velox itself, with Go and Node on your machine, see [Development setup](CONTRIBUTING.md#development-setup).
 
