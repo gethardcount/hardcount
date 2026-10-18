@@ -670,7 +670,9 @@ func TestRetryRefundAudit_SharedFate(t *testing.T) {
 		// fact: the state move the provider reported, and the operator's
 		// create attempt that failed. The old single-row expectation encoded
 		// the pre-reconcile flow.
-		refunder := &stubRefunder{err: errors.New("stripe: card_declined")}
+		// A refusal, so the create records failed. An unclear answer
+		// records unknown instead (#965, refund_unknown_integration_test.go).
+		refunder := &stubRefunder{err: refusedRefundErr{msg: "stripe: card_declined"}}
 		svc := creditnote.NewService(store, invStore, refunder)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "RETRYSTRIPEFAIL"})
 		svc.SetAuditLogger(logger)

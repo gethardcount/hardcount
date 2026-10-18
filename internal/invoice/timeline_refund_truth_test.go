@@ -102,6 +102,10 @@ func TestPaymentTimeline_RefundRowReportsOutcomeNotIntent(t *testing.T) {
 			// Allocated but never executed. Must not borrow the success
 			// wording merely because it is not an explicit failure.
 			{domain.RefundNone, "Refund not processed", "pending"},
+			// Stripe gave no clear answer (#965). "Not processed" would tell
+			// the operator nothing moved, which invites a second refund by
+			// hand in Stripe; the customer may already have been refunded.
+			{domain.RefundStatus("unknown"), "Refund result unknown", "pending"},
 		}
 		for _, tc := range cases {
 			t.Run(string(tc.status), func(t *testing.T) {
@@ -138,6 +142,7 @@ func TestPaymentTimeline_RefundRowReportsOutcomeNotIntent(t *testing.T) {
 			{domain.RefundFailed, "Credit note issued — card refund failed"},
 			{domain.RefundPending, "Credit note issued — card refund pending"},
 			{domain.RefundNone, "Credit note issued — card refund not processed"},
+			{domain.RefundStatus("unknown"), "Credit note issued — card refund result unknown"},
 		}
 		for _, tc := range cases {
 			t.Run(string(tc.status), func(t *testing.T) {

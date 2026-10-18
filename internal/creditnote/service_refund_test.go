@@ -2,7 +2,6 @@ package creditnote
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -285,13 +284,15 @@ func TestCreateRefund_MissingReason(t *testing.T) {
 	}
 }
 
-// When Stripe refund fails at Issue time, the service records RefundFailed on
-// the credit note but still issues it (the CN is an accounting doc — the
-// operator can resolve the Stripe side manually).
+// When Stripe refuses the refund at Issue time, the service records
+// RefundFailed on the credit note but still issues it (the CN is an
+// accounting doc — the operator can resolve the Stripe side manually). An
+// unclear answer, such as an unreachable network, is "unknown" instead:
+// TestIssue_RefundResultUnknownOrFailed (#965).
 func TestCreateRefund_StripeFailure_IssuesWithFailedStatus(t *testing.T) {
 	t.Parallel()
 	svc, _, _, refunder := setupRefundSvc(t)
-	refunder.failWith = errors.New("stripe: card network unreachable")
+	refunder.failWith = errRefundRefused
 
 	cn, err := svc.CreateRefund(context.Background(), "t1", RefundInput{
 		InvoiceID: "inv_paid", Reason: "fraudulent",
