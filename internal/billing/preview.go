@@ -412,9 +412,24 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 			}
 		}
 	}
-	meterIntervals, _ := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough)
-	capped := sub.UsageCapUnits != nil && *sub.UsageCapUnits > 0 && sub.OverageAction == "block"
-	ladder := newUsageLadder(wm, capped)
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough)
+	// The tier ladder runs only after a threshold fire, and the close turns
+	// it off only when the block usage cap binds; the preview works the cap
+	// out the same way for that switch (usage_cap.go). It does not scale its
+	// lines by the cap (capWarning says so).
+	capBinds := false
+	if wm.exists() {
+		meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
+		if err != nil {
+			return PreviewResult{}, fmt.Errorf("preview: %w", err)
+		}
+		usageCap, err := e.usageCapFor(ctx, sub, meterIntervalsFull, newWindowUsage(e, sub, meterAggs))
+		if err != nil {
+			return PreviewResult{}, fmt.Errorf("preview: %w", err)
+		}
+		capBinds = usageCap.binds()
+	}
+	ladder := newUsageLadder(wm, capBinds)
 	usageLineCount := 0
 	for _, meterID := range order {
 		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
