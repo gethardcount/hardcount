@@ -526,6 +526,70 @@ func TestItemChange_OverlappingChanges_BillOnceFromTheLatestState(t *testing.T) 
 	}
 }
 
+// TestItemWriters_SubscriptionRowFirst_NoDeadlock pins the lock order of
+// item writers. A plan swap locks the subscription row with its period CAS
+// and then writes the item. The billing run's scheduled-plan apply
+// (ApplyDuePendingItemPlansAtomic) used to write the item first and then ask
+// for the subscription row (for the item's billing interval). Run together
+// on one item, each waited for the other: Postgres aborted one of them with
+// a deadlock error. #1270 makes every item change take the subscription row
+// first, like the swap, so every writer of subscription_items must too.
+//
+// Mutation-verify: drop lockSubscriptionRow from
+// ApplyDuePendingItemPlansAtomic and one side fails with SQLSTATE 40P01.
+func TestItemWriters_SubscriptionRowFirst_NoDeadlock(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	r := newItemRaceRig(t, db, "Item Writers Lock Order", 5, false)
+	ctx := clock.WithEffectiveNow(r.ctx, proNow)
+
+	// A scheduled change to the keeper plan, due at the period end.
+	if _, err := r.store.SetItemPendingPlan(ctx, r.tenantID, r.itemID, r.plans["keeper"].ID, proPeriodEnd); err != nil {
+		t.Fatalf("schedule plan change: %v", err)
+	}
+	sub, err := r.store.Get(ctx, r.tenantID, r.subID)
+	if err != nil {
+		t.Fatalf("get subscription: %v", err)
+	}
+
+	// The swap's order: the period CAS (here verify-only) holds the row ...
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if err := r.store.ClosePeriodTx(ctx, tx, r.tenantID, r.subID, SnapshotOf(sub),
+		*sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd, *sub.NextBillingAt, sub.BillingAnchorDay); err != nil {
+		t.Fatalf("period CAS: %v", err)
+	}
+
+	// ... while the billing run applies the scheduled change.
+	applied := make(chan error, 1)
+	go func() {
+		_, err := r.store.ApplyDuePendingItemPlansAtomic(ctx, r.tenantID, r.subID, proPeriodEnd)
+		applied <- err
+	}()
+	testutil.WaitForLockWaiter(t, r.ctx, testutil.AdminPool(t), "subscription")
+
+	// ... then the swap writes the item.
+	_, swapErr := r.store.ApplyItemPlanImmediatelyTx(ctx, tx, r.tenantID, r.itemID, r.plans["pro"].ID, proNow)
+	if swapErr == nil {
+		swapErr = tx.Commit()
+	} else {
+		postgres.Rollback(tx)
+	}
+	applyErr := <-applied
+
+	if swapErr != nil || applyErr != nil {
+		t.Fatalf("plan write: %v; scheduled-plan apply: %v; want both to succeed, one after the other", swapErr, applyErr)
+	}
+	// The immediate change superseded the scheduled one: the apply that ran
+	// after it found nothing due.
+	it, live := r.item(t)
+	if !live || it.PlanID != r.plans["pro"].ID || it.PendingPlanID != "" {
+		t.Fatalf("item = live %v plan %s pending %q, want the pro plan and nothing scheduled", live, it.PlanID, it.PendingPlanID)
+	}
+}
+
 // TestItemChange_SwapAfterAQuantityChange_Refused: a monthly-to-yearly swap
 // prices the old period's refund and the new period's invoice from the
 // items it read before its transaction. A quantity change that commits in
