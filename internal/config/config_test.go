@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -500,6 +501,64 @@ func TestLoad_TrustProxyMustParse(t *testing.T) {
 			if _, err := Load(); err != nil {
 				t.Errorf("APP_ENV=%s TRUST_PROXY=%q must boot, got: %v", env, ok, err)
 			}
+		}
+	}
+}
+
+// An origin with a * inside it, such as https://*.example.com, is not a
+// pattern: Velox matches origins exactly, so it would allow nothing. "*"
+// beside other origins turns the sign-in cookie off for them too. Both stop
+// start-up, in every environment.
+func TestLoad_CORSAllowedOriginsRefusesPatterns(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
+	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("TRUST_PROXY", "none")
+
+	for _, env := range []string{"production", "local"} {
+		t.Setenv("APP_ENV", env)
+		for _, bad := range []string{"https://*.example.com", "h*", "https://app.example.com,*.example.com", "**", "*,https://app.example.com", "https://app.example.com, *"} {
+			t.Setenv("CORS_ALLOWED_ORIGINS", bad)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS") {
+				t.Errorf("APP_ENV=%s CORS_ALLOWED_ORIGINS=%q must refuse to boot naming CORS_ALLOWED_ORIGINS, got: %v", env, bad, err)
+			}
+		}
+		for _, ok := range []string{"", "*", " * ", "https://app.example.com", " https://a.example.com , https://b.example.com ,", "http://localhost:5173"} {
+			t.Setenv("CORS_ALLOWED_ORIGINS", ok)
+			if _, err := Load(); err != nil {
+				t.Errorf("APP_ENV=%s CORS_ALLOWED_ORIGINS=%q must boot, got: %v", env, ok, err)
+			}
+		}
+	}
+}
+
+// ParseCORSOrigins feeds the boot check, CORS and the CSRF guard. The usable
+// entries come back alongside the error naming the refused ones.
+func TestParseCORSOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		spec string
+		want []string
+		err  string
+	}{
+		{"", nil, ""},
+		{" , ", nil, ""},
+		{" https://a.example.com , https://b.example.com ,", []string{"https://a.example.com", "https://b.example.com"}, ""},
+		{" * ", []string{"*"}, ""},
+		{"*,*", []string{"*"}, ""},
+		{"https://a.example.com, https://*.example.com, h*", []string{"https://a.example.com"}, `"https://*.example.com", "h*"`},
+		{"*, https://a.example.com", []string{"https://a.example.com"}, "* beside other origins"},
+	} {
+		got, err := ParseCORSOrigins(tc.spec)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("ParseCORSOrigins(%q) = %q, want %q", tc.spec, got, tc.want)
+		}
+		switch {
+		case tc.err == "" && err != nil:
+			t.Errorf("ParseCORSOrigins(%q): unexpected error %v", tc.spec, err)
+		case tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)):
+			t.Errorf("ParseCORSOrigins(%q): error %v, want one containing %q", tc.spec, err, tc.err)
 		}
 	}
 }

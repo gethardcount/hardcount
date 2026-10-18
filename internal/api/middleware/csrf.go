@@ -40,8 +40,9 @@ import (
 //     bearing BOTH a bearer header AND a session cookie is not a legitimate
 //     shape (the SDK has no cookie; the dashboard sends no bearer): it is the
 //     "add a junk Authorization header to trip the exemption, let the ambient
-//     cookie authenticate" move, which a permissive (CORS `*`) config would
-//     otherwise let through a preflight. Such a request is origin-checked, not
+//     cookie authenticate" move, which a CORS config that let the attacker's
+//     origin send credentials would otherwise let through a preflight (CORS
+//     `*` sends none; see CORS). Such a request is origin-checked, not
 //     exempted, so the dodge fails regardless of CORS config.
 //   - Otherwise the browser's Sec-Fetch-Site (which page JS cannot forge) is the
 //     primary signal: same-origin and none pass; cross-site is rejected;

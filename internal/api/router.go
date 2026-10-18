@@ -1451,15 +1451,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if corsEnv == "" {
 		corsEnv = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
 	}
-	// Trimmed here, once, for both consumers (CORS and the CSRF origin
-	// allowlist). CORS matches entries exactly, so "a, b" would otherwise
-	// never allow " b"; a blank entry would match a request with no Origin.
-	var allowedOrigins []string
-	for _, o := range strings.Split(corsEnv, ",") {
-		if o = strings.TrimSpace(o); o != "" {
-			allowedOrigins = append(allowedOrigins, o)
-		}
-	}
+	// Parsed here, once, for both consumers (CORS and the CSRF origin
+	// allowlist), by the parser behind the boot check. Both match entries
+	// exactly, so entries are trimmed ("a, b" must allow "b") and blanks
+	// dropped (a blank entry would match a request with no Origin). The
+	// error is ignored: config.Load already refused to start on it, and the
+	// list returned with it holds only the usable entries.
+	allowedOrigins, _ := config.ParseCORSOrigins(corsEnv)
 	r.Use(mw.CORS(allowedOrigins))
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)

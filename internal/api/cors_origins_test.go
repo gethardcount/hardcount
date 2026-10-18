@@ -40,3 +40,23 @@ func TestCORSAllowedOrigins_EntriesAreTrimmed(t *testing.T) {
 		t.Errorf("request without Origin got Access-Control-Allow-Credentials %q", got)
 	}
 }
+
+// CORS_ALLOWED_ORIGINS=* lets any site read responses, but not with the
+// sign-in cookie: a page on another site must not read a signed-in
+// operator's data.
+func TestCORSAllowedOrigins_WildcardSendsNoCredentials(t *testing.T) {
+	t.Setenv("CORS_ALLOWED_ORIGINS", "*")
+	srv := newTestServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "https://sibling.example.com")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("Access-Control-Allow-Origin = %q, want a literal *", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Errorf("Access-Control-Allow-Credentials = %q, want none with *", got)
+	}
+}
