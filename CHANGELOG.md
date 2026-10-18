@@ -18,12 +18,21 @@ original text.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-18
+
+Fixes before the first partner installs. Long invoice PDFs go onto more pages, and every email has a `Date` and a `Message-ID`. Webhook URLs with a private IPv6 address are refused when saved, and sign-ins record the real client address. No database migrations.
+
+**Before upgrading:**
+
+- **`OTEL_TRACES_SAMPLER` now takes effect.** If you set it, Velox now keeps only the traces it selects; before, every trace was exported. Unset, nothing changes.
+- **A webhook endpoint saved earlier with a private IPv6 URL still fails every delivery.** Change its URL to a public address.
+
 ### Changed
 
 - **`make test` no longer reads `.env` (2026-10-18).** For contributors: only `make run`, `dev`, `migrate`, `migrate-status` and `bootstrap` load it, so tests see the same settings as CI. `make test-unit` runs packages in parallel (about 30 s, was 60 s). The unused `test-integration` and `test-verbose` targets are gone. ([#1207](https://github.com/getvelox/velox/pull/1207))
 - **ADRs 001–061 all open with a short Summary (2026-10-18).** Forty-six records gained one, giving the current rule and status, including what later ADRs changed. The records below each Summary are unchanged. Fourteen status lines now name their dated amendment or partial supersession. See the [ADR index](docs/adr/README.md).
 - **Go tests now walk five untested backend flows over HTTP on a real database (2026-10-18).** Contributors: `internal/api` has new journeys for API keys (create, use, revoke, rotate), offline payments and signed Stripe webhooks, the update-payment link, dunning-policy delete, and whoami, the mode switch and the reset-link check. ([#1204](https://github.com/getvelox/velox/pull/1204))
-- **Decision recorded: migrations move to goose in v0.9.0 (2026-10-18).** Nothing changes yet. v0.9.0 takes over a v0.8.0 or v0.8.1 database without changing a table; older ones upgrade to v0.8.1 first. A failed migration leaves nothing to repair, so `velox migrate force` goes. [ADR-125](docs/adr/125-goose-migrations-from-one-v081-baseline.md) supersedes ADR-124; ADR-073's deadlock correction stands.
+- **Decision recorded: migrations move to goose in v0.9.0 (2026-10-18).** Nothing changes yet. v0.9.0 takes over a v0.8.0, v0.8.1 or v0.8.2 database without changing a table; older ones upgrade to v0.8.2 first. A failed migration leaves nothing to repair, so `velox migrate force` goes. [ADR-125](docs/adr/125-goose-migrations-from-one-v081-baseline.md) supersedes ADR-124; ADR-073's deadlock correction stands.
 - **Dashboard lint now fails on unused code (2026-10-18).** For contributors: `npm run lint` in `web-v2` runs knip after eslint, so an unused file, export or dependency fails CI. Unused dashboard files, exports and three unused dependencies are deleted. `web-v2/knip.jsonc` says what is ignored and why. ([#1196](https://github.com/getvelox/velox/pull/1196))
 - **The README shows before it tells (2026-10-17).** The pictures come first, then a small diagram of how Velox works and one example usage event, then the quick start. The gaps table is shorter, and the volume line now uses the €6.49-a-month server test.
 
@@ -4978,7 +4987,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/getvelox/velox/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/getvelox/velox/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/getvelox/velox/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/getvelox/velox/compare/v0.6.1...v0.7.0
