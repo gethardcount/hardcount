@@ -445,6 +445,20 @@ func (s *Service) SetCardRefusalReader(r CardRefusalReader) {
 	s.cardRefusals = r
 }
 
+// DisputeReader: failing-first skeleton for #979, not read yet.
+type DisputeReader interface {
+	ListDisputesByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDispute, error)
+	LostDisputesByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceDispute, error)
+}
+
+// SetDisputeReader: failing-first skeleton for #979.
+func (s *Service) SetDisputeReader(DisputeReader) {}
+
+// ListInvoiceDisputes: failing-first skeleton for #979.
+func (s *Service) ListInvoiceDisputes(context.Context, string, string) ([]domain.InvoiceDispute, error) {
+	return nil, errDisputesNotImplemented
+}
+
 // collectionPaused reports whether the invoice's subscription has
 // pause_collection in force now. An unwired reader, no subscription id or a subscription
 // that no longer exists answers false (nothing to pause). Any other read error

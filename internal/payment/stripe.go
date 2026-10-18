@@ -422,6 +422,14 @@ func (s *Stripe) SetRefundStatusUpdater(u RefundStatusUpdater) {
 	s.refundUpdater = u
 }
 
+// DisputeRecorder: failing-first skeleton for #979, never called yet.
+type DisputeRecorder interface {
+	RecordStripeDispute(ctx context.Context, tenantID string, snap domain.DisputeSnapshot) (domain.DisputeRecordResult, error)
+}
+
+// SetDisputeRecorder: failing-first skeleton for #979.
+func (s *Stripe) SetDisputeRecorder(DisputeRecorder) {}
+
 // IsUnknownPaymentFailure classifies an error returned from ChargeInvoice
 // as a Stripe-side unknown outcome (5xx, timeout, network) — the failure
 // category that should feed the circuit breaker. Explicit card declines

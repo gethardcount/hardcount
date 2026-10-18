@@ -145,6 +145,8 @@ const (
 	// leg failed and the customer paid inside the residual. Distinct cause
 	// from duplicate_charge: the money is owed BACK, not double-collected.
 	EventPaymentReceivedOnVoidedInvoice     = "payment.received_on_voided_invoice"
+	EventPaymentDisputeOpened               = "payment.dispute_opened" // failing-first skeleton
+	EventPaymentDisputeClosed               = "payment.dispute_closed" // failing-first skeleton
 	EventSubscriptionCreated                = "subscription.created"
 	EventSubscriptionActivated              = "subscription.activated"
 	EventSubscriptionCanceled               = "subscription.canceled"

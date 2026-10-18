@@ -1332,6 +1332,8 @@ const (
 	rankEscalated         = 50
 	rankLifecycleTerminal = 60 // paid / voided / uncollectible
 	rankCreditNote        = 70
+	rankDisputeOpened     = 74 // failing-first skeleton for #979
+	rankDisputeClosed     = 76 // failing-first skeleton for #979
 	rankDunningResolved   = 80
 	rankEmail             = 90 // external lane; rank is a formality
 )
@@ -2503,6 +2505,9 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{"events": events, "degraded": degraded, "truncated": truncated})
 }
+
+// disputeTimelineEvents: failing-first skeleton for #979, renders nothing.
+func disputeTimelineEvents([]domain.InvoiceDispute) []timelineEvent { return nil }
 
 func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())

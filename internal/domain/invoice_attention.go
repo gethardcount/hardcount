@@ -171,6 +171,9 @@ const (
 	// the default pause action collection must be resumed too. Chargebee/Stripe
 	// parity: the end-of-dunning terminal is an explicit, visible state.
 	AttentionReasonDunningExhausted AttentionReason = "dunning_exhausted"
+
+	// AttentionReasonDisputeLost: failing-first skeleton, never set yet.
+	AttentionReasonDisputeLost AttentionReason = "dispute_lost"
 )
 
 // AttentionAction names the operator's recommended next step. Closed
@@ -485,6 +488,9 @@ type AttentionContext struct {
 	// Zero value (false) gives the no-retry copy, which still sends the
 	// operator to get a new card rather than to wait on a retry.
 	DunningRetrying bool
+
+	// LostDispute: failing-first skeleton, never read yet.
+	LostDispute *InvoiceDispute
 
 	// LastFailedChargeAt is the simulated instant of the invoice's latest
 	// failed charge, for a clock-pinned invoice only (nil otherwise). The
