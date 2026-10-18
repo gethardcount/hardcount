@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	BearerAuthScopes    bearerAuthContextKey    = "BearerAuth.Scopes"
-	SessionCookieScopes sessionCookieContextKey = "SessionCookie.Scopes"
+	BearerAuthScopes        bearerAuthContextKey        = "BearerAuth.Scopes"
+	MetricsTokenScopes      metricsTokenContextKey      = "MetricsToken.Scopes"
+	PostmarkBasicAuthScopes postmarkBasicAuthContextKey = "PostmarkBasicAuth.Scopes"
+	SessionCookieScopes     sessionCookieContextKey     = "SessionCookie.Scopes"
 )
 
 // Defines values for APIKeyKeyType.
@@ -399,6 +401,27 @@ func (e CustomerBillingProfileInputTaxStatus) Valid() bool {
 	}
 }
 
+// Defines values for CustomerPaymentSetupSetupStatus.
+const (
+	CustomerPaymentSetupSetupStatusMissing CustomerPaymentSetupSetupStatus = "missing"
+	CustomerPaymentSetupSetupStatusPending CustomerPaymentSetupSetupStatus = "pending"
+	CustomerPaymentSetupSetupStatusReady   CustomerPaymentSetupSetupStatus = "ready"
+)
+
+// Valid indicates whether the value is a known member of the CustomerPaymentSetupSetupStatus enum.
+func (e CustomerPaymentSetupSetupStatus) Valid() bool {
+	switch e {
+	case CustomerPaymentSetupSetupStatusMissing:
+		return true
+	case CustomerPaymentSetupSetupStatusPending:
+		return true
+	case CustomerPaymentSetupSetupStatusReady:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CustomerPriceOverrideMode.
 const (
 	CustomerPriceOverrideModeFlat      CustomerPriceOverrideMode = "flat"
@@ -684,6 +707,21 @@ func (e HeldUsageGroupReason) Valid() bool {
 	case CustomerNotFound:
 		return true
 	case MeterNotFound:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HostedInvoicePayUnavailableReason.
+const (
+	OnlinePaymentUnavailable HostedInvoicePayUnavailableReason = "online_payment_unavailable"
+)
+
+// Valid indicates whether the value is a known member of the HostedInvoicePayUnavailableReason enum.
+func (e HostedInvoicePayUnavailableReason) Valid() bool {
+	switch e {
+	case OnlinePaymentUnavailable:
 		return true
 	default:
 		return false
@@ -1095,6 +1133,27 @@ func (e RatingRuleMode) Valid() bool {
 	case RatingRuleModeGraduated:
 		return true
 	case RatingRuleModePackage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReadinessReportStatus.
+const (
+	ReadinessReportStatusDegraded ReadinessReportStatus = "degraded"
+	ReadinessReportStatusDraining ReadinessReportStatus = "draining"
+	ReadinessReportStatusOk       ReadinessReportStatus = "ok"
+)
+
+// Valid indicates whether the value is a known member of the ReadinessReportStatus enum.
+func (e ReadinessReportStatus) Valid() bool {
+	switch e {
+	case ReadinessReportStatusDegraded:
+		return true
+	case ReadinessReportStatusDraining:
+		return true
+	case ReadinessReportStatusOk:
 		return true
 	default:
 		return false
@@ -1557,6 +1616,27 @@ func (e TenantSettingsInputTaxProvider) Valid() bool {
 	}
 }
 
+// Defines values for WebhookDeliveryStatus.
+const (
+	WebhookDeliveryStatusFailed    WebhookDeliveryStatus = "failed"
+	WebhookDeliveryStatusPending   WebhookDeliveryStatus = "pending"
+	WebhookDeliveryStatusSucceeded WebhookDeliveryStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the WebhookDeliveryStatus enum.
+func (e WebhookDeliveryStatus) Valid() bool {
+	switch e {
+	case WebhookDeliveryStatusFailed:
+		return true
+	case WebhookDeliveryStatusPending:
+		return true
+	case WebhookDeliveryStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookDeliveryReplayResultStatus.
 const (
 	WebhookDeliveryReplayResultStatusQueued WebhookDeliveryReplayResultStatus = "queued"
@@ -1595,19 +1675,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	Failed    WebhookEventDeliveryAttemptStatus = "failed"
-	Pending   WebhookEventDeliveryAttemptStatus = "pending"
-	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
+	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
+	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case Failed:
+	case WebhookEventDeliveryAttemptStatusFailed:
 		return true
-	case Pending:
+	case WebhookEventDeliveryAttemptStatusPending:
 		return true
-	case Succeeded:
+	case WebhookEventDeliveryAttemptStatusSucceeded:
 		return true
 	default:
 		return false
@@ -1715,16 +1795,16 @@ func (e CheckPasswordResetToken422JSONResponseBodyValid) Valid() bool {
 
 // Defines values for PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery.
 const (
-	NotConfigured PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "not_configured"
-	Ok            PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "ok"
+	PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDeliveryNotConfigured PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "not_configured"
+	PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDeliveryOk            PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery = "ok"
 )
 
 // Valid indicates whether the value is a known member of the PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery enum.
 func (e PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDelivery) Valid() bool {
 	switch e {
-	case NotConfigured:
+	case PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDeliveryNotConfigured:
 		return true
-	case Ok:
+	case PostV1AuthPasswordResetRequest200JSONResponseBodyEmailDeliveryOk:
 		return true
 	default:
 		return false
@@ -2327,19 +2407,19 @@ func (e GetEmailSettings200JSONResponseBodyLinksEnv) Valid() bool {
 
 // Defines values for GetEmailSettings200JSONResponseBodyTlsMode.
 const (
-	Implicit GetEmailSettings200JSONResponseBodyTlsMode = "implicit"
-	None     GetEmailSettings200JSONResponseBodyTlsMode = "none"
-	Starttls GetEmailSettings200JSONResponseBodyTlsMode = "starttls"
+	GetEmailSettings200JSONResponseBodyTlsModeImplicit GetEmailSettings200JSONResponseBodyTlsMode = "implicit"
+	GetEmailSettings200JSONResponseBodyTlsModeNone     GetEmailSettings200JSONResponseBodyTlsMode = "none"
+	GetEmailSettings200JSONResponseBodyTlsModeStarttls GetEmailSettings200JSONResponseBodyTlsMode = "starttls"
 )
 
 // Valid indicates whether the value is a known member of the GetEmailSettings200JSONResponseBodyTlsMode enum.
 func (e GetEmailSettings200JSONResponseBodyTlsMode) Valid() bool {
 	switch e {
-	case Implicit:
+	case GetEmailSettings200JSONResponseBodyTlsModeImplicit:
 		return true
-	case None:
+	case GetEmailSettings200JSONResponseBodyTlsModeNone:
 		return true
-	case Starttls:
+	case GetEmailSettings200JSONResponseBodyTlsModeStarttls:
 		return true
 	default:
 		return false
@@ -2478,6 +2558,60 @@ const (
 func (e GetUsageSummary500JSONResponseBodyError) Valid() bool {
 	switch e {
 	case InternalError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReplayWebhookEventLegacy200JSONResponseBodyStatus.
+const (
+	Replayed ReplayWebhookEventLegacy200JSONResponseBodyStatus = "replayed"
+)
+
+// Valid indicates whether the value is a known member of the ReplayWebhookEventLegacy200JSONResponseBodyStatus enum.
+func (e ReplayWebhookEventLegacy200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case Replayed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReceivePostmarkWebhook200JSONResponseBodyStatus.
+const (
+	ReceivePostmarkWebhook200JSONResponseBodyStatusIgnored   ReceivePostmarkWebhook200JSONResponseBodyStatus = "ignored"
+	ReceivePostmarkWebhook200JSONResponseBodyStatusProcessed ReceivePostmarkWebhook200JSONResponseBodyStatus = "processed"
+	ReceivePostmarkWebhook200JSONResponseBodyStatusSkipped   ReceivePostmarkWebhook200JSONResponseBodyStatus = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the ReceivePostmarkWebhook200JSONResponseBodyStatus enum.
+func (e ReceivePostmarkWebhook200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case ReceivePostmarkWebhook200JSONResponseBodyStatusIgnored:
+		return true
+	case ReceivePostmarkWebhook200JSONResponseBodyStatusProcessed:
+		return true
+	case ReceivePostmarkWebhook200JSONResponseBodyStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReceiveStripeWebhook200JSONResponseBodyStatus.
+const (
+	ReceiveStripeWebhook200JSONResponseBodyStatusProcessed ReceiveStripeWebhook200JSONResponseBodyStatus = "processed"
+	ReceiveStripeWebhook200JSONResponseBodyStatusSkipped   ReceiveStripeWebhook200JSONResponseBodyStatus = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the ReceiveStripeWebhook200JSONResponseBodyStatus enum.
+func (e ReceiveStripeWebhook200JSONResponseBodyStatus) Valid() bool {
+	switch e {
+	case ReceiveStripeWebhook200JSONResponseBodyStatusProcessed:
+		return true
+	case ReceiveStripeWebhook200JSONResponseBodyStatusSkipped:
 		return true
 	default:
 		return false
@@ -3244,6 +3378,32 @@ type CustomerOverview struct {
 	RecentInvoices []Invoice `json:"recent_invoices"`
 }
 
+// CustomerPaymentSetup defines model for CustomerPaymentSetup.
+type CustomerPaymentSetup struct {
+	CardBrand                   string    `json:"card_brand,omitempty"`
+	CardExpMonth                int       `json:"card_exp_month,omitempty"`
+	CardExpYear                 int       `json:"card_exp_year,omitempty"`
+	CardLast4                   string    `json:"card_last4,omitempty"`
+	CreatedAt                   time.Time `json:"created_at"`
+	CustomerId                  string    `json:"customer_id"`
+	DefaultPaymentMethodPresent bool      `json:"default_payment_method_present"`
+	PaymentMethodType           string    `json:"payment_method_type,omitempty"`
+
+	// SetupStatus `ready`: the customer has a default payment method. `pending`:
+	// a Stripe customer exists but there is no default payment method
+	// yet. `missing`: there is no Stripe customer.
+	SetupStatus           CustomerPaymentSetupSetupStatus `json:"setup_status"`
+	StripeCustomerId      string                          `json:"stripe_customer_id,omitempty"`
+	StripePaymentMethodId string                          `json:"stripe_payment_method_id,omitempty"`
+	TenantId              string                          `json:"tenant_id,omitempty"`
+	UpdatedAt             time.Time                       `json:"updated_at"`
+}
+
+// CustomerPaymentSetupSetupStatus `ready`: the customer has a default payment method. `pending`:
+// a Stripe customer exists but there is no default payment method
+// yet. `missing`: there is no Stripe customer.
+type CustomerPaymentSetupSetupStatus string
+
 // CustomerPriceOverride defines model for CustomerPriceOverride.
 type CustomerPriceOverride struct {
 	Active     bool      `json:"active"`
@@ -3661,6 +3821,106 @@ type HeldUsageReleaseResult struct {
 	// customer's current time (a customer on a test clock).
 	StillHeld int `json:"still_held"`
 }
+
+// HostedInvoice What the hosted invoice page shows. It leaves out internal ids and
+// Stripe details. `bill_to` and the company details in `branding`
+// come from the same place as the invoice PDF's.
+type HostedInvoice struct {
+	BillTo struct {
+		AddressLine1 string `json:"address_line1,omitempty"`
+		AddressLine2 string `json:"address_line2,omitempty"`
+		City         string `json:"city,omitempty"`
+		Country      string `json:"country,omitempty"`
+		Email        string `json:"email,omitempty"`
+		Name         string `json:"name,omitempty"`
+		PostalCode   string `json:"postal_code,omitempty"`
+		State        string `json:"state,omitempty"`
+	} `json:"bill_to"`
+	Branding struct {
+		BrandColor          string `json:"brand_color,omitempty"`
+		CompanyAddressLine1 string `json:"company_address_line1,omitempty"`
+		CompanyAddressLine2 string `json:"company_address_line2,omitempty"`
+		CompanyCity         string `json:"company_city,omitempty"`
+		CompanyCountry      string `json:"company_country,omitempty"`
+		CompanyEmail        string `json:"company_email,omitempty"`
+		CompanyName         string `json:"company_name,omitempty"`
+		CompanyPhone        string `json:"company_phone,omitempty"`
+		CompanyPostalCode   string `json:"company_postal_code,omitempty"`
+		CompanyState        string `json:"company_state,omitempty"`
+		LogoUrl             string `json:"logo_url,omitempty"`
+		SupportUrl          string `json:"support_url,omitempty"`
+	} `json:"branding"`
+	Invoice struct {
+		AmountDueCents  int64 `json:"amount_due_cents"`
+		AmountPaidCents int64 `json:"amount_paid_cents"`
+
+		// BillingTimezone The time zone to show the dates in, so they match the PDF.
+		BillingTimezone     string    `json:"billing_timezone,omitempty"`
+		CreditsAppliedCents int64     `json:"credits_applied_cents"`
+		Currency            string    `json:"currency"`
+		DiscountCents       int64     `json:"discount_cents"`
+		DueAt               time.Time `json:"due_at,omitempty"`
+		Footer              string    `json:"footer,omitempty"`
+		InvoiceNumber       string    `json:"invoice_number"`
+		IssuedAt            time.Time `json:"issued_at,omitempty"`
+		Memo                string    `json:"memo,omitempty"`
+		PaidAt              time.Time `json:"paid_at,omitempty"`
+
+		// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
+		// returned an ambiguous error (5xx, timeout, connection reset) where
+		// we cannot tell whether Stripe processed the charge — a reconciler
+		// resolves these by querying Stripe after a cool-off window.
+		PaymentStatus InvoicePaymentStatus `json:"payment_status"`
+
+		// Status Lifecycle state of the invoice. `uncollectible` marks an invoice
+		// a dunning policy has given up collecting (no further retries) while
+		// keeping it on the books — distinct from `voided` (cancelled, owes
+		// nothing).
+		Status          InvoiceStatus `json:"status"`
+		SubtotalCents   int64         `json:"subtotal_cents"`
+		TaxAmountCents  int64         `json:"tax_amount_cents"`
+		TaxExemptReason string        `json:"tax_exempt_reason,omitempty"`
+		TaxName         string        `json:"tax_name,omitempty"`
+
+		// TaxRate Tax rate in percent, for example `18` for 18%.
+		TaxRate          float32   `json:"tax_rate"`
+		TaxReverseCharge bool      `json:"tax_reverse_charge,omitempty"`
+		TotalAmountCents int64     `json:"total_amount_cents"`
+		VoidedAt         time.Time `json:"voided_at,omitempty"`
+	} `json:"invoice"`
+	LineItems []struct {
+		AmountCents int64  `json:"amount_cents"`
+		Currency    string `json:"currency"`
+		Description string `json:"description"`
+		MeterUnit   string `json:"meter_unit,omitempty"`
+		Quantity    int64  `json:"quantity"`
+
+		// QuantityDecimal The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities.
+		QuantityDecimal  string `json:"quantity_decimal,omitempty"`
+		TaxAmountCents   int64  `json:"tax_amount_cents,omitempty"`
+		TotalAmountCents int64  `json:"total_amount_cents"`
+		UnitAmountCents  int64  `json:"unit_amount_cents"`
+
+		// UnitAmountDecimal The unit price in cents at full precision, for example `0.3` for $0.003.
+		UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
+	} `json:"line_items"`
+
+	// Livemode False for a test-mode invoice. The page shows a test-mode banner.
+	Livemode bool `json:"livemode"`
+
+	// PayEnabled True when the customer can pay online now: the invoice is
+	// finalized, something is owed, no payment is in progress, and the
+	// seller has Stripe connected for the invoice's mode.
+	PayEnabled bool `json:"pay_enabled"`
+
+	// PayUnavailableReason Sent only when money is owed but the seller has no payment
+	// provider connected for this mode.
+	PayUnavailableReason HostedInvoicePayUnavailableReason `json:"pay_unavailable_reason,omitempty"`
+}
+
+// HostedInvoicePayUnavailableReason Sent only when money is owed but the seller has no payment
+// provider connected for this mode.
+type HostedInvoicePayUnavailableReason string
 
 // Invoice A Velox invoice. Returned from create, finalize, void, list, get,
 // rotate-public-token, and collect-payment endpoints.
@@ -4257,6 +4517,28 @@ type ProviderCostRate struct {
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
+// PublicPaymentUpdate What the payment-update page shows before the customer adds a card.
+type PublicPaymentUpdate struct {
+	// AmountDueCents Not cleared when the invoice is voided. Check `invoice_status` before asking for payment.
+	AmountDueCents int64 `json:"amount_due_cents"`
+	Branding       struct {
+		BrandColor   string `json:"brand_color,omitempty"`
+		CompanyEmail string `json:"company_email,omitempty"`
+		CompanyName  string `json:"company_name,omitempty"`
+		LogoUrl      string `json:"logo_url,omitempty"`
+		SupportUrl   string `json:"support_url,omitempty"`
+	} `json:"branding"`
+	Currency      string `json:"currency"`
+	CustomerName  string `json:"customer_name"`
+	InvoiceNumber string `json:"invoice_number"`
+
+	// InvoiceStatus Lifecycle state of the invoice. `uncollectible` marks an invoice
+	// a dunning policy has given up collecting (no further retries) while
+	// keeping it on the books — distinct from `voided` (cancelled, owes
+	// nothing).
+	InvoiceStatus InvoiceStatus `json:"invoice_status"`
+}
+
 // RatingRule defines model for RatingRule.
 type RatingRule struct {
 	CreatedAt time.Time `json:"created_at,omitempty"`
@@ -4287,6 +4569,19 @@ type RatingRuleLifecycleState string
 
 // RatingRuleMode defines model for RatingRule.Mode.
 type RatingRuleMode string
+
+// ReadinessReport defines model for ReadinessReport.
+type ReadinessReport struct {
+	// Checks One entry per check. `api` is `ok` or `draining`. `database` is
+	// `ok` or `error`. `scheduler` starts with `ok` or `degraded`,
+	// followed by detail such as `ok: last run 12s ago`. While
+	// draining, only `api` is sent.
+	Checks map[string]string     `json:"checks"`
+	Status ReadinessReportStatus `json:"status"`
+}
+
+// ReadinessReportStatus defines model for ReadinessReport.Status.
+type ReadinessReportStatus string
 
 // Recipe A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata.
 type Recipe struct {
@@ -5044,6 +5339,34 @@ type UsageSummary struct {
 	TotalEvents int               `json:"total_events"`
 }
 
+// WebhookDelivery One delivery of an event to one endpoint, as the older events routes return it.
+type WebhookDelivery struct {
+	AttemptCount        int       `json:"attempt_count"`
+	CompletedAt         time.Time `json:"completed_at,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	EndpointDescription string    `json:"endpoint_description,omitempty"`
+
+	// EndpointUrl The endpoint's URL, kept after the endpoint is deleted.
+	EndpointUrl  string `json:"endpoint_url,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+
+	// HttpStatusCode HTTP status from the receiver. Left out when there was no response.
+	HttpStatusCode    int                   `json:"http_status_code,omitempty"`
+	Id                string                `json:"id"`
+	Livemode          bool                  `json:"livemode"`
+	NextRetryAt       time.Time             `json:"next_retry_at,omitempty"`
+	ResponseBody      string                `json:"response_body,omitempty"`
+	Status            WebhookDeliveryStatus `json:"status"`
+	TenantId          string                `json:"tenant_id,omitempty"`
+	WebhookEndpointId string                `json:"webhook_endpoint_id"`
+
+	// WebhookEventId The event this delivery sent. A replay's own id for a replay's delivery.
+	WebhookEventId string `json:"webhook_event_id"`
+}
+
+// WebhookDeliveryStatus defines model for WebhookDelivery.Status.
+type WebhookDeliveryStatus string
+
 // WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
 type WebhookDeliveryReplayResult struct {
 	// DeliveryId The new delivery to this endpoint.
@@ -5185,6 +5508,12 @@ type WebhookStreamFrame struct {
 
 // bearerAuthContextKey is the context key for BearerAuth security scheme
 type bearerAuthContextKey string
+
+// metricsTokenContextKey is the context key for MetricsToken security scheme
+type metricsTokenContextKey string
+
+// postmarkBasicAuthContextKey is the context key for PostmarkBasicAuth security scheme
+type postmarkBasicAuthContextKey string
 
 // sessionCookieContextKey is the context key for SessionCookie security scheme
 type sessionCookieContextKey string
@@ -5331,6 +5660,21 @@ type BootstrapJSONBody struct {
 
 	// Token The value of `VELOX_BOOTSTRAP_TOKEN`. Or send it as a Bearer token.
 	Token string `json:"token,omitempty"`
+}
+
+// CreateCheckoutSetupSessionJSONBody defines parameters for CreateCheckoutSetupSession.
+type CreateCheckoutSetupSessionJSONBody struct {
+	AddressCity       string `json:"address_city,omitempty"`
+	AddressCountry    string `json:"address_country,omitempty"`
+	AddressLine1      string `json:"address_line1,omitempty"`
+	AddressPostalCode string `json:"address_postal_code,omitempty"`
+	AddressState      string `json:"address_state,omitempty"`
+	CustomerId        string `json:"customer_id"`
+	CustomerName      string `json:"customer_name,omitempty"`
+	Email             string `json:"email,omitempty"`
+
+	// ReturnUrl The page Stripe sends the customer back to. Always send it, because the default works only in local development.
+	ReturnUrl string `json:"return_url,omitempty"`
 }
 
 // ListCreditNotesParams defines parameters for ListCreditNotes.
@@ -6309,6 +6653,26 @@ type PatchV1WebhookEndpointsEndpointsIdJSONBody struct {
 	Url         string   `json:"url,omitempty"`
 }
 
+// ReplayWebhookEventLegacy200JSONResponseBodyStatus defines parameters for ReplayWebhookEventLegacy.
+type ReplayWebhookEventLegacy200JSONResponseBodyStatus string
+
+// ReceivePostmarkWebhookJSONBody defines parameters for ReceivePostmarkWebhook.
+type ReceivePostmarkWebhookJSONBody map[string]interface{}
+
+// ReceivePostmarkWebhook200JSONResponseBodyStatus defines parameters for ReceivePostmarkWebhook.
+type ReceivePostmarkWebhook200JSONResponseBodyStatus string
+
+// ReceiveStripeWebhookJSONBody defines parameters for ReceiveStripeWebhook.
+type ReceiveStripeWebhookJSONBody map[string]interface{}
+
+// ReceiveStripeWebhookParams defines parameters for ReceiveStripeWebhook.
+type ReceiveStripeWebhookParams struct {
+	StripeSignature string `json:"Stripe-Signature"`
+}
+
+// ReceiveStripeWebhook200JSONResponseBodyStatus defines parameters for ReceiveStripeWebhook.
+type ReceiveStripeWebhook200JSONResponseBodyStatus string
+
 // GetV1Whoami200JSONResponseBodyKeyType defines parameters for GetV1Whoami.
 type GetV1Whoami200JSONResponseBodyKeyType string
 
@@ -6335,6 +6699,9 @@ type PostV1AuthPasswordResetRequestJSONRequestBody PostV1AuthPasswordResetReques
 
 // BootstrapJSONRequestBody defines body for Bootstrap for application/json ContentType.
 type BootstrapJSONRequestBody BootstrapJSONBody
+
+// CreateCheckoutSetupSessionJSONRequestBody defines body for CreateCheckoutSetupSession for application/json ContentType.
+type CreateCheckoutSetupSessionJSONRequestBody CreateCheckoutSetupSessionJSONBody
 
 // PostV1CreditNotesJSONRequestBody defines body for PostV1CreditNotes for application/json ContentType.
 type PostV1CreditNotesJSONRequestBody PostV1CreditNotesJSONBody
@@ -6485,6 +6852,12 @@ type PostV1WebhookEndpointsEndpointsJSONRequestBody PostV1WebhookEndpointsEndpoi
 
 // PatchV1WebhookEndpointsEndpointsIdJSONRequestBody defines body for PatchV1WebhookEndpointsEndpointsId for application/json ContentType.
 type PatchV1WebhookEndpointsEndpointsIdJSONRequestBody PatchV1WebhookEndpointsEndpointsIdJSONBody
+
+// ReceivePostmarkWebhookJSONRequestBody defines body for ReceivePostmarkWebhook for application/json ContentType.
+type ReceivePostmarkWebhookJSONRequestBody ReceivePostmarkWebhookJSONBody
+
+// ReceiveStripeWebhookJSONRequestBody defines body for ReceiveStripeWebhook for application/json ContentType.
+type ReceiveStripeWebhookJSONRequestBody ReceiveStripeWebhookJSONBody
 
 // AsLitellmSpendLog returns the union data inside the IngestLitellmSpendJSONBody as a LitellmSpendLog
 func (t IngestLitellmSpendJSONBody) AsLitellmSpendLog() (LitellmSpendLog, error) {
@@ -6765,6 +7138,12 @@ type ServerInterface interface {
 	// Health check
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// Readiness check for load balancers
+	// (GET /health/ready)
+	GetHealthReady(w http.ResponseWriter, r *http.Request)
+	// Prometheus metrics
+	// (GET /metrics)
+	GetMetrics(w http.ResponseWriter, r *http.Request)
 	// Get MRR movement over time
 	// (GET /v1/analytics/mrr-movement)
 	GetAnalyticsMrrMovement(w http.ResponseWriter, r *http.Request, params GetAnalyticsMrrMovementParams)
@@ -6828,6 +7207,12 @@ type ServerInterface interface {
 	// Set up a new installation
 	// (POST /v1/bootstrap)
 	Bootstrap(w http.ResponseWriter, r *http.Request)
+	// Start a card setup in Stripe Checkout (older route)
+	// (POST /v1/checkout/setup)
+	CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request)
+	// Get a customer's card setup status (older route)
+	// (GET /v1/checkout/status/{customerID})
+	GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request, customerID string)
 	// List credit notes
 	// (GET /v1/credit-notes)
 	ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams)
@@ -7098,6 +7483,21 @@ type ServerInterface interface {
 	// Public cost-dashboard projection (ADR-032)
 	// (GET /v1/public/cost-dashboard/{token})
 	GetV1PublicCostDashboardToken(w http.ResponseWriter, r *http.Request, token string)
+	// Data behind the hosted invoice page
+	// (GET /v1/public/invoices/{token})
+	GetHostedInvoice(w http.ResponseWriter, r *http.Request, token string)
+	// Start paying the invoice in Stripe Checkout
+	// (POST /v1/public/invoices/{token}/checkout)
+	CreateHostedInvoiceCheckout(w http.ResponseWriter, r *http.Request, token string)
+	// Download the hosted invoice PDF
+	// (GET /v1/public/invoices/{token}/pdf)
+	GetHostedInvoicePdf(w http.ResponseWriter, r *http.Request, token string)
+	// Data behind the payment-update page
+	// (GET /v1/public/payment-updates/{token})
+	GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Request, token string)
+	// Start adding a card in Stripe Checkout
+	// (POST /v1/public/payment-updates/{token}/checkout)
+	CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, r *http.Request, token string)
 	// List rating rules
 	// (GET /v1/rating-rules)
 	GetV1RatingRules(w http.ResponseWriter, r *http.Request)
@@ -7290,6 +7690,12 @@ type ServerInterface interface {
 	// List recent outbound events (newest 50)
 	// (GET /v1/webhook-endpoints/events)
 	GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request)
+	// List an event's deliveries (older route)
+	// (GET /v1/webhook-endpoints/events/{id}/deliveries)
+	ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request, id string)
+	// Replay an event to all matching endpoints (older route)
+	// (POST /v1/webhook-endpoints/events/{id}/replay)
+	ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request, id string)
 	// Stream webhook events live (Server-Sent Events)
 	// (GET /v1/webhook_events/stream)
 	StreamWebhookEvents(w http.ResponseWriter, r *http.Request)
@@ -7299,6 +7705,12 @@ type ServerInterface interface {
 	// Replay an event to all matching endpoints
 	// (POST /v1/webhook_events/{id}/replay)
 	ReplayWebhookEvent(w http.ResponseWriter, r *http.Request, id string)
+	// Receive a Postmark delivery webhook
+	// (POST /v1/webhooks/postmark)
+	ReceivePostmarkWebhook(w http.ResponseWriter, r *http.Request)
+	// Receive a Stripe webhook
+	// (POST /v1/webhooks/stripe/{endpoint_id})
+	ReceiveStripeWebhook(w http.ResponseWriter, r *http.Request, endpointId string, params ReceiveStripeWebhookParams)
 	// Resolve the current credential to its tenant context
 	// (GET /v1/whoami)
 	GetV1Whoami(w http.ResponseWriter, r *http.Request)
@@ -7311,6 +7723,18 @@ type Unimplemented struct{}
 // Health check
 // (GET /health)
 func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Readiness check for load balancers
+// (GET /health/ready)
+func (_ Unimplemented) GetHealthReady(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Prometheus metrics
+// (GET /metrics)
+func (_ Unimplemented) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -7437,6 +7861,18 @@ func (_ Unimplemented) PostV1BillingRun(w http.ResponseWriter, r *http.Request) 
 // Set up a new installation
 // (POST /v1/bootstrap)
 func (_ Unimplemented) Bootstrap(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Start a card setup in Stripe Checkout (older route)
+// (POST /v1/checkout/setup)
+func (_ Unimplemented) CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a customer's card setup status (older route)
+// (GET /v1/checkout/status/{customerID})
+func (_ Unimplemented) GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request, customerID string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -7980,6 +8416,36 @@ func (_ Unimplemented) GetV1PublicCostDashboardToken(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Data behind the hosted invoice page
+// (GET /v1/public/invoices/{token})
+func (_ Unimplemented) GetHostedInvoice(w http.ResponseWriter, r *http.Request, token string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Start paying the invoice in Stripe Checkout
+// (POST /v1/public/invoices/{token}/checkout)
+func (_ Unimplemented) CreateHostedInvoiceCheckout(w http.ResponseWriter, r *http.Request, token string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Download the hosted invoice PDF
+// (GET /v1/public/invoices/{token}/pdf)
+func (_ Unimplemented) GetHostedInvoicePdf(w http.ResponseWriter, r *http.Request, token string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Data behind the payment-update page
+// (GET /v1/public/payment-updates/{token})
+func (_ Unimplemented) GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Request, token string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Start adding a card in Stripe Checkout
+// (POST /v1/public/payment-updates/{token}/checkout)
+func (_ Unimplemented) CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, r *http.Request, token string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List rating rules
 // (GET /v1/rating-rules)
 func (_ Unimplemented) GetV1RatingRules(w http.ResponseWriter, r *http.Request) {
@@ -8364,6 +8830,18 @@ func (_ Unimplemented) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List an event's deliveries (older route)
+// (GET /v1/webhook-endpoints/events/{id}/deliveries)
+func (_ Unimplemented) ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Replay an event to all matching endpoints (older route)
+// (POST /v1/webhook-endpoints/events/{id}/replay)
+func (_ Unimplemented) ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Stream webhook events live (Server-Sent Events)
 // (GET /v1/webhook_events/stream)
 func (_ Unimplemented) StreamWebhookEvents(w http.ResponseWriter, r *http.Request) {
@@ -8379,6 +8857,18 @@ func (_ Unimplemented) ListWebhookEventDeliveries(w http.ResponseWriter, r *http
 // Replay an event to all matching endpoints
 // (POST /v1/webhook_events/{id}/replay)
 func (_ Unimplemented) ReplayWebhookEvent(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Receive a Postmark delivery webhook
+// (POST /v1/webhooks/postmark)
+func (_ Unimplemented) ReceivePostmarkWebhook(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Receive a Stripe webhook
+// (POST /v1/webhooks/stripe/{endpoint_id})
+func (_ Unimplemented) ReceiveStripeWebhook(w http.ResponseWriter, r *http.Request, endpointId string, params ReceiveStripeWebhookParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8402,6 +8892,40 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHealthReady operation middleware
+func (siw *ServerInterfaceWrapper) GetHealthReady(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHealthReady(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetMetrics(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, MetricsTokenScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMetrics(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9098,6 +9622,58 @@ func (siw *ServerInterfaceWrapper) Bootstrap(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Bootstrap(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCheckoutSetupSession operation middleware
+func (siw *ServerInterfaceWrapper) CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCheckoutSetupSession(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCheckoutSetupStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "customerID" -------------
+	var customerID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "customerID", chi.URLParam(r, "customerID"), &customerID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customerID", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCheckoutSetupStatus(w, r, customerID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12578,6 +13154,136 @@ func (siw *ServerInterfaceWrapper) GetV1PublicCostDashboardToken(w http.Response
 	handler.ServeHTTP(w, r)
 }
 
+// GetHostedInvoice operation middleware
+func (siw *ServerInterfaceWrapper) GetHostedInvoice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", chi.URLParam(r, "token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHostedInvoice(w, r, token)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateHostedInvoiceCheckout operation middleware
+func (siw *ServerInterfaceWrapper) CreateHostedInvoiceCheckout(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", chi.URLParam(r, "token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateHostedInvoiceCheckout(w, r, token)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHostedInvoicePdf operation middleware
+func (siw *ServerInterfaceWrapper) GetHostedInvoicePdf(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", chi.URLParam(r, "token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHostedInvoicePdf(w, r, token)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublicPaymentUpdate operation middleware
+func (siw *ServerInterfaceWrapper) GetPublicPaymentUpdate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", chi.URLParam(r, "token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublicPaymentUpdate(w, r, token)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePublicPaymentUpdateCheckout operation middleware
+func (siw *ServerInterfaceWrapper) CreatePublicPaymentUpdateCheckout(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", chi.URLParam(r, "token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePublicPaymentUpdateCheckout(w, r, token)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetV1RatingRules operation middleware
 func (siw *ServerInterfaceWrapper) GetV1RatingRules(w http.ResponseWriter, r *http.Request) {
 
@@ -14626,6 +15332,70 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWr
 	handler.ServeHTTP(w, r)
 }
 
+// ListWebhookEventDeliveriesLegacy operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWebhookEventDeliveriesLegacy(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReplayWebhookEventLegacy operation middleware
+func (siw *ServerInterfaceWrapper) ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReplayWebhookEventLegacy(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StreamWebhookEvents operation middleware
 func (siw *ServerInterfaceWrapper) StreamWebhookEvents(w http.ResponseWriter, r *http.Request) {
 
@@ -14701,6 +15471,80 @@ func (siw *ServerInterfaceWrapper) ReplayWebhookEvent(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ReplayWebhookEvent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReceivePostmarkWebhook operation middleware
+func (siw *ServerInterfaceWrapper) ReceivePostmarkWebhook(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, PostmarkBasicAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReceivePostmarkWebhook(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReceiveStripeWebhook operation middleware
+func (siw *ServerInterfaceWrapper) ReceiveStripeWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "endpoint_id" -------------
+	var endpointId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "endpoint_id", chi.URLParam(r, "endpoint_id"), &endpointId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "endpoint_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReceiveStripeWebhookParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Stripe-Signature" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Stripe-Signature")]; found {
+		var StripeSignature string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Stripe-Signature", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Stripe-Signature", valueList[0], &StripeSignature, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Stripe-Signature", Err: err})
+			return
+		}
+
+		params.StripeSignature = StripeSignature
+
+	} else {
+		err := fmt.Errorf("Header parameter Stripe-Signature is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Stripe-Signature", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReceiveStripeWebhook(w, r, endpointId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14847,6 +15691,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/health", wrapper.GetHealth)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/health/ready", wrapper.GetHealthReady)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/metrics", wrapper.GetMetrics)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/analytics/mrr-movement", wrapper.GetAnalyticsMrrMovement)
 	})
 	r.Group(func(r chi.Router) {
@@ -14908,6 +15758,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/bootstrap", wrapper.Bootstrap)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/checkout/setup", wrapper.CreateCheckoutSetupSession)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/checkout/status/{customerID}", wrapper.GetCheckoutSetupStatus)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes", wrapper.ListCreditNotes)
@@ -15180,6 +16036,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/public/cost-dashboard/{token}", wrapper.GetV1PublicCostDashboardToken)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/public/invoices/{token}", wrapper.GetHostedInvoice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/public/invoices/{token}/checkout", wrapper.CreateHostedInvoiceCheckout)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/public/invoices/{token}/pdf", wrapper.GetHostedInvoicePdf)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/public/payment-updates/{token}", wrapper.GetPublicPaymentUpdate)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/public/payment-updates/{token}/checkout", wrapper.CreatePublicPaymentUpdateCheckout)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/rating-rules", wrapper.GetV1RatingRules)
 	})
 	r.Group(func(r chi.Router) {
@@ -15372,6 +16243,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/events", wrapper.GetV1WebhookEndpointsEvents)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/webhook-endpoints/events/{id}/deliveries", wrapper.ListWebhookEventDeliveriesLegacy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/webhook-endpoints/events/{id}/replay", wrapper.ReplayWebhookEventLegacy)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook_events/stream", wrapper.StreamWebhookEvents)
 	})
 	r.Group(func(r chi.Router) {
@@ -15379,6 +16256,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/webhook_events/{id}/replay", wrapper.ReplayWebhookEvent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/webhooks/postmark", wrapper.ReceivePostmarkWebhook)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/webhooks/stripe/{endpoint_id}", wrapper.ReceiveStripeWebhook)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/whoami", wrapper.GetV1Whoami)

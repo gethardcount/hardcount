@@ -39,7 +39,7 @@ tags:
   - name: Dunning
     description: Retrying failed payments. Policies and runs.
   - name: Webhooks
-    description: Outbound webhook endpoints, events and deliveries.
+    description: Outbound webhook endpoints, events and deliveries. Also the inbound webhooks Stripe and Postmark call.
   - name: Auth
     description: Dashboard sign-in, password reset and API keys.
   - name: Members
@@ -72,6 +72,20 @@ components:
         under `/v1` (except `/v1/tenants`) accept it in place of a Bearer
         key. Operations that list only this scheme (members, mode
         switch, logout) do not accept an API key.
+    MetricsToken:
+      type: http
+      scheme: bearer
+      description: |
+        The value of the `METRICS_TOKEN` setting, sent as
+        `Authorization: Bearer <token>`. Used only by `GET /metrics`. It is
+        not an API key.
+    PostmarkBasicAuth:
+      type: http
+      scheme: basic
+      description: |
+        HTTP Basic auth with `POSTMARK_WEBHOOK_USER` and
+        `POSTMARK_WEBHOOK_PASS`. You put both in the webhook URL you give
+        Postmark. Used only by `POST /v1/webhooks/postmark`.
 
   schemas:
     Error:
@@ -1983,6 +1997,45 @@ components:
           type: string
           format: date-time
 
+    CustomerPaymentSetup:
+      type: object
+      required: [customer_id, setup_status, default_payment_method_present, created_at, updated_at]
+      properties:
+        customer_id:
+          type: string
+        tenant_id:
+          type: string
+        setup_status:
+          type: string
+          enum: [missing, pending, ready]
+          description: |
+            `ready`: the customer has a default payment method. `pending`:
+            a Stripe customer exists but there is no default payment method
+            yet. `missing`: there is no Stripe customer.
+        default_payment_method_present:
+          type: boolean
+        payment_method_type:
+          type: string
+          example: card
+        stripe_customer_id:
+          type: string
+        stripe_payment_method_id:
+          type: string
+        card_brand:
+          type: string
+        card_last4:
+          type: string
+        card_exp_month:
+          type: integer
+        card_exp_year:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     CreditLedgerEntry:
       type: object
       required: [id, customer_id, entry_type, amount_cents, balance_after, description, created_at]
@@ -3878,6 +3931,237 @@ components:
           type: string
           nullable: true
 
+    WebhookDelivery:
+      type: object
+      description: One delivery of an event to one endpoint, as the older events routes return it.
+      required: [id, livemode, webhook_endpoint_id, webhook_event_id, status, attempt_count, created_at]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        livemode:
+          type: boolean
+        webhook_endpoint_id:
+          type: string
+        webhook_event_id:
+          type: string
+          description: The event this delivery sent. A replay's own id for a replay's delivery.
+        status:
+          type: string
+          enum: [pending, succeeded, failed]
+        http_status_code:
+          type: integer
+          description: HTTP status from the receiver. Left out when there was no response.
+        response_body:
+          type: string
+        error_message:
+          type: string
+        attempt_count:
+          type: integer
+        next_retry_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        endpoint_url:
+          type: string
+          description: The endpoint's URL, kept after the endpoint is deleted.
+        endpoint_description:
+          type: string
+
+    HostedInvoice:
+      type: object
+      description: |
+        What the hosted invoice page shows. It leaves out internal ids and
+        Stripe details. `bill_to` and the company details in `branding`
+        come from the same place as the invoice PDF's.
+      required: [invoice, line_items, bill_to, branding, pay_enabled, livemode]
+      properties:
+        invoice:
+          type: object
+          required: [invoice_number, status, payment_status, currency, subtotal_cents, discount_cents, tax_amount_cents, tax_rate, total_amount_cents, amount_due_cents, amount_paid_cents, credits_applied_cents]
+          properties:
+            invoice_number:
+              type: string
+            status:
+              $ref: "#/components/schemas/InvoiceStatus"
+            payment_status:
+              $ref: "#/components/schemas/InvoicePaymentStatus"
+            currency:
+              type: string
+            subtotal_cents:
+              type: integer
+              format: int64
+            discount_cents:
+              type: integer
+              format: int64
+            tax_amount_cents:
+              type: integer
+              format: int64
+            tax_rate:
+              type: number
+              description: Tax rate in percent, for example `18` for 18%.
+            tax_name:
+              type: string
+            tax_reverse_charge:
+              type: boolean
+            tax_exempt_reason:
+              type: string
+            total_amount_cents:
+              type: integer
+              format: int64
+            amount_due_cents:
+              type: integer
+              format: int64
+            amount_paid_cents:
+              type: integer
+              format: int64
+            credits_applied_cents:
+              type: integer
+              format: int64
+            issued_at:
+              type: string
+              format: date-time
+            due_at:
+              type: string
+              format: date-time
+            paid_at:
+              type: string
+              format: date-time
+            voided_at:
+              type: string
+              format: date-time
+            billing_timezone:
+              type: string
+              description: The time zone to show the dates in, so they match the PDF.
+              example: Asia/Kolkata
+            memo:
+              type: string
+            footer:
+              type: string
+        line_items:
+          type: array
+          items:
+            type: object
+            required: [description, quantity, unit_amount_cents, amount_cents, total_amount_cents, currency]
+            properties:
+              description:
+                type: string
+              quantity:
+                type: integer
+                format: int64
+              quantity_decimal:
+                type: string
+                description: The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities.
+              unit_amount_cents:
+                type: integer
+                format: int64
+              unit_amount_decimal:
+                type: string
+                description: The unit price in cents at full precision, for example `0.3` for $0.003.
+              meter_unit:
+                type: string
+              amount_cents:
+                type: integer
+                format: int64
+              tax_amount_cents:
+                type: integer
+                format: int64
+              total_amount_cents:
+                type: integer
+                format: int64
+              currency:
+                type: string
+        bill_to:
+          type: object
+          properties:
+            name: { type: string }
+            email: { type: string }
+            address_line1: { type: string }
+            address_line2: { type: string }
+            city: { type: string }
+            state: { type: string }
+            postal_code: { type: string }
+            country: { type: string }
+        branding:
+          type: object
+          properties:
+            company_name: { type: string }
+            company_email: { type: string }
+            company_phone: { type: string }
+            company_address_line1: { type: string }
+            company_address_line2: { type: string }
+            company_city: { type: string }
+            company_state: { type: string }
+            company_postal_code: { type: string }
+            company_country: { type: string }
+            logo_url: { type: string }
+            brand_color: { type: string }
+            support_url: { type: string }
+        pay_enabled:
+          type: boolean
+          description: |
+            True when the customer can pay online now: the invoice is
+            finalized, something is owed, no payment is in progress, and the
+            seller has Stripe connected for the invoice's mode.
+        pay_unavailable_reason:
+          type: string
+          enum: [online_payment_unavailable]
+          description: |
+            Sent only when money is owed but the seller has no payment
+            provider connected for this mode.
+        livemode:
+          type: boolean
+          description: False for a test-mode invoice. The page shows a test-mode banner.
+
+    PublicPaymentUpdate:
+      type: object
+      description: What the payment-update page shows before the customer adds a card.
+      required: [customer_name, invoice_number, invoice_status, amount_due_cents, currency, branding]
+      properties:
+        customer_name:
+          type: string
+        invoice_number:
+          type: string
+        invoice_status:
+          $ref: "#/components/schemas/InvoiceStatus"
+        amount_due_cents:
+          type: integer
+          format: int64
+          description: Not cleared when the invoice is voided. Check `invoice_status` before asking for payment.
+        currency:
+          type: string
+        branding:
+          type: object
+          properties:
+            company_name: { type: string }
+            company_email: { type: string }
+            logo_url: { type: string }
+            brand_color: { type: string }
+            support_url: { type: string }
+
+    ReadinessReport:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, draining]
+        checks:
+          type: object
+          description: |
+            One entry per check. `api` is `ok` or `draining`. `database` is
+            `ok` or `error`. `scheduler` starts with `ok` or `degraded`,
+            followed by detail such as `ok: last run 12s ago`. While
+            draining, only `api` is sent.
+          additionalProperties:
+            type: string
+
 paths:
   /health:
     get:
@@ -3887,6 +4171,60 @@ paths:
       responses:
         "200":
           description: Service is healthy
+
+  /health/ready:
+    get:
+      tags: [System]
+      summary: Readiness check for load balancers
+      operationId: getHealthReady
+      security: []
+      description: |
+        Tells a load balancer whether this server can take requests. It
+        returns 503 when the server is shutting down (`draining`) or cannot
+        reach the database. A late billing scheduler shows as `degraded` in
+        the body but keeps the status at 200: taking the server out of the
+        balancer would not restart the scheduler. Alert on the scheduler
+        metrics instead (see docs/ops/runbook/monitoring.md).
+      responses:
+        "200":
+          description: Ready. `status` is `ok`, or `degraded` when only the scheduler is late.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessReport"
+        "503":
+          description: Not ready. `status` is `draining`, or `degraded` when the database cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessReport"
+
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      operationId: getMetrics
+      security:
+        - MetricsToken: []
+        - {}
+      description: |
+        Metrics in the Prometheus text format, for a Prometheus scrape.
+        When `METRICS_TOKEN` is set, send it as a Bearer token. When it is
+        not set, the route is open, except with `APP_ENV=production`, where
+        it answers 401. This is not an API key route.
+      responses:
+        "200":
+          description: Metrics in the Prometheus text format.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: The token is missing or wrong, or `METRICS_TOKEN` is not set in production. The body is the plain text `unauthorized`.
+          content:
+            text/plain:
+              schema:
+                type: string
 
   /v1/customers:
     post:
@@ -4682,6 +5020,118 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/checkout/setup:
+    post:
+      tags: [Customers]
+      summary: Start a card setup in Stripe Checkout (older route)
+      operationId: createCheckoutSetupSession
+      description: |
+        An older route the dashboard no longer uses. Prefer
+        `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
+
+        Creates the Stripe customer if there is none, or copies
+        `customer_name`, `email` and the address to the existing one. It
+        then returns a Stripe Checkout URL in setup mode (card only, no
+        charge). Stripe sends the customer back to `return_url` with
+        `?payment=success` or `?payment=cancel` added. Without
+        `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
+        which works only in local development. Writes an audit row. Needs
+        the `customer:write` permission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id]
+              properties:
+                customer_id:
+                  type: string
+                customer_name:
+                  type: string
+                email:
+                  type: string
+                address_line1:
+                  type: string
+                address_city:
+                  type: string
+                address_state:
+                  type: string
+                address_postal_code:
+                  type: string
+                address_country:
+                  type: string
+                return_url:
+                  type: string
+                  description: The page Stripe sends the customer back to. Always send it, because the default works only in local development.
+      responses:
+        "201":
+          description: Setup session created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, url, stripe_customer_id]
+                properties:
+                  session_id:
+                    type: string
+                    description: Stripe Checkout Session ID.
+                  url:
+                    type: string
+                    description: Stripe Checkout URL.
+                  stripe_customer_id:
+                    type: string
+        "400":
+          description: The body is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No such customer in this mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: "`customer_id` is missing."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Stripe is not connected for this mode, or a Stripe call failed. Code `stripe_error`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/checkout/status/{customerID}:
+    get:
+      tags: [Customers]
+      summary: Get a customer's card setup status (older route)
+      operationId: getCheckoutSetupStatus
+      description: |
+        An older route the dashboard no longer uses. Prefer
+        `GET /v1/customers/{customer_id}/payment-methods`.
+
+        Any read error, an unknown customer included, returns 200 with
+        `setup_status: missing` and zero timestamps. Needs the
+        `customer:write` permission.
+      parameters:
+        - name: customerID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Setup status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerPaymentSetup"
+
   /v1/public/cost-dashboard/{token}:
     get:
       tags: [Public]
@@ -4820,6 +5270,219 @@ paths:
           description: Invalid token
         "429":
           description: Rate limited (60/min/IP)
+
+  /v1/public/invoices/{token}:
+    get:
+      tags: [Public]
+      security: []
+      summary: Data behind the hosted invoice page
+      operationId: getHostedInvoice
+      description: |
+        Unauthenticated. The invoice's public token in the URL is the only
+        credential. Paid and voided invoices stay viewable. A draft is
+        never shown: it returns 404 like an unknown token. Share the page
+        link with customers instead of calling this route.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The invoice as the page shows it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostedInvoice"
+        "404":
+          description: Unknown token, or the invoice is a draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+
+  /v1/public/invoices/{token}/pdf:
+    get:
+      tags: [Public]
+      security: []
+      summary: Download the hosted invoice PDF
+      operationId: getHostedInvoicePdf
+      description: |
+        Unauthenticated, like the hosted invoice page. Returns the same PDF
+        as `GET /v1/invoices/{id}/pdf`, shown inline and named after the
+        invoice number.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PDF file.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Unknown token, or the invoice is a draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+
+  /v1/public/invoices/{token}/checkout:
+    post:
+      tags: [Public]
+      security: []
+      summary: Start paying the invoice in Stripe Checkout
+      operationId: createHostedInvoiceCheckout
+      description: |
+        The hosted page's Pay button. Returns a Stripe Checkout URL for the
+        amount due. Velox has already worked out the tax, so Stripe adds
+        none. After paying, Stripe sends the customer back to the hosted
+        page with `?paid=1`. The Stripe webhook, not this redirect, marks
+        the invoice paid.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Checkout session created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    description: Stripe Checkout URL.
+        "404":
+          description: Unknown token, or the invoice is a draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            The invoice cannot be paid now. The code says why:
+            `not_payable` when it is not finalized, nothing is owed, or its
+            payment status is `processing` or `unknown`.
+            `payment_in_progress` when another payment for it has started.
+            `online_payment_unavailable` when the seller has no Stripe keys
+            for the invoice's mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+        "502":
+          description: Stripe could not create the session. Code `stripe_error`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: The server runs without a Stripe adapter. Code `stripe_unavailable`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/public/payment-updates/{token}:
+    get:
+      tags: [Public]
+      security: []
+      summary: Data behind the payment-update page
+      operationId: getPublicPaymentUpdate
+      description: |
+        Unauthenticated. The token from the payment-update email is the only
+        credential. It is valid for 24 hours, and starting checkout uses it
+        up. Share the page link with customers instead of calling this
+        route.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: What the page shows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicPaymentUpdate"
+        "401":
+          description: The token is unknown, expired or already used. Code `invalid_token`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: The invoice or customer the token names is gone. Code `invoice_not_found` or `customer_not_found`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+
+  /v1/public/payment-updates/{token}/checkout:
+    post:
+      tags: [Public]
+      security: []
+      summary: Start adding a card in Stripe Checkout
+      operationId: createPublicPaymentUpdateCheckout
+      description: |
+        Returns a Stripe Checkout URL in setup mode (card only, no charge).
+        Creates the Stripe customer if there is none. This call uses up the
+        token. If Stripe fails to create the session, the token works again.
+        Stripe sends the customer to the payment-method-added page with
+        `?status=success` or `?status=cancel`. Writes an audit row.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Checkout session created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    description: Stripe Checkout URL.
+        "401":
+          description: The token is unknown, expired or already used. Code `invalid_token`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+        "502":
+          description: Stripe is not connected for this mode, or Stripe could not create the session. Code `stripe_error`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/meters:
     post:
@@ -5648,6 +6311,82 @@ paths:
         "200":
           description: Event list
 
+  /v1/webhook-endpoints/events/{id}/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: List an event's deliveries (older route)
+      operationId: listWebhookEventDeliveriesLegacy
+      description: |
+        An older route the dashboard no longer uses. Prefer
+        `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
+        an unknown event.
+
+        Returns the deliveries of the event and of its replays, oldest
+        first. An unknown id returns 200 with an empty list. Needs the
+        `apikey:write` permission.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookDelivery"
+
+  /v1/webhook-endpoints/events/{id}/replay:
+    post:
+      tags: [Webhooks]
+      summary: Replay an event to all matching endpoints (older route)
+      operationId: replayWebhookEventLegacy
+      description: |
+        An older route the dashboard no longer uses. Prefer
+        `POST /v1/webhook_events/{id}/replay`.
+
+        Does the same replay. The response always says `replayed`, even
+        when no endpoint will receive the copy. Writes an audit row. Needs
+        the `apikey:write` permission.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Replay created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, event_id, replay_of]
+                properties:
+                  status:
+                    type: string
+                    enum: [replayed]
+                  event_id:
+                    type: string
+                    description: The new event created by the replay.
+                  replay_of:
+                    type: string
+                    description: The original event.
+        "404":
+          description: No such event in this mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/webhook_events/{id}/deliveries:
     get:
       tags: [Webhooks]
@@ -5781,6 +6520,140 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /v1/webhooks/stripe/{endpoint_id}:
+    post:
+      tags: [Webhooks]
+      security: []
+      summary: Receive a Stripe webhook
+      operationId: receiveStripeWebhook
+      description: |
+        Stripe calls this route; your code does not. Point a webhook in your
+        Stripe dashboard at it for each connected mode. `endpoint_id` is the
+        `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
+        The request is checked against the `Stripe-Signature` header and
+        that mode's signing secret. The body can be at most 64 KB.
+
+        Events for objects Velox did not create are answered 200 with
+        `status: skipped`. A 500 means a temporary failure, and Stripe
+        sends the event again.
+      parameters:
+        - name: endpoint_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A Stripe event object.
+              additionalProperties: true
+      responses:
+        "200":
+          description: Processed, or skipped.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [processed, skipped]
+                  reason:
+                    type: string
+                    description: Why the event was skipped.
+        "400":
+          description: Bad signature, an unreadable body or invalid JSON, or the event's mode or Velox account does not match the endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No Stripe connection has this `endpoint_id`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: The body is over 64 KB. Code `payload_too_large`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Temporary failure. Stripe retries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/webhooks/postmark:
+    post:
+      tags: [Webhooks]
+      security:
+        - PostmarkBasicAuth: []
+      summary: Receive a Postmark delivery webhook
+      operationId: receivePostmarkWebhook
+      description: |
+        Postmark calls this route; your code does not. Velox reads
+        `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
+        record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
+        `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
+        docs/ops/email-setup.md.
+
+        Error bodies are `{"error": "<reason>"}`, not the usual error
+        object. A body that a retry cannot fix is answered 200, so Postmark
+        stops retrying: over 64 KB, invalid JSON, or no known Velox email
+        id in its metadata.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A Postmark webhook payload.
+              additionalProperties: true
+      responses:
+        "200":
+          description: Processed, skipped or ignored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [processed, skipped, ignored]
+                  reason:
+                    type: string
+        "401":
+          description: Wrong or missing Basic auth, or the credentials are not set on the server.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        "500":
+          description: Temporary failure. Postmark retries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
 
   /v1/plans:
     post:

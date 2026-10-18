@@ -65,6 +65,17 @@ changed anything in the working tree. So both of these fail CI:
 The rule: generated files must equal what `make gen` produces from the
 committed spec.
 
+A unit test also ties the spec to the router. `TestOpenAPISpec_MatchesRouter`
+in `internal/api/openapi_routes_test.go` walks the chi router and fails when:
+
+- a route the server answers is not in the spec with the same method and
+  path parameter names;
+- an operation in the spec matches no route.
+
+A route that no caller should use can go in `routesNotInSpec` in that test
+instead, with the reason. Today that is only the methods other than `GET` on
+`/metrics`, which exist because `/metrics` is registered for every method.
+
 ## Why it is built this way
 
 ### Why a build-time copy of the spec into `web-v2/public/`

@@ -43,9 +43,13 @@ import type {
   CheckPasswordResetTokenParams,
   ConnectStripeBody,
   CreateApiKeyBody,
+  CreateCheckoutSetupSession201,
+  CreateCheckoutSetupSessionBody,
   CreateCustomerPaymentSetupSession201,
   CreateCustomerPaymentSetupSessionBody,
+  CreateHostedInvoiceCheckout200,
   CreatePriceOverrideBody,
+  CreatePublicPaymentUpdateCheckout201,
   CreateTenantBody,
   CreditBalance,
   CreditLedgerEntry,
@@ -55,6 +59,7 @@ import type {
   CustomerBillingProfile,
   CustomerBillingProfileInput,
   CustomerOverview,
+  CustomerPaymentSetup,
   CustomerPriceOverride,
   CustomerUsage,
   DeleteDunningPolicy200,
@@ -101,6 +106,7 @@ import type {
   GetV1Whoami200,
   GetWebhookEndpointStats200,
   HeldUsageReleaseResult,
+  HostedInvoice,
   IngestLitellmSpendBody,
   InstantiateRecipeBody,
   InviteMemberBody,
@@ -140,6 +146,7 @@ import type {
   ListTestClockCustomers200,
   ListWebhookEndpointDeliveries200,
   ListWebhookEventDeliveries200,
+  ListWebhookEventDeliveriesLegacy200,
   LitellmSpendResult,
   MarginReport,
   MemberInvitation,
@@ -183,14 +190,23 @@ import type {
   PostV1WebhookEndpointsEndpointsBody,
   PreviewRecipeBody,
   ProviderCostRate,
+  PublicPaymentUpdate,
   PutV1ProviderCostsBody,
   RatingRule,
+  ReadinessReport,
+  ReceivePostmarkWebhook200,
+  ReceivePostmarkWebhook401,
+  ReceivePostmarkWebhook500,
+  ReceivePostmarkWebhookBody,
+  ReceiveStripeWebhook200,
+  ReceiveStripeWebhookBody,
   RecipeDetail,
   RecipeInstance,
   RecipePreviewResult,
   RecordInvoicePaymentBody,
   RefundInvoiceBody,
   ReleaseHeldUsageBody,
+  ReplayWebhookEventLegacy200,
   ResendInvoiceSetupLink200,
   ResolveDunningRunBody,
   RotateApiKeyBody,
@@ -328,6 +344,218 @@ export function useGetHealth<TData = Awaited<ReturnType<typeof getHealth>>, TErr
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetHealthReadyUrl = () => {
+
+
+
+
+  return `/health/ready`
+}
+
+/**
+ * Tells a load balancer whether this server can take requests. It
+ * returns 503 when the server is shutting down (`draining`) or cannot
+ * reach the database. A late billing scheduler shows as `degraded` in
+ * the body but keeps the status at 200: taking the server out of the
+ * balancer would not restart the scheduler. Alert on the scheduler
+ * metrics instead (see docs/ops/runbook/monitoring.md).
+ * @summary Readiness check for load balancers
+ */
+export const getHealthReady = async ( options?: RequestInit): Promise<ReadinessReport> => {
+
+  return orvalClient<ReadinessReport>(getGetHealthReadyUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHealthReadyQueryKey = () => {
+    return [
+    `/health/ready`
+    ] as const;
+    }
+
+
+export const getGetHealthReadyQueryOptions = <TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHealthReadyQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealthReady>>> = () => getHealthReady(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHealthReadyQueryResult = NonNullable<Awaited<ReturnType<typeof getHealthReady>>>
+export type GetHealthReadyQueryError = ReadinessReport
+
+
+export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHealthReady>>,
+          TError,
+          Awaited<ReturnType<typeof getHealthReady>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHealthReady>>,
+          TError,
+          Awaited<ReturnType<typeof getHealthReady>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Readiness check for load balancers
+ */
+
+export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetHealthReadyQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMetricsUrl = () => {
+
+
+
+
+  return `/metrics`
+}
+
+/**
+ * Metrics in the Prometheus text format, for a Prometheus scrape.
+ * When `METRICS_TOKEN` is set, send it as a Bearer token. When it is
+ * not set, the route is open, except with `APP_ENV=production`, where
+ * it answers 401. This is not an API key route.
+ * @summary Prometheus metrics
+ */
+export const getMetrics = async ( options?: RequestInit): Promise<string> => {
+
+  return orvalClient<string>(getGetMetricsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMetricsQueryKey = () => {
+    return [
+    `/metrics`
+    ] as const;
+    }
+
+
+export const getGetMetricsQueryOptions = <TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMetricsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMetrics>>> = () => getMetrics(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetMetricsQueryResult = NonNullable<Awaited<ReturnType<typeof getMetrics>>>
+export type GetMetricsQueryError = string
+
+
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMetrics>>,
+          TError,
+          Awaited<ReturnType<typeof getMetrics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMetrics>>,
+          TError,
+          Awaited<ReturnType<typeof getMetrics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Prometheus metrics
+ */
+
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetMetricsQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1977,6 +2205,195 @@ export const useSetCustomerDefaultPaymentMethod = <TError = Error,
       return useMutation(getSetCustomerDefaultPaymentMethodMutationOptions(options), queryClient);
     }
 
+export const getCreateCheckoutSetupSessionUrl = () => {
+
+
+
+
+  return `/v1/checkout/setup`
+}
+
+/**
+ * An older route the dashboard no longer uses. Prefer
+ * `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
+ *
+ * Creates the Stripe customer if there is none, or copies
+ * `customer_name`, `email` and the address to the existing one. It
+ * then returns a Stripe Checkout URL in setup mode (card only, no
+ * charge). Stripe sends the customer back to `return_url` with
+ * `?payment=success` or `?payment=cancel` added. Without
+ * `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
+ * which works only in local development. Writes an audit row. Needs
+ * the `customer:write` permission.
+ * @summary Start a card setup in Stripe Checkout (older route)
+ */
+export const createCheckoutSetupSession = async (createCheckoutSetupSessionBody: CreateCheckoutSetupSessionBody, options?: RequestInit): Promise<CreateCheckoutSetupSession201> => {
+
+  return orvalClient<CreateCheckoutSetupSession201>(getCreateCheckoutSetupSessionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createCheckoutSetupSessionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateCheckoutSetupSessionMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSetupSession>>, TError,{data: CreateCheckoutSetupSessionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSetupSession>>, TError,{data: CreateCheckoutSetupSessionBody}, TContext> => {
+
+const mutationKey = ['createCheckoutSetupSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCheckoutSetupSession>>, {data: CreateCheckoutSetupSessionBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCheckoutSetupSession(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCheckoutSetupSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createCheckoutSetupSession>>>
+    export type CreateCheckoutSetupSessionMutationBody = CreateCheckoutSetupSessionBody
+    export type CreateCheckoutSetupSessionMutationError = Error
+
+    /**
+ * @summary Start a card setup in Stripe Checkout (older route)
+ */
+export const useCreateCheckoutSetupSession = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSetupSession>>, TError,{data: CreateCheckoutSetupSessionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createCheckoutSetupSession>>,
+        TError,
+        {data: CreateCheckoutSetupSessionBody},
+        TContext
+      > => {
+      return useMutation(getCreateCheckoutSetupSessionMutationOptions(options), queryClient);
+    }
+
+export const getGetCheckoutSetupStatusUrl = (customerID: string,) => {
+
+
+
+
+  return `/v1/checkout/status/${customerID}`
+}
+
+/**
+ * An older route the dashboard no longer uses. Prefer
+ * `GET /v1/customers/{customer_id}/payment-methods`.
+ *
+ * Any read error, an unknown customer included, returns 200 with
+ * `setup_status: missing` and zero timestamps. Needs the
+ * `customer:write` permission.
+ * @summary Get a customer's card setup status (older route)
+ */
+export const getCheckoutSetupStatus = async (customerID: string, options?: RequestInit): Promise<CustomerPaymentSetup> => {
+
+  return orvalClient<CustomerPaymentSetup>(getGetCheckoutSetupStatusUrl(customerID),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCheckoutSetupStatusQueryKey = (customerID: string,) => {
+    return [
+    `/v1/checkout/status/${customerID}`
+    ] as const;
+    }
+
+
+export const getGetCheckoutSetupStatusQueryOptions = <TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(customerID: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCheckoutSetupStatusQueryKey(customerID);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCheckoutSetupStatus>>> = () => getCheckoutSetupStatus(customerID, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: customerID !== null && customerID !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetCheckoutSetupStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getCheckoutSetupStatus>>>
+export type GetCheckoutSetupStatusQueryError = unknown
+
+
+export function useGetCheckoutSetupStatus<TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(
+ customerID: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCheckoutSetupStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getCheckoutSetupStatus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCheckoutSetupStatus<TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(
+ customerID: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCheckoutSetupStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getCheckoutSetupStatus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCheckoutSetupStatus<TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(
+ customerID: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get a customer's card setup status (older route)
+ */
+
+export function useGetCheckoutSetupStatus<TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(
+ customerID: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetCheckoutSetupStatusQueryOptions(customerID,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetV1PublicCostDashboardTokenUrl = (token: string,) => {
 
 
@@ -2086,6 +2503,472 @@ export function useGetV1PublicCostDashboardToken<TData = Awaited<ReturnType<type
 
 
 
+
+export const getGetHostedInvoiceUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/invoices/${token}`
+}
+
+/**
+ * Unauthenticated. The invoice's public token in the URL is the only
+ * credential. Paid and voided invoices stay viewable. A draft is
+ * never shown: it returns 404 like an unknown token. Share the page
+ * link with customers instead of calling this route.
+ * @summary Data behind the hosted invoice page
+ */
+export const getHostedInvoice = async (token: string, options?: RequestInit): Promise<HostedInvoice> => {
+
+  return orvalClient<HostedInvoice>(getGetHostedInvoiceUrl(token),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHostedInvoiceQueryKey = (token: string,) => {
+    return [
+    `/v1/public/invoices/${token}`
+    ] as const;
+    }
+
+
+export const getGetHostedInvoiceQueryOptions = <TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHostedInvoiceQueryKey(token);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHostedInvoice>>> = () => getHostedInvoice(token, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: token !== null && token !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHostedInvoiceQueryResult = NonNullable<Awaited<ReturnType<typeof getHostedInvoice>>>
+export type GetHostedInvoiceQueryError = Error | void
+
+
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHostedInvoice>>,
+          TError,
+          Awaited<ReturnType<typeof getHostedInvoice>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHostedInvoice>>,
+          TError,
+          Awaited<ReturnType<typeof getHostedInvoice>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Data behind the hosted invoice page
+ */
+
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetHostedInvoiceQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetHostedInvoicePdfUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/invoices/${token}/pdf`
+}
+
+/**
+ * Unauthenticated, like the hosted invoice page. Returns the same PDF
+ * as `GET /v1/invoices/{id}/pdf`, shown inline and named after the
+ * invoice number.
+ * @summary Download the hosted invoice PDF
+ */
+export const getHostedInvoicePdf = async (token: string, options?: RequestInit): Promise<Blob> => {
+
+  return orvalClient<Blob>(getGetHostedInvoicePdfUrl(token),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHostedInvoicePdfQueryKey = (token: string,) => {
+    return [
+    `/v1/public/invoices/${token}/pdf`
+    ] as const;
+    }
+
+
+export const getGetHostedInvoicePdfQueryOptions = <TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHostedInvoicePdfQueryKey(token);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHostedInvoicePdf>>> = () => getHostedInvoicePdf(token, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: token !== null && token !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHostedInvoicePdfQueryResult = NonNullable<Awaited<ReturnType<typeof getHostedInvoicePdf>>>
+export type GetHostedInvoicePdfQueryError = Error | void
+
+
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHostedInvoicePdf>>,
+          TError,
+          Awaited<ReturnType<typeof getHostedInvoicePdf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHostedInvoicePdf>>,
+          TError,
+          Awaited<ReturnType<typeof getHostedInvoicePdf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Download the hosted invoice PDF
+ */
+
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetHostedInvoicePdfQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateHostedInvoiceCheckoutUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/invoices/${token}/checkout`
+}
+
+/**
+ * The hosted page's Pay button. Returns a Stripe Checkout URL for the
+ * amount due. Velox has already worked out the tax, so Stripe adds
+ * none. After paying, Stripe sends the customer back to the hosted
+ * page with `?paid=1`. The Stripe webhook, not this redirect, marks
+ * the invoice paid.
+ * @summary Start paying the invoice in Stripe Checkout
+ */
+export const createHostedInvoiceCheckout = async (token: string, options?: RequestInit): Promise<CreateHostedInvoiceCheckout200> => {
+
+  return orvalClient<CreateHostedInvoiceCheckout200>(getCreateHostedInvoiceCheckoutUrl(token),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateHostedInvoiceCheckoutMutationOptions = <TError = Error | void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext> => {
+
+const mutationKey = ['createHostedInvoiceCheckout'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, {token: string}> = (props) => {
+          const {token} = props ?? {};
+
+          return  createHostedInvoiceCheckout(token,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateHostedInvoiceCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>>
+
+    export type CreateHostedInvoiceCheckoutMutationError = Error | void
+
+    /**
+ * @summary Start paying the invoice in Stripe Checkout
+ */
+export const useCreateHostedInvoiceCheckout = <TError = Error | void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createHostedInvoiceCheckout>>,
+        TError,
+        {token: string},
+        TContext
+      > => {
+      return useMutation(getCreateHostedInvoiceCheckoutMutationOptions(options), queryClient);
+    }
+
+export const getGetPublicPaymentUpdateUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/payment-updates/${token}`
+}
+
+/**
+ * Unauthenticated. The token from the payment-update email is the only
+ * credential. It is valid for 24 hours, and starting checkout uses it
+ * up. Share the page link with customers instead of calling this
+ * route.
+ * @summary Data behind the payment-update page
+ */
+export const getPublicPaymentUpdate = async (token: string, options?: RequestInit): Promise<PublicPaymentUpdate> => {
+
+  return orvalClient<PublicPaymentUpdate>(getGetPublicPaymentUpdateUrl(token),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPublicPaymentUpdateQueryKey = (token: string,) => {
+    return [
+    `/v1/public/payment-updates/${token}`
+    ] as const;
+    }
+
+
+export const getGetPublicPaymentUpdateQueryOptions = <TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPublicPaymentUpdateQueryKey(token);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublicPaymentUpdate>>> = () => getPublicPaymentUpdate(token, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: token !== null && token !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPublicPaymentUpdateQueryResult = NonNullable<Awaited<ReturnType<typeof getPublicPaymentUpdate>>>
+export type GetPublicPaymentUpdateQueryError = Error | void
+
+
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublicPaymentUpdate>>,
+          TError,
+          Awaited<ReturnType<typeof getPublicPaymentUpdate>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublicPaymentUpdate>>,
+          TError,
+          Awaited<ReturnType<typeof getPublicPaymentUpdate>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Data behind the payment-update page
+ */
+
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPublicPaymentUpdateQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreatePublicPaymentUpdateCheckoutUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/payment-updates/${token}/checkout`
+}
+
+/**
+ * Returns a Stripe Checkout URL in setup mode (card only, no charge).
+ * Creates the Stripe customer if there is none. This call uses up the
+ * token. If Stripe fails to create the session, the token works again.
+ * Stripe sends the customer to the payment-method-added page with
+ * `?status=success` or `?status=cancel`. Writes an audit row.
+ * @summary Start adding a card in Stripe Checkout
+ */
+export const createPublicPaymentUpdateCheckout = async (token: string, options?: RequestInit): Promise<CreatePublicPaymentUpdateCheckout201> => {
+
+  return orvalClient<CreatePublicPaymentUpdateCheckout201>(getCreatePublicPaymentUpdateCheckoutUrl(token),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreatePublicPaymentUpdateCheckoutMutationOptions = <TError = Error | void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext> => {
+
+const mutationKey = ['createPublicPaymentUpdateCheckout'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, {token: string}> = (props) => {
+          const {token} = props ?? {};
+
+          return  createPublicPaymentUpdateCheckout(token,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePublicPaymentUpdateCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>>
+
+    export type CreatePublicPaymentUpdateCheckoutMutationError = Error | void
+
+    /**
+ * @summary Start adding a card in Stripe Checkout
+ */
+export const useCreatePublicPaymentUpdateCheckout = <TError = Error | void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>,
+        TError,
+        {token: string},
+        TContext
+      > => {
+      return useMutation(getCreatePublicPaymentUpdateCheckoutMutationOptions(options), queryClient);
+    }
 
 export const getPostV1MetersUrl = () => {
 
@@ -4323,6 +5206,191 @@ export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof
 
 
 
+export const getListWebhookEventDeliveriesLegacyUrl = (id: string,) => {
+
+
+
+
+  return `/v1/webhook-endpoints/events/${id}/deliveries`
+}
+
+/**
+ * An older route the dashboard no longer uses. Prefer
+ * `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
+ * an unknown event.
+ *
+ * Returns the deliveries of the event and of its replays, oldest
+ * first. An unknown id returns 200 with an empty list. Needs the
+ * `apikey:write` permission.
+ * @summary List an event's deliveries (older route)
+ */
+export const listWebhookEventDeliveriesLegacy = async (id: string, options?: RequestInit): Promise<ListWebhookEventDeliveriesLegacy200> => {
+
+  return orvalClient<ListWebhookEventDeliveriesLegacy200>(getListWebhookEventDeliveriesLegacyUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListWebhookEventDeliveriesLegacyQueryKey = (id: string,) => {
+    return [
+    `/v1/webhook-endpoints/events/${id}/deliveries`
+    ] as const;
+    }
+
+
+export const getListWebhookEventDeliveriesLegacyQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListWebhookEventDeliveriesLegacyQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>> = () => listWebhookEventDeliveriesLegacy(id, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListWebhookEventDeliveriesLegacyQueryResult = NonNullable<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>>
+export type ListWebhookEventDeliveriesLegacyQueryError = unknown
+
+
+export function useListWebhookEventDeliveriesLegacy<TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>,
+          TError,
+          Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListWebhookEventDeliveriesLegacy<TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>,
+          TError,
+          Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListWebhookEventDeliveriesLegacy<TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List an event's deliveries (older route)
+ */
+
+export function useListWebhookEventDeliveriesLegacy<TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListWebhookEventDeliveriesLegacyQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReplayWebhookEventLegacyUrl = (id: string,) => {
+
+
+
+
+  return `/v1/webhook-endpoints/events/${id}/replay`
+}
+
+/**
+ * An older route the dashboard no longer uses. Prefer
+ * `POST /v1/webhook_events/{id}/replay`.
+ *
+ * Does the same replay. The response always says `replayed`, even
+ * when no endpoint will receive the copy. Writes an audit row. Needs
+ * the `apikey:write` permission.
+ * @summary Replay an event to all matching endpoints (older route)
+ */
+export const replayWebhookEventLegacy = async (id: string, options?: RequestInit): Promise<ReplayWebhookEventLegacy200> => {
+
+  return orvalClient<ReplayWebhookEventLegacy200>(getReplayWebhookEventLegacyUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getReplayWebhookEventLegacyMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEventLegacy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEventLegacy>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['replayWebhookEventLegacy'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replayWebhookEventLegacy>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  replayWebhookEventLegacy(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplayWebhookEventLegacyMutationResult = NonNullable<Awaited<ReturnType<typeof replayWebhookEventLegacy>>>
+
+    export type ReplayWebhookEventLegacyMutationError = Error
+
+    /**
+ * @summary Replay an event to all matching endpoints (older route)
+ */
+export const useReplayWebhookEventLegacy = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEventLegacy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof replayWebhookEventLegacy>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getReplayWebhookEventLegacyMutationOptions(options), queryClient);
+    }
+
 export const getListWebhookEventDeliveriesUrl = (id: string,) => {
 
 
@@ -4624,6 +5692,168 @@ export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamW
 
 
 
+
+export const getReceiveStripeWebhookUrl = (endpointId: string,) => {
+
+
+
+
+  return `/v1/webhooks/stripe/${endpointId}`
+}
+
+/**
+ * Stripe calls this route; your code does not. Point a webhook in your
+ * Stripe dashboard at it for each connected mode. `endpoint_id` is the
+ * `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
+ * The request is checked against the `Stripe-Signature` header and
+ * that mode's signing secret. The body can be at most 64 KB.
+ *
+ * Events for objects Velox did not create are answered 200 with
+ * `status: skipped`. A 500 means a temporary failure, and Stripe
+ * sends the event again.
+ * @summary Receive a Stripe webhook
+ */
+export const receiveStripeWebhook = async (endpointId: string,
+    receiveStripeWebhookBody: ReceiveStripeWebhookBody, options?: RequestInit): Promise<ReceiveStripeWebhook200> => {
+
+  return orvalClient<ReceiveStripeWebhook200>(getReceiveStripeWebhookUrl(endpointId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(receiveStripeWebhookBody)
+  }
+);}
+
+
+
+
+
+export const getReceiveStripeWebhookMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receiveStripeWebhook>>, TError,{endpointId: string;data: ReceiveStripeWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof receiveStripeWebhook>>, TError,{endpointId: string;data: ReceiveStripeWebhookBody}, TContext> => {
+
+const mutationKey = ['receiveStripeWebhook'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof receiveStripeWebhook>>, {endpointId: string;data: ReceiveStripeWebhookBody}> = (props) => {
+          const {endpointId,data} = props ?? {};
+
+          return  receiveStripeWebhook(endpointId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReceiveStripeWebhookMutationResult = NonNullable<Awaited<ReturnType<typeof receiveStripeWebhook>>>
+    export type ReceiveStripeWebhookMutationBody = ReceiveStripeWebhookBody
+    export type ReceiveStripeWebhookMutationError = Error
+
+    /**
+ * @summary Receive a Stripe webhook
+ */
+export const useReceiveStripeWebhook = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receiveStripeWebhook>>, TError,{endpointId: string;data: ReceiveStripeWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof receiveStripeWebhook>>,
+        TError,
+        {endpointId: string;data: ReceiveStripeWebhookBody},
+        TContext
+      > => {
+      return useMutation(getReceiveStripeWebhookMutationOptions(options), queryClient);
+    }
+
+export const getReceivePostmarkWebhookUrl = () => {
+
+
+
+
+  return `/v1/webhooks/postmark`
+}
+
+/**
+ * Postmark calls this route; your code does not. Velox reads
+ * `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
+ * record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
+ * `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
+ * docs/ops/email-setup.md.
+ *
+ * Error bodies are `{"error": "<reason>"}`, not the usual error
+ * object. A body that a retry cannot fix is answered 200, so Postmark
+ * stops retrying: over 64 KB, invalid JSON, or no known Velox email
+ * id in its metadata.
+ * @summary Receive a Postmark delivery webhook
+ */
+export const receivePostmarkWebhook = async (receivePostmarkWebhookBody: ReceivePostmarkWebhookBody, options?: RequestInit): Promise<ReceivePostmarkWebhook200> => {
+
+  return orvalClient<ReceivePostmarkWebhook200>(getReceivePostmarkWebhookUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(receivePostmarkWebhookBody)
+  }
+);}
+
+
+
+
+
+export const getReceivePostmarkWebhookMutationOptions = <TError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext> => {
+
+const mutationKey = ['receivePostmarkWebhook'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof receivePostmarkWebhook>>, {data: ReceivePostmarkWebhookBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  receivePostmarkWebhook(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReceivePostmarkWebhookMutationResult = NonNullable<Awaited<ReturnType<typeof receivePostmarkWebhook>>>
+    export type ReceivePostmarkWebhookMutationBody = ReceivePostmarkWebhookBody
+    export type ReceivePostmarkWebhookMutationError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500
+
+    /**
+ * @summary Receive a Postmark delivery webhook
+ */
+export const useReceivePostmarkWebhook = <TError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof receivePostmarkWebhook>>,
+        TError,
+        {data: ReceivePostmarkWebhookBody},
+        TContext
+      > => {
+      return useMutation(getReceivePostmarkWebhookMutationOptions(options), queryClient);
+    }
 
 export const getPostV1PlansUrl = () => {
 

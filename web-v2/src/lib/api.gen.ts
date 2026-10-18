@@ -38,6 +38,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness check for load balancers
+         * @description Tells a load balancer whether this server can take requests. It
+         *     returns 503 when the server is shutting down (`draining`) or cannot
+         *     reach the database. A late billing scheduler shows as `degraded` in
+         *     the body but keeps the status at 200: taking the server out of the
+         *     balancer would not restart the scheduler. Alert on the scheduler
+         *     metrics instead (see docs/ops/runbook/monitoring.md).
+         */
+        get: operations["getHealthReady"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Prometheus metrics
+         * @description Metrics in the Prometheus text format, for a Prometheus scrape.
+         *     When `METRICS_TOKEN` is set, send it as a Bearer token. When it is
+         *     not set, the route is open, except with `APP_ENV=production`, where
+         *     it answers 401. This is not an API key route.
+         */
+        get: operations["getMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/customers": {
         parameters: {
             query?: never;
@@ -523,6 +571,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/checkout/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a card setup in Stripe Checkout (older route)
+         * @description An older route the dashboard no longer uses. Prefer
+         *     `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
+         *
+         *     Creates the Stripe customer if there is none, or copies
+         *     `customer_name`, `email` and the address to the existing one. It
+         *     then returns a Stripe Checkout URL in setup mode (card only, no
+         *     charge). Stripe sends the customer back to `return_url` with
+         *     `?payment=success` or `?payment=cancel` added. Without
+         *     `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
+         *     which works only in local development. Writes an audit row. Needs
+         *     the `customer:write` permission.
+         */
+        post: operations["createCheckoutSetupSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/checkout/status/{customerID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a customer's card setup status (older route)
+         * @description An older route the dashboard no longer uses. Prefer
+         *     `GET /v1/customers/{customer_id}/payment-methods`.
+         *
+         *     Any read error, an unknown customer included, returns 200 with
+         *     `setup_status: missing` and zero timestamps. Needs the
+         *     `customer:write` permission.
+         */
+        get: operations["getCheckoutSetupStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/public/cost-dashboard/{token}": {
         parameters: {
             query?: never;
@@ -654,6 +757,122 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/invoices/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data behind the hosted invoice page
+         * @description Unauthenticated. The invoice's public token in the URL is the only
+         *     credential. Paid and voided invoices stay viewable. A draft is
+         *     never shown: it returns 404 like an unknown token. Share the page
+         *     link with customers instead of calling this route.
+         */
+        get: operations["getHostedInvoice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/invoices/{token}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the hosted invoice PDF
+         * @description Unauthenticated, like the hosted invoice page. Returns the same PDF
+         *     as `GET /v1/invoices/{id}/pdf`, shown inline and named after the
+         *     invoice number.
+         */
+        get: operations["getHostedInvoicePdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/invoices/{token}/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start paying the invoice in Stripe Checkout
+         * @description The hosted page's Pay button. Returns a Stripe Checkout URL for the
+         *     amount due. Velox has already worked out the tax, so Stripe adds
+         *     none. After paying, Stripe sends the customer back to the hosted
+         *     page with `?paid=1`. The Stripe webhook, not this redirect, marks
+         *     the invoice paid.
+         */
+        post: operations["createHostedInvoiceCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/payment-updates/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data behind the payment-update page
+         * @description Unauthenticated. The token from the payment-update email is the only
+         *     credential. It is valid for 24 hours, and starting checkout uses it
+         *     up. Share the page link with customers instead of calling this
+         *     route.
+         */
+        get: operations["getPublicPaymentUpdate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/payment-updates/{token}/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start adding a card in Stripe Checkout
+         * @description Returns a Stripe Checkout URL in setup mode (card only, no charge).
+         *     Creates the Stripe customer if there is none. This call uses up the
+         *     token. If Stripe fails to create the session, the token works again.
+         *     Stripe sends the customer to the payment-method-added page with
+         *     `?status=success` or `?status=cancel`. Writes an audit row.
+         */
+        post: operations["createPublicPaymentUpdateCheckout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1409,6 +1628,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/webhook-endpoints/events/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an event's deliveries (older route)
+         * @description An older route the dashboard no longer uses. Prefer
+         *     `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
+         *     an unknown event.
+         *
+         *     Returns the deliveries of the event and of its replays, oldest
+         *     first. An unknown id returns 200 with an empty list. Needs the
+         *     `apikey:write` permission.
+         */
+        get: operations["listWebhookEventDeliveriesLegacy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook-endpoints/events/{id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay an event to all matching endpoints (older route)
+         * @description An older route the dashboard no longer uses. Prefer
+         *     `POST /v1/webhook_events/{id}/replay`.
+         *
+         *     Does the same replay. The response always says `replayed`, even
+         *     when no endpoint will receive the copy. Writes an audit row. Needs
+         *     the `apikey:write` permission.
+         */
+        post: operations["replayWebhookEventLegacy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhook_events/{id}/deliveries": {
         parameters: {
             query?: never;
@@ -1489,6 +1759,63 @@ export interface paths {
         get: operations["streamWebhookEvents"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/stripe/{endpoint_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a Stripe webhook
+         * @description Stripe calls this route; your code does not. Point a webhook in your
+         *     Stripe dashboard at it for each connected mode. `endpoint_id` is the
+         *     `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
+         *     The request is checked against the `Stripe-Signature` header and
+         *     that mode's signing secret. The body can be at most 64 KB.
+         *
+         *     Events for objects Velox did not create are answered 200 with
+         *     `status: skipped`. A 500 means a temporary failure, and Stripe
+         *     sends the event again.
+         */
+        post: operations["receiveStripeWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/postmark": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a Postmark delivery webhook
+         * @description Postmark calls this route; your code does not. Velox reads
+         *     `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
+         *     record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
+         *     `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
+         *     docs/ops/email-setup.md.
+         *
+         *     Error bodies are `{"error": "<reason>"}`, not the usual error
+         *     object. A body that a retry cannot fix is answered 200, so Postmark
+         *     stops retrying: over 64 KB, invalid JSON, or no known Velox email
+         *     id in its metadata.
+         */
+        post: operations["receivePostmarkWebhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7202,6 +7529,30 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        CustomerPaymentSetup: {
+            customer_id: string;
+            tenant_id?: string;
+            /**
+             * @description `ready`: the customer has a default payment method. `pending`:
+             *     a Stripe customer exists but there is no default payment method
+             *     yet. `missing`: there is no Stripe customer.
+             * @enum {string}
+             */
+            setup_status: "missing" | "pending" | "ready";
+            default_payment_method_present: boolean;
+            /** @example card */
+            payment_method_type?: string;
+            stripe_customer_id?: string;
+            stripe_payment_method_id?: string;
+            card_brand?: string;
+            card_last4?: string;
+            card_exp_month?: number;
+            card_exp_year?: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         CreditLedgerEntry: {
             id: string;
             tenant_id?: string;
@@ -8478,6 +8829,167 @@ export interface components {
             livemode: boolean;
             replay_of_event_id: string | null;
         };
+        /** @description One delivery of an event to one endpoint, as the older events routes return it. */
+        WebhookDelivery: {
+            id: string;
+            tenant_id?: string;
+            livemode: boolean;
+            webhook_endpoint_id: string;
+            /** @description The event this delivery sent. A replay's own id for a replay's delivery. */
+            webhook_event_id: string;
+            /** @enum {string} */
+            status: "pending" | "succeeded" | "failed";
+            /** @description HTTP status from the receiver. Left out when there was no response. */
+            http_status_code?: number;
+            response_body?: string;
+            error_message?: string;
+            attempt_count: number;
+            /** Format: date-time */
+            next_retry_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            completed_at?: string;
+            /** @description The endpoint's URL, kept after the endpoint is deleted. */
+            endpoint_url?: string;
+            endpoint_description?: string;
+        };
+        /**
+         * @description What the hosted invoice page shows. It leaves out internal ids and
+         *     Stripe details. `bill_to` and the company details in `branding`
+         *     come from the same place as the invoice PDF's.
+         */
+        HostedInvoice: {
+            invoice: {
+                invoice_number: string;
+                status: components["schemas"]["InvoiceStatus"];
+                payment_status: components["schemas"]["InvoicePaymentStatus"];
+                currency: string;
+                /** Format: int64 */
+                subtotal_cents: number;
+                /** Format: int64 */
+                discount_cents: number;
+                /** Format: int64 */
+                tax_amount_cents: number;
+                /** @description Tax rate in percent, for example `18` for 18%. */
+                tax_rate: number;
+                tax_name?: string;
+                tax_reverse_charge?: boolean;
+                tax_exempt_reason?: string;
+                /** Format: int64 */
+                total_amount_cents: number;
+                /** Format: int64 */
+                amount_due_cents: number;
+                /** Format: int64 */
+                amount_paid_cents: number;
+                /** Format: int64 */
+                credits_applied_cents: number;
+                /** Format: date-time */
+                issued_at?: string;
+                /** Format: date-time */
+                due_at?: string;
+                /** Format: date-time */
+                paid_at?: string;
+                /** Format: date-time */
+                voided_at?: string;
+                /**
+                 * @description The time zone to show the dates in, so they match the PDF.
+                 * @example Asia/Kolkata
+                 */
+                billing_timezone?: string;
+                memo?: string;
+                footer?: string;
+            };
+            line_items: {
+                description: string;
+                /** Format: int64 */
+                quantity: number;
+                /** @description The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities. */
+                quantity_decimal?: string;
+                /** Format: int64 */
+                unit_amount_cents: number;
+                /** @description The unit price in cents at full precision, for example `0.3` for $0.003. */
+                unit_amount_decimal?: string;
+                meter_unit?: string;
+                /** Format: int64 */
+                amount_cents: number;
+                /** Format: int64 */
+                tax_amount_cents?: number;
+                /** Format: int64 */
+                total_amount_cents: number;
+                currency: string;
+            }[];
+            bill_to: {
+                name?: string;
+                email?: string;
+                address_line1?: string;
+                address_line2?: string;
+                city?: string;
+                state?: string;
+                postal_code?: string;
+                country?: string;
+            };
+            branding: {
+                company_name?: string;
+                company_email?: string;
+                company_phone?: string;
+                company_address_line1?: string;
+                company_address_line2?: string;
+                company_city?: string;
+                company_state?: string;
+                company_postal_code?: string;
+                company_country?: string;
+                logo_url?: string;
+                brand_color?: string;
+                support_url?: string;
+            };
+            /**
+             * @description True when the customer can pay online now: the invoice is
+             *     finalized, something is owed, no payment is in progress, and the
+             *     seller has Stripe connected for the invoice's mode.
+             */
+            pay_enabled: boolean;
+            /**
+             * @description Sent only when money is owed but the seller has no payment
+             *     provider connected for this mode.
+             * @enum {string}
+             */
+            pay_unavailable_reason?: "online_payment_unavailable";
+            /** @description False for a test-mode invoice. The page shows a test-mode banner. */
+            livemode: boolean;
+        };
+        /** @description What the payment-update page shows before the customer adds a card. */
+        PublicPaymentUpdate: {
+            customer_name: string;
+            invoice_number: string;
+            invoice_status: components["schemas"]["InvoiceStatus"];
+            /**
+             * Format: int64
+             * @description Not cleared when the invoice is voided. Check `invoice_status` before asking for payment.
+             */
+            amount_due_cents: number;
+            currency: string;
+            branding: {
+                company_name?: string;
+                company_email?: string;
+                logo_url?: string;
+                brand_color?: string;
+                support_url?: string;
+            };
+        };
+        ReadinessReport: {
+            /** @enum {string} */
+            status: "ok" | "degraded" | "draining";
+            /**
+             * @description One entry per check. `api` is `ok` or `draining`. `database` is
+             *     `ok` or `error`. `scheduler` starts with `ok` or `degraded`,
+             *     followed by detail such as `ok: last run 12s ago`. While
+             *     draining, only `api` is sent.
+             */
+            checks: {
+                [key: string]: string;
+            };
+        };
     };
     responses: never;
     parameters: never;
@@ -8487,6 +8999,64 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getHealthReady: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ready. `status` is `ok`, or `degraded` when only the scheduler is late. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessReport"];
+                };
+            };
+            /** @description Not ready. `status` is `draining`, or `degraded` when the database cannot be reached. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessReport"];
+                };
+            };
+        };
+    };
+    getMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Metrics in the Prometheus text format. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description The token is missing or wrong, or `METRICS_TOKEN` is not set in production. The body is the plain text `unauthorized`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
     getCustomer: {
         parameters: {
             query?: never;
@@ -9115,6 +9685,353 @@ export interface operations {
             };
         };
     };
+    createCheckoutSetupSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    customer_id: string;
+                    customer_name?: string;
+                    email?: string;
+                    address_line1?: string;
+                    address_city?: string;
+                    address_state?: string;
+                    address_postal_code?: string;
+                    address_country?: string;
+                    /** @description The page Stripe sends the customer back to. Always send it, because the default works only in local development. */
+                    return_url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Setup session created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Stripe Checkout Session ID. */
+                        session_id: string;
+                        /** @description Stripe Checkout URL. */
+                        url: string;
+                        stripe_customer_id: string;
+                    };
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such customer in this mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `customer_id` is missing. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Stripe is not connected for this mode, or a Stripe call failed. Code `stripe_error`. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCheckoutSetupStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Setup status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerPaymentSetup"];
+                };
+            };
+        };
+    };
+    getHostedInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invoice as the page shows it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedInvoice"];
+                };
+            };
+            /** @description Unknown token, or the invoice is a draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getHostedInvoicePdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PDF file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description Unknown token, or the invoice is a draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createHostedInvoiceCheckout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Checkout session created. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Stripe Checkout URL. */
+                        url: string;
+                    };
+                };
+            };
+            /** @description Unknown token, or the invoice is a draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The invoice cannot be paid now. The code says why:
+             *     `not_payable` when it is not finalized, nothing is owed, or its
+             *     payment status is `processing` or `unknown`.
+             *     `payment_in_progress` when another payment for it has started.
+             *     `online_payment_unavailable` when the seller has no Stripe keys
+             *     for the invoice's mode.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stripe could not create the session. Code `stripe_error`. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The server runs without a Stripe adapter. Code `stripe_unavailable`. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicPaymentUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the page shows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicPaymentUpdate"];
+                };
+            };
+            /** @description The token is unknown, expired or already used. Code `invalid_token`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The invoice or customer the token names is gone. Code `invoice_not_found` or `customer_not_found`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createPublicPaymentUpdateCheckout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Checkout session created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Stripe Checkout URL. */
+                        url: string;
+                    };
+                };
+            };
+            /** @description The token is unknown, expired or already used. Code `invalid_token`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stripe is not connected for this mode, or Stripe could not create the session. Code `stripe_error`. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getMeter: {
         parameters: {
             query?: never;
@@ -9602,6 +10519,68 @@ export interface operations {
             };
         };
     };
+    listWebhookEventDeliveriesLegacy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deliveries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WebhookDelivery"][];
+                    };
+                };
+            };
+        };
+    };
+    replayWebhookEventLegacy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replay created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "replayed";
+                        /** @description The new event created by the replay. */
+                        event_id: string;
+                        /** @description The original event. */
+                        replay_of: string;
+                    };
+                };
+            };
+            /** @description No such event in this mode */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listWebhookEventDeliveries: {
         parameters: {
             query?: never;
@@ -9724,6 +10703,129 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    receiveStripeWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                "Stripe-Signature": string;
+            };
+            path: {
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Processed, or skipped. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "processed" | "skipped";
+                        /** @description Why the event was skipped. */
+                        reason?: string;
+                    };
+                };
+            };
+            /** @description Bad signature, an unreadable body or invalid JSON, or the event's mode or Velox account does not match the endpoint. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No Stripe connection has this `endpoint_id`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body is over 64 KB. Code `payload_too_large`. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Temporary failure. Stripe retries. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    receivePostmarkWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Processed, skipped or ignored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "processed" | "skipped" | "ignored";
+                        reason?: string;
+                    };
+                };
+            };
+            /** @description Wrong or missing Basic auth, or the credentials are not set on the server. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                    };
+                };
+            };
+            /** @description Temporary failure. Postmark retries. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                    };
                 };
             };
         };

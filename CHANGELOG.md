@@ -34,6 +34,7 @@ original text.
 
 ### Changed
 
+- **The OpenAPI file now lists every route the server answers (2026-10-18).** Thirteen were missing, among them the data behind the hosted invoice and payment-update pages, the Stripe and Postmark webhooks, `/health/ready` and `/metrics`. A Go test now fails when the router and `api/openapi.yaml` disagree ([OpenAPI workflow](docs/dev/openapi-workflow.md#ci-gate)).
 - **New page: card payment failure handling (2026-10-18).** How Velox handles declines, ambiguous charge results, crashes mid-charge, duplicate or late Stripe webhooks and refunds, and the four gaps still open ([docs/payments.md](docs/payments.md)).
 - **Browser tests now set up pricing, recipes, price overrides and dunning policies through the dashboard (2026-10-18).** Contributors: `web-v2/e2e/account-setup.spec.ts` has four journeys, each checked against the API, and the smoke test now opens the six public pages signed out, including links with no or a dead code.
 - **Browser tests now change subscriptions through the dashboard (2026-10-18).** Contributors: `web-v2/e2e/subscriptions.spec.ts` has four journeys: change plan now (proration invoice) and at renewal, cancel at period end, undo and cancel now, quantity and item changes against the upcoming invoice, and trial and collection controls. Each checks the page against the API.
