@@ -231,8 +231,36 @@ func (f *exhaustFixture) tick(t *testing.T) {
 }
 
 // assertHeld: the final action did not fire, and the run is still active and
-// due again later.
-func (f *exhaustFixture) assertHeld(t *testing.T) {
+// due again later: next_action_at is the lease, after now. It returns that
+// lease.
+func (f *exhaustFixture) assertHeld(t *testing.T) time.Time {
+	t.Helper()
+	run := f.assertNothingFired(t)
+	if run.NextActionAt == nil || !run.NextActionAt.After(f.clk.Now(f.ctx)) {
+		t.Errorf("run next_action_at=%v, want the lease, after now (%v): a dunning tick must pick it up again later",
+			run.NextActionAt, f.clk.Now(f.ctx))
+		return time.Time{}
+	}
+	return *run.NextActionAt
+}
+
+// assertHeldPastLease: the clock is past the lease and the payment is still in
+// flight. The due-run pickers skip a run whose invoice is processing or
+// unknown, so nothing fired and next_action_at is still that lease, now in the
+// past: the run is due as soon as its payment leaves flight.
+func (f *exhaustFixture) assertHeldPastLease(t *testing.T, lease time.Time) {
+	t.Helper()
+	run := f.assertNothingFired(t)
+	if run.NextActionAt == nil || !run.NextActionAt.Equal(lease) {
+		t.Errorf("run next_action_at=%v, want the lease %v unchanged: a held run keeps it, so it is due once its payment leaves flight",
+			run.NextActionAt, lease)
+	}
+}
+
+// assertNothingFired: the subscription is untouched, the invoice is not
+// written off, the run is active with no resolution, and no escalated event
+// was written. It returns the run.
+func (f *exhaustFixture) assertNothingFired(t *testing.T) domain.InvoiceDunningRun {
 	t.Helper()
 	sub, err := f.subs.Get(f.ctx, f.tenantID, f.subID)
 	if err != nil {
@@ -256,10 +284,6 @@ func (f *exhaustFixture) assertHeld(t *testing.T) {
 	if run.State != domain.DunningActive || run.Resolution != "" {
 		t.Errorf("run state=%s resolution=%q, want active with no resolution: it must wait and be re-checked", run.State, run.Resolution)
 	}
-	if run.NextActionAt == nil || !run.NextActionAt.After(f.clk.Now(f.ctx)) {
-		t.Errorf("run next_action_at=%v, want the lease, after now (%v): a dunning tick must pick it up again later",
-			run.NextActionAt, f.clk.Now(f.ctx))
-	}
 	events, err := f.runs.ListEvents(f.ctx, f.tenantID, f.runID)
 	if err != nil {
 		t.Fatalf("list run events: %v", err)
@@ -269,6 +293,7 @@ func (f *exhaustFixture) assertHeld(t *testing.T) {
 			t.Errorf("an escalated event was written while the run was held: %+v", e)
 		}
 	}
+	return run
 }
 
 // assertActed: the policy's final actions fired and the run escalated.
@@ -427,25 +452,28 @@ func TestExhaust_HeldRun_ReachesAnEnd(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	acts := policyActions[0] // cancel and write off: the irreversible one
 
-	hold := func(t *testing.T, name string, shape func(*testing.T, context.Context, *exhaustFixture)) *exhaustFixture {
+	hold := func(t *testing.T, name string, shape func(*testing.T, context.Context, *exhaustFixture)) (*exhaustFixture, time.Time) {
 		t.Helper()
 		var f *exhaustFixture
 		retry := &finalRetry{t: t, f: &f, raceIn: shape}
 		f = newExhaustFixture(t, db, name, acts, 1, nil, retry)
 		f.tick(t)
-		f.assertHeld(t)
+		lease := f.assertHeld(t)
 		// While the lease runs the run is not due; the next tick changes nothing.
 		f.tick(t)
-		f.assertHeld(t)
+		if again := f.assertHeld(t); !again.Equal(lease) {
+			t.Errorf("next_action_at moved from %v to %v on a tick inside the lease", lease, again)
+		}
 		f.clk.Advance(16 * time.Minute) // past the 15-minute exhaustion lease
-		return f
+		return f, lease
 	}
 
 	t.Run("payment fails, then the final actions fire", func(t *testing.T) {
-		f := hold(t, "Held then failed", stamp(domain.PaymentProcessing, "pi_racing", ""))
-		// Still in flight past the lease: the pickers skip it, nothing fires.
+		f, lease := hold(t, "Held then failed", stamp(domain.PaymentProcessing, "pi_racing", ""))
+		// Still in flight past the lease: the pickers skip it, nothing fires,
+		// and the run keeps its lease, so it is due once the payment fails.
 		f.tick(t)
-		f.assertHeld(t)
+		f.assertHeldPastLease(t, lease)
 
 		stamp(domain.PaymentFailed, "", "card_declined")(t, f.ctx, f)
 		f.tick(t)
@@ -453,7 +481,7 @@ func TestExhaust_HeldRun_ReachesAnEnd(t *testing.T) {
 	})
 
 	t.Run("payment succeeds, then the run resolves as recovered", func(t *testing.T) {
-		f := hold(t, "Held then paid", stamp(domain.PaymentProcessing, "pi_racing", ""))
+		f, _ := hold(t, "Held then paid", stamp(domain.PaymentProcessing, "pi_racing", ""))
 		if _, err := f.invoices.MarkPaid(f.ctx, f.tenantID, f.invoiceID, "pi_racing", f.clk.Now(f.ctx)); err != nil {
 			t.Fatalf("mark paid: %v", err)
 		}
@@ -476,7 +504,7 @@ func TestExhaust_HeldRun_ReachesAnEnd(t *testing.T) {
 	})
 
 	t.Run("parked, written off by an operator, the run closes without the subscription action", func(t *testing.T) {
-		f := hold(t, "Held then written off", stamp(domain.PaymentUnknown, "", "stripe: request timed out"))
+		f, _ := hold(t, "Held then written off", stamp(domain.PaymentUnknown, "", "stripe: request timed out"))
 		if _, err := f.invSvc.MarkUncollectible(f.ctx, f.tenantID, f.invoiceID); err != nil {
 			t.Fatalf("operator write-off of a parked invoice: %v", err)
 		}
