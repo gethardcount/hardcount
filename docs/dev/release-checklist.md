@@ -20,7 +20,14 @@ clean.
 - `cp .env.example .env`, then `make up` (Postgres, Redis, Mailpit), `make bootstrap` (prints the sign-in and the test keys), `make dev` (API on :8080) and `cd web-v2 && npm run dev` (dashboard on :5173).
 - The `.env.example` defaults send email to Mailpit and point email links at the dashboard on :5173. Read mail at http://localhost:8025.
 - Settings → Payments: paste the Stripe test keys. Run `stripe listen --forward-to localhost:8080/v1/webhooks/stripe/<vlx_spc_id>` and paste its `whsec_…` back.
-- Test cards: `4242 4242 4242 4242` succeeds; `4000 0000 0000 0341` saves but declines on charge; `4000 0027 6000 3184` asks for 3-D Secure.
+- Stripe test cards:
+
+  | Card | Result |
+  |---|---|
+  | `4242 4242 4242 4242` | Succeeds |
+  | `4000 0000 0000 0341` | Saves, then declines on charge |
+  | `4000 0027 6000 3184` | Asks for 3-D Secure |
+
 - In Checkout, choose "Pay without Link" if offered, and give a ZIP for a US address, or Save does nothing.
 - [Stripe end-to-end test](stripe-end-to-end-test.md) has the step-by-step commands for the Stripe checks.
 
