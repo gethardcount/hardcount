@@ -2,7 +2,11 @@ package telemetry_test
 
 import (
 	"context"
+	"os"
 	"testing"
+	"time"
+
+	"go.opentelemetry.io/otel"
 
 	"github.com/sagarsuperuser/velox/internal/platform/telemetry"
 )
@@ -38,6 +42,50 @@ func TestInit_SucceedsWhenEndpointConfigured(t *testing.T) {
 		t.Fatal("Init returned a nil shutdown func")
 	}
 	t.Cleanup(func() { _ = shutdown(context.Background()) })
+}
+
+// TestInit_RespectsSamplerEnv pins that OTEL_TRACES_SAMPLER decides sampling.
+// Init used to pass its own sampler to the tracer provider, and an explicit
+// sampler replaces whatever the SDK read from the environment, so an operator
+// who set OTEL_TRACES_SAMPLER=always_off (or a ratio, to cut trace volume)
+// still exported every trace. With the variable unset, the SDK's default
+// (parentbased_always_on) samples everything, as before.
+func TestInit_RespectsSamplerEnv(t *testing.T) {
+	cases := []struct {
+		sampler     string
+		wantSampled bool
+	}{
+		{sampler: "always_off", wantSampled: false},
+		{sampler: "", wantSampled: true}, // unset
+	}
+	for _, tc := range cases {
+		t.Run("OTEL_TRACES_SAMPLER="+tc.sampler, func(t *testing.T) {
+			prev := otel.GetTracerProvider()
+			t.Cleanup(func() { otel.SetTracerProvider(prev) })
+			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+			t.Setenv("OTEL_TRACES_SAMPLER", tc.sampler) // restores the old value on cleanup
+			if tc.sampler == "" {
+				_ = os.Unsetenv("OTEL_TRACES_SAMPLER")
+			}
+
+			shutdown, err := telemetry.Init(context.Background())
+			if err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				_ = shutdown(ctx)
+			})
+
+			_, span := otel.Tracer("test").Start(context.Background(), "probe")
+			got := span.SpanContext().IsSampled()
+			span.End()
+			if got != tc.wantSampled {
+				t.Fatalf("span sampled = %v, want %v: OTEL_TRACES_SAMPLER=%q must decide sampling", got, tc.wantSampled, tc.sampler)
+			}
+		})
+	}
 }
 
 // TestInit_NoopWhenEndpointUnset pins the other half of the contract: with no

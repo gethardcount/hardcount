@@ -11,7 +11,7 @@
 //   - none   → the server says there is nothing to preview (no period, no
 //              items, no active subscription), in its own words;
 //   - error  → "Couldn't load" with Retry.
-// Plain data in, plain data out (no api.ts import), so node --test runs it.
+// Plain data in, plain data out, pinned by tests/invoicePreview.test.ts.
 
 export interface PreviewLike {
   billing_period_start: string

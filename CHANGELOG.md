@@ -29,6 +29,8 @@ original text.
 
 ### Fixed
 
+- **`OTEL_TRACES_SAMPLER` now decides which traces Velox keeps (2026-10-18).** Velox set its own sampler, which replaced the variable, so every trace was exported whatever you set. Unset, all traces are still kept. The Compose stack now passes the sampler settings, and its example endpoint uses the OTLP/HTTP port 4318 ([self-host settings](docs/self-host.md#settings)).
+- **A failed release of an `Idempotency-Key` is now logged and counted (2026-10-18).** When a 409, 422 or usage-ingest 5xx could not free its key, nothing was recorded, and retries with that key got 409. It now logs an error and counts in `velox_idempotency_cache_errors_total{stage="release"}`. The finalize log and metric help no longer claim a retry runs the request again ([API errors](docs/api-surface.md)).
 - **Long invoice and credit-note PDFs now go onto more pages (2026-10-17).** Before, rows after about the 30th and the totals were drawn below the page edge, out of sight. Later pages repeat the table header and are numbered "Page N of M", and the totals stay together on the last page. Amounts are unchanged.
 - **Thai baht amounts on PDFs show their currency (2026-10-17).** The PDF font has no ฿ sign, so THB amounts printed with no currency mark. They now print as `THB 1,234.00`, like AED and SAR.
 - **Every email now has a `Date` and a `Message-ID`, and its text is encoded the standard way (2026-10-18).** Mail servers and spam filters expect both headers. Accented names and long lines, such as a long note on a setup link, now travel as quoted-printable in short lines. The Message-ID uses your `SMTP_FROM` domain. The wording is unchanged (#1187).

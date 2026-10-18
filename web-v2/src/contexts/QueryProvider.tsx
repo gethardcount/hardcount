@@ -38,7 +38,8 @@ const queryDefaults = {
 //
 // Per-user-id memo recreates fresh clients on logout / different
 // sign-in so the previous user's cache is gc'd. Anonymous bucket while
-// auth loads keeps the public routes (/login, /portal) functional.
+// auth loads keeps the signed-out routes (such as /login and
+// /invoice/:token) functional.
 export function ModeAwareQueryProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const userKey = user ? `${user.tenant_id}:${user.user_id}` : 'anon'

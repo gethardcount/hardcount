@@ -10,7 +10,8 @@
 //   - a period's last covered day is "through Nov 15" (inclusive);
 //   - the boundary after it is the event day: "Renews Nov 16", "Won't renew
 //     Nov 16", "Cancels Nov 16".
-// Dates come in through `fmt`, so node --test can check every branch.
+// Dates come in through `fmt`, so tests/subscriptionPeriod.test.ts can check
+// every branch.
 
 import { hasScheduledCancel } from './subscriptionNotices.ts'
 

@@ -186,7 +186,7 @@ func Idempotency(db *postgres.DB, releaseServerErrors func(*http.Request) bool) 
 			// reservation instead, freeing the key for a clean retry.
 			if recorder.statusCode == http.StatusConflict ||
 				recorder.statusCode == http.StatusUnprocessableEntity {
-				releaseKey(bgCtx, db, tenantID, key)
+				releaseKey(bgCtx, db, tenantID, key, recorder.statusCode)
 				return
 			}
 			// Ingest-only (ha-11, 2026-08-31): a 5xx on a dedup-safe ingest
@@ -194,7 +194,7 @@ func Idempotency(db *postgres.DB, releaseServerErrors func(*http.Request) bool) 
 			// turned "retry with the same key" into 24 h of replayed failure
 			// and unrecorded usage.
 			if recorder.statusCode >= 500 && releaseServerErrors != nil && releaseServerErrors(r) {
-				releaseKey(bgCtx, db, tenantID, key)
+				releaseKey(bgCtx, db, tenantID, key, recorder.statusCode)
 				return
 			}
 			finalizeKey(bgCtx, db, tenantID, key,
@@ -275,13 +275,15 @@ func finalizeKey(ctx context.Context, db *postgres.DB, tenantID, key string, sta
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	// A finalize failure leaves the row 'pending', so a retry under the same
-	// key re-runs the handler (the response was never cached) — the exact
-	// double-execution idempotency exists to prevent. Make every failure path
-	// observable instead of swallowing it.
+	// A finalize failure leaves the row pending with no response stored. The
+	// handler does NOT re-run on a retry: the retry finds the pending row and
+	// gets 409 conflict_idempotency, then conflict_idempotency_unresolved once
+	// the reservation is older than idempotencyOrphanAfter, for the rest of the
+	// key's 24-hour life. The client never sees this response replayed, so
+	// every failure path is counted and logged.
 	fail := func(stage string, err error) {
 		idempotencyCacheErrors.WithLabelValues("finalize").Inc()
-		slog.ErrorContext(ctx, "idempotency finalize failed; response NOT cached, retry will re-run the handler",
+		slog.ErrorContext(ctx, "idempotency finalize failed; response not stored, key stays pending and retries with it get 409",
 			"stage", stage, "tenant_id", tenantID, "status_code", statusCode, "error", err)
 	}
 
@@ -306,14 +308,24 @@ func finalizeKey(ctx context.Context, db *postgres.DB, tenantID, key string, sta
 }
 
 // releaseKey deletes the pending reservation so a key whose handler returned a
-// non-cacheable status (409/422) can be retried cleanly. Without this, the
-// pending row would linger until expiry and every retry would 409.
-func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string) {
+// non-cacheable status (409/422, or a 5xx on a release-on-error route) can be
+// retried cleanly. When the delete fails, the pending row lingers and every
+// retry with the key gets 409 (conflict_idempotency_unresolved once the
+// reservation is older than idempotencyOrphanAfter) instead of running again,
+// so each failure is counted and logged like a finalize failure.
+func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string, statusCode int) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
+	fail := func(stage string, err error) {
+		idempotencyCacheErrors.WithLabelValues("release").Inc()
+		slog.ErrorContext(ctx, "idempotency release failed; key stays pending and retries with it get 409 instead of running again",
+			"stage", stage, "tenant_id", tenantID, "status_code", statusCode, "error", err)
+	}
+
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
+		fail("begin", err)
 		return
 	}
 	defer postgres.Rollback(tx)
@@ -322,9 +334,12 @@ func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string) {
 		`DELETE FROM idempotency_keys WHERE tenant_id = $1 AND key = $2 AND status_code = $3`,
 		tenantID, key, statusPending,
 	); err != nil {
+		fail("delete", err)
 		return
 	}
-	_ = tx.Commit()
+	if err := tx.Commit(); err != nil {
+		fail("commit", err)
+	}
 }
 
 // readKey loads the current state of a reserved/completed idempotency row.

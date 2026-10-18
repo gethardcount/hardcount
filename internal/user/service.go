@@ -56,14 +56,13 @@ const (
 	PasswordResetTokenTTL = 1 * time.Hour
 )
 
-// CommonPasswords is the top-1000 most-used passwords from the 2023
-// HaveIBeenPwned breach corpus (lower-cased). Login flow rejects
-// passwords on this list at signup/reset so trivially-guessable
-// credentials never enter our DB. Embedded as a tiny in-memory set.
-//
-// Not exhaustive — a real "weak password" feel needs zxcvbn — but
-// catches the 90th percentile of bad passwords (password, 123456,
-// qwerty123, etc).
+// commonPasswords is a hand-picked stub of 10 guessable passwords
+// (lower-cased; matched case-insensitively). ValidatePassword rejects
+// them when a password is set (bootstrap, reset, invite accept). Three
+// entries are shorter than MinPasswordLength, so the length check
+// already refuses them. It is NOT a breached-password list:
+// "Password1234" and "Nimbus@2026!" pass. Replacing it with an embedded
+// top-N breached set is the open Phase-0 item in ADR-095.
 var commonPasswords = map[string]struct{}{
 	"password":       {},
 	"password123":    {},
@@ -75,9 +74,6 @@ var commonPasswords = map[string]struct{}{
 	"iloveyou1234":   {},
 	"welcome12345":   {},
 	"admin12345678":  {},
-	// ... in production we'd embed the full top-1000 list. For v1
-	// this seed catches the most embarrassing cases. Expand when a
-	// security review asks for stronger denial.
 }
 
 // HashPassword applies bcrypt to a candidate plaintext. Validates

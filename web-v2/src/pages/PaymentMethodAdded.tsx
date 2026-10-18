@@ -7,19 +7,17 @@ import { VeloxLogo } from '@/components/VeloxLogo'
 // PaymentMethodAdded is the public landing page Stripe Checkout
 // redirects to after a customer completes (or cancels) a setup-mode
 // session. Hit via the URL the operator sent in the "Add payment
-// method" email — the customer has no portal session at this point,
-// so this page is unauthenticated and self-contained.
+// method" email — the customer is not signed in to anything, so this
+// page is unauthenticated and self-contained.
 //
 // Two states, gated on ?status= query (?status=success default; the
 // cancel URL passes ?status=cancel). Stripe's Checkout-mode
 // success_url + cancel_url both point here so the SPA renders the
 // right copy without us needing two routes.
 //
-// Why a dedicated route (vs. redirecting to /portal): the customer
-// who arrived via an emailed link does not have a portal session
-// token. Sending them to /portal would land them on /portal/login
-// asking for credentials they don't have. This page is the right
-// terminal — confirm, encourage closing the tab.
+// Customers have no Velox sign-in (the self-serve portal was removed,
+// ADR-051), so this page is the end of the flow: confirm, encourage
+// closing the tab.
 //
 // We deliberately don't try to poll for the new payment_method row.
 // The setup_intent.succeeded webhook is async; by the time the

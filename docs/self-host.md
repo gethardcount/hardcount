@@ -200,6 +200,8 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 | `VELOX_BOOTSTRAP_TOKEN` | unset | Allows the `POST /v1/bootstrap` call that creates the first tenant. At least 16 characters outside `local`. |
 | `METRICS_TOKEN` | unset | The bearer token a scraper must send to read `/metrics`. If unset, `/metrics` answers 401 in `production` and is open elsewhere. |
 | `INVOICE_GRACE_PERIOD` | `1h` | How long Velox waits after a billing period ends before it builds the invoice, so usage that arrives late but belongs to the period is billed. See below. A duration from `0` to `72h`, such as `30m` or `24h`. Any other value stops start-up. `0` builds the invoice as soon as the period ends. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Your OpenTelemetry collector's OTLP/HTTP address, such as `http://otel-collector:4318`. If unset, Velox sends no traces. |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | all traces | Which traces to keep, using the standard OpenTelemetry values. To keep 1 in 10, set `parentbased_traceidratio` and `0.1`. |
 
 Stripe is not set here. Each tenant connects its own Stripe account in the dashboard, under Settings → Payments. The Stripe API keys and the webhook signing secret (`whsec_…`) are stored per tenant, in the database.
 

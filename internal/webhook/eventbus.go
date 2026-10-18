@@ -94,10 +94,9 @@ type EventBus struct {
 	closed bool
 }
 
-// NewEventBus returns an empty in-memory bus. Single instance per
-// process is sufficient — the API server is the only producer
-// (replicas use the leader-elected outbox dispatcher; replicas with no
-// HTTP traffic produce no live events to fan out).
+// NewEventBus returns an empty in-memory bus, one per process. It fans
+// out only frames published in this process; see streamEvents (sse.go)
+// for what a stream misses when Velox runs as several replicas.
 func NewEventBus() *EventBus {
 	return &EventBus{subscribers: make(map[string]map[*subscription]struct{})}
 }

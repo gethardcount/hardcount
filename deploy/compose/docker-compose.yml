@@ -148,6 +148,8 @@ services:
       # Optional — OpenTelemetry export
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-velox}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1.0}
     healthcheck:
       # The image is distroless (no shell, no curl); use the binary's own
       # zero-arg `version` exit-0 as a process-level liveness probe. The
