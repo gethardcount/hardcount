@@ -18,10 +18,16 @@ original text.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-18
+
+Database migrations move to goose, before the first partner installs. A new install applies one baseline file instead of 178, a failed migration leaves nothing to repair, and copies that start together take turns. A v0.8.0 or v0.8.1 database is taken over without a table change. Also: long PDFs go onto more pages, every email has a `Date` and a `Message-ID`, and two security fixes. No new migrations: the schema is still v0.8.1's.
+
 **Before upgrading:**
 
-- **Upgrade from v0.8.0 or v0.8.1.** This release takes over a database at migration 180 and changes no table. Older databases upgrade to v0.8.1 first. A dirty v0.8 database is repaired with v0.8.1.
-- **With `RUN_MIGRATIONS_ON_BOOT=false`, run `velox migrate` once before you start this release.** It changes no table, so v0.8.x copies keep serving meanwhile. Until it has run, this release refuses to start.
+- **Upgrade from v0.8.0 or v0.8.1, and take a backup first.** The first start of this release, or `velox migrate`, takes the database over: it records version 180 in a new table, `goose_db_version`, adds a comment to `schema_migrations`, and changes no other table ([Upgrade to a new release](docs/production-one-vm.md#upgrade-to-a-new-release)).
+- **Older than v0.8.0? Upgrade to v0.8.1 first.** This release refuses any v0.8 record other than a clean 180, says what it found, and changes nothing. A dirty v0.8 database is repaired with v0.8.1 first ([v0.8.1 runbook](https://github.com/getvelox/velox/blob/v0.8.1/docs/ops/runbook/migration-failed-midway.md)).
+- **With `RUN_MIGRATIONS_ON_BOOT=false`, run `velox migrate` once before you start this release.** It changes no table, so v0.8.x copies keep serving meanwhile. Until it has run, this release refuses to start. With several copies, upgrade them one at a time after it ([Upgrades](docs/ops/high-availability.md#upgrades)).
+- **Run the upgrade as the same database user as before.** Taking over adds a comment to `schema_migrations`, and only its owner may do that. As a user that does not own it, the upgrade stops with a `must be owner` error and applies nothing.
 - **`velox migrate status` prints a plan now.** A script that reads its old `version: N, dirty: …` line must change.
 - **`velox migrate force` is removed, and `velox migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade ([Going back](docs/production-one-vm.md#going-back)).
 - **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, Velox refuses to start and says why.
@@ -4993,7 +4999,8 @@ contents of `[Unreleased]` above will move under a new
 `## [0.X.0] - YYYY-MM-DD` heading here, and a matching entry will be
 curated into the public changelog page.
 
-[Unreleased]: https://github.com/getvelox/velox/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/getvelox/velox/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/getvelox/velox/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/getvelox/velox/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/getvelox/velox/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/getvelox/velox/compare/v0.6.1...v0.7.0
