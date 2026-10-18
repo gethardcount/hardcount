@@ -287,9 +287,11 @@ moves. Respond to it in Stripe; if it is lost, decide what the invoice should
 say ([Card disputes](ops/runbook/card-disputes.md)). Both events carry
 `invoice_id`, `invoice_number`, `customer_id`, `dispute_id`,
 `payment_intent_id`, `stripe_charge_id`, `currency` and `opened_at`, and
-`payment.dispute_closed` adds `closed_at`. Velox hears of a dispute only when
-Stripe's `charge.dispute.*` events are turned on for its Stripe webhook
-endpoint.
+`closed_at` once the dispute is closed. When the first Stripe event Velox
+receives is already the close, both events are sent with the closed status,
+in either order. Velox hears of a dispute only when Stripe's
+`charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`
+events are turned on for its Stripe webhook endpoint.
 
 ### Subscriptions
 

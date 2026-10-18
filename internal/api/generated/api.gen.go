@@ -904,6 +904,7 @@ const (
 	InvoicePaymentTimelineDegradedAudit          InvoicePaymentTimelineDegraded = "audit"
 	InvoicePaymentTimelineDegradedChargeAttempts InvoicePaymentTimelineDegraded = "charge_attempts"
 	InvoicePaymentTimelineDegradedCreditNotes    InvoicePaymentTimelineDegraded = "credit_notes"
+	InvoicePaymentTimelineDegradedDisputes       InvoicePaymentTimelineDegraded = "disputes"
 	InvoicePaymentTimelineDegradedDunning        InvoicePaymentTimelineDegraded = "dunning"
 	InvoicePaymentTimelineDegradedEmails         InvoicePaymentTimelineDegraded = "emails"
 )
@@ -916,6 +917,8 @@ func (e InvoicePaymentTimelineDegraded) Valid() bool {
 	case InvoicePaymentTimelineDegradedChargeAttempts:
 		return true
 	case InvoicePaymentTimelineDegradedCreditNotes:
+		return true
+	case InvoicePaymentTimelineDegradedDisputes:
 		return true
 	case InvoicePaymentTimelineDegradedDunning:
 		return true
@@ -3187,8 +3190,13 @@ type Attention struct {
 	// the customer disputed with their bank and that the dispute took
 	// back (the dispute closed as `lost`). Velox leaves the invoice paid
 	// and moves no money; the operator records the loss. Surfaced on paid
-	// invoices. The disputes themselves are at
-	// `GET /v1/invoices/{id}/disputes` (2026-10-19).
+	// invoices. On an invoice that bought prepaid credit, the message
+	// also says how much of the credit is still spendable and names
+	// commit relief, because an ordinary credit note is refused there.
+	// When the invoice also has `payment_anomaly`, that reason stays and
+	// its message asks the operator to check Stripe before any refund.
+	// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
+	// (2026-10-19).
 	Reason AttentionReason `json:"reason"`
 
 	// Severity Urgency of an Attention surface. Operators sort/filter on this
@@ -3263,8 +3271,13 @@ type AttentionActionItem struct {
 // the customer disputed with their bank and that the dispute took
 // back (the dispute closed as `lost`). Velox leaves the invoice paid
 // and moves no money; the operator records the loss. Surfaced on paid
-// invoices. The disputes themselves are at
-// `GET /v1/invoices/{id}/disputes` (2026-10-19).
+// invoices. On an invoice that bought prepaid credit, the message
+// also says how much of the credit is still spendable and names
+// commit relief, because an ordinary credit note is refused there.
+// When the invoice also has `payment_anomaly`, that reason stays and
+// its message asks the operator to check Stripe before any refund.
+// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
+// (2026-10-19).
 type AttentionReason string
 
 // AttentionSeverity Urgency of an Attention surface. Operators sort/filter on this
@@ -3884,14 +3897,18 @@ type CustomerUsageMeter struct {
 // same transaction that records the dispute, so a crash cannot drop
 // them. `payment.dispute_opened` is sent once per dispute, when Velox
 // first records it; if the first event Velox receives is already the
-// close, both are sent, opened first. `payment.dispute_closed` is sent
-// when the dispute reaches a closed status it did not have: `won`,
-// `lost`, `warning_closed` or `prevented`. A lost dispute that Stripe
-// later marks won sends it again.
+// close, both are sent, and both carry the closed status and
+// `closed_at`. Their delivery order is not guaranteed.
+// `payment.dispute_closed` is sent when the dispute reaches a closed
+// status it did not have: `won`, `lost`, `warning_closed` or
+// `prevented`. A lost dispute that Stripe later marks won sends it
+// again.
 type DisputeWebhookEventData struct {
 	AmountCents int64 `json:"amount_cents"`
 
-	// ClosedAt Set on `payment.dispute_closed`.
+	// ClosedAt Set when the dispute is closed: always on `payment.dispute_closed`,
+	// and on `payment.dispute_opened` when the first event Velox received
+	// was already the close.
 	ClosedAt   time.Time `json:"closed_at,omitempty"`
 	Currency   string    `json:"currency"`
 	CustomerId string    `json:"customer_id"`

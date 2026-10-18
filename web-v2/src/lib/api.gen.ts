@@ -7143,8 +7143,13 @@ export interface components {
          *     the customer disputed with their bank and that the dispute took
          *     back (the dispute closed as `lost`). Velox leaves the invoice paid
          *     and moves no money; the operator records the loss. Surfaced on paid
-         *     invoices. The disputes themselves are at
-         *     `GET /v1/invoices/{id}/disputes` (2026-10-19).
+         *     invoices. On an invoice that bought prepaid credit, the message
+         *     also says how much of the credit is still spendable and names
+         *     commit relief, because an ordinary credit note is refused there.
+         *     When the invoice also has `payment_anomaly`, that reason stays and
+         *     its message asks the operator to check Stripe before any refund.
+         *     The disputes themselves are at `GET /v1/invoices/{id}/disputes`
+         *     (2026-10-19).
          * @enum {string}
          */
         AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost";
@@ -8641,10 +8646,12 @@ export interface components {
          *     same transaction that records the dispute, so a crash cannot drop
          *     them. `payment.dispute_opened` is sent once per dispute, when Velox
          *     first records it; if the first event Velox receives is already the
-         *     close, both are sent, opened first. `payment.dispute_closed` is sent
-         *     when the dispute reaches a closed status it did not have: `won`,
-         *     `lost`, `warning_closed` or `prevented`. A lost dispute that Stripe
-         *     later marks won sends it again.
+         *     close, both are sent, and both carry the closed status and
+         *     `closed_at`. Their delivery order is not guaranteed.
+         *     `payment.dispute_closed` is sent when the dispute reaches a closed
+         *     status it did not have: `won`, `lost`, `warning_closed` or
+         *     `prevented`. A lost dispute that Stripe later marks won sends it
+         *     again.
          */
         DisputeWebhookEventData: {
             invoice_id: string;
@@ -8668,14 +8675,16 @@ export interface components {
             opened_at: string;
             /**
              * Format: date-time
-             * @description Set on `payment.dispute_closed`.
+             * @description Set when the dispute is closed: always on `payment.dispute_closed`,
+             *     and on `payment.dispute_opened` when the first event Velox received
+             *     was already the close.
              */
             closed_at?: string;
         };
         InvoicePaymentTimeline: {
             events: components["schemas"]["InvoiceTimelineEvent"][];
             /** @description Sources that could not be read, so their rows are missing. */
-            degraded: ("audit" | "credit_notes" | "emails" | "dunning" | "charge_attempts")[];
+            degraded: ("audit" | "credit_notes" | "emails" | "dunning" | "charge_attempts" | "disputes")[];
             /** @description True when the credit-note source hit its limit of 100 rows. */
             truncated: boolean;
         };

@@ -14,10 +14,12 @@
  * same transaction that records the dispute, so a crash cannot drop
  * them. `payment.dispute_opened` is sent once per dispute, when Velox
  * first records it; if the first event Velox receives is already the
- * close, both are sent, opened first. `payment.dispute_closed` is sent
- * when the dispute reaches a closed status it did not have: `won`,
- * `lost`, `warning_closed` or `prevented`. A lost dispute that Stripe
- * later marks won sends it again.
+ * close, both are sent, and both carry the closed status and
+ * `closed_at`. Their delivery order is not guaranteed.
+ * `payment.dispute_closed` is sent when the dispute reaches a closed
+ * status it did not have: `won`, `lost`, `warning_closed` or
+ * `prevented`. A lost dispute that Stripe later marks won sends it
+ * again.
  */
 export interface DisputeWebhookEventData {
   invoice_id: string;
@@ -36,6 +38,10 @@ export interface DisputeWebhookEventData {
   currency: string;
   evidence_due_by?: string;
   opened_at: string;
-  /** Set on `payment.dispute_closed`. */
+  /**
+     * Set when the dispute is closed: always on `payment.dispute_closed`,
+     * and on `payment.dispute_opened` when the first event Velox received
+     * was already the close.
+     */
   closed_at?: string;
 }

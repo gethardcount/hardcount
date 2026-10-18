@@ -33,8 +33,13 @@
  * the customer disputed with their bank and that the dispute took
  * back (the dispute closed as `lost`). Velox leaves the invoice paid
  * and moves no money; the operator records the loss. Surfaced on paid
- * invoices. The disputes themselves are at
- * `GET /v1/invoices/{id}/disputes` (2026-10-19).
+ * invoices. On an invoice that bought prepaid credit, the message
+ * also says how much of the credit is still spendable and names
+ * commit relief, because an ordinary credit note is refused there.
+ * When the invoice also has `payment_anomaly`, that reason stays and
+ * its message asks the operator to check Stripe before any refund.
+ * The disputes themselves are at `GET /v1/invoices/{id}/disputes`
+ * (2026-10-19).
  */
 export type AttentionReason = typeof AttentionReason[keyof typeof AttentionReason];
 

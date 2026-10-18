@@ -1186,9 +1186,10 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// while the cash never arrived (ADR-078 D3 fast-follow). Read per row, but
 	// behind the tightest guard of any attention read — commit lines
 	// are manual-invoice-only and funded at finalize (ADR-078 D2/D3), so a
-	// draft, a subscription-cycle invoice, or a paid one can never carry a live
-	// grant and never pays for the lookup. What remains is one hit on the
-	// unique partial index idx_credit_ledger_commit_fund_dedup.
+	// draft or a subscription-cycle invoice can never carry a live grant, and
+	// a paid one has nothing to report (the cash arrived); none of them pays
+	// for the lookup, except the paid case below. What remains is one hit on
+	// the unique partial index idx_credit_ledger_commit_fund_dedup.
 	//
 	// The clock here is the RESOLVER's, deliberately unlike atc.Now a few lines
 	// above: that one ages an in-flight payment, which settles in the real
@@ -1200,9 +1201,16 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// A read error leaves both figures zero and claims no exposure. The
 	// alternative — a banner asserting a balance we could not read — is the
 	// failure worth avoiding, and the invoice's own cause banner still renders.
+	//
+	// One paid case joins the read: a lost dispute (#1287 review). The bank
+	// took the cash back while the credit stays spendable, and the
+	// dispute_lost notice must say so and point to commit relief instead of
+	// the credit note a commit invoice refuses. Only paid invoices with a lost
+	// dispute pay for it, which is almost none.
 	if s.commitGrants != nil && inv.ID != "" &&
 		inv.BillingReason == domain.BillingReasonManual &&
-		(inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible) {
+		(inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible ||
+			(inv.Status == domain.InvoicePaid && atc.LostDispute != nil)) {
 		if drawable, consumed, err := s.commitGrants.CommitGrantExposure(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx)); err == nil {
 			atc.CommitGrantDrawableCents = drawable
 			atc.CommitGrantConsumedCents = consumed

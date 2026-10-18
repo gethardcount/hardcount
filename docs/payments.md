@@ -104,8 +104,16 @@ payment failures, and the gaps still open.
 - **The dashboard has no badge for an open dispute.** An open dispute shows
   only as a row in the invoice's Activity list, and the lost-dispute notice
   carries the generic title "Needs attention". The dashboard's list of Stripe
-  events to turn on does not name the three dispute events yet. Read
-  disputes with `GET /v1/invoices/{id}/disputes`.
+  events to turn on does not name the three dispute events yet, so a setup
+  that follows only that list records no disputes; add them by hand
+  ([runbook](ops/runbook/card-disputes.md)). Read disputes with
+  `GET /v1/invoices/{id}/disputes`.
+- **A dispute that Stripe's dispute prevention settles (status
+  `prevented`) shows no notice.** Prevention settles a dispute by
+  refunding the payment in Stripe, and Velox does not record a refund made
+  in Stripe. The dispute is in the invoice's Activity list; record the
+  refund with a credit note
+  ([ADR-049](adr/049-payment-settlement-primitive.md), "Deferred").
 
 Related: [operations runbook](ops/runbook/index.md),
 [webhook events](webhooks.md#event-catalog),

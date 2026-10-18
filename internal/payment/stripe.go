@@ -1394,6 +1394,13 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 // while keeping a genuinely-foreign refund from looping for days.
 const refundWebhookRaceWindow = 15 * time.Minute
 
+// disputeWebhookRaceWindow bounds redelivery for a dispute webhook that
+// arrives before Velox has recorded the payment it disputes (handleDispute).
+// Same reasoning and value as refundWebhookRaceWindow: longer than Stripe's
+// first redelivery backoff, short enough that a dispute on a payment made
+// outside Velox does not loop for days.
+const disputeWebhookRaceWindow = refundWebhookRaceWindow
+
 // handleRefundUpdated reconciles the ASYNC outcome of a refund. A refund can
 // return pending at create then later flip to succeeded or FAILED (bank reject /
 // insufficient platform balance → money back to the platform, customer
@@ -1470,9 +1477,12 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 // Outcomes:
 //   - recorded, or already recorded (a redelivery, or an older event arriving
 //     after a newer one): nil, and HandleWebhook writes the dedup row;
-//   - no Velox invoice holds the disputed PaymentIntent: an ErrNotFound
-//     error, which HandleWebhook acknowledges with its audit row. The tenant
-//     can charge cards outside Velox on the same Stripe account;
+//   - no Velox invoice holds the disputed PaymentIntent, and the dispute is
+//     older than disputeWebhookRaceWindow: an ErrNotFound error, which
+//     HandleWebhook acknowledges with its audit row. The tenant can charge
+//     cards outside Velox on the same Stripe account;
+//   - the same, but the dispute is younger (Velox may not have recorded its
+//     own payment yet): an error, so Stripe redelivers it;
 //   - a status Velox does not know (Stripe added one) or a body it cannot
 //     read: an error, so the delivery fails and Stripe redelivers it, which
 //     shows on Stripe's webhook page, instead of the dispute being dropped;
@@ -1545,6 +1555,18 @@ func (s *Stripe) handleDispute(ctx context.Context, tenantID string, event domai
 
 	res, err := s.disputes.RecordStripeDispute(ctx, tenantID, snap)
 	if errors.Is(err, errs.ErrNotFound) {
+		// No invoice holds the payment yet. It can be a Velox payment whose
+		// record has not committed: a hosted-page payment before its settle,
+		// an off-session charge before its attempt row (written after Stripe
+		// answers). Stripe's test dispute cards open the dispute right after
+		// the charge. So a dispute younger than the race window, or of unknown
+		// age, fails the delivery and Stripe sends it again, as a young refund
+		// does (handleRefundUpdated); an older one is acknowledged as not
+		// Velox's, with its audit row.
+		// Wall clock against Stripe's clock: the dispute's age is real time.
+		if dp.Created == 0 || time.Now().Unix()-dp.Created < int64(disputeWebhookRaceWindow.Seconds()) {
+			return fmt.Errorf("%s: dispute %s: no invoice holds payment %s yet (recent dispute — retry)", event.EventType, dp.ID, pi)
+		}
 		slog.WarnContext(ctx, "dispute webhook names a payment no Velox invoice holds — acknowledged; if it is a Velox charge, find the invoice by this payment intent",
 			"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID,
 			"stripe_payment_intent_id", pi, "status", dp.Status)

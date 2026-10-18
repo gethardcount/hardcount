@@ -75,21 +75,49 @@ The status tells you where the dispute is:
    - Bill the customer again on a new invoice, if they still owe it.
    - Write it off in your own accounting. Velox cannot mark a paid invoice
      uncollectible.
-4. **If it is `prevented`, check the payment in Stripe.** If Stripe
-   refunded it to resolve the dispute, record that refund with a credit
-   note, as in step 3.
+
+   **If the invoice bought prepaid credit**, the customer can still spend
+   that credit, and Velox refuses an ordinary credit note on the invoice.
+   Retire the credit with commit relief instead: `POST /v1/credit-notes`
+   with `"commit_relief": {"retire_all": true}` and the relief amount as
+   `out_of_band_amount_cents`. If the amount you send is wrong, the answer
+   names the right one. Relief pays back at most what the customer paid
+   for the unspent credit, so record the rest of the loss in your own
+   books. If the credit is all spent, there is nothing to retire: bill
+   again or write it off.
+
+   **If the invoice also shows "Payment needs review"** (for example, a
+   second payment), the notice names the payment the bank took back. Check
+   both payments in Stripe before you refund anything: a refund of the other
+   payment can give the customer the same money back twice.
+4. **If it is `prevented`, check the payment in Stripe.** Stripe's dispute
+   prevention settles a dispute by refunding the payment, and Velox does
+   not record a refund made in Stripe. Record that refund with a credit
+   note, as in step 3. No notice appears for this.
+5. **If a lost dispute later turns into a win** (Stripe calls it a late
+   win), Stripe returns the money to your balance, the disputes list shows
+   `won` and the notice goes away. If you already acted on the loss, undo
+   it: a credit note you issued for the loss is final, so record the money
+   again with a new invoice marked paid outside Velox
+   (`POST /v1/invoices/{id}/record-payment`). If you billed the customer
+   again and they paid, they have now paid twice: refund that invoice with
+   a credit note.
 
 ## Verify
 
 The disputes list shows the final status. For a lost dispute, the invoice
 has the credit note or the new invoice you chose. The lost-dispute notice
-stays on the invoice as a record that the dispute was lost.
+stays on the invoice, with the same text, as a record that the dispute was
+lost, even after you act. Only a late win removes it.
 
 Two log lines matter:
 
 - `dispute webhook names a payment no Velox invoice holds`: the payment was
-  not made through Velox, so nothing was recorded. If it was a Velox
-  payment, find the invoice by the `stripe_payment_intent_id` in the line.
+  not made through Velox, so nothing was recorded. For the first 15 minutes
+  after Stripe opens a dispute, Velox asks Stripe to send the event again
+  instead, because it may not have recorded its own payment yet. If it was
+  a Velox payment, find the invoice by the `stripe_payment_intent_id` in
+  the line.
 - `dispute webhook carries a status Velox does not know`: Stripe added a
   dispute status. The delivery fails, so Stripe sends it again for up to
   three days. Upgrade Velox to a release that knows the status.
