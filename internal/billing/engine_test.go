@@ -747,6 +747,9 @@ type mockUsage struct {
 	// per claimed rule). Keyed by meterID; when unset, the legacy
 	// single-bucket fallback below applies.
 	ruleAggs map[string][]domain.RuleAggregation
+	// ruleAggsByWindow stubs a meter's pricing-rule buckets for one
+	// [from, to), keyed like perInterval. Missing keys fall back to ruleAggs.
+	ruleAggsByWindow map[string][]domain.RuleAggregation
 }
 
 func mockIntervalKey(meterID string, from, to time.Time) string {
@@ -786,7 +789,10 @@ func (m *mockUsage) AggregateForBillingPeriodByAgg(_ context.Context, _, _ strin
 // integration tests cover that against real Postgres. We return one
 // aggregation per known meter so the new preview path produces the same
 // totals the legacy tests expect.
-func (m *mockUsage) AggregateByPricingRules(_ context.Context, _, _, meterID string, _ domain.AggregationMode, _, _ time.Time) ([]domain.RuleAggregation, error) {
+func (m *mockUsage) AggregateByPricingRules(_ context.Context, _, _, meterID string, _ domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error) {
+	if aggs, ok := m.ruleAggsByWindow[mockIntervalKey(meterID, from, to)]; ok {
+		return aggs, nil
+	}
 	if aggs, ok := m.ruleAggs[meterID]; ok {
 		return aggs, nil
 	}
