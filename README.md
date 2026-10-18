@@ -1,6 +1,6 @@
 # Velox
 
-### Meter every token. Sell prepaid commits. Know your margin.
+### Meter every token. Sell prepaid credits. Know your margin.
 
 [![CI](https://github.com/getvelox/velox/actions/workflows/ci.yml/badge.svg)](https://github.com/getvelox/velox/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev)
