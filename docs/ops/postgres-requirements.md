@@ -33,10 +33,12 @@ Velox needs three standard extensions. They ship with Postgres and with every co
 Velox creates them during its database upgrades (migrations), so the admin user needs permission to create extensions. If your provider forbids that, create them first, as a user that may:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE EXTENSION IF NOT EXISTS citext;
-CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 ```
+
+They must be in schema `public`, where Velox keeps its tables and looks for them. If one already exists in another schema (some providers put extensions in a schema named `extensions`), the first upgrade stops with an error such as `function public.gen_random_bytes(integer) does not exist`, and changes nothing. Move the extension with `ALTER EXTENSION pgcrypto SET SCHEMA public`, if nothing else in the database depends on where it is, or give Velox a database of its own.
 
 ## The two database users
 

@@ -117,17 +117,32 @@ func newProvider(db *sql.DB, fsys fs.FS, locked bool) (*goose.Provider, error) {
 		if err != nil {
 			return nil, err
 		}
-		opts = append(opts, goose.WithSessionLocker(lockWait{inner}))
+		opts = append(opts, goose.WithSessionLocker(migrationSession{inner}))
 	}
 	return goose.NewProvider(goose.DialectPostgres, db, fsys, opts...)
 }
 
-// lockWait turns goose's "failed to acquire lock" into a LockWaitError.
-// goose wraps the locker's error with %w, so errors.As finds it.
-type lockWait struct{ lock.SessionLocker }
+// migrationSession wraps goose's session locker. goose runs every
+// migration of a command on the connection it locks, so this is also where
+// that session is set up:
+//
+//   - search_path is public. The baseline names every object public.x, so
+//     a later file that says CREATE TABLE x must put x in public too, not
+//     in a schema the admin user's search_path lists first (its own
+//     schema, under Postgres's default "$user", public), where velox_app
+//     would not find it. readState has already read with the operator's
+//     search_path, which is how it finds a v0.8 install outside public
+//     (M3). The pool is closed after the command, so the setting goes
+//     with it.
+//   - goose's "failed to acquire lock" becomes a LockWaitError. goose
+//     wraps the locker's error with %w, so errors.As finds it.
+type migrationSession struct{ lock.SessionLocker }
 
-func (l lockWait) SessionLock(ctx context.Context, conn *sql.Conn) error {
-	err := l.SessionLocker.SessionLock(ctx, conn)
+func (m migrationSession) SessionLock(ctx context.Context, conn *sql.Conn) error {
+	if _, err := conn.ExecContext(ctx, `SET search_path = public`); err != nil {
+		return fmt.Errorf("set search_path for the migration session: %w", err)
+	}
+	err := m.SessionLocker.SessionLock(ctx, conn)
 	if err != nil && err.Error() == gooseLockBusy {
 		waited := time.Duration(lockWaitPeriod*lockWaitPolls) * time.Second
 		return &LockWaitError{Waited: waited, Err: err}
@@ -182,7 +197,18 @@ func up(ctx context.Context, dsn string, fsys fs.FS) error {
 		return upError(err, fsys, st, results)
 	}
 	if len(results) == 0 {
-		slog.Info("migrations up to date", "version", st.gooseVersion())
+		// Read again: another copy may have applied everything while this
+		// one waited for the lock, after st was read. Through the store, not
+		// the provider's GetDBVersion, which takes the migration lock again.
+		store, err := versionStore()
+		if err != nil {
+			return err
+		}
+		version, err := store.GetLatestVersion(ctx, db)
+		if err != nil {
+			return fmt.Errorf("read the applied version: %w", err)
+		}
+		slog.Info("migrations up to date", "version", version)
 		return nil
 	}
 	slog.Info("migrations applied",
@@ -211,6 +237,9 @@ func upError(err error, fsys fs.FS, st state, applied []*goose.MigrationResult) 
 	noTx := src.Type == goose.TypeSQL && isNoTxFile(fsys, src.Path)
 	if !noTx && isLockTimeout(partial.Err) {
 		prev := st.gooseVersion()
+		if prev == 0 && st.v08.clean180() {
+			prev = baselineVersion // a v0.8 database migration 180 was taking over
+		}
 		if len(applied) > 0 {
 			prev = applied[len(applied)-1].Source.Version
 		}
@@ -231,16 +260,25 @@ func sourceName(s *goose.Source) string {
 	return s.Path
 }
 
-// isNoTxFile reports whether a migration file carries goose's
-// `-- +goose NO TRANSACTION` annotation, the mark of an index build.
+// isNoTxFile reports whether goose runs a migration file without a
+// transaction, the mark of an index build. It reads the NO TRANSACTION
+// annotation the way goose v3.27.0 does (internal/sqlparser, which is not
+// importable): a line that starts with "--" and contains "+goose" is an
+// annotation; with every "--" and the first "+goose" removed, the rest is
+// compared without case. goose refuses an indented annotation line, so it
+// never runs such a file at all.
 func isNoTxFile(fsys fs.FS, path string) bool {
 	body, err := fs.ReadFile(fsys, path)
 	if err != nil {
 		return false
 	}
 	for _, line := range strings.Split(string(body), "\n") {
-		rest, ok := strings.CutPrefix(strings.TrimRight(line, " \t\r"), "-- +goose ")
-		if ok && strings.EqualFold(strings.TrimSpace(rest), "NO TRANSACTION") {
+		line = strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(line, "--") || !strings.Contains(line, "+goose") {
+			continue
+		}
+		cmd := strings.Replace(strings.ReplaceAll(line, "--", ""), "+goose", "", 1)
+		if strings.EqualFold(strings.TrimSpace(cmd), "NO TRANSACTION") {
 			return true
 		}
 	}

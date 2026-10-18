@@ -82,9 +82,9 @@ start_pg() {
 CREATE ROLE velox_owner WITH LOGIN PASSWORD 'velox_owner' NOSUPERUSER CREATEROLE;
 CREATE DATABASE velox OWNER velox_owner;
 \connect velox
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE EXTENSION IF NOT EXISTS citext;
-CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 SQL
       # docs/ops/postgres-requirements.md, "The two database users", run
       # as the admin user.
