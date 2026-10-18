@@ -292,6 +292,25 @@ func TestTxControlFindings(t *testing.T) {
 	}
 }
 
+// TestNoMigrationFileBeforeItsLints holds sql/ empty until the remaining
+// lints for files after 180 land (ADR-125, PR 3): the file name goose
+// accepts (it skips a misnamed file without a word, so it would never be
+// applied), no gaps, Up and Down present, and the one NO TRANSACTION
+// shape, whose drop-then-build is what lets FileError promise that
+// running an index build again is safe. Delete this test in that PR.
+func TestNoMigrationFileBeforeItsLints(t *testing.T) {
+	entries, err := sqlFS.ReadDir("sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "README.md" {
+			t.Errorf("sql/%s: no migration file may land before the lints for files after 180 (ADR-125, PR 3: names, gaps, "+
+				"Up and Down, the NO TRANSACTION template, new index names). Land those first, and delete this test with them.", e.Name())
+		}
+	}
+}
+
 // TestMigrationsHaveNoTransactionControl is the CI gate for the rule
 // above. An index-build file runs without a transaction and has no
 // transaction to control.
