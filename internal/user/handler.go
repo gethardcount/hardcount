@@ -77,20 +77,20 @@ func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 // Best-effort: a write failure is logged, never surfaced — auth must not fail
 // because the audit row didn't land.
 //
-// livemode stamps the row's RLS mode partition. These endpoints run OUTSIDE session
-// middleware, so the ctx carries no livemode and the audit writer's TxTenant would
-// refuse to open (every auth audit row silently failed this way until 2026-07-06).
+// It also sets the row's RLS mode partition on the ctx. These endpoints run OUTSIDE
+// session middleware, so the ctx carries no livemode and the audit writer's TxTenant
+// would refuse to open (every auth audit row silently failed this way until 2026-07-06).
 //
 // Auth events are ACCOUNT-PLANE — a login is a login, not a "test-mode login" — so
-// they are ALL filed in the canonical (test) partition. They used to inherit the
-// session's mode, which meant the same event landed in a different partition
-// depending on which way the operator's Test/Live toggle happened to be pointing,
-// and "when did they last sign in?" had no reliable answer.
+// they are ALL filed in the canonical (test) partition, whatever the session's mode.
+// They used to inherit the session's mode, which meant the same event landed in a
+// different partition depending on which way the operator's Test/Live toggle
+// happened to be pointing, and "when did they last sign in?" had no reliable answer.
 //
 // Accepted loss, stated rather than glossed: an operator viewing the audit log in
 // LIVE mode does not see these rows. See the note in tenant/settings.go for why the
 // obvious fix (an OR arm on livemode) is the one thing we must not do.
-func (h *Handler) auditAuthEvent(ctx context.Context, r *http.Request, livemode bool, actorUserID, tenantID, action, resourceID, label string, meta map[string]any) {
+func (h *Handler) auditAuthEvent(ctx context.Context, r *http.Request, actorUserID, tenantID, action, resourceID, label string, meta map[string]any) {
 	if h.auditLogger == nil || tenantID == "" {
 		return
 	}
@@ -224,7 +224,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	// No email in the label: resource_id IS the user id, and the reader resolves the
 	// address from the (erasable) users row. audit_log is append-only — an email
 	// written here could never be deleted.
-	h.auditAuthEvent(r.Context(), r, sess.Livemode, u.ID, tenant.TenantID, "login", u.ID, "",
+	h.auditAuthEvent(r.Context(), r, u.ID, tenant.TenantID, "login", u.ID, "",
 		map[string]any{"livemode": sess.Livemode})
 	respond.JSON(w, r, http.StatusOK, loginResp{
 		UserID:    u.ID,
@@ -275,9 +275,9 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stamped with the NEW mode — the row lands in the partition the
-	// operator just switched into, alongside the actions that follow.
-	h.auditAuthEvent(r.Context(), r, req.Livemode, sess.UserID, sess.TenantID, "mode_changed", sess.UserID, "",
+	// Like every auth event, the row lands in the test partition whichever
+	// way the operator switched; the new mode is recorded in its metadata.
+	h.auditAuthEvent(r.Context(), r, sess.UserID, sess.TenantID, "mode_changed", sess.UserID, "",
 		map[string]any{"livemode": req.Livemode})
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{
@@ -344,7 +344,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		audit.MarkSkip(r.Context())
 	} else {
 		// The row is written only now, on the far side of a revoke that WORKED.
-		h.auditAuthEvent(r.Context(), r, sess.Livemode, sess.UserID, sess.TenantID, "logout", sess.UserID, "", nil)
+		h.auditAuthEvent(r.Context(), r, sess.UserID, sess.TenantID, "logout", sess.UserID, "", nil)
 	}
 
 	h.cookie.ClearCookie(w)
@@ -426,7 +426,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 		// STORE its address — neither in the label nor in metadata, where it used
 		// to sit twice. audit_log is append-only, so an email written here could
 		// never be erased; the reader resolves it from the users row, which can.
-		h.auditAuthEvent(r.Context(), r, false, "", tenantID, "password_reset_requested", targetUserID, "", nil)
+		h.auditAuthEvent(r.Context(), r, "", tenantID, "password_reset_requested", targetUserID, "", nil)
 	} else {
 		// No account matched (or issuance failed): no token exists, nothing was
 		// mutated, and deliberately nothing is written — a row here would turn
@@ -524,7 +524,7 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	// held the token); tenant resolved separately since domain.User carries none.
 	if tenantID, terr := h.users.TenantForUser(r.Context(), u.ID); terr == nil {
 		// resource_id = the user id; the reader resolves the address. Not stored.
-		h.auditAuthEvent(r.Context(), r, false, u.ID, tenantID, "password_reset_completed", u.ID, "", nil)
+		h.auditAuthEvent(r.Context(), r, u.ID, tenantID, "password_reset_completed", u.ID, "", nil)
 	}
 
 	respond.JSON(w, r, http.StatusOK, map[string]string{

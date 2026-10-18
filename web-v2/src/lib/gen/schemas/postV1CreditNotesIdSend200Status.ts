@@ -8,4 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type GetV1TestClocksIdSubscriptions200DataItem = { [key: string]: unknown };
+export type PostV1CreditNotesIdSend200Status = typeof PostV1CreditNotesIdSend200Status[keyof typeof PostV1CreditNotesIdSend200Status];
+
+
+export const PostV1CreditNotesIdSend200Status = {
+  sent: 'sent',
+} as const;

@@ -8,4 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type PostV1TestClocksIdRetryAdvance200 = { [key: string]: unknown };
+export interface InvoicePreviewTotal {
+  currency: string;
+  amount_cents: number;
+}

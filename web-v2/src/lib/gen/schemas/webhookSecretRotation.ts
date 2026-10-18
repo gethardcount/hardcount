@@ -8,4 +8,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type UsageEventProperties = { [key: string]: unknown };
+/**
+ * The endpoint's new signing secret. It is shown only here.
+ */
+export interface WebhookSecretRotation {
+  secret: string;
+  /** Until this time, deliveries are also signed with the old secret. */
+  secondary_valid_until?: string;
+}

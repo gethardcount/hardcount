@@ -87,6 +87,20 @@ components:
         `POSTMARK_WEBHOOK_PASS`. You put both in the webhook URL you give
         Postmark. Used only by `POST /v1/webhooks/postmark`.
 
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Makes the call safe to retry. Send a unique value (a UUID works) and
+        the same value on every retry. For 24 hours, a repeat with the same
+        key, method, path and body gets the first response again, with an
+        `Idempotent-Replayed: true` header, instead of running again. The
+        error cases are in docs/api-surface.md.
+      schema:
+        type: string
+
   schemas:
     Error:
       type: object
@@ -210,6 +224,8 @@ components:
       properties:
         id:
           type: string
+        tenant_id:
+          type: string
         key:
           type: string
         name:
@@ -232,6 +248,8 @@ components:
       type: object
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         code:
           type: string
@@ -277,6 +295,8 @@ components:
       type: object
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         rule_key:
           type: string
@@ -458,23 +478,48 @@ components:
 
     UsageEvent:
       type: object
+      required: [id, customer_id, meter_id, quantity, timestamp]
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         customer_id:
           type: string
         meter_id:
           type: string
         quantity:
-          type: integer
-          format: int64
-        properties:
+          type: string
+          description: Exact quantity as a decimal string (e.g. "1.5").
+        dimensions:
           type: object
+          additionalProperties: true
+          description: The dimension values sent with the event. Absent when none were sent.
         idempotency_key:
           type: string
         timestamp:
           type: string
           format: date-time
+        origin:
+          type: string
+          enum: [api, backfill]
+          description: How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+        provider_cost_micros:
+          type: integer
+          format: int64
+          description: |
+            What serving this event cost you at your provider, in millionths
+            of a dollar, priced from your provider cost rates when the event
+            arrived. Absent when no rate matched or the event has no costed
+            dimensions.
+        provider_cost_source:
+          type: string
+          enum: [table, not_applicable, observed]
+          description: |
+            Where `provider_cost_micros` came from: `table` (your provider
+            cost rates), `observed` (the cost the sender reported), or
+            `not_applicable` (the meter has no costed dimensions). Absent when
+            the cost is unknown.
 
     DocumentBillTo:
       type: object
@@ -769,6 +814,19 @@ components:
             When the attention condition started — operators triage
             by age. tax_deferred_at for tax reasons; due_at for
             overdue; updated_at as a proxy for payment failures.
+        next_attempt_at:
+          type: string
+          format: date-time
+          description: |
+            When Velox will next retry on its own. Today only a tax
+            retry sets it. Absent when no automatic retry is scheduled.
+        due_by:
+          type: string
+          format: date-time
+          description: |
+            The invoice's payment deadline (its `due_at`). Velox does not
+            act on this date; it is shown so the operator knows it.
+            Absent when the invoice has no due date.
 
     InvoiceBillingReason:
       type: string
@@ -899,6 +957,39 @@ components:
             `provider_outage`, `provider_auth`, `unknown`. Empty for
             invoices deferred before this column existed (migration
             0067).
+        tax_next_retry_at:
+          type: string
+          format: date-time
+          description: |
+            The earliest time the background retry may calculate tax again,
+            after a failed attempt. Absent when a retry may run now.
+        tax_reversed_at:
+          type: string
+          format: date-time
+          description: |
+            When the provider's tax transaction was reversed after a void or
+            write-off, or found to need no reversal. Absent while the
+            reversal is not confirmed.
+        payment_anomaly_kind:
+          type: string
+          description: |
+            Set when a payment arrived that the invoice did not expect. The
+            webhook event name of the cause: `payment.duplicate_charge`,
+            `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+            Only the latest one is kept.
+        payment_anomaly_payment_intent_id:
+          type: string
+          description: The Stripe PaymentIntent of that unexpected payment.
+        payment_anomaly_captured_cents:
+          type: integer
+          format: int64
+          description: The amount Stripe took in that unexpected payment.
+        payment_card_brand:
+          type: string
+          description: Brand of the saved card that paid the invoice. Absent when the card is unknown.
+        payment_card_last4:
+          type: string
+          description: Last four digits of the saved card that paid the invoice.
         attention:
           $ref: "#/components/schemas/Attention"
         recovery_warning:
@@ -979,12 +1070,32 @@ components:
           type: string
           format: date-time
           nullable: true
+        uncollectible_at:
+          type: string
+          format: date-time
+          description: When the invoice was marked uncollectible.
         stripe_payment_intent_id:
           type: string
         last_payment_error:
           type: string
         auto_charge_pending:
           type: boolean
+        no_pm_notified_at:
+          type: string
+          format: date-time
+          description: |
+            When the customer was emailed a link to add a payment method for
+            this invoice. The email is sent once.
+        provider_payment_status:
+          type: string
+          description: |
+            Stripe's PaymentIntent status the last time Velox checked it,
+            word for word. For information only: `payment_status` is the
+            invoice's payment state. Absent until Velox has checked.
+        provider_synced_at:
+          type: string
+          format: date-time
+          description: When Velox last checked `provider_payment_status`.
         public_token:
           type: string
           description: |
@@ -1161,6 +1272,8 @@ components:
       required: [id, provider, model, token_type, cost_per_token, currency]
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         provider:
           type: string
@@ -2080,6 +2193,25 @@ components:
         source_invoice_id:
           type: string
           description: For a `commit` grant, the invoice that paid for it.
+        source_subscription_id:
+          type: string
+          description: |
+            With `source_subscription_item_id`, `source_plan_changed_at` and
+            `source_change_type`, set on a proration credit: the subscription
+            change that produced it.
+        source_subscription_item_id:
+          type: string
+        source_plan_changed_at:
+          type: string
+          format: date-time
+        source_change_type:
+          $ref: "#/components/schemas/ItemChangeType"
+        source_credit_note_id:
+          type: string
+          description: The credit note that granted this credit to the balance.
+        source_invoice_reversal_id:
+          type: string
+          description: The voided invoice whose applied credit this entry gave back.
 
     SubscriptionItem:
       type: object
@@ -2087,6 +2219,8 @@ components:
       description: One priced line of a subscription. It pairs a plan with a quantity.
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         subscription_id:
           type: string
@@ -2899,6 +3033,8 @@ components:
       properties:
         id:
           type: string
+        tenant_id:
+          type: string
         meter_id:
           type: string
         rating_rule_version_id:
@@ -2927,6 +3063,8 @@ components:
         id:
           type: string
           example: vlx_cpo_1a2b3c4d5e6f7890
+        tenant_id:
+          type: string
         rule_key:
           type: string
           description: The rating rule this override replaces the price of, across all its versions.
@@ -3023,6 +3161,8 @@ components:
         id:
           type: string
           example: vlx_dpol_1a2b3c4d5e6f7890
+        tenant_id:
+          type: string
         name:
           type: string
         enabled:
@@ -4162,6 +4302,289 @@ components:
           additionalProperties:
             type: string
 
+    CreditGrantBlock:
+      type: object
+      description: |
+        One block of credit on a customer's balance (a grant or a positive
+        adjustment) and how much of it is left.
+      required: [id, entry_type, description, amount_cents, consumed_cents, remaining_cents, expired_cents, retired_cents, deducted_cents, created_at]
+      properties:
+        id:
+          type: string
+          description: The ledger entry that added the credit.
+        entry_type:
+          type: string
+          description: "`grant` or `adjustment`."
+        grant_kind:
+          type: string
+          enum: [commit, promotional]
+          description: Absent for unclassified credit.
+        description:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+          description: The credit the block started with.
+        consumed_cents:
+          type: integer
+          format: int64
+          description: |
+            Everything drawn from the block: used by invoices, expired,
+            retired and deducted.
+        remaining_cents:
+          type: integer
+          format: int64
+        expired_cents:
+          type: integer
+          format: int64
+          description: The part that expired unused.
+        retired_cents:
+          type: integer
+          format: int64
+          description: |
+            Commit credit taken back when the invoice that paid for it was
+            voided, or refunded by a credit note.
+        deducted_cents:
+          type: integer
+          format: int64
+          description: The part an operator removed with a negative adjustment.
+        expires_at:
+          type: string
+          format: date-time
+        source_invoice_id:
+          type: string
+          description: For a `commit` block, the invoice that paid for it.
+        created_at:
+          type: string
+          format: date-time
+
+    CreditGrants:
+      type: object
+      description: |
+        A customer's credit blocks, newest first, with the remaining credit
+        added up by kind.
+      required: [grants, commit_remaining_cents, promotional_remaining_cents, other_remaining_cents]
+      properties:
+        grants:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreditGrantBlock"
+        commit_remaining_cents:
+          type: integer
+          format: int64
+          description: Remaining credit the customer paid for (`commit`).
+        promotional_remaining_cents:
+          type: integer
+          format: int64
+          description: Remaining free credit (`promotional`).
+        other_remaining_cents:
+          type: integer
+          format: int64
+          description: Remaining credit with no kind, such as adjustments and proration credits.
+
+    WebhookEndpointCreated:
+      type: object
+      description: A new webhook endpoint and its signing secret. The secret is shown only here.
+      required: [endpoint, secret]
+      properties:
+        endpoint:
+          $ref: "#/components/schemas/WebhookEndpoint"
+        secret:
+          type: string
+          description: The signing secret (`whsec_…`). Store it now; Velox does not show it again.
+
+    WebhookSecretRotation:
+      type: object
+      description: The endpoint's new signing secret. It is shown only here.
+      required: [secret]
+      properties:
+        secret:
+          type: string
+        secondary_valid_until:
+          type: string
+          format: date-time
+          description: Until this time, deliveries are also signed with the old secret.
+
+    WebhookEvent:
+      type: object
+      description: One outbound webhook event, as Velox created it.
+      required: [id, livemode, event_type, payload, created_at]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        livemode:
+          type: boolean
+        event_type:
+          type: string
+          example: invoice.finalized
+        payload:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        replay_of_event_id:
+          type: string
+          description: Set on a replay. The event the replay was made from.
+
+    TestClock:
+      type: object
+      description: |
+        A clock for test mode. Customers and subscriptions attached to it
+        are billed on its time, not the real time.
+      required: [id, name, frozen_time, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        name:
+          type: string
+        frozen_time:
+          type: string
+          format: date-time
+          description: The clock's current time.
+        status:
+          type: string
+          enum: [ready, advancing, internal_failure]
+          description: |
+            `ready`: it can be advanced or deleted. `advancing`: billing is
+            catching up to the new time. `internal_failure`: the last advance
+            failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_failure_reason:
+          type: string
+          description: Why the last advance failed. Cleared by the next successful advance.
+        last_advance_summary:
+          $ref: "#/components/schemas/TestClockAdvanceSummary"
+
+    TestClockAdvanceSummary:
+      type: object
+      description: |
+        What the latest advance did: the time span it covered and how many
+        of each billing step it ran. Absent until the clock is first
+        advanced.
+      required: [advanced_from, advanced_to, invoices_generated, trials_activated, pauses_resumed, thresholds_fired, tax_retried, charges_retried, clawbacks_issued, credits_expired, dunning_advanced, had_errors]
+      properties:
+        advanced_from:
+          type: string
+          format: date-time
+        advanced_to:
+          type: string
+          format: date-time
+        invoices_generated:
+          type: integer
+        trials_activated:
+          type: integer
+        pauses_resumed:
+          type: integer
+        thresholds_fired:
+          type: integer
+        tax_retried:
+          type: integer
+        charges_retried:
+          type: integer
+        clawbacks_issued:
+          type: integer
+        credits_expired:
+          type: integer
+        dunning_advanced:
+          type: integer
+        had_errors:
+          type: boolean
+          description: True when a step failed. The counts then cover only the work done before the failure.
+
+    InvoicePreview:
+      type: object
+      description: |
+        A dry-run invoice built from the usage recorded so far. Nothing is
+        saved.
+      required: [customer_id, subscription_id, plan_name, billing_period_start, billing_period_end, lines, totals, warnings, generated_at]
+      properties:
+        customer_id:
+          type: string
+        subscription_id:
+          type: string
+        plan_name:
+          type: string
+          description: The names of the subscription's plans, comma-separated.
+        billing_period_start:
+          type: string
+          format: date-time
+        billing_period_end:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoicePreviewLine"
+        totals:
+          type: array
+          description: One total per currency on the lines.
+          items:
+            $ref: "#/components/schemas/InvoicePreviewTotal"
+        warnings:
+          type: array
+          description: Ways the real invoice can differ from this preview.
+          items:
+            type: string
+        generated_at:
+          type: string
+          format: date-time
+
+    InvoicePreviewLine:
+      type: object
+      required: [line_type, description, currency, quantity, unit_amount_cents, amount_cents]
+      properties:
+        line_type:
+          type: string
+          enum: [base_fee, usage]
+        description:
+          type: string
+        meter_id:
+          type: string
+        meter_unit:
+          type: string
+        rating_rule_version_id:
+          type: string
+        rule_key:
+          type: string
+        dimension_match:
+          type: object
+          additionalProperties: true
+          description: For a meter with several pricing rules, the dimension values this line's rule matches.
+        currency:
+          type: string
+        quantity:
+          type: string
+          description: Exact quantity as a decimal string.
+        unit_amount_cents:
+          type: integer
+          format: int64
+        amount_cents:
+          type: integer
+          format: int64
+        pricing_mode:
+          type: string
+          enum: [flat, graduated, package]
+
+    InvoicePreviewTotal:
+      type: object
+      required: [currency, amount_cents]
+      properties:
+        currency:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+
 paths:
   /health:
     get:
@@ -4171,6 +4594,15 @@ paths:
       responses:
         "200":
           description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
 
   /health/ready:
     get:
@@ -4230,6 +4662,8 @@ paths:
     post:
       tags: [Customers]
       summary: Create customer
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4306,6 +4740,18 @@ paths:
       responses:
         "200":
           description: Customer list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Customer"
+                  total:
+                    type: integer
 
   /v1/customers/{id}/rotate-cost-dashboard-token:
     post:
@@ -4319,6 +4765,7 @@ paths:
         and is shown ONCE — Velox never returns it again after this
         response. Audit log records the rotation without the token.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -4394,6 +4841,7 @@ paths:
         the email changed, not the address).
       operationId: updateCustomer
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -4482,6 +4930,7 @@ paths:
         customer data are retried. The change is written to the audit log.
       operationId: upsertCustomerBillingProfile
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -4803,6 +5252,7 @@ paths:
         without a note. The send is written to the audit log.
       operationId: sendCustomerPaymentSetupEmail
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: customer_id
           in: path
           required: true
@@ -4908,6 +5358,7 @@ paths:
         Fails with 500 when Stripe is not connected for this mode.
       operationId: createCustomerPaymentSetupSession
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: customer_id
           in: path
           required: true
@@ -4995,6 +5446,7 @@ paths:
         the call).
       operationId: setCustomerDefaultPaymentMethod
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: customer_id
           in: path
           required: true
@@ -5037,6 +5489,8 @@ paths:
         `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
         which works only in local development. Writes an audit row. Needs
         the `customer:write` permission.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5488,6 +5942,8 @@ paths:
     post:
       tags: [Pricing]
       summary: Create meter
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5512,12 +5968,26 @@ paths:
       responses:
         "201":
           description: Meter created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Meter"
     get:
       tags: [Pricing]
       summary: List meters
       responses:
         "200":
           description: Meter list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Meter"
 
   /v1/meters/{id}:
     patch:
@@ -5534,6 +6004,7 @@ paths:
         every invoice. Add a pricing rule first, or move the subscriptions
         to a plan without this meter.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -5559,6 +6030,10 @@ paths:
       responses:
         "200":
           description: Updated meter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Meter"
         "404":
           description: Meter not found
         "409":
@@ -5635,6 +6110,7 @@ paths:
         path is used; a `meter_id` in the body is ignored.
       operationId: upsertMeterPricingRule
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: meter_id
           in: path
           required: true
@@ -5805,6 +6281,8 @@ paths:
         AND issued in one transaction; the credit-balance channel is
         forbidden on relief. Unpaid commit invoices: void the invoice
         instead.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5854,6 +6332,10 @@ paths:
       responses:
         "201":
           description: Credit note (issued immediately for commit relief)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditNote"
         "409":
           description: State gate (unpaid commit → void; fully-consumed commit; in-flight charge)
         "422":
@@ -5953,6 +6435,10 @@ paths:
       responses:
         "200":
           description: Grants with remaining + kind subtotals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditGrants"
 
   /v1/credits/adjust:
     post:
@@ -5968,6 +6454,8 @@ paths:
         ($1,000,000), or a removal larger than the credit that can be
         drawn (expired grants not yet written off do not count).
       operationId: adjustCredits
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -6101,6 +6589,8 @@ paths:
         event Velox never emits is a 422, not silence. Omitted/empty
         events = all events ("*"); "invoice.*"-style prefix wildcards are
         supported.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -6120,6 +6610,10 @@ paths:
       responses:
         "201":
           description: Endpoint created (response carries the one-time signing secret)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpointCreated"
         "422":
           description: Invalid URL or unknown event type
     get:
@@ -6128,6 +6622,16 @@ paths:
       responses:
         "200":
           description: Endpoint list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookEndpoint"
 
   /v1/webhook-endpoints/endpoints/{id}:
     patch:
@@ -6141,6 +6645,7 @@ paths:
         recipe-created endpoint (inactive, placeholder URL) is pointed at
         a real receiver and activated.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6166,6 +6671,10 @@ paths:
       responses:
         "200":
           description: Updated endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
         "404":
           description: Endpoint not found
         "422":
@@ -6182,12 +6691,22 @@ paths:
       responses:
         "200":
           description: Endpoint disabled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [deleted]
 
   /v1/webhook-endpoints/endpoints/{id}/rotate-secret:
     post:
       tags: [Webhooks]
       summary: Rotate signing secret (72h dual-signing grace)
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6196,6 +6715,10 @@ paths:
       responses:
         "200":
           description: New secret (old secret keeps verifying during the grace window)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSecretRotation"
 
   /v1/webhook-endpoints/endpoints/{id}/deliveries:
     get:
@@ -6248,6 +6771,7 @@ paths:
         background, so `status` is always `queued`.
         Writes an audit row.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6310,6 +6834,16 @@ paths:
       responses:
         "200":
           description: Event list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookEvent"
 
   /v1/webhook-endpoints/events/{id}/deliveries:
     get:
@@ -6357,6 +6891,7 @@ paths:
         when no endpoint will receive the copy. Writes an audit row. Needs
         the `apikey:write` permission.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6450,6 +6985,7 @@ paths:
         endpoint will receive it. Sending happens in the background.
         Writes an audit row. Needs only the `apikey:read` permission.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6659,6 +7195,8 @@ paths:
     post:
       tags: [Pricing]
       summary: Create plan
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -6691,12 +7229,26 @@ paths:
       responses:
         "201":
           description: Plan created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
     get:
       tags: [Pricing]
       summary: List plans
       responses:
         "200":
           description: Plan list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plan"
 
   /v1/plans/{id}:
     get:
@@ -6750,6 +7302,7 @@ paths:
         or a pricing rule) in the plan's currency.
       operationId: updatePlan
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6838,6 +7391,8 @@ paths:
     post:
       tags: [Pricing]
       summary: Create rating rule
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -6882,12 +7437,42 @@ paths:
       responses:
         "201":
           description: Rating rule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingRule"
     get:
       tags: [Pricing]
       summary: List rating rules
+      parameters:
+        - name: rule_key
+          in: query
+          description: Only versions of this rule.
+          schema:
+            type: string
+        - name: lifecycle_state
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, archived]
+        - name: latest
+          in: query
+          description: When true, only the newest version of each rule.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Rating rule list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RatingRule"
 
   /v1/rating-rules/{id}:
     get:
@@ -6919,6 +7504,8 @@ paths:
     post:
       tags: [Subscriptions]
       summary: Create subscription
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -6956,6 +7543,10 @@ paths:
       responses:
         "201":
           description: Subscription created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
     get:
       tags: [Subscriptions]
       summary: List subscriptions
@@ -7008,12 +7599,25 @@ paths:
       responses:
         "200":
           description: Subscription list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Subscription"
+                  total:
+                    type: integer
 
   /v1/subscriptions/{id}/activate:
     post:
       tags: [Subscriptions]
       summary: Activate draft subscription
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7022,6 +7626,10 @@ paths:
       responses:
         "200":
           description: Subscription activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
 
   /v1/subscriptions/{id}/retry-billing:
     post:
@@ -7055,6 +7663,7 @@ paths:
         stay, and the next billing run finishes the rest. The failure may
         already be cleared at that point, so a repeat call can answer 409.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7145,6 +7754,7 @@ paths:
 
         Sends the `subscription.canceled` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7195,6 +7805,7 @@ paths:
         The response's `cancel_effective_at` says when the cancel takes
         effect. Sends the `subscription.cancel_scheduled` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7313,6 +7924,7 @@ paths:
 
         Sends the `subscription.collection_paused` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7419,6 +8031,7 @@ paths:
 
         Sends the `subscription.trial_ended` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7459,6 +8072,7 @@ paths:
 
         Sends the `subscription.trial_extended` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7527,6 +8141,7 @@ paths:
         Each call replaces the whole configuration. Item thresholds left
         out of the body are removed.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7646,6 +8261,7 @@ paths:
 
         Sends the `subscription.item.added` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7739,6 +8355,7 @@ paths:
         `subscription.pending_change.scheduled` for a scheduled plan
         change.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7947,6 +8564,8 @@ paths:
     post:
       tags: [Usage]
       summary: Ingest usage event
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -7995,11 +8614,19 @@ paths:
       responses:
         "201":
           description: Event ingested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageEvent"
         "200":
           description: |
             Idempotency replay — the original event is returned unchanged
             with an `Idempotent-Replayed: true` header. No duplicate row
             is written. The new body is not compared with the original.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageEvent"
         "422":
           description: |
             Validation failed and nothing was stored. `param` names the
@@ -8029,9 +8656,53 @@ paths:
             `model=gpt-4o,token_type=input`.
           schema:
             type: string
+        - name: from
+          in: query
+          description: Only events at or after this time (RFC 3339). A value that does not parse is ignored.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: after
+          in: query
+          description: Opaque cursor from `next_cursor`. Takes precedence over `offset`.
+          schema:
+            type: string
       responses:
         "200":
           description: Event list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UsageEvent"
+                  total:
+                    type: integer
+                    description: Number of matching events. Left out when the page was read with an `after` cursor.
+                  has_more:
+                    type: boolean
+                    description: Sent only when the page was read with an `after` cursor. True when another page follows.
+                  next_cursor:
+                    type: string
+                    description: Pass it as `after` to read the next page. Sent only when `has_more` is true.
         "422":
           description: Malformed dimensions filter
 
@@ -8050,6 +8721,8 @@ paths:
         you never sent before means some keys were already used, by an
         earlier event or by another event in the batch. Those events
         were not stored.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -8138,6 +8811,8 @@ paths:
         `Idempotent-Replayed: true` header, and writes nothing.
         Requires usage write permission.
       operationId: backfillUsageEvent
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -8283,6 +8958,8 @@ paths:
         has not been built yet; Velox does not move it onto a later
         invoice. Writes an audit log entry. Requires usage write permission.
       operationId: releaseHeldUsage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -8324,6 +9001,8 @@ paths:
         stored as a record. Writes an audit log entry. Requires usage write
         permission.
       operationId: discardHeldUsage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -8554,6 +9233,25 @@ paths:
       responses:
         "200":
           description: Invoice list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Invoice"
+                  total:
+                    type: integer
+                    description: Number of matching invoices. Left out when the page was read with an `after` cursor.
+                  has_more:
+                    type: boolean
+                    description: Sent only when the page was read with an `after` cursor. True when another page follows.
+                  next_cursor:
+                    type: string
+                    description: Pass it as `after` to read the next page. Sent only when `has_more` is true.
 
     post:
       tags: [Invoices]
@@ -8574,6 +9272,8 @@ paths:
 
         Tax is not calculated here. It is calculated when the invoice is
         finalized, so totals equal the subtotal until then.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -8638,6 +9338,8 @@ paths:
         specific pattern, otherwise `/{id}` would capture
         `create_preview` as an invoice ID). See
         [`docs/design/create-preview.md`](../docs/design/create-preview.md).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -8672,6 +9374,10 @@ paths:
       responses:
         "200":
           description: Preview result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoicePreview"
         "400":
           description: Invalid request body
           content:
@@ -8730,7 +9436,10 @@ paths:
         "200":
           description: PDF file
           content:
-            application/pdf: {}
+            application/pdf:
+              schema:
+                type: string
+                format: binary
 
   /v1/invoices/{id}/send:
     post:
@@ -8744,6 +9453,7 @@ paths:
         explicit list → validated exact override (same rules as the
         customer field — normalize, dedupe, not-the-recipient, cap 10).
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8768,6 +9478,15 @@ paths:
       responses:
         "200":
           description: Email enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [sent]
         "404":
           description: Invoice not found
         "409":
@@ -8792,6 +9511,7 @@ paths:
         `amount_cents` is `quantity × unit_amount_cents`. Only draft invoices
         accept new lines.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8848,6 +9568,7 @@ paths:
 
         A paid invoice cannot be voided: issue a credit note instead.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8893,6 +9614,7 @@ paths:
         This is different from `POST /v1/invoices/{id}/send`, which emails
         the invoice itself with a link to pay it.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8942,6 +9664,7 @@ paths:
         payment retries stop. Fires the `invoice.marked_uncollectible`
         webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8984,6 +9707,7 @@ paths:
         `invoice.payment_recorded` webhook event. The optional `note` is
         stored in the audit log, cut to 500 characters.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9038,6 +9762,7 @@ paths:
         link stops working at once. Use it when a link was shared with the
         wrong people. Draft invoices have no public link.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9084,6 +9809,7 @@ paths:
         A written-off (`uncollectible`) invoice cannot be charged here.
         Record an offline payment or issue a new invoice instead.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9151,6 +9877,7 @@ paths:
         an invoice paid outside Stripe, create a credit note with
         `out_of_band_amount_cents`.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9259,6 +9986,7 @@ paths:
         `additional_emails`). The send is recorded on the applied
         invoice's timeline and the customer's Sent-emails section.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9283,6 +10011,15 @@ paths:
       responses:
         "200":
           description: Email enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [sent]
         "404":
           description: Credit note not found
         "409":
@@ -9342,6 +10079,7 @@ paths:
         - If the invoice was voided or written off, the draft is voided
           instead and returned with `status` `voided`.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9379,6 +10117,7 @@ paths:
         note and records it if found, so a retry does not refund the
         customer twice.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9427,6 +10166,7 @@ paths:
         Cancels a `draft` credit note. Issued credit notes are final and
         cannot be voided.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9489,6 +10229,7 @@ paths:
       tags: [Invoices]
       summary: Finalize draft invoice
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9497,6 +10238,10 @@ paths:
       responses:
         "200":
           description: Invoice finalized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
 
   /v1/invoices/{id}/retry-tax:
     post:
@@ -9520,6 +10265,7 @@ paths:
         is still failing is **not** an HTTP error — the caller
         renders the new attention.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -9945,6 +10691,8 @@ paths:
         outbox. Requires `DASHBOARD_BASE_URL` — accept links are never
         derived from request headers. 409 when the email is already a
         member or already has a pending invite. ADR-081.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10106,6 +10854,8 @@ paths:
     post:
       tags: [Billing]
       summary: Trigger billing cycle
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: Billing cycle result
@@ -10134,6 +10884,10 @@ paths:
       responses:
         "200":
           description: Invoice preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoicePreview"
 
   /v1/provider-costs:
     get:
@@ -10158,6 +10912,8 @@ paths:
     put:
       tags: [ProviderCosts]
       summary: Create or update a provider cost rate
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10267,6 +11023,8 @@ paths:
     post:
       tags: [Credits]
       summary: Grant credits to customer
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10298,6 +11056,10 @@ paths:
       responses:
         "201":
           description: Credits granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLedgerEntry"
 
   /v1/credits/balance/{customer_id}:
     get:
@@ -10370,7 +11132,8 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { type: object }
+                    items:
+                      $ref: "#/components/schemas/TestClock"
         "403":
           description: Caller is in live mode
           content:
@@ -10383,6 +11146,8 @@ paths:
       description: |
         Test mode only. The clock starts in `ready` state at
         `frozen_time`. Use `/advance` to move it forward.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10402,7 +11167,8 @@ paths:
           description: Clock created
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/TestClock"
 
   /v1/test-clocks/{id}:
     get:
@@ -10418,7 +11184,8 @@ paths:
           description: Clock
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/TestClock"
         "404":
           description: Clock not found
     delete:
@@ -10432,6 +11199,15 @@ paths:
       responses:
         "200":
           description: Clock deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [deleted]
 
   /v1/test-clocks/{id}/subscriptions:
     get:
@@ -10452,7 +11228,8 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { type: object }
+                    items:
+                      $ref: "#/components/schemas/Subscription"
         "404":
           description: Clock not found
 
@@ -10470,6 +11247,7 @@ paths:
         it with `POST /v1/test-clocks/{id}/retry-advance` (deletion is
         not required). ADR-018.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
           name: id
           required: true
@@ -10490,7 +11268,8 @@ paths:
           description: Advance accepted — clock returned in `advancing` state
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/TestClock"
         "409":
           description: Clock is not in `ready` state
         "422":
@@ -10510,6 +11289,7 @@ paths:
         poll `GET /v1/test-clocks/{id}` until status leaves `advancing`.
         ADR-018.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
           name: id
           required: true
@@ -10519,7 +11299,8 @@ paths:
           description: Retry accepted — clock returned in `advancing` state
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/TestClock"
         "404":
           description: Clock not found
         "409":
@@ -10639,6 +11420,7 @@ paths:
         audit row.
       operationId: previewRecipe
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
           name: key
           required: true
@@ -10678,6 +11460,7 @@ paths:
         a duplicate plan (ADR-085; badge livemode-scoped per m0157).
       operationId: instantiateRecipe
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
           name: key
           required: true
@@ -11244,6 +12027,7 @@ paths:
         returned. If the invoice is already in the requested state, that
         step is skipped. Fires the `dunning.resolved` webhook event once.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -11353,6 +12137,8 @@ paths:
         send `enabled: true` for the policy to take effect. A policy created
         disabled never takes the default from "Default retries".
       operationId: createDunningPolicy
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -11412,6 +12198,7 @@ paths:
         `is_default` cannot be changed here; use set-default.
       operationId: updateDunningPolicy
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -11493,6 +12280,7 @@ paths:
         new default for dunning started from now on.
       operationId: setDefaultDunningPolicy
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -11530,6 +12318,8 @@ paths:
         period; the current period keeps the price it opened with. The
         override's currency is the rule's currency.
       operationId: createPriceOverride
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -11705,6 +12495,8 @@ paths:
         If the usage store cannot be reached, the whole request fails with
         503 so LiteLLM retries it. Requires usage write permission.
       operationId: ingestLitellmSpend
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -11760,6 +12552,8 @@ paths:
         Platform keys do not hold the `apikey:write` permission this route
         needs, so in practice this route never issues one (403).
         Writes an audit row (never the key value).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -11878,6 +12672,7 @@ paths:
         key working for that many seconds (at most 604800, 7 days), so
         deployed clients can switch without downtime. Writes an audit row.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -11980,6 +12775,8 @@ paths:
 
         A save that changes a field writes one audit row listing each
         change.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -12070,6 +12867,8 @@ paths:
         Dashboard sessions only. Sends one plain-text email to the signed-in
         member's own address, directly over SMTP (not queued), and returns
         the server's answer. Writes an audit row on success.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: Sent
@@ -12115,6 +12914,8 @@ paths:
 
         Stripe sends payment webhooks to `/v1/webhooks/stripe/{id}`, where
         `{id}` is the returned `id`. Writes an audit row.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -12188,6 +12989,7 @@ paths:
         Stripe here; the secret is checked on each incoming webhook.
         Writes an audit row (never the secret).
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: mode
           in: path
           required: true

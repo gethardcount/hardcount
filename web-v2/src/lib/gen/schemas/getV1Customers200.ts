@@ -7,5 +7,9 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { Customer } from './customer';
 
-export type GetV1TestClocks200DataItem = { [key: string]: unknown };
+export type GetV1Customers200 = {
+  data: Customer[];
+  total: number;
+};

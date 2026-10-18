@@ -79,6 +79,32 @@ export interface Invoice {
      * 0067).
      */
   tax_error_code?: string;
+  /**
+     * The earliest time the background retry may calculate tax again,
+     * after a failed attempt. Absent when a retry may run now.
+     */
+  tax_next_retry_at?: string;
+  /**
+     * When the provider's tax transaction was reversed after a void or
+     * write-off, or found to need no reversal. Absent while the
+     * reversal is not confirmed.
+     */
+  tax_reversed_at?: string;
+  /**
+     * Set when a payment arrived that the invoice did not expect. The
+     * webhook event name of the cause: `payment.duplicate_charge`,
+     * `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+     * Only the latest one is kept.
+     */
+  payment_anomaly_kind?: string;
+  /** The Stripe PaymentIntent of that unexpected payment. */
+  payment_anomaly_payment_intent_id?: string;
+  /** The amount Stripe took in that unexpected payment. */
+  payment_anomaly_captured_cents?: number;
+  /** Brand of the saved card that paid the invoice. Absent when the card is unknown. */
+  payment_card_brand?: string;
+  /** Last four digits of the saved card that paid the invoice. */
+  payment_card_last4?: string;
   attention?: Attention;
   /**
      * What an operator must know BEFORE recording an OFFLINE payment on a
@@ -123,9 +149,24 @@ export interface Invoice {
   paid_at?: string | null;
   /** @nullable */
   voided_at?: string | null;
+  /** When the invoice was marked uncollectible. */
+  uncollectible_at?: string;
   stripe_payment_intent_id?: string;
   last_payment_error?: string;
   auto_charge_pending?: boolean;
+  /**
+     * When the customer was emailed a link to add a payment method for
+     * this invoice. The email is sent once.
+     */
+  no_pm_notified_at?: string;
+  /**
+     * Stripe's PaymentIntent status the last time Velox checked it,
+     * word for word. For information only: `payment_status` is the
+     * invoice's payment state. Absent until Velox has checked.
+     */
+  provider_payment_status?: string;
+  /** When Velox last checked `provider_payment_status`. */
+  provider_synced_at?: string;
   /**
      * Hosted-invoice-URL credential (Stripe-parity
      * `hosted_invoice_url`). Generated at finalize; drafts have an

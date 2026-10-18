@@ -7,5 +7,9 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { Subscription } from './subscription';
 
-export type PostV1TestClocksIdAdvance200 = { [key: string]: unknown };
+export type GetV1Subscriptions200 = {
+  data: Subscription[];
+  total: number;
+};

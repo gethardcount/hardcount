@@ -12,6 +12,7 @@ import type { MeterPricingRuleDimensionMatch } from './meterPricingRuleDimension
 
 export interface MeterPricingRule {
   id: string;
+  tenant_id?: string;
   meter_id: string;
   rating_rule_version_id: string;
   /** Dimensions an event must have for this rule to bill it. `{}` matches every event. */

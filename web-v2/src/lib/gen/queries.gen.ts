@@ -52,6 +52,7 @@ import type {
   CreatePublicPaymentUpdateCheckout201,
   CreateTenantBody,
   CreditBalance,
+  CreditGrants,
   CreditLedgerEntry,
   CreditLiveBalance,
   CreditNote,
@@ -64,6 +65,8 @@ import type {
   CustomerUsage,
   DeleteDunningPolicy200,
   DeletePriceOverride200,
+  DeleteV1TestClocksId200,
+  DeleteV1WebhookEndpointsEndpointsId200,
   DiscardHeldUsage200,
   DiscardHeldUsageBody,
   DunningPolicy,
@@ -87,22 +90,32 @@ import type {
   GetAnalyticsUsageParams,
   GetCustomerUsageParams,
   GetEmailSettings200,
+  GetHealth200,
   GetPlan200,
   GetSubscriptionTimeline200,
   GetUsageSummary500,
   GetUsageSummaryParams,
   GetV1AuthInviteToken200,
   GetV1CreditsGrantsCustomerIdParams,
+  GetV1Customers200,
   GetV1CustomersIdMarginParams,
   GetV1CustomersParams,
+  GetV1Invoices200,
   GetV1InvoicesParams,
+  GetV1Meters200,
+  GetV1Plans200,
   GetV1ProviderCosts200,
   GetV1PublicCostDashboardToken200,
+  GetV1RatingRules200,
+  GetV1RatingRulesParams,
+  GetV1Subscriptions200,
   GetV1SubscriptionsParams,
   GetV1TestClocks200,
-  GetV1TestClocksId200,
   GetV1TestClocksIdSubscriptions200,
+  GetV1UsageEvents200,
   GetV1UsageEventsParams,
+  GetV1WebhookEndpointsEndpoints200,
+  GetV1WebhookEndpointsEvents200,
   GetV1Whoami200,
   GetWebhookEndpointStats200,
   HeldUsageReleaseResult,
@@ -115,6 +128,7 @@ import type {
   InvoiceLineItem,
   InvoiceLineItemInput,
   InvoicePaymentTimeline,
+  InvoicePreview,
   InvoiceWithLineItems,
   ListAllMeterPricingRules200,
   ListApiKeys200,
@@ -168,22 +182,21 @@ import type {
   PostV1AuthPasswordResetRequestBody,
   PostV1BillingRun200,
   PostV1CreditNotesBody,
+  PostV1CreditNotesIdSend200,
   PostV1CreditNotesIdSendBody,
   PostV1CreditsGrantBody,
   PostV1CustomersBody,
   PostV1CustomersIdRotateCostDashboardToken200,
   PostV1InvoicesCreatePreviewBody,
+  PostV1InvoicesIdSend200,
   PostV1InvoicesIdSendBody,
   PostV1MetersBody,
   PostV1PlansBody,
   PostV1RatingRulesBody,
   PostV1SubscriptionsBody,
   PostV1SubscriptionsIdRetryBilling200,
-  PostV1TestClocks201,
   PostV1TestClocksBody,
-  PostV1TestClocksIdAdvance200,
   PostV1TestClocksIdAdvanceBody,
-  PostV1TestClocksIdRetryAdvance200,
   PostV1UsageEventsBatch201,
   PostV1UsageEventsBatchBodyItem,
   PostV1UsageEventsBody,
@@ -224,6 +237,7 @@ import type {
   Tenant,
   TenantSettings,
   TenantSettingsInput,
+  TestClock,
   UpdateCustomerBody,
   UpdatePlanBody,
   UpdateSubscriptionItemBody,
@@ -232,7 +246,10 @@ import type {
   UsageEvent,
   UsageSummary,
   WebhookDeliveryReplayResult,
-  WebhookReplayResult
+  WebhookEndpoint,
+  WebhookEndpointCreated,
+  WebhookReplayResult,
+  WebhookSecretRotation
 } from './schemas';
 
 import { orvalClient } from '../orvalClient';
@@ -266,9 +283,9 @@ export const getGetHealthUrl = () => {
 /**
  * @summary Health check
  */
-export const getHealth = async ( options?: RequestInit): Promise<void> => {
+export const getHealth = async ( options?: RequestInit): Promise<GetHealth200> => {
 
-  return orvalClient<void>(getGetHealthUrl(),
+  return orvalClient<GetHealth200>(getGetHealthUrl(),
   {
     ...options,
     method: 'GET'
@@ -657,9 +674,9 @@ export const getGetV1CustomersUrl = (params?: GetV1CustomersParams,) => {
 /**
  * @summary List customers
  */
-export const getV1Customers = async (params?: GetV1CustomersParams, options?: RequestInit): Promise<void> => {
+export const getV1Customers = async (params?: GetV1CustomersParams, options?: RequestInit): Promise<GetV1Customers200> => {
 
-  return orvalClient<void>(getGetV1CustomersUrl(params),
+  return orvalClient<GetV1Customers200>(getGetV1CustomersUrl(params),
   {
     ...options,
     method: 'GET'
@@ -2981,9 +2998,9 @@ export const getPostV1MetersUrl = () => {
 /**
  * @summary Create meter
  */
-export const postV1Meters = async (postV1MetersBody: PostV1MetersBody, options?: RequestInit): Promise<void> => {
+export const postV1Meters = async (postV1MetersBody: PostV1MetersBody, options?: RequestInit): Promise<Meter> => {
 
-  return orvalClient<void>(getPostV1MetersUrl(),
+  return orvalClient<Meter>(getPostV1MetersUrl(),
   {
     ...options,
     method: 'POST',
@@ -3052,9 +3069,9 @@ export const getGetV1MetersUrl = () => {
 /**
  * @summary List meters
  */
-export const getV1Meters = async ( options?: RequestInit): Promise<void> => {
+export const getV1Meters = async ( options?: RequestInit): Promise<GetV1Meters200> => {
 
-  return orvalClient<void>(getGetV1MetersUrl(),
+  return orvalClient<GetV1Meters200>(getGetV1MetersUrl(),
   {
     ...options,
     method: 'GET'
@@ -3163,9 +3180,9 @@ export const getPatchV1MetersIdUrl = (id: string,) => {
  * @summary Update meter (incl. the default rating-rule binding)
  */
 export const patchV1MetersId = async (id: string,
-    patchV1MetersIdBody: PatchV1MetersIdBody, options?: RequestInit): Promise<void> => {
+    patchV1MetersIdBody: PatchV1MetersIdBody, options?: RequestInit): Promise<Meter> => {
 
-  return orvalClient<void>(getPatchV1MetersIdUrl(id),
+  return orvalClient<Meter>(getPatchV1MetersIdUrl(id),
   {
     ...options,
     method: 'PATCH',
@@ -3819,9 +3836,9 @@ export const getPostV1CreditNotesUrl = () => {
  * instead.
  * @summary Create a credit note (line-based, or commit relief)
  */
-export const postV1CreditNotes = async (postV1CreditNotesBody: PostV1CreditNotesBody, options?: RequestInit): Promise<void> => {
+export const postV1CreditNotes = async (postV1CreditNotesBody: PostV1CreditNotesBody, options?: RequestInit): Promise<CreditNote> => {
 
-  return orvalClient<void>(getPostV1CreditNotesUrl(),
+  return orvalClient<CreditNote>(getPostV1CreditNotesUrl(),
   {
     ...options,
     method: 'POST',
@@ -4021,9 +4038,9 @@ export const getGetV1CreditsGrantsCustomerIdUrl = (customerId: string,
  * @summary Per-grant burndown + kind subtotals
  */
 export const getV1CreditsGrantsCustomerId = async (customerId: string,
-    params?: GetV1CreditsGrantsCustomerIdParams, options?: RequestInit): Promise<void> => {
+    params?: GetV1CreditsGrantsCustomerIdParams, options?: RequestInit): Promise<CreditGrants> => {
 
-  return orvalClient<void>(getGetV1CreditsGrantsCustomerIdUrl(customerId,params),
+  return orvalClient<CreditGrants>(getGetV1CreditsGrantsCustomerIdUrl(customerId,params),
   {
     ...options,
     method: 'GET'
@@ -4437,9 +4454,9 @@ export const getPostV1WebhookEndpointsEndpointsUrl = () => {
  * supported.
  * @summary Create webhook endpoint
  */
-export const postV1WebhookEndpointsEndpoints = async (postV1WebhookEndpointsEndpointsBody: PostV1WebhookEndpointsEndpointsBody, options?: RequestInit): Promise<void> => {
+export const postV1WebhookEndpointsEndpoints = async (postV1WebhookEndpointsEndpointsBody: PostV1WebhookEndpointsEndpointsBody, options?: RequestInit): Promise<WebhookEndpointCreated> => {
 
-  return orvalClient<void>(getPostV1WebhookEndpointsEndpointsUrl(),
+  return orvalClient<WebhookEndpointCreated>(getPostV1WebhookEndpointsEndpointsUrl(),
   {
     ...options,
     method: 'POST',
@@ -4508,9 +4525,9 @@ export const getGetV1WebhookEndpointsEndpointsUrl = () => {
 /**
  * @summary List webhook endpoints
  */
-export const getV1WebhookEndpointsEndpoints = async ( options?: RequestInit): Promise<void> => {
+export const getV1WebhookEndpointsEndpoints = async ( options?: RequestInit): Promise<GetV1WebhookEndpointsEndpoints200> => {
 
-  return orvalClient<void>(getGetV1WebhookEndpointsEndpointsUrl(),
+  return orvalClient<GetV1WebhookEndpointsEndpoints200>(getGetV1WebhookEndpointsEndpointsUrl(),
   {
     ...options,
     method: 'GET'
@@ -4616,9 +4633,9 @@ export const getPatchV1WebhookEndpointsEndpointsIdUrl = (id: string,) => {
  * @summary Update webhook endpoint (no secret rotation)
  */
 export const patchV1WebhookEndpointsEndpointsId = async (id: string,
-    patchV1WebhookEndpointsEndpointsIdBody: PatchV1WebhookEndpointsEndpointsIdBody, options?: RequestInit): Promise<void> => {
+    patchV1WebhookEndpointsEndpointsIdBody: PatchV1WebhookEndpointsEndpointsIdBody, options?: RequestInit): Promise<WebhookEndpoint> => {
 
-  return orvalClient<void>(getPatchV1WebhookEndpointsEndpointsIdUrl(id),
+  return orvalClient<WebhookEndpoint>(getPatchV1WebhookEndpointsEndpointsIdUrl(id),
   {
     ...options,
     method: 'PATCH',
@@ -4687,9 +4704,9 @@ export const getDeleteV1WebhookEndpointsEndpointsIdUrl = (id: string,) => {
 /**
  * @summary Delete (disable) webhook endpoint
  */
-export const deleteV1WebhookEndpointsEndpointsId = async (id: string, options?: RequestInit): Promise<void> => {
+export const deleteV1WebhookEndpointsEndpointsId = async (id: string, options?: RequestInit): Promise<DeleteV1WebhookEndpointsEndpointsId200> => {
 
-  return orvalClient<void>(getDeleteV1WebhookEndpointsEndpointsIdUrl(id),
+  return orvalClient<DeleteV1WebhookEndpointsEndpointsId200>(getDeleteV1WebhookEndpointsEndpointsIdUrl(id),
   {
     ...options,
     method: 'DELETE'
@@ -4758,9 +4775,9 @@ export const getPostV1WebhookEndpointsEndpointsIdRotateSecretUrl = (id: string,)
 /**
  * @summary Rotate signing secret (72h dual-signing grace)
  */
-export const postV1WebhookEndpointsEndpointsIdRotateSecret = async (id: string, options?: RequestInit): Promise<void> => {
+export const postV1WebhookEndpointsEndpointsIdRotateSecret = async (id: string, options?: RequestInit): Promise<WebhookSecretRotation> => {
 
-  return orvalClient<void>(getPostV1WebhookEndpointsEndpointsIdRotateSecretUrl(id),
+  return orvalClient<WebhookSecretRotation>(getPostV1WebhookEndpointsEndpointsIdRotateSecretUrl(id),
   {
     ...options,
     method: 'POST'
@@ -5116,9 +5133,9 @@ export const getGetV1WebhookEndpointsEventsUrl = () => {
 /**
  * @summary List recent outbound events (newest 50)
  */
-export const getV1WebhookEndpointsEvents = async ( options?: RequestInit): Promise<void> => {
+export const getV1WebhookEndpointsEvents = async ( options?: RequestInit): Promise<GetV1WebhookEndpointsEvents200> => {
 
-  return orvalClient<void>(getGetV1WebhookEndpointsEventsUrl(),
+  return orvalClient<GetV1WebhookEndpointsEvents200>(getGetV1WebhookEndpointsEventsUrl(),
   {
     ...options,
     method: 'GET'
@@ -5866,9 +5883,9 @@ export const getPostV1PlansUrl = () => {
 /**
  * @summary Create plan
  */
-export const postV1Plans = async (postV1PlansBody: PostV1PlansBody, options?: RequestInit): Promise<void> => {
+export const postV1Plans = async (postV1PlansBody: PostV1PlansBody, options?: RequestInit): Promise<Plan> => {
 
-  return orvalClient<void>(getPostV1PlansUrl(),
+  return orvalClient<Plan>(getPostV1PlansUrl(),
   {
     ...options,
     method: 'POST',
@@ -5937,9 +5954,9 @@ export const getGetV1PlansUrl = () => {
 /**
  * @summary List plans
  */
-export const getV1Plans = async ( options?: RequestInit): Promise<void> => {
+export const getV1Plans = async ( options?: RequestInit): Promise<GetV1Plans200> => {
 
-  return orvalClient<void>(getGetV1PlansUrl(),
+  return orvalClient<GetV1Plans200>(getGetV1PlansUrl(),
   {
     ...options,
     method: 'GET'
@@ -6222,9 +6239,9 @@ export const getPostV1RatingRulesUrl = () => {
 /**
  * @summary Create rating rule
  */
-export const postV1RatingRules = async (postV1RatingRulesBody: PostV1RatingRulesBody, options?: RequestInit): Promise<void> => {
+export const postV1RatingRules = async (postV1RatingRulesBody: PostV1RatingRulesBody, options?: RequestInit): Promise<RatingRule> => {
 
-  return orvalClient<void>(getPostV1RatingRulesUrl(),
+  return orvalClient<RatingRule>(getPostV1RatingRulesUrl(),
   {
     ...options,
     method: 'POST',
@@ -6282,20 +6299,27 @@ export const usePostV1RatingRules = <TError = unknown,
       return useMutation(getPostV1RatingRulesMutationOptions(options), queryClient);
     }
 
-export const getGetV1RatingRulesUrl = () => {
+export const getGetV1RatingRulesUrl = (params?: GetV1RatingRulesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/rating-rules`
+  return stringifiedParams.length > 0 ? `/v1/rating-rules?${stringifiedParams}` : `/v1/rating-rules`
 }
 
 /**
  * @summary List rating rules
  */
-export const getV1RatingRules = async ( options?: RequestInit): Promise<void> => {
+export const getV1RatingRules = async (params?: GetV1RatingRulesParams, options?: RequestInit): Promise<GetV1RatingRules200> => {
 
-  return orvalClient<void>(getGetV1RatingRulesUrl(),
+  return orvalClient<GetV1RatingRules200>(getGetV1RatingRulesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -6308,23 +6332,23 @@ export const getV1RatingRules = async ( options?: RequestInit): Promise<void> =>
 
 
 
-export const getGetV1RatingRulesQueryKey = () => {
+export const getGetV1RatingRulesQueryKey = (params?: GetV1RatingRulesParams,) => {
     return [
-    `/v1/rating-rules`
+    `/v1/rating-rules`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1RatingRulesQueryOptions = <TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1RatingRulesQueryOptions = <TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1RatingRulesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetV1RatingRulesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1RatingRules>>> = () => getV1RatingRules(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1RatingRules>>> = () => getV1RatingRules(params, requestOptions);
 
 
 
@@ -6338,7 +6362,7 @@ export type GetV1RatingRulesQueryError = unknown
 
 
 export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
+ params: undefined |  GetV1RatingRulesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1RatingRules>>,
           TError,
@@ -6348,7 +6372,7 @@ export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1Ratin
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
+ params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1RatingRules>>,
           TError,
@@ -6358,7 +6382,7 @@ export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1Ratin
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -6366,11 +6390,11 @@ export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1Ratin
  */
 
 export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1RatingRulesQueryOptions(options)
+  const queryOptions = getGetV1RatingRulesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -6496,9 +6520,9 @@ export const getPostV1SubscriptionsUrl = () => {
 /**
  * @summary Create subscription
  */
-export const postV1Subscriptions = async (postV1SubscriptionsBody: PostV1SubscriptionsBody, options?: RequestInit): Promise<void> => {
+export const postV1Subscriptions = async (postV1SubscriptionsBody: PostV1SubscriptionsBody, options?: RequestInit): Promise<Subscription> => {
 
-  return orvalClient<void>(getPostV1SubscriptionsUrl(),
+  return orvalClient<Subscription>(getPostV1SubscriptionsUrl(),
   {
     ...options,
     method: 'POST',
@@ -6574,9 +6598,9 @@ export const getGetV1SubscriptionsUrl = (params?: GetV1SubscriptionsParams,) => 
 /**
  * @summary List subscriptions
  */
-export const getV1Subscriptions = async (params?: GetV1SubscriptionsParams, options?: RequestInit): Promise<void> => {
+export const getV1Subscriptions = async (params?: GetV1SubscriptionsParams, options?: RequestInit): Promise<GetV1Subscriptions200> => {
 
-  return orvalClient<void>(getGetV1SubscriptionsUrl(params),
+  return orvalClient<GetV1Subscriptions200>(getGetV1SubscriptionsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -6675,9 +6699,9 @@ export const getPostV1SubscriptionsIdActivateUrl = (id: string,) => {
 /**
  * @summary Activate draft subscription
  */
-export const postV1SubscriptionsIdActivate = async (id: string, options?: RequestInit): Promise<void> => {
+export const postV1SubscriptionsIdActivate = async (id: string, options?: RequestInit): Promise<Subscription> => {
 
-  return orvalClient<void>(getPostV1SubscriptionsIdActivateUrl(id),
+  return orvalClient<Subscription>(getPostV1SubscriptionsIdActivateUrl(id),
   {
     ...options,
     method: 'POST'
@@ -8106,9 +8130,9 @@ export const getPostV1UsageEventsUrl = () => {
 /**
  * @summary Ingest usage event
  */
-export const postV1UsageEvents = async (postV1UsageEventsBody: PostV1UsageEventsBody, options?: RequestInit): Promise<void> => {
+export const postV1UsageEvents = async (postV1UsageEventsBody: PostV1UsageEventsBody, options?: RequestInit): Promise<UsageEvent> => {
 
-  return orvalClient<void>(getPostV1UsageEventsUrl(),
+  return orvalClient<UsageEvent>(getPostV1UsageEventsUrl(),
   {
     ...options,
     method: 'POST',
@@ -8184,9 +8208,9 @@ export const getGetV1UsageEventsUrl = (params?: GetV1UsageEventsParams,) => {
 /**
  * @summary List usage events
  */
-export const getV1UsageEvents = async (params?: GetV1UsageEventsParams, options?: RequestInit): Promise<void> => {
+export const getV1UsageEvents = async (params?: GetV1UsageEventsParams, options?: RequestInit): Promise<GetV1UsageEvents200> => {
 
-  return orvalClient<void>(getGetV1UsageEventsUrl(params),
+  return orvalClient<GetV1UsageEvents200>(getGetV1UsageEventsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -8964,9 +8988,9 @@ export const getGetV1InvoicesUrl = (params?: GetV1InvoicesParams,) => {
 /**
  * @summary List invoices
  */
-export const getV1Invoices = async (params?: GetV1InvoicesParams, options?: RequestInit): Promise<void> => {
+export const getV1Invoices = async (params?: GetV1InvoicesParams, options?: RequestInit): Promise<GetV1Invoices200> => {
 
-  return orvalClient<void>(getGetV1InvoicesUrl(params),
+  return orvalClient<GetV1Invoices200>(getGetV1InvoicesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -9167,9 +9191,9 @@ export const getPostV1InvoicesCreatePreviewUrl = () => {
  * [`docs/design/create-preview.md`](../docs/design/create-preview.md).
  * @summary Preview the next invoice for a customer (Stripe-equivalent)
  */
-export const postV1InvoicesCreatePreview = async (postV1InvoicesCreatePreviewBody: PostV1InvoicesCreatePreviewBody, options?: RequestInit): Promise<void> => {
+export const postV1InvoicesCreatePreview = async (postV1InvoicesCreatePreviewBody: PostV1InvoicesCreatePreviewBody, options?: RequestInit): Promise<InvoicePreview> => {
 
-  return orvalClient<void>(getPostV1InvoicesCreatePreviewUrl(),
+  return orvalClient<InvoicePreview>(getPostV1InvoicesCreatePreviewUrl(),
   {
     ...options,
     method: 'POST',
@@ -9447,9 +9471,9 @@ export const getPostV1InvoicesIdSendUrl = (id: string,) => {
  * @summary Email the invoice (PDF attached) to a recipient
  */
 export const postV1InvoicesIdSend = async (id: string,
-    postV1InvoicesIdSendBody: PostV1InvoicesIdSendBody, options?: RequestInit): Promise<void> => {
+    postV1InvoicesIdSendBody: PostV1InvoicesIdSendBody, options?: RequestInit): Promise<PostV1InvoicesIdSend200> => {
 
-  return orvalClient<void>(getPostV1InvoicesIdSendUrl(id),
+  return orvalClient<PostV1InvoicesIdSend200>(getPostV1InvoicesIdSendUrl(id),
   {
     ...options,
     method: 'POST',
@@ -10270,9 +10294,9 @@ export const getPostV1CreditNotesIdSendUrl = (id: string,) => {
  * @summary Email the credit-note document (PDF attached)
  */
 export const postV1CreditNotesIdSend = async (id: string,
-    postV1CreditNotesIdSendBody: PostV1CreditNotesIdSendBody, options?: RequestInit): Promise<void> => {
+    postV1CreditNotesIdSendBody: PostV1CreditNotesIdSendBody, options?: RequestInit): Promise<PostV1CreditNotesIdSend200> => {
 
-  return orvalClient<void>(getPostV1CreditNotesIdSendUrl(id),
+  return orvalClient<PostV1CreditNotesIdSend200>(getPostV1CreditNotesIdSendUrl(id),
   {
     ...options,
     method: 'POST',
@@ -10780,9 +10804,9 @@ export const getPostV1InvoicesIdFinalizeUrl = (id: string,) => {
 /**
  * @summary Finalize draft invoice
  */
-export const postV1InvoicesIdFinalize = async (id: string, options?: RequestInit): Promise<void> => {
+export const postV1InvoicesIdFinalize = async (id: string, options?: RequestInit): Promise<Invoice> => {
 
-  return orvalClient<void>(getPostV1InvoicesIdFinalizeUrl(id),
+  return orvalClient<Invoice>(getPostV1InvoicesIdFinalizeUrl(id),
   {
     ...options,
     method: 'POST'
@@ -12124,9 +12148,9 @@ export const getGetV1BillingPreviewSubscriptionIdUrl = (subscriptionId: string,)
 /**
  * @summary Invoice preview (dry run)
  */
-export const getV1BillingPreviewSubscriptionId = async (subscriptionId: string, options?: RequestInit): Promise<void> => {
+export const getV1BillingPreviewSubscriptionId = async (subscriptionId: string, options?: RequestInit): Promise<InvoicePreview> => {
 
-  return orvalClient<void>(getGetV1BillingPreviewSubscriptionIdUrl(subscriptionId),
+  return orvalClient<InvoicePreview>(getGetV1BillingPreviewSubscriptionIdUrl(subscriptionId),
   {
     ...options,
     method: 'GET'
@@ -12599,9 +12623,9 @@ export const getPostV1CreditsGrantUrl = () => {
 /**
  * @summary Grant credits to customer
  */
-export const postV1CreditsGrant = async (postV1CreditsGrantBody: PostV1CreditsGrantBody, options?: RequestInit): Promise<void> => {
+export const postV1CreditsGrant = async (postV1CreditsGrantBody: PostV1CreditsGrantBody, options?: RequestInit): Promise<CreditLedgerEntry> => {
 
-  return orvalClient<void>(getPostV1CreditsGrantUrl(),
+  return orvalClient<CreditLedgerEntry>(getPostV1CreditsGrantUrl(),
   {
     ...options,
     method: 'POST',
@@ -12992,9 +13016,9 @@ export const getPostV1TestClocksUrl = () => {
  * `frozen_time`. Use `/advance` to move it forward.
  * @summary Create a test clock
  */
-export const postV1TestClocks = async (postV1TestClocksBody: PostV1TestClocksBody, options?: RequestInit): Promise<PostV1TestClocks201> => {
+export const postV1TestClocks = async (postV1TestClocksBody: PostV1TestClocksBody, options?: RequestInit): Promise<TestClock> => {
 
-  return orvalClient<PostV1TestClocks201>(getPostV1TestClocksUrl(),
+  return orvalClient<TestClock>(getPostV1TestClocksUrl(),
   {
     ...options,
     method: 'POST',
@@ -13063,9 +13087,9 @@ export const getGetV1TestClocksIdUrl = (id: string,) => {
 /**
  * @summary Get a test clock by id
  */
-export const getV1TestClocksId = async (id: string, options?: RequestInit): Promise<GetV1TestClocksId200> => {
+export const getV1TestClocksId = async (id: string, options?: RequestInit): Promise<TestClock> => {
 
-  return orvalClient<GetV1TestClocksId200>(getGetV1TestClocksIdUrl(id),
+  return orvalClient<TestClock>(getGetV1TestClocksIdUrl(id),
   {
     ...options,
     method: 'GET'
@@ -13164,9 +13188,9 @@ export const getDeleteV1TestClocksIdUrl = (id: string,) => {
 /**
  * @summary Delete a test clock (cascades to pinned subscriptions)
  */
-export const deleteV1TestClocksId = async (id: string, options?: RequestInit): Promise<void> => {
+export const deleteV1TestClocksId = async (id: string, options?: RequestInit): Promise<DeleteV1TestClocksId200> => {
 
-  return orvalClient<void>(getDeleteV1TestClocksIdUrl(id),
+  return orvalClient<DeleteV1TestClocksId200>(getDeleteV1TestClocksIdUrl(id),
   {
     ...options,
     method: 'DELETE'
@@ -13345,9 +13369,9 @@ export const getPostV1TestClocksIdAdvanceUrl = (id: string,) => {
  * @summary Advance the clock to a new frozen_time
  */
 export const postV1TestClocksIdAdvance = async (id: string,
-    postV1TestClocksIdAdvanceBody: PostV1TestClocksIdAdvanceBody, options?: RequestInit): Promise<PostV1TestClocksIdAdvance200> => {
+    postV1TestClocksIdAdvanceBody: PostV1TestClocksIdAdvanceBody, options?: RequestInit): Promise<TestClock> => {
 
-  return orvalClient<PostV1TestClocksIdAdvance200>(getPostV1TestClocksIdAdvanceUrl(id),
+  return orvalClient<TestClock>(getPostV1TestClocksIdAdvanceUrl(id),
   {
     ...options,
     method: 'POST',
@@ -13424,9 +13448,9 @@ export const getPostV1TestClocksIdRetryAdvanceUrl = (id: string,) => {
  * ADR-018.
  * @summary Retry catchup on a clock parked in internal_failure
  */
-export const postV1TestClocksIdRetryAdvance = async (id: string, options?: RequestInit): Promise<PostV1TestClocksIdRetryAdvance200> => {
+export const postV1TestClocksIdRetryAdvance = async (id: string, options?: RequestInit): Promise<TestClock> => {
 
-  return orvalClient<PostV1TestClocksIdRetryAdvance200>(getPostV1TestClocksIdRetryAdvanceUrl(id),
+  return orvalClient<TestClock>(getPostV1TestClocksIdRetryAdvanceUrl(id),
   {
     ...options,
     method: 'POST'

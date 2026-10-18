@@ -13,6 +13,7 @@ import type { RatingRuleMode } from './ratingRuleMode';
 
 export interface RatingRule {
   id?: string;
+  tenant_id?: string;
   rule_key?: string;
   name?: string;
   version?: number;

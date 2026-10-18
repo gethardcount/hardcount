@@ -80,4 +80,15 @@ export interface Attention {
      * overdue; updated_at as a proxy for payment failures.
      */
   since?: string;
+  /**
+     * When Velox will next retry on its own. Today only a tax
+     * retry sets it. Absent when no automatic retry is scheduled.
+     */
+  next_attempt_at?: string;
+  /**
+     * The invoice's payment deadline (its `due_at`). Velox does not
+     * act on this date; it is shown so the operator knows it.
+     * Absent when the invoice has no due date.
+     */
+  due_by?: string;
 }

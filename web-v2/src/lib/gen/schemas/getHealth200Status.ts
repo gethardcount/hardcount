@@ -8,4 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type GetV1TestClocksId200 = { [key: string]: unknown };
+export type GetHealth200Status = typeof GetHealth200Status[keyof typeof GetHealth200Status];
+
+
+export const GetHealth200Status = {
+  ok: 'ok',
+} as const;

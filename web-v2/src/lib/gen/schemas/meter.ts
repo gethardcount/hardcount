@@ -11,6 +11,7 @@ import type { MeterAggregation } from './meterAggregation';
 
 export interface Meter {
   id?: string;
+  tenant_id?: string;
   key?: string;
   name?: string;
   unit?: string;

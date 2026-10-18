@@ -7,8 +7,8 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { GetV1TestClocks200DataItem } from './getV1TestClocks200DataItem';
+import type { TestClock } from './testClock';
 
 export type GetV1TestClocks200 = {
-  data?: GetV1TestClocks200DataItem[];
+  data?: TestClock[];
 };

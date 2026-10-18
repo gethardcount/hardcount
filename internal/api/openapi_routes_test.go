@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -182,5 +184,125 @@ gen. The generated server reads each parameter by the name the spec gives it.`, 
 	if len(badExclusions) > 0 {
 		sort.Strings(badExclusions)
 		t.Errorf("routesNotInSpec has entries to fix:\n  %s", strings.Join(badExclusions, "\n  "))
+	}
+}
+
+// idempotencyKeyRef is how a spec operation declares the Idempotency-Key header.
+const idempotencyKeyRef = "#/components/parameters/IdempotencyKey"
+
+// specIdempotencyHeader reads api/openapi.yaml. It returns every operation keyed
+// by routeShape, mapped to whether the operation (or its path item) lists the
+// IdempotencyKey parameter.
+func specIdempotencyHeader(t *testing.T) map[string]bool {
+	t.Helper()
+	raw, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", specPath, err)
+	}
+	type param struct {
+		Ref string `yaml:"$ref"`
+	}
+	var doc struct {
+		Paths map[string]map[string]yaml.Node `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse %s: %v", specPath, err)
+	}
+	declares := func(n yaml.Node) bool {
+		var params []param
+		if err := n.Decode(&params); err != nil {
+			t.Fatalf("decode parameters in %s: %v", specPath, err)
+		}
+		for _, p := range params {
+			if p.Ref == idempotencyKeyRef {
+				return true
+			}
+		}
+		return false
+	}
+	out := make(map[string]bool)
+	for path, item := range doc.Paths {
+		onPath := false
+		if n, ok := item["parameters"]; ok {
+			onPath = declares(n)
+		}
+		for key, node := range item {
+			if !openAPIMethods[key] {
+				continue
+			}
+			var op struct {
+				Parameters yaml.Node `yaml:"parameters"`
+			}
+			if err := node.Decode(&op); err != nil {
+				t.Fatalf("decode %s %s: %v", key, path, err)
+			}
+			out[routeShape(strings.ToUpper(key), path)] = onPath || (op.Parameters.Kind != 0 && declares(op.Parameters))
+		}
+	}
+	return out
+}
+
+// isIdempotencyMiddleware reports whether m is the closure mw.Idempotency
+// returns. Comparing function pointers does not work: the compiler inlines
+// mw.Idempotency into NewServer, so the router's closure is a different
+// function from one built here. The closure's name still carries
+// ".Idempotency." either way ("middleware.Idempotency.func1" when not inlined,
+// "NewServer.func15.Idempotency.4" when inlined). If a rename breaks the match,
+// the test finds 0 routes and fails.
+func isIdempotencyMiddleware(m func(http.Handler) http.Handler) bool {
+	fn := runtime.FuncForPC(reflect.ValueOf(m).Pointer())
+	return fn != nil && strings.Contains(fn.Name(), ".Idempotency.")
+}
+
+// TestOpenAPISpec_IdempotencyKeyHeader ties the spec's Idempotency-Key header
+// to the routes that honour it. mw.Idempotency caches the response of a POST,
+// PUT or PATCH that sends the header, and only routes mounted behind it do
+// that. Every such route must declare the header in api/openapi.yaml, so
+// generated clients can send it, and no other operation may declare it, since
+// the server would ignore it there.
+func TestOpenAPISpec_IdempotencyKeyHeader(t *testing.T) {
+	honours := make(map[string]bool)
+	srv := newTestServer()
+	err := chi.Walk(srv.router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
+			return nil
+		}
+		for _, m := range mws {
+			if isIdempotencyMiddleware(m) {
+				honours[routeShape(method, route)] = true
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("chi.Walk over the live router: %v", err)
+	}
+	if len(honours) == 0 {
+		t.Fatal("found 0 routes behind mw.Idempotency: the walk is broken, not the router")
+	}
+
+	spec := specIdempotencyHeader(t)
+	paths := specOperations(t)
+	var undeclared, stray []string
+	for k := range honours {
+		if declared, inSpec := spec[k]; inSpec && !declared {
+			undeclared = append(undeclared, k+" ("+paths[k]+")")
+		}
+	}
+	for k, declared := range spec {
+		if declared && !honours[k] {
+			stray = append(stray, k+" ("+paths[k]+")")
+		}
+	}
+	if len(undeclared) > 0 {
+		sort.Strings(undeclared)
+		t.Errorf("%d operation(s) honour Idempotency-Key but do not declare it. Add\n  - $ref: \"%s\"\nto their parameters:\n  %s",
+			len(undeclared), idempotencyKeyRef, strings.Join(undeclared, "\n  "))
+	}
+	if len(stray) > 0 {
+		sort.Strings(stray)
+		t.Errorf("%d operation(s) declare Idempotency-Key, but mw.Idempotency does not act on them, so the server ignores it:\n  %s",
+			len(stray), strings.Join(stray, "\n  "))
 	}
 }

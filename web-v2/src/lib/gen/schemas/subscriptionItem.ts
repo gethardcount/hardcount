@@ -13,6 +13,7 @@
  */
 export interface SubscriptionItem {
   id: string;
+  tenant_id?: string;
   subscription_id: string;
   plan_id: string;
   quantity: number;

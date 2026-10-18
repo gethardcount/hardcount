@@ -12,6 +12,7 @@ import type { DunningPolicyFinalSubscriptionAction } from './dunningPolicyFinalS
 
 export interface DunningPolicy {
   id: string;
+  tenant_id?: string;
   name: string;
   enabled: boolean;
   /** Customers without an assigned policy use the default. */

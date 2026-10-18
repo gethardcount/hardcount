@@ -8,4 +8,13 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type PostV1TestClocks201 = { [key: string]: unknown };
+/**
+ * Absent for unclassified credit.
+ */
+export type CreditGrantBlockGrantKind = typeof CreditGrantBlockGrantKind[keyof typeof CreditGrantBlockGrantKind];
+
+
+export const CreditGrantBlockGrantKind = {
+  commit: 'commit',
+  promotional: 'promotional',
+} as const;
