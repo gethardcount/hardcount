@@ -23,7 +23,8 @@ type fakeRefunder struct {
 	returnStatus domain.RefundStatus // empty → succeeded (back-compat with existing tests)
 
 	getCalls    []string
-	getStatus   domain.RefundStatus // empty → succeeded
+	getStatus   domain.RefundStatus            // empty → succeeded
+	getStatusOf map[string]domain.RefundStatus // per refund id; wins over getStatus
 	getReason   string
 	getErr      error
 	findCalls   []fakeFindCall
@@ -65,6 +66,9 @@ func (f *fakeRefunder) GetRefund(_ context.Context, refundID string) (domain.Ref
 	f.getCalls = append(f.getCalls, refundID)
 	if f.getErr != nil {
 		return "", "", f.getErr
+	}
+	if status, ok := f.getStatusOf[refundID]; ok {
+		return status, f.getReason, nil
 	}
 	status := f.getStatus
 	if status == "" {

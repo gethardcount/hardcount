@@ -19,11 +19,20 @@ import (
 const (
 	stripe500             = `{"error":{"message":"An unknown error occurred","type":"api_error"}}`
 	stripeAlreadyRefunded = `{"error":{"code":"charge_already_refunded","message":"Charge ch_1 has already been refunded.","type":"invalid_request_error"}}`
+	// Stripe's answer while another request with the same idempotency key
+	// is still running (https://docs.stripe.com/error-codes, code
+	// idempotency_key_in_use). Its type reads as a refusal.
+	stripeRefundKeyInUse = `{"error":{"code":"idempotency_key_in_use","message":"The idempotency key provided is currently being used in another request.","type":"invalid_request_error"}}`
+	// Stripe's answer to a revoked or mistyped secret key.
+	stripeBadKey = `{"error":{"message":"Invalid API Key provided: sk_test_****FAKE","type":"invalid_request_error"}}`
 )
 
 // refundOutcome is how the credit-note service reads a refund error. It is
 // declared here, not imported, because creditnote may not import payment.
-type refundOutcome interface{ OutcomeUnknown() bool }
+type refundOutcome interface {
+	OutcomeUnknown() bool
+	RequestNotRun() bool
+}
 
 // noAnswer fails every request at the transport, like a timeout or a dropped
 // connection: Velox never sees Stripe's answer.
@@ -47,6 +56,7 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 		name    string
 		stripe  func(t *testing.T)
 		unknown bool
+		notRun  bool   // Stripe ran nothing, so it saved no result for the key
 		code    string // the 502 code the API answers with
 	}{
 		{
@@ -66,6 +76,15 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 			code:    "payment_outcome_unknown",
 		},
 		{
+			// Retry refund resends an unclear request under its own key. If
+			// that request is still running, this is the answer, and the
+			// refund may still be made.
+			name:    "409 key in use: the first request may still make the refund",
+			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusConflict, stripeRefundKeyInUse) },
+			unknown: true,
+			code:    "payment_outcome_unknown",
+		},
+		{
 			name:    "invalid request: Stripe refused, nothing was refunded",
 			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusBadRequest, stripeAlreadyRefunded) },
 			unknown: false,
@@ -80,6 +99,16 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 			name:    "rate limit: Stripe refused before running the request",
 			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusTooManyRequests, stripe429) },
 			unknown: false,
+			notRun:  true,
+			code:    "provider_error",
+		},
+		{
+			// An invalid API key is also refused before execution, with no
+			// saved result (same page).
+			name:    "invalid API key: Stripe refused before running the request",
+			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusUnauthorized, stripeBadKey) },
+			unknown: false,
+			notRun:  true,
 			code:    "provider_error",
 		},
 	}
@@ -99,6 +128,9 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 			}
 			if oe.OutcomeUnknown() != tc.unknown {
 				t.Fatalf("OutcomeUnknown() = %v, want %v (error: %v)", oe.OutcomeUnknown(), tc.unknown, err)
+			}
+			if oe.RequestNotRun() != tc.notRun {
+				t.Fatalf("RequestNotRun() = %v, want %v (error: %v)", oe.RequestNotRun(), tc.notRun, err)
 			}
 
 			// What an API caller of retry-refund sees: a 502 with a code

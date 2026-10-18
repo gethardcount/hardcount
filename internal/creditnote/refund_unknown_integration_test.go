@@ -50,7 +50,11 @@ func (r *keyRecordingRefunder) CreateRefund(_ context.Context, _ string, _ int64
 	return r.refundID, domain.RefundSucceeded, nil
 }
 
-func (r *keyRecordingRefunder) GetRefund(context.Context, string) (domain.RefundStatus, string, error) {
+// GetRefund: the refund this fake made has succeeded; any other is dead.
+func (r *keyRecordingRefunder) GetRefund(_ context.Context, id string) (domain.RefundStatus, string, error) {
+	if r.refundID != "" && id == r.refundID {
+		return domain.RefundSucceeded, "", nil
+	}
 	return domain.RefundFailed, "", nil
 }
 
@@ -118,6 +122,21 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		}
 		if out.RefundStatus != domain.RefundSucceeded || out.StripeRefundID != "re_unk_resent" {
 			t.Fatalf("refund leg = (%q, %q), want (succeeded, re_unk_resent)", out.RefundStatus, out.StripeRefundID)
+		}
+		// The key goes with the unknown status and only with it: once the
+		// result is known, nothing is left to resend.
+		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		var keyCleared bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT refund_unknown_key IS NULL FROM credit_notes WHERE id = $1`, cn.ID).Scan(&keyCleared); err != nil {
+			t.Fatalf("read refund_unknown_key: %v", err)
+		}
+		if !keyCleared {
+			t.Fatal("refund_unknown_key is still set after the refund's result became known")
 		}
 	})
 
