@@ -5,14 +5,16 @@ import type { Seed } from './fixtures/seed'
 
 // Every page, at a desktop and a phone width, must load with no console
 // errors, no failed API calls, no sideways page scroll, and its heading shown.
-// Keep this list in step with the routes in src/main.tsx.
+// Keep this list in step with the routes in src/main.tsx, public ones too.
 
-interface Route {
+// A page shows it has rendered with its h1, or, on the sign-in pages, which
+// show the logo instead of a heading, with a line of its text. A public page
+// is opened signed out.
+type Route = {
   name: string
   path: (s: Seed) => string
-  heading: (s: Seed) => string
   public?: boolean
-}
+} & ({ heading: (s: Seed) => string } | { text: string })
 
 const routes: Route[] = [
   { name: 'home', path: () => '/', heading: () => 'Home' },
@@ -43,13 +45,27 @@ const routes: Route[] = [
   { name: 'settings', path: () => '/settings', heading: () => 'Settings' },
   { name: 'settings email', path: () => '/settings?tab=email', heading: () => 'Settings' },
   { name: 'hosted invoice (public)', path: s => `/invoice/${s.invoice.public_token}`, heading: s => `Invoice ${s.invoice.invoice_number}`, public: true },
+  { name: 'sign in (public)', path: () => '/login', text: 'Sign in to the dashboard', public: true },
+  { name: 'forgot password (public)', path: () => '/forgot-password', text: 'Reset your password', public: true },
+  // The emailed links, opened with no code: each says the link is no good.
+  { name: 'reset password, no code (public)', path: () => '/reset-password', text: 'This reset link is no longer valid.', public: true },
+  { name: 'accept invite, no code (public)', path: () => '/accept-invite', text: 'This invitation link is no longer valid.', public: true },
+  { name: 'update payment, no code (public)', path: () => '/update-payment', heading: () => 'Secure payment update', public: true },
+  // Where Stripe Checkout sends a customer back after adding a card, or not.
+  { name: 'payment method added (public)', path: () => '/payment-method-added?status=success', heading: () => 'Payment method added', public: true },
+  { name: 'payment method setup canceled (public)', path: () => '/payment-method-added?status=cancel', heading: () => 'Setup canceled', public: true },
 ]
 
-// API calls that may answer 404 on a healthy page, because 404 is how the API
-// says "there is none yet". Each entry names the page state it belongs to.
-const expected404s: RegExp[] = [
-  // A customer with no billing profile yet (the page offers to add one).
-  /^\/v1\/customers\/[^/]+\/billing-profile$/,
+// API calls that may fail on a healthy page, because the failure is the
+// API's answer to the page's question. Each entry names the page state it
+// belongs to.
+const expectedFailures: { status: number; path: RegExp; signedOutOnly?: boolean }[] = [
+  // A customer with no billing profile yet: 404 is "there is none yet", and
+  // the page offers to add one.
+  { status: 404, path: /^\/v1\/customers\/[^/]+\/billing-profile$/ },
+  // Signed out: the session check answers 401, which is how the sign-in
+  // pages learn that no one is signed in.
+  { status: 401, path: /^\/v1\/whoami$/, signedOutOnly: true },
 ]
 
 const viewports = [
@@ -62,21 +78,23 @@ function readSeed(): Seed {
 }
 
 // Collects every problem the page reports while it loads.
-function watchForProblems(page: Page): string[] {
+function watchForProblems(page: Page, signedOut: boolean): string[] {
   const problems: string[] = []
-  const isExpected404 = (url: string) => expected404s.some(re => re.test(new URL(url).pathname))
+  const expected = expectedFailures.filter(f => signedOut || !f.signedOutOnly)
+  const isExpected = (url: string, status?: number) =>
+    expected.some(f => f.path.test(new URL(url).pathname) && (status === undefined || f.status === status))
   page.on('console', msg => {
     if (msg.type() !== 'error') return
     // The browser logs every failed request to the console as well; those
     // are judged by the response check below.
-    if (msg.text().startsWith('Failed to load resource') && isExpected404(msg.location().url)) return
+    if (msg.text().startsWith('Failed to load resource') && isExpected(msg.location().url)) return
     problems.push(`console error: ${msg.text()}`)
   })
   page.on('pageerror', err => problems.push(`uncaught exception: ${err.message}`))
   page.on('response', res => {
     const url = new URL(res.url())
     if (!url.pathname.startsWith('/v1/') || res.status() < 400) return
-    if (res.status() === 404 && isExpected404(res.url())) return
+    if (isExpected(res.url(), res.status())) return
     problems.push(`${res.request().method()} ${url.pathname}${url.search} returned ${res.status()}`)
   })
   page.on('requestfailed', req => {
@@ -96,10 +114,14 @@ for (const vp of viewports) {
       test(route.name, async ({ page }) => {
         const seed = readSeed()
         if (route.public) await page.context().clearCookies()
-        const problems = watchForProblems(page)
+        const problems = watchForProblems(page, !!route.public)
 
         await page.goto(route.path(seed))
-        await expect(page.getByRole('heading', { level: 1, name: route.heading(seed), exact: true })).toBeVisible()
+        if ('heading' in route) {
+          await expect(page.getByRole('heading', { level: 1, name: route.heading(seed), exact: true })).toBeVisible()
+        } else {
+          await expect(page.getByText(route.text)).toBeVisible()
+        }
         // Let the page's own data requests finish before judging it.
         await page.waitForLoadState('networkidle')
 

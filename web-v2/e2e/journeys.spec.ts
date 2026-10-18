@@ -65,6 +65,28 @@ test.describe('signed out', () => {
     await expect(page.getByText(/token|billing provider/i)).toHaveCount(0)
   })
 
+  test('a reset or invite link with a dead code says the link is no longer valid, as the API does', async ({ page }) => {
+    const answer = (path: RegExp) => page.waitForResponse(r => path.test(new URL(r.url()).pathname))
+
+    const checking = answer(/^\/v1\/auth\/password-reset\/check$/)
+    await page.goto('/reset-password?token=vlx_prt_does_not_exist')
+    const check = await checking
+    expect([check.status(), await check.json()]).toEqual([422, { valid: false, reason: 'invalid_or_expired' }])
+    await expect(page.getByText('This reset link is no longer valid. It may have been used already or expired.')).toBeVisible()
+    await expect(page.getByLabel('New password')).toHaveCount(0)
+    await page.getByRole('link', { name: 'Request a new reset link' }).click()
+    await expect(page).toHaveURL(/\/forgot-password$/)
+    await expect(page.getByLabel('Email')).toBeVisible()
+
+    const previewing = answer(/^\/v1\/auth\/invite\//)
+    await page.goto('/accept-invite?token=vlx_inv_does_not_exist')
+    const preview = await previewing
+    expect(preview.status()).toBe(422)
+    await expect(page.getByText('This invitation link is no longer valid.', { exact: false })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^(Accept invitation|Create account & join)$/ })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/login')
+  })
+
   test('sign-in follows dark mode; the hosted invoice stays light', async ({ page }) => {
     const { invoice } = JSON.parse(fs.readFileSync(seedFile, 'utf8')) as Seed
     await page.addInitScript(() => localStorage.setItem('velox-theme', 'dark'))

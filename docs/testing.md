@@ -72,8 +72,8 @@ gate and its local command.
 The specs live in `web-v2/e2e/` and run in Chromium against a real API and
 the built dashboard (`vite preview`, which forwards `/v1` to the API).
 
-- **Smoke:** `smoke.spec.ts` opens every dashboard page at 1440px and 390px
-  wide. A page fails if it logs a console error, an API call answers 400 or
+- **Smoke:** `smoke.spec.ts` opens every dashboard page, and every public
+  page signed out, at 1440px and 390px wide. A page fails if it logs a console error, an API call answers 400 or
   more, the page scrolls sideways, or its heading is missing. Each page is
   its own test, so a failure names the page.
 - **Journeys:** `journeys.spec.ts` signs in, creates a customer and a
@@ -81,6 +81,9 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
   invoice, opens the public invoice page, and grants credits.
   `subscriptions.spec.ts` changes a subscription's plan, items, trial and
   collection, and cancels it, checking each change against the API.
+  `account-setup.spec.ts` creates a price, meter and plan, installs a recipe,
+  adds and ends a customer's price override, and creates, assigns and makes
+  default a dunning policy.
 - **Data:** the tests make their data through the public API, with the
   test-mode secret key from `velox-bootstrap`. Each test uses its own unique
   names, so the suite can run many times against the same database. Use a

@@ -7,7 +7,9 @@ the screen, and that the main things an operator does work end to end.
 - `smoke.spec.ts` opens every page at 1440px and 390px wide. A page fails if
   the browser logs a console error, an API call answers 400 or more, the page
   scrolls sideways, or its heading is missing. Each page is its own test, so a
-  failure names the page.
+  failure names the page. Public pages (sign-in, password reset, invite,
+  update payment, the Stripe return page, the hosted invoice) are opened
+  signed out, and the emailed-link pages with no code.
 - `journeys.spec.ts` signs in, creates a customer, creates a subscription,
   advances a test clock to the renewal and opens the new invoice, opens the
   public invoice page, and grants credits. Each journey checks that the screen
@@ -18,6 +20,14 @@ the screen, and that the main things an operator does work end to end.
   cancel now, quantity and item changes against the upcoming invoice, and the
   trial and collection controls. Each journey checks the page, the toast and
   any invoice the change made against the API.
+- `account-setup.spec.ts` sets up what an operator sells and how they
+  collect. It creates a price, a meter on it and a plan, and checks that a
+  meter with no price is refused. It previews and installs a recipe, then
+  installs it again. It adds and ends a customer's price override and checks
+  the upcoming invoice each time. It creates and edits a dunning policy,
+  assigns it to a customer, tries to delete it and makes it the default. The
+  recipe and dunning journeys run one after the other, because both move the
+  default dunning policy. The dunning journey puts the old default back.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.
