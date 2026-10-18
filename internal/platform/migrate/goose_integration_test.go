@@ -505,13 +505,19 @@ func TestUpLockWait(t *testing.T) {
 
 // T11. The boot check. Mutation: treat row 5 (a v0.8 database at 180) as
 // ready; the server would then start before migration 180 records it.
+//
+// CheckSchemaReady reads the set this binary ships: migration 180 and the
+// files in sql/. The counts and the "ahead" version below follow that set,
+// so adding a migration file does not change what the test proves.
 func TestCheckSchemaReady(t *testing.T) {
 	ctx := context.Background()
+	shipped, latest := shippedSet(t)
+	behind := countMigrations(shipped) + " to apply; run `velox migrate`"
 
 	t.Run("empty", func(t *testing.T) {
 		_, db := scratchDB(t, "velox_migrate_t11a")
-		if err := CheckSchemaReady(db); err == nil || !strings.Contains(err.Error(), "1 migration to apply; run `velox migrate`") {
-			t.Fatalf("got %v", err)
+		if err := CheckSchemaReady(db); err == nil || !strings.Contains(err.Error(), behind) {
+			t.Fatalf("got %v, want %q", err, behind)
 		}
 	})
 	t.Run("v0.8 at 180", func(t *testing.T) {
@@ -520,10 +526,11 @@ func TestCheckSchemaReady(t *testing.T) {
 			t.Fatal(err)
 		}
 		buildV08(t, db, 180, false)
-		if err := CheckSchemaReady(db); err == nil || !strings.Contains(err.Error(), "1 migration to apply; run `velox migrate`") {
-			t.Fatalf("got %v", err)
+		if err := CheckSchemaReady(db); err == nil || !strings.Contains(err.Error(), behind) {
+			t.Fatalf("got %v, want %q", err, behind)
 		}
-		if err := up(ctx, dsn, noFiles); err != nil {
+		// What `velox migrate` does: adopt 180, then apply the shipped files.
+		if err := up(ctx, dsn, migrationFiles()); err != nil {
 			t.Fatalf("adopt: %v", err)
 		}
 		if err := CheckSchemaReady(db); err != nil {
@@ -538,17 +545,35 @@ func TestCheckSchemaReady(t *testing.T) {
 	})
 	t.Run("up to date, then ahead", func(t *testing.T) {
 		dsn, db := scratchDB(t, "velox_migrate_t11c")
-		if err := up(ctx, dsn, noFiles); err != nil {
+		if err := up(ctx, dsn, migrationFiles()); err != nil {
 			t.Fatal(err)
 		}
 		if err := CheckSchemaReady(db); err != nil {
 			t.Fatalf("up to date: %v", err)
 		}
-		recordGoose(t, db, 181)
+		recordGoose(t, db, latest+1)
 		if err := CheckSchemaReady(db); err != nil {
 			t.Fatalf("ahead: want a WARN and no error, got %v", err)
 		}
 	})
+}
+
+// shippedSet is the set CheckSchemaReady reads: how many migrations an
+// empty database needs (180 plus the files in sql/), and the highest
+// version shipped. goose lists sources without connecting, so the handle
+// never dials.
+func shippedSet(t *testing.T) (count int, latest int64) {
+	t.Helper()
+	db, err := sql.Open("pgx", "postgres://unused@127.0.0.1:1/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	files, err := embeddedFiles(db, migrationFiles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(files), files[len(files)-1].Version
 }
 
 // T12. Status is read-only: it creates no goose_db_version and waits for
