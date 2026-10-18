@@ -5,47 +5,50 @@ package middleware
 
 import (
 	"net/http"
+	"slices"
 	"strings"
+
+	"github.com/rs/cors"
 )
 
-// CORS returns middleware that handles Cross-Origin Resource Sharing.
-// Allows browser-based frontends to call the Velox API.
+// CORS lets browser pages on the allowed origins call the API and read the
+// response. github.com/rs/cors answers preflights and sets the headers; Velox
+// only decides which origins match.
+//
+// allowedOrigins comes from config.ParseCORSOrigins, the parser behind the
+// boot check. Two shapes:
+//
+//   - A bare "*" allows every origin, without credentials. The answer is a
+//     literal "*" with no Access-Control-Allow-Credentials, so browsers send
+//     no sign-in cookie: a page on another site can call the API with an API
+//     key but cannot read a signed-in operator's data.
+//   - Listed origins match exactly, ignoring case: the same rule as CSRFGuard,
+//     which gets the same list. A listed origin may send the sign-in cookie,
+//     so a dashboard served from another address can sign in.
+//
+// The match is ours, not rs/cors's AllowedOrigins, because that option reads
+// an empty list as every origin and an entry with a * inside it as a
+// prefix-and-suffix pattern ("h*" would allow every https origin). The boot
+// check refuses such entries; here they simply match nothing.
+//
+// An OPTIONS request without Access-Control-Request-Method is not a preflight
+// and goes on to the router.
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
-	originSet := make(map[string]bool, len(allowedOrigins))
-	allowAll := false
-	for _, o := range allowedOrigins {
-		if o == "*" {
-			allowAll = true
+	opts := cors.Options{
+		AllowedMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
+		AllowedHeaders: []string{"Authorization", "Content-Type", "X-API-Key", "Idempotency-Key"},
+		ExposedHeaders: []string{"Velox-Version", "Velox-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"},
+		MaxAge:         86400,
+	}
+	if slices.Contains(allowedOrigins, "*") {
+		opts.AllowedOrigins = []string{"*"}
+	} else {
+		allow := make(map[string]bool, len(allowedOrigins))
+		for _, o := range allowedOrigins {
+			allow[strings.ToLower(o)] = true
 		}
-		originSet[strings.ToLower(o)] = true
+		opts.AllowOriginFunc = func(origin string) bool { return allow[strings.ToLower(origin)] }
+		opts.AllowCredentials = true
 	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-
-			if allowAll || originSet[strings.ToLower(origin)] {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				// Required when the browser sends cookies (session auth). With
-				// credentials=true the spec forbids the "*" wildcard, so we
-				// always echo the specific origin above.
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				// Vary on Origin so intermediaries don't cache a response
-				// generated for one origin and serve it to a different one.
-				w.Header().Add("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key, Idempotency-Key")
-				w.Header().Set("Access-Control-Expose-Headers", "Velox-Version, Velox-Request-Id, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After")
-				w.Header().Set("Access-Control-Max-Age", "86400")
-			}
-
-			// Handle preflight
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
+	return cors.New(opts).Handler
 }

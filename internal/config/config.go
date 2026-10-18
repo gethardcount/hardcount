@@ -191,6 +191,13 @@ func (c Config) validateFatal() error {
 		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)", err)
 	}
 
+	// Otherwise a pattern meant to allow a dashboard would allow nothing, or
+	// a * beside it would keep it from signing in, and the operator would
+	// not know why. Checked in every environment.
+	if _, err := ParseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); err != nil {
+		return fmt.Errorf("%w (docs/self-host.md)", err)
+	}
+
 	if encKey != "" {
 		if len(encKey) != 64 {
 			return fmt.Errorf("VELOX_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d", len(encKey))
@@ -440,6 +447,46 @@ func ParseTrustProxy(spec string) ([]*net.IPNet, error) {
 		return nil, fmt.Errorf("TRUST_PROXY=%q names no proxy address", spec)
 	}
 	return nets, nil
+}
+
+// ParseCORSOrigins parses a CORS_ALLOWED_ORIGINS value: browser origins,
+// comma-separated, such as https://billing.example.com, or a bare "*" on its
+// own. Entries are trimmed and blank ones skipped. It is the one parser behind
+// the boot check and the router, which hands the list to both CORS and the
+// CSRF guard, so a value cannot pass the first and mean something else to
+// the others.
+//
+// Two values are errors:
+//   - An entry with a * inside it, such as https://*.example.com. Both
+//     consumers match origins exactly, so it would allow nothing.
+//   - "*" beside other origins. "*" allows every origin without the sign-in
+//     cookie, which would stop a listed dashboard from signing in.
+//
+// The error names the entries; the usable entries are returned with it.
+func ParseCORSOrigins(spec string) ([]string, error) {
+	var origins, patterns []string
+	wildcard := false
+	for _, o := range strings.Split(spec, ",") {
+		switch o = strings.TrimSpace(o); {
+		case o == "":
+		case o == "*":
+			wildcard = true
+		case strings.Contains(o, "*"):
+			patterns = append(patterns, strconv.Quote(o))
+		default:
+			origins = append(origins, o)
+		}
+	}
+	if len(patterns) > 0 {
+		return origins, fmt.Errorf("CORS_ALLOWED_ORIGINS has entries with a * inside: %s. Velox matches origins exactly, so list each one in full, such as https://billing.example.com", strings.Join(patterns, ", "))
+	}
+	if wildcard && len(origins) > 0 {
+		return origins, fmt.Errorf("CORS_ALLOWED_ORIGINS has * beside other origins. * allows every origin without the sign-in cookie, so the listed ones could not sign in either: list only the origins, or set * on its own")
+	}
+	if wildcard {
+		return []string{"*"}, nil
+	}
+	return origins, nil
 }
 
 // boolEnv reads a true/false setting: unset → fallback. Any value other than
