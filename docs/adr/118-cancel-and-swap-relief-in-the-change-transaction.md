@@ -1,7 +1,10 @@
 # ADR-118: Cancel and plan-swap relief is written in the change's transaction
 
 **Date:** 2026-10-12
-**Status:** Accepted
+**Status:** Accepted. **Amended 2026-10-19:** after a cancel commits, the
+relief is issued before the final invoice is collected, so the relief
+reduces the final invoice; see the
+[amendment](#amendment-2026-10-19-the-relief-is-issued-before-the-final-invoice-is-collected).
 
 ## Summary
 
@@ -182,3 +185,75 @@ inside the lock, and the retry reads fresh data.
 - Code: `internal/billing/engine.go` (`reliefTx`, `unpaidRelief`,
   `FinishRelief`), `internal/invoice/service.go` (`VoidUnchangedTx`,
   `AfterVoid`), `internal/domain/relief.go`
+
+## Amendment 2026-10-19: the relief is issued before the final invoice is collected
+
+**Decision.** The relief reduces the final invoice of a cancel. This is the
+rule of [ADR-088](088-credit-balance-applies-to-all-invoices.md): the credit
+balance applies to every invoice when it is finalized, the final invoice of
+a cancel included. The owner, Sagar, decided it on #1272 on 2026-10-18. A
+card on file and no card must end with the same amounts.
+
+**What was wrong.** After the cancel committed, `Cancel` and
+`FireDueScheduledCancel` ran `FinalizeOnCreateInvoice` first and
+`FinishRelief` second. Collecting the final invoice applies the customer's
+balance and charges the card in one call (`processAutoCharge`). The relief's
+credit notes were not issued yet, so a paid share's credit was not on the
+balance yet:
+
+- With a card on file, the card was charged the whole final invoice. The
+  relief then landed on the balance of a customer with no subscription.
+  Getting it back took a manual refund.
+- With no card, the email asking for a card, and the no-payment dunning
+  run, were for the whole amount. The auto-charge sweep applied the relief
+  on a later tick.
+
+The cross-interval swap (`FinalizeCrossIntervalSwap`) already ran the relief
+first. The cancel order came from a code comment of 2026-05-18 ("so the
+credit grant doesn't pre-apply against this invoice"). That comment is older
+than ADR-088, and no later ADR decided the order again.
+
+**What changed** (#1286). All three callers run their post-commit legs
+through one helper, `Service.finishReliefThenCollect` in
+`internal/subscription/service.go`. It runs `FinishRelief`, then
+`FinalizeOnCreateInvoice`. The writes inside the transaction, and their
+order, are unchanged. Neither of those writes applies credits.
+
+What the relief now does to the final invoice, by share:
+
+- **Paid share.** Its credit note credits the balance, and collection
+  applies that credit to the final invoice. The card is charged only the
+  rest. A relief larger than the final invoice pays it with no charge, and
+  the rest stays on the balance.
+- **Unpaid share, partly used.** Its credit note reduces the amount due of
+  its own invoice, as before. Customer credits that the note takes off that
+  invoice go back to the balance, and now apply to the final invoice too.
+- **Void.** Unchanged. The void returns the credits applied to the voided
+  invoice inside the cancel's transaction, before either leg runs.
+
+**Residual, not closed.** The relief reduces the final invoice only when
+`FinishRelief` issues the credit notes before the final invoice is
+collected. In three cases the final invoice is collected first, and the
+relief stays on the balance, as it did before this amendment:
+
+- The process crashes between the commit and `FinishRelief`.
+  `RetryPendingClawbackIssue` and the auto-charge sweep both recover their
+  half, on separate schedules and in no fixed order.
+- `Issue` fails during `FinishRelief`. `RetryPendingClawbackIssue` issues
+  the note later.
+- An auto-charge sweep tick claims the final invoice between the commit and
+  the end of `FinishRelief`.
+
+In each case no money is lost: the customer pays the final invoice and keeps
+the relief as balance credit. Closing them would move the credit grant into
+the cancel's transaction, which ADR-118 keeps after commit. That waits until
+one of them is seen in production.
+
+**Tests.**
+
+- `internal/billing/cancel_relief_reduces_final_invoice_integration_test.go`
+  runs on real Postgres. It covers the immediate and the scheduled cancel,
+  each with a card on file and with no card. In one case the relief is
+  smaller than the final invoice; in the other it is larger.
+- `internal/subscription/relief_before_collect_test.go` checks the order on
+  all three callers.
