@@ -38,7 +38,9 @@ import (
 // during a wait is refused before any account lookup or bcrypt, and is not
 // counted. A count whose last attempt is over 24 hours old starts again.
 // Proof of the account (the right password, a completed password reset, an
-// accepted invite) clears the address and email counts and marks the browser.
+// accepted invite) marks the browser and clears this address's count. Only
+// the right password from a browser the email's count held clears that
+// count too (SignedIn says why).
 //
 // Every subject is an HMAC keyed from VELOX_ENCRYPTION_KEY, and the typed
 // email is used as typed (trimmed, lower-cased), so an email with no account
@@ -54,8 +56,9 @@ const (
 	pairThreshold = 5
 	// accountThreshold: one email, from every browser that never signed in
 	// to it, over all addresses. The 10th attempt starts a 1-minute wait.
-	// After that about 100 guesses a day reach the check, the bound NIST
-	// SP 800-63B §5.2.2 sets on failed attempts for one account.
+	// After that about 100 guesses a day reach the check, with no cap.
+	// NIST SP 800-63B-4 §3.2.2 caps 100 failures in a row and then disables
+	// the password; Velox does not lock, by decision (ADR-094).
 	accountThreshold = 10
 	// browserThreshold: one known browser and one email.
 	browserThreshold = 5
@@ -148,6 +151,9 @@ type ThrottleVerdict struct {
 	// use it to group attempts on one email from any address without
 	// writing the email down.
 	Account string
+	// countedForEmail: the attempt was counted under the email's subject,
+	// because it came from a browser that never signed in to the email.
+	countedForEmail bool
 }
 
 // subject is the hex HMAC of the kind and its parts, NUL-separated. Only
@@ -206,6 +212,7 @@ func (t *LoginThrottle) Reserve(r *http.Request, email string) (ThrottleVerdict,
 	}
 
 	var subjects []thresholdSubject
+	knownBrowser := false
 	if tok := deviceToken(r); tok != "" {
 		browser := t.subject("browser", tok, email)
 		var one int
@@ -215,12 +222,13 @@ func (t *LoginThrottle) Reserve(r *http.Request, email string) (ThrottleVerdict,
 			   FOR UPDATE`, browser, now.Add(-knownBrowserFor)).Scan(&one)
 		switch {
 		case err == nil:
+			knownBrowser = true
 			subjects = []thresholdSubject{{browser, browserThreshold}}
 		case !errors.Is(err, sql.ErrNoRows):
 			return verdict, fmt.Errorf("login throttle: read the browser: %w", err)
 		}
 	}
-	if subjects == nil {
+	if !knownBrowser {
 		subjects = []thresholdSubject{
 			{t.subject("pair", audit.ExtractClientIP(r), email), pairThreshold},
 			{account, accountThreshold},
@@ -231,16 +239,17 @@ func (t *LoginThrottle) Reserve(r *http.Request, email string) (ThrottleVerdict,
 
 	steps := make([]throttleStep, len(subjects))
 	for i, s := range subjects {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO login_throttle (subject) VALUES ($1)
-			ON CONFLICT (subject) DO NOTHING`, s.subject); err != nil {
-			return verdict, fmt.Errorf("login throttle: add a subject: %w", err)
-		}
+		// One statement adds the row if it is new, locks it and reads it.
+		// Added and then locked in two statements, a row that a sign-in or
+		// the cleanup deleted in between left nothing to lock, and the
+		// attempt failed with a 503. ON CONFLICT DO UPDATE waits for such a
+		// delete and then adds the row again.
 		var row throttleRow
 		var blocked sql.NullTime
 		if err := tx.QueryRowContext(ctx, `
-			SELECT attempts, last_attempt_at, blocked_until
-			  FROM login_throttle WHERE subject = $1 FOR UPDATE`, s.subject).
+			INSERT INTO login_throttle (subject) VALUES ($1)
+			ON CONFLICT (subject) DO UPDATE SET attempts = login_throttle.attempts
+			RETURNING attempts, last_attempt_at, blocked_until`, s.subject).
 			Scan(&row.attempts, &row.lastAttempt, &blocked); err != nil {
 			return verdict, fmt.Errorf("login throttle: lock a subject: %w", err)
 		}
@@ -270,15 +279,41 @@ func (t *LoginThrottle) Reserve(r *http.Request, email string) (ThrottleVerdict,
 		return verdict, fmt.Errorf("login throttle: commit: %w", err)
 	}
 	verdict.Allowed = true
+	verdict.countedForEmail = !knownBrowser
 	return verdict, nil
 }
 
-// SignedIn records proof of the account from this request's browser: the
-// right password, a completed password reset or an accepted invite. It
-// clears the email's count and this address's count for the email, marks
-// the browser as known for the email, and sets the velox_device cookie.
+// SignedIn records a sign-in with the right password. v is the verdict
+// Reserve gave the same request. The sign-in marks the browser, sets the
+// velox_device cookie and clears this address's count for the email.
+//
+// It clears the email's count only when the attempt was counted under it,
+// that is, from a browser that never signed in to the email. A successful
+// sign-in should reset the failures it was held by (NIST SP 800-63B-4
+// §3.2.2), and without that reset a person who signs in from private
+// windows, or a script with no cookie jar, would pile up waits. Such a
+// sign-in cannot end a running wait: during one, the attempt was refused.
+// A known browser was never held by the email's count, so its sign-in leaves
+// the count alone. Clearing it there would end other people's wait early,
+// which shows a guesser that the email has an account and gives them a new
+// allowance of guesses.
+func (t *LoginThrottle) SignedIn(w http.ResponseWriter, r *http.Request, email string, v ThrottleVerdict) error {
+	return t.proved(w, r, email, v.countedForEmail)
+}
+
+// InboxProved records a completed password reset or an accepted invite.
+// Each proves the inbox, so it marks the browser and clears this address's
+// count for the email, like a sign-in. It leaves the email's count running:
+// the marked browser is no longer held by it, and clearing it would end
+// other people's wait early (see SignedIn).
+func (t *LoginThrottle) InboxProved(w http.ResponseWriter, r *http.Request, email string) error {
+	return t.proved(w, r, email, false)
+}
+
+// proved marks the browser as known for the email, clears this address's
+// count for the email and, when clearEmail is set, the email's count.
 // Counts for the email at other addresses stay until they fade.
-func (t *LoginThrottle) SignedIn(w http.ResponseWriter, r *http.Request, email string) error {
+func (t *LoginThrottle) proved(w http.ResponseWriter, r *http.Request, email string, clearEmail bool) error {
 	ctx := r.Context()
 	email = normalizeEmail(email)
 	tok := deviceToken(r)
@@ -289,7 +324,10 @@ func (t *LoginThrottle) SignedIn(w http.ResponseWriter, r *http.Request, email s
 		}
 		tok = hex.EncodeToString(buf)
 	}
-	cleared := []string{t.subject("pair", audit.ExtractClientIP(r), email), t.subject("account", email)}
+	cleared := []string{t.subject("pair", audit.ExtractClientIP(r), email)}
+	if clearEmail {
+		cleared = append(cleared, t.subject("account", email))
+	}
 	sort.Strings(cleared)
 
 	tx, err := t.db.BeginTx(ctx, postgres.TxBypass, "")

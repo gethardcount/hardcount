@@ -198,9 +198,10 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	// The sign-in throttle counts this attempt before the password check, so
 	// a refused attempt costs no account lookup and no bcrypt. It is keyed on
 	// the typed email, so an email with no account is refused the same way.
-	var account string
+	var verdict ThrottleVerdict
 	if h.throttle != nil {
-		verdict, err := h.throttle.Reserve(r, req.Email)
+		var err error
+		verdict, err = h.throttle.Reserve(r, req.Email)
 		if err != nil {
 			// Fail closed: sign-in needs the database anyway.
 			slog.ErrorContext(r.Context(), "auth: sign-in throttle failed; sign-in refused", "ip", ip, "error", err)
@@ -209,7 +210,6 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 				"Sign-in is unavailable right now. Try again in a minute.")
 			return
 		}
-		account = verdict.Account
 		if !verdict.Allowed {
 			slog.WarnContext(r.Context(), "auth: sign-in throttled",
 				"account", verdict.Account, "ip", ip, "retry_after_s", retryAfterSeconds(verdict.RetryAfter))
@@ -231,21 +231,28 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 			// user id: never the typed email, which would sit in the log sink
 			// with no way to erase it.
 			slog.WarnContext(r.Context(), "auth: failed login attempt",
-				"account", account, "user_id", wrongPasswordUserID(err), "ip", ip, "reason", "bad_credentials")
+				"account", verdict.Account, "user_id", wrongPasswordUserID(err), "ip", ip, "reason", "bad_credentials")
 			recordLogin("bad_credentials")
 			respond.Unauthorized(w, r, "invalid email or password")
 			return
 		}
-		recordLogin("error")
-		respond.FromError(w, r, err, "user")
+		// A store failure is a server error. A refusal is not: the right
+		// password for a user with no tenant (a removed member) gets a 409.
+		rec := &statusRecorder{ResponseWriter: w}
+		respond.FromError(rec, r, err, "user")
+		if rec.status >= http.StatusInternalServerError {
+			recordLogin("error")
+		} else {
+			recordLogin("refused")
+		}
 		return
 	}
 
 	if h.throttle != nil {
-		// The right password clears this email's count and marks this
-		// browser. A failure here does not undo the sign-in; the counts
-		// fade within a day.
-		if err := h.throttle.SignedIn(w, r, req.Email); err != nil {
+		// The right password marks this browser and clears the counts this
+		// attempt was held by (LoginThrottle.SignedIn). A failure here does
+		// not undo the sign-in; the counts fade within a day.
+		if err := h.throttle.SignedIn(w, r, req.Email, verdict); err != nil {
 			slog.ErrorContext(r.Context(), "auth: sign-in throttle not cleared after a sign-in", "user_id", u.ID, "error", err)
 		}
 	}
@@ -568,14 +575,14 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 			"user_id", u.ID, "err", revokeErr)
 	}
 
-	// The reset link proved the inbox, the same proof a sign-in gives. It
-	// clears the email's sign-in count and marks this browser, so an owner
-	// held out by guesses from many addresses can always get back in: reset
-	// from this browser, then sign in from it. Logged, not surfaced: the
+	// The reset link proved the inbox. It marks this browser, so a person
+	// held out by guesses from many addresses gets back in: reset from this
+	// browser, then sign in from it. It leaves the email's count running for
+	// other browsers (LoginThrottle.InboxProved). Logged, not surfaced: the
 	// password is already changed.
 	if h.throttle != nil {
-		if err := h.throttle.SignedIn(w, r, u.Email); err != nil {
-			slog.ErrorContext(r.Context(), "auth: sign-in throttle not cleared after a password reset", "user_id", u.ID, "error", err)
+		if err := h.throttle.InboxProved(w, r, u.Email); err != nil {
+			slog.ErrorContext(r.Context(), "auth: sign-in throttle did not mark the browser after a password reset", "user_id", u.ID, "error", err)
 		}
 	}
 
@@ -605,6 +612,18 @@ func writeLoginThrottled(w http.ResponseWriter, r *http.Request, wait time.Durat
 	w.Header().Set("Retry-After", strconv.Itoa(secs))
 	respond.Error(w, r, http.StatusTooManyRequests, "rate_limit_error", "login_throttled",
 		fmt.Sprintf("Too many sign-in attempts. Try again in %d %s.", minutes, unit))
+}
+
+// statusRecorder keeps the status a response was written with, so the
+// sign-in metric can tell a refusal from a server error.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
 }
 
 // retryAfterSeconds rounds a wait up to whole seconds, at least 1.

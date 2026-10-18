@@ -40,11 +40,10 @@ type Handler struct {
 
 // SignInRecorder is told when an invite accept signs a new member in. The
 // sign-in throttle (internal/user) implements it: the accept proved the
-// inbox and set the password, so it clears the email's sign-in count and
-// marks the browser, like a sign-in with the right password. Wired in
-// internal/api.
+// inbox, so it marks the browser as known for the email, and guesses from
+// elsewhere no longer slow that browser. Wired in internal/api.
 type SignInRecorder interface {
-	SignedIn(w http.ResponseWriter, r *http.Request, email string) error
+	InboxProved(w http.ResponseWriter, r *http.Request, email string) error
 }
 
 // AuditRecorder is the narrow audit surface (same shape as the auth
@@ -292,8 +291,8 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.cookie.SetCookie(w, rawID, sess.ExpiresAt)
 			if h.signIns != nil {
-				if err := h.signIns.SignedIn(w, r, res.Email); err != nil {
-					slog.ErrorContext(ctx, "accept-invite: sign-in throttle not cleared", "user_id", res.UserID, "error", err)
+				if err := h.signIns.InboxProved(w, r, res.Email); err != nil {
+					slog.ErrorContext(ctx, "accept-invite: sign-in throttle did not mark the browser", "user_id", res.UserID, "error", err)
 				}
 			}
 			out["session_minted"] = true
