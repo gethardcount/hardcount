@@ -44,8 +44,7 @@ func TestE2E_ProrationInvoice_FinalizedWebhookAndAuditRow(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r := newLagRig(t, "in_advance", false)
-			first := r.payFirstInvoice(lagP0.Add(time.Hour))
-			r.wantFinalizedOnce(first, domain.BillingReasonSubscriptionCreate)
+			r.payFirstInvoice(lagP0.Add(time.Hour))
 
 			method, path, body := c.write(r)
 			if code, raw := r.do(method, path, changeAt, body); code >= 300 {
@@ -92,10 +91,12 @@ func TestE2E_ProrationInvoice_FinalizedWebhookAndAuditRow(t *testing.T) {
 	})
 }
 
-// payFirstInvoice records an offline payment on the subscription's first
-// invoice and returns its id. A charge on top of an unpaid invoice for the
+// payFirstInvoice checks the control (the subscription's first invoice, born
+// finalized by the engine, has its one event and one row), then records an
+// offline payment on it. The check runs first because the payment lowers the
+// amount due the event reported. A charge on top of an unpaid invoice for the
 // running period is refused (ADR-050), which is not what these cases test.
-func (r *lagRig) payFirstInvoice(at time.Time) string {
+func (r *lagRig) payFirstInvoice(at time.Time) {
 	r.t.Helper()
 	var id string
 	for _, i := range r.invoices() {
@@ -110,8 +111,8 @@ func (r *lagRig) payFirstInvoice(at time.Time) string {
 		r.logInvoices(r.invoices())
 		r.t.Fatalf("no subscription_create invoice")
 	}
+	r.wantFinalizedOnce(id, domain.BillingReasonSubscriptionCreate)
 	r.must(http.MethodPost, "/v1/invoices/"+id+"/record-payment", at, map[string]any{"note": "fixture"}, http.StatusOK)
-	return id
 }
 
 // prorationInvoice returns the subscription's one subscription_update invoice.
