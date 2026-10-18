@@ -441,10 +441,10 @@ func TestBillFinalOnImmediateCancel_NetNegativeBucket_UsageCapCountsWhatBills(t 
 	}
 }
 
-// Cycle close, cap re-derivation in buildLineItems: a pricing-rule meter is
-// priced from raw buckets x the re-derived capScale, so the re-derivation
-// must count a meter below zero as 0 too.
-func TestRunCycle_NetNegativeMeter_CapRederivationCountsItAsZero(t *testing.T) {
+// Cycle close: a pricing-rule meter is priced from its raw buckets scaled by
+// the cap, and the cap's total counts a meter below zero as 0, so the
+// pricing-rule meter bills the cap.
+func TestRunCycle_NetNegativeMeter_CapScalesPricingRuleMeter(t *testing.T) {
 	engine, subs, usage, pricing, invoices := setupEngine()
 	sub := subs.subs["sub_1"]
 	capUnits := int64(80)

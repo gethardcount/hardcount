@@ -2425,11 +2425,10 @@ func (e *Engine) invoiceCurrency(ctx context.Context, sub domain.Subscription, p
 	return "USD", nil
 }
 
-// resolveBillingInputs gathers everything needed to price this period:
-// each item's plan, the invoice currency, and the per-meter usage totals
-// (usage-cap-scaled when a subscription cap fires). Extracted from
-// billOnePeriod (behavior-preserving).
-func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time) (map[string]domain.Plan, string, map[string]string, map[string]decimal.Decimal, error) {
+// resolveBillingInputs resolves each item's plan and the invoice currency
+// for this period. Usage is read in buildLineItems, once the plans that
+// only a mid-period segment carries are known (#1192).
+func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscription) (map[string]domain.Plan, string, error) {
 	// Resolve every item's plan up-front so we can read currency / meters / base
 	// fee from the set. Plans come back keyed by item plan_id — items sharing a
 	// plan (which UNIQUE (sub_id, plan_id) prevents, but defend anyway) resolve
@@ -2441,7 +2440,7 @@ func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscripti
 		}
 		pl, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
 		if err != nil {
-			return nil, "", nil, nil, fmt.Errorf("get plan %s: %w", it.PlanID, err)
+			return nil, "", fmt.Errorf("get plan %s: %w", it.PlanID, err)
 		}
 		plans[it.PlanID] = pl
 	}
@@ -2459,64 +2458,9 @@ func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscripti
 	invoiceCurrency := firstPlanCurrency
 	invoiceCurrency, err := e.invoiceCurrency(ctx, sub, invoiceCurrency)
 	if err != nil {
-		return nil, "", nil, nil, err
+		return nil, "", err
 	}
-
-	// Collect the union of meter_ids across every item's plan. Usage is
-	// customer+meter-scoped (not item-scoped) — a meter shared between two
-	// items' plans aggregates once, not twice. The aggregation type is picked
-	// from whichever meter lookup resolves first; in practice a meter has one
-	// canonical aggregation so this is a no-op, but the map shape tolerates
-	// duplicates defensively.
-	meterAggs := make(map[string]string)
-	for _, it := range sub.Items {
-		for _, meterID := range plans[it.PlanID].MeterIDs {
-			if _, ok := meterAggs[meterID]; ok {
-				continue
-			}
-			// An unreadable meter fails the close (retried per ADR-119):
-			// defaulting to "sum" billed a max/last meter as its total.
-			m, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err != nil {
-				return nil, "", nil, nil, fmt.Errorf("get meter %s aggregation: %w", meterID, err)
-			}
-			meterAggs[meterID] = m.Aggregation
-		}
-	}
-
-	// Aggregate usage for each meter using its configured aggregation type.
-	usageTotals, err := e.usage.AggregateForBillingPeriodByAgg(ctx, sub.TenantID, sub.CustomerID, meterAggs, periodStart, periodEnd)
-	if err != nil {
-		return nil, "", nil, nil, fmt.Errorf("aggregate usage: %w", err)
-	}
-
-	// Enforce usage cap if configured. Cap is a subscription-level total
-	// across all meters — a container-level guardrail, not a per-plan
-	// constraint. Cap stays integer (UsageCapUnits int64) because operators
-	// author it as a whole-unit ceiling; per-meter quantities are decimal
-	// and prorated proportionally if the cap fires.
-	// The cap totals what the invoice bills (#1193): a meter below zero bills
-	// 0, so the cap neither counts nor scales it, and a pricing-rule meter
-	// counts its buckets above zero (capUsageTotals). Such a meter's entry is
-	// then that sum: only the cap reads it, since the close prices the meter
-	// from its buckets, and buildLineItems re-derives the scale only when the
-	// scaled entries sum to the cap.
-	if sub.UsageCapUnits != nil && *sub.UsageCapUnits > 0 && sub.OverageAction == "block" {
-		usageTotals, err = e.capUsageTotals(ctx, sub, meterAggs, usageTotals, periodStart, periodEnd)
-		if err != nil {
-			return nil, "", nil, nil, fmt.Errorf("usage cap totals: %w", err)
-		}
-		totalUsage := billableUsageTotal(usageTotals)
-		capDec := decimal.NewFromInt(*sub.UsageCapUnits)
-		if totalUsage.GreaterThan(capDec) {
-			for mid, qty := range usageTotals {
-				if qty.IsPositive() {
-					usageTotals[mid] = qty.Mul(capDec).Div(totalUsage)
-				}
-			}
-		}
-	}
-	return plans, invoiceCurrency, meterAggs, usageTotals, nil
+	return plans, invoiceCurrency, nil
 }
 
 // handleTrialState runs the trial lifecycle for a trialing subscription:
@@ -2669,7 +2613,7 @@ func nominalRate(rule domain.RatingRuleVersion) *decimal.Decimal {
 // unpriced is added to unpriced, which the caller records once the close
 // commits. Usage below zero bills 0 and is added to belowZero, which the
 // caller writes on the closer tx (net_negative.go).
-func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, now, periodStart, periodEnd time.Time, plans map[string]domain.Plan, invoiceCurrency string, meterAggs map[string]string, usageTotals map[string]decimal.Decimal, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, *time.Time, error) {
+func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, now, periodStart, periodEnd time.Time, plans map[string]domain.Plan, invoiceCurrency string, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, *time.Time, error) {
 	var lineItems []domain.InvoiceLineItem
 	subtotal := int64(0)
 
@@ -2746,23 +2690,37 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 			plans[seg.planID] = pl
 		}
 	}
-	// Augment meterAggs with meters from hydrated change-log plans —
-	// segment-aware usage needs every meter that was active at ANY
-	// point during the period, not just meters on current items'
-	// plans. Without this, a meter that existed on plan_A (now
-	// swapped out) wouldn't be aggregated in the [seg.start, seg.end)
-	// window where plan_A was still active.
+	// Every meter the invoice bills: the meters of the current items' plans
+	// and of the plans hydrated above. Segment-aware usage needs every meter
+	// that was active at ANY point during the period: a meter that existed
+	// on plan_A (now swapped out or removed) bills its [seg.start, seg.end)
+	// window. Usage is customer+meter scoped, so a meter on two plans
+	// aggregates once.
+	meterAggs := make(map[string]string)
 	for _, pl := range plans {
 		for _, meterID := range pl.MeterIDs {
 			if _, ok := meterAggs[meterID]; ok {
 				continue
 			}
+			// An unreadable meter fails the close (retried per ADR-119):
+			// defaulting to "sum" billed a max/last meter as its total.
 			m, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err != nil { // never default to "sum": a max/last meter would bill its total
+			if err != nil {
 				return nil, 0, nil, fmt.Errorf("get meter %s aggregation: %w", meterID, err)
 			}
 			meterAggs[meterID] = m.Aggregation
 		}
+	}
+	// Each meter's usage over the whole period, by its own aggregation.
+	usageTotals, err := e.usage.AggregateForBillingPeriodByAgg(ctx, sub.TenantID, sub.CustomerID, meterAggs, periodStart, periodEnd)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("aggregate usage: %w", err)
+	}
+	// The block usage cap, worked out once over every meter above. Every
+	// usage quantity below is scaled by it (usage_cap.go).
+	usageCap, err := e.usageCapFor(ctx, sub, meterAggs, usageTotals, periodStart, periodEnd)
+	if err != nil {
+		return nil, 0, nil, err
 	}
 
 	// Base-fee lines: segment-aware for in_arrears, one upcoming-period
@@ -2779,39 +2737,8 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// meter has exactly one full-period interval — output collapses
 	// to the pre-segment-aware single-line behavior. For subs where
 	// a mid-period plan change adds/removes meters, each meter
-	// bills only for the time it was actually on the sub.
-	//
-	// Cap math is preserved: the period's totalUsage (pre-cap) and
-	// the capScale derived from it apply uniformly across all
-	// (meter, interval) pairs.
-	capScale := decimal.New(1, 0)
-	if sub.UsageCapUnits != nil && *sub.UsageCapUnits > 0 && sub.OverageAction == "block" {
-		// usageTotals here is already post-cap (the existing block
-		// above scaled it in place). Recover the scale by comparing
-		// to a re-aggregated full-period total — but simpler: the
-		// cap-scale block above sets a stable factor we can re-derive
-		// from sub.UsageCapUnits + sum of post-cap totals.
-		postCapTotal := billableUsageTotal(usageTotals)
-		capDec := decimal.NewFromInt(*sub.UsageCapUnits)
-		if postCapTotal.Equal(capDec) && !postCapTotal.IsZero() {
-			// Cap actually fired (post-cap total == cap). Compute the
-			// pre-cap total by re-aggregating, then derive scale.
-			preCapTotals, err := e.usage.AggregateForBillingPeriodByAgg(ctx, sub.TenantID, sub.CustomerID, meterAggs, periodStart, periodEnd)
-			if err != nil {
-				// Never bill uncapped: leaving capScale at 1 on an error
-				// billed a block-capped customer for every unit.
-				return nil, 0, nil, fmt.Errorf("re-aggregate usage for the cap scale: %w", err)
-			}
-			preCapTotals, err = e.capUsageTotals(ctx, sub, meterAggs, preCapTotals, periodStart, periodEnd)
-			if err != nil {
-				return nil, 0, nil, fmt.Errorf("usage cap totals for the cap scale: %w", err)
-			}
-			preCapTotal := billableUsageTotal(preCapTotals)
-			if preCapTotal.GreaterThan(capDec) && !preCapTotal.IsZero() {
-				capScale = capDec.Div(preCapTotal)
-			}
-		}
-	}
+	// bills only for the time it was actually on the sub. The usage
+	// cap scales every (meter, interval) quantity by one factor.
 
 	// The windows each meter is billed over, from item segments and
 	// removed-item segments (meterUsageIntervals; shared with the live
@@ -2829,7 +2756,6 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// Separate cache for the multi-dim (pricing-rules) path — keyed by
 	// meter + interval since AggregateByPricingRules is per-meter.
 	ruleAggCache := map[string][]domain.RuleAggregation{}
-	one := decimal.New(1, 0)
 
 	// Union of meters with billable windows. When a watermark exists, a
 	// meter whose clamped intervals vanished entirely (all usage inside the
@@ -2853,7 +2779,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	}
 	// One tier ladder per usage bucket for the whole close, continuing from
 	// what a threshold fire already billed (P21, ADR-066 amendment).
-	ladder := newUsageLadder(wm, !capScale.Equal(one))
+	ladder := newUsageLadder(wm, usageCap.binds())
 	for meterID := range meterIDSet {
 		meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 		if err != nil {
@@ -2910,15 +2836,9 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 					ruleAggCache[cacheK] = a
 				}
 				for _, agg := range aggs {
-					qty := agg.Quantity
-					// AggregateByPricingRules always returns raw (pre-cap)
-					// quantities, so apply the cap scale here in BOTH the
-					// full-period and sub-period cases (unlike usageTotals,
-					// which is pre-scaled in place above). A bucket below
-					// zero bills 0, so the cap leaves it at its own value.
-					if !capScale.Equal(one) && qty.IsPositive() {
-						qty = qty.Mul(capScale)
-					}
+					// The cap's one factor. A bucket below zero bills 0, so
+					// the cap leaves it at its own value.
+					qty := usageCap.apply(agg.Quantity)
 					if qty.IsZero() {
 						continue
 					}
@@ -3017,14 +2937,10 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 					intervalAggCache[key] = t
 				}
 				quantity = totals[meterID]
-				// Apply cap scale to sub-period quantities so the
-				// per-interval sum matches the cap-scaled full-period
-				// total. Cap doesn't apply if capScale == 1, or to a
-				// quantity below zero (it bills 0).
-				if !capScale.Equal(one) && quantity.IsPositive() {
-					quantity = quantity.Mul(capScale)
-				}
 			}
+			// The cap's one factor, for a full-period and a sub-period
+			// quantity alike; not for a quantity below zero (it bills 0).
+			quantity = usageCap.apply(quantity)
 			if quantity.IsZero() {
 				continue
 			}
@@ -3194,8 +3110,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// commits from here on makes this close's CAS miss and nothing written.
 	expected := subscription.SnapshotOf(sub)
 
-	// Gather pricing inputs for this period (plans, currency, usage).
-	plans, invoiceCurrency, meterAggs, usageTotals, err := e.resolveBillingInputs(ctx, sub, periodStart, periodEnd)
+	// Gather pricing inputs for this period (plans, currency); buildLineItems
+	// reads the usage.
+	plans, invoiceCurrency, err := e.resolveBillingInputs(ctx, sub)
 	if err != nil {
 		return false, err
 	}
@@ -3213,7 +3130,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// against; commitPeriodClose re-reads it on the closer tx.
 	unpriced := unpricedUsage{}
 	belowZero := netNegativeUsage{}
-	lineItems, subtotal, thresholdBilledThrough, err := e.buildLineItems(ctx, sub, now, periodStart, periodEnd, plans, invoiceCurrency, meterAggs, usageTotals, billingLoc, unpriced, belowZero)
+	lineItems, subtotal, thresholdBilledThrough, err := e.buildLineItems(ctx, sub, now, periodStart, periodEnd, plans, invoiceCurrency, billingLoc, unpriced, belowZero)
 	if err != nil {
 		return false, err
 	}
@@ -4064,34 +3981,13 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		usageTotals = totals
 	}
 
-	// Enforce the subscription-level usage cap, same semantics as
-	// billOnePeriod: the partial window [periodStart, canceledAt] is the
+	// The block usage cap, worked out as the period close works it out
+	// (usage_cap.go): the partial window [periodStart, canceledAt] is the
 	// entire billable extent of the final cycle, so the per-cycle cap
-	// applies to it whole. Totals are scaled in place (full-period reads)
-	// and capScale carries the same factor to the sub-period and
-	// multi-dim branches below, whose aggregations return raw quantities.
-	// Pre-fix the cancel path billed raw above-cap usage that cycle close
-	// would have capped — overbilling "block"-capped subs on cancel.
-	// The cap totals what the invoice bills (#1193): a meter below zero
-	// bills 0, so the cap neither counts nor scales it, and a pricing-rule
-	// meter counts its buckets above zero (capUsageTotals).
-	capScale := decimal.New(1, 0)
-	capOne := decimal.New(1, 0)
-	if sub.UsageCapUnits != nil && *sub.UsageCapUnits > 0 && sub.OverageAction == "block" {
-		capTotals, err := e.capUsageTotals(ctx, sub, meterAggs, usageTotals, periodStart, canceledAt)
-		if err != nil {
-			return nil, 0, fmt.Errorf("usage cap totals on cancel: %w", err)
-		}
-		totalUsage := billableUsageTotal(capTotals)
-		capDec := decimal.NewFromInt(*sub.UsageCapUnits)
-		if totalUsage.GreaterThan(capDec) {
-			capScale = capDec.Div(totalUsage)
-			for mid, qty := range usageTotals {
-				if qty.IsPositive() {
-					usageTotals[mid] = qty.Mul(capScale)
-				}
-			}
-		}
+	// applies to it whole. Every usage quantity below is scaled by it.
+	usageCap, err := e.usageCapFor(ctx, sub, meterAggs, usageTotals, periodStart, canceledAt)
+	if err != nil {
+		return nil, 0, fmt.Errorf("on cancel: %w", err)
 	}
 
 	// Segment-aware usage billing over the partial period
@@ -4167,7 +4063,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		nonAdditiveOnly bool
 	}
 	// Same per-bucket tier ladder as the cycle close (P21, ADR-066 amendment).
-	ladder := newUsageLadder(wm, !capScale.Equal(capOne))
+	ladder := newUsageLadder(wm, usageCap.binds())
 	for meterID := range cancelMeterIDSet {
 		// Does this meter price via dimension-match pricing rules (the
 		// multi-dim shape: e.g. the AI `tokens` meter, one rule per
@@ -4216,14 +4112,9 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 					return nil, 0, fmt.Errorf("aggregate by pricing rules for meter %s on cancel [%v, %v): %w", meterID, iv.start, iv.end, err)
 				}
 				for _, agg := range aggs {
-					qty := agg.Quantity
-					// AggregateByPricingRules returns raw (pre-cap)
-					// quantities — apply the cap scale here, same as
-					// billOnePeriod's multi-dim branch (not to a bucket
-					// below zero, which bills 0).
-					if !capScale.Equal(capOne) && qty.IsPositive() {
-						qty = qty.Mul(capScale)
-					}
+					// The cap's one factor, as in billOnePeriod's multi-dim
+					// branch (not for a bucket below zero, which bills 0).
+					qty := usageCap.apply(agg.Quantity)
 					if qty.IsZero() {
 						continue
 					}
@@ -4315,14 +4206,10 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 					intervalAggCache[key] = t
 				}
 				quantity = totals[meterID]
-				// Sub-period aggregates are raw — apply the cap scale so
-				// the per-interval sum matches the capped window total
-				// (usageTotals above is already scaled in place). Not to
-				// a quantity below zero, which bills 0.
-				if !capScale.Equal(capOne) && quantity.IsPositive() {
-					quantity = quantity.Mul(capScale)
-				}
 			}
+			// The cap's one factor, for the whole window and a segment
+			// alike; not for a quantity below zero, which bills 0.
+			quantity = usageCap.apply(quantity)
 			if quantity.IsZero() {
 				continue
 			}
