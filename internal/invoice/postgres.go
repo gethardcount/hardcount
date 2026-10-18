@@ -4092,10 +4092,8 @@ func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID,
 				THEN EXCLUDED.provider_reason ELSE invoice_charge_attempts.provider_reason END,
 			amount_cents = CASE WHEN EXCLUDED.amount_cents > 0
 				THEN EXCLUDED.amount_cents ELSE invoice_charge_attempts.amount_cents END,
-			decline_code = CASE WHEN EXCLUDED.decline_code <> ''
-				THEN EXCLUDED.decline_code ELSE invoice_charge_attempts.decline_code END,
-			stripe_payment_method_id = CASE WHEN EXCLUDED.stripe_payment_method_id <> ''
-				THEN EXCLUDED.stripe_payment_method_id ELSE invoice_charge_attempts.stripe_payment_method_id END,
+			decline_code = EXCLUDED.decline_code, -- MUTATION i2: an empty report erases
+			stripe_payment_method_id = EXCLUDED.stripe_payment_method_id,
 			updated_at = now()`,
 		tenantID, invoiceID, piID, outcome, reason, amountCents, declineCode, paymentMethodID)
 	if err != nil {
@@ -4274,7 +4272,7 @@ func (s *PostgresStore) HardDeclinesOnDefaultCards(ctx context.Context, tenantID
 		FROM invoice_charge_attempts a
 		JOIN invoices i ON i.id = a.invoice_id
 		JOIN payment_methods pm ON pm.customer_id = i.customer_id
-			AND pm.is_default AND pm.detached_at IS NULL
+			AND pm.detached_at IS NULL -- MUTATION i3: any card, not the default
 			AND pm.stripe_payment_method_id = a.stripe_payment_method_id
 		WHERE a.invoice_id = ANY($1::text[])
 		  AND a.stripe_payment_method_id <> ''
