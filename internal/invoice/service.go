@@ -887,6 +887,7 @@ type attentionFacts struct {
 	paused          map[string]bool   // subscription id → pause_collection in force
 	pageLive        map[string]bool   // invoice id → hosted payment page live
 	refusedCard     map[string]string // invoice id → hard decline code on the default card
+	retrying        map[string]bool   // invoice id → dunning run active and not paused
 }
 
 // attachAttentionAll decorates every invoice with its Attention, reading the
@@ -972,14 +973,42 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		}
 	}
 
+	// A refused card (#966) changes only the payment-failure notice, so only
+	// failed, finalized invoices join the read. A read error leaves it empty:
+	// the notice then shows the ordinary decline, which still leads with
+	// Update payment method. Read before the dunning runs, which it gates.
+	if s.cardRefusals != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentFailed {
+				return inv.ID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			refused, err := s.cardRefusals.HardDeclinesOnDefaultCards(ctx, tenantID, ids)
+			if err != nil {
+				slog.Warn("invoice: attention could not read refused cards", "error", err,
+					"tenant_id", tenantID, "invoices", len(ids))
+			}
+			f.refusedCard = refused
+		}
+	}
+
 	// Same guard for the dunning-escalated signal (P1-4): only the
 	// finalized-unpaid-no-PM invoices that reach classifyNoPaymentMethod
 	// join the read. No run / read errors leave the zero-value (false) — the
 	// banner shows the normal pre-escalation copy, which is the safe
 	// direction of drift.
+	//
+	// The refused-card notice (#966) joins the same read: it may say that
+	// retries keep their schedule only while the run is active and not
+	// paused. No run, or a read error, leaves retrying false, and the notice
+	// then says no retry is scheduled — the direction that still sends the
+	// operator to get a new card, rather than waiting on a retry that may
+	// never run.
 	if s.dunningReader != nil {
 		ids := distinct(page, func(inv domain.Invoice) string {
-			if awaitsPaymentNoCard(inv, f.paymentReady[inv.CustomerID]) {
+			if awaitsPaymentNoCard(inv, f.paymentReady[inv.CustomerID]) || f.refusedCard[inv.ID] != "" {
 				return inv.ID
 			}
 			return ""
@@ -987,8 +1016,10 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		if len(ids) > 0 {
 			if runs, err := s.dunningReader.ListRunsByInvoices(ctx, tenantID, ids); err == nil {
 				f.escalated = make(map[string]bool, len(runs))
+				f.retrying = make(map[string]bool, len(runs))
 				for _, run := range runs {
 					f.escalated[run.InvoiceID] = run.State == domain.DunningEscalated
+					f.retrying[run.InvoiceID] = run.State == domain.DunningActive && !run.Paused
 				}
 			}
 		}
@@ -1037,26 +1068,6 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		}
 	}
 
-	// A refused card (#966) changes only the payment-failure notice, so only
-	// failed, finalized invoices join the read. A read error leaves it empty:
-	// the notice then shows the ordinary decline, which still leads with
-	// Update payment method.
-	if s.cardRefusals != nil {
-		ids := distinct(page, func(inv domain.Invoice) string {
-			if inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentFailed {
-				return inv.ID
-			}
-			return ""
-		})
-		if len(ids) > 0 {
-			refused, err := s.cardRefusals.HardDeclinesOnDefaultCards(ctx, tenantID, ids)
-			if err != nil {
-				slog.Warn("invoice: attention could not read refused cards", "error", err,
-					"tenant_id", tenantID, "invoices", len(ids))
-			}
-			f.refusedCard = refused
-		}
-	}
 	return f
 }
 
@@ -1097,6 +1108,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	}
 	atc.PaymentPageOpen = f.pageLive[inv.ID]
 	atc.RefusedCardDeclineCode = f.refusedCard[inv.ID]
+	atc.DunningRetrying = f.retrying[inv.ID]
 	// A clock-pinned invoice's failure banner dates "since" from its latest
 	// failed charge's simulated instant. Simulated failed invoices only, so a
 	// live list page never pays this read.

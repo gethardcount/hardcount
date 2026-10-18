@@ -42,7 +42,7 @@ payment failures, and the gaps still open.
 | Case | Velox | Operator |
 |---|---|---|
 | Card declined on a Velox charge | Payment `failed`, customer emailed (if SMTP is set), `payment.failed` sent, dunning starts (new accounts' default policy: day 3, 7, 14). A decline on the hosted page leaves the invoice as it was. | Nothing, or ask for a new card. |
-| Card refused for good: lost, stolen, pick up card, revoked authorization and the rest of Stripe's hard decline codes | As above, but retries no longer charge that card for this invoice. They keep their schedule and count, and charge only once another card is the customer's default. The customer is asked for a different card; the reason is not named. The invoice says "needs a different card". | Ask for a new card, then make it the default on the customer's page. A card the customer adds does not become the default by itself. The customer can also pay on the hosted page ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)). |
+| Card refused for good: lost, stolen, pick up card, revoked authorization and the rest of Stripe's hard decline codes | As above, but retries no longer charge that card for this invoice. They keep their schedule and count, and charge only once another card is the customer's default. A card the customer saves after the refusal becomes the default by itself, and the next retry charges it. The customer is asked for a different card; the reason is not named. The invoice says "needs a different card". | Ask for a new card (**Update payment method**), or let the customer pay on the hosted page. A card saved before the refusal needs **Set as default** on the customer's page ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)). |
 | Stripe 5xx that names a PaymentIntent | `unknown` ("Confirming payment"); the reconciler reads the PaymentIntent after 1 minute, or a webhook settles it. | Nothing. If it lasts hours: [runbook](ops/runbook/payment-status-unknown.md). |
 | Timeout, or an error with no PaymentIntent ID | Invoice *parked* ("Payment status unknown"); searched in Stripe hourly from 1 hour after parking. A found success marks it paid; no result never marks it failed. If Stripe never received the request, nothing resolves it. Stripe Search is not offered to every account (for example, India); there only a webhook can. | Check Stripe; **Mark uncollectible** if nothing was taken: [runbook](ops/runbook/parked-invoices.md). |
 | Crash after finalize, before the charge | Finalize and the charge queue are one write; the next run charges it. | Nothing. |
@@ -67,10 +67,9 @@ payment failures, and the gaps still open.
   is flagged as `payment.duplicate_charge` when the first one's webhook
   arrives; if it never arrives, nothing flags it
   ([#976](https://github.com/getvelox/velox/issues/976)).
-- **A new card does not replace a refused one by itself.** After a hard
-  decline, retries wait until another card is the default. A card the
-  customer saves through the update link or the hosted page is added beside
-  the refused default, so an operator has to make it the default
+- **Collect payment still charges a card refused for good.** The invoice
+  notice no longer offers a retry, but the invoice page's **Collect
+  payment** reaches Stripe with the refused card
   ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)).
 - **Disputes are not recorded**: the invoice stays paid and no webhook is
   sent; follow disputes in Stripe

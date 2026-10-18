@@ -770,7 +770,7 @@ func paymentFailedTextBody(customerName, invoiceNumber, reason, hostedURL string
 		fmt.Fprintf(&b, "Reason: %s\n", reason)
 	}
 	if hostedURL != "" {
-		fmt.Fprintf(&b, "\nUpdate payment method: %s\n", hostedURL)
+		fmt.Fprintf(&b, "\nPay invoice: %s\n", hostedURL)
 	}
 	return b.String()
 }

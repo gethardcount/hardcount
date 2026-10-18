@@ -238,8 +238,8 @@ type PaymentIntentResult struct {
 	// the webhook landed. Zero for wall-clock charges, which carry no anchor.
 	AnchorAt time.Time
 	// DeclineCode and PaymentMethodID are the PaymentIntent's
-	// last_payment_error decline_code and payment_method.id, populated by
-	// GetPaymentIntent. The reconciler passes them on when it records a
+	// last_payment_error decline code (declineCodeOf) and payment_method.id,
+	// populated by GetPaymentIntent. The reconciler passes them on when it records a
 	// failure, as the webhook does, so a hard decline it is the first to
 	// learn of still stops dunning from charging that card (#966).
 	DeclineCode     string
@@ -1516,7 +1516,9 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 
 // declineFromEventPayload reads the bank's decline code and the declined card
 // from data.object.last_payment_error of a payment_intent.payment_failed body
-// (decline_code, payment_method.id — Stripe's PaymentIntent object). They
+// (decline_code, payment_method.id — Stripe's PaymentIntent object; the code
+// and type too, for a hard decline Stripe sends as the error code, see
+// declineCodeOf). They
 // matter only to a later dunning retry (#966), so anything unreadable yields
 // empty values rather than an error: a decline the webhook could not label
 // is retried on schedule, as every decline was before, and the settlement
@@ -1531,6 +1533,8 @@ func declineFromEventPayload(payload map[string]any) (declineCode, paymentMethod
 		Data struct {
 			Object struct {
 				LastPaymentError *struct {
+					Type          string          `json:"type"`
+					Code          string          `json:"code"`
 					DeclineCode   string          `json:"decline_code"`
 					PaymentMethod json.RawMessage `json:"payment_method"`
 				} `json:"last_payment_error"`
@@ -1541,7 +1545,7 @@ func declineFromEventPayload(payload map[string]any) (declineCode, paymentMethod
 		return "", ""
 	}
 	lpe := parsed.Data.Object.LastPaymentError
-	return lpe.DeclineCode, stripeObjectID(lpe.PaymentMethod)
+	return declineCodeOf(lpe.Type, lpe.Code, lpe.DeclineCode), stripeObjectID(lpe.PaymentMethod)
 }
 
 // stripeObjectID returns the id of a Stripe field that is either an expanded

@@ -16,15 +16,26 @@ import (
 // number (14), lost (41), stolen (43), transaction not permitted (57) and the
 // revoked recurring authorizations (R1, R3).
 //
-// One code on Stripe's list is left out: authentication_required. That
-// decline asks for the customer to confirm the payment (3-D Secure), not for
-// a new card, and the "use a different card" copy would tell them the wrong
-// thing. It keeps the ordinary retry schedule, as it did before.
+// Two codes on Stripe's list are left out:
+//   - authentication_required asks for the customer to confirm the payment
+//     (3-D Secure), not for a new card, and the "use a different card" copy
+//     would tell them the wrong thing.
+//   - highest_risk_level is not a decline code at all. It is Stripe Radar's
+//     reason for blocking a charge (the charge's outcome.reason, with
+//     network_status not_sent_to_network:
+//     https://docs.stripe.com/declines#blocked-payments), so no bank refused
+//     the card and Velox never sees it as a decline code.
+//
+// Both keep the ordinary retry schedule, as they did before.
 //
 // Not on the list, so still retried on schedule: fraudulent and
 // merchant_blacklist (Stripe Radar's decisions, not the bank's),
 // restricted_card, stop_payment_order, expired_card and every other code.
 // Stripe's retry rule does not treat them as final either.
+//
+// incorrect_number reaches Velox in two shapes: as the bank's decline code,
+// or as Stripe's error code with no decline code. The payment package reads
+// both (payment.declineCodeOf).
 var hardDeclineCodes = map[string]bool{
 	"incorrect_number":                 true,
 	"lost_card":                        true,
@@ -32,7 +43,6 @@ var hardDeclineCodes = map[string]bool{
 	"stolen_card":                      true,
 	"revocation_of_authorization":      true,
 	"revocation_of_all_authorizations": true,
-	"highest_risk_level":               true,
 	"transaction_not_allowed":          true,
 }
 
