@@ -1380,12 +1380,6 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.CreditN
 	return s.store.List(ctx, filter)
 }
 
-// CreditedCents returns the sum of non-voided credit-note totals already issued
-// against an invoice — i.e. how much of the invoice has been credited. The
-// remaining creditable headroom is inv.TotalAmountCents - CreditedCents. The
-// billing engine's headroom-aware multi-invoice credit fan-out uses it so a
-// share never overruns an invoice whose creditable amount a prior credit note
-// (e.g. an earlier downgrade clawback) already consumed.
 // UnreliefedClawbackCents sums relief this invoice was OWED but never received:
 // auto-issue clawback drafts (issue_pending) that ended up voided, so their
 // Issue() never ran and never reduced amount_due.
@@ -1422,6 +1416,12 @@ func (s *Service) UnreliefedClawbackCents(ctx context.Context, tenantID, invoice
 	return total, nil
 }
 
+// CreditedCents returns the sum of non-voided credit-note totals already issued
+// against an invoice — i.e. how much of the invoice has been credited. The
+// remaining creditable headroom is inv.TotalAmountCents - CreditedCents. The
+// billing engine's headroom-aware multi-invoice credit fan-out uses it so a
+// share never overruns an invoice whose creditable amount a prior credit note
+// (e.g. an earlier downgrade clawback) already consumed.
 func (s *Service) CreditedCents(ctx context.Context, tenantID, invoiceID string) (int64, error) {
 	cns, err := s.store.List(ctx, ListFilter{TenantID: tenantID, InvoiceID: invoiceID})
 	if err != nil {

@@ -21,11 +21,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 )
 
-// Stripe is the payment adapter. It creates PaymentIntents for finalized invoices
-// and processes webhook events to update invoice payment status.
-//
-// This is NOT an abstract "payment provider" interface. Velox is Stripe-native.
-// If we ever support another provider, we'll refactor — not speculate now.
 // DunningStarter starts dunning for failed payments.
 type DunningStarter interface {
 	StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
@@ -93,6 +88,11 @@ type EmailPaymentFailed interface {
 	SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
 }
 
+// Stripe is the payment adapter. It creates PaymentIntents for finalized invoices
+// and processes webhook events to update invoice payment status.
+//
+// This is NOT an abstract "payment provider" interface. Velox is Stripe-native.
+// If we ever support another provider, we'll refactor — not speculate now.
 type Stripe struct {
 	client             StripeClient
 	invoices           InvoiceUpdater

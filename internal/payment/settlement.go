@@ -432,14 +432,6 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	return fresh, res, nil
 }
 
-// escalatePaymentAnomaly is the shared loud channel for money anomalies the
-// settle path DETECTS but must not absorb silently (ADR-068): a duplicate
-// charge, a captured-amount mismatch, a payment on a voided invoice. It
-// slog.Errors (ops), dispatches the per-cause outbound event (integrators),
-// and stamps the durable anomaly marker the dashboard attention banner reads
-// (operators — the load-bearing surface: with auto-refund deferred, the
-// operator IS the refund mechanism). Best-effort by design: detection must
-// never fail the settlement that triggered it.
 // receiptAmountCents is the figure the payment receipt calls "your
 // payment": the amount Stripe actually captured for THIS charge, or the
 // invoice's recorded amount_paid when the webhook predates captured-
@@ -455,6 +447,14 @@ func receiptAmountCents(capturedCents int64, fresh domain.Invoice) int64 {
 	return fresh.TotalAmountCents
 }
 
+// escalatePaymentAnomaly is the shared loud channel for money anomalies the
+// settle path DETECTS but must not absorb silently (ADR-068): a duplicate
+// charge, a captured-amount mismatch, a payment on a voided invoice. It
+// slog.Errors (ops), dispatches the per-cause outbound event (integrators),
+// and stamps the durable anomaly marker the dashboard attention banner reads
+// (operators — the load-bearing surface: with auto-refund deferred, the
+// operator IS the refund mechanism). Best-effort by design: detection must
+// never fail the settlement that triggered it.
 func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, msg string) {
 	slog.ErrorContext(ctx, "payment anomaly: "+msg,
 		"event", eventType,

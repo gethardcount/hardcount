@@ -2738,21 +2738,6 @@ func (s *PostgresStore) ListUnknownPayments(ctx context.Context, olderThan time.
 	return s.listInflightPayments(ctx, domain.PaymentUnknown, olderThan, limit)
 }
 
-// CountParkedInvoices counts invoices parked by ADR-107 — payment unresolved
-// and carrying no PaymentIntent id, so nothing can name the attempt and no
-// ordinary sweep will resolve them.
-//
-// Counts written-off rows too, because writing a parked invoice off is the
-// exit the product ADVISES ("mark this invoice uncollectible to close it out",
-// invoice_attention.go) — and until 2026-08-05 doing so silently dropped the
-// row out of this count AND out of the ADR-108 search that is the only thing
-// that could ever name its PaymentIntent. Taking the advice made the money
-// permanently unaccounted for. Split by disposition below.
-//
-// It exists because ListUnknownPayments deliberately EXCLUDES these rows (they
-// are not reconcilable, and leaving them in starved the queue). That exclusion
-// was correct but it also made them invisible, and "stuck and loud" was
-// log-only. This is the number an operator and an alert can act on.
 // RecordProviderSync stamps what the reconciler just observed at the provider:
 // the verbatim PaymentIntent status and the moment we looked (migration 0167).
 //
@@ -2895,6 +2880,22 @@ func (s *PostgresStore) AdoptPaymentIntentIfParked(ctx context.Context, tenantID
 	return n == 1, nil
 }
 
+// CountParkedInvoices counts invoices parked by ADR-107 — payment unresolved
+// and carrying no PaymentIntent id, so nothing can name the attempt and no
+// ordinary sweep will resolve them.
+//
+// Counts written-off rows too, because writing a parked invoice off is the
+// exit the product ADVISES ("mark this invoice uncollectible to close it out",
+// invoice_attention.go) — and until 2026-08-05 doing so silently dropped the
+// row out of this count AND out of the ADR-108 search that is the only thing
+// that could ever name its PaymentIntent. Taking the advice made the money
+// permanently unaccounted for. Split by disposition below.
+//
+// It exists because ListUnknownPayments deliberately EXCLUDES these rows (they
+// are not reconcilable, and leaving them in starved the queue). That exclusion
+// was correct but it also made them invisible, and "stuck and loud" was
+// log-only. This is the number an operator and an alert can act on.
+//
 // Split by disposition because the two halves are different alerts. An `open`
 // parked invoice is an unmade decision; a `written_off` one has been decided by
 // a human and is only still here because the ADR-108 search might yet name its

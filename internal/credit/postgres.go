@@ -1494,10 +1494,6 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 	return entries, rows.Err()
 }
 
-// CountEntries is ListEntries' total-row twin: same filter arms, no
-// limit/offset/sort. Powers honest pagination + the complete-CSV export
-// on the credits page (pre-fix the UI paginated, filtered, and exported
-// a silently-capped 50-row slice as if it were the whole ledger).
 func (s *PostgresStore) SumCreditNoteGrantsForInvoice(ctx context.Context, tenantID, customerID, invoiceID string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1514,6 +1510,10 @@ func (s *PostgresStore) SumCreditNoteGrantsForInvoice(ctx context.Context, tenan
 	return sum, err
 }
 
+// CountEntries is ListEntries' total-row twin: same filter arms, no
+// limit/offset/sort. Powers honest pagination + the complete-CSV export
+// on the credits page (pre-fix the UI paginated, filtered, and exported
+// a silently-capped 50-row slice as if it were the whole ledger).
 func (s *PostgresStore) CountEntries(ctx context.Context, filter ListFilter) (int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {

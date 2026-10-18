@@ -447,6 +447,12 @@ func classifyDunningRetryError(err error) error {
 	return err
 }
 
+// dunningRunStarter is the minimal slice of dunning.Service the adapter
+// needs — an interface so the disabled-skip branch is unit-testable.
+type dunningRunStarter interface {
+	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
+}
+
 // dunningStarterAdapter bridges billing.DunningStarter → dunning.Service so
 // the engine's no-payment enrollment sweep can route a card-less,
 // auto_charge_pending invoice into a dunning campaign (closing the limbo
@@ -462,12 +468,6 @@ func classifyDunningRetryError(err error) error {
 // case — so the per-tick sweep doesn't emit a spurious error for every stalled
 // invoice. A genuine error (DB down, etc.) is NOT InvalidState and still
 // propagates as a sweep error (fail loud).
-// dunningRunStarter is the minimal slice of dunning.Service the adapter
-// needs — an interface so the disabled-skip branch is unit-testable.
-type dunningRunStarter interface {
-	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
-}
-
 type dunningStarterAdapter struct {
 	dunning dunningRunStarter
 }
@@ -716,6 +716,14 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 	return out, nil
 }
 
+// canEmailSetupLinks reports whether a setup-link email can be sent at all:
+// it needs SMTP, and the link needs the payment-update page to point at
+// (NotifyNoPaymentMethod refuses without it). The invoice notices read this to
+// decide whether to say a link is emailed and whether to offer Resend.
+func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL string) bool {
+	return smtpConfigured && paymentUpdateURL != ""
+}
+
 // noPaymentMethodNotifierAdapter bridges email.SendPaymentSetupRequest
 // into billing.NoPaymentMethodNotifier so the engine can dispatch a
 // "set up your payment method" email at finalize when the customer
@@ -731,14 +739,6 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 // email link the customer clicks days after issuance: the operator can
 // invalidate tokens at any time, and the SPA shows "for invoice X, $Y"
 // before sending the customer to Stripe.
-// canEmailSetupLinks reports whether a setup-link email can be sent at all:
-// it needs SMTP, and the link needs the payment-update page to point at
-// (NotifyNoPaymentMethod refuses without it). The invoice notices read this to
-// decide whether to say a link is emailed and whether to offer Resend.
-func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL string) bool {
-	return smtpConfigured && paymentUpdateURL != ""
-}
-
 type noPaymentMethodNotifierAdapter struct {
 	email            paymentSetupEmailSender
 	customerEmail    *customerEmailFetcherAdapter

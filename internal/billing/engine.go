@@ -43,11 +43,6 @@ func roundDays(d time.Duration) int {
 	return int(math.Round(d.Hours() / 24))
 }
 
-// Engine orchestrates the billing cycle: finds subscriptions due for billing,
-// aggregates usage, computes charges, and generates invoices with line items.
-//
-// It coordinates across domain boundaries (subscription, usage, pricing, invoice)
-// without those domains knowing about each other.
 // SettingsReader reads tenant settings for invoice configuration.
 type SettingsReader interface {
 	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
@@ -58,6 +53,11 @@ type SettingsReader interface {
 	Get(ctx context.Context, tenantID string) (domain.TenantSettings, error)
 }
 
+// Engine orchestrates the billing cycle: finds subscriptions due for billing,
+// aggregates usage, computes charges, and generates invoices with line items.
+//
+// It coordinates across domain boundaries (subscription, usage, pricing, invoice)
+// without those domains knowing about each other.
 type Engine struct {
 	subs          SubscriptionReader
 	usage         UsageAggregator
@@ -2247,19 +2247,6 @@ func catchupDelayFromEnvBilling() time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// billOnePeriod generates an invoice for ONE billing period of a
-// subscription, advancing next_billing_at by one cycle. Pre-Phase-2
-// (ADR-028) this was the only billing primitive — RunCycle called it
-// once per due sub per pass, and runCatchupLoop relied on an outer
-// loop to compress N periods of catch-up into N passes. Phase 2
-// keeps this function unchanged but wraps it in billSubscription
-// which loops until the sub catches up to its effectiveNow.
-//
-// Returns (true, nil) if an invoice was created, (false, nil) if
-// skipped (e.g. trial-active, status not active). The bool here
-// means "invoice generated", NOT "next_billing_at advanced" — some
-// skip paths (trial-active) advance the cycle without generating
-// an invoice. The wrapper distinguishes via fresh sub-state reads.
 // usageLineDescription labels a multi-dim usage line by its dimension match
 // so an invoice with N rule buckets on one meter (e.g. tokens → input /
 // cache_read / output) reads as distinct lines rather than N identical
@@ -3061,6 +3048,19 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	return lineItems, subtotal, thresholdBilledThrough, nil
 }
 
+// billOnePeriod generates an invoice for ONE billing period of a
+// subscription, advancing next_billing_at by one cycle. Pre-Phase-2
+// (ADR-028) this was the only billing primitive — RunCycle called it
+// once per due sub per pass, and runCatchupLoop relied on an outer
+// loop to compress N periods of catch-up into N passes. Phase 2
+// keeps this function unchanged but wraps it in billSubscription
+// which loops until the sub catches up to its effectiveNow.
+//
+// Returns (true, nil) if an invoice was created, (false, nil) if
+// skipped (e.g. trial-active, status not active). The bool here
+// means "invoice generated", NOT "next_billing_at advanced" — some
+// skip paths (trial-active) advance the cycle without generating
+// an invoice. The wrapper distinguishes via fresh sub-state reads.
 func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bool, error) {
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillSubscription",
 		trace.WithAttributes(
@@ -4593,17 +4593,6 @@ func (e *Engine) unusedBaseForPeriod(ctx context.Context, sub domain.Subscriptio
 	return totalUnused, nil
 }
 
-// prepareCancelCredit runs the guards + day-based unused-base math for a
-// mid-period cancel. ok=false means there is nothing to credit (not
-// canceled, a cancel at/after period end, no in_advance items, or zero
-// unused) — both cancel-credit paths no-op. Error only on a malformed sub
-// (canceled with no canceled_at) or a plan lookup failure.
-//
-// creditGranter is REQUIRED (boot fails closed if unwired, #442) — the old
-// nil arm silently returned "nothing to credit", turning a missing wiring
-// into an unrefunded customer. Deleted 2026-07-10 (design-review redesign
-// #3 stage 2): a nil granter here is now a test-fixture bug, not a silent
-// $0 refund.
 // prorationRefundDesc formats the customer-facing credit-note / ledger
 // description for a cancel or plan-swap base-fee refund. Civil-day dates render
 // in the tenant billing timezone (loc), NOT UTC (ADR-077) — a raw UTC render
@@ -4617,6 +4606,12 @@ func prorationRefundDesc(leadIn, subCode, verb string, periodStart, periodEnd, a
 		verb, at.In(loc).Format("2006-01-02"))
 }
 
+// prepareCancelCredit runs the guards + day-based unused-base math for a
+// mid-period cancel. ok=false means there is nothing to credit (not
+// canceled, a cancel at/after period end, no in_advance items, or zero
+// unused) — both cancel-credit paths no-op. Error only on a malformed sub
+// (canceled with no canceled_at), a tenant-timezone lookup failure, or a
+// plan lookup failure.
 func (e *Engine) prepareCancelCredit(ctx context.Context, sub domain.Subscription) (cancelCreditInputs, bool, error) {
 	if sub.Status != domain.SubscriptionCanceled {
 		return cancelCreditInputs{}, false, nil

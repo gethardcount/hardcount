@@ -340,14 +340,6 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 	return subs, total, nil
 }
 
-// CancelAtomic terminates a subscription. Cancellation is allowed from
-// every non-terminal status — draft (operator scrapping a never-activated
-// row), trialing (customer abandoning during trial — by far the dominant
-// industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
-// and active. Only canceled/archived are rejected (the row already
-// terminated). Note: the `paused` source state was removed in PR-8
-// when the hard-pause API was deleted — no path now produces
-// status='paused', so it's not in allowedFrom.
 func cancelSpec() transitionSpec {
 	return transitionSpec{
 		targetStatus: string(domain.SubscriptionCanceled),
@@ -361,6 +353,14 @@ func cancelSpec() transitionSpec {
 	}
 }
 
+// CancelAtomic terminates a subscription. Cancellation is allowed from
+// every non-terminal status — draft (operator scrapping a never-activated
+// row), trialing (customer abandoning during trial — by far the dominant
+// industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
+// and active. Only canceled/archived are rejected (the row already
+// terminated). Note: the `paused` source state was removed in PR-8
+// when the hard-pause API was deleted — no path now produces
+// status='paused', so it's not in allowedFrom.
 func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	return s.transitionAtomic(ctx, tenantID, id, cancelSpec())
 }
@@ -779,12 +779,6 @@ func (s *PostgresStore) ActivateAfterTrial(ctx context.Context, tenantID, id str
 	return s.ActivateAfterTrialWithBill(ctx, tenantID, id, at, nil)
 }
 
-// ActivateAfterTrialWithBill flips 'trialing' → 'active' AND runs billFn (the
-// day-1 in_advance invoice insert) in the SAME transaction, so a billing
-// failure rolls the activation back rather than leaving an active sub with no
-// first-period invoice (the cycle scheduler skips the just-elapsed in_advance
-// segment, so a lost day-1 invoice is a permanent revenue leak). ADR-056.
-// billFn may be nil.
 // ActivateDraftWithBill — see the Store interface doc. Draft→active flip +
 // period/anchor stamps + day-1 bill in one tx (the ADR-056 pattern applied to
 // the plain-draft path).
@@ -846,6 +840,12 @@ func (s *PostgresStore) ActivateDraftWithBill(ctx context.Context, tenantID, id 
 	return sub, nil
 }
 
+// ActivateAfterTrialWithBill flips 'trialing' → 'active' AND runs billFn (the
+// day-1 in_advance invoice insert) in the SAME transaction, so a billing
+// failure rolls the activation back rather than leaving an active sub with no
+// first-period invoice (the cycle scheduler skips the just-elapsed in_advance
+// segment, so a lost day-1 invoice is a permanent revenue leak). ADR-056.
+// billFn may be nil.
 func (s *PostgresStore) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

@@ -246,7 +246,7 @@ func (h *Handler) SetDB(db *postgres.DB) { h.db = db }
 
 // bindForSub returns ctx with effective-now bound from the sub pin
 // when the resolver is wired. Used at proration handler entries so
-// remainingPeriodFactor / changeAt stamps land in simulated time on
+// remainingPeriodRatio / changeAt stamps land in simulated time on
 // clock-pinned subs. Falls through unchanged when resolver isn't set
 // or the sub isn't clock-pinned (resolver returns wall-clock).
 func (h *Handler) bindForSub(ctx context.Context, tenantID, subID string) context.Context {
@@ -947,8 +947,8 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 
 	// Bind effective-now from the sub pin so proration math runs in
 	// simulated time on clock-pinned subs (ADR-030). Without binding,
-	// `remainingPeriodFactor(sub, time.Now())` would compute the
-	// wrong factor for a clock-pinned sub whose current_period is in
+	// `remainingPeriodRatio(sub, time.Now())` would compute the
+	// wrong ratio for a clock-pinned sub whose current_period is in
 	// the simulated future. PR-12.
 	ctx := h.bindForSub(r.Context(), tenantID, id)
 	r = r.WithContext(ctx)
@@ -1606,10 +1606,6 @@ type itemProrationSpec struct {
 	newQuantity   int64
 }
 
-// handleItemProration generates the invoice or credit for a single item
-// mutation. Dedup key is (tenant, subscription, item, change_type, change_at)
-// — retries of the same mutation converge on the existing artifact via the
-// proration dedup index.
 // atomicAddItemWithProration opens one outer transaction that wraps
 // the subscription-item insert + the proration invoice/credit insert.
 // A failure on either side rolls back BOTH via the deferred Rollback —
@@ -1924,21 +1920,6 @@ func (h *Handler) enrollAutoChargeTx(ctx context.Context, tx *sql.Tx, tenantID s
 	return h.invoices.SetAutoChargePendingTx(ctx, tx, tenantID, detail.AutoChargeInvoiceID, true)
 }
 
-// issueClawbackCreditNote issues the tax-reversing adjustment credit note for a
-// downgrade clawback recorded on the detail (ADR-048). Issued AFTER the atomic
-// tx is durable — the credit-note service is not tx-aware and its tax reversal
-// is an external Stripe call, so it must not ride the DB tx (a rollback would
-// orphan a committed CN + balance grant). The downgrade branch calls it inline
-// on the non-atomic path. No-op unless that branch recorded a clawback (CN
-// issuer wired + PAID source invoice resolved).
-//
-// On error the item change is already durable but the customer was not
-// credited — log at error level so it surfaces for reconciliation. The
-// operation still reports success: the downgrade itself committed, and a client
-// retry is rejected at Service.UpdateItem's no-op gate (so we never double-
-// issue), so returning an error here would be misleading and unrecoverable by
-// retry anyway. The source invoice's over-credit cap bounds any aggregate
-// over-credit.
 // resolveClawbackPieces fans a downgrade/qty-decrease/item-removal clawback of
 // netCredit (net, the unconsumed removed value) across EVERY invoice that funded
 // the current period, each piece capped at that invoice's remaining headroom
@@ -2059,6 +2040,21 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 	return pieces, nil
 }
 
+// issueClawbackCreditNote issues the tax-reversing adjustment credit note for a
+// downgrade clawback recorded on the detail (ADR-048). Issued AFTER the atomic
+// tx is durable — the credit-note service is not tx-aware and its tax reversal
+// is an external Stripe call, so it must not ride the DB tx (a rollback would
+// orphan a committed CN + balance grant). The downgrade branch calls it inline
+// on the non-atomic path. No-op unless that branch recorded a clawback (CN
+// issuer wired + PAID source invoice resolved).
+//
+// On error the item change is already durable but the customer was not
+// credited — log at error level so it surfaces for reconciliation. The
+// operation still reports success: the downgrade itself committed, and a client
+// retry is rejected at Service.UpdateItem's no-op gate (so we never double-
+// issue), so returning an error here would be misleading and unrecoverable by
+// retry anyway. The source invoice's over-credit cap bounds any aggregate
+// over-credit.
 func (h *Handler) issueClawbackCreditNote(ctx context.Context, tenantID string, detail *ProrationDetail) {
 	if h.creditNotes == nil || detail == nil {
 		return
@@ -2160,6 +2156,10 @@ func (h *Handler) issueClawbackDrafts(ctx context.Context, tenantID string, deta
 	}
 }
 
+// handleItemProration generates the invoice or credit for a single item
+// mutation. Dedup key is (tenant, subscription, item, change_type, change_at)
+// — retries of the same mutation converge on the existing artifact via the
+// proration dedup index.
 func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, tx *sql.Tx) (*ProrationDetail, error) {
 	// Resolve plans needed for pricing and naming. The "effective" plan drives
 	// currency and pricing — for a remove it's the old plan; for
@@ -2913,9 +2913,6 @@ func clawbackReason(ct domain.ItemChangeType) string {
 	}
 }
 
-// remainingPeriodFactor returns the fraction of the current billing period
-// that is still ahead of `now`, clamped to [0, 1]. Used to scale a proration
-// charge/credit against the per-period price.
 // remainingPeriodRatio returns the integer day counts that drive proration
 // math. Per ADR-042 (2026-05-31) Velox switched from float64 prorationFactor
 // to integer day-ratio (`amount * remaining / total`) matching engine.go's
@@ -3044,20 +3041,6 @@ func planLabel(planID string, planNames map[string]string) string {
 	return planID
 }
 
-// describeSubscriptionAction maps audit_log action + metadata to a
-// human-readable sentence + sub-line + status tag the UI colors by.
-// Unknown actions pass through with a neutral info tag rather than
-// hiding — the feed should never silently drop an event.
-//
-// Detail is the optional sub-line beneath the main description. Used
-// for human-meaningful context (dates, counts, plan names) that
-// bloats the title if inlined. Mirrors the invoice timeline shape.
-//
-// planNames is a lookup from plan_id → plan.Name used to resolve
-// raw IDs in metadata to operator-friendly labels. The caller
-// (activityTimeline) batch-fetches every plan_id referenced in the
-// audit entries before invoking this function. Missing entries fall
-// back to the raw ID (deleted plan / lookup miss).
 // addProrationMeta stamps the proration OUTCOME (the invoice/credit/
 // adjustment a mid-period change produced) into a subscription audit-row
 // payload, so the activity timeline can show "Plan changed · … · Proration
@@ -3144,6 +3127,20 @@ func formatAmountForTimeline(cents int64, currency string) string {
 	}
 }
 
+// describeSubscriptionAction maps audit_log action + metadata to a
+// human-readable sentence + sub-line + status tag the UI colors by.
+// Unknown actions pass through with a neutral info tag rather than
+// hiding — the feed should never silently drop an event.
+//
+// Detail is the optional sub-line beneath the main description. Used
+// for human-meaningful context (dates, counts, plan names) that
+// bloats the title if inlined. Mirrors the invoice timeline shape.
+//
+// planNames is a lookup from plan_id → plan.Name used to resolve
+// raw IDs in metadata to operator-friendly labels. The caller
+// (activityTimeline) batch-fetches every plan_id referenced in the
+// audit entries before invoking this function. Missing entries fall
+// back to the raw ID (deleted plan / lookup miss).
 func describeSubscriptionAction(action string, meta map[string]any, planNames map[string]string) (desc, detail, detailTimestamp, status string) {
 	switch action {
 	case domain.AuditActionCreate:

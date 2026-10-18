@@ -540,12 +540,6 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	return notes, rows.Err()
 }
 
-// TransitionStatus atomically flips a credit note from `from` to `to` only if
-// it is currently in `from`, returning whether this call won the transition.
-// The conditional UPDATE ... WHERE status=$from is the compare-and-swap that
-// serializes concurrent/retried Issue() calls: exactly one caller gets won=true
-// and proceeds to the (non-idempotent) amount_due reduction; the losers get
-// won=false and must not re-apply.
 // BeginTx opens an RLS-scoped (TxTenant) coordinator transaction the
 // creditnote Service owns for Issue(): the draft→issued CAS and the internal
 // money effect (amount_due reduction or credit grant) run on this one tx and
@@ -556,6 +550,12 @@ func (s *PostgresStore) BeginTx(ctx context.Context, tenantID string) (*sql.Tx, 
 	return s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 }
 
+// TransitionStatus atomically flips a credit note from `from` to `to` only if
+// it is currently in `from`, returning whether this call won the transition.
+// The conditional UPDATE ... WHERE status=$from is the compare-and-swap that
+// serializes concurrent/retried Issue() calls: exactly one caller gets won=true
+// and proceeds to the (non-idempotent) amount_due reduction; the losers get
+// won=false and must not re-apply.
 func (s *PostgresStore) TransitionStatus(ctx context.Context, tenantID, id string, from, to domain.CreditNoteStatus) (bool, error) {
 	return s.TransitionStatusAudited(ctx, tenantID, id, from, to, nil)
 }

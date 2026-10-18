@@ -126,12 +126,6 @@ type InvoiceSettledChecker interface {
 // SetSettledChecker wires the staleness gate (see handle).
 func (d *Dispatcher) SetSettledChecker(c InvoiceSettledChecker) { d.settled = c }
 
-// actionRequiredTypes are the email types whose ENTIRE purpose collapses
-// once the invoice settles: "update your payment method", "payment
-// failed", "we'll retry on <date>", "action taken — balance due". The
-// informational types (invoice document, receipt, credit note) stay
-// deliverable regardless — a paid invoice's document is still the
-// customer's record.
 // escalationAnnounces reports the one case where a terminal invoice must
 // NOT mute its email: a dunning escalation whose final action is
 // mark_uncollectible marks the invoice uncollectible in the same breath
@@ -166,6 +160,12 @@ func setupLinkServesRecovery(emailType, terminalState string) bool {
 	return emailType == TypePaymentSetupRequest && terminalState == "uncollectible"
 }
 
+// actionRequiredTypes are the email types whose ENTIRE purpose collapses
+// once the invoice settles: "update your payment method", "payment
+// failed", "we'll retry on <date>", "action taken — balance due". The
+// informational types (invoice document, receipt, credit note) stay
+// deliverable regardless — a paid invoice's document is still the
+// customer's record.
 var actionRequiredTypes = map[string]bool{
 	TypePaymentSetupRequest: true,
 	TypePaymentFailed:       true,

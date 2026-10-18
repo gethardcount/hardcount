@@ -873,7 +873,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// per-run level.
 	subSvc.SetResolver(engine)
 	// Handler-side resolver for proration math + changeAt stamps on
-	// clock-pinned subs (PR-12). Without this, remainingPeriodFactor
+	// clock-pinned subs (PR-12). Without this, remainingPeriodRatio
 	// + handleItemProration would use wall-clock now even when the
 	// underlying sub is in simulated time.
 	subH.SetResolver(engine)

@@ -784,12 +784,6 @@ func (s *Service) GetBillingProfile(ctx context.Context, tenantID, customerID st
 	return s.store.GetBillingProfile(ctx, tenantID, customerID)
 }
 
-// validateEmail accepts only well-formed RFC 5322 addresses via the
-// Go stdlib parser, plus a hard requirement that the domain contains
-// at least one dot. ParseAddress alone allows local-only addresses
-// like `foo@bar` (no TLD) — fine in RFC terms, useless for actual
-// SMTP delivery, so we still gate on the dot. Tier-1 syntax check;
-// tier-6 (bounce-driven suppression) catches what survives.
 // normalizeAdditionalEmails delegates to the shared canonicalizer so
 // the stored list and the per-send overrides (invoice/CN send
 // handlers) enforce identical rules from one source.
@@ -797,6 +791,12 @@ func normalizeAdditionalEmails(list []string, primaryEmail string) ([]string, er
 	return domain.NormalizeAdditionalEmails(list, primaryEmail)
 }
 
+// validateEmail accepts only well-formed RFC 5322 addresses via the
+// Go stdlib parser, plus a hard requirement that the domain contains
+// at least one dot. ParseAddress alone allows local-only addresses
+// like `foo@bar` (no TLD) — fine in RFC terms, useless for actual
+// SMTP delivery, so we still gate on the dot. Tier-1 syntax check;
+// tier-6 (bounce-driven suppression) catches what survives.
 func validateEmail(field, email string) error {
 	addr, err := mail.ParseAddress(email)
 	if err != nil {

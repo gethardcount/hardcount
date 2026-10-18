@@ -1974,6 +1974,10 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 
 	var events []timelineEvent
 
+	// Lane-degradation disclosure (2026-07-19 audit, finding 4): a
+	// side-lane fetch failure used to be swallowed (`if err == nil`) — the
+	// lane silently vanished, and a timeline missing its dunning rows is
+	// indistinguishable from an invoice that never saw dunning. The core
 	// lifecycle rows come from the invoice row itself (a failure there
 	// 500s above); side lanes degrade LOUDLY instead: named in `degraded`,
 	// logged, and bannered by the UI. `truncated` discloses the one capped
@@ -2107,11 +2111,6 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 			IsSimulated:  isSimulated,
 		})
 	}
-
-	// Lane-degradation disclosure (2026-07-19 audit, finding 4): a
-	// side-lane fetch failure used to be swallowed (`if err == nil`) — the
-	// lane silently vanished, and a timeline missing its dunning rows is
-	// indistinguishable from an invoice that never saw dunning. The core
 
 	// Credit-note chronology rows. The settlement waterfall on the page
 	// already shows credit notes channel-by-channel; these rows give the

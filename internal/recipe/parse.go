@@ -112,10 +112,6 @@ type rawWebhook struct {
 // through URLs (`/v1/recipes/{key}`) without escaping.
 var recipeKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// parseRecipe reads YAML bytes, validates the structural invariants we
-// rely on at runtime, and returns the canonical domain.Recipe. Errors are
-// wrapped with the offending field name so a malformed recipe in CI
-// surfaces the exact line at boot.
 // parseRate converts a recipe's string-form per-unit rate into a decimal.
 // Empty is treated as zero (a mode that doesn't use the field). A malformed
 // value fails recipe load loudly rather than silently pricing at zero.
@@ -131,6 +127,10 @@ func parseRate(recipeKey, ruleKey, field, raw string) (decimal.Decimal, error) {
 	return d, nil
 }
 
+// parseRecipe reads YAML bytes, validates the structural invariants we
+// rely on at runtime, and returns the canonical domain.Recipe. Errors are
+// wrapped with the offending field name so a malformed recipe in CI
+// surfaces the exact line at boot.
 func parseRecipe(data []byte) (domain.Recipe, error) {
 	var raw rawRecipe
 	if err := yaml.Unmarshal(data, &raw); err != nil {

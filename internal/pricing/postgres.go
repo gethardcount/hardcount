@@ -702,12 +702,6 @@ func (s *PostgresStore) GetMeterPricingRule(ctx context.Context, tenantID, id st
 	return rule, nil
 }
 
-// ListMeterPricingRulesByMeter returns all pricing rules for a meter
-// ordered by (priority DESC, created_at ASC, id ASC). This matches the
-// runtime resolution order in docs/design/multi-dim-meters.md so callers can
-// walk the slice top-down without re-sorting. The id tiebreaker pins
-// determinism for the corner case where two rules share priority AND
-// created_at (same-txn bulk import, clock-resolution collisions).
 // ListMeterPricingRules returns every pricing-rule binding for the tenant —
 // the read behind GET /v1/meter-pricing-rules, which the dashboard uses to
 // resolve rule→meter units and priced-ness without N per-meter round trips.
@@ -742,6 +736,12 @@ func (s *PostgresStore) ListMeterPricingRules(ctx context.Context, tenantID stri
 	return out, tx.Commit()
 }
 
+// ListMeterPricingRulesByMeter returns all pricing rules for a meter
+// ordered by (priority DESC, created_at ASC, id ASC). This matches the
+// runtime resolution order in docs/design/multi-dim-meters.md so callers can
+// walk the slice top-down without re-sorting. The id tiebreaker pins
+// determinism for the corner case where two rules share priority AND
+// created_at (same-txn bulk import, clock-resolution collisions).
 func (s *PostgresStore) ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
