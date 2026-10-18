@@ -21,7 +21,7 @@ Relates: ADR-011 (homegrown email+password auth — the login this protects), AD
 
 ## Summary
 
-This ADR records the target design for protecting the dashboard login against password guessing. v1 ships none of it, so the per-IP `/v1/auth` rate limiter is the only brute-force control today. The old lockout was removed because it split its count across Redis and memory, let anyone who knew an operator's email lock them out, and stored plaintext emails in Redis; an interim Postgres throttle (PR #497) and the `users.locked_until` column were removed too. In the target design the failed-login count lives in Postgres, blocks apply only to an IP and account together, and a bare account is never locked. A counter only catches guessing, so MFA and a breached-password check are what stop credential stuffing; ADR-095 now governs when each ships, simplifies the key to `(IP × account)`, and drops the graduated ladder, aggregate detection and CAPTCHA. Bcrypt overload from login floods is a separate problem, best fixed at the edge or reverse proxy. Amended 2026-10-18: the throttle ships. Repeated wrong passwords wait 1 to 15 minutes, counted per (address × email) and per email over all addresses, in Postgres. A browser that signed in to the email before is counted on its own, so guesses from elsewhere never hold it out, and no account is ever locked.
+This ADR records the target design for protecting the dashboard login against password guessing. v1 ships none of it, so the per-IP `/v1/auth` rate limiter is the only brute-force control today. The old lockout was removed because it split its count across Redis and memory, let anyone who knew an operator's email lock them out, and stored plaintext emails in Redis; an interim Postgres throttle (PR #497) and the `users.locked_until` column were removed too. In the target design the failed-login count lives in Postgres, blocks apply only to an IP and account together, and a bare account is never locked. A counter only catches guessing, so MFA and a breached-password check are what stop credential stuffing; ADR-095 now governs when each ships, simplifies the key to `(IP × account)`, and drops the graduated ladder, aggregate detection and CAPTCHA. Bcrypt overload from login floods is a separate problem, best fixed at the edge or reverse proxy. Amended 2026-10-18: the throttle ships. Repeated wrong passwords wait 1 to 15 minutes, counted per (address × email) and per email over all addresses, in Postgres. A browser that signed in to the email before is counted on its own, so guesses from elsewhere do not slow it. No account is locked, but a new browser waits for as long as the guessing goes on.
 
 ## Context
 
@@ -259,12 +259,12 @@ around them, and the reason the graduated ladder + MFA are the *real* fix:
 On 2026-10-18 the owner decided that MFA no longer gates go-live (ADR-095
 amendment of the same date) and that the throttle ships on its own, before
 go-live. ADR-095 had narrowed the key to plain `(IP × account)`, relying on
-MFA to bound guesses spread over many addresses. Without MFA that bound has
-to come from the throttle, so the shipped design adds a per-email count and,
-to keep it from locking anyone out, the device-cookie pattern OWASP
-recommends for this problem.
+MFA to bound guesses spread over many addresses. Without MFA, that bound
+has to come from the throttle, so the shipped design adds a per-email count.
+It also adds the device-cookie pattern OWASP recommends for this problem, so
+the per-email count does not slow a browser that signed in before.
 
-**What ships** (`internal/user/throttle.go`, migration 182):
+**What ships** (`internal/user/throttle.go`, migration 181):
 
 | Subject | Counts | A wait starts at |
 |---|---|---|
@@ -279,20 +279,32 @@ recommends for this problem.
   is refused with 429 `login_throttled` and `Retry-After`, before any account
   lookup or bcrypt, and it is not counted. A count with no attempt for 24
   hours starts over.
-- **Never a lockout.** A browser with the cookie is counted only under its
-  own subject, so guesses from elsewhere never hold it out, whatever the
-  address. A completed password reset and an accepted invite count as proof
-  of the account, like the right password: each clears the email's count
-  and this address's count, and marks the browser. So an owner held out on
-  a new browser can always get back in by resetting from it. The cookie
-  never replaces the password, so it is not the "trusted-device remember-me"
-  that ADR-095 rules out.
+- **No lockout, and a way back in.** A browser with the cookie is counted
+  only under its own subject, so guesses from elsewhere do not slow it,
+  whatever the address. A completed password reset and an accepted invite
+  prove the inbox: each marks the browser and clears this address's count.
+  So a person held out on a new browser gets back in by resetting from it,
+  when email is set up (`SMTP_HOST` and `DASHBOARD_BASE_URL`). Without
+  email, the way back in is a known browser, or an operator running
+  `DELETE FROM login_throttle;`. The cookie never replaces the password, so
+  it is not the "trusted-device remember-me" that ADR-095 rules out.
+- **What a sign-in clears.** The right password clears this address's
+  count. It clears the email's count only when the attempt was counted
+  under it, that is, from a new browser. NIST SP 800-63B-4 §3.2.2 says a
+  success should reset the failure count, and without the reset a private
+  window or a script with no cookie jar would pile up waits. Such a sign-in
+  cannot end a running wait, because during one the attempt is refused. A
+  sign-in from a known browser, a reset and an invite accept leave the
+  email's count running. Clearing it there would end other people's wait
+  early, which tells a guesser that the email has an account and gives them
+  new guesses.
 - **No enumeration.** Subjects are keyed on the typed email, trimmed and
   lower-cased, and checked before the account lookup. An email with no
   account is counted and answered exactly like a real one.
 - **Storage.** Postgres only, on the database clock, so every replica shares
-  one count and Redis plays no part. The per-IP Redis limiter stays as the
-  outer layer, unchanged. Each subject is an HMAC whose key HKDF derives from
+  one count and Redis plays no part. The per-address `/v1/auth` limiter
+  stays as the outer layer. It counts in Redis, and in each server process
+  when Redis is down (ADR-095 amendment of the same date). Each subject is an HMAC whose key HKDF derives from
   `VELOX_ENCRYPTION_KEY`, so the table holds no email, address or cookie
   value. The leader deletes rows with no attempt for 24 hours, no running
   wait, and no sign-in from that browser for 180 days.
@@ -301,20 +313,39 @@ recommends for this problem.
 - **Logs and metrics.** The failed-login line no longer holds the typed
   email. It holds the first 12 characters of the email's subject and, when
   the email has an account, the user id. `velox_auth_login_total{outcome}`
-  counts `ok`, `bad_credentials`, `throttled` and `error`.
+  counts `ok`, `bad_credentials`, `throttled`, `refused` (the right
+  password from a user who cannot sign in, such as a removed member) and
+  `error` (a server failure).
 
 **The bound.** After the 10th attempt, about 100 guesses a day reach the
-password check for one email from new browsers, over all addresses. That is
-the NIST SP 800-63B §5.2.2 limit on failed attempts for one account, met by
-rate rather than by a lock.
+password check for one email from new browsers, over all addresses, with no
+cap. NIST SP 800-63B-4 §3.2.2 caps failures in a row at 100 and then
+disables the password until it is bound again. Velox does not lock, by
+decision: a lock lets anyone who knows an email hold its owner out.
 
 **What stays open:**
 
 - **A new browser can be held out.** While guesses keep the email's count in
   a wait, a browser that never signed in to it waits too, from any address.
   The way back in is a known browser, a password reset from the new browser
-  (which needs email), or an operator clearing the table
-  (`DELETE FROM login_throttle;`, which holds only counters).
+  (which needs `SMTP_HOST` and `DASHBOARD_BASE_URL`), or an operator
+  clearing the table (`DELETE FROM login_throttle;`, which holds only
+  counters).
+- **A sign-in from a new browser resets the email's count.** A guesser who
+  counts their own attempts can notice that reset between two waits, which
+  shows the email has an account. It needs the person to sign in from a new
+  browser in the gap between the guesser's waits.
+- **The `velox_device` value is kept across sign-ins.** A sign-in reuses a
+  well-formed cookie the browser sends, so one browser stays known for every
+  email it signed in to. The cost: someone who can plant the cookie in a
+  person's browser before that person signs in gets a second allowance of
+  about 100 guesses a day on that email. A new value at every sign-in would
+  close this, but a browser signed in to two emails would then stay known
+  for only the last one.
+- **A browser stays known after a password reset.** Someone who signed in
+  with a stolen password keeps their browser known, with its own allowance,
+  against the new password. Forgetting every browser at a reset needs a
+  column that links browser rows to the email.
 - **`TRUST_PROXY` still matters.** If every request appears to come from the
   load balancer, the address × email count becomes a per-email count at
   threshold 5 for every new browser. Known browsers are unaffected.

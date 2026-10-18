@@ -229,17 +229,19 @@ These close a period at once, with no grace: an immediate cancel, `POST /v1/subs
 
 ## Repeated wrong passwords
 
-Velox slows down anyone who guesses passwords at the dashboard sign-in. It never locks an account. It needs no setup and no Redis: the count is kept in Postgres, so every copy of the server shares it.
+Velox slows down anyone who guesses passwords at the dashboard sign-in, instead of locking the account. It needs no setup and no Redis: the count is kept in Postgres, so every copy of the server shares it.
 
 - **One address and one email:** the first 5 wrong passwords are checked as usual. After that, each try waits 1 minute, then 2, 4 and 8, then 15 minutes.
 - **One email from many addresses:** the same waits start after 10 tries in total. This stops guesses spread over many addresses.
-- **A browser that signed in before is never held out.** A sign-in leaves a `velox_device` cookie in the browser. Its tries count only against that browser, so other people's guesses do not slow it.
-- **The right password clears the email's count,** and the count for the address it came from. A completed password reset and an accepted invite do the same.
+- **A browser that signed in before is not slowed by other people's guesses.** A sign-in leaves a `velox_device` cookie in the browser. Its tries count only against that browser.
+- **A new browser waits while the guessing goes on.** While someone keeps guessing at an email, every browser that never signed in with it waits too, from any address.
+- **The right password clears the count for its address.** From a new browser it also clears the email's count. From a browser that signed in before, it leaves the email's count running, so a sign-in never ends someone else's wait early.
+- **A completed password reset and an accepted invite** mark the browser, which can then sign in during a wait.
 - **The answer is the same whether or not the email has an account,** so a wait tells no one which emails exist.
 
 During a wait the sign-in page says "Too many sign-in attempts. Try again in N minutes." A count with no try for 24 hours starts over. The count uses the client address, so set `TRUST_PROXY` correctly (see [Settings](#settings)).
 
-If a team member is held out on a new browser, they can sign in from a browser they used before, or reset their password from the new one. To clear every count, see [Sign-in says "Too many sign-in attempts"](ops/runbook/sign-in-throttled.md).
+If a team member is held out on a new browser, they can sign in from a browser they used before. Or they can reset their password from the new browser, which then signs in. A reset needs email set up (`SMTP_HOST` and `DASHBOARD_BASE_URL`). Without email, run `DELETE FROM login_throttle;` in `psql` to clear every count; see [Sign-in says "Too many sign-in attempts"](ops/runbook/sign-in-throttled.md).
 
 ## How much load it takes
 

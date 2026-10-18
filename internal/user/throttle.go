@@ -21,7 +21,7 @@ import (
 )
 
 // The sign-in throttle (ADR-094, amended 2026-10-18). It slows repeated
-// wrong passwords and never locks an account.
+// wrong passwords instead of locking the account.
 //
 // Every sign-in attempt is counted before the password is checked, under one
 // or two subjects:

@@ -19,12 +19,15 @@ address for one email. It also starts at the 10th try for one email from
 any address, counting only browsers that never signed in to it. A count
 with no try for 24 hours starts over.
 
-The wait never locks the account:
+The wait does not lock the account:
 
 - A browser that signed in to the email before counts on its own, so other
   people's guesses do not slow it.
-- A completed password reset clears the count and marks the browser that
-  completed it.
+- A completed password reset marks the browser that completed it, and that
+  browser can then sign in during the wait.
+
+A browser that never signed in to the email waits for as long as someone
+keeps guessing.
 
 Two causes are common:
 
@@ -52,9 +55,10 @@ Two causes are common:
 - **Sign in from a browser used before.** Guesses from elsewhere do not slow
   it.
 - **Or reset the password from the browser you want to use.** This needs
-  email. The reset clears the count, and that browser can then sign in.
-- **If you know the tries were not an attack, clear every count.** The table
-  holds only counters, no account data. Run it in `psql`:
+  email set up (`SMTP_HOST` and `DASHBOARD_BASE_URL`). The reset marks that
+  browser, and it can then sign in.
+- **Without email, or if you know the tries were not an attack, clear every
+  count.** The table holds only counters, no account data. Run it in `psql`:
 
   ```sql
   DELETE FROM login_throttle;

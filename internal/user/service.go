@@ -175,7 +175,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (domain.User, error) {
 // On success: stamps last_login_at.
 //
 // There is no account-lock check, and there never is: the sign-in throttle
-// (throttle.go) slows guesses before this runs and never locks an account
+// (throttle.go) slows guesses before this runs and does not lock an account
 // (ADR-094). An account under active attack is handled by password reset /
 // session revocation, not by refusing login.
 func (s *Service) Authenticate(ctx context.Context, email, plaintext string) (domain.User, []domain.UserTenant, error) {
