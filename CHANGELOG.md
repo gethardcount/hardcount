@@ -20,6 +20,7 @@ original text.
 
 ### Changed
 
+- **A misspelled key in a bundled recipe now fails CI and stops Velox at startup (2026-10-18).** For contributors: before, a key such as `base_bill_timming` was skipped without a word, so the plan quietly billed in arrears. The three bundled recipes load unchanged.
 - **`make test` no longer reads `.env` (2026-10-18).** For contributors: only `make run`, `dev`, `migrate`, `migrate-status` and `bootstrap` load it, so tests see the same settings as CI. `make test-unit` runs packages in parallel (about 30 s, was 60 s). The unused `test-integration` and `test-verbose` targets are gone. ([#1207](https://github.com/getvelox/velox/pull/1207))
 - **ADRs 001–061 all open with a short Summary (2026-10-18).** Forty-six records gained one, giving the current rule and status, including what later ADRs changed. The records below each Summary are unchanged. Fourteen status lines now name their dated amendment or partial supersession. See the [ADR index](docs/adr/README.md).
 - **Go tests now walk five untested backend flows over HTTP on a real database (2026-10-18).** Contributors: `internal/api` has new journeys for API keys (create, use, revoke, rotate), offline payments and signed Stripe webhooks, the update-payment link, dunning-policy delete, and whoami, the mode switch and the reset-link check. ([#1204](https://github.com/getvelox/velox/pull/1204))
