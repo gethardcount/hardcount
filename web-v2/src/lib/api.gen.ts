@@ -13885,7 +13885,7 @@ export interface operations {
                      * @default admin@velox.local
                      */
                     owner_email?: string;
-                    /** @description 12 or more characters, at most 72 bytes. Omit to have Velox generate one. */
+                    /** @description 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Velox generate one. */
                     owner_password?: string;
                 };
             };

@@ -15,6 +15,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/user/breachedpw"
 )
 
 // Service is the auth-side surface for user accounts. ADR-011.
@@ -56,28 +57,8 @@ const (
 	PasswordResetTokenTTL = 1 * time.Hour
 )
 
-// commonPasswords is a hand-picked stub of 10 guessable passwords
-// (lower-cased; matched case-insensitively). ValidatePassword rejects
-// them when a password is set (bootstrap, reset, invite accept). Three
-// entries are shorter than MinPasswordLength, so the length check
-// already refuses them. It is NOT a breached-password list:
-// "Password1234" and "Nimbus@2026!" pass. Replacing it with an embedded
-// top-N breached set is the open Phase-0 item in ADR-095.
-var commonPasswords = map[string]struct{}{
-	"password":       {},
-	"password123":    {},
-	"123456789012":   {},
-	"qwertyuiopasdf": {},
-	"administrator":  {},
-	"changeme123":    {},
-	"letmein12345":   {},
-	"iloveyou1234":   {},
-	"welcome12345":   {},
-	"admin12345678":  {},
-}
-
 // HashPassword applies bcrypt to a candidate plaintext. Validates
-// length and common-password-list before hashing. Returns the hash
+// length and the breached-password list before hashing. Returns the hash
 // suitable for `users.password_hash`.
 func HashPassword(plaintext string) (string, error) {
 	if err := ValidatePassword(plaintext); err != nil {
@@ -108,7 +89,11 @@ func ValidatePassword(plaintext string) error {
 		// bytes: an accented letter is 2 in UTF-8, most other scripts 3.
 		return errs.Invalid("password", "is too long. Use at most 72 characters; accented and non-Latin letters count as two or more")
 	}
-	if _, blocked := commonPasswords[strings.ToLower(plaintext)]; blocked {
+	// The embedded breached-password list (ADR-095 Phase 0(a)): about
+	// 30,000 passwords of 12 or more characters from the top million of a
+	// breach corpus, matched in any letter case. Checked only when a
+	// password is set (bootstrap, reset, invite accept), never at login.
+	if breachedpw.Contains(plaintext) {
 		return errs.Invalid("password",
 			"is one of the most common passwords. Pick a different one")
 	}

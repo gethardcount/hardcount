@@ -54,7 +54,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [011](011-email-password-auth-and-clean-api-keys.md) | 2026-05-01 | Accepted (amended) | Auth & security | Dashboard signs in with email and password; API keys serve only SDK and curl callers |
 | [012](012-day-grade-calendar-billing.md) | 2026-05-01 | Accepted (amended) | Billing | Billing periods start and end at tenant-timezone midnight; a day is the smallest unit |
 | [013](013-invoice-attention-collection-state.md) | 2026-05-01 | Accepted | Invoices | Attention reports a missing payment method apart from an invoice that is awaiting payment |
-| [014](014-sso-direction-embedded-oidc-saml.md) | 2026-05-02 | Accepted | Auth & security | When SSO is needed, embed OIDC and SAML libraries in-process; keep passwords homegrown |
+| [014](014-sso-direction-embedded-oidc-saml.md) | 2026-05-02 | Accepted (amended) | Auth & security | When SSO is needed, embed OIDC and SAML libraries in-process; keep passwords homegrown |
 | [015](015-test-clock-async-catchup.md) | 2026-05-04 | Accepted | Test clocks & simulated time | Advancing a test clock returns at once; a background worker runs the catch-up |
 | [016](016-test-clock-soft-delete.md) | 2026-05-04 | Superseded by ADR-086 | Test clocks & simulated time | Deleting a test clock soft-deletes it and cancels its pinned subscriptions |
 | [017](017-tax-retry-and-auto-finalize.md) | 2026-05-04 | Accepted | Tax | A background job retries failed tax calculation and finalizes the invoice when it succeeds |
@@ -134,7 +134,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [092](092-split-billing-timezone-from-display.md) | 2026-07-14 | Proposed | Timezones | Split the billing timezone from the display timezone; deferred until a partner needs it |
 | [093](093-csrf-origin-verification.md) | 2026-07-16 | Accepted | Auth & security | State-changing cookie requests must come from the same site, checked by origin headers |
 | [094](094-login-brute-force-throttle.md) | 2026-07-17 | Accepted (amended) | Auth & security | v1 has no login lockout; a throttle, MFA and breached-password check are designed, deferred |
-| [095](095-login-security-roadmap-and-mfa.md) | 2026-07-17 | Accepted (amended) | Auth & security | TOTP MFA and an offline breached-password check must ship before first deployment; neither is built |
+| [095](095-login-security-roadmap-and-mfa.md) | 2026-07-17 | Accepted (amended) | Auth & security | TOTP MFA must ship before first deployment and is not built; the offline breached-password check shipped 2026-10-18 |
 | [096](096-unpriced-meter-plan-attach-guard.md) | 2026-07-18 | Accepted (amended) | Pricing & usage | Plans attach only priced meters; a billing meter's last price cannot be removed |
 | [097](097-mid-period-scheduled-cancel-fires-as-immediate-cancel.md) | 2026-07-18 | Accepted (amended) | Subscriptions | A scheduled cancel that falls mid-period fires as an immediate cancel at that time |
 | [098](098-postmark-delivery-webhook-ingestion.md) | 2026-07-19 | Accepted | Integrations | Ingest Postmark delivery, bounce and spam-complaint webhooks; ignore opens and clicks |

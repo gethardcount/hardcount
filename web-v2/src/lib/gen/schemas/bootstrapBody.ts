@@ -15,7 +15,7 @@ export type BootstrapBody = {
   /** Must contain `@`. */
   owner_email?: string;
   /**
-     * 12 or more characters, at most 72 bytes. Omit to have Velox generate one.
+     * 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Velox generate one.
      * @minLength 12
      */
   owner_password?: string;

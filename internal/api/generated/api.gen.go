@@ -5325,7 +5325,7 @@ type BootstrapJSONBody struct {
 	// OwnerEmail Must contain `@`.
 	OwnerEmail string `json:"owner_email,omitempty"`
 
-	// OwnerPassword 12 or more characters, at most 72 bytes. Omit to have Velox generate one.
+	// OwnerPassword 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Velox generate one.
 	OwnerPassword string `json:"owner_password,omitempty"`
 	TenantName    string `json:"tenant_name,omitempty"`
 

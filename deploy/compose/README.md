@@ -89,7 +89,7 @@ curl -X POST http://localhost/v1/bootstrap \
   -d '{"tenant_name":"Acme","owner_email":"you@example.com","owner_password":"a-strong-password-12ch"}'
 ```
 
-The email and password are optional. Without them the owner is `admin@velox.local`, with a generated password. A password needs at least 12 characters.
+The email and password are optional. Without them the owner is `admin@velox.local`, with a generated password. A password needs at least 12 characters, and Velox refuses common passwords from leaked-password lists.
 
 **Save the reply. It is shown once.** Velox stores only hashes, so none of it can be recovered later. It contains:
 

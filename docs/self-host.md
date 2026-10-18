@@ -69,7 +69,7 @@ VELOX_BOOTSTRAP_EMAIL=you@example.com VELOX_BOOTSTRAP_PASSWORD=change-me-please1
 make dev
 ```
 
-The email and password are optional. Without them, the owner is `admin@velox.local` and bootstrap prints a generated password. A password needs at least 12 characters.
+The email and password are optional. Without them, the owner is `admin@velox.local` and bootstrap prints a generated password. A password needs at least 12 characters, and Velox refuses common passwords from leaked-password lists.
 
 You now have:
 

@@ -169,7 +169,7 @@ Already-existing Redis rate limiter gets a new key shape: `auth:login:<email_low
 - Minimum 12 characters
 - No maximum (avoid the bcrypt 72-byte cliff by pre-hashing if needed; bcrypt accepts up to 72 bytes which covers 12-char passwords by orders of magnitude)
 - No required-character classes (NIST SP 800-63B says these reduce security)
-- Reject the most-common-1000 password list (built into the validator) *(Never built: the validator holds a 10-entry stub. See the [amendment](#amendment-2026-10-18-the-common-password-list-has-10-entries).)*
+- Reject the most-common-1000 password list (built into the validator) *(Never built: the validator held a 10-entry stub until the breached-password list of ADR-095 replaced it on 2026-10-18. See the [amendment](#amendment-2026-10-18-the-common-password-list-has-10-entries).)*
 
 ### Email infrastructure for password reset
 
@@ -292,3 +292,5 @@ Per `feedback_pre_launch_scoping`:
 "Password complexity" above says the validator rejects the most-common-1000 password list. It never did. `commonPasswords` in `internal/user/service.go` holds 10 hand-picked entries, and three of them are shorter than the 12-character minimum, so the length check already refuses them. The code comment called it a top-1000 list from a breach corpus, which was also false; it is corrected in the same change.
 
 A longer common list would add little: most of a top-1000 list is shorter than 12 characters. The real fix is the embedded breached-password set in [ADR-095](095-login-security-roadmap-and-mfa.md), still an open item before the first deployment. Found by the build-vs-library audit of 2026-10-17.
+
+Later the same day the embedded breached-password list in [ADR-095](095-login-security-roadmap-and-mfa.md#amendment-2026-10-18-the-breached-password-list-shipped) replaced the stub (#PRNUM).

@@ -78,6 +78,7 @@ Fixes before the first partner installs. Long invoice PDFs go onto more pages, a
 
 ### Security
 
+- **Setting a password now refuses common leaked passwords (2026-10-18).** Bootstrap, password reset and invite accept refuse about 30,000 passwords of 12 or more characters, such as `Password1234`, in any letter case. Passwords already set still work. Before upgrading, check that scripts which bootstrap or reset with a fixed password do not use one. ([#PRNUM](https://github.com/getvelox/velox/pull/PRNUM))
 - **Dashboard sign-ins record the real client address (2026-10-18).** A login or invite accept stored the first `X-Forwarded-For` entry, which any client can write, in `dashboard_sessions.ip`. It now stores the address `TRUST_PROXY` resolves, the same one the audit log and rate limits use. Nothing reads this column yet. ([#1203](https://github.com/getvelox/velox/pull/1203))
 
 ## [0.8.1] - 2026-10-17
