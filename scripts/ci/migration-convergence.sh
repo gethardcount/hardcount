@@ -52,12 +52,13 @@ docker pull -q "$POSTGRES16_IMAGE" >/dev/null
 docker pull -q "$POSTGRES14_IMAGE" >/dev/null
 docker pull -q "$VELOX_V081_IMAGE" >/dev/null
 
-# start_pg NAME PORT IMAGE SETUP: starts Postgres for one role setup on a
-# host port. The roles exist when it returns. Callers add NAME to
+# start_pg NAME IMAGE SETUP: starts Postgres for one role setup on a host
+# port Docker picks (a fixed port can already be taken on the runner), and
+# sets PG_PORT to it. The roles exist when it returns. Callers add NAME to
 # CONTAINERS first: this runs in the caller's shell, not a subshell.
 start_pg() {
-  local name=$1 port=$2 image=$3 setup=$4
-  local args=(-d --name "$name" -p "127.0.0.1:$port:5432")
+  local name=$1 image=$2 setup=$3
+  local args=(-d --name "$name" -p "127.0.0.1::5432")
   case "$setup" in
     compose)
       args+=(-e POSTGRES_USER=velox -e POSTGRES_PASSWORD=velox -e POSTGRES_DB=velox
@@ -69,6 +70,9 @@ start_pg() {
       args+=(-e POSTGRES_USER=velox -e POSTGRES_PASSWORD=velox -e POSTGRES_DB=velox) ;;
   esac
   docker run "${args[@]}" "$image" >/dev/null
+  PG_PORT=$(docker port "$name" 5432/tcp | head -1)
+  PG_PORT=${PG_PORT##*:}
+  [ -n "$PG_PORT" ] || fail "$name has no host port"
   local user=velox
   [ "$setup" = managed ] && user=postgres
   for _ in $(seq 1 60); do
@@ -145,10 +149,10 @@ check_leases() {
 converge() {
   local setup=$1
   say "setup $setup"
-  local a="mig-$setup-a" b="mig-$setup-b" pa=$2 pb=$3
+  local a="mig-$setup-a" b="mig-$setup-b" pa pb
   CONTAINERS+=("$a" "$b")
-  start_pg "$a" "$pa" "$POSTGRES16_IMAGE" "$setup"
-  start_pg "$b" "$pb" "$POSTGRES16_IMAGE" "$setup"
+  start_pg "$a" "$POSTGRES16_IMAGE" "$setup"; pa=$PG_PORT
+  start_pg "$b" "$POSTGRES16_IMAGE" "$setup"; pb=$PG_PORT
   local ua ub
   ua=$(dsn "$setup" "$pa"); ub=$(dsn "$setup" "$pb")
 
@@ -201,9 +205,9 @@ converge() {
 
 restore_drill() {
   say "restore drill: a v0.8.1 backup restored over a database HEAD took over"
-  local c=mig-restore port=55437 url before after out
+  local c=mig-restore port url before after out
   CONTAINERS+=("$c")
-  start_pg "$c" "$port" "$POSTGRES16_IMAGE" compose
+  start_pg "$c" "$POSTGRES16_IMAGE" compose; port=$PG_PORT
   url=$(dsn compose "$port")
   v081_migrate "$url"
   DATABASE_URL="$url" BACKUP_DIR="$WORK/backups" \
@@ -232,18 +236,18 @@ restore_drill() {
 
 pg14() {
   say "Postgres 14: HEAD applies"
-  local c=mig-pg14 port=55438 url
+  local c=mig-pg14 port url
   CONTAINERS+=("$c")
-  start_pg "$c" "$port" "$POSTGRES14_IMAGE" compose
+  start_pg "$c" "$POSTGRES14_IMAGE" compose; port=$PG_PORT
   url=$(dsn compose "$port")
   head_velox "$url" migrate
   head_velox "$url" migrate status | tee "$OUT/pg14-status.txt"
   grep -q 'up to date, nothing to apply' "$OUT/pg14-status.txt" || fail "postgres 14: status is not up to date"
 }
 
-converge compose 55431 55432
-converge managed 55433 55434
-converge citest 55435 55436
+converge compose
+converge managed
+converge citest
 restore_drill
 pg14
 say "migrations: all checks passed"
