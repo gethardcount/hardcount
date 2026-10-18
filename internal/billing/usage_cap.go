@@ -38,8 +38,10 @@ import (
 //
 // After a spend-threshold invoice (ADR-066) the windows are counted before the
 // threshold clamp, so the total includes the usage that invoice billed while
-// the close bills only what is left. The threshold invoice is not capped; that
-// is the registered "usage caps with thresholds" gap.
+// the close bills only what is left. Sum and count usage then bills from
+// separate reads of the clamped windows, so the same-reads guarantee above
+// does not cover it. The threshold invoice is not capped; that is the
+// registered "usage caps with thresholds" gap.
 
 // capQuantityPlaces is the scale of invoice_line_items.quantity_decimal.
 const capQuantityPlaces = 12
