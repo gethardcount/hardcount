@@ -109,7 +109,7 @@ type PaymentBlock struct {
 // Neither is pre-built here. Speculative parameters for a parked design are how
 // the ledger reached 1,900 lines in the first place.
 func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
-	if !inv.PaymentStatus.IsInFlight() {
+	if !inv.PaymentInFlight() {
 		return PaymentBlock{}
 	}
 

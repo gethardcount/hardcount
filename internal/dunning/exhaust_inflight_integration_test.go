@@ -22,7 +22,7 @@ import (
 )
 
 // Dunning's final action must never fire while a payment on the invoice may
-// still take money (#976 PR 2, ADR-112 amendment 2026-10-18). Canceling a
+// still take money (#976 PR 2, ADR-112 amendment 2026-10-19). Canceling a
 // subscription cannot be undone, and canceling one whose payment then succeeds
 // is the outcome this pins against.
 //

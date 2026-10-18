@@ -40,6 +40,10 @@ Find the attempt in Stripe by customer, amount and approximate time.
 3. If nothing was charged, mark the invoice uncollectible. This is the only
    action the invoice page offers. It also releases the invoice's deferred
    clawback draft and closes its dunning run.
+4. After a write-off in step 2 or 3, check the customer's dunning policy. If
+   it cancels or pauses the subscription when retries run out, do that by
+   hand on the subscription page. Dunning holds its final action while a
+   payment may be in flight, so the write-off closes the run without it.
 
 ## Verify
 
