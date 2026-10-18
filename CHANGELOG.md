@@ -26,6 +26,7 @@ original text.
 - **`velox migrate force` is removed, and `velox migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade ([Going back](docs/production-one-vm.md#going-back)).
 - **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, Velox refuses to start and says why.
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
+- **A password on the built-in leaked-password list is refused when it is set ([#1222](https://github.com/getvelox/velox/pull/1222)).** Passwords already in use keep working. If a script bootstraps or resets with a fixed password, check that it still works; a refused password gets a 422.
 
 ### Added
 
@@ -78,7 +79,7 @@ Fixes before the first partner installs. Long invoice PDFs go onto more pages, a
 
 ### Security
 
-- **Setting a password now refuses common leaked passwords (2026-10-18).** Bootstrap, password reset and invite accept refuse about 30,000 passwords of 12 or more characters, such as `Password1234`, in any letter case. Passwords already set still work. Before upgrading, check that scripts which bootstrap or reset with a fixed password do not use one. ([#1222](https://github.com/getvelox/velox/pull/1222))
+- **Setting a password now refuses common leaked passwords (2026-10-18).** Bootstrap, password reset and invite accept refuse about 30,000 passwords of 12 or more characters, such as `Password1234`, in any letter case. Passwords already set still work. ([#1222](https://github.com/getvelox/velox/pull/1222))
 - **Dashboard sign-ins record the real client address (2026-10-18).** A login or invite accept stored the first `X-Forwarded-For` entry, which any client can write, in `dashboard_sessions.ip`. It now stores the address `TRUST_PROXY` resolves, the same one the audit log and rate limits use. Nothing reads this column yet. ([#1203](https://github.com/getvelox/velox/pull/1203))
 
 ## [0.8.1] - 2026-10-17
