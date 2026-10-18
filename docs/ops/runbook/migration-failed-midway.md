@@ -12,7 +12,11 @@ each kind of error.
 ## Before anything else
 
 1. Make sure only one copy of Velox is trying to start. With Docker Compose,
-   stop the API, because it restarts every few seconds while it refuses:
+   stop the API. It restarts every few seconds while it refuses, and with
+   `RUN_MIGRATIONS_ON_BOOT=true` every restart runs the failed migration
+   again from the start. A slow one, such as an index build or a data
+   change on a large table, then loads the database on every restart until
+   you stop it:
 
    ```bash
    docker compose stop velox-api
@@ -124,6 +128,20 @@ schema is present, and changes nothing.
 
 **Fix:** pick the case.
 
+- **`goose_db_version` says 180, and the record says version 180,
+  dirty=false, without the comment.** The comment was lost: a copy tool
+  left comments out (`pg_dump --no-comments`, some database migration
+  services), or a v0.8.x backup was restored over a database still at 180.
+  Either way the tables are v0.8.1's, at the 180 both records name. Put the
+  comment back, then start this release:
+
+  ```sql
+  COMMENT ON TABLE public.schema_migrations IS 'velox: frozen at 180; the migration record moved to public.goose_db_version';
+  ```
+
+  This case is only for `goose_db_version` at 180. Above 180, newer
+  migrations changed tables a v0.8.x backup does not have: see the next
+  case.
 - **A v0.8.x backup was restored over this database.** `scripts/restore.sh`
   replaces only the objects in the backup. It leaves `goose_db_version` and
   any table a newer migration created. Restore the backup into an **empty**
