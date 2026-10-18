@@ -8,6 +8,7 @@ package billing
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -70,10 +71,10 @@ func wantNoteWindow(t *testing.T, r auditRow, meterID string, from, to time.Time
 	if !ok {
 		t.Fatalf("row has no entry for %s", meterID)
 	}
-	if got, want := m["from"], from.UTC().Format(time.RFC3339); got != want {
+	if got, want := m["from"], from.UTC().Format(time.RFC3339Nano); got != want {
 		t.Errorf("%s from = %v, want %s (the window the invoice priced)", meterID, got, want)
 	}
-	if got, want := m["to"], to.UTC().Format(time.RFC3339); got != want {
+	if got, want := m["to"], to.UTC().Format(time.RFC3339Nano); got != want {
 		t.Errorf("%s to = %v, want %s", meterID, got, want)
 	}
 }
@@ -356,36 +357,40 @@ func capTokensMeter(pricing *mockPricing, usage *mockUsage) {
 
 // A block usage cap totals what the invoice bills. A meter priced by pricing
 // rules bills its buckets, so its bucket below zero counts as 0 in the cap's
-// total too. Taking the meter's total (+100) instead put the scale at 80/100
-// and billed 120 tokens against a cap of 80.
+// total too. Taking the meter's total (+100) instead billed 120 tokens
+// against a cap of 80 (scale 80/100), and all 150 against a cap of 120 (the
+// total was under it, so the cap never applied).
 func TestRunCycle_NetNegativeBucket_UsageCapCountsWhatBills(t *testing.T) {
-	engine, subs, usage, pricing, invoices := setupEngine()
-	aud := &fakeEngineAudit{}
-	engine.SetAuditLogger(aud)
-	sub := subs.subs["sub_1"]
-	capUnits := int64(80)
-	sub.UsageCapUnits = &capUnits
-	sub.OverageAction = "block"
-	subs.subs["sub_1"] = sub
-	plan := pricing.plans["pln_1"]
-	plan.MeterIDs = []string{"mtr_tok"}
-	pricing.plans["pln_1"] = plan
-	usage.totals = map[string]int64{}
-	capTokensMeter(pricing, usage)
+	for _, capUnits := range []int64{80, 120} {
+		t.Run(fmt.Sprintf("cap %d", capUnits), func(t *testing.T) {
+			engine, subs, usage, pricing, invoices := setupEngine()
+			aud := &fakeEngineAudit{}
+			engine.SetAuditLogger(aud)
+			sub := subs.subs["sub_1"]
+			sub.UsageCapUnits = &capUnits
+			sub.OverageAction = "block"
+			subs.subs["sub_1"] = sub
+			plan := pricing.plans["pln_1"]
+			plan.MeterIDs = []string{"mtr_tok"}
+			pricing.plans["pln_1"] = plan
+			usage.totals = map[string]int64{}
+			capTokensMeter(pricing, usage)
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
-		t.Fatalf("RunCycle errors: %v", errs)
-	}
-	qty, amount := meterBilled(invoices.lineItems, "mtr_tok")
-	if !qty.Round(6).Equal(decimal.NewFromInt(80)) || amount != 80 {
-		t.Errorf("block cap 80: tokens billed %s for %d¢, want 80 for 80¢", qty, amount)
-	}
-	rows := netNegativeRows(t, aud)
-	if len(rows) != 1 {
-		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
-	}
-	if got := noteMeters(t, rows[0]); got["mtr_tok"] != "-50" {
-		t.Errorf("meters = %v, want mtr_tok: -50 (the cap does not scale usage below zero)", got)
+			if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+				t.Fatalf("RunCycle errors: %v", errs)
+			}
+			qty, amount := meterBilled(invoices.lineItems, "mtr_tok")
+			if !qty.Round(6).Equal(decimal.NewFromInt(capUnits)) || amount != capUnits {
+				t.Errorf("block cap %d: tokens billed %s for %d¢, want %d for %d¢", capUnits, qty, amount, capUnits, capUnits)
+			}
+			rows := netNegativeRows(t, aud)
+			if len(rows) != 1 {
+				t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+			}
+			if got := noteMeters(t, rows[0]); got["mtr_tok"] != "-50" {
+				t.Errorf("meters = %v, want mtr_tok: -50 (the cap does not scale usage below zero)", got)
+			}
+		})
 	}
 }
 
@@ -637,4 +642,17 @@ func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing
 		t.Errorf("meters = %v, want mtr_api: -40 (the cap does not scale usage below zero)", got)
 	}
 	wantNoteWindow(t, rows[0], "mtr_api", fireEnd, cancelAt)
+}
+
+// A meter below zero in two windows (a mid-period plan change) is one entry:
+// the sum of its quantities, and the window that spans them.
+func TestNetNegativeUsage_AddSpansWindows(t *testing.T) {
+	d := func(day int) time.Time { return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC) }
+	n := netNegativeUsage{}
+	n.add("mtr_api", "api_calls", decimal.NewFromInt(-20), d(15), d(31))
+	n.add("mtr_api", "api_calls", decimal.NewFromInt(-30), d(1), d(10))
+	m := n["mtr_api"]
+	if !m.qty.Equal(decimal.NewFromInt(-50)) || !m.from.Equal(d(1)) || !m.to.Equal(d(31)) {
+		t.Errorf("entry = %s over [%s, %s), want -50 over [%s, %s)", m.qty, m.from, m.to, d(1), d(31))
+	}
 }

@@ -866,7 +866,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	expected := subscription.SnapshotOf(sub)
 	belowZero := netNegativeUsage{}
 	for _, b := range eval.BelowZero {
-		belowZero.add(b.MeterID, b.MeterKey, b.Quantity)
+		belowZero.add(b.MeterID, b.MeterKey, b.Quantity, periodStart, now) // the window the fire priced
 	}
 	var inv domain.Invoice
 	err = e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {

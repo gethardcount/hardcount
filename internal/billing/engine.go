@@ -2495,9 +2495,17 @@ func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscripti
 	// constraint. Cap stays integer (UsageCapUnits int64) because operators
 	// author it as a whole-unit ceiling; per-meter quantities are decimal
 	// and prorated proportionally if the cap fires.
-	// A meter below zero bills 0 (#1193), so the cap neither counts nor
-	// scales it.
+	// The cap totals what the invoice bills (#1193): a meter below zero bills
+	// 0, so the cap neither counts nor scales it, and a pricing-rule meter
+	// counts its buckets above zero (capUsageTotals). Such a meter's entry is
+	// then that sum: only the cap reads it, since the close prices the meter
+	// from its buckets, and buildLineItems re-derives the scale only when the
+	// scaled entries sum to the cap.
 	if sub.UsageCapUnits != nil && *sub.UsageCapUnits > 0 && sub.OverageAction == "block" {
+		usageTotals, err = e.capUsageTotals(ctx, sub, meterAggs, usageTotals, periodStart, periodEnd)
+		if err != nil {
+			return nil, "", nil, nil, fmt.Errorf("usage cap totals: %w", err)
+		}
 		totalUsage := billableUsageTotal(usageTotals)
 		capDec := decimal.NewFromInt(*sub.UsageCapUnits)
 		if totalUsage.GreaterThan(capDec) {
@@ -2794,6 +2802,10 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 				// billed a block-capped customer for every unit.
 				return nil, 0, nil, fmt.Errorf("re-aggregate usage for the cap scale: %w", err)
 			}
+			preCapTotals, err = e.capUsageTotals(ctx, sub, meterAggs, preCapTotals, periodStart, periodEnd)
+			if err != nil {
+				return nil, 0, nil, fmt.Errorf("usage cap totals for the cap scale: %w", err)
+			}
 			preCapTotal := billableUsageTotal(preCapTotals)
 			if preCapTotal.GreaterThan(capDec) && !preCapTotal.IsZero() {
 				capScale = capDec.Div(preCapTotal)
@@ -2939,7 +2951,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 						slog.Warn("cycle: usage below zero after corrections — billed as 0",
 							"meter", meter.Key, "quantity", qty.String(),
 							"subscription_id", sub.ID)
-						belowZero.add(meterID, meter.Key, qty)
+						belowZero.add(meterID, meter.Key, qty, ivStart, ivEnd)
 						continue
 					}
 					if ratingRuleID == "" {
@@ -3022,7 +3034,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 				slog.Warn("cycle: usage below zero after corrections — billed as 0",
 					"meter", meter.Key, "quantity", quantity.String(),
 					"subscription_id", sub.ID)
-				belowZero.add(meterID, meter.Key, quantity)
+				belowZero.add(meterID, meter.Key, quantity, ivStart, ivEnd)
 				continue
 			}
 
@@ -4060,12 +4072,17 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	// multi-dim branches below, whose aggregations return raw quantities.
 	// Pre-fix the cancel path billed raw above-cap usage that cycle close
 	// would have capped — overbilling "block"-capped subs on cancel.
-	// A meter below zero bills 0 (#1193), so the cap neither counts nor
-	// scales it.
+	// The cap totals what the invoice bills (#1193): a meter below zero
+	// bills 0, so the cap neither counts nor scales it, and a pricing-rule
+	// meter counts its buckets above zero (capUsageTotals).
 	capScale := decimal.New(1, 0)
 	capOne := decimal.New(1, 0)
 	if sub.UsageCapUnits != nil && *sub.UsageCapUnits > 0 && sub.OverageAction == "block" {
-		totalUsage := billableUsageTotal(usageTotals)
+		capTotals, err := e.capUsageTotals(ctx, sub, meterAggs, usageTotals, periodStart, canceledAt)
+		if err != nil {
+			return nil, 0, fmt.Errorf("usage cap totals on cancel: %w", err)
+		}
+		totalUsage := billableUsageTotal(capTotals)
 		capDec := decimal.NewFromInt(*sub.UsageCapUnits)
 		if totalUsage.GreaterThan(capDec) {
 			capScale = capDec.Div(totalUsage)
@@ -4226,7 +4243,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 						slog.Warn("cancel: usage below zero after corrections — billed as 0",
 							"meter", meter.Key, "quantity", qty.String(),
 							"subscription_id", sub.ID)
-						belowZero.add(meterID, meter.Key, qty)
+						belowZero.add(meterID, meter.Key, qty, ivStart, ivEnd)
 						continue
 					}
 					if ratingRuleID == "" {
@@ -4313,7 +4330,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 			if quantity.IsNegative() {
 				slog.Warn("cancel: usage below zero after corrections — billed as 0",
 					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
-				belowZero.add(meterID, meter.Key, quantity)
+				belowZero.add(meterID, meter.Key, quantity, iv.start, iv.end)
 				continue
 			}
 			if meter.RatingRuleVersionID == "" {

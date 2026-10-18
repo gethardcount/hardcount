@@ -282,8 +282,8 @@ func TestNetNegativeUsage_ThresholdFire_RecordedOnce(t *testing.T) {
 	if notes[0].Metadata["invoice_id"] != fire.ID || notes[0].Metadata["billing_reason"] != string(domain.BillingReasonThreshold) {
 		t.Errorf("row metadata = %v, want invoice_id %s and billing_reason threshold", notes[0].Metadata, fire.ID)
 	}
-	if from := noteFrom(t, notes[0], "tok_thr"); from != f.cycleStart.UTC().Format(time.RFC3339) {
-		t.Errorf("tok_thr from = %q, want the period start %s (the fire priced the period so far)", from, f.cycleStart.UTC().Format(time.RFC3339))
+	if from, want := noteFrom(t, notes[0], "tok_thr"), f.cycleStart.UTC().Format(time.RFC3339Nano); from != want {
+		t.Errorf("tok_thr from = %q, want the period start %s (the fire priced the period so far)", from, want)
 	}
 
 	time.Sleep(10 * time.Millisecond)

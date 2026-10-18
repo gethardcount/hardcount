@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sort"
 	"time"
 
@@ -25,20 +26,25 @@ import (
 // The rule now, the same in every path that prices usage (period close,
 // cancel final invoice, spend-threshold invoice, preview, live balance,
 // customer usage view): the bucket counts as 0 for that window and the rest
-// of the invoice is built. A block-mode usage cap counts it as 0 too.
+// of the invoice is built. A block-mode usage cap totals what the invoice
+// bills, so it counts the bucket as 0 too (capUsageTotals).
 //
 // It is never silent. The preview and the usage view show a warning. Each
 // invoice decision that leaves such a bucket out logs a WARN and writes one
 // subscription.net_negative_usage audit row on its own transaction, so a
 // rolled-back or retried close writes none or one. The row shows on the
-// subscription's activity timeline with each meter and its amount below
-// zero. A correction larger than the window's usage usually means an earlier
-// invoice billed the usage it corrects, so that invoice may need a credit
-// note.
+// subscription's activity timeline with each meter, its amount below zero
+// and the window it was priced over. A correction larger than the window's
+// usage usually means an earlier invoice billed the usage it corrects, so
+// that invoice may need a credit note.
 //
 // Granularity: one usage bucket (a meter, or one pricing rule of a meter)
 // over one billing window, the unit each path prices. A meter whose buckets
-// or windows have different signs bills its positive ones in full.
+// or windows have different signs bills its positive ones in full. The
+// window is not always the billing period: after a reset_billing_cycle=false
+// threshold invoice the close and the cancel price usage from that invoice's
+// end, and a meter added or removed mid-period is priced over its own
+// segment. The row names each meter's window.
 
 // auditActionNetNegativeUsage is the audit action of that row.
 const auditActionNetNegativeUsage = "subscription.net_negative_usage"
@@ -49,21 +55,32 @@ const auditActionNetNegativeUsage = "subscription.net_negative_usage"
 type netNegativeUsage map[string]netNegativeMeter
 
 type netNegativeMeter struct {
-	key string
-	qty decimal.Decimal // below zero
+	key      string
+	qty      decimal.Decimal // below zero
+	from, to time.Time       // the window it was priced over
 }
 
-func (n netNegativeUsage) add(meterID, meterKey string, qty decimal.Decimal) {
-	m := n[meterID]
+// add records one bucket below zero, priced over [from, to). A meter with
+// buckets below zero in more than one window gets their sum, and the window
+// that spans them.
+func (n netNegativeUsage) add(meterID, meterKey string, qty decimal.Decimal, from, to time.Time) {
+	m, seen := n[meterID]
 	m.key = meterKey
 	m.qty = m.qty.Add(qty)
+	if !seen || from.Before(m.from) {
+		m.from = from
+	}
+	if !seen || to.After(m.to) {
+		m.to = to
+	}
 	n[meterID] = m
 }
 
 // billableUsageTotal is the usage cap's total: the sum of the meters'
 // quantities, with a meter below zero counted as 0, as it bills. That is what
 // the cap saw when the store dropped such totals; counting one at its value
-// would lower the total and scale the other meters above the cap.
+// would lower the total and scale the other meters above the cap. The
+// quantities come from capUsageTotals.
 func billableUsageTotal(totals map[string]decimal.Decimal) decimal.Decimal {
 	sum := decimal.Zero
 	for _, q := range totals {
@@ -74,11 +91,52 @@ func billableUsageTotal(totals map[string]decimal.Decimal) decimal.Decimal {
 	return sum
 }
 
+// capUsageTotals returns totals, the meter totals over [from, to), as a
+// block usage cap counts them: each meter at what the invoice bills for it
+// before the cap. A meter priced by pricing rules bills its rule buckets,
+// not its total, so its entry is the sum of its buckets above zero. Its
+// total nets a bucket below zero in, while the invoice bills that bucket 0:
+// buckets of +150 and -50 have a total of +100, and a cap of 80 taken from
+// that total billed 120. Every other meter keeps its total.
+func (e *Engine) capUsageTotals(ctx context.Context, sub domain.Subscription, meterAggs map[string]string, totals map[string]decimal.Decimal, from, to time.Time) (map[string]decimal.Decimal, error) {
+	out := make(map[string]decimal.Decimal, len(totals))
+	for id, q := range totals {
+		out[id] = q
+	}
+	for meterID, agg := range meterAggs {
+		rules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, sub.TenantID, meterID)
+		if err != nil {
+			return nil, fmt.Errorf("list pricing rules for meter %s: %w", meterID, err)
+		}
+		if len(rules) == 0 {
+			continue
+		}
+		aggs, err := e.usage.AggregateByPricingRules(ctx, sub.TenantID, sub.CustomerID, meterID, mapMeterAggregation(agg), from, to)
+		if err != nil {
+			return nil, fmt.Errorf("aggregate by pricing rules for meter %s: %w", meterID, err)
+		}
+		billed := decimal.Zero
+		for _, a := range aggs {
+			if a.Quantity.IsPositive() {
+				billed = billed.Add(a.Quantity)
+			}
+		}
+		if billed.IsZero() {
+			delete(out, meterID)
+		} else {
+			out[meterID] = billed
+		}
+	}
+	return out, nil
+}
+
 // noteNetNegativeTx writes the decision's subscription.net_negative_usage row
 // on tx. reason is the invoice kind the decision builds, [periodStart,
-// periodEnd) the window it billed, and inv the invoice it made (zero when it
-// made none). A no-op when nothing was below zero or no audit logger is
-// wired. An error fails the decision, like the finalize row (ADR-090).
+// periodEnd) its billing period, and inv the invoice it made (zero when it
+// made none). Each meter's from and to are the window its usage below zero
+// was priced over, which can start after periodStart (see the header). A
+// no-op when nothing was below zero or no audit logger is wired. An error
+// fails the decision, like the finalize row (ADR-090).
 func (e *Engine) noteNetNegativeTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, n netNegativeUsage, reason domain.InvoiceBillingReason, periodStart, periodEnd time.Time, inv domain.Invoice) error {
 	if len(n) == 0 || e.auditLogger == nil {
 		return nil
@@ -99,6 +157,8 @@ func (e *Engine) noteNetNegativeTx(ctx context.Context, tx *sql.Tx, sub domain.S
 			"meter_id":  id,
 			"meter_key": n[id].key,
 			"quantity":  n[id].qty.String(),
+			"from":      n[id].from.UTC().Format(time.RFC3339Nano),
+			"to":        n[id].to.UTC().Format(time.RFC3339Nano),
 		})
 	}
 	meta := map[string]any{
