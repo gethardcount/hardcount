@@ -1821,6 +1821,27 @@ func (s *stubPauseReader) Get(_ context.Context, _, id string) (domain.Subscript
 	return sub, nil
 }
 
+// PauseCollections mirrors the real store: a missing subscription is absent
+// from the map (the stub's ErrNotFound), any other error is returned.
+func (s *stubPauseReader) PauseCollections(_ context.Context, _ string, ids []string) (map[string]*domain.PauseCollection, error) {
+	s.calls++
+	out := map[string]*domain.PauseCollection{}
+	if errors.Is(s.err, errs.ErrNotFound) {
+		return out, nil
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	for _, id := range ids {
+		if s.paused {
+			out[id] = &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}
+		} else {
+			out[id] = nil
+		}
+	}
+	return out, nil
+}
+
 // TestRetryTax_AutoFinalize_RespectsPauseCollection pins that a paused
 // subscription's draft stays a draft when its tax resolves.
 //

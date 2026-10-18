@@ -27,6 +27,9 @@ export interface SessionInfo {
   // Whether this server can invite a teammate (email sending and its
   // dashboard address are both set up). Server config, not per user.
   can_send_invites?: boolean
+  // Whether this server has SMTP set up at all. False: no email of any kind
+  // is sent. Pages read it to show one "email is off" notice.
+  smtp_configured?: boolean
 }
 
 export interface LoginResponse {

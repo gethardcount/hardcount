@@ -4,6 +4,10 @@ Date: 2026-07-19
 Status: Accepted
 Amends: ADR-082 (whose "Still cut" list deferred email provider events)
 
+## Summary
+
+Velox ingests Postmark's delivery, bounce and spam-complaint webhooks at `POST /v1/webhooks/postmark`, and ignores opens and clicks. Postmark answers SMTP 250 before it knows whether a message will deliver and reports bounces only later, so without this the dashboard could not show delivery and bounced addresses were never suppressed. The endpoint uses HTTP Basic Auth (`POSTMARK_WEBHOOK_USER`, `POSTMARK_WEBHOOK_PASS`), refuses every post with 401 when they are unset, and finds the tenant only through the outbox row id each email carries. A verdict sets `email_outbox.delivery_state`, which only moves to a more severe state; a hard bounce or spam complaint also flags the customer's email, and a soft bounce changes nothing. Status: active; it partly reverses [ADR-082](082-email-recipient-semantics.md)'s cut of provider events, and with other SMTP providers the state stays `unknown`.
+
 ## Context
 
 Velox marks an outbox row `dispatched` on SMTP 250. For an

@@ -545,9 +545,30 @@ func (h *exportsHandler) exportUsageEvents(w http.ResponseWriter, r *http.Reques
 		respond.BadRequest(w, r, fmt.Sprintf("date range exceeds %d days — split into multiple calls", usageExportMaxSpanDays))
 		return
 	}
+	// Optional filters, the same as GET /v1/usage-events, so the dashboard's
+	// Export CSV downloads exactly the rows the Usage page lists. A malformed
+	// dimensions pair is refused: dropping it would export unfiltered rows
+	// as if filtered.
+	q := r.URL.Query()
+	dims, err := usage.ParseDimensionsParam(q.Get("dimensions"))
+	if err != nil {
+		respond.Validation(w, r, err.Error())
+		return
+	}
+	exportFilter := usage.ExportFilter{CustomerID: q.Get("customer_id"), MeterID: q.Get("meter_id"), Dimensions: dims}
 
 	filename := exportFilename("usage-events")
-	if err := h.auditExport(r, tenantID, "usage_event", filename, exportScope(from, to)); err != nil {
+	scope := exportScope(from, to)
+	if exportFilter.CustomerID != "" {
+		scope["customer_id"] = exportFilter.CustomerID
+	}
+	if exportFilter.MeterID != "" {
+		scope["meter_id"] = exportFilter.MeterID
+	}
+	if q.Get("dimensions") != "" {
+		scope["dimensions"] = q.Get("dimensions")
+	}
+	if err := h.auditExport(r, tenantID, "usage_event", filename, scope); err != nil {
 		exportAuditFailed(w, r, "usage_event", err)
 		return
 	}
@@ -570,7 +591,7 @@ func (h *exportsHandler) exportUsageEvents(w http.ResponseWriter, r *http.Reques
 	}
 
 	n := 0
-	err = h.usage.StreamForExport(r.Context(), tenantID, from, to, func(ev domain.UsageEvent) error {
+	err = h.usage.StreamForExportFiltered(r.Context(), tenantID, from, to, exportFilter, func(ev domain.UsageEvent) error {
 		dimsJSON := ""
 		if len(ev.Dimensions) > 0 {
 			if b, err := json.Marshal(ev.Dimensions); err == nil {

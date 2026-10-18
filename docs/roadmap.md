@@ -4,8 +4,13 @@ What changed lately, and what is being worked on next. Every change, with its da
 
 ## Shipped recently
 
-October 2026 (v0.6.1 and v0.7.0):
+October 2026 (v0.6.1, v0.7.0, v0.8.0, v0.8.1 and v0.8.2):
 
+- **Long invoices print in full, and emails look standard to mail servers.** Long invoice and credit-note PDFs go onto more pages, and every email has a `Date` and a `Message-ID`.
+- **Safer upgrades.** By default a migration waits at most 5 seconds for a table lock (`MIGRATION_LOCK_TIMEOUT` changes it). In v0.8.x, `velox migrate force` repairs an upgrade that stopped halfway; from v0.9.0 (not yet released) migrations run with goose, a failed one leaves nothing to repair, and `force` is gone.
+- **LiteLLM usage for a customer that does not exist yet is kept.** Velox holds it and shows it on the Usage page. Create the customer, then release it once.
+- **New accounts retry failed payments.** Each new account starts with a "Default retries" policy.
+- **Settings → Email** shows whether this server can send email, with a test send.
 - **Try it with Docker only.** `deploy/compose/quickstart.sh` starts Velox from the published images and prints a login, and `./quickstart.sh demo` runs AI token usage through to an invoice.
 - **Late usage is billed.** An invoice is built an hour after its period ends (`INVOICE_GRACE_PERIOD`), so usage that arrives a little late still counts.
 - **Issued invoices do not change.** An invoice or credit note keeps the customer and company details it was issued with.
@@ -16,6 +21,7 @@ October 2026 (v0.6.1 and v0.7.0):
 - **Login works in Safari when Velox runs on localhost.**
 - **Security fixes.** Endpoints refuse ids from another account, webhooks check the address they connect to, and `/metrics` needs a token in production.
 - **Release images for ARM and Intel/AMD**, signed with cosign.
+- **API reference for every route you call** ([`api/openapi.yaml`](../api/openapi.yaml)).
 
 July to September 2026:
 
@@ -28,9 +34,7 @@ July to September 2026:
 
 ## Next
 
-- **API reference** covering every route the server answers ([#962](https://github.com/getvelox/velox/issues/962)).
-- **Safer upgrades.** A repair command for a database upgrade that stopped halfway ([#967](https://github.com/getvelox/velox/issues/967)), and checks that a database upgrade cannot lock tables for long ([#987](https://github.com/getvelox/velox/issues/987)).
-- **LiteLLM usage for a customer that does not exist yet** is skipped today. Make it visible, and decide whether to keep it ([#1044](https://github.com/getvelox/velox/issues/1044)).
+Open work is in the [issue tracker](https://github.com/getvelox/velox/issues).
 
 ## Not planned for now
 

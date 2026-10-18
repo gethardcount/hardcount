@@ -1,13 +1,17 @@
 # ADR-012: Day-Grade Calendar Billing & Period Boundary Snapping
 
 **Date:** 2026-05-01
-**Status:** Accepted
+**Status:** Accepted (amended 2026-07-26)
 
 ## Status
 Accepted
 
 ## Date
 2026-05-01
+
+## Summary
+
+Billing period boundaries snap to midnight in the tenant timezone, so a subscription started at any time of day is billed for that whole day. Proration counts whole days and rounds hour counts, so a daylight-saving shift cannot add or lose a day. Amended 2026-07-26: an item added on the period's first day (in that timezone) is billed for the full period. Mid-period change proration also uses a whole-day ratio ([ADR-042](042-tax-rate-decimal-precision.md)), and the timezone is the org billing timezone ([ADR-077](077-org-level-billing-timezone.md)). Status: active, amended.
 
 ## Context
 

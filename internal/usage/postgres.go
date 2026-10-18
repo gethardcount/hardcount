@@ -311,15 +311,17 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.U
 }
 
 // Aggregate returns the totals + per-meter breakdown that powers the
-// /usage page's stat cards + "Usage by Meter" card. It honours the same
-// filter as List (customer / meter / from / to) but ignores limit/offset —
-// the whole point is to surface filtered totals, not page slices.
+// /usage page. It honours the same filter as List (customer / meter /
+// from / to / dimensions) but ignores limit/offset — the whole point is to
+// surface filtered totals, not page slices.
 //
-// SQL strategy: one row-of-totals query for COUNT/SUM/distinct-counts,
-// plus a GROUP BY meter_id query for the per-meter breakdown. Both run
-// inside the same tenant tx so RLS scopes them identically. SUM is
-// decimal-precision (NUMERIC(38,12)) so 0.5 + 0.5 + 0.0001 round-trips
-// to "1.0001" without floating-point drift.
+// SQL strategy: one row-of-totals query, then one per-meter query and one
+// per-(day, meter) query. The per-meter queries first roll up per
+// customer (sum, count, peak, latest reading) so the service can pick the
+// value that matches each meter's aggregation mode: a Maximum meter is the
+// sum of each customer's peak, never the sum of every reading. All three
+// run inside the same tenant tx so RLS scopes them identically. SUM is
+// decimal-precision (NUMERIC(38,12)).
 func (s *PostgresStore) Aggregate(ctx context.Context, filter ListFilter) (Aggregate, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {
@@ -342,28 +344,84 @@ func (s *PostgresStore) Aggregate(ctx context.Context, filter ListFilter) (Aggre
 		return Aggregate{}, fmt.Errorf("aggregate totals: %w", err)
 	}
 
+	// Latest reading: id DESC breaks same-timestamp ties, the same order
+	// AggregateForBillingPeriodByAgg's "last" query bills with.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT meter_id, COALESCE(SUM(quantity), 0)
-		FROM usage_events`+where+`
+		WITH per_customer AS (
+			SELECT meter_id, customer_id,
+				SUM(quantity) AS s,
+				COUNT(*) AS c,
+				MAX(quantity) AS mx,
+				(ARRAY_AGG(quantity ORDER BY timestamp DESC, id DESC))[1] AS lst
+			FROM usage_events`+where+`
+			GROUP BY meter_id, customer_id
+		)
+		SELECT meter_id, SUM(s), SUM(c)::bigint, COUNT(*), MAX(mx), SUM(mx), SUM(lst)
+		FROM per_customer
 		GROUP BY meter_id
-		ORDER BY 2 DESC`, args...)
+		ORDER BY 2 DESC, meter_id`, args...)
 	if err != nil {
 		return Aggregate{}, fmt.Errorf("aggregate by_meter: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
+	index := map[string]int{}
 	for rows.Next() {
 		var m MeterTotal
-		if err := rows.Scan(&m.MeterID, &m.Total); err != nil {
+		if err := rows.Scan(&m.MeterID, &m.Total, &m.Events, &m.Customers, &m.Peak, &m.sumOfCustomerMax, &m.sumOfCustomerLast); err != nil {
 			return Aggregate{}, err
 		}
+		m.Value = m.Total
+		m.Daily = []DailyValue{}
+		index[m.MeterID] = len(agg.ByMeter)
 		agg.ByMeter = append(agg.ByMeter, m)
 	}
 	if err := rows.Err(); err != nil {
 		return Aggregate{}, err
 	}
+	_ = rows.Close()
 	if agg.ByMeter == nil {
 		agg.ByMeter = []MeterTotal{}
+		return agg, nil
+	}
+
+	loc := "UTC"
+	if filter.DayLoc != nil {
+		loc = filter.DayLoc.String()
+	}
+	dayArgs := append(append([]any{}, args...), loc)
+	tzParam := fmt.Sprintf("$%d", len(dayArgs))
+	days, err := tx.QueryContext(ctx, `
+		WITH per_customer AS (
+			SELECT to_char(timestamp AT TIME ZONE `+tzParam+`, 'YYYY-MM-DD') AS d, meter_id, customer_id,
+				SUM(quantity) AS s,
+				COUNT(*) AS c,
+				MAX(quantity) AS mx,
+				(ARRAY_AGG(quantity ORDER BY timestamp DESC, id DESC))[1] AS lst
+			FROM usage_events`+where+`
+			GROUP BY 1, meter_id, customer_id
+		)
+		SELECT d, meter_id, SUM(s), SUM(c), SUM(mx), SUM(lst)
+		FROM per_customer
+		GROUP BY d, meter_id
+		ORDER BY d`, dayArgs...)
+	if err != nil {
+		return Aggregate{}, fmt.Errorf("aggregate daily: %w", err)
+	}
+	defer func() { _ = days.Close() }()
+	for days.Next() {
+		var meterID string
+		var d DailyValue
+		if err := days.Scan(&d.Date, &meterID, &d.sum, &d.count, &d.sumOfCustomerMax, &d.sumOfCustomerLast); err != nil {
+			return Aggregate{}, err
+		}
+		d.Value = d.sum
+		if i, ok := index[meterID]; ok {
+			agg.ByMeter[i].Daily = append(agg.ByMeter[i].Daily, d)
+		}
+	}
+	if err := days.Err(); err != nil {
+		return Aggregate{}, err
 	}
 	return agg, nil
 }
@@ -382,9 +440,9 @@ func (s *PostgresStore) AggregateForBillingPeriodByAgg(ctx context.Context, tena
 
 	// One query per DISTINCT aggregation function (at most four) rather
 	// than one per meter. A subscription spanning M meters cost M round
-	// trips per billing period — and billOnePeriod calls this up to four
-	// times (base, pre-cap re-derive, per-interval), so the fan-out was
-	// multiplicative in M.
+	// trips per call — and a period close calls this once per distinct
+	// usage window (the whole period, and each mid-period segment), so the
+	// fan-out was multiplicative in M.
 	byAgg := make(map[string][]string, 4)
 	for meterID, agg := range meters {
 		byAgg[agg] = append(byAgg[agg], meterID)
@@ -455,10 +513,12 @@ func (s *PostgresStore) AggregateForBillingPeriodByAgg(ctx context.Context, tena
 				if err := rows.Scan(&meterID, &val); err != nil {
 					return err
 				}
-				// Only a positive aggregate is a billable line. A meter
-				// with no events in the period produces no row at all,
-				// which lands in the same place: absent from the map.
-				if val.IsPositive() {
+				// A zero aggregate is absent from the map, the same as a
+				// meter with no events in the period (no row at all).
+				// A total below zero (corrections larger than the usage)
+				// is returned as it is: the billing engine bills it 0
+				// and records it (#1193). Dropping it here hid it.
+				if !val.IsZero() {
 					result[meterID] = val
 				}
 			}
@@ -571,7 +631,7 @@ func (s *PostgresStore) AggregateForBillingPeriod(ctx context.Context, tenantID,
 }
 
 // AggregateByPricingRules implements the priority+claim resolution path
-// described in docs/design-multi-dim-meters.md. Strategy:
+// described in docs/design/multi-dim-meters.md. Strategy:
 //
 //  1. Rank meter_pricing_rules by (priority DESC, created_at ASC, id ASC)
 //     so the ROW_NUMBER is fully deterministic. The id tiebreaker covers
@@ -912,6 +972,21 @@ func (s propertiesScanner) Scan(src any) error {
 // operator BACKFILL from a metered API event in the artifact they reconcile
 // with. The export's columns are its own contract.
 func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, from, to time.Time, fn func(domain.UsageEvent) error) error {
+	return s.StreamForExportFiltered(ctx, tenantID, from, to, ExportFilter{}, fn)
+}
+
+// ExportFilter narrows the usage export to what the Usage page shows:
+// one customer, one meter, and events whose dimensions contain every pair
+// (`properties @>`, the same match List uses). Empty fields do not filter.
+type ExportFilter struct {
+	CustomerID string
+	MeterID    string
+	Dimensions map[string]any
+}
+
+// StreamForExportFiltered is StreamForExport with the Usage page's filters,
+// so "Export CSV" downloads exactly the rows the page lists.
+func (s *PostgresStore) StreamForExportFiltered(ctx context.Context, tenantID string, from, to time.Time, f ExportFilter, fn func(domain.UsageEvent) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
@@ -920,13 +995,31 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 
 	// Tenant + livemode isolation is RLS's (TxTenant), as in List. The window is
 	// REQUIRED by the caller (the table is unbounded), so both bounds always bind.
+	where := "WHERE timestamp >= $1 AND timestamp <= $2"
+	args := []any{from, to}
+	if f.CustomerID != "" {
+		args = append(args, f.CustomerID)
+		where += fmt.Sprintf(" AND customer_id = $%d", len(args))
+	}
+	if f.MeterID != "" {
+		args = append(args, f.MeterID)
+		where += fmt.Sprintf(" AND meter_id = $%d", len(args))
+	}
+	if len(f.Dimensions) > 0 {
+		doc, err := json.Marshal(f.Dimensions)
+		if err != nil {
+			return fmt.Errorf("export dimensions: %w", err)
+		}
+		args = append(args, string(doc))
+		where += fmt.Sprintf(" AND properties @> $%d::jsonb", len(args))
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, customer_id, meter_id,
 			quantity, properties, COALESCE(idempotency_key,''), timestamp, origin,
 			provider_cost_micros, COALESCE(provider_cost_source,'')
 		FROM usage_events
-		WHERE timestamp >= $1 AND timestamp <= $2
-		ORDER BY timestamp DESC, id DESC`, from, to)
+		`+where+`
+		ORDER BY timestamp DESC, id DESC`, args...)
 	if err != nil {
 		return err
 	}

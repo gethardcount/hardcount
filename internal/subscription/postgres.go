@@ -247,6 +247,39 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.Su
 	return sub, nil
 }
 
+// PauseCollections returns the collection-pause state of the given
+// subscriptions in one read, keyed by id; a subscription with no pause set
+// maps to nil and an id with no row is absent. The pause is composed by
+// scanSubRow, the same path Get takes, so both reads agree on it. Backs the
+// invoice list's attention banners (issue #1142), which need the pause of
+// many rows at once and none of the children Get hydrates.
+func (s *PostgresStore) PauseCollections(ctx context.Context, tenantID string, ids []string) (map[string]*domain.PauseCollection, error) {
+	out := make(map[string]*domain.PauseCollection, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+subCols+` FROM subscriptions WHERE id = ANY($1::text[])`, postgres.StringArray(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var sub domain.Subscription
+		if err := scanSubRow(rows, &sub); err != nil {
+			return nil, err
+		}
+		out[sub.ID] = sub.PauseCollection
+	}
+	return out, rows.Err()
+}
+
 func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.Subscription, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {
@@ -307,14 +340,6 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 	return subs, total, nil
 }
 
-// CancelAtomic terminates a subscription. Cancellation is allowed from
-// every non-terminal status — draft (operator scrapping a never-activated
-// row), trialing (customer abandoning during trial — by far the dominant
-// industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
-// and active. Only canceled/archived are rejected (the row already
-// terminated). Note: the `paused` source state was removed in PR-8
-// when the hard-pause API was deleted — no path now produces
-// status='paused', so it's not in allowedFrom.
 func cancelSpec() transitionSpec {
 	return transitionSpec{
 		targetStatus: string(domain.SubscriptionCanceled),
@@ -328,6 +353,14 @@ func cancelSpec() transitionSpec {
 	}
 }
 
+// CancelAtomic terminates a subscription. Cancellation is allowed from
+// every non-terminal status — draft (operator scrapping a never-activated
+// row), trialing (customer abandoning during trial — by far the dominant
+// industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
+// and active. Only canceled/archived are rejected (the row already
+// terminated). Note: the `paused` source state was removed in PR-8
+// when the hard-pause API was deleted — no path now produces
+// status='paused', so it's not in allowedFrom.
 func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	return s.transitionAtomic(ctx, tenantID, id, cancelSpec())
 }
@@ -746,12 +779,6 @@ func (s *PostgresStore) ActivateAfterTrial(ctx context.Context, tenantID, id str
 	return s.ActivateAfterTrialWithBill(ctx, tenantID, id, at, nil)
 }
 
-// ActivateAfterTrialWithBill flips 'trialing' → 'active' AND runs billFn (the
-// day-1 in_advance invoice insert) in the SAME transaction, so a billing
-// failure rolls the activation back rather than leaving an active sub with no
-// first-period invoice (the cycle scheduler skips the just-elapsed in_advance
-// segment, so a lost day-1 invoice is a permanent revenue leak). ADR-056.
-// billFn may be nil.
 // ActivateDraftWithBill — see the Store interface doc. Draft→active flip +
 // period/anchor stamps + day-1 bill in one tx (the ADR-056 pattern applied to
 // the plain-draft path).
@@ -813,6 +840,12 @@ func (s *PostgresStore) ActivateDraftWithBill(ctx context.Context, tenantID, id 
 	return sub, nil
 }
 
+// ActivateAfterTrialWithBill flips 'trialing' → 'active' AND runs billFn (the
+// day-1 in_advance invoice insert) in the SAME transaction, so a billing
+// failure rolls the activation back rather than leaving an active sub with no
+// first-period invoice (the cycle scheduler skips the just-elapsed in_advance
+// segment, so a lost day-1 invoice is a permanent revenue leak). ADR-056.
+// billFn may be nil.
 func (s *PostgresStore) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2947,11 +2980,6 @@ func (s *PostgresStore) ListItemChangesInPeriod(ctx context.Context, tenantID, s
 	}
 	return out, rows.Err()
 }
-
-// Subscription scan now includes PlanChangedAt on items, but the bytes
-// exchange via JSON. pgx returns bytea for JSONB by default; store/consume
-// raw bytes on the Metadata field so the caller owns the encoding policy.
-var _ = sql.ErrNoRows // retain import
 
 // ErrTrialCancelDue / ErrTrialCancelConflict live in domain (the billing
 // engine routes on them without a peer import); aliased here for the

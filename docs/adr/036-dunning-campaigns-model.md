@@ -1,7 +1,7 @@
 # ADR-036: Dunning campaigns model (multi-policy-per-tenant)
 
 **Date:** 2026-05-16
-**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
+**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
 
 > ⚠️ **The 2026-05-16 amendment below describes a `final_action` column that no
 > longer exists.** [ADR-112](112-dunning-exhaustion-settles-two-questions.md)
@@ -15,7 +15,7 @@
 
 ## Summary
 
-A tenant can keep many named dunning policies (retry rules for unpaid invoices), with at most one per tenant and `livemode` marked `is_default`. A customer uses the policy set in `customers.dunning_policy_id`, or the tenant default when it is empty, and a run keeps the policy it started with. This follows the named-template model of Lago, Orb and Recurly and replaces the per-customer partial overrides. `UpsertPolicy` rejects a policy whose `max_retry_attempts` is greater than `len(retry_schedule) + 1`, so no retry reuses an interval silently. An amendment of 2026-05-16 added the terminal actions that fire when retries run out (pause collection, mark uncollectible, cancel subscription, manual review). ADR-112 has since split them into separate subscription and invoice choices. Amended 2026-07-05: the first policy per tenant and `livemode` becomes the default. When a customer has no effective policy, dunning is skipped on purpose with a warning instead of failing billing, while a real database error still fails.
+A tenant can keep many named dunning policies (retry rules for unpaid invoices), with at most one per tenant and `livemode` marked `is_default`. A customer uses the policy set in `customers.dunning_policy_id`, or the tenant default when it is empty, and a run keeps the policy it started with. This follows the named-template model of Lago, Orb and Recurly and replaces the per-customer partial overrides. `UpsertPolicy` rejects a policy whose `max_retry_attempts` is greater than `len(retry_schedule) + 1`, so no retry reuses an interval silently. An amendment of 2026-05-16 added the terminal actions that fire when retries run out (pause collection, mark uncollectible, cancel subscription, manual review). ADR-112 has since split them into separate subscription and invoice choices. Amended 2026-07-05: the first policy per tenant and `livemode` becomes the default. When a customer has no effective policy, dunning is skipped on purpose with a warning instead of failing billing, while a real database error still fails. Amended 2026-10-17 (ADR-123): every new account starts with a seeded "Default retries" policy per mode as the default, and the first enabled policy anyone creates takes the default from it unless the operator has edited it or chosen it.
 
 ## Context
 
@@ -333,3 +333,23 @@ Resolution precedence (per-customer `dunning_policy_id` → tenant `is_default`)
 is unchanged. Memory: `feedback_adversarial_panel_before_build`,
 `feedback_settings_aspirational_runtime_enforcement`, `feedback_no_silent_fallbacks`,
 `feedback_no_belt_and_suspenders`, `feedback_longterm_fixes`.
+
+## Amendment 2026-10-17 — new accounts start with a default
+
+Point 2 of the 2026-07-05 amendment said a plain bootstrap deliberately
+seeds no dunning policy, because a seeded default would take the default
+slot and leave a recipe's policy non-default. That left every new account
+not retrying failed payments until someone created a policy (#1152).
+
+Now every new account, from `tenant.RunBootstrap` or `POST /v1/tenants`,
+starts with one "Default retries" policy per mode as the default, marked
+`seeded`. The first-policy rule of point 1 still decides the default: an
+insert of an enabled policy first demotes a default that is still
+`seeded`, so the first enabled policy anyone creates (by hand or from a
+recipe) becomes the default as before. A policy created disabled leaves the
+seed as default.
+Editing the seeded policy or making it the default clears `seeded`, and it
+then keeps the default. The no-policy skip of point 2 is unchanged and now
+applies only to accounts created before this change. Details, values and
+the rejected alternatives are in
+[ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md).

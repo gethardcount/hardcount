@@ -1,6 +1,7 @@
 package recipe
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -98,8 +99,9 @@ type rawDunningPolicy struct {
 	FinalSubscriptionAction string `yaml:"final_subscription_action"`
 	FinalInvoiceAction      string `yaml:"final_invoice_action"`
 	// LegacyFinalAction is decoded ONLY so parse can reject a recipe still
-	// using the pre-ADR-112 key by name. Silently ignoring an unknown key
-	// would apply a policy the recipe author did not write.
+	// using the pre-ADR-112 key with an error that names the two keys that
+	// replace it. Strict decoding would refuse it anyway, but only as an
+	// unknown field.
 	LegacyFinalAction string `yaml:"final_action"`
 }
 
@@ -112,10 +114,6 @@ type rawWebhook struct {
 // through URLs (`/v1/recipes/{key}`) without escaping.
 var recipeKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// parseRecipe reads YAML bytes, validates the structural invariants we
-// rely on at runtime, and returns the canonical domain.Recipe. Errors are
-// wrapped with the offending field name so a malformed recipe in CI
-// surfaces the exact line at boot.
 // parseRate converts a recipe's string-form per-unit rate into a decimal.
 // Empty is treated as zero (a mode that doesn't use the field). A malformed
 // value fails recipe load loudly rather than silently pricing at zero.
@@ -131,10 +129,20 @@ func parseRate(recipeKey, ruleKey, field, raw string) (decimal.Decimal, error) {
 	return d, nil
 }
 
+// parseRecipe reads YAML bytes, validates the structural invariants we
+// rely on at runtime, and returns the canonical domain.Recipe. Errors are
+// wrapped with the offending field name so a malformed recipe in CI
+// surfaces the exact line at boot.
 func parseRecipe(data []byte) (domain.Recipe, error) {
 	var raw rawRecipe
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return domain.Recipe{}, fmt.Errorf("yaml unmarshal: %w", err)
+	// KnownFields rejects any key the raw structs don't declare. Without it a
+	// typo such as `base_bill_timming` is silently dropped and the field
+	// falls back to its zero value, so the recipe installs a policy its
+	// author did not write.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&raw); err != nil {
+		return domain.Recipe{}, fmt.Errorf("yaml decode: %w", err)
 	}
 
 	if raw.Key == "" {

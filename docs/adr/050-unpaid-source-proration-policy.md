@@ -1,7 +1,11 @@
 # ADR-050: Unpaid-source proration — block charges, adjust credits
 
 **Date:** 2026-06-08
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-12)
+
+## Summary
+
+When a mid-period change prorates against an `in_advance` invoice that is still unpaid, the direction of the change decides. A change that would charge more (upgrade, added item, higher quantity) is refused with 409 `unpaid_invoice_blocks_change` until that invoice is paid or voided. A change that gives money back (downgrade, removed item, lower quantity) issues an adjustment credit note that reduces the invoice's amount due, with no cash refund. Amended 2026-10-12: the note is capped at the amount due plus customer credits applied to the invoice, and the credits it displaces return to the balance. Status: active, amended; cancel and cross-interval swaps settle an unpaid invoice the same way.
 
 ## Context
 

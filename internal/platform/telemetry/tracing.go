@@ -4,6 +4,8 @@
 //
 //	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318  (Jaeger, Grafana Tempo, etc.)
 //	OTEL_SERVICE_NAME=velox                            (defaults to "velox")
+//	OTEL_TRACES_SAMPLER=parentbased_traceidratio       (defaults to parentbased_always_on)
+//	OTEL_TRACES_SAMPLER_ARG=0.1                        (the ratio, for the *traceidratio samplers)
 //
 // When OTEL_EXPORTER_OTLP_ENDPOINT is not set, tracing is disabled (noop).
 package telemetry
@@ -21,7 +23,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // Init sets up the global OpenTelemetry tracer provider.
@@ -67,10 +68,12 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 		return nil, err
 	}
 
+	// No WithSampler on purpose: the SDK reads OTEL_TRACES_SAMPLER and
+	// OTEL_TRACES_SAMPLER_ARG, and an explicit sampler would replace them.
+	// Unset, the SDK default is parentbased_always_on (sample everything).
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0))),
 	)
 
 	otel.SetTracerProvider(tp)
@@ -87,9 +90,4 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 // Safe to call even when tracing is disabled (returns noop tracer).
 func Tracer(name string) trace.Tracer {
 	return otel.Tracer(name)
-}
-
-// NoopTracer returns a tracer that does nothing (for tests).
-func NoopTracer() trace.Tracer {
-	return noop.NewTracerProvider().Tracer("")
 }

@@ -9,6 +9,10 @@ Accepted
 ## Date
 2026-04-14
 
+## Summary
+
+All tenants share one PostgreSQL database and the same tables, and Row-Level Security (RLS) keeps each tenant's rows apart. Each tenant table has a `tenant_id` column and a `tenant_isolation` policy that shows a row only when it matches the transaction's `app.tenant_id`, or when `app.bypass_rls` is `on`. `postgres.BeginTx` sets these per transaction: `TxTenant` for tenant work, `TxBypass` for cross-tenant background jobs. The app connects as a role that is neither a superuser nor `BYPASSRLS`, and with `APP_ENV` set to anything but `local` Velox refuses to start otherwise ([Postgres requirements](../ops/postgres-requirements.md)). Status: active.
+
 ## Context
 Velox is multi-tenant: multiple organizations share the same deployment, each seeing only their own data. The three standard approaches are: (1) database-per-tenant, (2) schema-per-tenant, (3) shared tables with row-level isolation.
 

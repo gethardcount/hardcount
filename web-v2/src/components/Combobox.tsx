@@ -92,14 +92,14 @@ export function Combobox({
 
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
-      <div ref={anchorRef} className={cn('w-full', className)}>
+      <div ref={anchorRef} className={cn('w-full min-w-0', className)}>
         <PopoverPrimitive.Trigger
           render={
             <button
               type="button"
               disabled={disabled}
               className={cn(
-                'w-full flex items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground',
+                'w-full min-w-0 flex items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground',
                 'ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                 'disabled:cursor-not-allowed disabled:opacity-50',
                 !selected && 'text-muted-foreground',

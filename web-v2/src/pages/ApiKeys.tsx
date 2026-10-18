@@ -140,14 +140,14 @@ export default function ApiKeysPage() {
 
   return (
     <Layout>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">API Keys</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage API authentication keys{activeKeys.length > 0 ? ` · ${activeKeys.length} active` : ''}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-72">
+          <h1 className="text-2xl font-semibold text-foreground">API keys</h1>
+          <p className="text-sm text-muted-foreground mt-1">Keys your app uses to call the Velox API{activeKeys.length > 0 ? ` · ${activeKeys.length} active` : ''}</p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
           <Plus size={16} className="mr-2" />
-          Create API Key
+          Create API key
         </Button>
       </div>
 
@@ -169,7 +169,7 @@ export default function ApiKeysPage() {
               title="No API keys yet"
               description="Create an API key to start using the Velox API from your backend or CLI."
               action={{
-                label: 'Create API Key',
+                label: 'Create API key',
                 icon: Plus,
                 onClick: () => setShowCreate(true),
               }}
@@ -219,8 +219,8 @@ export default function ApiKeysPage() {
                         </div>
                         <p className="text-xs text-muted-foreground mt-1.5">
                           {k.key_type === 'secret'
-                            ? 'Full access -- use server-side only. Never expose in client code.'
-                            : 'Authenticate-only -- identifies the tenant, no data access. Safe to embed in client code.'}
+                            ? 'Full access. Keep it on your server; never put it in browser or mobile app code.'
+                            : "Identifies your account only. It can't read or change any data, so it's safe to use in a browser."}
                         </p>
                       </div>
                     </div>
@@ -340,7 +340,7 @@ export default function ApiKeysPage() {
         <Dialog open onOpenChange={() => setCreatedKey(null)}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>API Key Created</DialogTitle>
+              <DialogTitle>API key created</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl p-4">
@@ -399,7 +399,7 @@ export default function ApiKeysPage() {
   )
 }
 
-/* --- Create Key Dialog --- */
+/* --- Create key Dialog --- */
 
 type ExpiryPreset = 'never' | '30d' | '90d' | '1y' | 'custom'
 
@@ -482,7 +482,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create API Key</DialogTitle>
+          <DialogTitle>Create API key</DialogTitle>
           <DialogDescription>Generate a new key for programmatic API access</DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -503,7 +503,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
             />
 
             <div>
-              <Label className="mb-2 block">Key Type</Label>
+              <Label className="mb-2 block">Key type</Label>
               <div className="grid grid-cols-2 gap-3">
                 <button type="button" onClick={() => setKeyType('secret')}
                   className={cn(
@@ -513,7 +513,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
                   <Shield size={18} className={cn('mt-0.5', keyType === 'secret' ? 'text-primary' : 'text-muted-foreground')} />
                   <div>
                     <p className={cn('text-sm font-medium', keyType === 'secret' ? 'text-primary' : 'text-foreground')}>Secret</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Full access. Server-side only.</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Full access. Keep it on your server.</p>
                   </div>
                 </button>
                 <button type="button" onClick={() => setKeyType('publishable')}
@@ -524,7 +524,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
                   <Eye size={18} className={cn('mt-0.5', keyType === 'publishable' ? 'text-primary' : 'text-muted-foreground')} />
                   <div>
                     <p className={cn('text-sm font-medium', keyType === 'publishable' ? 'text-primary' : 'text-foreground')}>Publishable</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Authenticate-only. No data access.</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Identifies your account only; safe to use in a browser.</p>
                   </div>
                 </button>
               </div>
@@ -579,7 +579,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
                 {form.formState.isSubmitting ? (
                   <><Loader2 size={14} className="animate-spin mr-2" /> Creating...</>
                 ) : (
-                  'Create Key'
+                  'Create key'
                 )}
               </Button>
             </DialogFooter>
@@ -590,7 +590,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
   )
 }
 
-/* --- Rotate Key Dialog --- */
+/* --- Rotate key Dialog --- */
 
 // Rotate replaces a key in place: the old key keeps working for the
 // chosen grace window (so deployed clients can swap credentials without
@@ -632,7 +632,7 @@ function RotateKeyDialog({
     <Dialog open onOpenChange={(open) => { if (!open && !submitting) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Rotate API Key</DialogTitle>
+          <DialogTitle>Rotate API key</DialogTitle>
           <DialogDescription>
             A new {keyTypeLabel(target.key_type).toLowerCase()} key will be issued for "{target.name}". The current key
             stops working when the grace period ends — immediately if you pick "Now" — so anything
@@ -664,7 +664,7 @@ function RotateKeyDialog({
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? <><Loader2 size={14} className="animate-spin mr-2" /> Rotating...</> : 'Rotate Key'}
+            {submitting ? <><Loader2 size={14} className="animate-spin mr-2" /> Rotating...</> : 'Rotate key'}
           </Button>
         </DialogFooter>
       </DialogContent>

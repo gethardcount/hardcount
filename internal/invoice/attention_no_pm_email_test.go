@@ -24,13 +24,33 @@ func (s *spyCustomerReader) Get(_ context.Context, _, _ string) (domain.Customer
 	return s.cust, s.err
 }
 
+// GetMany returns the fixed customer under each requested id; one call per
+// batch, so calls counts reads, not rows.
+func (s *spyCustomerReader) GetMany(_ context.Context, _ string, ids []string) ([]domain.Customer, error) {
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	out := make([]domain.Customer, 0, len(ids))
+	for _, id := range ids {
+		c := s.cust
+		c.ID = id
+		out = append(out, c)
+	}
+	return out, nil
+}
+
 // readyPMReader is a PaymentMethodReader that reports a ready payment method,
 // so a test can drive atc.HasPaymentMethod=true and assert the lazy guard skips
 // the customer lookup for has-PM invoices.
 type readyPMReader struct{}
 
-func (readyPMReader) GetPaymentSetup(_ context.Context, _, _ string) (domain.CustomerPaymentSetup, error) {
-	return domain.CustomerPaymentSetup{SetupStatus: domain.PaymentSetupReady, StripeCustomerID: "cus_stripe_1"}, nil
+func (readyPMReader) PaymentReadyCustomers(_ context.Context, _ string, ids []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
 }
 
 func finalizedUnpaidNoPM() domain.Invoice {

@@ -33,9 +33,19 @@ type MeterLookup interface {
 }
 
 // Ingester is the narrow surface the adapter calls to actually
-// persist resolved events. Implemented by *usage.Service.
+// persist resolved events. Implemented by *usage.Service. It refuses a row
+// whose key was held and then discarded (errs.ErrDuplicateKey), so a
+// LiteLLM resend after the customer exists cannot bill a discarded row, and
+// it marks a row whose key is still held released (#1044).
 type Ingester interface {
-	Ingest(ctx context.Context, tenantID string, input usage.IngestInput) (domain.UsageEvent, error)
+	IngestResolvingHeld(ctx context.Context, tenantID string, input usage.IngestInput) (domain.UsageEvent, error)
+}
+
+// Holder keeps a row whose customer or meter does not exist yet, so it is
+// not lost (#1044, ADR-122). Implemented by *usage.Service. Returns
+// errs.ErrDuplicateKey when the row is already held.
+type Holder interface {
+	Hold(ctx context.Context, tenantID string, in usage.HoldInput) (domain.HeldUsageEvent, error)
 }
 
 // Handler exposes POST /v1/integrations/litellm/spend. Auth is the
@@ -46,15 +56,17 @@ type Handler struct {
 	customers CustomerLookup
 	meters    MeterLookup
 	ingester  Ingester
+	holder    Holder
 }
 
-// New constructs the LiteLLM adapter handler. All three deps are
+// New constructs the LiteLLM adapter handler. All four deps are
 // required — adapter does no useful work without persistence.
-func New(customers CustomerLookup, meters MeterLookup, ingester Ingester) *Handler {
+func New(customers CustomerLookup, meters MeterLookup, ingester Ingester, holder Holder) *Handler {
 	return &Handler{
 		customers: customers,
 		meters:    meters,
 		ingester:  ingester,
+		holder:    holder,
 	}
 }
 
@@ -72,7 +84,12 @@ func (h *Handler) Routes() chi.Router {
 // the existing /v1/usage-events/batch response so partners using
 // both surfaces see one shape:
 //
-//	{ "accepted": N, "deduplicated": D, "skipped": M, "errors": [{ "id": "...", "error": "..." }] }
+//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "errors": [{ "id": "...", "error": "..." }] }
+//
+// held counts rows whose customer or meter does not exist yet. They are
+// kept in usage_held_events, not billed, and shown to the operator, who
+// releases them once the customer exists (#1044, ADR-122). Before this they
+// were listed in errors[] and lost: LiteLLM reads a 200 as delivered.
 //
 // accepted counts rows the store NEWLY recorded. Deduplicated counts rows
 // it already held — a success, since LiteLLM redelivering a batch is the
@@ -83,6 +100,7 @@ func (h *Handler) Routes() chi.Router {
 type SpendResponse struct {
 	Accepted     int             `json:"accepted"`
 	Deduplicated int             `json:"deduplicated"`
+	Held         int             `json:"held"`
 	Skipped      int             `json:"skipped"`
 	Errors       []SpendRowError `json:"errors,omitempty"`
 }
@@ -109,13 +127,14 @@ type SpendRowError struct {
 //     usage_events UNIQUE (tenant_id, livemode, idempotency_key) —
 //     tenant-wide, NOT per customer/meter, which is why the mapper
 //     suffixes the key per token type)
-//  5. Tally accepted / skipped / errors; return 200 with envelope
+//  5. Tally accepted / deduplicated / held / skipped / errors; return 200
 //
 // The status code answers ONE question: did Velox reach a verdict on
-// this batch? Per-row verdicts — a customer or meter the operator has
-// not mapped, a payload that fails validation, a row the store already
-// holds — stay 200 with errors[] / deduplicated, so one misconfigured
-// call never fails the batch and never makes LiteLLM retry it. A
+// this batch? Per-row verdicts — a customer or meter that does not exist
+// yet (the row is HELD, counted in held, #1044), a payload that fails
+// validation, a row the store already has — stay 200 with held / errors[]
+// / deduplicated, so one misconfigured call never fails the batch and
+// never makes LiteLLM retry it. A
 // NON-verdict — the usage store could not be reached or could not
 // commit (managed-Postgres failover, a replica losing its pool during
 // a rolling restart, a stalled connection) — aborts the batch fail-fast
@@ -160,6 +179,8 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 			switch err := h.persist(r.Context(), tenantID, ing); {
 			case err == nil:
 				resp.Accepted++
+			case errors.Is(err, errHeldRow):
+				resp.Held++
 			case errors.Is(err, errDuplicateRow):
 				// Already held by the store. Still a success — LiteLLM
 				// retrying a delivered batch is the happy path — but
@@ -187,11 +208,12 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if len(resp.Errors) > 0 {
-		slog.WarnContext(r.Context(), "litellm spend: partial failure",
+	if len(resp.Errors) > 0 || resp.Held > 0 {
+		slog.WarnContext(r.Context(), "litellm spend: rows held or refused",
 			"tenant_id", tenantID,
 			"accepted", resp.Accepted,
 			"deduplicated", resp.Deduplicated,
+			"held", resp.Held,
 			"skipped", resp.Skipped,
 			"errors", len(resp.Errors),
 		)
@@ -213,14 +235,14 @@ func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalInge
 	cust, err := h.customers.GetByExternalID(ctx, tenantID, ing.ExternalCustomerID)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
-			return fmt.Errorf("customer %q not found (set user=<external_customer_id> on the LiteLLM call)", ing.ExternalCustomerID)
+			return h.hold(ctx, tenantID, ing, domain.HeldReasonCustomerNotFound)
 		}
 		return fmt.Errorf("%w: customer lookup: %w", errIngestUnavailable, err)
 	}
 	meter, err := h.meters.GetMeterByKey(ctx, tenantID, ing.MeterKey)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
-			return fmt.Errorf("meter %q not found (create it via the recipe or POST /v1/meters)", ing.MeterKey)
+			return h.hold(ctx, tenantID, ing, domain.HeldReasonMeterNotFound)
 		}
 		return fmt.Errorf("%w: meter lookup: %w", errIngestUnavailable, err)
 	}
@@ -238,7 +260,7 @@ func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalInge
 		ObservedCostMicros: ing.ObservedCostMicros,
 	}
 
-	if _, err := h.ingester.Ingest(ctx, tenantID, input); err != nil {
+	if _, err := h.ingester.IngestResolvingHeld(ctx, tenantID, input); err != nil {
 		// Idempotency replay is silent success: the usage store returns
 		// ErrDuplicateKey on the (tenant_id, livemode, idempotency_key) UNIQUE — a
 		// LiteLLM network-retry redelivering an already-ingested batch is
@@ -263,6 +285,40 @@ func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalInge
 	}
 	return nil
 }
+
+// hold keeps a row whose customer or meter does not exist yet (#1044,
+// ADR-122). The row keeps its idempotency key, so a release later writes it
+// at most once, and a LiteLLM resend of a row already held is counted as
+// deduplicated. A hold that cannot be written is a NON-verdict: 503, so
+// LiteLLM resends the batch rather than reading a 200 as delivered.
+func (h *Handler) hold(ctx context.Context, tenantID string, ing ExternalIngest, reason domain.HeldUsageReason) error {
+	_, err := h.holder.Hold(ctx, tenantID, usage.HoldInput{
+		Source:             domain.HeldUsageSourceLiteLLM,
+		ExternalCustomerID: ing.ExternalCustomerID,
+		MeterKey:           ing.MeterKey,
+		Quantity:           ing.Quantity,
+		Dimensions:         ing.Dimensions,
+		IdempotencyKey:     ing.IdempotencyKey,
+		EventAt:            ing.Timestamp,
+		ObservedCostMicros: ing.ObservedCostMicros,
+		Reason:             reason,
+	})
+	switch {
+	case err == nil:
+		return errHeldRow
+	case errors.Is(err, errs.ErrDuplicateKey):
+		return errDuplicateRow
+	case errors.Is(err, errs.ErrValidation):
+		// The row itself is bad; holding it would only fail later.
+		return err
+	default:
+		return fmt.Errorf("%w: hold: %w", errIngestUnavailable, err)
+	}
+}
+
+// errHeldRow marks a row kept in usage_held_events: not billed yet, not
+// lost. Never returned to the caller.
+var errHeldRow = errors.New("litellm: row held")
 
 // errIngestUnavailable marks a NON-verdict: the usage store could not be
 // reached or could not commit. spend aborts the batch with 503 so the

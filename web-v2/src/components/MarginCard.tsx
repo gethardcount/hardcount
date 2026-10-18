@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +12,7 @@ import {
 import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
 import { formatCivilPeriod } from '@/lib/dates'
 import { marginCardView } from '@/lib/actionOutcomes'
+import { formatMarginBps, marginCostNote, marginCostState } from '@/lib/marginCost'
 import {
   DEFAULT_MARGIN_PRESET, MARGIN_EMPTY_NOTE, MARGIN_PRESETS, isOutsideWindow, marginWindowFor, marginWindowIsEmpty, rangeIncluding, type MarginPreset,
 } from '@/lib/usageWindow'
@@ -27,7 +29,10 @@ import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@
 // The card opens on the customer's current billing period, with the last
 // invoiced period one click away (ADR-121). A rolling 30 days never matched a
 // billing period, so its total disagreed with the invoice on the same page.
-export function MarginCard({ customerId, customerTestClockId }: { customerId: string; customerTestClockId?: string }) {
+// currency: the customer's currency (useCustomerCurrency). The report names
+// no revenue currency when the window has no revenue, and that $0 must still
+// be in the customer's currency. Undefined while it loads: "—" until then.
+export function MarginCard({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
   const [preset, setPreset] = useState<MarginPreset>(DEFAULT_MARGIN_PRESET)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
@@ -88,10 +93,16 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
   const costCurrency = rep?.cost_currency || 'USD'
   const mixedRevenue = !!rep && !revenueCurrency && rep.revenue_cents > 0
   const currencyMismatch = !!rep && !!revenueCurrency && revenueCurrency !== costCurrency && rep.revenue_cents > 0
-  const billed = (cents: number) => (mixedRevenue ? '—' : formatCents(cents, revenueCurrency))
+  const shownCurrency = revenueCurrency || currency
+  const billed = (cents: number) => (mixedRevenue || !shownCurrency ? '—' : formatCents(cents, shownCurrency))
   // micros (1e-6 of the currency unit) → display amount.
   const cost = (micros: number) =>
     `${getCurrencySymbol(costCurrency)}${(micros / 1_000_000).toFixed(micros >= 100_000 ? 2 : 4)}`
+  // No event carries a provider cost: the cost is unknown, not $0, and the
+  // margin is not 100% (the server leaves margin_bps out).
+  const costState = rep ? marginCostState(rep) : 'measured'
+  const costNote = marginCostNote(costState)
+  const costKnown = costState === 'measured'
 
   return (
     <Card>
@@ -164,17 +175,25 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Provider cost</p>
-                <p className="text-lg font-semibold text-foreground mt-0.5">{cost(rep.cost_micros)}</p>
+                <p className="text-lg font-semibold text-foreground mt-0.5">{costKnown ? cost(rep.cost_micros) : '—'}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Margin</p>
                 <p className="text-lg font-semibold text-foreground mt-0.5">
-                  {rep.margin_bps != null ? `${(rep.margin_bps / 100).toFixed(1)}%` : '—'}
+                  {formatMarginBps(rep.margin_bps)}
                 </p>
               </div>
             </div>
 
-            {currencyMismatch && (
+            {costNote && (
+              <p className="text-xs text-muted-foreground mt-3">
+                {costNote}{' '}
+                <Link to="/provider-costs" className="text-primary underline-offset-2 hover:underline">
+                  {costState === 'no-rates' ? 'Set up provider costs' : 'Provider costs'}
+                </Link>
+              </p>
+            )}
+            {currencyMismatch && costKnown && (
               <p className="text-xs text-muted-foreground mt-3">
                 Margin needs billing and provider cost in one currency. This customer is
                 billed in {revenueCurrency} and provider cost is in {costCurrency}, so no
@@ -195,24 +214,29 @@ export function MarginCard({ customerId, customerTestClockId }: { customerId: st
                     <TableHead>Model</TableHead>
                     <TableHead className="text-right">Billed</TableHead>
                     <TableHead className="text-right">Cost</TableHead>
+                    <TableHead className="text-right">Margin</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rep.by_model.map(m => (
                     <TableRow key={m.model}>
-                      <TableCell className="text-sm font-mono">{m.model}</TableCell>
+                      {/* Wraps only when a phone is too narrow for the name,
+                          so the four columns still fit at 390px. */}
+                      <TableCell className="text-sm font-mono whitespace-normal [overflow-wrap:anywhere]">{m.model}</TableCell>
                       <TableCell className="text-sm text-right">
                         {m.attributed
                           ? billed(m.revenue_cents ?? 0)
                           : <Badge variant="outline">not model-priced</Badge>}
                       </TableCell>
                       <TableCell className="text-sm text-right">{cost(m.cost_micros)}</TableCell>
+                      <TableCell className="text-sm text-right">{formatMarginBps(m.margin_bps)}</TableCell>
                     </TableRow>
                   ))}
                   {rep.unattributed_revenue_cents > 0 && (
                     <TableRow>
                       <TableCell className="text-sm text-muted-foreground">Not model-attributed</TableCell>
                       <TableCell className="text-sm text-right">{billed(rep.unattributed_revenue_cents)}</TableCell>
+                      <TableCell className="text-sm text-right text-muted-foreground">—</TableCell>
                       <TableCell className="text-sm text-right text-muted-foreground">—</TableCell>
                     </TableRow>
                   )}

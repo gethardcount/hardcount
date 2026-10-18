@@ -21,11 +21,15 @@ export interface MarginReport {
   cost_micros: number;
   /** Currency of cost_micros. Always USD. */
   cost_currency: string;
-  /** (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency. */
+  /** (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high). */
   margin_bps?: number;
   by_model: MarginReportByModelItem[];
   unattributed_revenue_cents: number;
   /** Token events with costable dims but no matching rate — add a rate to cost new events. */
   unresolved_events: number;
+  /** Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown. */
+  costed_events: number;
+  /** Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up. */
+  cost_rates_configured: boolean;
   cache_write_excluded?: boolean;
 }

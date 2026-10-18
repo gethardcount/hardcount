@@ -15,7 +15,7 @@ import (
 )
 
 // TestAggregateByPricingRules is the runtime contract test for
-// docs/design-multi-dim-meters.md priority+claim resolution. Each
+// docs/design/multi-dim-meters.md priority+claim resolution. Each
 // sub-test exercises one piece of the algorithm:
 //
 //   - per-mode aggregation: sum, count, max, last_during_period, last_ever

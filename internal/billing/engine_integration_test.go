@@ -21,7 +21,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
-	"github.com/sagarsuperuser/velox/internal/tax"
 	"github.com/sagarsuperuser/velox/internal/tenant"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
@@ -76,10 +75,6 @@ func (a *subStoreAdapter) ClearPauseCollection(ctx context.Context, tenantID, id
 	return a.store.ClearPauseCollection(ctx, tenantID, id)
 }
 
-func (a *subStoreAdapter) ActivateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error) {
-	return a.store.ActivateAfterTrial(ctx, tenantID, id, at)
-}
-
 func (a *subStoreAdapter) ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error) {
 	return a.store.ListWithThresholds(ctx, livemode, afterID, limit)
 }
@@ -126,10 +121,6 @@ type usageStoreAdapter struct {
 	store *usage.PostgresStore
 }
 
-func (a *usageStoreAdapter) AggregateForBillingPeriod(ctx context.Context, tenantID, subID string, meterIDs []string, from, to time.Time) (map[string]decimal.Decimal, error) {
-	return a.store.AggregateForBillingPeriod(ctx, tenantID, subID, meterIDs, from, to)
-}
-
 func (a *usageStoreAdapter) AggregateForBillingPeriodByAgg(ctx context.Context, tenantID, customerID string, meters map[string]string, from, to time.Time) (map[string]decimal.Decimal, error) {
 	return a.store.AggregateForBillingPeriodByAgg(ctx, tenantID, customerID, meters, from, to)
 }
@@ -141,14 +132,6 @@ func (a *usageStoreAdapter) AggregateByPricingRules(ctx context.Context, tenantI
 // invoiceStoreAdapter wraps invoice.PostgresStore to implement billing.InvoiceWriter
 type invoiceStoreAdapter struct {
 	store *invoice.PostgresStore
-}
-
-func (a *invoiceStoreAdapter) CreateInvoice(ctx context.Context, tenantID string, inv domain.Invoice) (domain.Invoice, error) {
-	return a.store.Create(ctx, tenantID, inv)
-}
-
-func (a *invoiceStoreAdapter) CreateLineItem(ctx context.Context, tenantID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, error) {
-	return a.store.CreateLineItem(ctx, tenantID, item)
 }
 
 func (a *invoiceStoreAdapter) GetInvoice(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
@@ -211,16 +194,8 @@ func (a *invoiceStoreAdapter) UpdateTaxAtomic(ctx context.Context, tenantID, inv
 	return a.store.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, lineItems)
 }
 
-func (a *invoiceStoreAdapter) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
-	return a.store.FindBaseInvoiceForPeriod(ctx, tenantID, subscriptionID, periodStart)
-}
-
 func (a *invoiceStoreAdapter) FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error) {
 	return a.store.FindFundingInvoicesForPeriod(ctx, tenantID, subscriptionID, periodStart, periodEnd)
-}
-
-func (a *invoiceStoreAdapter) LatestThresholdPeriodEnd(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error) {
-	return a.store.LatestThresholdPeriodEnd(ctx, tenantID, subscriptionID, periodStart, periodEnd)
 }
 
 func (a *invoiceStoreAdapter) GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
@@ -354,27 +329,12 @@ func TestFullBillingCycle_E2E(t *testing.T) {
 
 	// 8. Run billing engine with a real settings store (exercises the
 	// UPSERT path in NextInvoiceNumber for a tenant with no prior settings row).
-	settingsStore := tenant.NewSettingsStore(db)
 	// Pin the engine clock just past period_end so only one period
 	// is due — the post-ADR-028 per-sub period loop would otherwise
 	// catch up multiple cycles using wall-clock time and the test's
 	// 2026-03/04 fixture period.
 	fakeClk := clock.NewFake(periodEnd.Add(time.Nanosecond))
-	engine := billing.NewEngine(
-		&subStoreAdapter{subStore},
-		&usageStoreAdapter{usageStore},
-		&pricingStoreAdapter{pricingStore},
-		&invoiceStoreAdapter{invoiceStore},
-		nil, settingsStore, testPaymentSetupsNoPM{}, testChargerSentinel{}, fakeClk,
-	)
-	engine.SetIntervalReader(subStore)
-	// Production engine always has a tax resolver wired; the
-	// engine fails loudly without one (ApplyTaxToLineItems → error).
-	// Test harness wires NoneProvider explicitly so the integration
-	// path matches production shape.
-	engine.SetTaxProviderResolver(tax.NewResolver(nil))
-	engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
-	engine.SetDunningStarter(testDunningStarter{})
+	engine := newRealEngine(db, fakeClk)
 
 	count, errs := engine.RunCycle(ctx, 50, nil)
 	if len(errs) > 0 {
@@ -484,7 +444,6 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 	pricingStore := pricing.NewPostgresStore(db)
 	subStore := subscription.NewPostgresStore(db)
 	invoiceStore := invoice.NewPostgresStore(db)
-	usageStore := usage.NewPostgresStore(db)
 	creditStore := credit.NewPostgresStore(db)
 	creditSvc := credit.NewService(creditStore)
 
@@ -528,17 +487,7 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 
 	settingsStore := tenant.NewSettingsStore(db)
 	fakeClk := clock.NewFake(periodStart.Add(time.Hour))
-	engine := billing.NewEngine(
-		&subStoreAdapter{subStore},
-		&usageStoreAdapter{usageStore},
-		&pricingStoreAdapter{pricingStore},
-		&invoiceStoreAdapter{invoiceStore},
-		nil, settingsStore, testPaymentSetupsNoPM{}, testChargerSentinel{}, fakeClk,
-	)
-	engine.SetIntervalReader(subStore)
-	engine.SetTaxProviderResolver(tax.NewResolver(nil))
-	engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
-	engine.SetDunningStarter(testDunningStarter{})
+	engine := newRealEngine(db, fakeClk)
 	engine.SetCreditGranter(creditSvc)
 	// Issuers are REQUIRED post-#442: the paid-source cancel credit routes
 	// through the real creditnote.Service (Issue grants the balance via the
@@ -754,7 +703,6 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 	pricingStore := pricing.NewPostgresStore(db)
 	subStore := subscription.NewPostgresStore(db)
 	invoiceStore := invoice.NewPostgresStore(db)
-	usageStore := usage.NewPostgresStore(db)
 	creditStore := credit.NewPostgresStore(db)
 	creditSvc := credit.NewService(creditStore)
 	creditNoteStore := creditnote.NewPostgresStore(db)
@@ -781,17 +729,7 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 	creditNoteSvc.SetNumberGenerator(settingsStore)
 
 	newEngine := func() *billing.Engine {
-		e := billing.NewEngine(
-			&subStoreAdapter{subStore},
-			&usageStoreAdapter{usageStore},
-			&pricingStoreAdapter{pricingStore},
-			&invoiceStoreAdapter{invoiceStore},
-			nil, settingsStore, testPaymentSetupsNoPM{}, testChargerSentinel{}, clock.NewFake(periodStart.Add(time.Hour)),
-		)
-		e.SetIntervalReader(subStore)
-		e.SetTaxProviderResolver(tax.NewResolver(nil))
-		e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
-		e.SetDunningStarter(testDunningStarter{})
+		e := newRealEngine(db, clock.NewFake(periodStart.Add(time.Hour)))
 		e.SetCreditGranter(creditSvc)
 		e.SetInvoiceVoider(invoiceSvc)
 		e.SetCreditNoteAdjuster(creditNoteSvc)

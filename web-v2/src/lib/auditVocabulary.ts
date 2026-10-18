@@ -115,6 +115,7 @@ export function describeAction(entry: AuditEntry): string {
     case 'subscription.pending_change_applied': return `Applied scheduled change${label ? ` to ${label}` : ''}`
     case 'subscription.threshold_crossed': return `Billing threshold crossed${label ? ` on ${label}` : ''}`
     case 'subscription.threshold_deferred': return `Billing threshold deferred${label ? ` on ${label}` : ''}`
+    case 'subscription.net_negative_usage': return `Usage below zero billed as zero${label ? ` on ${label}` : ''}`
     case 'revoke': return `Revoked API key${label ? ` "${label}"` : ''}`
     case 'rotate':
       if (entry.resource_type === 'api_key') return `Rotated API key${label ? ` "${label}"` : ''}`
@@ -230,7 +231,7 @@ export const DEFAULT_ACTIONS = [
   'credit.adjustment', 'credit.deduction', 'credit_note.issued',
   'subscription.item_updated', 'subscription.pending_change_applied',
   'subscription.proration_failed', 'subscription.threshold_crossed',
-  'subscription.threshold_deferred',
+  'subscription.threshold_deferred', 'subscription.net_negative_usage',
   'member.invited', 'member.joined', 'member.invite_revoked', 'member.removed',
   'login', 'logout', 'mode_changed',
   'password_reset_requested', 'password_reset_completed',

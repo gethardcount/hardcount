@@ -356,13 +356,6 @@ func NullableStringPtr(v *string) any {
 	return *v
 }
 
-func NullableFloat64(v *float64) any {
-	if v == nil {
-		return nil
-	}
-	return *v
-}
-
 func NullableTime(v *time.Time) any {
 	if v == nil {
 		return nil

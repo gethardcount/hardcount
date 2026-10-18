@@ -50,12 +50,12 @@ import {
   postalPlaceholderForCountry,
 } from '@/lib/geo'
 
-import { Building2, CreditCard, FileText, Receipt, Check, AlertCircle, Info, Loader2, Trash2, Copy, ExternalLink, X, Users } from 'lucide-react'
+import { Building2, CreditCard, FileText, Receipt, Check, AlertCircle, Info, Loader2, Trash2, Copy, ExternalLink, X, Users, Mail } from 'lucide-react'
 import { TeamTab } from '@/components/TeamTab'
+import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
-import { useStickyActionBar } from '@/hooks/useStickyActionBar'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -179,7 +179,6 @@ export default function SettingsPage() {
 
   const form = watch()
   const hasChanges = isDirty
-  useStickyActionBar(hasChanges)
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -223,9 +222,9 @@ export default function SettingsPage() {
   // Tab values: 'general' is the default home; 'business' is accepted
   // as a back-compat alias since older bookmarks / external links
   // (docs, support emails) point at ?tab=business.
-  const tab = ((): 'general' | 'invoicing' | 'tax' | 'payments' | 'team' => {
+  const tab = ((): 'general' | 'invoicing' | 'tax' | 'payments' | 'email' | 'team' => {
     const q = searchParams.get('tab')
-    if (q === 'invoicing' || q === 'tax' || q === 'payments' || q === 'team') return q
+    if (q === 'invoicing' || q === 'tax' || q === 'payments' || q === 'email' || q === 'team') return q
     if (q === 'business') return 'general'
     return 'general'
   })()
@@ -352,7 +351,7 @@ export default function SettingsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
-          <p className="text-sm text-muted-foreground mt-1">Configure your billing tenant</p>
+          <p className="text-sm text-muted-foreground mt-1">Your business details, invoice defaults, tax and payment setup</p>
         </div>
         {!hasChanges && !loading && (
           <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 rounded-lg">
@@ -362,13 +361,18 @@ export default function SettingsPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="mt-6">
+        {/* Six tabs are wider than a phone: the strip scrolls sideways
+            instead of widening the page. */}
+        <div className="-mx-4 max-w-[100vw] overflow-x-auto px-4 md:mx-0 md:px-0">
         <TabsList>
           <TabsTrigger value="general"><Building2 size={14} className="hidden sm:block" /> General</TabsTrigger>
           <TabsTrigger value="invoicing"><FileText size={14} className="hidden sm:block" /> Invoicing</TabsTrigger>
           <TabsTrigger value="tax"><Receipt size={14} className="hidden sm:block" /> Tax</TabsTrigger>
           <TabsTrigger value="payments"><CreditCard size={14} className="hidden sm:block" /> Payments</TabsTrigger>
+          <TabsTrigger value="email"><Mail size={14} className="hidden sm:block" /> Email</TabsTrigger>
           <TabsTrigger value="team"><Users size={14} className="hidden sm:block" /> Team</TabsTrigger>
         </TabsList>
+        </div>
 
         <div className="max-w-3xl mt-6 pb-24">
 
@@ -534,7 +538,7 @@ export default function SettingsPage() {
               <CardContent className="p-6">
                 <div className="mb-5">
                   <h2 className="text-sm font-semibold text-foreground">Preferences</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Tenant-wide display and date conventions</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Timezone for your whole account</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
@@ -633,7 +637,7 @@ export default function SettingsPage() {
                     </div>
                     {formErrors.credit_balance_low_threshold
                       ? <p className="text-xs text-destructive mt-1">{formErrors.credit_balance_low_threshold.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1.5">Sends a webhook when a customer's credit balance drops below this amount. Leave blank to turn off. Empty and depleted balances always send their own events.</p>}
+                      : <p className="text-xs text-muted-foreground mt-1.5">Velox tells your app (by webhook) when a customer's credit balance drops below this amount. Leave blank to turn off. A balance that runs out always sends its own message.</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-invoice-footer">Invoice footer</Label>
@@ -662,7 +666,7 @@ export default function SettingsPage() {
                 <div className="mb-5">
                   <h2 className="text-sm font-semibold text-foreground">Your tax identity</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    The tax ID you print on invoices. The seller's jurisdiction is your business address (set in General tab).
+                    The tax ID you print on invoices. Your tax country is the one in your business address (General tab).
                   </p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -673,14 +677,14 @@ export default function SettingsPage() {
                       className={cn('mt-1 font-mono', formErrors.tax_id && 'border-destructive')} />
                     {formErrors.tax_id
                       ? <p className="text-xs text-destructive mt-1">{formErrors.tax_id.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1">Your VAT, EIN, GSTIN, or ABN — required on B2B invoices in most jurisdictions</p>}
+                      : <p className="text-xs text-muted-foreground mt-1">Your VAT, EIN, GSTIN, or ABN — required on business invoices in most countries</p>}
                   </div>
                   <div>
                     <Label>Seller country</Label>
                     <div className="mt-1 px-3 py-2 rounded-md border border-border bg-muted/30 text-sm text-muted-foreground">
                       {form.company_country ? (COUNTRY_NAME[form.company_country] || form.company_country) : 'Set business address in General tab'}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">Drives tax name/rate suggestions and cross-border VAT handling</p>
+                    <p className="text-xs text-muted-foreground mt-1">Used to suggest a tax name and rate, and to handle VAT for customers abroad</p>
                   </div>
                 </div>
               </CardContent>
@@ -735,7 +739,7 @@ export default function SettingsPage() {
                         Stripe Tax
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">AUTO</span>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1">Jurisdiction-aware rates, reverse-charge, tax transactions. Requires Stripe in Payments tab.</div>
+                      <div className="text-xs text-muted-foreground mt-1">Stripe works out the right tax for each customer's country or state. Connect Stripe in the Payments tab first.</div>
                     </button>
                   </div>
                 </div>
@@ -797,7 +801,7 @@ export default function SettingsPage() {
                       <div>
                         <Label className="font-medium text-foreground">Tax-inclusive pricing</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          When on, plan and usage prices already include tax. Velox carves tax out of the sticker price.
+                          When on, your plan and usage prices already include tax, and Velox shows the tax part inside them.
                           When off (default), tax is added on top of the subtotal.
                         </p>
                       </div>
@@ -817,7 +821,7 @@ export default function SettingsPage() {
                           <Info size={14} className="shrink-0 mt-0.5" aria-hidden />
                           {form.tax_inclusive ? (
                             <span>
-                              Example: {ex.base} sticker price includes {form.tax_name || 'tax'} at {formatTaxRate(form.tax_rate)}%.
+                              Example: a {ex.base} price includes {form.tax_name || 'tax'} at {formatTaxRate(form.tax_rate)}%.
                               Net subtotal = <strong className="text-foreground">{ex.net}</strong>.
                               Customer pays <strong className="text-foreground">{ex.total}</strong>.
                             </span>
@@ -857,7 +861,7 @@ export default function SettingsPage() {
                       <div>
                         <Label className="font-medium text-foreground">Tax-inclusive pricing</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          When on, plan prices already include tax. Stripe Tax carves tax out of the gross amount.
+                          When on, your plan prices already include tax, and Stripe Tax works out the tax part inside them.
                         </p>
                       </div>
                       <Switch
@@ -871,8 +875,8 @@ export default function SettingsPage() {
                         <AlertCircle size={14} className="shrink-0 mt-0.5" />
                         <span>
                           Tax is calculated per invoice via Stripe. If a calculation fails, the invoice stays in draft until it
-                          resolves. Requires Stripe Tax enabled in your Stripe dashboard; registrations control which
-                          jurisdictions collect tax.
+                          resolves. Turn on Stripe Tax in your Stripe dashboard first; tax is collected only in the
+                          places where you add a tax registration there.
                         </span>
                       </p>
                     </div>
@@ -890,6 +894,11 @@ export default function SettingsPage() {
           {/* Team: members + invitations. Lives outside the settings
               form — membership changes apply immediately, there's
               nothing to save. */}
+          {/* Email: read-only server email setup + test send. */}
+          <TabsContent value="email">
+            <EmailSettingsPanel />
+          </TabsContent>
+
           <TabsContent value="team">
             <TeamTab />
           </TabsContent>
@@ -897,10 +906,7 @@ export default function SettingsPage() {
         </div>
       </Tabs>
 
-      {/* Sticky save bar. The onboarding pill (also fixed bottom-right,
-          z-30) hides while it shows (useStickyActionBar); a reserved right
-          edge left the bar too narrow at phone width and the pill still
-          covered Save Changes. */}
+      {/* Sticky save bar. */}
       {hasChanges && (
         <div className="fixed bottom-0 left-0 right-0 z-30 md:left-60">
           <div className={cn(CONTENT_BAND, 'px-4 md:px-8')}>
@@ -926,7 +932,7 @@ export default function SettingsPage() {
                   </AlertDialogContent>
                 </AlertDialog>
                 <Button onClick={() => handleSave()} disabled={saving}>
-                  {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Save Changes'}
+                  {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Save changes'}
                 </Button>
               </div>
             </div>

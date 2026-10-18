@@ -4,6 +4,10 @@
 **Date:** 2026-05-15
 **Related**: ADR-031 (per-plan bill_timing), ADR-005 (integer cents for money), industry-reference-first workflow
 
+## Summary
+
+A plan's base price (`base_amount_cents`), `base_bill_timing` and meter set can change only while no live subscription (any status except `canceled` or `archived`) uses the plan. After that, such an edit is refused with a message to create a new plan, because subscriptions read the plan at billing time and would be billed differently mid-cycle. Name, description, `tax_code` and status stay editable. Velox does not version plans or copy them onto each subscription. Status: active.
+
 ## Context
 
 Velox plans are currently mutable in place. Active subscriptions read the plan live at billing time (`pricing.GetPlan` inside `billing.Engine.billOnePeriod`). Operator edits to a plan's `base_amount_cents`, `base_bill_timing`, or `meter_ids` therefore **silently change what existing subs bill at their next cycle close** — including potentially producing revenue gaps (an in_arrears base period that never gets invoiced because the plan flipped to in_advance mid-cycle).

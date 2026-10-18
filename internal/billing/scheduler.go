@@ -100,6 +100,12 @@ type IdempotencyCleaner interface {
 	Cleanup(ctx context.Context) (int, error)
 }
 
+// LoginThrottleCleaner deletes sign-in throttle rows nothing reads any more
+// (user.LoginThrottle).
+type LoginThrottleCleaner interface {
+	Cleanup(ctx context.Context) (int, error)
+}
+
 // PaymentReconciler resolves invoices in the PaymentUnknown state by querying
 // Stripe for the authoritative PaymentIntent outcome. See payment.Reconciler.
 type PaymentReconciler interface {
@@ -114,6 +120,7 @@ type Scheduler struct {
 	credits           CreditExpirer
 	tokenCleaner      TokenCleaner
 	idempotencyClean  IdempotencyCleaner
+	loginThrottle     LoginThrottleCleaner
 	taxRetrier        TaxRetrier
 	clawbackRetrier   ClawbackRetrier
 	trialExpirer      TrialExpirer
@@ -125,9 +132,6 @@ type Scheduler struct {
 	onRun             func() // liveness stamp: every poll, and every page of a billing drain (see SetOnRun)
 	clock             clock.Clock
 }
-
-// Interval returns the configured scheduler interval.
-func (s *Scheduler) Interval() time.Duration { return s.interval }
 
 func NewScheduler(engine *Engine, interval time.Duration, batch int, dunning DunningProcessor, tenants TenantLister, clk clock.Clock, credits ...CreditExpirer) *Scheduler {
 	if interval <= 0 {
@@ -157,6 +161,13 @@ func (s *Scheduler) SetTokenCleaner(cleaner TokenCleaner) {
 // B-tree — a slow leak that only shows up in p99 latency weeks later.
 func (s *Scheduler) SetIdempotencyCleaner(cleaner IdempotencyCleaner) {
 	s.idempotencyClean = cleaner
+}
+
+// SetLoginThrottleCleaner wires the sign-in throttle's cleanup. The table
+// gains a row for every email and address that tries to sign in, including
+// emails with no account, so without a sweep it grows with every attempt.
+func (s *Scheduler) SetLoginThrottleCleaner(cleaner LoginThrottleCleaner) {
+	s.loginThrottle = cleaner
 }
 
 // SetTaxRetrier wires the background tax-retry reconciler. Each
@@ -452,6 +463,17 @@ func (s *Scheduler) runCrossModeCleanup(ctx context.Context) {
 		}
 	}
 
+	// 7. Sign-in throttle rows: no attempt for a day, no wait running, and
+	// no sign-in from that browser for 180 days.
+	if s.loginThrottle != nil {
+		cleaned, err := s.loginThrottle.Cleanup(ctx)
+		if err != nil {
+			slog.Error("login throttle cleanup error", "error", err)
+		} else if cleaned > 0 {
+			slog.Info("old sign-in throttle rows cleaned up", "count", cleaned)
+			mw.RecordScheduledCleanup("login_throttle", cleaned)
+		}
+	}
 }
 
 // runDunningHalf runs the leader-gated half that advances dunning state.

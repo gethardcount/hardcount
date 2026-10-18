@@ -159,7 +159,7 @@ export default function TestClockDetailPage() {
     setRetryingAdvance(true)
     try {
       await api.retryAdvanceTestClock(id)
-      toast.success('Retrying — catchup running in background')
+      toast.success('Retrying. Billing the skipped days…')
       // Refresh the clock + its subs. The detail query's poll
       // (every 1.5s while status==='advancing', set up below)
       // picks up the worker-driven transition without us doing
@@ -274,7 +274,7 @@ export default function TestClockDetailPage() {
           <CardContent className="px-6 py-4 flex items-start gap-3">
             <AlertTriangle size={16} className="text-destructive shrink-0 mt-0.5" />
             <div className="text-sm flex-1 min-w-0">
-              <p className="font-medium text-destructive">Catchup failed during last advance.</p>
+              <p className="font-medium text-destructive">The last advance stopped before it finished billing the skipped days.</p>
               {clock.last_failure_reason && (
                 <p className="text-xs text-muted-foreground mt-1.5 font-mono break-all">
                   Reason: {clock.last_failure_reason}
@@ -282,7 +282,7 @@ export default function TestClockDetailPage() {
               )}
               <p className="text-muted-foreground mt-2">
                 Some invoices may have been generated before the failure — review them below.
-                Click <span className="font-medium text-foreground">Retry advance</span> to resume from where catchup stopped, or
+                Click <span className="font-medium text-foreground">Retry advance</span> to carry on from where it stopped, or
                 delete this clock to start over.
               </p>
               <div className="mt-3 flex items-center gap-2">
@@ -332,8 +332,8 @@ export default function TestClockDetailPage() {
         ) : attachedCustomers.length === 0 ? (
           <EmptyState
             icon={Users}
-            title="No customers attached"
-            description="Customers attached to this clock have all their billing — invoices, dunning, trial expirations — run on the clock's simulated time. Attach one from the Customers page when creating a new customer."
+            title="No customers on this clock yet"
+            description="Customers on this clock are billed on its time: renewals, invoices, trial ends and payment retries. To add one, create a new customer and pick this clock. A customer can't be moved onto a clock after it is created."
             action={{
               label: 'Go to Customers',
               to: '/customers',
@@ -551,7 +551,7 @@ function AdvanceClockDialog({
     setSubmitting(true)
     try {
       await api.advanceTestClock(clock.id, targetIso)
-      toast.success('Clock advancing — billing catchup running')
+      toast.success('Moving the clock forward. Billing the skipped days…')
       queryClient.invalidateQueries({ queryKey: ['test-clocks', clock.id] })
       queryClient.invalidateQueries({ queryKey: ['test-clocks', clock.id, 'subscriptions'] })
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
@@ -576,8 +576,8 @@ function AdvanceClockDialog({
             <strong className="text-foreground">
               {customerCount === 1 ? '1 customer' : `all ${customerCount} customers`}
             </strong>{' '}
-            ({subs.length === 1 ? '1 subscription' : `${subs.length} subscriptions`}) pinned to this
-            clock, running billing catchup for each.
+            ({subs.length === 1 ? '1 subscription' : `${subs.length} subscriptions`}) on this
+            clock, and runs the billing each of them was due in the skipped days.
           </DialogDescription>
         </DialogHeader>
 
@@ -609,7 +609,7 @@ function AdvanceClockDialog({
                 minDate={new Date(clock.frozen_time)}
               />
             </div>
-            <p className="text-xs text-muted-foreground mt-1.5">Times in tenant timezone ({tz}). Each advance moves the clock forward by up to 1 year — chunk longer simulations into successive advances.</p>
+            <p className="text-xs text-muted-foreground mt-1.5">Times are in your account's timezone ({tz}). Each advance moves the clock forward by up to 1 year — chunk longer simulations into successive advances.</p>
             {targetIso !== null && new Date(targetIso) <= new Date(clock.frozen_time) && (
               <p className="text-xs text-destructive mt-1">Target time must be after the current clock time.</p>
             )}
@@ -626,7 +626,7 @@ function AdvanceClockDialog({
             {overlongWarning && (
               <div className="px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-xs text-amber-900 dark:text-amber-200">
                 <strong>Heads up:</strong> jumping more than ~1 month closes many billing cycles in a single
-                run. Catchup may take a moment.
+                run. Billing the skipped days may take a moment.
               </div>
             )}
           </div>

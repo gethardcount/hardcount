@@ -1,9 +1,13 @@
 # Writing style for Velox docs
 
 How to write docs in this repo so they are easy to read and still precise.
-It applies to every Markdown file: README, guides, runbooks, ADRs, design
-docs, CHANGELOG, the release checklist and the files AI agents read (CLAUDE.md,
-playbooks). Use it when you write a new doc and when you touch an old one.
+Use it when you write a new doc and when you touch an old one. It applies to
+every Markdown file: README, guides, runbooks, ADRs, design docs, CHANGELOG,
+the release checklist and the files AI agents read (CLAUDE.md, playbooks).
+
+**In short:** keep every fact, put the point first, write one idea per
+sentence, define words a new reader cannot know, and keep history behind a
+link. [Checks](#checks) lists the tools that enforce this.
 
 ## Who reads our docs
 
@@ -69,6 +73,67 @@ the sentences.
 **The one-pass test.** Read the sentence once, at normal speed, as a new
 reader would. If you had to read it twice, or hold a parenthesis in your head
 until the end, rewrite it.
+
+## The first-time reader bar
+
+Set on 2026-10-17. Every reader-facing page (README, guides, `docs/` pages a
+user opens) meets it, on top of the rules above. Write for a friendly, busy
+person who has never heard of Velox. The reader should never have to decode a
+word.
+
+1. **Say what the thing is in one plain line.** "Velox is a billing system
+   you run yourself" before any feature list.
+2. **Say why it exists and who it is for.** One or two lines each, near the
+   top.
+3. **Give a new idea one everyday comparison.** One, not three. "The quick
+   start is a demo car at a showroom: you drive it, you don't build it."
+4. **Explain every term on first use, plain meaning first** (rule 3): "a
+   test clock is a pretend clock for test customers". Then use the term the
+   same way everywhere after.
+5. **End each task step with "You see:"** (rule 7 makes tasks numbered
+   steps). After it comes the real output, the screen, or the page the
+   reader lands on. Copy it from a real run, not from memory.
+
+   ```markdown
+   1. Run `./quickstart.sh`.
+      **You see:** a box with the dashboard address, an email, a password
+      and a test API key.
+   ```
+
+On these pages, history, ADR and PR numbers, code paths and internal names
+all stay out of the reader's path. One "Related" link at the end is enough.
+Every number, command, code block and link the reader needs stays (see
+[Keep](#keep)).
+
+### Words to keep out of UI text
+
+The dashboard and the pages an end customer sees use the reader's words, not
+the code's.
+
+| Do not write | Write |
+|---|---|
+| tenant | account |
+| catchup, catch-up running | what is happening: "Billing the skipped days…" |
+| `rule_key` or any field name | what it means: "The name your app sends with each usage event, for example `api_calls`" |
+| Configure … | what the page is for: "Your business details, invoice defaults, tax and payment setup" |
+
+### Before and after
+
+The Test clocks page intro.
+
+Before:
+
+> A test clock freezes 'now' for the subscriptions you pin to it. Advance the
+> clock to fast-forward billing without waiting for real time to pass.
+
+After:
+
+> A test clock is a pretend clock for test customers. Create a clock, add a
+> new customer on it, then move the clock forward to see renewals, invoices
+> and payment retries happen in minutes.
+
+The new text says what a test clock is, uses no undefined words ("pin",
+"freezes 'now'"), and is true: a clock holds customers, not subscriptions.
 
 ## Shapes for common docs
 

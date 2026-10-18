@@ -28,15 +28,17 @@ import { customerNeedsPaymentMethod } from '@/lib/paymentReadiness'
 import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
+import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
+import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
+import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
 import { statusBadgeVariant } from '@/lib/status'
+import { invoiceStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -219,14 +221,9 @@ export default function CustomerDetailPage() {
     ;(clocksData?.data ?? []).forEach(c => { m[c.id] = c.name || c.id })
     return m
   }, [clocksData])
-
-  // Commit/promo burndown (2026-07-06): per-grant remaining + kind
-  // subtotals — the DP's primary finance question on hybrid commit+usage.
-  const { data: creditGrants } = useQuery({
-    queryKey: ['credit-grants', id],
-    queryFn: () => api.listCreditGrants(id!),
-    enabled: !!id,
-  })
+  // The customer's "now" (its test clock when pinned), for Past due on the
+  // recent-invoice badges. Subscriptions inherit the customer's pin (ADR-027).
+  const invoiceNow = useEffectiveNow(customer?.test_clock_id)
 
   const { data: overview } = useQuery({
     queryKey: ['customer-overview', id],
@@ -256,13 +253,16 @@ export default function CustomerDetailPage() {
   })
   const profileCard = billingProfileCard({ data: billingProfile, isError: billingProfileError })
 
-  // Credits have no currency of their own: the ledger is drawn down 1:1
-  // against whatever currency this customer's invoices are in (ADR-100).
-  // So show them in the customer's billing currency, then their invoices'
-  // currency; the workspace default only when neither exists.
-  const creditCurrency = billingProfile?.currency
-    || overview?.recent_invoices?.find(inv => inv.currency)?.currency
-    || undefined
+  // One currency for every figure on this page that has none of its own, in
+  // the order the engine picks an invoice's currency: the billing profile,
+  // then the live subscription's plan, then the latest invoice, then the
+  // workspace default (lib/customerCurrency). Credits have no currency
+  // either; they are drawn 1:1 against the invoice (ADR-100). Undefined
+  // while it loads or if a read failed: figures read "—" and New invoice
+  // stays disabled rather than use a wrong currency.
+  const customerCurrency = useCustomerCurrency(id)
+  const creditCurrency = customerCurrency?.currency
+  const creditMoney = (cents: number) => (creditCurrency ? formatCents(cents, creditCurrency) : '—')
 
   const { data: metersData } = useQuery({
     queryKey: ['meters'],
@@ -277,14 +277,11 @@ export default function CustomerDetailPage() {
     queryFn: () => api.listPlans().then(r => r.data.filter(p => p.status === 'active')),
   })
 
-  const { data: subsPage } = useQuery({
-    queryKey: ['customer-subscriptions', id],
-    // Filtered by the server: filtering one page of every subscription here
-    // dropped this customer's once the tenant had more than a page. The
-    // server returns at most 100; `total` is the real count.
-    queryFn: () => api.listSubscriptions(`customer_id=${encodeURIComponent(id!)}&limit=100`),
-    enabled: !!id,
-  })
+  // Filtered by the server: filtering one page of every subscription here
+  // dropped this customer's once the tenant had more than a page. The
+  // server returns at most 100; `total` is the real count. The hook's query
+  // key is shared with the usage and currency cards, so it loads once.
+  const { data: subsPage } = useCustomerSubscriptions(id)
   const allSubs = subsPage?.data
   const subsTotal = subsPage?.total ?? allSubs?.length ?? 0
 
@@ -417,10 +414,9 @@ export default function CustomerDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['customer-overview', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-balance', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-billing-profile', id] })
-    queryClient.invalidateQueries({ queryKey: ['customer-subscriptions', id] })
+    queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-usage', id] })
     queryClient.invalidateQueries({ queryKey: ['customer-payment-methods', id] })
-    queryClient.invalidateQueries({ queryKey: ['customer-dunning-override', id] })
     queryClient.invalidateQueries({ queryKey: ['customers'] })
     // Actions on this page can move money (a subscription created or
     // changed here may bill and draw on credit): refresh every surface that
@@ -477,7 +473,7 @@ export default function CustomerDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {!isArchived && (
-            <Button size="sm" onClick={() => setShowNewInvoice(true)}>
+            <Button size="sm" disabled={!customerCurrency} onClick={() => setShowNewInvoice(true)}>
               <FilePlus2 size={14} className="mr-1.5" />
               New invoice
             </Button>
@@ -528,7 +524,7 @@ export default function CustomerDetailPage() {
                       })
                     }}
                   >
-                    Archive Customer
+                    Archive customer
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -589,7 +585,7 @@ export default function CustomerDetailPage() {
               // A plain cell while the fetch has failed: the retry button
               // cannot sit inside the link to the ledger.
               <div className="flex-1 min-w-0 px-6 py-4">
-                <p className="text-sm text-muted-foreground">Credit Balance</p>
+                <p className="text-sm text-muted-foreground">Credit balance</p>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-sm font-medium text-foreground" title="Couldn't load the credit balance">—</p>
                   <Button variant="outline" size="xs" onClick={() => refetchBalance()}>Retry</Button>
@@ -597,25 +593,21 @@ export default function CustomerDetailPage() {
               </div>
             ) : (
               <Link to={`/credits?customer=${id}`} className="flex-1 min-w-0 px-6 py-4 hover:bg-accent/50 transition-colors">
-                <p className="text-sm text-muted-foreground">Credit Balance</p>
+                <p className="text-sm text-muted-foreground">Credit balance</p>
                 <p className={cn('text-sm font-medium mt-1', (balance ?? 0) > 0 ? 'text-emerald-600' : 'text-foreground')}>
-                  {balance === undefined ? '—' : formatCents(balance, creditCurrency)}
+                  {balance === undefined ? '—' : creditMoney(balance)}
                 </p>
                 {/* Kind split — money-backed commit liability must not read
                     as one number with free promo credits. */}
-                {creditGrants && (creditGrants.commit_remaining_cents > 0 || creditGrants.promotional_remaining_cents > 0) && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {creditGrants.commit_remaining_cents > 0 && <>Commit {formatCents(creditGrants.commit_remaining_cents, creditCurrency)}</>}
-                    {creditGrants.commit_remaining_cents > 0 && creditGrants.promotional_remaining_cents > 0 && ' · '}
-                    {creditGrants.promotional_remaining_cents > 0 && <>Promo {formatCents(creditGrants.promotional_remaining_cents, creditCurrency)}</>}
-                  </p>
+                {balanceData && creditCurrency && creditTotalsLine(balanceData, creditCurrency) && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{creditTotalsLine(balanceData, creditCurrency)}</p>
                 )}
               </Link>
             )}
             {/* Outstanding balance — accounts-receivable exposure for
                 this customer (Stripe / Lago / Chargebee / Recurly all
                 surface this on the customer page). Distinct from
-                Credit Balance (positive credit owed TO the customer);
+                Credit balance (positive credit owed TO the customer);
                 this is unpaid invoices owed BY the customer. Links to
                 invoices filtered to their unpaid list so the operator
                 can drill into resolution. Hidden when there's no
@@ -631,6 +623,9 @@ export default function CustomerDetailPage() {
                     · {overview?.outstanding_balance?.unpaid_count} invoice{overview?.outstanding_balance?.unpaid_count === 1 ? '' : 's'}
                   </span>
                 </p>
+                {outstandingIncludesCredit(overview?.recent_invoices ?? []) && (
+                  <p className="text-xs text-muted-foreground mt-0.5">Amount due after credit applied</p>
+                )}
               </Link>
             )}
             <div className="flex-1 min-w-0 px-6 py-4">
@@ -679,13 +674,13 @@ export default function CustomerDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Billing Profile */}
+      {/* Billing profile */}
       <Card className="mt-6">
         {profileCard === 'profile' && billingProfile ? (
           <>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Billing Profile</CardTitle>
+                <CardTitle className="text-sm">Billing profile</CardTitle>
                 {!isArchived && (
                   <Button variant="outline" size="sm" onClick={() => setShowEditBilling(true)}>
                     <Pencil size={12} className="mr-1.5" />
@@ -700,7 +695,7 @@ export default function CustomerDetailPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Contact</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                   <div>
-                    <p className="text-xs text-muted-foreground">Legal Name</p>
+                    <p className="text-xs text-muted-foreground">Legal name</p>
                     <p className="text-sm text-foreground mt-1">{billingProfile.legal_name || '—'}</p>
                   </div>
                   <div>
@@ -753,12 +748,12 @@ export default function CustomerDetailPage() {
                   </div>
                 ) : billingProfile.tax_status === 'reverse_charge' ? (
                   <p className="text-sm text-muted-foreground">
-                    B2B reverse charge — tax is zero on the invoice; the buyer self-accounts for VAT/GST in their jurisdiction.
+                    Reverse charge: no tax on the invoice; the business customer pays the VAT/GST themselves.
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                     <div>
-                      <p className="text-xs text-muted-foreground">Tax ID Type</p>
+                      <p className="text-xs text-muted-foreground">Tax ID type</p>
                       <p className="text-sm text-foreground mt-1 uppercase">{billingProfile.tax_id_type || '—'}</p>
                     </div>
                     <div>
@@ -777,7 +772,7 @@ export default function CustomerDetailPage() {
                 <p className="text-sm text-foreground">
                   {billingProfile.currency
                     ? billingProfile.currency.toUpperCase()
-                    : <span className="text-muted-foreground">Use tenant default</span>}
+                    : <span className="text-muted-foreground">Use account default</span>}
                 </p>
               </section>
             </CardContent>
@@ -787,7 +782,7 @@ export default function CustomerDetailPage() {
           // neither Set Up nor Edit is offered.
           <>
             <CardHeader>
-              <CardTitle className="text-sm">Billing Profile</CardTitle>
+              <CardTitle className="text-sm">Billing profile</CardTitle>
             </CardHeader>
             <CardContent className="text-center py-8">
               {profileCard === 'error' ? (
@@ -803,7 +798,7 @@ export default function CustomerDetailPage() {
         ) : (
           <>
             <CardHeader>
-              <CardTitle className="text-sm">Billing Profile</CardTitle>
+              <CardTitle className="text-sm">Billing profile</CardTitle>
             </CardHeader>
             <CardContent className="text-center py-8">
               <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mx-auto mb-3">
@@ -813,7 +808,7 @@ export default function CustomerDetailPage() {
               <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">Set up billing details to enable invoicing and payments for this customer</p>
               {!isArchived && (
                 <Button size="sm" className="mt-4" onClick={() => setShowEditBilling(true)}>
-                  Set Up Billing Profile
+                  Set up billing profile
                 </Button>
               )}
             </CardContent>
@@ -843,7 +838,7 @@ export default function CustomerDetailPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-foreground">{effectiveDunningPolicy.name || 'Default'}</span>
                   {!assignedDunningPolicy && (
-                    <Badge variant="outline">tenant default</Badge>
+                    <Badge variant="outline">account default</Badge>
                   )}
                 </div>
               </div>
@@ -875,59 +870,27 @@ export default function CustomerDetailPage() {
           customerTestClockId pins its relative-time/window surfaces to the
           customer's simulated clock (ADR-027) instead of wall-clock. */}
       <div className="mt-6">
-        <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} />
+        <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
       </div>
 
       {/* Margin — rated usage revenue vs provider COGS (ADR-079).
           Operator-only; never rendered on customer-facing surfaces. */}
       <div className="mt-6">
-        <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} />
+        <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
       </div>
 
-      {/* Commit / credit-grant burndown — per-grant drawn vs remaining
-          (Metronome/Orb surface commitment burndown on the customer view;
-          this is the hybrid commit+usage DP's primary finance question). */}
-      {creditGrants && creditGrants.grants.length > 0 && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Credit grants</CardTitle>
-            <CardDescription>
-              Drawdown per grant. Commit grants are money-backed (funded by a
-              paid commit invoice); promotional grants burn first.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Grant</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead className="text-right">Granted</TableHead>
-                  <TableHead className="text-right">Drawn</TableHead>
-                  <TableHead className="text-right">Remaining</TableHead>
-                  <TableHead>Expires</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {creditGrants.grants.map(g => (
-                  <TableRow key={g.id}>
-                    <TableCell className="text-sm max-w-xs truncate" title={g.description}>{g.description}</TableCell>
-                    <TableCell>
-                      {g.grant_kind === 'commit' ? <Badge>Commit</Badge>
-                        : g.grant_kind === 'promotional' ? <Badge variant="secondary">Promo</Badge>
-                        : <Badge variant="outline">Credit</Badge>}
-                    </TableCell>
-                    <TableCell className="text-sm text-right">{formatCents(g.amount_cents, creditCurrency)}</TableCell>
-                    <TableCell className="text-sm text-right">{formatCents(g.consumed_cents, creditCurrency)}</TableCell>
-                    <TableCell className="text-sm text-right font-medium">{formatCents(g.remaining_cents, creditCurrency)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{g.expires_at ? formatDate(g.expires_at) : 'never'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+      {/* Credits: balance with granted/used/expired, every grant including
+          used-up ones, the latest ledger entries, and Grant credits. It waits
+          for the customer's currency, so no figure shows in the wrong one. */}
+      {creditCurrency && <div className="mt-6">
+        <CustomerCreditsSection
+          customerId={id!}
+          customerName={customer.display_name}
+          currency={creditCurrency}
+          testClockId={customer.test_clock_id}
+          readOnly={isArchived}
+        />
+      </div>}
 
       {/* Public cost-dashboard token — ADR-031 / MANUAL_TEST CU8. Operator
           rotates to mint a shareable URL the customer can embed (iframe
@@ -1068,7 +1031,7 @@ export default function CustomerDetailPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">Subscriptions ({subsTotal})</CardTitle>
-              {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create Subscription</Button>}
+              {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -1124,10 +1087,10 @@ export default function CustomerDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Recent Invoices */}
+        {/* Recent invoices */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Recent Invoices</CardTitle>
+            <CardTitle className="text-sm">Recent invoices</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border">
@@ -1136,10 +1099,15 @@ export default function CustomerDetailPage() {
                   <Link key={inv.id} to={`/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-accent/50 transition-colors">
                     <div>
                       <p className="text-sm font-medium text-foreground">{inv.invoice_number}</p>
-                      <p className="text-xs text-muted-foreground">{formatDate(inv.created_at)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(inv.created_at)}
+                        {/* Why amount due is below the total: Outstanding
+                            sums amount due, after credit. */}
+                        {invoiceCreditNote(inv) && <> · {invoiceCreditNote(inv)}</>}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <Badge variant={statusVariant(inv.status)}>{inv.status}</Badge>
+                      <StatusBadge status={invoiceStatus(inv, invoiceNow)} />
                       <span className="text-sm font-medium">{formatCents(inv.total_amount_cents, inv.currency)}</span>
                     </div>
                   </Link>
@@ -1222,7 +1190,7 @@ export default function CustomerDetailPage() {
         </Card>
       </div>
 
-      {/* Edit Customer Dialog */}
+      {/* Edit customer Dialog */}
       {showEditCustomer && (
         <EditCustomerDialog
           customer={customer}
@@ -1239,7 +1207,7 @@ export default function CustomerDetailPage() {
         />
       )}
 
-      {/* Create Subscription Dialog — shared with the Subscriptions
+      {/* Create subscription Dialog — shared with the Subscriptions
           page; locked to this customer so the picker is hidden and
           the customer_id is pre-filled. */}
       {plans && customer && (
@@ -1257,7 +1225,7 @@ export default function CustomerDetailPage() {
         />
       )}
 
-      {/* Edit Billing Profile Dialog */}
+      {/* Edit billing profile Dialog */}
       {showEditBilling && id && customer && (
         <EditBillingProfileDialog
           customerId={id}
@@ -1291,11 +1259,12 @@ export default function CustomerDetailPage() {
           create a draft invoice, attach line items, optionally finalize+send.
           Backed by POST /v1/invoices, POST /v1/invoices/{id}/line-items,
           POST /v1/invoices/{id}/finalize, POST /v1/invoices/{id}/send. */}
-      {showNewInvoice && id && customer && (
+      {showNewInvoice && id && customer && customerCurrency && (
         <NewInvoiceDialog
           customerId={id}
           customer={customer}
           billingProfile={billingProfile ?? null}
+          defaultCurrency={customerCurrency.currency}
           onClose={() => setShowNewInvoice(false)}
           onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
@@ -1315,7 +1284,7 @@ export default function CustomerDetailPage() {
   )
 }
 
-/* ─── Edit Customer ──────────────────────────────────────────── */
+/* ─── Edit customer ──────────────────────────────────────────── */
 
 function EditCustomerDialog({ customer, onClose, onSaved }: {
   customer: Customer; onClose: () => void; onSaved: () => void
@@ -1348,11 +1317,11 @@ function EditCustomerDialog({ customer, onClose, onSaved }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Customer</DialogTitle>
+          <DialogTitle>Edit customer</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="display_name">Display Name</Label>
+            <Label htmlFor="display_name">Display name</Label>
             <Input id="display_name" maxLength={255} {...register('display_name')} />
             {errors.display_name && <p className="text-xs text-destructive">{errors.display_name.message}</p>}
           </div>
@@ -1382,7 +1351,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: {
 }
 
 
-/* ─── Edit Billing Profile ───────────────────────────────────── */
+/* ─── Edit billing profile ───────────────────────────────────── */
 
 function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSaved }: {
   customerId: string
@@ -1445,7 +1414,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
     : null
 
   const currencyOptions = [
-    { value: '', label: 'Use tenant default', keywords: ['default', 'tenant', 'inherit'] },
+    { value: '', label: 'Use account default', keywords: ['default', 'tenant', 'inherit'] },
     ...GEO_CURRENCIES.map(c => ({
       value: c.code.toLowerCase(),
       label: `${c.code} — ${c.label}`,
@@ -1461,7 +1430,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
       {/* eslint-disable-next-line no-restricted-syntax -- DialogContent scrolls as ONE box including its own close button, so a content mask would fade that button. Giving dialogs a scrolling BODY inside a fixed shell is a redesign of every dialog; tracked, not bundled here. */}
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{profile ? 'Edit Billing Profile' : 'Set Up Billing Profile'}</DialogTitle>
+          <DialogTitle>{profile ? 'Edit billing profile' : 'Set up billing profile'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} noValidate className="space-y-6">
 
@@ -1485,7 +1454,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
           <div className="space-y-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Contact</p>
             <div className="space-y-2">
-              <Label>Legal Name</Label>
+              <Label>Legal name</Label>
               <Input maxLength={255} placeholder="Acme Corporation Inc." {...register('legal_name')} />
             </div>
             <div className="space-y-2">
@@ -1514,7 +1483,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
               />
             </div>
             <div className="space-y-2">
-              <Label>Street Address</Label>
+              <Label>Street address</Label>
               <Input maxLength={200} placeholder="123 Main Street" {...register('address_line1')} />
             </div>
             <div className="space-y-2">
@@ -1541,7 +1510,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 )}
               </div>
               <div className="space-y-2">
-                <Label>Postal Code</Label>
+                <Label>Postal code</Label>
                 <Input placeholder={postalPlaceholder} maxLength={20} {...register('postal_code')} />
               </div>
             </div>
@@ -1564,7 +1533,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                     <SelectContent>
                       <SelectItem value="standard">Standard — tax applied per provider rules</SelectItem>
                       <SelectItem value="exempt">Exempt — no tax (certificate, non-profit, etc.)</SelectItem>
-                      <SelectItem value="reverse_charge">Reverse charge — B2B buyer self-accounts</SelectItem>
+                      <SelectItem value="reverse_charge">Reverse charge — the business customer pays the VAT/GST</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -1573,7 +1542,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 {form.tax_status === 'exempt'
                   ? 'Forces zero tax with the exempt reason printed on the PDF audit trail. Use for a certificate or non-profit the tax provider can\'t see.'
                   : form.tax_status === 'reverse_charge'
-                    ? 'Forces zero tax with the reverse-charge legend (buyer self-assesses). For most B2B customers, prefer Standard + a Tax ID — reverse charge is then applied automatically only where it\'s valid. It never applies to a buyer in your own country.'
+                    ? 'No tax on the invoice, which notes that the business customer pays the VAT/GST themselves. For most business customers, pick Standard and add their tax ID instead: reverse charge then applies automatically, only where it\'s allowed. It never applies to a customer in your own country.'
                     : 'Tax is calculated by your provider. For a B2B customer, add their Tax ID below — reverse charge is then applied automatically where it applies (cross-border).'}
               </p>
             </div>
@@ -1595,7 +1564,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
             {form.tax_status !== 'exempt' && (
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Tax ID Type</Label>
+                  <Label>Tax ID type</Label>
                   <Combobox
                     value={form.tax_id_type}
                     onChange={(val) => setValue('tax_id_type', val, { shouldDirty: true })}
@@ -1640,7 +1609,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
                 options={currencyOptions}
                 placeholder="Select currency..."
               />
-              <p className="text-xs text-muted-foreground">Overrides the tenant default for invoices on this customer.</p>
+              <p className="text-xs text-muted-foreground">Overrides the account default for invoices on this customer.</p>
             </div>
           </div>
 
@@ -1711,7 +1680,7 @@ function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onCl
               value={selected}
               onChange={(val) => setSelected(val ?? '__default__')}
               options={[
-                { value: '__default__', label: defaultPolicy ? `Tenant default (${defaultPolicy.name || 'Default'})` : 'Tenant default' },
+                { value: '__default__', label: defaultPolicy ? `Account default (${defaultPolicy.name || 'Default'})` : 'Account default' },
                 ...policies.filter(p => !p.is_default).map(p => ({ value: p.id, label: p.name || '(unnamed policy)' })),
               ]}
               emptyMessage="No policy matches that search."
@@ -1786,17 +1755,17 @@ const blankLine = (): ComposerLine => ({
   commitExpiresAt: '',
 })
 
-function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCreated }: {
+function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrency, onClose, onCreated }: {
   customerId: string
   customer: Customer
   billingProfile: BillingProfile | null
+  defaultCurrency: string
   onClose: () => void
   onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
 }) {
-  // Default currency: prefer the customer's billing profile currency, else
-  // tenant default (USD here is a placeholder until the tenant settings query
-  // is plumbed; the operator can switch in one click).
-  const initialCurrency = (billingProfile?.currency || 'USD').toUpperCase()
+  // Default currency: the customer's currency (lib/customerCurrency), so a
+  // customer on a EUR plan opens in EUR. The operator can switch in one click.
+  const initialCurrency = defaultCurrency.toUpperCase()
   const [currency, setCurrency] = useState(initialCurrency)
   const [memo, setMemo] = useState('')
   // Service period (optional) — the inclusive dates this invoice covers.
@@ -2084,7 +2053,10 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
             </div>
 
             <div className="rounded-md border border-border overflow-hidden">
-              <div className="grid grid-cols-[1fr_150px_140px_160px_44px] gap-0 bg-muted/40 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {/* Columns from sm up; on a phone each line stacks (description
+                  and type full width, quantity and unit side by side) with
+                  its own field labels, so the dialog never scrolls sideways. */}
+              <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_150px_140px_160px_44px] gap-0 bg-muted/40 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 <div className="px-3 py-2">Description</div>
                 <div className="px-3 py-2">Type</div>
                 <div className="px-3 py-2">Qty</div>
@@ -2101,8 +2073,9 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                     : 0
                   return (
                     <div key={idx}>
-                    <div className="grid grid-cols-[1fr_150px_140px_160px_44px] items-start gap-0">
-                      <div className="px-3 py-2 space-y-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-[minmax(0,1fr)_150px_140px_160px_44px] items-start gap-0">
+                      <div className="col-span-2 sm:col-span-1 px-3 py-2 space-y-1">
+                        <span className="text-xs text-muted-foreground sm:hidden">Description</span>
                         <Input
                           placeholder="Implementation services"
                           value={line.description}
@@ -2113,7 +2086,8 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                         />
                         {lineErrs.description && <p className="text-xs text-destructive">{lineErrs.description}</p>}
                       </div>
-                      <div className="px-3 py-2">
+                      <div className="col-span-2 sm:col-span-1 px-3 py-2 space-y-1">
+                        <span className="text-xs text-muted-foreground sm:hidden">Type</span>
                         <Select items={COMPOSER_LINE_TYPES} value={line.line_type} onValueChange={v => updateLine(idx, { line_type: v ?? 'add_on' })}>
                           <SelectTrigger className="w-full">
                             <SelectValue />
@@ -2126,6 +2100,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                         </Select>
                       </div>
                       <div className="px-3 py-2 space-y-1">
+                        <span className="text-xs text-muted-foreground sm:hidden">Qty</span>
                         <Input
                           type="number"
                           inputMode="numeric"
@@ -2140,6 +2115,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                         {lineErrs.quantity && <p className="text-xs text-destructive">{lineErrs.quantity}</p>}
                       </div>
                       <div className="px-3 py-2 space-y-1">
+                        <span className="text-xs text-muted-foreground sm:hidden">Unit ({currencySymbol.trim() || currency})</span>
                         <Input
                           type="number"
                           inputMode="numeric"
@@ -2155,7 +2131,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
                           ? <p className="text-xs text-destructive">{lineErrs.unit_amount_cents}</p>
                           : <p className="text-xs text-muted-foreground">= {formatCents(totalCents, currency)}</p>}
                       </div>
-                      <div className="px-3 py-2 flex justify-center">
+                      <div className="col-span-2 sm:col-span-1 px-3 py-2 flex justify-end sm:justify-center">
                         <Button
                           type="button"
                           variant="ghost"
@@ -2219,7 +2195,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Amounts are in cents (e.g. 2500 = {formatCents(2500, currency)}). Tax is applied per the tenant's tax provider when the invoice finalizes.
+              Amounts are in cents (e.g. 2500 = {formatCents(2500, currency)}). Tax is worked out from your tax settings when the invoice is finalized.
             </p>
           </div>
 
@@ -2229,7 +2205,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, onClose, onCre
               it reads "Jun 1 – Jun 30". Blank = a one-off charge with no period. */}
           <div className="space-y-2">
             <Label>Service period (optional)</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
                 type="date"
                 aria-label="Service period start"

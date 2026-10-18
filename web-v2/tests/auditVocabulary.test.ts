@@ -47,7 +47,7 @@ const EMITTED_ACTIONS = [
   // subscription lifecycle
   'subscription.item_updated', 'subscription.pending_change_applied',
   'subscription.proration_failed', 'subscription.threshold_crossed',
-  'subscription.threshold_deferred',
+  'subscription.threshold_deferred', 'subscription.net_negative_usage',
   // team membership (ADR-081)
   'member.invited', 'member.joined', 'member.invite_revoked', 'member.removed',
   // dashboard auth (ADR-011)

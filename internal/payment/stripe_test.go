@@ -100,6 +100,10 @@ type mockInvoiceUpdater struct {
 	// unrecordedFailures counts failure reports that did not move the
 	// invoice (another attempt's, a hosted attempt's, or a paid invoice's).
 	unrecordedFailures int
+	// failureReports records every MarkPaymentFailedReportingTransition
+	// report, in call order — what each source told the store (#966: the
+	// decline code and the declined card ride on it).
+	failureReports []domain.PaymentFailureReport
 }
 
 func newMockInvoiceUpdater() *mockInvoiceUpdater {
@@ -262,6 +266,7 @@ func (m *mockInvoiceUpdater) MarkPaidCardSettlementTransition(ctx context.Contex
 }
 
 func (m *mockInvoiceUpdater) MarkPaymentFailedReportingTransition(_ context.Context, _, id string, report domain.PaymentFailureReport, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, domain.PaymentFailureResult, error) {
+	m.failureReports = append(m.failureReports, report)
 	piID := report.PaymentIntentID
 	if piID == "" {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, fmt.Errorf("mark payment failed: a failure report needs a PaymentIntent id")

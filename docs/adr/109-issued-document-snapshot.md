@@ -1,7 +1,7 @@
 # ADR-109: Snapshot the bill-to and supplier blocks onto issued documents
 
 **Date:** 2026-08-05
-**Status:** Accepted (amended 2026-10-14)
+**Status:** Accepted (amended 2026-08-05, 2026-10-14)
 
 ## Summary
 

@@ -2,7 +2,6 @@ package creditnote
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -24,13 +23,22 @@ type fakeRefunder struct {
 	returnStatus domain.RefundStatus // empty → succeeded (back-compat with existing tests)
 
 	getCalls    []string
-	getStatus   domain.RefundStatus // empty → succeeded
+	getStatus   domain.RefundStatus            // empty → succeeded
+	getStatusOf map[string]domain.RefundStatus // per refund id; wins over getStatus
 	getReason   string
 	getErr      error
 	findCalls   []fakeFindCall
 	foundID     string
 	foundStatus domain.RefundStatus
 	findErr     error
+
+	// duringCreate runs inside CreateRefund, while the request is "at
+	// Stripe". A test passes a context's cancel func to end the caller's
+	// context in the middle of the call.
+	duringCreate func()
+	// afterAnswer runs once Stripe has made the refund and answered, just
+	// before CreateRefund returns: the caller's context can end right then.
+	afterAnswer func()
 }
 
 type fakeRefundCall struct {
@@ -45,19 +53,31 @@ type fakeFindCall struct {
 	creditNoteID    string
 }
 
-func (f *fakeRefunder) CreateRefund(_ context.Context, paymentIntentID string, amountCents int64, idempotencyKey, creditNoteID string) (string, domain.RefundStatus, error) {
+func (f *fakeRefunder) CreateRefund(ctx context.Context, paymentIntentID string, amountCents int64, idempotencyKey, creditNoteID string) (string, domain.RefundStatus, error) {
 	f.calls = append(f.calls, fakeRefundCall{
 		paymentIntentID: paymentIntentID,
 		amountCents:     amountCents,
 		idempotencyKey:  idempotencyKey,
 		creditNoteID:    creditNoteID,
 	})
+	if f.duringCreate != nil {
+		f.duringCreate()
+		// stripe-go gives up when the caller's context ends, with no answer
+		// from Stripe. The Stripe refunder reads that as "result unknown",
+		// as it reads any error that is not Stripe's own.
+		if err := ctx.Err(); err != nil {
+			return "", "", &outcomeErr{msg: "stripe refund: Post \"https://api.stripe.com/v1/refunds\": " + err.Error(), unknown: true}
+		}
+	}
 	if f.failWith != nil {
 		return "", "", f.failWith
 	}
 	status := f.returnStatus
 	if status == "" {
 		status = domain.RefundSucceeded
+	}
+	if f.afterAnswer != nil {
+		f.afterAnswer()
 	}
 	return fmt.Sprintf("re_fake_%d", len(f.calls)), status, nil
 }
@@ -66,6 +86,9 @@ func (f *fakeRefunder) GetRefund(_ context.Context, refundID string) (domain.Ref
 	f.getCalls = append(f.getCalls, refundID)
 	if f.getErr != nil {
 		return "", "", f.getErr
+	}
+	if status, ok := f.getStatusOf[refundID]; ok {
+		return status, f.getReason, nil
 	}
 	status := f.getStatus
 	if status == "" {
@@ -285,13 +308,15 @@ func TestCreateRefund_MissingReason(t *testing.T) {
 	}
 }
 
-// When Stripe refund fails at Issue time, the service records RefundFailed on
-// the credit note but still issues it (the CN is an accounting doc — the
-// operator can resolve the Stripe side manually).
+// When Stripe refuses the refund at Issue time, the service records
+// RefundFailed on the credit note but still issues it (the CN is an
+// accounting doc — the operator can resolve the Stripe side manually). An
+// unclear answer, such as an unreachable network, is "unknown" instead:
+// TestIssue_RefundResultUnknownOrFailed (#965).
 func TestCreateRefund_StripeFailure_IssuesWithFailedStatus(t *testing.T) {
 	t.Parallel()
 	svc, _, _, refunder := setupRefundSvc(t)
-	refunder.failWith = errors.New("stripe: card network unreachable")
+	refunder.failWith = errRefundRefused
 
 	cn, err := svc.CreateRefund(context.Background(), "t1", RefundInput{
 		InvoiceID: "inv_paid", Reason: "fraudulent",

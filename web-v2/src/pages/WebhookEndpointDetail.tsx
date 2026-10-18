@@ -131,7 +131,7 @@ export default function WebhookEndpointDetailPage() {
           of the Endpoints tab, not a third surface. */}
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Webhooks</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage outbound webhook endpoints and events</p>
+        <p className="text-sm text-muted-foreground mt-1">Velox calls a URL in your app when something happens, such as an invoice paid or a payment failed, so your app can react.</p>
       </div>
 
       <Tabs value="endpoints" onValueChange={(t) => { if (t === 'events') navigate('/webhooks/events') }} className="mt-6">

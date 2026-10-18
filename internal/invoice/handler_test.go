@@ -27,6 +27,9 @@ func TestDescribeDunningEvent_StartCauses(t *testing.T) {
 		// the actual email_outbox row, not asserted here.
 		{"retry_attempted", "no_payment_method", "Payment retry #1 attempted", "scheduled", "No payment method", 1},
 		{"retry_attempted", "no payment method for customer", "Payment retry #2 attempted", "scheduled", "No payment method", 2},
+		// A retry that skipped a card the bank refused for good charged
+		// nothing either (#966).
+		{"retry_attempted", "card_refused", "Payment retry #2 attempted", "scheduled", "Not charged: the bank refused this card, so a different card is needed", 2},
 		// A real decline keeps the processing shape (provider reason
 		// folds in from the Stripe twin); the recovering attempt is green.
 		{"retry_attempted", "card_declined", "Payment retry #3 attempted", "processing", "", 3},

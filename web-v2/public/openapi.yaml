@@ -39,7 +39,7 @@ tags:
   - name: Dunning
     description: Retrying failed payments. Policies and runs.
   - name: Webhooks
-    description: Outbound webhook endpoints, events and deliveries.
+    description: Outbound webhook endpoints, events and deliveries. Also the inbound webhooks Stripe and Postmark call.
   - name: Auth
     description: Dashboard sign-in, password reset and API keys.
   - name: Members
@@ -72,6 +72,34 @@ components:
         under `/v1` (except `/v1/tenants`) accept it in place of a Bearer
         key. Operations that list only this scheme (members, mode
         switch, logout) do not accept an API key.
+    MetricsToken:
+      type: http
+      scheme: bearer
+      description: |
+        The value of the `METRICS_TOKEN` setting, sent as
+        `Authorization: Bearer <token>`. Used only by `GET /metrics`. It is
+        not an API key.
+    PostmarkBasicAuth:
+      type: http
+      scheme: basic
+      description: |
+        HTTP Basic auth with `POSTMARK_WEBHOOK_USER` and
+        `POSTMARK_WEBHOOK_PASS`. You put both in the webhook URL you give
+        Postmark. Used only by `POST /v1/webhooks/postmark`.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Makes the call safe to retry. Send a unique value (a UUID works) and
+        the same value on every retry. For 24 hours, a repeat with the same
+        key, method, path and body gets the first response again, with an
+        `Idempotent-Replayed: true` header, instead of running again. The
+        error cases are in docs/api-surface.md.
+      schema:
+        type: string
 
   schemas:
     Error:
@@ -196,6 +224,8 @@ components:
       properties:
         id:
           type: string
+        tenant_id:
+          type: string
         key:
           type: string
         name:
@@ -218,6 +248,8 @@ components:
       type: object
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         code:
           type: string
@@ -263,6 +295,8 @@ components:
       type: object
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         rule_key:
           type: string
@@ -444,23 +478,48 @@ components:
 
     UsageEvent:
       type: object
+      required: [id, customer_id, meter_id, quantity, timestamp]
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         customer_id:
           type: string
         meter_id:
           type: string
         quantity:
-          type: integer
-          format: int64
-        properties:
+          type: string
+          description: Exact quantity as a decimal string (e.g. "1.5").
+        dimensions:
           type: object
+          additionalProperties: true
+          description: The dimension values sent with the event. Absent when none were sent.
         idempotency_key:
           type: string
         timestamp:
           type: string
           format: date-time
+        origin:
+          type: string
+          enum: [api, backfill]
+          description: How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+        provider_cost_micros:
+          type: integer
+          format: int64
+          description: |
+            What serving this event cost you at your provider, in millionths
+            of a dollar, priced from your provider cost rates when the event
+            arrived. Absent when no rate matched or the event has no costed
+            dimensions.
+        provider_cost_source:
+          type: string
+          enum: [table, not_applicable, observed]
+          description: |
+            Where `provider_cost_micros` came from: `table` (your provider
+            cost rates), `observed` (the cost the sender reported), or
+            `not_applicable` (the meter has no costed dimensions). Absent when
+            the cost is unknown.
 
     DocumentBillTo:
       type: object
@@ -755,6 +814,19 @@ components:
             When the attention condition started — operators triage
             by age. tax_deferred_at for tax reasons; due_at for
             overdue; updated_at as a proxy for payment failures.
+        next_attempt_at:
+          type: string
+          format: date-time
+          description: |
+            When Velox will next retry on its own. Today only a tax
+            retry sets it. Absent when no automatic retry is scheduled.
+        due_by:
+          type: string
+          format: date-time
+          description: |
+            The invoice's payment deadline (its `due_at`). Velox does not
+            act on this date; it is shown so the operator knows it.
+            Absent when the invoice has no due date.
 
     InvoiceBillingReason:
       type: string
@@ -885,6 +957,39 @@ components:
             `provider_outage`, `provider_auth`, `unknown`. Empty for
             invoices deferred before this column existed (migration
             0067).
+        tax_next_retry_at:
+          type: string
+          format: date-time
+          description: |
+            The earliest time the background retry may calculate tax again,
+            after a failed attempt. Absent when a retry may run now.
+        tax_reversed_at:
+          type: string
+          format: date-time
+          description: |
+            When the provider's tax transaction was reversed after a void or
+            write-off, or found to need no reversal. Absent while the
+            reversal is not confirmed.
+        payment_anomaly_kind:
+          type: string
+          description: |
+            Set when a payment arrived that the invoice did not expect. The
+            webhook event name of the cause: `payment.duplicate_charge`,
+            `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+            Only the latest one is kept.
+        payment_anomaly_payment_intent_id:
+          type: string
+          description: The Stripe PaymentIntent of that unexpected payment.
+        payment_anomaly_captured_cents:
+          type: integer
+          format: int64
+          description: The amount Stripe took in that unexpected payment.
+        payment_card_brand:
+          type: string
+          description: Brand of the saved card that paid the invoice. Absent when the card is unknown.
+        payment_card_last4:
+          type: string
+          description: Last four digits of the saved card that paid the invoice.
         attention:
           $ref: "#/components/schemas/Attention"
         recovery_warning:
@@ -965,12 +1070,32 @@ components:
           type: string
           format: date-time
           nullable: true
+        uncollectible_at:
+          type: string
+          format: date-time
+          description: When the invoice was marked uncollectible.
         stripe_payment_intent_id:
           type: string
         last_payment_error:
           type: string
         auto_charge_pending:
           type: boolean
+        no_pm_notified_at:
+          type: string
+          format: date-time
+          description: |
+            When the customer was emailed a link to add a payment method for
+            this invoice. The email is sent once.
+        provider_payment_status:
+          type: string
+          description: |
+            Stripe's PaymentIntent status the last time Velox checked it,
+            word for word. For information only: `payment_status` is the
+            invoice's payment state. Absent until Velox has checked.
+        provider_synced_at:
+          type: string
+          format: date-time
+          description: When Velox last checked `provider_payment_status`.
         public_token:
           type: string
           description: |
@@ -1148,6 +1273,8 @@ components:
       properties:
         id:
           type: string
+        tenant_id:
+          type: string
         provider:
           type: string
         model:
@@ -1168,7 +1295,7 @@ components:
 
     MarginReport:
       type: object
-      required: [customer_id, from, to, revenue_cents, cost_micros, cost_currency, by_model, unattributed_revenue_cents, unresolved_events]
+      required: [customer_id, from, to, revenue_cents, cost_micros, cost_currency, by_model, unattributed_revenue_cents, unresolved_events, costed_events, cost_rates_configured]
       properties:
         customer_id:
           type: string
@@ -1195,7 +1322,7 @@ components:
         margin_bps:
           type: integer
           format: int64
-          description: (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency.
+          description: (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
         by_model:
           type: array
           items:
@@ -1213,6 +1340,10 @@ components:
               attributed:
                 type: boolean
                 description: True only when a pricing rule pins this model — margin is never heuristically allocated.
+              margin_bps:
+                type: integer
+                format: int64
+                description: This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
         unattributed_revenue_cents:
           type: integer
           format: int64
@@ -1220,6 +1351,13 @@ components:
           type: integer
           format: int64
           description: Token events with costable dims but no matching rate — add a rate to cost new events.
+        costed_events:
+          type: integer
+          format: int64
+          description: Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown.
+        cost_rates_configured:
+          type: boolean
+          description: Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up.
         cache_write_excluded:
           type: boolean
 
@@ -1241,7 +1379,12 @@ components:
 
     CreditBalance:
       type: object
-      required: [customer_id, balance_cents, total_granted, total_used, total_expired]
+      description: >
+        A customer's credit balance and where the credit went. Every cent
+        granted is either still in the balance or in one of the totals:
+        total_granted = total_used + total_expired + total_retired +
+        total_deducted + balance_cents.
+      required: [customer_id, balance_cents, total_granted, total_used, total_expired, total_retired, total_deducted]
       properties:
         customer_id:
           type: string
@@ -1251,13 +1394,27 @@ components:
         total_granted:
           type: integer
           format: int64
+          description: >
+            Every credit added: grants, positive adjustments, and credit given
+            back when an invoice it was applied to was voided.
         total_used:
           type: integer
           format: int64
+          description: Credit applied to invoices.
         total_expired:
           type: integer
           format: int64
           description: Credit written off by expiry.
+        total_retired:
+          type: integer
+          format: int64
+          description: >
+            Prepaid commit credit taken back because the invoice that funded
+            it was voided or refunded by a credit note.
+        total_deducted:
+          type: integer
+          format: int64
+          description: Credit an operator deducted (a negative adjustment).
 
     CreditLiveBalance:
       type: object
@@ -1953,6 +2110,45 @@ components:
           type: string
           format: date-time
 
+    CustomerPaymentSetup:
+      type: object
+      required: [customer_id, setup_status, default_payment_method_present, created_at, updated_at]
+      properties:
+        customer_id:
+          type: string
+        tenant_id:
+          type: string
+        setup_status:
+          type: string
+          enum: [missing, pending, ready]
+          description: |
+            `ready`: the customer has a default payment method. `pending`:
+            a Stripe customer exists but there is no default payment method
+            yet. `missing`: there is no Stripe customer.
+        default_payment_method_present:
+          type: boolean
+        payment_method_type:
+          type: string
+          example: card
+        stripe_customer_id:
+          type: string
+        stripe_payment_method_id:
+          type: string
+        card_brand:
+          type: string
+        card_last4:
+          type: string
+        card_exp_month:
+          type: integer
+        card_exp_year:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     CreditLedgerEntry:
       type: object
       required: [id, customer_id, entry_type, amount_cents, balance_after, description, created_at]
@@ -1997,6 +2193,25 @@ components:
         source_invoice_id:
           type: string
           description: For a `commit` grant, the invoice that paid for it.
+        source_subscription_id:
+          type: string
+          description: |
+            With `source_subscription_item_id`, `source_plan_changed_at` and
+            `source_change_type`, set on a proration credit: the subscription
+            change that produced it.
+        source_subscription_item_id:
+          type: string
+        source_plan_changed_at:
+          type: string
+          format: date-time
+        source_change_type:
+          $ref: "#/components/schemas/ItemChangeType"
+        source_credit_note_id:
+          type: string
+          description: The credit note that granted this credit to the balance.
+        source_invoice_reversal_id:
+          type: string
+          description: The voided invoice whose applied credit this entry gave back.
 
     SubscriptionItem:
       type: object
@@ -2004,6 +2219,8 @@ components:
       description: One priced line of a subscription. It pairs a plan with a quantity.
       properties:
         id:
+          type: string
+        tenant_id:
           type: string
         subscription_id:
           type: string
@@ -2271,10 +2488,13 @@ components:
         - credit_balance_total
         - active_customers
         - new_customers
+        - live_customers
+        - live_customers_prev
         - active_subscriptions
         - trialing_subscriptions
         - paid_invoices
         - failed_payments
+        - failed_payments_prev
         - open_invoices
         - dunning_active
         - refunds_needing_attention
@@ -2349,23 +2569,36 @@ components:
           description: Sum of all customers' credit balances. Not limited to `currency`.
         active_customers:
           type: integer
+          description: |
+            Customer records with status `active`. Includes customers with
+            no subscription or only canceled ones; `live_customers` counts
+            the customers you bill.
         new_customers:
           type: integer
           description: Customers created in the window.
-        active_subscriptions:
+        live_customers:
           type: integer
-        trialing_subscriptions:
+          description: Customers with at least one `active` or `trialing` subscription now.
+        live_customers_prev:
           type: integer
           description: |
-            Subscriptions with status `active` whose `trial_end_at` is in
-            the future. Subscriptions with status `trialing` are not
-            counted.
+            `live_customers` at the start of the window, rebuilt from
+            subscription start and cancel times.
+        active_subscriptions:
+          type: integer
+          description: Subscriptions with status `active`.
+        trialing_subscriptions:
+          type: integer
+          description: Subscriptions with status `trialing`.
         paid_invoices:
           type: integer
           description: Invoices paid in the window.
         failed_payments:
           type: integer
           description: Invoices created in the window whose payment failed. All currencies.
+        failed_payments_prev:
+          type: integer
+          description: "`failed_payments` for the previous window."
         open_invoices:
           type: integer
           description: Finalized invoices whose payment has not succeeded. All currencies.
@@ -2375,8 +2608,9 @@ components:
         refunds_needing_attention:
           type: integer
           description: |
-            Issued credit notes whose refund failed, has been pending for
-            more than 72 hours, or has not started an hour after issue.
+            Issued credit notes whose refund failed, has an unknown result,
+            has been pending for more than 72 hours, or has not started an
+            hour after issue.
         usage_events:
           type: integer
           format: int64
@@ -2544,7 +2778,15 @@ components:
           format: date-time
         refund_status:
           type: string
-          enum: [none, pending, succeeded, failed]
+          enum: [none, pending, succeeded, failed, unknown]
+          description: |
+            The refund part's state at Stripe. `unknown`: Stripe gave no
+            clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
+            a 429), so the customer may already be refunded. Don't refund it
+            again in the Stripe Dashboard. Retry it with
+            `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+            refund at Stripe first and then resends the same request with
+            the same idempotency key.
         stripe_refund_id:
           type: string
         bill_to_snapshot:
@@ -2800,6 +3042,8 @@ components:
       properties:
         id:
           type: string
+        tenant_id:
+          type: string
         meter_id:
           type: string
         rating_rule_version_id:
@@ -2828,6 +3072,8 @@ components:
         id:
           type: string
           example: vlx_cpo_1a2b3c4d5e6f7890
+        tenant_id:
+          type: string
         rule_key:
           type: string
           description: The rating rule this override replaces the price of, across all its versions.
@@ -2919,11 +3165,13 @@ components:
 
     DunningPolicy:
       type: object
-      required: [id, name, enabled, is_default, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, created_at, updated_at]
+      required: [id, name, enabled, is_default, seeded, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, created_at, updated_at]
       properties:
         id:
           type: string
           example: vlx_dpol_1a2b3c4d5e6f7890
+        tenant_id:
+          type: string
         name:
           type: string
         enabled:
@@ -2931,6 +3179,13 @@ components:
         is_default:
           type: boolean
           description: Customers without an assigned policy use the default.
+        seeded:
+          type: boolean
+          description: |
+            True for the "Default retries" policy the account was created
+            with, until you edit it or make it the default. While it is
+            true, the next enabled policy you create (by hand or from a
+            recipe) becomes the default instead. Ignored in request bodies.
         retry_schedule:
           type: array
           nullable: true
@@ -2971,7 +3226,10 @@ components:
           type: integer
         total_units:
           type: string
-          description: Sum of all matching quantities across meters, as a decimal string.
+          description: |
+            Sum of all matching quantities across meters, as a decimal
+            string. It adds different units and ignores each meter's
+            aggregation; use `by_meter[].value` instead.
         active_meters:
           type: integer
           description: Distinct meters among the matching events.
@@ -2983,13 +3241,52 @@ components:
           description: One row per meter, largest total first.
           items:
             type: object
-            required: [meter_id, total]
+            required: [meter_id, total, aggregation, value, events, customers, peak, daily]
             properties:
               meter_id:
                 type: string
               total:
                 type: string
-                description: Sum of quantities, as a decimal string.
+                description: Plain sum of reported quantities, as a decimal string.
+              aggregation:
+                type: string
+                description: |
+                  The aggregation billing uses for this meter's events (`sum`,
+                  `count`, `max`, `last`), read from its pricing rules and, for
+                  events no rule claims, the meter's own aggregation. `mixed`
+                  when those differ, or when a `max` or `last` meter is billed
+                  in more than one part (several rules, or a rule plus the
+                  events no rule claims), since peaks of the parts added up
+                  are not one peak: `value` is then the plain sum, which
+                  billing may not use. Empty when unknown.
+              value:
+                type: string
+                description: |
+                  Usage under the meter's aggregation, as a decimal string.
+                  `max` and `last` take each customer's peak or latest
+                  reading in the window and add them across customers.
+                  Billing applies them per billing period.
+              events:
+                type: integer
+              customers:
+                type: integer
+                description: Distinct customers with events on this meter.
+              peak:
+                type: string
+                description: Highest single reported quantity, as a decimal string.
+              daily:
+                type: array
+                description: One entry per calendar day (in `tz`) with events, oldest first.
+                items:
+                  type: object
+                  required: [date, value]
+                  properties:
+                    date:
+                      type: string
+                      format: date
+                    value:
+                      type: string
+                      description: The day's usage under the meter's aggregation.
 
     UsageSummary:
       type: object
@@ -3110,16 +3407,106 @@ components:
             `team_id` and `request_tags` become event dimensions;
             `usage_object` is read for token counts; other keys are ignored.
 
+    HeldUsageGroup:
+      type: object
+      description: The usage rows still held for one external customer ID, meter key and reason.
+      required: [external_customer_id, meter_key, reason, rows, total_quantity, first_event_at, last_event_at, last_received_at, customer_id, meter_exists]
+      properties:
+        external_customer_id:
+          type: string
+          description: The LiteLLM `user` value the rows carried.
+        meter_key:
+          type: string
+        reason:
+          type: string
+          enum: [customer_not_found, meter_not_found]
+          description: What was missing when the rows arrived.
+        rows:
+          type: integer
+        total_quantity:
+          type: string
+          description: Sum of the held quantities, as a decimal string.
+        first_event_at:
+          type: string
+          format: date-time
+        last_event_at:
+          type: string
+          format: date-time
+        last_received_at:
+          type: string
+          format: date-time
+          description: When Velox last received a row for this group.
+        customer_id:
+          type: string
+          description: The customer whose external ID now matches, or empty when none does yet.
+        meter_exists:
+          type: boolean
+          description: Whether a meter with this key exists now.
+
+    HeldUsageReleaseResult:
+      type: object
+      required: [customer_id, released, deduplicated, still_held, more_to_release, in_open_period, not_on_plan, outside_open_period]
+      properties:
+        customer_id:
+          type: string
+          description: The customer the rows were ingested for.
+        released:
+          type: integer
+          description: Rows newly written as usage events.
+        deduplicated:
+          type: integer
+          description: |
+            Rows that were already usage events under the same idempotency
+            key (LiteLLM resent the call after the customer existed). Marked
+            released, not written again.
+        still_held:
+          type: integer
+          description: |
+            Rows for this external ID still held that a release cannot take
+            yet: their meter does not exist yet, or their time is after the
+            customer's current time (a customer on a test clock).
+        more_to_release:
+          type: integer
+          description: |
+            Rows for this external ID still held only because one release
+            takes at most 5,000 rows. Release again to take them.
+        in_open_period:
+          type: integer
+          description: |
+            Released rows inside an active subscription's current billing
+            period whose meter the subscription's plan prices. That period's
+            invoice counts them.
+        not_on_plan:
+          type: integer
+          description: |
+            Released rows inside an active subscription's current billing
+            period whose meter no plan on that subscription prices. No
+            invoice charges them.
+        outside_open_period:
+          type: integer
+          description: |
+            Released rows outside every current billing period: before the
+            subscription started, or in an earlier period. A subscription
+            invoice does not count them unless that period's invoice has not
+            been built yet. Bill them with a one-off invoice if they should
+            be charged.
+
     LitellmSpendResult:
       type: object
-      required: [accepted, deduplicated, skipped]
+      required: [accepted, deduplicated, held, skipped]
       properties:
         accepted:
           type: integer
           description: Usage events newly recorded.
         deduplicated:
           type: integer
-          description: Usage events already recorded by an earlier delivery.
+          description: Usage events already recorded, or already held, by an earlier delivery.
+        held:
+          type: integer
+          description: |
+            Usage events kept because their customer or meter does not
+            exist yet. Not billed until released with
+            `POST /v1/usage-events/held/release`.
         skipped:
           type: integer
           description: Records that carry no billable tokens.
@@ -3693,6 +4080,520 @@ components:
           type: string
           nullable: true
 
+    WebhookDelivery:
+      type: object
+      description: One delivery of an event to one endpoint, as the older events routes return it.
+      required: [id, livemode, webhook_endpoint_id, webhook_event_id, status, attempt_count, created_at]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        livemode:
+          type: boolean
+        webhook_endpoint_id:
+          type: string
+        webhook_event_id:
+          type: string
+          description: The event this delivery sent. A replay's own id for a replay's delivery.
+        status:
+          type: string
+          enum: [pending, succeeded, failed]
+        http_status_code:
+          type: integer
+          description: HTTP status from the receiver. Left out when there was no response.
+        response_body:
+          type: string
+        error_message:
+          type: string
+        attempt_count:
+          type: integer
+        next_retry_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        endpoint_url:
+          type: string
+          description: The endpoint's URL, kept after the endpoint is deleted.
+        endpoint_description:
+          type: string
+
+    HostedInvoice:
+      type: object
+      description: |
+        What the hosted invoice page shows. It leaves out internal ids and
+        Stripe details. `bill_to` and the company details in `branding`
+        come from the same place as the invoice PDF's.
+      required: [invoice, line_items, bill_to, branding, pay_enabled, livemode]
+      properties:
+        invoice:
+          type: object
+          required: [invoice_number, status, payment_status, currency, subtotal_cents, discount_cents, tax_amount_cents, tax_rate, total_amount_cents, amount_due_cents, amount_paid_cents, credits_applied_cents]
+          properties:
+            invoice_number:
+              type: string
+            status:
+              $ref: "#/components/schemas/InvoiceStatus"
+            payment_status:
+              $ref: "#/components/schemas/InvoicePaymentStatus"
+            currency:
+              type: string
+            subtotal_cents:
+              type: integer
+              format: int64
+            discount_cents:
+              type: integer
+              format: int64
+            tax_amount_cents:
+              type: integer
+              format: int64
+            tax_rate:
+              type: number
+              description: Tax rate in percent, for example `18` for 18%.
+            tax_name:
+              type: string
+            tax_reverse_charge:
+              type: boolean
+            tax_exempt_reason:
+              type: string
+            total_amount_cents:
+              type: integer
+              format: int64
+            amount_due_cents:
+              type: integer
+              format: int64
+            amount_paid_cents:
+              type: integer
+              format: int64
+            credits_applied_cents:
+              type: integer
+              format: int64
+            issued_at:
+              type: string
+              format: date-time
+            due_at:
+              type: string
+              format: date-time
+            paid_at:
+              type: string
+              format: date-time
+            voided_at:
+              type: string
+              format: date-time
+            billing_timezone:
+              type: string
+              description: The time zone to show the dates in, so they match the PDF.
+              example: Asia/Kolkata
+            memo:
+              type: string
+            footer:
+              type: string
+        line_items:
+          type: array
+          items:
+            type: object
+            required: [description, quantity, unit_amount_cents, amount_cents, total_amount_cents, currency]
+            properties:
+              description:
+                type: string
+              quantity:
+                type: integer
+                format: int64
+              quantity_decimal:
+                type: string
+                description: The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities.
+              unit_amount_cents:
+                type: integer
+                format: int64
+              unit_amount_decimal:
+                type: string
+                description: The unit price in cents at full precision, for example `0.3` for $0.003.
+              meter_unit:
+                type: string
+              amount_cents:
+                type: integer
+                format: int64
+              tax_amount_cents:
+                type: integer
+                format: int64
+              total_amount_cents:
+                type: integer
+                format: int64
+              currency:
+                type: string
+        bill_to:
+          type: object
+          properties:
+            name: { type: string }
+            email: { type: string }
+            address_line1: { type: string }
+            address_line2: { type: string }
+            city: { type: string }
+            state: { type: string }
+            postal_code: { type: string }
+            country: { type: string }
+        branding:
+          type: object
+          properties:
+            company_name: { type: string }
+            company_email: { type: string }
+            company_phone: { type: string }
+            company_address_line1: { type: string }
+            company_address_line2: { type: string }
+            company_city: { type: string }
+            company_state: { type: string }
+            company_postal_code: { type: string }
+            company_country: { type: string }
+            logo_url: { type: string }
+            brand_color: { type: string }
+            support_url: { type: string }
+        pay_enabled:
+          type: boolean
+          description: |
+            True when the customer can pay online now: the invoice is
+            finalized, something is owed, no payment is in progress, and the
+            seller has Stripe connected for the invoice's mode.
+        pay_unavailable_reason:
+          type: string
+          enum: [online_payment_unavailable]
+          description: |
+            Sent only when money is owed but the seller has no payment
+            provider connected for this mode.
+        livemode:
+          type: boolean
+          description: False for a test-mode invoice. The page shows a test-mode banner.
+
+    PublicPaymentUpdate:
+      type: object
+      description: What the payment-update page shows before the customer adds a card.
+      required: [customer_name, invoice_number, invoice_status, amount_due_cents, currency, branding]
+      properties:
+        customer_name:
+          type: string
+        invoice_number:
+          type: string
+        invoice_status:
+          $ref: "#/components/schemas/InvoiceStatus"
+        amount_due_cents:
+          type: integer
+          format: int64
+          description: Not cleared when the invoice is voided. Check `invoice_status` before asking for payment.
+        currency:
+          type: string
+        branding:
+          type: object
+          properties:
+            company_name: { type: string }
+            company_email: { type: string }
+            logo_url: { type: string }
+            brand_color: { type: string }
+            support_url: { type: string }
+
+    ReadinessReport:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, draining]
+        checks:
+          type: object
+          description: |
+            One entry per check. `api` is `ok` or `draining`. `database` is
+            `ok` or `error`. `scheduler` starts with `ok` or `degraded`,
+            followed by detail such as `ok: last run 12s ago`. While
+            draining, only `api` is sent.
+          additionalProperties:
+            type: string
+
+    CreditGrantBlock:
+      type: object
+      description: |
+        One block of credit on a customer's balance (a grant or a positive
+        adjustment) and how much of it is left.
+      required: [id, entry_type, description, amount_cents, consumed_cents, remaining_cents, expired_cents, retired_cents, deducted_cents, created_at]
+      properties:
+        id:
+          type: string
+          description: The ledger entry that added the credit.
+        entry_type:
+          type: string
+          description: "`grant` or `adjustment`."
+        grant_kind:
+          type: string
+          enum: [commit, promotional]
+          description: Absent for unclassified credit.
+        description:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+          description: The credit the block started with.
+        consumed_cents:
+          type: integer
+          format: int64
+          description: |
+            Everything drawn from the block: used by invoices, expired,
+            retired and deducted.
+        remaining_cents:
+          type: integer
+          format: int64
+        expired_cents:
+          type: integer
+          format: int64
+          description: The part that expired unused.
+        retired_cents:
+          type: integer
+          format: int64
+          description: |
+            Commit credit taken back when the invoice that paid for it was
+            voided, or refunded by a credit note.
+        deducted_cents:
+          type: integer
+          format: int64
+          description: The part an operator removed with a negative adjustment.
+        expires_at:
+          type: string
+          format: date-time
+        source_invoice_id:
+          type: string
+          description: For a `commit` block, the invoice that paid for it.
+        created_at:
+          type: string
+          format: date-time
+
+    CreditGrants:
+      type: object
+      description: |
+        A customer's credit blocks, newest first, with the remaining credit
+        added up by kind.
+      required: [grants, commit_remaining_cents, promotional_remaining_cents, other_remaining_cents]
+      properties:
+        grants:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreditGrantBlock"
+        commit_remaining_cents:
+          type: integer
+          format: int64
+          description: Remaining credit the customer paid for (`commit`).
+        promotional_remaining_cents:
+          type: integer
+          format: int64
+          description: Remaining free credit (`promotional`).
+        other_remaining_cents:
+          type: integer
+          format: int64
+          description: Remaining credit with no kind, such as adjustments and proration credits.
+
+    WebhookEndpointCreated:
+      type: object
+      description: A new webhook endpoint and its signing secret. The secret is shown only here.
+      required: [endpoint, secret]
+      properties:
+        endpoint:
+          $ref: "#/components/schemas/WebhookEndpoint"
+        secret:
+          type: string
+          description: The signing secret (`whsec_…`). Store it now; Velox does not show it again.
+
+    WebhookSecretRotation:
+      type: object
+      description: The endpoint's new signing secret. It is shown only here.
+      required: [secret]
+      properties:
+        secret:
+          type: string
+        secondary_valid_until:
+          type: string
+          format: date-time
+          description: Until this time, deliveries are also signed with the old secret.
+
+    WebhookEvent:
+      type: object
+      description: One outbound webhook event, as Velox created it.
+      required: [id, livemode, event_type, payload, created_at]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        livemode:
+          type: boolean
+        event_type:
+          type: string
+          example: invoice.finalized
+        payload:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        replay_of_event_id:
+          type: string
+          description: Set on a replay. The event the replay was made from.
+
+    TestClock:
+      type: object
+      description: |
+        A clock for test mode. Customers and subscriptions attached to it
+        are billed on its time, not the real time.
+      required: [id, name, frozen_time, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        name:
+          type: string
+        frozen_time:
+          type: string
+          format: date-time
+          description: The clock's current time.
+        status:
+          type: string
+          enum: [ready, advancing, internal_failure]
+          description: |
+            `ready`: it can be advanced or deleted. `advancing`: billing is
+            catching up to the new time. `internal_failure`: the last advance
+            failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_failure_reason:
+          type: string
+          description: Why the last advance failed. Cleared by the next successful advance.
+        last_advance_summary:
+          $ref: "#/components/schemas/TestClockAdvanceSummary"
+
+    TestClockAdvanceSummary:
+      type: object
+      description: |
+        What the latest advance did: the time span it covered and how many
+        of each billing step it ran. Absent until the clock is first
+        advanced.
+      required: [advanced_from, advanced_to, invoices_generated, trials_activated, pauses_resumed, thresholds_fired, tax_retried, charges_retried, clawbacks_issued, credits_expired, dunning_advanced, had_errors]
+      properties:
+        advanced_from:
+          type: string
+          format: date-time
+        advanced_to:
+          type: string
+          format: date-time
+        invoices_generated:
+          type: integer
+        trials_activated:
+          type: integer
+        pauses_resumed:
+          type: integer
+        thresholds_fired:
+          type: integer
+        tax_retried:
+          type: integer
+        charges_retried:
+          type: integer
+        clawbacks_issued:
+          type: integer
+        credits_expired:
+          type: integer
+        dunning_advanced:
+          type: integer
+        had_errors:
+          type: boolean
+          description: True when a step failed. The counts then cover only the work done before the failure.
+
+    InvoicePreview:
+      type: object
+      description: |
+        A dry-run invoice built from the usage recorded so far. Nothing is
+        saved.
+      required: [customer_id, subscription_id, plan_name, billing_period_start, billing_period_end, lines, totals, warnings, generated_at]
+      properties:
+        customer_id:
+          type: string
+        subscription_id:
+          type: string
+        plan_name:
+          type: string
+          description: The names of the subscription's plans, comma-separated.
+        billing_period_start:
+          type: string
+          format: date-time
+        billing_period_end:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoicePreviewLine"
+        totals:
+          type: array
+          description: One total per currency on the lines.
+          items:
+            $ref: "#/components/schemas/InvoicePreviewTotal"
+        warnings:
+          type: array
+          description: Ways the real invoice can differ from this preview.
+          items:
+            type: string
+        generated_at:
+          type: string
+          format: date-time
+
+    InvoicePreviewLine:
+      type: object
+      required: [line_type, description, currency, quantity, unit_amount_cents, amount_cents]
+      properties:
+        line_type:
+          type: string
+          enum: [base_fee, usage]
+        description:
+          type: string
+        meter_id:
+          type: string
+        meter_unit:
+          type: string
+        rating_rule_version_id:
+          type: string
+        rule_key:
+          type: string
+        dimension_match:
+          type: object
+          additionalProperties: true
+          description: For a meter with several pricing rules, the dimension values this line's rule matches.
+        currency:
+          type: string
+        quantity:
+          type: string
+          description: Exact quantity as a decimal string.
+        unit_amount_cents:
+          type: integer
+          format: int64
+        amount_cents:
+          type: integer
+          format: int64
+        pricing_mode:
+          type: string
+          enum: [flat, graduated, package]
+
+    InvoicePreviewTotal:
+      type: object
+      required: [currency, amount_cents]
+      properties:
+        currency:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+
 paths:
   /health:
     get:
@@ -3702,11 +4603,76 @@ paths:
       responses:
         "200":
           description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+
+  /health/ready:
+    get:
+      tags: [System]
+      summary: Readiness check for load balancers
+      operationId: getHealthReady
+      security: []
+      description: |
+        Tells a load balancer whether this server can take requests. It
+        returns 503 when the server is shutting down (`draining`) or cannot
+        reach the database. A late billing scheduler shows as `degraded` in
+        the body but keeps the status at 200: taking the server out of the
+        balancer would not restart the scheduler. Alert on the scheduler
+        metrics instead (see docs/ops/runbook/monitoring.md).
+      responses:
+        "200":
+          description: Ready. `status` is `ok`, or `degraded` when only the scheduler is late.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessReport"
+        "503":
+          description: Not ready. `status` is `draining`, or `degraded` when the database cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessReport"
+
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      operationId: getMetrics
+      security:
+        - MetricsToken: []
+        - {}
+      description: |
+        Metrics in the Prometheus text format, for a Prometheus scrape.
+        When `METRICS_TOKEN` is set, send it as a Bearer token. When it is
+        not set, the route is open, except with `APP_ENV=production`, where
+        it answers 401. This is not an API key route.
+      responses:
+        "200":
+          description: Metrics in the Prometheus text format.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: The token is missing or wrong, or `METRICS_TOKEN` is not set in production. The body is the plain text `unauthorized`.
+          content:
+            text/plain:
+              schema:
+                type: string
 
   /v1/customers:
     post:
       tags: [Customers]
       summary: Create customer
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3783,6 +4749,18 @@ paths:
       responses:
         "200":
           description: Customer list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Customer"
+                  total:
+                    type: integer
 
   /v1/customers/{id}/rotate-cost-dashboard-token:
     post:
@@ -3796,6 +4774,7 @@ paths:
         and is shown ONCE — Velox never returns it again after this
         response. Audit log records the rotation without the token.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -3871,6 +4850,7 @@ paths:
         the email changed, not the address).
       operationId: updateCustomer
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -3959,6 +4939,7 @@ paths:
         customer data are retried. The change is written to the audit log.
       operationId: upsertCustomerBillingProfile
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -4280,6 +5261,7 @@ paths:
         without a note. The send is written to the audit log.
       operationId: sendCustomerPaymentSetupEmail
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: customer_id
           in: path
           required: true
@@ -4385,6 +5367,7 @@ paths:
         Fails with 500 when Stripe is not connected for this mode.
       operationId: createCustomerPaymentSetupSession
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: customer_id
           in: path
           required: true
@@ -4472,6 +5455,7 @@ paths:
         the call).
       operationId: setCustomerDefaultPaymentMethod
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: customer_id
           in: path
           required: true
@@ -4496,6 +5480,120 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /v1/checkout/setup:
+    post:
+      tags: [Customers]
+      summary: Start a card setup in Stripe Checkout (older route)
+      operationId: createCheckoutSetupSession
+      description: |
+        An older route the dashboard no longer uses. Prefer
+        `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
+
+        Creates the Stripe customer if there is none, or copies
+        `customer_name`, `email` and the address to the existing one. It
+        then returns a Stripe Checkout URL in setup mode (card only, no
+        charge). Stripe sends the customer back to `return_url` with
+        `?payment=success` or `?payment=cancel` added. Without
+        `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
+        which works only in local development. Writes an audit row. Needs
+        the `customer:write` permission.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id]
+              properties:
+                customer_id:
+                  type: string
+                customer_name:
+                  type: string
+                email:
+                  type: string
+                address_line1:
+                  type: string
+                address_city:
+                  type: string
+                address_state:
+                  type: string
+                address_postal_code:
+                  type: string
+                address_country:
+                  type: string
+                return_url:
+                  type: string
+                  description: The page Stripe sends the customer back to. Always send it, because the default works only in local development.
+      responses:
+        "201":
+          description: Setup session created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, url, stripe_customer_id]
+                properties:
+                  session_id:
+                    type: string
+                    description: Stripe Checkout Session ID.
+                  url:
+                    type: string
+                    description: Stripe Checkout URL.
+                  stripe_customer_id:
+                    type: string
+        "400":
+          description: The body is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No such customer in this mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: "`customer_id` is missing."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Stripe is not connected for this mode, or a Stripe call failed. Code `stripe_error`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/checkout/status/{customerID}:
+    get:
+      tags: [Customers]
+      summary: Get a customer's card setup status (older route)
+      operationId: getCheckoutSetupStatus
+      description: |
+        An older route the dashboard no longer uses. Prefer
+        `GET /v1/customers/{customer_id}/payment-methods`.
+
+        Any read error, an unknown customer included, returns 200 with
+        `setup_status: missing` and zero timestamps. Needs the
+        `customer:write` permission.
+      parameters:
+        - name: customerID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Setup status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerPaymentSetup"
 
   /v1/public/cost-dashboard/{token}:
     get:
@@ -4636,10 +5734,225 @@ paths:
         "429":
           description: Rate limited (60/min/IP)
 
+  /v1/public/invoices/{token}:
+    get:
+      tags: [Public]
+      security: []
+      summary: Data behind the hosted invoice page
+      operationId: getHostedInvoice
+      description: |
+        Unauthenticated. The invoice's public token in the URL is the only
+        credential. Paid and voided invoices stay viewable. A draft is
+        never shown: it returns 404 like an unknown token. Share the page
+        link with customers instead of calling this route.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The invoice as the page shows it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostedInvoice"
+        "404":
+          description: Unknown token, or the invoice is a draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+
+  /v1/public/invoices/{token}/pdf:
+    get:
+      tags: [Public]
+      security: []
+      summary: Download the hosted invoice PDF
+      operationId: getHostedInvoicePdf
+      description: |
+        Unauthenticated, like the hosted invoice page. Returns the same PDF
+        as `GET /v1/invoices/{id}/pdf`, shown inline and named after the
+        invoice number.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PDF file.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Unknown token, or the invoice is a draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+
+  /v1/public/invoices/{token}/checkout:
+    post:
+      tags: [Public]
+      security: []
+      summary: Start paying the invoice in Stripe Checkout
+      operationId: createHostedInvoiceCheckout
+      description: |
+        The hosted page's Pay button. Returns a Stripe Checkout URL for the
+        amount due. Velox has already worked out the tax, so Stripe adds
+        none. After paying, Stripe sends the customer back to the hosted
+        page with `?paid=1`. The Stripe webhook, not this redirect, marks
+        the invoice paid.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Checkout session created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    description: Stripe Checkout URL.
+        "404":
+          description: Unknown token, or the invoice is a draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            The invoice cannot be paid now. The code says why:
+            `not_payable` when it is not finalized, nothing is owed, or its
+            payment status is `processing` or `unknown`.
+            `payment_in_progress` when another payment for it has started.
+            `online_payment_unavailable` when the seller has no Stripe keys
+            for the invoice's mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+        "502":
+          description: Stripe could not create the session. Code `stripe_error`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: The server runs without a Stripe adapter. Code `stripe_unavailable`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/public/payment-updates/{token}:
+    get:
+      tags: [Public]
+      security: []
+      summary: Data behind the payment-update page
+      operationId: getPublicPaymentUpdate
+      description: |
+        Unauthenticated. The token from the payment-update email is the only
+        credential. It is valid for 24 hours, and starting checkout uses it
+        up. Share the page link with customers instead of calling this
+        route.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: What the page shows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicPaymentUpdate"
+        "401":
+          description: The token is unknown, expired or already used. Code `invalid_token`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: The invoice or customer the token names is gone. Code `invoice_not_found` or `customer_not_found`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+
+  /v1/public/payment-updates/{token}/checkout:
+    post:
+      tags: [Public]
+      security: []
+      summary: Start adding a card in Stripe Checkout
+      operationId: createPublicPaymentUpdateCheckout
+      description: |
+        Returns a Stripe Checkout URL in setup mode (card only, no charge).
+        Creates the Stripe customer if there is none. This call uses up the
+        token. If Stripe fails to create the session, the token works again.
+        Stripe sends the customer to the payment-method-added page with
+        `?status=success` or `?status=cancel`. Writes an audit row.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Checkout session created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    description: Stripe Checkout URL.
+        "401":
+          description: The token is unknown, expired or already used. Code `invalid_token`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (60/min/IP)
+        "502":
+          description: Stripe is not connected for this mode, or Stripe could not create the session. Code `stripe_error`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/meters:
     post:
       tags: [Pricing]
       summary: Create meter
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4664,12 +5977,26 @@ paths:
       responses:
         "201":
           description: Meter created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Meter"
     get:
       tags: [Pricing]
       summary: List meters
       responses:
         "200":
           description: Meter list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Meter"
 
   /v1/meters/{id}:
     patch:
@@ -4686,6 +6013,7 @@ paths:
         every invoice. Add a pricing rule first, or move the subscriptions
         to a plan without this meter.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -4711,6 +6039,10 @@ paths:
       responses:
         "200":
           description: Updated meter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Meter"
         "404":
           description: Meter not found
         "409":
@@ -4787,6 +6119,7 @@ paths:
         path is used; a `meter_id` in the body is ignored.
       operationId: upsertMeterPricingRule
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: meter_id
           in: path
           required: true
@@ -4957,6 +6290,8 @@ paths:
         AND issued in one transaction; the credit-balance channel is
         forbidden on relief. Unpaid commit invoices: void the invoice
         instead.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5006,6 +6341,10 @@ paths:
       responses:
         "201":
           description: Credit note (issued immediately for commit relief)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditNote"
         "409":
           description: State gate (unpaid commit → void; fully-consumed commit; in-flight charge)
         "422":
@@ -5037,11 +6376,12 @@ paths:
           in: query
           schema:
             type: string
-            enum: [none, pending, succeeded, failed, needs_attention]
+            enum: [none, pending, succeeded, failed, unknown, needs_attention]
           description: |
             `needs_attention` returns issued, non-test-clock notes whose
-            refund failed, has been pending more than 72 hours, or has a
-            refund amount still at `none` after 1 hour.
+            refund failed or has an unknown result, has been pending more
+            than 72 hours, or has a refund amount still at `none` after 1
+            hour.
         - name: sort
           in: query
           description: One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
@@ -5085,7 +6425,13 @@ paths:
         drawn / remaining per grant, expiry, and remaining split by
         cost-basis class (commit = money-backed, promotional = free,
         other = legacy/adjustments). include_exhausted=true adds
-        fully-drawn blocks for history.
+        fully-drawn blocks for history. Each grant's `consumed_cents`
+        also counts credit no invoice used: `expired_cents`, the part that
+        expired unused; `retired_cents`, commit credit taken back when the
+        invoice that funded it was voided or refunded by a credit note; and
+        `deducted_cents`, the part an operator deduction (a negative
+        adjustment) drew from this grant. The credit invoices actually used
+        is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
       parameters:
         - name: customer_id
           in: path
@@ -5099,6 +6445,10 @@ paths:
       responses:
         "200":
           description: Grants with remaining + kind subtotals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditGrants"
 
   /v1/credits/adjust:
     post:
@@ -5114,6 +6464,8 @@ paths:
         ($1,000,000), or a removal larger than the credit that can be
         drawn (expired grants not yet written off do not count).
       operationId: adjustCredits
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5247,6 +6599,8 @@ paths:
         event Velox never emits is a 422, not silence. Omitted/empty
         events = all events ("*"); "invoice.*"-style prefix wildcards are
         supported.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5266,6 +6620,10 @@ paths:
       responses:
         "201":
           description: Endpoint created (response carries the one-time signing secret)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpointCreated"
         "422":
           description: Invalid URL or unknown event type
     get:
@@ -5274,6 +6632,16 @@ paths:
       responses:
         "200":
           description: Endpoint list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookEndpoint"
 
   /v1/webhook-endpoints/endpoints/{id}:
     patch:
@@ -5287,6 +6655,7 @@ paths:
         recipe-created endpoint (inactive, placeholder URL) is pointed at
         a real receiver and activated.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -5312,6 +6681,10 @@ paths:
       responses:
         "200":
           description: Updated endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
         "404":
           description: Endpoint not found
         "422":
@@ -5328,12 +6701,22 @@ paths:
       responses:
         "200":
           description: Endpoint disabled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [deleted]
 
   /v1/webhook-endpoints/endpoints/{id}/rotate-secret:
     post:
       tags: [Webhooks]
       summary: Rotate signing secret (72h dual-signing grace)
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -5342,6 +6725,10 @@ paths:
       responses:
         "200":
           description: New secret (old secret keeps verifying during the grace window)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSecretRotation"
 
   /v1/webhook-endpoints/endpoints/{id}/deliveries:
     get:
@@ -5394,6 +6781,7 @@ paths:
         background, so `status` is always `queued`.
         Writes an audit row.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -5456,6 +6844,93 @@ paths:
       responses:
         "200":
           description: Event list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookEvent"
+
+  /v1/webhook-endpoints/events/{id}/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: List an event's deliveries (older route)
+      operationId: listWebhookEventDeliveriesLegacy
+      description: |
+        An older route the dashboard no longer uses. Prefer
+        `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
+        an unknown event.
+
+        Returns the deliveries of the event and of its replays, oldest
+        first. An unknown id returns 200 with an empty list. Needs the
+        `apikey:write` permission.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookDelivery"
+
+  /v1/webhook-endpoints/events/{id}/replay:
+    post:
+      tags: [Webhooks]
+      summary: Replay an event to all matching endpoints (older route)
+      operationId: replayWebhookEventLegacy
+      description: |
+        An older route the dashboard no longer uses. Prefer
+        `POST /v1/webhook_events/{id}/replay`.
+
+        Does the same replay. The response always says `replayed`, even
+        when no endpoint will receive the copy. Writes an audit row. Needs
+        the `apikey:write` permission.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Replay created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, event_id, replay_of]
+                properties:
+                  status:
+                    type: string
+                    enum: [replayed]
+                  event_id:
+                    type: string
+                    description: The new event created by the replay.
+                  replay_of:
+                    type: string
+                    description: The original event.
+        "404":
+          description: No such event in this mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/webhook_events/{id}/deliveries:
     get:
@@ -5520,6 +6995,7 @@ paths:
         endpoint will receive it. Sending happens in the background.
         Writes an audit row. Needs only the `apikey:read` permission.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -5591,10 +7067,146 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/webhooks/stripe/{endpoint_id}:
+    post:
+      tags: [Webhooks]
+      security: []
+      summary: Receive a Stripe webhook
+      operationId: receiveStripeWebhook
+      description: |
+        Stripe calls this route; your code does not. Point a webhook in your
+        Stripe dashboard at it for each connected mode. `endpoint_id` is the
+        `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
+        The request is checked against the `Stripe-Signature` header and
+        that mode's signing secret. The body can be at most 64 KB.
+
+        Events for objects Velox did not create are answered 200 with
+        `status: skipped`. A 500 means a temporary failure, and Stripe
+        sends the event again.
+      parameters:
+        - name: endpoint_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A Stripe event object.
+              additionalProperties: true
+      responses:
+        "200":
+          description: Processed, or skipped.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [processed, skipped]
+                  reason:
+                    type: string
+                    description: Why the event was skipped.
+        "400":
+          description: Bad signature, an unreadable body or invalid JSON, or the event's mode or Velox account does not match the endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No Stripe connection has this `endpoint_id`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: The body is over 64 KB. Code `payload_too_large`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Temporary failure. Stripe retries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/webhooks/postmark:
+    post:
+      tags: [Webhooks]
+      security:
+        - PostmarkBasicAuth: []
+      summary: Receive a Postmark delivery webhook
+      operationId: receivePostmarkWebhook
+      description: |
+        Postmark calls this route; your code does not. Velox reads
+        `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
+        record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
+        `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
+        docs/ops/email-setup.md.
+
+        Error bodies are `{"error": "<reason>"}`, not the usual error
+        object. A body that a retry cannot fix is answered 200, so Postmark
+        stops retrying: over 64 KB, invalid JSON, or no known Velox email
+        id in its metadata.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A Postmark webhook payload.
+              additionalProperties: true
+      responses:
+        "200":
+          description: Processed, skipped or ignored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [processed, skipped, ignored]
+                  reason:
+                    type: string
+        "401":
+          description: Wrong or missing Basic auth, or the credentials are not set on the server.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        "500":
+          description: Temporary failure. Postmark retries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
   /v1/plans:
     post:
       tags: [Pricing]
       summary: Create plan
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5627,12 +7239,26 @@ paths:
       responses:
         "201":
           description: Plan created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
     get:
       tags: [Pricing]
       summary: List plans
       responses:
         "200":
           description: Plan list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plan"
 
   /v1/plans/{id}:
     get:
@@ -5686,6 +7312,7 @@ paths:
         or a pricing rule) in the plan's currency.
       operationId: updatePlan
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -5774,6 +7401,8 @@ paths:
     post:
       tags: [Pricing]
       summary: Create rating rule
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5818,12 +7447,42 @@ paths:
       responses:
         "201":
           description: Rating rule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingRule"
     get:
       tags: [Pricing]
       summary: List rating rules
+      parameters:
+        - name: rule_key
+          in: query
+          description: Only versions of this rule.
+          schema:
+            type: string
+        - name: lifecycle_state
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, archived]
+        - name: latest
+          in: query
+          description: When true, only the newest version of each rule.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Rating rule list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RatingRule"
 
   /v1/rating-rules/{id}:
     get:
@@ -5855,6 +7514,8 @@ paths:
     post:
       tags: [Subscriptions]
       summary: Create subscription
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5892,6 +7553,10 @@ paths:
       responses:
         "201":
           description: Subscription created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
     get:
       tags: [Subscriptions]
       summary: List subscriptions
@@ -5944,12 +7609,25 @@ paths:
       responses:
         "200":
           description: Subscription list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Subscription"
+                  total:
+                    type: integer
 
   /v1/subscriptions/{id}/activate:
     post:
       tags: [Subscriptions]
       summary: Activate draft subscription
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -5958,6 +7636,10 @@ paths:
       responses:
         "200":
           description: Subscription activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
 
   /v1/subscriptions/{id}/retry-billing:
     post:
@@ -5991,6 +7673,7 @@ paths:
         stay, and the next billing run finishes the rest. The failure may
         already be cleared at that point, so a repeat call can answer 409.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6081,6 +7764,7 @@ paths:
 
         Sends the `subscription.canceled` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6131,6 +7815,7 @@ paths:
         The response's `cancel_effective_at` says when the cancel takes
         effect. Sends the `subscription.cancel_scheduled` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6249,6 +7934,7 @@ paths:
 
         Sends the `subscription.collection_paused` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6355,6 +8041,7 @@ paths:
 
         Sends the `subscription.trial_ended` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6395,6 +8082,7 @@ paths:
 
         Sends the `subscription.trial_extended` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6463,6 +8151,7 @@ paths:
         Each call replaces the whole configuration. Item thresholds left
         out of the body are removed.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6582,6 +8271,7 @@ paths:
 
         Sends the `subscription.item.added` webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6625,12 +8315,13 @@ paths:
           description: |
             Code `already_exists`: the subscription already has an item for
             this plan. Code `invalid_state`: the subscription is `canceled`
-            or `archived`; the plan's meters overlap another live
-            subscription of the customer; or the plan's currency differs
-            from the subscription's. Code `unpaid_invoice_blocks_change`:
-            the invoice for the current period is unpaid; settle or void it
-            first. Code `unbilled_period`: a billing period ended and could
-            not be invoiced; retry billing first.
+            or `archived`; the plan is archived; the plan's meters overlap
+            another live subscription of the customer; or the plan's
+            currency differs from the subscription's. Code
+            `unpaid_invoice_blocks_change`: the invoice for the current
+            period is unpaid; settle or void it first. Code
+            `unbilled_period`: a billing period ended and could not be
+            invoiced; retry billing first.
           content:
             application/json:
               schema:
@@ -6674,6 +8365,7 @@ paths:
         `subscription.pending_change.scheduled` for a scheduled plan
         change.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -6882,6 +8574,8 @@ paths:
     post:
       tags: [Usage]
       summary: Ingest usage event
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -6930,11 +8624,19 @@ paths:
       responses:
         "201":
           description: Event ingested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageEvent"
         "200":
           description: |
             Idempotency replay — the original event is returned unchanged
             with an `Idempotent-Replayed: true` header. No duplicate row
             is written. The new body is not compared with the original.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageEvent"
         "422":
           description: |
             Validation failed and nothing was stored. `param` names the
@@ -6964,9 +8666,53 @@ paths:
             `model=gpt-4o,token_type=input`.
           schema:
             type: string
+        - name: from
+          in: query
+          description: Only events at or after this time (RFC 3339). A value that does not parse is ignored.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: after
+          in: query
+          description: Opaque cursor from `next_cursor`. Takes precedence over `offset`.
+          schema:
+            type: string
       responses:
         "200":
           description: Event list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UsageEvent"
+                  total:
+                    type: integer
+                    description: Number of matching events. Left out when the page was read with an `after` cursor.
+                  has_more:
+                    type: boolean
+                    description: Sent only when the page was read with an `after` cursor. True when another page follows.
+                  next_cursor:
+                    type: string
+                    description: Pass it as `after` to read the next page. Sent only when `has_more` is true.
         "422":
           description: Malformed dimensions filter
 
@@ -6985,6 +8731,8 @@ paths:
         you never sent before means some keys were already used, by an
         earlier event or by another event in the batch. Those events
         were not stored.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -7073,6 +8821,8 @@ paths:
         `Idempotent-Replayed: true` header, and writes nothing.
         Requires usage write permission.
       operationId: backfillUsageEvent
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -7166,16 +8916,148 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/usage-events/held:
+    get:
+      tags: [Usage]
+      summary: List held usage
+      description: |
+        Usage rows the LiteLLM integration received for a customer or meter
+        that did not exist yet. They are kept with their idempotency keys,
+        not billed, until you release or discard them. Grouped by external
+        customer ID, meter key and reason, most recent arrival first. Lists
+        the 200 external customer IDs with the most recent arrivals, with
+        every group for each; `total_customers` and `total_rows` count all
+        held rows, listed or not. Requires usage read permission.
+      operationId: listHeldUsage
+      responses:
+        "200":
+          description: Held groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total_customers, total_rows]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HeldUsageGroup"
+                  total_customers:
+                    type: integer
+                    description: External customer IDs with rows held, including those not listed in `data`.
+                  total_rows:
+                    type: integer
+                    description: Rows held, including those not listed in `data`.
+
+  /v1/usage-events/held/release:
+    post:
+      tags: [Usage]
+      summary: Release held usage
+      description: |
+        Writes the held rows for one external customer ID as usage events
+        for a customer, each under its original idempotency key and time,
+        marked `origin: backfill`, in one transaction. A row that is already
+        a usage event under the same key is not written again. Releasing
+        twice writes nothing the second time.
+
+        Rows whose meter still does not exist, or whose time is after the
+        customer's current time, stay held. One call releases at most 5,000
+        rows; `more_to_release` counts the rest, and another call takes
+        them. A released row counts toward
+        the billing period its time falls in only if that period's invoice
+        has not been built yet; Velox does not move it onto a later
+        invoice. Writes an audit log entry. Requires usage write permission.
+      operationId: releaseHeldUsage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_customer_id]
+              properties:
+                external_customer_id:
+                  type: string
+                  description: The external ID the rows were held under.
+                customer_id:
+                  type: string
+                  description: |
+                    Release into this customer (a `vlx_cus_` id) instead of
+                    the one whose external ID matches, for a `user` value
+                    that had a typo.
+      responses:
+        "200":
+          description: Release result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HeldUsageReleaseResult"
+        "422":
+          description: "`validation_error`: no customer has that external ID yet and no `customer_id` was given, or `customer_id` was not found."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/usage-events/held/discard:
+    post:
+      tags: [Usage]
+      summary: Discard held usage
+      description: |
+        Marks the held rows for one external customer ID (and one meter
+        key, when given) as discarded. They are never billed. The rows stay
+        stored as a record. Writes an audit log entry. Requires usage write
+        permission.
+      operationId: discardHeldUsage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_customer_id]
+              properties:
+                external_customer_id:
+                  type: string
+                meter_key:
+                  type: string
+                  description: Discard only this meter's rows. Omit for all.
+      responses:
+        "200":
+          description: Rows discarded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [discarded]
+                properties:
+                  discarded:
+                    type: integer
+        "422":
+          description: "`validation_error`: `external_customer_id` is missing."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/usage-events/aggregate:
     get:
       tags: [Usage]
       summary: Usage totals
       description: |
         Event count, quantity totals, and a per-meter breakdown over every
-        usage event matching the filters (no paging). Quantities are plain
-        sums of event quantities, whatever the meter's aggregation, and
-        `total_units` adds quantities across all meters. A `from` or `to`
-        value that is not RFC 3339 is ignored, not rejected.
+        usage event matching the filters (no paging). Each `by_meter` row
+        carries `value`, the meter's usage under its own aggregation: a
+        sum, an event count, each customer's peak (Maximum) or each
+        customer's latest reading (Latest value), added across customers.
+        `total` stays the plain sum of reported quantities. `total_units`
+        adds quantities across all meters whatever their units, and is kept
+        for compatibility only. A `from` or `to` value that is not RFC 3339
+        is ignored, not rejected.
       operationId: aggregateUsageEvents
       parameters:
         - name: customer_id
@@ -7206,6 +9088,13 @@ paths:
             `model=gpt-4o,token_type=input`.
           schema:
             type: string
+        - name: tz
+          in: query
+          description: |
+            IANA time zone for the calendar days of `by_meter[].daily`
+            (default UTC). An unknown name returns 422.
+          schema:
+            type: string
       responses:
         "200":
           description: Totals
@@ -7214,7 +9103,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UsageAggregate"
         "422":
-          description: "`validation_error`: a malformed `dimensions` pair."
+          description: "`validation_error`: a malformed `dimensions` pair or an unknown `tz`."
           content:
             application/json:
               schema:
@@ -7354,6 +9243,25 @@ paths:
       responses:
         "200":
           description: Invoice list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Invoice"
+                  total:
+                    type: integer
+                    description: Number of matching invoices. Left out when the page was read with an `after` cursor.
+                  has_more:
+                    type: boolean
+                    description: Sent only when the page was read with an `after` cursor. True when another page follows.
+                  next_cursor:
+                    type: string
+                    description: Pass it as `after` to read the next page. Sent only when `has_more` is true.
 
     post:
       tags: [Invoices]
@@ -7374,6 +9282,8 @@ paths:
 
         Tax is not calculated here. It is calculated when the invoice is
         finalized, so totals equal the subtotal until then.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -7421,18 +9331,25 @@ paths:
       tags: [Invoices]
       summary: Preview the next invoice for a customer (Stripe-equivalent)
       description: |
-        Answers "what is my next bill going to look like?" as a
-        full-period ESTIMATE. Usage lines are rated through the same
-        per-meter aggregation path as the cycle scan, but the estimate
-        deliberately does NOT replicate usage-cap scaling or mid-period
-        segment proration (ADR-045) — for capped or mid-period-changed
-        subscriptions the response carries `warnings[]` naming the
-        divergence and the finalized invoice can differ (lower, for
-        capped usage). Composes across customer / subscription / pricing;
+        Answers "what is my next bill going to look like?" from the usage
+        recorded so far. Without `period`, the preview mirrors the cycle
+        close for the subscription's current period: base fees prorate for
+        a short first period and per segment after a mid-period item add,
+        quantity change, plan swap or removal, and each meter's usage counts
+        only while a plan carrying it was on the subscription. For a
+        trialing subscription it is the first invoice after the trial: the
+        trial-end invoice when a plan bills in advance, otherwise the close
+        of the first paid period, prorated the same way. With an
+        explicit `period`, it is a flat estimate over that window and warns
+        when a mid-period change makes the invoice differ. Neither applies
+        usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
+        says the invoice can be lower. Composes across customer / subscription / pricing;
         registered as a sibling of `/v1/invoices` (chi picks the more
         specific pattern, otherwise `/{id}` would capture
         `create_preview` as an invoice ID). See
-        [`docs/design-create-preview.md`](../docs/design-create-preview.md).
+        [`docs/design/create-preview.md`](../docs/design/create-preview.md).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -7467,6 +9384,10 @@ paths:
       responses:
         "200":
           description: Preview result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoicePreview"
         "400":
           description: Invalid request body
           content:
@@ -7525,7 +9446,10 @@ paths:
         "200":
           description: PDF file
           content:
-            application/pdf: {}
+            application/pdf:
+              schema:
+                type: string
+                format: binary
 
   /v1/invoices/{id}/send:
     post:
@@ -7539,6 +9463,7 @@ paths:
         explicit list → validated exact override (same rules as the
         customer field — normalize, dedupe, not-the-recipient, cap 10).
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7563,6 +9488,15 @@ paths:
       responses:
         "200":
           description: Email enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [sent]
         "404":
           description: Invoice not found
         "409":
@@ -7587,6 +9521,7 @@ paths:
         `amount_cents` is `quantity × unit_amount_cents`. Only draft invoices
         accept new lines.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7643,6 +9578,7 @@ paths:
 
         A paid invoice cannot be voided: issue a credit note instead.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7688,6 +9624,7 @@ paths:
         This is different from `POST /v1/invoices/{id}/send`, which emails
         the invoice itself with a link to pay it.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7737,6 +9674,7 @@ paths:
         payment retries stop. Fires the `invoice.marked_uncollectible`
         webhook event.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7779,6 +9717,7 @@ paths:
         `invoice.payment_recorded` webhook event. The optional `note` is
         stored in the audit log, cut to 500 characters.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7833,6 +9772,7 @@ paths:
         link stops working at once. Use it when a link was shared with the
         wrong people. Draft invoices have no public link.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7879,6 +9819,7 @@ paths:
         A written-off (`uncollectible`) invoice cannot be charged here.
         Record an offline payment or issue a new invoice instead.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -7939,13 +9880,16 @@ paths:
 
         Leave out `amount_cents`, or send 0, to refund everything not yet
         refunded. The response is the credit note. Check its
-        `refund_status`: if Stripe failed, it is `failed` and can be retried
-        with `POST /v1/credit-notes/{id}/retry-refund`.
+        `refund_status`: if Stripe refused the refund, it is `failed`. If
+        Stripe gave no clear answer, it is `unknown`: the customer may
+        already be refunded, so don't refund again in the Stripe Dashboard.
+        Retry either with `POST /v1/credit-notes/{id}/retry-refund`.
 
         Only invoices paid by card through Stripe can be refunded here. For
         an invoice paid outside Stripe, create a credit note with
         `out_of_band_amount_cents`.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8054,6 +9998,7 @@ paths:
         `additional_emails`). The send is recorded on the applied
         invoice's timeline and the customer's Sent-emails section.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8078,6 +10023,15 @@ paths:
       responses:
         "200":
           description: Email enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [sent]
         "404":
           description: Credit note not found
         "409":
@@ -8129,14 +10083,17 @@ paths:
           part is added to the customer's credit balance.
 
         Check the returned `status` and `refund_status`:
-        - A failed Stripe refund still returns 200, with `refund_status`
-          `failed`. Retry it with `POST /v1/credit-notes/{id}/retry-refund`.
+        - A refund Stripe refused still returns 200, with `refund_status`
+          `failed`. A refund with no clear answer from Stripe returns 200
+          with `unknown`: the customer may already be refunded. Retry either
+          with `POST /v1/credit-notes/{id}/retry-refund`.
         - If the invoice's charge is still running, or the invoice is still
           a draft, nothing changes and the note stays `draft`. Velox issues
           it later.
         - If the invoice was voided or written off, the draft is voided
           instead and returned with `status` `voided`.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8169,11 +10126,15 @@ paths:
       operationId: retryCreditNoteRefund
       description: |
         Sends the refund part of an `issued` credit note to Stripe again,
-        when its `refund_status` is `failed`, `pending` or `none`. Before
-        creating a refund, Velox asks Stripe for one already made for this
-        note and records it if found, so a retry does not refund the
-        customer twice.
+        when its `refund_status` is `failed`, `unknown`, `pending` or
+        `none`. Before creating a refund, Velox asks Stripe for one already
+        made for this note and records it if found. For `unknown` and
+        `none`, Velox then resends the earlier request whose result it
+        never recorded, with the same idempotency key. While Stripe keeps
+        that key (at least 24 hours), Stripe returns the earlier request's
+        result instead of making a second refund.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8205,9 +10166,10 @@ paths:
                 $ref: "#/components/schemas/Error"
         "502":
           description: |
-            Stripe refused the refund again (code `provider_error`). The
-            note keeps `refund_status` `failed`; retry later. A Stripe error
-            without a safe message returns 500 instead.
+            Stripe refused the refund (code `provider_error`): the note's
+            `refund_status` is `failed`. Or Stripe gave no clear answer (code
+            `payment_outcome_unknown`): it is `unknown`, and the customer may
+            already be refunded. Retry later in both cases.
           content:
             application/json:
               schema:
@@ -8222,6 +10184,7 @@ paths:
         Cancels a `draft` credit note. Issued credit notes are final and
         cannot be voided.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8284,6 +10247,7 @@ paths:
       tags: [Invoices]
       summary: Finalize draft invoice
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8292,6 +10256,10 @@ paths:
       responses:
         "200":
           description: Invoice finalized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
 
   /v1/invoices/{id}/retry-tax:
     post:
@@ -8315,6 +10283,7 @@ paths:
         is still failing is **not** an HTTP error — the caller
         renders the new attention.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -8345,6 +10314,11 @@ paths:
         Subsequent dashboard requests authenticate via the cookie; sessions
         are bound to `users.id` and are independent of API key lifecycle.
         See ADR-011.
+
+        A successful sign-in also sets `velox_device` (HttpOnly,
+        `Path=/v1/auth`, 180 days). It marks the browser as one that signed
+        in to this email, so the sign-in throttle counts its attempts on
+        their own. It never replaces the password.
       requestBody:
         required: true
         content:
@@ -8386,9 +10360,31 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           description: |
-            Rate limited — the shared per-IP request limit on `/v1/auth`
-            was exceeded. There is no per-account lockout or login
-            throttle in v1 (ADR-094).
+            Too many attempts. Two limits answer 429, and neither locks
+            the account:
+
+            - Code `login_throttled`: the sign-in throttle. Repeated wrong
+              passwords for one email, from one address or from many,
+              start a wait of 1 to 15 minutes. The message names the wait
+              in minutes and `Retry-After` gives it in seconds. The answer
+              is the same for an email with no account. A browser that
+              signed in to the email before is counted on its own.
+            - Code `rate_limited`: the shared per-address request limit on
+              `/v1/auth`.
+          headers:
+            Retry-After:
+              description: Seconds until an attempt is counted again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: |
+            Code `authentication_unavailable`: the sign-in throttle could not
+            read the database, so the attempt was refused before the password
+            check. Try again shortly.
           content:
             application/json:
               schema:
@@ -8740,6 +10736,8 @@ paths:
         outbox. Requires `DASHBOARD_BASE_URL` — accept links are never
         derived from request headers. 409 when the email is already a
         member or already has a pending invite. ADR-081.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -8848,7 +10846,7 @@ paths:
         `Authorization: Bearer` (SDK / curl). Cookie path returns
         `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
         All callers get `tenant_id`, `livemode`,
-        `can_email_setup_links` and `can_send_invites`.
+        `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
       responses:
         "200":
           description: Resolved auth context
@@ -8875,6 +10873,12 @@ paths:
                       Whether this server can invite a teammate. False when
                       email sending (SMTP) or DASHBOARD_BASE_URL is not set
                       up; inviting then fails with 409.
+                  smtp_configured:
+                    type: boolean
+                    description: |
+                      Whether this server has SMTP set up (SMTP_HOST). False
+                      means no email of any kind is sent. Settings → Email
+                      (`GET /v1/settings/email`) has the details.
                   user_id:
                     type: string
                   email:
@@ -8895,6 +10899,8 @@ paths:
     post:
       tags: [Billing]
       summary: Trigger billing cycle
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: Billing cycle result
@@ -8923,6 +10929,10 @@ paths:
       responses:
         "200":
           description: Invoice preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoicePreview"
 
   /v1/provider-costs:
     get:
@@ -8947,6 +10957,8 @@ paths:
     put:
       tags: [ProviderCosts]
       summary: Create or update a provider cost rate
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -9056,6 +11068,8 @@ paths:
     post:
       tags: [Credits]
       summary: Grant credits to customer
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -9087,6 +11101,10 @@ paths:
       responses:
         "201":
           description: Credits granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLedgerEntry"
 
   /v1/credits/balance/{customer_id}:
     get:
@@ -9159,7 +11177,8 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { type: object }
+                    items:
+                      $ref: "#/components/schemas/TestClock"
         "403":
           description: Caller is in live mode
           content:
@@ -9172,6 +11191,8 @@ paths:
       description: |
         Test mode only. The clock starts in `ready` state at
         `frozen_time`. Use `/advance` to move it forward.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -9191,7 +11212,8 @@ paths:
           description: Clock created
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/TestClock"
 
   /v1/test-clocks/{id}:
     get:
@@ -9207,7 +11229,8 @@ paths:
           description: Clock
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/TestClock"
         "404":
           description: Clock not found
     delete:
@@ -9221,6 +11244,15 @@ paths:
       responses:
         "200":
           description: Clock deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [deleted]
 
   /v1/test-clocks/{id}/subscriptions:
     get:
@@ -9241,7 +11273,8 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { type: object }
+                    items:
+                      $ref: "#/components/schemas/Subscription"
         "404":
           description: Clock not found
 
@@ -9259,6 +11292,7 @@ paths:
         it with `POST /v1/test-clocks/{id}/retry-advance` (deletion is
         not required). ADR-018.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
           name: id
           required: true
@@ -9279,7 +11313,8 @@ paths:
           description: Advance accepted — clock returned in `advancing` state
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/TestClock"
         "409":
           description: Clock is not in `ready` state
         "422":
@@ -9299,6 +11334,7 @@ paths:
         poll `GET /v1/test-clocks/{id}` until status leaves `advancing`.
         ADR-018.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
           name: id
           required: true
@@ -9308,7 +11344,8 @@ paths:
           description: Retry accepted — clock returned in `advancing` state
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/TestClock"
         "404":
           description: Clock not found
         "409":
@@ -9428,6 +11465,7 @@ paths:
         audit row.
       operationId: previewRecipe
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
           name: key
           required: true
@@ -9467,6 +11505,7 @@ paths:
         a duplicate plan (ADR-085; badge livemode-scoped per m0157).
       operationId: instantiateRecipe
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
           name: key
           required: true
@@ -9645,7 +11684,8 @@ paths:
       description: |
         Streams usage events whose `timestamp` falls in the window,
         newest first, from one consistent snapshot. `from` and `to` are
-        both required and may span at most 366 days. Columns: id,
+        both required and may span at most 366 days. `customer_id`,
+        `meter_id` and `dimensions` narrow it like the event list. Columns: id,
         customer_id, meter_id, quantity, timestamp, idempotency_key,
         origin, dimensions_json, provider_cost_micros,
         provider_cost_source.
@@ -9666,6 +11706,21 @@ paths:
           description: Upper bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC).
           schema:
             type: string
+        - name: customer_id
+          in: query
+          description: Only this customer's events.
+          schema:
+            type: string
+        - name: meter_id
+          in: query
+          description: Only this meter's events.
+          schema:
+            type: string
+        - name: dimensions
+          in: query
+          description: Comma-separated key=value pairs, same syntax as `GET /v1/usage-events`.
+          schema:
+            type: string
       responses:
         "200":
           description: CSV file (sent as an attachment).
@@ -9680,7 +11735,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: "`from` or `to` is malformed, or `to` is before `from`."
+          description: "`from` or `to` is malformed, `to` is before `from`, or a `dimensions` pair is malformed."
           content:
             application/json:
               schema:
@@ -10017,6 +12072,7 @@ paths:
         returned. If the invoice is already in the requested state, that
         step is skipped. Fires the `dunning.resolved` webhook event once.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -10115,13 +12171,19 @@ paths:
       summary: Create dunning policy
       description: |
         A dunning policy decides how failed payments are retried and what
-        happens when the retries run out. The first policy created in a
-        tenant and mode becomes the default; later ones do not (use
-        set-default). Customers without an assigned policy use the default.
+        happens when the retries run out. Every account starts with one
+        policy per mode, "Default retries", as the default. The first
+        enabled policy you create in a mode takes the default from it,
+        unless you have edited it or made it the default yourself; later
+        ones do not (use set-default). Customers without an assigned policy
+        use the default, so check `is_default` in the response.
 
         `enabled` defaults to false. A disabled policy starts no dunning, so
-        send `enabled: true` for the policy to take effect.
+        send `enabled: true` for the policy to take effect. A policy created
+        disabled never takes the default from "Default retries".
       operationId: createDunningPolicy
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10181,6 +12243,7 @@ paths:
         `is_default` cannot be changed here; use set-default.
       operationId: updateDunningPolicy
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -10262,6 +12325,7 @@ paths:
         new default for dunning started from now on.
       operationId: setDefaultDunningPolicy
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -10299,6 +12363,8 @@ paths:
         period; the current period keeps the price it opened with. The
         override's currency is the rule's currency.
       operationId: createPriceOverride
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10465,12 +12531,17 @@ paths:
         `id` plus the token type, so a resent record is counted as
         `deduplicated`, not billed twice.
 
-        A problem with one record (no customer, unknown customer or meter,
-        invalid event) is listed in `errors` and the rest of the batch
-        still goes in, with status 200. If the usage store cannot be
-        reached, the whole request fails with 503 so LiteLLM retries it.
-        Requires usage write permission.
+        A token row whose customer or meter does not exist yet is held,
+        not billed and not lost: it is counted in `held` and listed by
+        `GET /v1/usage-events/held` until you release or discard it. A
+        resent row that is already held is counted as `deduplicated`. A
+        record with no `user` or no `id`, or an invalid event, is listed in
+        `errors` and the rest of the batch still goes in, with status 200.
+        If the usage store cannot be reached, the whole request fails with
+        503 so LiteLLM retries it. Requires usage write permission.
       operationId: ingestLitellmSpend
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10526,6 +12597,8 @@ paths:
         Platform keys do not hold the `apikey:write` permission this route
         needs, so in practice this route never issues one (403).
         Writes an audit row (never the key value).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10644,6 +12717,7 @@ paths:
         key working for that many seconds (at most 604800, 7 days), so
         deployed clients can switch without downtime. Writes an audit row.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -10746,6 +12820,8 @@ paths:
 
         A save that changes a field writes one audit row listing each
         change.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10778,6 +12854,90 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/settings/email:
+    get:
+      tags: [System]
+      summary: Email setup status
+      operationId: getEmailSettings
+      description: |
+        Read-only. Email is configured in the server environment, not per
+        workspace: `SMTP_HOST` and friends, plus the base URLs email links
+        are built from. Never returns credentials.
+      responses:
+        "200":
+          description: Email setup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [smtp_configured, smtp_host, from_address, tls_mode, links, can_email_setup_links, can_send_invites]
+                properties:
+                  smtp_configured:
+                    type: boolean
+                    description: False when `SMTP_HOST` is unset; every email then fails.
+                  smtp_host:
+                    type: string
+                    description: The SMTP relay host name, without port or credentials. Empty when not configured.
+                  from_address:
+                    type: string
+                    description: The envelope sender (`SMTP_FROM`).
+                  tls_mode:
+                    type: string
+                    enum: [starttls, implicit, none]
+                  links:
+                    type: array
+                    description: Every environment variable an email link is built from, set or not.
+                    items:
+                      type: object
+                      required: [env, set, effect]
+                      properties:
+                        env:
+                          type: string
+                          enum: [HOSTED_INVOICE_BASE_URL, PAYMENT_UPDATE_URL, DASHBOARD_BASE_URL]
+                        set:
+                          type: boolean
+                        effect:
+                          type: string
+                          description: What doesn't work while it is unset.
+                  can_email_setup_links:
+                    type: boolean
+                  can_send_invites:
+                    type: boolean
+  /v1/settings/email/test:
+    post:
+      tags: [System]
+      summary: Send a test email
+      operationId: sendTestEmail
+      description: |
+        Dashboard sessions only. Sends one plain-text email to the signed-in
+        member's own address, directly over SMTP (not queued), and returns
+        the server's answer. Writes an audit row on success.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent_to]
+                properties:
+                  sent_to:
+                    type: string
+        "409":
+          description: "`email_not_configured`: SMTP_HOST is not set."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: "`smtp_error`: the SMTP server refused the email or could not be reached. The message carries its answer."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/settings/stripe:
     post:
       tags: [System]
@@ -10799,6 +12959,8 @@ paths:
 
         Stripe sends payment webhooks to `/v1/webhooks/stripe/{id}`, where
         `{id}` is the returned `id`. Writes an audit row.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -10872,6 +13034,7 @@ paths:
         Stripe here; the secret is checked on each incoming webhook.
         Writes an audit row (never the secret).
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: mode
           in: path
           required: true
@@ -11118,7 +13281,7 @@ paths:
                 owner_password:
                   type: string
                   minLength: 12
-                  description: 12 or more characters, at most 72 bytes. Omit to have Velox generate one.
+                  description: 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Velox generate one.
       responses:
         "201":
           description: Installation set up. Save these credentials; they are not shown again.

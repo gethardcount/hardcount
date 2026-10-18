@@ -135,12 +135,23 @@ func (f *previewFixture) seedSubscription(
 		t.Fatalf("insert sub: %v", err)
 	}
 
+	itemID := postgres.NewID("vlx_si")
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, $5, $5)
-	`, postgres.NewID("vlx_si"), f.tenantID, subID, plan.ID, now)
+	`, itemID, f.tenantID, subID, plan.ID, now)
 	if err != nil {
 		t.Fatalf("insert sub item: %v", err)
+	}
+	// The item's billing_intervals lifetime, which every real writer opens
+	// in the same tx (ADR-101). The default-window preview mirrors the
+	// cycle close and reads it (M-SUB-1).
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO billing_intervals (tenant_id, subscription_id, subscription_item_id, plan_id, quantity, starts_at, source)
+		VALUES ($1, $2, $3, $4, 1, $5, 'create')
+	`, f.tenantID, subID, itemID, plan.ID, cycleStart)
+	if err != nil {
+		t.Fatalf("insert interval: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit sub: %v", err)
@@ -646,7 +657,16 @@ func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
 		custID, planID, subID := f.seedSubscription(t, ctx, "cus_seg", "pln_seg", meter.ID, cycleStart, cycleEnd)
 		f.seedItemChange(t, ctx, subID, planID, cycleStart.Add(24*time.Hour))
 		ingest(custID, 10)
-		res := preview(custID)
+		// An EXPLICIT window is the flat estimate, which still disclaims
+		// segment proration. The default window mirrors the cycle close and
+		// applies it (TestPreview_MatchesCycleClose), so it needs no warning.
+		res, err := f.preview.CreatePreview(ctx, f.tenantID, billing.CreatePreviewRequest{
+			CustomerID: custID,
+			Period:     billing.CreatePreviewPeriod{From: cycleStart, To: cycleEnd},
+		})
+		if err != nil {
+			t.Fatalf("CreatePreview: %v", err)
+		}
 		if !warns(res.Warnings, "mid-period proration") {
 			t.Errorf("mid-period-changed sub must warn about segment proration, got %v", res.Warnings)
 		}

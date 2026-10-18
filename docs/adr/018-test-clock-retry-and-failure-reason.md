@@ -1,7 +1,11 @@
 # ADR-018: Test-clock retry advance + persisted failure reason
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-05-05)
 **Date:** 2026-05-04
+
+## Summary
+
+When a test-clock catch-up fails, the clock stores the reason in `last_failure_reason` (cut to 500 characters) and the dashboard shows it. `POST /v1/test-clocks/{id}/retry-advance` moves a clock from `internal_failure` back to `advancing` and runs the catch-up again. This is safe because catch-up bills only subscriptions that are still due. Amended 2026-05-05: setting `VELOX_TEST_CLOCK_INJECT_FAILURE` makes the next catch-up fail once, so the failure path can be tested. Status: active, amended; deleting a clock is now a hard delete ([ADR-086](086-simulated-data-lifecycle.md)), not the soft delete named below.
 
 ## Context
 

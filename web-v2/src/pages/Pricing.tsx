@@ -179,13 +179,21 @@ export default function PricingPage() {
 
   return (
     <Layout>
-      <div className="flex justify-between items-center">
-        <div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-3xl">
           <h1 className="text-2xl font-semibold text-foreground">Pricing</h1>
-          <p className="text-sm text-muted-foreground mt-1">Configure plans, meters, and prices</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Set what you charge. A meter counts something your customers use, like API calls or tokens.
+            A price says what that usage costs. A plan puts a base fee and priced meters together.
+            To bill a customer, you put them on a plan with a subscription.
+          </p>
+          <p className="text-sm text-muted-foreground mt-2">
+            New here? Start with a plan, or install a{' '}
+            <Link to="/recipes" className="text-primary hover:underline">ready-made recipe</Link>.
+          </p>
         </div>
         {showAdd && (
-          <Button size="sm" onClick={() => setCreateFor(tab)}>
+          <Button size="sm" className="shrink-0 self-start" onClick={() => setCreateFor(tab)}>
             <Plus size={16} className="mr-2" />
             {tab === 'plans' ? 'Add Plan' : tab === 'meters' ? 'Add Meter' : 'Add Price'}
           </Button>
@@ -451,7 +459,7 @@ export default function PricingPage() {
           onCreated={() => {
             setRepublishRule(null)
             queryClient.invalidateQueries({ queryKey: ['rating-rules'] })
-            toast.success(`Published v${republishRule.version + 1} of ${republishRule.rule_key}`)
+            toast.success(`Published version ${republishRule.version + 1} of ${republishRule.name}`)
           }}
         />
       )}
@@ -598,8 +606,8 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{prefill ? `Publish New Version — ${prefill.rule_key}` : 'Create Price'}</DialogTitle>
-          <DialogDescription>{prefill ? `Currently v${prefill.version}. The new version takes effect from each customer's next billing period.` : 'Define a price. Link it to a meter to bill usage.'}</DialogDescription>
+          <DialogTitle>{prefill ? `New version of ${prefill.name}` : 'Create price'}</DialogTitle>
+          <DialogDescription>{prefill ? `The latest is version ${prefill.version}. The new version applies from each customer's next billing period.` : 'Set what usage costs. To bill usage, link the price to a meter.'}</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">
           <div>
@@ -617,7 +625,7 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
                 This key already exists, so saving publishes v{existingLatest.version + 1} in {existingLatest.currency}, from each customer's next billing period.
               </p>
             ) : (
-              <p className="text-xs text-muted-foreground mt-1">Stable identity for this price. Publishing the same key again creates a new version. To bill usage, link the price to a meter.</p>
+              <p className="text-xs text-muted-foreground mt-1">A short name for this price, for example api_calls. Saving a price with a key that already exists makes a new version of that price.</p>
             )}
           </div>
 
@@ -720,7 +728,7 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
-              {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : (prefill ? `Publish v${prefill.version + 1}` : 'Create Price')}
+              {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : (prefill ? `Publish version ${prefill.version + 1}` : 'Create price')}
             </Button>
           </DialogFooter>
         </form>
@@ -759,8 +767,8 @@ function CreateMeterDialog({ onClose, onCreated, rules }: { onClose: () => void;
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create Meter</DialogTitle>
-          <DialogDescription>Define a new usage meter for tracking events</DialogDescription>
+          <DialogTitle>Create meter</DialogTitle>
+          <DialogDescription>A meter counts one thing your customers use, like API calls or tokens.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">
           <div>
@@ -773,7 +781,7 @@ function CreateMeterDialog({ onClose, onCreated, rules }: { onClose: () => void;
             <Input value={form.key} onChange={e => setForm(f => ({ ...f, key: e.target.value }))}
               placeholder="api_calls" maxLength={100} className="mt-1 font-mono" />
             <p className="text-xs text-muted-foreground mt-1">
-              Used to match incoming usage events (e.g. api_calls, messages_sent)
+              The name your app sends with each usage event, e.g. api_calls.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -829,7 +837,7 @@ function CreateMeterDialog({ onClose, onCreated, rules }: { onClose: () => void;
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
-              {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Create Meter'}
+              {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Create meter'}
             </Button>
           </DialogFooter>
         </form>
@@ -881,8 +889,8 @@ function CreatePlanDialog({ onClose, onCreated, meters, rules }: { onClose: () =
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create Plan</DialogTitle>
-          <DialogDescription>Define a new billing plan with pricing and meters</DialogDescription>
+          <DialogTitle>Create plan</DialogTitle>
+          <DialogDescription>A plan is what a customer subscribes to: a base fee, priced meters, or both.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">
           <div>
@@ -962,7 +970,7 @@ function CreatePlanDialog({ onClose, onCreated, meters, rules }: { onClose: () =
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
-              {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Create Plan'}
+              {saving ? <><Loader2 size={14} className="animate-spin mr-2" /> Saving...</> : 'Create plan'}
             </Button>
           </DialogFooter>
         </form>

@@ -10,6 +10,7 @@
 
 export interface ProviderCostRate {
   id: string;
+  tenant_id?: string;
   provider: string;
   model: string;
   token_type: string;

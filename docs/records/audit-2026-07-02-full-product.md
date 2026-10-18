@@ -1,0 +1,193 @@
+# Velox — Full-Product Audit Report (2026-07-02)
+
+> **Record of 2026-07-02, kept as written.** Every high and medium finding was fixed or given a named deferral by 2026-07-03 (see the [remediation plan](audit-2026-07-02-remediation-plan.md)). File and line references point at the code of that date.
+
+Synthesized from 18 completed area audits. 117 findings survived adversarial verification (all CONFIRMED; ~110 distinct defects after de-duplicating shared roots): **0 critical, 16 high, 51 medium, 50 low**. The UNVERIFIED bucket is empty — nothing awaits re-verification.
+
+---
+
+## 1. Executive Verdict
+
+Velox's core machinery is genuinely industry-grade: RLS tenant isolation, timing-safe auth with real lockout, 256-bit token surfaces, durable dual outboxes, decimal-safe metering with a double-count-proofed multi-dim resolver, atomic recipe installs, ADR-056-grade coordinator transactions, and a disciplined per-domain architecture whose ownership comments were verified truthful. The weakness is not in what the code computes but in what happens when things *change* or *repeat*: every finding cluster sits on a lifecycle seam — a price version bump silently detaching a negotiated override, a threshold that re-fires every tick and double-bills across the period boundary, an archive button that promises to stop billing and doesn't, a second Checkout session that charges a card twice and gets silently dropped. The billing-thresholds feature (the AI-spend-cap wedge) is the single weakest surface, carrying two high-severity money bugs plus a starvation bug that silently disables the feature past 50 subscriptions. The second-weakest surface is the self-host story, where the reference deploy path dead-ends (no dashboard user, no live mode ever), the RLS runtime role has a hardcoded documented password, and the primary docs lie about their own env vars. Nothing found corrupts the existing payment/invoice/credit state machines — the 2026 hardening arcs held — but roughly a dozen of these findings would be hit by a design partner in their first week of realistic use.
+
+---
+
+## 2. Top Findings
+
+### HIGH (16)
+
+**Money correctness**
+
+1. **[HIGH] Threshold fire window not clamped to period end — usage double-billed across the boundary** — `internal/billing/threshold_scan.go:162`. First crossing observed after periodEnd (downtime or last inter-tick window) bills `[periodStart, now)` including next-period usage; the next cycle close's watermark (`invoice/postgres.go:2465`) misses the old-anchored invoice and bills the spilled usage again. Fix: skip firing when `now >= CurrentBillingPeriodEnd` (same-tick cycle close bills it); otherwise pass `min(now, periodEnd)`.
+2. **[HIGH] reset=false threshold re-runs fireThreshold every tick after crossing** — `internal/billing/threshold_scan.go:174`. ~600 burned invoice numbers + ~600 paid Stripe Tax calculation API calls per remaining monthly cycle before the dedup index rejects. Fix: probe `LatestThresholdPeriodEnd` before firing, mirroring `engine.go:2138`.
+3. **[HIGH] Customer price overrides silently detach when a new rating-rule version publishes** — `internal/billing/engine.go:2600` + `internal/pricing/override.go:84`. Engine resolves latest-by-key but looks up the override by the *new* version ID → negotiated price silently replaced by list price while the dashboard still shows the override active. Fix: key overrides by `rule_key`, or carry them forward on `CreateRatingRule`.
+4. **[HIGH] Archiving a customer does NOT stop billing, but the dialog promises it does** — `web-v2/src/pages/CustomerDetail.tsx:439`; `GetDueBilling` (`subscription/postgres.go:~895`) never joins customers. Archived customer's sub keeps invoicing, auto-charging, and dunning — unauthorized charge against explicit operator intent. Fix: block archive with non-terminal subs (409) or cancel/pause server-side; fix the copy immediately either way; reject `subscription.Create` for archived customers.
+5. **[HIGH] Second/stale Checkout session double-charges the card; duplicate success silently dropped** — `internal/api/adapters.go:970-996` (no idempotency key, no ExpiresAt, no expire-on-settle) + `settlement.go:47-54` (already-paid guard Info-logs and drops). Customer pays on two devices → charged twice, money exists only in Stripe, no operator surface. Fix: set ExpiresAt (~1h), persist+reuse the open session per invoice, expire siblings on settle; escalate different-PI-success-on-paid-invoice to an attention state.
+6. **[HIGH] Post-payment page promises to "update automatically," never refetches, and keeps the Pay button live** — `web-v2/src/pages/HostedInvoice.tsx:255` (query: `retry:false`, no `refetchInterval`). Every payer whose redirect beats the webhook sees an eternal spinner + live "Pay $X" — the direct feeder for #5. Fix: poll 2-3s while `paidSignal && finalized`; suppress Pay while pending.
+7. **[HIGH] Threshold scan starves subs beyond the first 50 — spend caps silently disabled at scale** — `internal/subscription/postgres.go:1642` (`ORDER BY s.id LIMIT 50`, candidate set never drains, one batch per tick from `threshold_scan.go:58`). The exact runaway-AI-spend scenario the wedge feature exists to prevent. Fix: id-cursor drain loop or drop the LIMIT.
+
+**Security / tenant isolation**
+
+8. **[HIGH] POST /v1/billing/run runs a cross-tenant TxBypass sweep and returns other tenants' error details** — `internal/billing/handler.go:32-50` → `engine.RunCycle` → `GetDueBilling` (TxBypass, `subscription/postgres.go:867`). Any secret key triggers global billing and reads other tenants' sub IDs + raw Stripe/DB errors in the 206 body. Fix: tenant-filtered `GetDueBillingForTenant`; unscoped RunCycle stays scheduler-only.
+9. **[HIGH] RLS runtime role locked to hardcoded `velox_app`/`velox_app`; documented APP_DATABASE_URL is never read** — `cmd/velox/main.go:382` (only reference to APP_DATABASE_URL is help text at :362). Production boot *requires* the publicly documented password; anyone with TCP reach to Postgres gets full cross-tenant read/write via the session GUC. Fix: implement APP_DATABASE_URL (verbatim when set); fail closed in production on the default password.
+
+**Operational robustness**
+
+10. **[HIGH] Email dispatcher can hang forever — STARTTLS/none SMTP path has no timeout, no ctx** — `internal/email/sender.go:787` (stdlib `smtp.SendMail`), inside an open row-locking tx (`outbox.go:144-196`) holding the leader advisory lock. One stalled relay freezes all tenants' invoice/receipt/dunning/reset email until restart, invisibly. Fix: apply the implicit-TLS branch's 30s deadline pattern (sender.go:800) to all three modes.
+11. **[HIGH] Invoice PDF currency symbol is a mutable package global — data race + wrong-currency money documents** — `internal/invoice/pdf.go:214`, mutated per render, read by formatters, reachable concurrently from three HTTP paths including the public hosted PDF. The creditnote copy (`creditnote/pdf.go:110`) already fixed this exact bug. Fix: call-scope the symbol; delete the global.
+12. **[HIGH] Batch usage ingest is fully N+1: ~3 transactions / ~15 round trips per event** — `internal/usage/service.go:224` + `handler.go:87-143`. A 1000-event batch = ~15,000 sequential DB round trips on the flagship AI-metering endpoint. Fix: memoize resolve() per batch; one TxTenant multi-row INSERT with per-row unique-violation surfacing.
+
+**Analytics / FE / self-host**
+
+13. **[HIGH] mrrAtPointInTime counts removed items forever — MRRPrev/NRR/revenue-churn permanently corrupted** — `internal/analytics/overview.go:261` (state-at-t ignores 'remove'; worse, soft-delete since migration 0102 means the 0029 trigger writes no 'remove' rows at all). Fix: fix the trigger's soft-delete branch + exclude removed items in the query.
+14. **[HIGH] Create Subscription dialog's customer picker only lists customers already on the visible subs page** — `web-v2/src/pages/Subscriptions.tsx:116` (ids-filtered fetch feeds the picker). Fresh tenant: the empty-state's own CTA opens a dialog with an empty dropdown — first subscription uncreatable from this page. Fix: dedicated picker query (UsageEvents' `customers-ref` pattern) or wire the dead `CustomerCombobox` with server search.
+15. **[HIGH] Compose self-host dead-ends: /v1/bootstrap silently drops owner_email/password, creates no user, and no live-mode key is ever mintable** — `internal/tenant/bootstrap.go:42-125`; Dockerfile ships only `./cmd/velox`. The production-flagged reference deploy can never log into the dashboard and is permanently test-mode. Fix: accept owner fields + create user + mint mode-prefixed key pair (or ship `velox bootstrap` subcommand); fix `deploy/compose/README.md:84`.
+16. **[HIGH] docs/self-host.md bootstrap uses env vars nothing reads (VELOX_OWNER_EMAIL/PASSWORD)** — `docs/self-host.md:15,100-101`, `.env.example:28-30`; binary reads VELOX_BOOTSTRAP_* (`cmd/velox-bootstrap/main.go:48,52`). Operator's chosen credentials silently ignored; owner created as admin@velox.local. Fix: rename in docs/.env.example (or accept both). *(Same root as the ops-boot-selfhost medium; counted once.)*
+
+### MEDIUM (51 — grouped by theme)
+
+**Pricing/billing lifecycle (money semantics)**
+- Retroactive repricing: new rating-rule version reprices the whole in-flight period on single-rule meters, is a no-op on multi-dim, and breaks preview==invoice — `internal/billing/engine.go:2596` / `preview.go:223`. Fix: pick pin-at-consumption or effective-next-period; document it.
+- No API to deactivate/delete a customer price override — permanent discount leak — `internal/pricing/handler.go:65`; upsert hardcodes `active=true` (`override.go:34-51`). Fix: DELETE route or honor `active:false`.
+- Archived plans accept new subscriptions — the enforcement ADR-034 attributes to archiving doesn't exist — `internal/subscription/service.go:422`. Fix: reject non-active plans in Create/swap.
+- Graduated rule without catch-all tier passes create (quantity=1 probe) then wedges cycle close with log-only visibility — `internal/pricing/service.go:157`, `domain/pricing.go:273`. Fix: structural tier validation at create.
+- Recipe uninstall→reinstall permanently 409s on fixed rule/meter keys; no delete API; CHANGELOG/MANUAL_TEST claim otherwise — `internal/recipe/service.go:428,452`. Fix: next-version-per-key on instantiate or reuse-by-key.
+- `cancel_at_period_end` during trial bills a full first paid period the customer declined; cancel-at-trial-end is inexpressible — `internal/subscription/service.go:1571` (Stripe cancels at trial end). Fix: treat at_period_end as trial-end for trialing subs.
+- `cancel_at` inside a future period bills that entire period and stamps canceled_at at the later close — `internal/subscription/service.go:1567`; MANUAL_TEST.md:488 asserts the opposite. Fix: reject non-boundary cancel_at or add an expired-cancel scan.
+- Billing-profile currency unvalidated; silently re-denominates plan prices (100 USD → €100/¥10000) with no guard at any of 4 invoice-writer sites — `internal/customer/service.go:371`, `engine.go:2037/3166/3451`. Fix: ValidateCurrency + plan-currency mismatch guard.
+- Credit expiry never retires the grant block (consumed_cents untouched) → backdated apply re-drains it and a later expiry drives the ledger negative — `internal/credit/service.go:381`, `postgres.go:52-158`. Fix: set consumed_cents=amount_cents atomically with the expiry entry.
+- Threshold reset=true bills the full unprorated in_arrears base per partial cycle (~$75 overcharge in the scenario) — `internal/billing/threshold_scan.go:196` / `preview.go:151`. Fix: prorate like `emitBaseSegmentLine`.
+- Threshold watermark splits max/last meters into two summed windows — peak-priced usage over-billed — `internal/billing/engine.go:2402`. Fix: bill max/last only at cycle close (un-clamped).
+- Explicit `quantity: 0` is indistinguishable from absent and billed as 1 — systematic over-billing on zero-unit events — `internal/usage/service.go:153`, `handler.go:79`. Fix: pointer/presence detection.
+- Invoice line items: unchecked int64 multiply overflows to negative persisted totals; `line_type` un-validated → 500 — `internal/invoice/service.go:1091`. Fix: overflow check/cap + RequireOneOf. *(2026-08-30: `line_type` is validated with a `switch` + `errs.Invalid` in `internal/invoice/service.go`; `RequireOneOf` was never called anywhere and `internal/api/middleware/validate.go` is deleted.)*
+
+**Customer-facing money communication**
+- Receipt email states invoice TOTAL as "your payment"; invoice email labels TOTAL "Amount due" — both wrong under credits/partials — `internal/payment/settlement.go:167`, `invoice/handler.go:813`. Fix: pass AmountDueCents.
+- Dunning escalation says "settle via the link" but a mark_uncollectible invoice has no Pay button (pay_enabled requires finalized) — `internal/hostedinvoice/handler.go:492`. Fix: make uncollectible payable (Stripe parity) or fix state + copy.
+- Escalation email renders the raw enum ("Action taken: mark_uncollectible") to the debtor — `internal/dunning/service.go:1128`, `email/templates.go:219`. Fix: map to customer copy.
+- Canceling at Stripe burns the single-use payment-update token; landing page says "use the original link" which is now dead — `internal/payment/public_handler.go:225,251`. Fix: consume on setup completion, or accurate cancel copy + re-mint.
+- Customer usage view + public cost dashboard ignore price overrides despite documented invoice-parity — `internal/usage/customer_usage.go:401` vs `billing/preview.go:243`. Fix: add GetOverride to PricingReader.
+- Payment-update/payment-method-added pages Velox-branded, not tenant-branded — trust break in the recovery funnel — `web-v2/src/pages/UpdatePayment.tsx:97`; token response has no branding block (`payment/public_handler.go:80`). Fix: add branding to validate response, render tenant header. *(fe-operator + fe-enduser duplicate — one root.)*
+
+**Security / abuse hygiene**
+- Password-reset issuance has no per-account throttle; tokens accumulate unbounded — `internal/user/handler.go:281`, `postgres.go:188`. Fix: per-email cooldown + invalidate priors.
+- Raw public tokens logged verbatim on every request (requestLogger skips the sanitizer metrics already use) — `internal/api/router.go:1382` vs `middleware/metrics.go:296`. Fix: sanitizePath before logging.
+- Raw hosted-invoice/payment-update tokens persisted forever in `email_outbox.payload`, defeating migration 0107's hash-at-rest design — `internal/email/outbox_sender.go:228`. Fix: encrypt/scrub token fields at enqueue or on dispatch.
+- `/v1/public/payment-updates` is the only public token surface with no rate limiter (unthrottled TxBypass per request) — `internal/api/router.go:1103` vs :1115/:1127. Fix: add `hostedInvoiceRL`.
+- `/metrics` IP allowlist defeated by the README's own LB topology; METRICS_TOKEN defaults open — `deploy/compose/nginx.conf:29`, `security.go:46`. Fix: require token in production or deny-by-default.
+- Compose never sets TRUST_PROXY behind nginx: per-IP limits collapse to one shared bucket, audit logs record the proxy IP — `deploy/compose/docker-compose.yml:42`, `router.go:1044`. Fix: pass TRUST_PROXY in compose env.
+
+**Pipelines / durability**
+- Email outbox marks batch-atomically while SMTP sends aren't transactional — mid-batch failure resends delivered emails (dup dunning reads as double charges), and rolled-back attempts defeat backoff/DLQ — `internal/email/outbox.go:195,247`. Fix: per-row mark commit.
+- Webhook outbox durability ends at the event row: delivery rows created in fire-and-forget goroutines after 'dispatched' — crash/transient error = event never delivered, never retried, contradicting ADR-040 — `internal/webhook/service.go:404-420`. Fix: create delivery rows synchronously in Dispatch.
+- `http://localhost` endpoints pass create-time validation but the SSRF dialer unconditionally refuses loopback — accepted at create, every delivery fails cryptically — `internal/webhook/service.go:216` vs `router.go:236`. Fix: make the layers agree (+ tighten the `localhost` prefix match at :210).
+- Batch ingest partial-failure response has no per-event index → keyless whole-batch retries double-bill — `internal/usage/handler.go:331`, `service.go:224-238`. Fix: indexed error entries (the LiteLLM adapter already does this).
+- Migration race: applyNoTx never re-checks schema_migrations under the advisory lock → double-apply + version rewind → deployment-wide dirty crash-loop on multi-replica boot — `internal/platform/migrate/migrate.go:218,347-385`. Fix: re-read version under the lock.
+- CSV exports silently truncate on the 30s route timeout and swallow all mid-stream store errors — clean 200 with a partial compliance dataset — `internal/api/exports.go:175-178` (+246/328/418), mounted inside the Timeout block (`router.go:1171/1294`). Fix: exempt from the cap (like SSE), keyset pagination, `panic(http.ErrAbortHandler)` on error.
+
+**Settings & tenant config**
+- PUT /v1/settings is whole-struct replace with zero-value back-fill: a partial body resets tax_provider→manual, tax_rate→0, timezone→UTC; the dashboard itself silently resets `audit_fail_closed` (no form field) on every save — `internal/tenant/settings.go:406-455`. Fix: merge-PATCH semantics (decode over current). *(api-surface + tenant-config duplicate — one root.)*
+- Timezone never validated; a typo silently anchors all ADR-058 date math in UTC; ADR-010 claims validation exists — `internal/tenant/settings.go:517`, `engine.go:5198`. Fix: `time.LoadLocation` at save.
+- Net terms 0 ("Due on receipt", a UI preset) silently coerced to 30 — dunning anchors a month late — `internal/tenant/settings.go:523` vs `Settings.tsx:94`. Fix: support 0 via pointer/sentinel or remove the preset.
+- `default_currency` stored without uppercasing → "eur" zeroes all currency-scoped analytics and dunning stats — `internal/tenant/settings.go:527` (recurrence of the #155 class from the other side). Fix: ToUpper before validate.
+
+**Analytics correctness & scale**
+- MRR/ARR/movement sum plan base fees across currencies (revenue on the same page is correctly scoped) — `internal/analytics/overview.go:229,244-301,336-399` + `mrr_movement.go`. Fix: `AND p.currency = $N` everywhere plans is joined; check `billing/metrics.go` too.
+- MRR movement ignores item add/remove on continuing subs — Net never reconciles with headline MRR (removals also write no audit row post-0102) — `overview.go:387`, `mrr_movement.go:140`. Fix: add/remove as expansion/contraction + fix the trigger.
+- usage_events has no (tenant_id, timestamp) index — the four dashboard aggregates and the /usage default view full-scan the highest-write table — `internal/analytics/usage.go:49`, `internal/usage/postgres.go:133,122`. Fix: one `CREATE INDEX CONCURRENTLY (tenant_id, timestamp DESC, id DESC)`. *(analytics + performance duplicate — one migration.)*
+- mrrAtPointInTime runs 4 correlated subqueries per item on unindexed `subscription_item_changes.subscription_item_id` — dashboard landing page goes superlinear — `overview.go:244`, migration 0029. Fix: index `(subscription_item_id, changed_at)`; longer term window functions.
+
+**FE operator surfaces**
+- Orphaned /onboarding wizard instructs three features that don't exist (CSV upload, "trigger billing run" button, Settings→Branding) + "Week 3 release" jargon — `web-v2/src/pages/Onboarding.tsx:152,46`. Fix: delete the route or rewrite.
+- Dunning page shows "Unknown"/truncated UUIDs beyond 50 customers; ResolveDialog ignores the denormalized amount it already has — `web-v2/src/pages/Dunning.tsx:149,565`. Fix: ids= fetch (the Invoices.tsx pattern).
+- Credits page joins all balances against a 50-row customer page — invisible balances, header total disagrees with rows, grant blocked for customer 51+ — `web-v2/src/pages/Credits.tsx:427,163,628`. Fix: balances-first + ids= fetch; searchable picker.
+- Customer-picker 50-cap class: bare `listCustomers()` feeding pickers/filters across Credits, UsageEvents, PlanDetail; purpose-built CustomerCombobox is dead code — `web-v2/src/components/CustomerCombobox.tsx:29`. Fix: server-search picker, sweep the class.
+
+**Architecture & docs truth**
+- Feature-flag subsystem fully inert (IsEnabled: zero production callers) while router comment, seeded flags, and MANUAL_TEST 1291/1508 claim it gates webhooks/auto-charge/Stripe Tax — `internal/feature/service.go:75`, `router.go:554`, `0002_seed.up.sql`. Fix: delete or wire; fix docs same PR.
+- Emailed invoice PDF silently omits the bill-to address block and credit-note section that download/hosted include — a non-compliant tax document delivered to the customer — `internal/invoice/handler.go:774-807` vs :1772-1821. Fix: one `buildPDFContext` helper for all three sites.
+- README/self-host Quick starts fail at `make dev` — the required `cp .env.example .env` step is missing; self-host claims redis/mailpit are running when they aren't — `README.md:122`, `docs/self-host.md:20-25`. Fix: add the step.
+- Ops runbook documents /v1/healthz, /v1/readyz, /v1/metrics — all 404 (real: /health, /health/ready, /metrics); same phantoms in backup-considerations.md:237, postgres-requirements.md:168, grafana-dashboard.json:15 — `docs/ops/runbook.md:11`. Fix: sweep docs/ops.
+- README sells an "embeddable `<CostDashboard/>`" that ADR-032 explicitly deferred and does not exist — `README.md:62,227`. Fix: reword to the token-authenticated URL/JSON that ships.
+- Compose env drift: three fabricated VELOX_DASHBOARD_* vars passed, real DASHBOARD_BASE_URL + VELOX_EMAIL_BIDX_KEY + TRUST_PROXY absent, and the explicit env map blocks .env fixes — `deploy/compose/docker-compose.yml:77-90`. Fix: reconcile with what the binary reads.
+
+### LOW (50 — compressed clusters)
+
+- **Validation → 500s**: plan status typo (`pricing/service.go:393`), customer status (`customer/service.go:292`), override FK bypasses RLS = cross-tenant ID oracle + 500 (`pricing/override.go:161`); UpdatePlan can't set base to 0 (`pricing/service.go:381`); credits `/adjust` bypasses the $1M grant cap (`credit/service.go:426`); invoice_prefix charset unenforced server-side (`tenant/settings.go:530`).
+- **Auth residue**: 10-entry password denylist vs ADR-011's claimed top-1000 (`user/service.go:105` — fix the doc or the list); sibling reset tokens survive a password change (`user/service.go:394`); wildcard-CORS+credentials footgun (`middleware/cors.go:27`); bootstrap un-rate-limited + token checked before the bootstrapped guard = token oracle (`tenant/bootstrap.go:58`, `router.go:1082` — one fix).
+- **Billing edges**: clock-pinned trial expiry activates-then-bills non-atomically (test-mode fidelity, `subscription/service.go:1812`); Phase 0.7 pause-clear vs production draft behavior diverges + stale engine.go:1777 comment (`testclock/service.go:589`); $0 threshold invoice stuck payment_status=pending forever (`threshold_scan.go:508`); clock deletable mid-advance (`testclock/postgres.go:129`); check-then-act plan-immutability race (`pricing/service.go:366`); 'last'/max aggregation lacks id tiebreaker → non-deterministic bills (`usage/postgres.go:242/456/528`).
+- **Pipelines**: LiteLLM replay counted as errors — wrong sentinel (`litellm/handler.go:188`); LiteLLM metadata built but never persisted, docs claim queryable (`:174`); suppressed emails ride 15 attempts into the DLQ, polluting the alert (`email/dispatcher.go:149`); webhook retry lease (1m) shorter than a worst-case batch (~17m) → multi-replica double-delivery (`webhook/service.go:48`).
+- **FE polish**: downloadPDF/preview save JSON error bodies as .pdf — no res.ok (`web-v2/src/lib/api.ts:1623`, `InvoiceDetail.tsx:647` — one fix); "next retry just now" for future timestamps (`WebhookEvents.tsx:366`); CreditNotes mutations don't invalidate invoice/credit caches (`CreditNotes.tsx:187`); disjoint credit-balance query keys (`Credits.tsx:171`); dunning resolution raw enums + dead 'write_off' (`Dunning.tsx:68`); due date in three timezone frames across hosted/dashboard/PDF (`HostedInvoice.tsx:342`, `invoice/pdf.go:380`); Go-duration jargon in dunning copy (`DunningPolicies.tsx:292`); unlabeled filter selects — WCAG 4.1.2 (`UsageEvents.tsx:265` et al.); Dunning page/filter not URL-persisted (`Dunning.tsx:134`); PDF modal aria-modal without focus trap (`InvoiceDetail.tsx:1415`); UsageEvents "full customer list" capped at 50 (`UsageEvents.tsx:76`).
+- **Arch/docs residue**: bill-to/CompanyInfo drift — buyer VAT on CN PDF but not invoice PDF (`creditnote/handler.go:248` vs `invoice/pdf.go:193`); dead subsystems kept green by tests (billing.Metrics second-MRR, TTFI reader, tenant suspension, dead exports — `billing/metrics.go:57`); "zero cross-domain imports" claim false with no lint (`docs/adr/002:24`, depguard disabled); raw cross-domain SQL in the public payment handler (`payment/public_handler.go:121`); payment-setup comment claims a revoke capability that doesn't exist (`api/adapters.go:610`); deploy/README phantom Helm/Terraform paths (`deploy/README.md:9`); README `make test` mislabeled unit-only (`README.md:262`), "full" OpenAPI = 31 of 140+ routes (`:202`), API-key "HMAC 72h rotation" misdescription (`:214`); self-host metric names that don't exist (`docs/self-host.md:135`); partial index predicate mismatch on the billing sweeps (`0001_schema.up.sql:255` vs `status IN (...)`); audit dropdown DISTINCT full-scans (`audit/audit.go:305`).
+
+---
+
+## 3. Per-Area Verdicts
+
+**api-surface** — Strong core: consistent read/write auth gating, clamped pagination, one sanitizing error envelope, Stripe-grade idempotency middleware. The one real isolation slip is `/v1/billing/run` (cross-tenant sweep + error disclosure); the rest is validation edges (int64 overflow, truncating CSV exports, PUT-replace settings). Fix the four findings and this surface is done.
+
+**auth-security** — SOLID at the crypto core: bcrypt-12 with constant-time dummy hash, atomic single-use reset tokens, timing-safe compares, always-on lockout with Redis+memory failover, proxy-gated XFF. Gaps are at flow edges: no per-account reset throttle, a 10-entry denylist that ADR-011 claims is 1000 entries. Don't re-audit the primitives.
+
+**token-surfaces** — The tokens themselves are excellent (256-bit CSPRNG, consume-before-effect CAS, livemode pinning, no-store). All three findings are seams *around* them: raw tokens re-persisted in logs and email_outbox (undermining the project's own hash-at-rest migration), and payment-updates missing the rate limiter its siblings have.
+
+**webhooks-email** — Genuinely well-designed (durable outboxes, dual-signature rotation, an SSRF-checking dialer (described here as DNS-rebinding-proof; it was not — it checked the host name and then dialed by name, a second lookup; corrected 2026-10-13, the check now runs on the connected address), header-injection-hardened MIME), but operationally brittle: the one high (untimeouted SMTP freezing the pipeline under the leader lock) plus batch-atomic marking duplication and the fire-and-forget delivery-row hop that quietly ends ADR-040's durability guarantee. The localhost validate-vs-dial contradiction is a self-host trap to fix before OSS launch.
+
+**usage-metering** — Core ingest/rating pipeline is SOLID: real DB dedup, decimal-safe aggregation, a double-count-proofed resolver shared by invoice/preview/threshold. Defects live at the edges: quantity=0 billed as 1, override-blind customer cost views, index-less batch errors making keyless retries a double-billing trap, and the LiteLLM adapter's replay/metadata sloppiness. The N+1 batch path is the scale ceiling.
+
+**pricing-recipes** — Rating math and recipe instantiation are correct (tier boundaries, banker's rounding, single-tx installs, real plan immutability). Everything about *changing* a price is broken: overrides detach on version bumps, can never be removed, versions retroactively reprice in-flight periods inconsistently by meter type, archived plans don't archive, recipes can't be reinstalled. This is the path an operator hits the first time they change a price in production — the highest-priority lifecycle work in the audit.
+
+**customer-subscription** — CRUD, PII encryption round-trips, external_id uniqueness, and pause/resume are carefully built. The seams bill money against intent: archive-is-a-label (with lying UI), scheduled-cancel semantics diverging during trials and mid-future-periods, and the one unvalidated money field (billing-profile currency).
+
+**billing-engine-edges** — Date math (ADR-055/058) and catchup ordering are solid. The threshold feature is the weakest fresh edge in the product: refire-every-tick, boundary-spill double-billing, unprorated reset=true base, max/last window splitting — plus the credit-expiry attribution gap. Treat thresholds as needing a dedicated hardening pass, not spot fixes.
+
+**analytics-overview** — Tenant isolation and test-mode separation are right everywhere, and revenue/AR are correctly currency-scoped. The MRR family is not: currency-blind, removed-items-forever (worse: removals write no audit row at all since 0102), movement blind to item add/remove. Plus the two missing indexes that make the dashboard the DB's worst client at scale.
+
+**ops-boot-selfhost** — The binary's boot code is genuinely good (leader-gated scheduler, fail-closed RLS pool, bounded shutdown, schema gate). The self-host story around it does not survive a literal walkthrough: compose bootstrap dead-end, hardcoded velox_app password with an unimplemented documented escape hatch, env schema drift, a real multi-replica migration race, and rotted ops docs. Nothing here is fine to ship to a self-hosting design partner as-is.
+
+**fe-data-contract** — SOLID; the best FE area. Every backend enum diffed has a matching FE union, hooks are key-aligned, money/date helpers deliberately mirror Go. Residue is 6 lows (cache invalidation gaps, a past-tense formatter on future timestamps, downloadPDF res.ok). Don't spend more audit effort here.
+
+**fe-operator-journey** — Strong against the Stripe/Linear bar: real empty states, confirm dialogs, server-mirrored gating, good first-run launcher. Defects are edges: the orphaned lying /onboarding wizard, the Dunning 50-cap "Unknown" rows, and Velox-branded recovery pages breaking the white-label promise.
+
+**fe-enduser-surfaces** — Polished surfaces (branded hosted invoice, multipart emails, sanitized public errors) with a broken payment-feedback *loop*: the never-updating paid banner feeding a real double-charge path, and a cluster of emails stating amounts/actions that don't match reality. These are last-mile coherence bugs concentrated exactly where customer trust is decided.
+
+**fe-consistency-a11y** — Unusually consistent (shared badge/skeleton/empty-state/toast/TZ helpers; destructive actions all behind dialogs). One systemic defect class: 50-capped customer lists feeding pickers and joins — including the outright-broken Subscriptions create flow. A11y basics mostly right except unnamed native filter selects.
+
+**arch-conformance** — Disciplined where it counts; ownership comments verified truthful. Rot is concentrated in two spots: copy-pasted PDF assembly (three-way divergence including a live data race whose fix exists in the creditnote copy) and the fully inert feature-flag subsystem with lying docs. The zero-cross-domain rule is prose-only and false; a small import-graph lint closes it.
+
+**performance** — Read paths and reconciler sweeps are in good shape. The weaknesses sit exactly where the AI-metering profile grows fastest: N+1 batch ingest, the missing usage_events index, and two fixed-batch scheduler designs (threshold starvation is a correctness bug wearing a perf costume). FE fetch-all-then-map was fixed on Invoices but still ships on Dunning/Credits.
+
+**docs-truth** — Internal discipline docs are SOLID (CLAUDE.md verified truthful, ADR index consistent, 118 MANUAL_TEST flows with a passing lint). The rot is entirely at operator-facing edges never mentally executed: self-host env vars, both quick starts dying at `make dev`, runbook probes pointing at 404s, and two README overstatements a first-touch evaluator will catch within an hour.
+
+**tenant-config** — Settings validation is strong except the two fields that matter most: timezone (anchors all billing date math, never validated, ADR-010 claims otherwise) and net-terms 0 silently becoming 30. Test-clock CAS machine is well built (one unguarded delete-mid-advance edge). Feature flags are a lying operational surface — see arch-conformance.
+
+---
+
+## 4. The Action List
+
+Ordered. Size: S (<½ day), M (1-3 days), L (1+ week).
+
+1. **★ BEFORE DP — Threshold hardening pass (M)** — one PR over `threshold_scan.go` + `engine.go`: already-fired probe (:174), clamp window to period end (:162), prorate reset=true base (:196), exclude max/last from split billing (engine.go:2402), cursor-drain the scan (subscription/postgres.go:1642), MarkPaid $0 fires (:508). This is the wedge feature; two of its bugs double-bill and one silently disables it.
+2. **★ BEFORE DP — Customer-money-against-intent cluster (M)** — archive blocks/cancels live subs + honest dialog copy (`CustomerDetail.tsx:439`, `customer/service.go`); hosted-invoice poll-until-paid + Pay suppression (`HostedInvoice.tsx:255`); Checkout ExpiresAt + session reuse + expire-on-settle (`adapters.go:970`); trial cancel-at-period-end = cancel-at-trial-end (`subscription/service.go:1571`).
+3. **★ BEFORE DP — Tenant-scope POST /v1/billing/run (S)** — `billing/handler.go:32`: tenant-filtered due scan, caller-only error strings. The only cross-tenant leak in the product; cheap fix.
+4. **Price-change lifecycle (M)** — overrides keyed by rule_key or carried forward on version bump (`engine.go:2600`), DELETE/deactivate override API (`pricing/handler.go:65`), decide + document retroactive-vs-pinned repricing (`engine.go:2596`), enforce archived plans at subscribe (`subscription/service.go:422`), structural tier validation (`pricing/service.go:157`).
+5. **Email/webhook pipeline robustness (M)** — deadlines on all three SMTP modes (`sender.go:787`), per-row outbox marking (`outbox.go:195`), synchronous delivery-row creation in Dispatch (`webhook/service.go:417`), localhost validate/dial agreement (`webhook/service.go:216`).
+6. **PDF consolidation (S)** — kill the `pdfCurrencySymbol` global (data race, `invoice/pdf.go:214`) and extract `buildPDFContext` so emailed/downloaded/hosted PDFs stop diverging (`invoice/handler.go:807`); add buyer TaxID while there.
+7. **Self-host truth pass (M)** — bootstrap creates owner user + live key (`tenant/bootstrap.go:42`); implement APP_DATABASE_URL / kill the hardcoded velox_app password (`cmd/velox/main.go:382`); reconcile env vars across self-host.md/.env.example/compose (VELOX_BOOTSTRAP_*, DASHBOARD_BASE_URL, TRUST_PROXY, VELOX_EMAIL_BIDX_KEY); add `cp .env.example .env` to quick starts; fix runbook endpoints; re-read version under the migration lock (`migrate.go:218`). Required before any *self-hosting* partner; the managed path can defer parts.
+8. **Settings save hardening (S)** — merge-PATCH semantics (`settings.go:406`), validate timezone (:517), support/reject net-terms 0 (:523), uppercase default_currency (:527), invoice_prefix charset (:530). One file, five findings.
+9. **MRR/analytics correctness (M)** — fix the 0029 trigger for soft-deletes, exclude removed items at t (`overview.go:261`), currency-scope all MRR queries (:229, mrr_movement.go), count add/remove as expansion/contraction (:387). Plus the two index migrations: `usage_events (tenant_id, timestamp DESC, id DESC)` and `subscription_item_changes (subscription_item_id, changed_at)`.
+10. **Batch ingest rework (M)** — memoized resolve + single-tx multi-row insert with indexed per-row errors (`usage/service.go:224`, `handler.go:331`); fix quantity=0 presence detection (`service.go:153`) in the same pass.
+11. **FE 50-cap sweep (M)** — revive CustomerCombobox with server search and fix the class in one PR: Subscriptions picker (breaks first-run), Credits, Dunning, UsageEvents, PlanDetail; decide the feature-flag subsystem's fate (delete or wire) alongside since both are "dead/lying surface" cleanups.
+
+---
+
+## 5. Coverage Honesty
+
+**Completed:** all 18 area audits ran to completion (the brief said 17; 18 assessments were delivered). Every finding above carries a CONFIRMED verdict from adversarial verification against the actual code; the unverified bucket is **empty** — nothing needs re-verification. Findings were screened against the do-not-report list, playbook §6, ADR open follow-ups, and memory deferral files; documented-deferred items (ADR-062 queue, Bug B proration, OpenAPI backfill, tax-commit reconciler, EU multi-registration, etc.) were honored and not re-flagged.
+
+**Not covered / structurally out of reach:**
+- **Live Stripe behavior.** All Stripe findings (double-charge sessions, PI settlement, tax calculation costs) were verified by code read against SDK call sites, not by executing real Checkout/PaymentIntent/Tax flows. Webhook ordering, Stripe-side idempotency behavior, and dispute/refund lifecycles against the live API remain unexercised.
+- **Runtime reproduction of races.** The PDF currency race, migration double-apply, webhook retry-lease overlap, and email-outbox rollback duplication were traced mechanically, not reproduced under `-race`, fault injection, or multi-replica deployment. Same for SMTP-stall behavior (no real degraded relay tested).
+- **Real-browser and assistive-tech behavior.** All FE findings come from source reads of web-v2, not rendered DOM, screen readers, or cross-browser testing. Visual PDF output was not inspected.
+- **Scale claims are analytical.** The N+1 ingest math, full-scan projections, and mrrAtPointInTime blowup are derived from query plans/index definitions, not measured against populated databases — pre-launch, no realistic dataset exists.
+- **Legal/compliance judgment.** VAT-invoice content gaps (bill-to address, buyer VAT on reverse charge) are flagged as code inconsistencies; no lawyer-grade review of EU/India invoicing requirements was performed.
+- **Out of audit scope by design:** dependency/supply-chain audit, secrets scanning of history, the private velox-ops repo, LiteLLM live-integration testing, Kubernetes/Helm paths (which don't exist in-repo anyway), and penetration testing beyond code-level reasoning (the velox_app credential finding, in particular, deserves a real network-posture test in any actual deployment).

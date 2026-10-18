@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/mail"
 	"regexp"
 	"strings"
 
@@ -33,14 +32,6 @@ var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 type StripeSyncer interface {
 	SyncBillingProfile(ctx context.Context, stripeCustomerID, customerEmail string, bp domain.CustomerBillingProfile) error
 }
-
-// PaymentSetupReader — DEPRECATED. The 1:1 customer_payment_setups
-// summary was retired in migration 0097. The Stripe Customer ID lives
-// on customers.stripe_customer_id (read via store.Get) and PM details
-// live on payment_methods rows. Kept as a no-op interface so existing
-// callers compile during the transition; new code should depend on
-// customer.Service.Get and read cust.StripeCustomerID directly.
-type PaymentSetupReader interface{}
 
 // TestClockChecker validates a test_clock_id at customer-create time (Stripe
 // parity, ADR-027) and hands back that clock's simulated instant with it.
@@ -117,7 +108,6 @@ type AuditEmitter interface {
 type Service struct {
 	store         Store
 	stripeSyncer  StripeSyncer
-	paymentSetups PaymentSetupReader
 	clocks        TestClockChecker
 	taxFlusher    TaxFlusher
 	events        domain.EventDispatcher
@@ -196,9 +186,8 @@ func (s *Service) AuditCtx(ctx context.Context, tenantID, customerID string) con
 }
 
 // SetStripeSyncer configures Stripe sync (optional, breaks circular dep).
-func (s *Service) SetStripeSyncer(syncer StripeSyncer, setups PaymentSetupReader) {
+func (s *Service) SetStripeSyncer(syncer StripeSyncer) {
 	s.stripeSyncer = syncer
-	s.paymentSetups = setups
 }
 
 // SetSubscriptionChecker wires the archive/currency guard's subscription
@@ -319,9 +308,11 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		return domain.Customer{}, err
 	}
 	if input.Email != "" {
-		if err := validateEmail("email", input.Email); err != nil {
+		addr, err := domain.ValidateEmail("email", input.Email)
+		if err != nil {
 			return domain.Customer{}, err
 		}
+		input.Email = addr
 	}
 	// Test-clock attach: validate the clock exists (mode gating happens at
 	// the route layer — test_clock_id only reaches us when the caller is on a
@@ -469,10 +460,11 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 		existing.DisplayName = name
 	}
 	if email := strings.TrimSpace(input.Email); email != "" {
-		if err := validateEmail("email", email); err != nil {
+		addr, err := domain.ValidateEmail("email", email)
+		if err != nil {
 			return domain.Customer{}, err
 		}
-		existing.Email = email
+		existing.Email = addr
 	}
 	if status := domain.CustomerStatus(input.Status); status != "" {
 		// Archive = 409-BLOCK while any subscription still bills, never
@@ -794,33 +786,11 @@ func (s *Service) GetBillingProfile(ctx context.Context, tenantID, customerID st
 	return s.store.GetBillingProfile(ctx, tenantID, customerID)
 }
 
-// validateEmail accepts only well-formed RFC 5322 addresses via the
-// Go stdlib parser, plus a hard requirement that the domain contains
-// at least one dot. ParseAddress alone allows local-only addresses
-// like `foo@bar` (no TLD) — fine in RFC terms, useless for actual
-// SMTP delivery, so we still gate on the dot. Tier-1 syntax check;
-// tier-6 (bounce-driven suppression) catches what survives.
 // normalizeAdditionalEmails delegates to the shared canonicalizer so
 // the stored list and the per-send overrides (invoice/CN send
 // handlers) enforce identical rules from one source.
 func normalizeAdditionalEmails(list []string, primaryEmail string) ([]string, error) {
 	return domain.NormalizeAdditionalEmails(list, primaryEmail)
-}
-
-func validateEmail(field, email string) error {
-	addr, err := mail.ParseAddress(email)
-	if err != nil {
-		return errs.Invalid(field, "invalid email")
-	}
-	at := strings.LastIndex(addr.Address, "@")
-	if at < 0 {
-		return errs.Invalid(field, "invalid email")
-	}
-	domainPart := addr.Address[at+1:]
-	if !strings.Contains(domainPart, ".") || strings.HasSuffix(domainPart, ".") {
-		return errs.Invalid(field, "invalid email: domain must contain a dot")
-	}
-	return nil
 }
 
 // archiveBlockedMessage is the refusal to archive a customer whose

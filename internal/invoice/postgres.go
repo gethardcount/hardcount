@@ -998,7 +998,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 		// only write. A paid invoice's attempt row still records the failure —
 		// the attempt did fail.
 		if err := upsertChargeAttemptTx(ctx, tx, tenantID, id, pi,
-			domain.ChargeAttemptFailed, report.Message, amountDue); err != nil {
+			domain.ChargeAttemptFailed, report.Message, amountDue, report.DeclineCode, report.PaymentMethodID); err != nil {
 			return domain.Invoice{}, domain.PaymentFailureResult{}, err
 		}
 		var inv domain.Invoice
@@ -1069,7 +1069,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 	// ADR-103: the attempt's outcome lands in THIS tx, so the timeline's
 	// single payment owner can never disagree with the invoice's state.
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, pi,
-		domain.ChargeAttemptFailed, report.Message, inv.AmountDueCents); err != nil {
+		domain.ChargeAttemptFailed, report.Message, inv.AmountDueCents, report.DeclineCode, report.PaymentMethodID); err != nil {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, err
 	}
 	// The money email rides THIS transaction (ADR-040 amendment): enqueued
@@ -1388,7 +1388,7 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	// ADR-103: same-tx outcome resolution (see upsertChargeAttemptTx).
 	// amount_paid_cents is what this PaymentIntent actually settled.
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, stripePaymentIntentID,
-		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents); err != nil {
+		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", ""); err != nil {
 		return domain.Invoice{}, false, err
 	}
 	// The money email rides THIS transaction (ADR-040 amendment): enqueued
@@ -2738,21 +2738,6 @@ func (s *PostgresStore) ListUnknownPayments(ctx context.Context, olderThan time.
 	return s.listInflightPayments(ctx, domain.PaymentUnknown, olderThan, limit)
 }
 
-// CountParkedInvoices counts invoices parked by ADR-107 — payment unresolved
-// and carrying no PaymentIntent id, so nothing can name the attempt and no
-// ordinary sweep will resolve them.
-//
-// Counts written-off rows too, because writing a parked invoice off is the
-// exit the product ADVISES ("mark this invoice uncollectible to close it out",
-// invoice_attention.go) — and until 2026-08-05 doing so silently dropped the
-// row out of this count AND out of the ADR-108 search that is the only thing
-// that could ever name its PaymentIntent. Taking the advice made the money
-// permanently unaccounted for. Split by disposition below.
-//
-// It exists because ListUnknownPayments deliberately EXCLUDES these rows (they
-// are not reconcilable, and leaving them in starved the queue). That exclusion
-// was correct but it also made them invisible, and "stuck and loud" was
-// log-only. This is the number an operator and an alert can act on.
 // RecordProviderSync stamps what the reconciler just observed at the provider:
 // the verbatim PaymentIntent status and the moment we looked (migration 0167).
 //
@@ -2895,6 +2880,22 @@ func (s *PostgresStore) AdoptPaymentIntentIfParked(ctx context.Context, tenantID
 	return n == 1, nil
 }
 
+// CountParkedInvoices counts invoices parked by ADR-107 — payment unresolved
+// and carrying no PaymentIntent id, so nothing can name the attempt and no
+// ordinary sweep will resolve them.
+//
+// Counts written-off rows too, because writing a parked invoice off is the
+// exit the product ADVISES ("mark this invoice uncollectible to close it out",
+// invoice_attention.go) — and until 2026-08-05 doing so silently dropped the
+// row out of this count AND out of the ADR-108 search that is the only thing
+// that could ever name its PaymentIntent. Taking the advice made the money
+// permanently unaccounted for. Split by disposition below.
+//
+// It exists because ListUnknownPayments deliberately EXCLUDES these rows (they
+// are not reconcilable, and leaving them in starved the queue). That exclusion
+// was correct but it also made them invisible, and "stuck and loud" was
+// log-only. This is the number an operator and an alert can act on.
+//
 // Split by disposition because the two halves are different alerts. An `open`
 // parked invoice is an unmade decision; a `written_off` one has been decided by
 // a human and is only still here because the ADR-108 search might yet name its
@@ -4067,15 +4068,21 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 // the ON CONFLICT — the chokepoint knows those; a settle does not. A
 // settle for a PaymentIntent Velox never minted (hosted checkout) INSERTS
 // here, and that row is the only record of the attempt.
-func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, piID string, outcome domain.ChargeAttemptOutcome, reason string, amountCents int64) error {
+//
+// declineCode and paymentMethodID are what the report knows about a decline
+// (#966); an empty value keeps what an earlier writer recorded, so a source
+// that did not say (a reconciler read, a success) never erases a hard
+// decline another source put on record.
+func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, piID string, outcome domain.ChargeAttemptOutcome, reason string, amountCents int64, declineCode, paymentMethodID string) error {
 	if piID == "" {
 		return nil
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO invoice_charge_attempts
 			(tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
-			 outcome, provider_reason, amount_cents, occurred_at)
-		VALUES ($1, $2, $3, 'external', $4, $5, $6, now())
+			 outcome, provider_reason, amount_cents, occurred_at,
+			 decline_code, stripe_payment_method_id)
+		VALUES ($1, $2, $3, 'external', $4, $5, $6, now(), $7, $8)
 		ON CONFLICT (tenant_id, stripe_payment_intent_id)
 			WHERE stripe_payment_intent_id <> ''
 		DO UPDATE SET
@@ -4085,8 +4092,12 @@ func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID,
 				THEN EXCLUDED.provider_reason ELSE invoice_charge_attempts.provider_reason END,
 			amount_cents = CASE WHEN EXCLUDED.amount_cents > 0
 				THEN EXCLUDED.amount_cents ELSE invoice_charge_attempts.amount_cents END,
+			decline_code = CASE WHEN EXCLUDED.decline_code <> ''
+				THEN EXCLUDED.decline_code ELSE invoice_charge_attempts.decline_code END,
+			stripe_payment_method_id = CASE WHEN EXCLUDED.stripe_payment_method_id <> ''
+				THEN EXCLUDED.stripe_payment_method_id ELSE invoice_charge_attempts.stripe_payment_method_id END,
 			updated_at = now()`,
-		tenantID, invoiceID, piID, outcome, reason, amountCents)
+		tenantID, invoiceID, piID, outcome, reason, amountCents, declineCode, paymentMethodID)
 	if err != nil {
 		return fmt.Errorf("upsert charge attempt in settle tx: %w", err)
 	}
@@ -4125,17 +4136,20 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO invoice_charge_attempts
 				(tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
-				 outcome, provider_reason, amount_cents, occurred_at, sim_effective_at)
-			VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8)`,
+				 outcome, provider_reason, amount_cents, occurred_at, sim_effective_at,
+				 decline_code, stripe_payment_method_id)
+			VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8, $9, $10)`,
 			tenantID, a.InvoiceID, a.Trigger, a.Outcome, a.ProviderReason,
 			a.AmountCents, a.OccurredAt, postgres.NullableTime(a.SimEffectiveAt),
+			a.DeclineCode, a.StripePaymentMethodID,
 		)
 	} else {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO invoice_charge_attempts
 				(tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
-				 outcome, provider_reason, amount_cents, occurred_at, sim_effective_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				 outcome, provider_reason, amount_cents, occurred_at, sim_effective_at,
+				 decline_code, stripe_payment_method_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (tenant_id, stripe_payment_intent_id)
 				WHERE stripe_payment_intent_id <> ''
 			DO UPDATE SET
@@ -4145,6 +4159,12 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 					THEN EXCLUDED.provider_reason ELSE invoice_charge_attempts.provider_reason END,
 				amount_cents = CASE WHEN EXCLUDED.amount_cents > 0
 					THEN EXCLUDED.amount_cents ELSE invoice_charge_attempts.amount_cents END,
+				-- Kept when this write does not know them (#966): see
+				-- upsertChargeAttemptTx.
+				decline_code = CASE WHEN EXCLUDED.decline_code <> ''
+					THEN EXCLUDED.decline_code ELSE invoice_charge_attempts.decline_code END,
+				stripe_payment_method_id = CASE WHEN EXCLUDED.stripe_payment_method_id <> ''
+					THEN EXCLUDED.stripe_payment_method_id ELSE invoice_charge_attempts.stripe_payment_method_id END,
 				sim_effective_at = COALESCE(invoice_charge_attempts.sim_effective_at, EXCLUDED.sim_effective_at),
 				-- A report that beat this writer (its webhook arrived first)
 				-- inserted the row as 'external'. This writer made the attempt,
@@ -4155,6 +4175,7 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 				updated_at = now()`,
 			tenantID, a.InvoiceID, a.StripePaymentIntentID, a.Trigger, a.Outcome,
 			a.ProviderReason, a.AmountCents, a.OccurredAt, postgres.NullableTime(a.SimEffectiveAt),
+			a.DeclineCode, a.StripePaymentMethodID,
 		)
 	}
 	if err != nil {
@@ -4163,21 +4184,118 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 	return tx.Commit()
 }
 
-// PaymentPageLive reports whether the invoice has a hosted payment page that
-// may still take the customer's money, or a hosted payment not yet recorded:
-// the same domain.HostedCheckoutLiveSQL rule the charge claims refuse on, so
-// the banner and the refusal cannot disagree.
-func (s *PostgresStore) PaymentPageLive(ctx context.Context, tenantID, invoiceID string) (bool, error) {
+// PaymentPagesLive reports which of the invoices have a hosted payment page
+// that may still take the customer's money, or a hosted payment not yet
+// recorded: the same domain.HostedCheckoutLiveSQL rule the charge claims
+// refuse on, so the banner and the refusal cannot disagree. One read for a
+// whole list page (issue #1142); invoices without a live page are absent.
+func (s *PostgresStore) PaymentPagesLive(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(invoiceIDs))
+	if len(invoiceIDs) == 0 {
+		return out, nil
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer postgres.Rollback(tx)
-	var live bool
-	if err := tx.QueryRowContext(ctx, `SELECT `+domain.HostedCheckoutLiveSQL("$1"), invoiceID).Scan(&live); err != nil {
-		return false, fmt.Errorf("payment page live: %w", err)
+	rows, err := tx.QueryContext(ctx, `SELECT q.id FROM unnest($1::text[]) AS q(id) WHERE `+
+		domain.HostedCheckoutLiveSQL("q.id"), postgres.StringArray(invoiceIDs))
+	if err != nil {
+		return nil, fmt.Errorf("payment pages live: %w", err)
 	}
-	return live, nil
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// HardDeclineOnCard returns Stripe's decline code when the bank refused this
+// card for good on this invoice (domain.IsHardDecline, #966), or "" when no
+// attempt on the invoice records such a decline for the card. A dunning retry
+// asks it about the card it is about to charge, and charges nothing when the
+// answer is not empty. The question is per invoice and per card, as Stripe
+// Billing's is: another invoice, or another card, is charged as usual.
+//
+// Any one matching row answers it; LIMIT 1 picks the newest for the code it
+// names, not because the set is singular.
+func (s *PostgresStore) HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error) {
+	if stripePaymentMethodID == "" {
+		return "", nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return "", err
+	}
+	defer postgres.Rollback(tx)
+
+	var code string
+	err = tx.QueryRowContext(ctx, `
+		SELECT decline_code FROM invoice_charge_attempts
+		WHERE invoice_id = $1 AND stripe_payment_method_id = $2
+		  AND decline_code = ANY($3::text[])
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1`,
+		invoiceID, stripePaymentMethodID, postgres.StringArray(domain.HardDeclineCodes()),
+	).Scan(&code)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("read hard decline on card: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+// HardDeclinesOnDefaultCards is HardDeclineOnCard for a page of invoices, each
+// asked about its customer's current default card: invoice id → Stripe's
+// decline code, for the invoices whose default card the bank refused for good
+// on that invoice. The attention notice reads it, so it says "needs a
+// different card" exactly while the next dunning retry would skip the card.
+// Invoices without such a decline are absent. One read for the page.
+func (s *PostgresStore) HardDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error) {
+	out := make(map[string]string, len(invoiceIDs))
+	if len(invoiceIDs) == 0 {
+		return out, nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT ON (a.invoice_id) a.invoice_id, a.decline_code
+		FROM invoice_charge_attempts a
+		JOIN invoices i ON i.id = a.invoice_id
+		JOIN payment_methods pm ON pm.customer_id = i.customer_id
+			AND pm.is_default AND pm.detached_at IS NULL
+			AND pm.stripe_payment_method_id = a.stripe_payment_method_id
+		WHERE a.invoice_id = ANY($1::text[])
+		  AND a.stripe_payment_method_id <> ''
+		  AND a.decline_code = ANY($2::text[])
+		ORDER BY a.invoice_id, a.created_at DESC, a.id DESC`,
+		postgres.StringArray(invoiceIDs), postgres.StringArray(domain.HardDeclineCodes()))
+	if err != nil {
+		return nil, fmt.Errorf("read hard declines on default cards: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, code string
+		if err := rows.Scan(&id, &code); err != nil {
+			return nil, err
+		}
+		out[id] = code
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
 }
 
 // ListChargeAttemptsByInvoice returns the invoice's charge attempts,
@@ -4192,7 +4310,7 @@ func (s *PostgresStore) ListChargeAttemptsByInvoice(ctx context.Context, tenantI
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
 		       outcome, provider_reason, amount_cents, occurred_at, sim_effective_at,
-		       livemode, created_at, updated_at
+		       livemode, created_at, updated_at, decline_code, stripe_payment_method_id
 		FROM invoice_charge_attempts
 		WHERE invoice_id = $1
 		ORDER BY occurred_at, created_at`,
@@ -4209,7 +4327,7 @@ func (s *PostgresStore) ListChargeAttemptsByInvoice(ctx context.Context, tenantI
 		var simAt sql.NullTime
 		if err := rows.Scan(&a.ID, &a.TenantID, &a.InvoiceID, &a.StripePaymentIntentID,
 			&a.Trigger, &a.Outcome, &a.ProviderReason, &a.AmountCents, &a.OccurredAt,
-			&simAt, &a.Livemode, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&simAt, &a.Livemode, &a.CreatedAt, &a.UpdatedAt, &a.DeclineCode, &a.StripePaymentMethodID); err != nil {
 			return nil, err
 		}
 		if simAt.Valid {

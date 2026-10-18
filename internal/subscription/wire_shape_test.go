@@ -24,7 +24,7 @@ import (
 //     so the UI can iterate without a null guard.
 //
 // This is the merge gate for /v1/subscriptions/{id}/billing-thresholds.
-// See docs/design-billing-thresholds.md.
+// See docs/design/billing-thresholds.md.
 func TestWireShape_SnakeCase(t *testing.T) {
 	t.Run("BillingThresholdsInputFullyPopulated", func(t *testing.T) {
 		reset := true

@@ -8,11 +8,20 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
+ */
 export interface CreditBalance {
   customer_id: string;
   balance_cents: number;
+  /** Every credit added: grants, positive adjustments, and credit given back when an invoice it was applied to was voided. */
   total_granted: number;
+  /** Credit applied to invoices. */
   total_used: number;
   /** Credit written off by expiry. */
   total_expired: number;
+  /** Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note. */
+  total_retired: number;
+  /** Credit an operator deducted (a negative adjustment). */
+  total_deducted: number;
 }

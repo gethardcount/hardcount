@@ -20,7 +20,7 @@ import (
 var auditWriteErrors *prometheus.CounterVec
 
 // Audit-write failure outcomes. The counter used to carry NO outcome label at all,
-// so an on-call engineer paging on velox_audit_write_errors_total (docs/ops/runbook.md:
+// so an on-call engineer paging on velox_audit_write_errors_total (docs/ops/runbook/audit-write-errors.md:
 // "rate > 0/s — SOC 2 evidence at risk") could not tell from metrics whether:
 //
 //   - evidence was PERMANENTLY LOST (a post-commit own-tx write failed: the mutation

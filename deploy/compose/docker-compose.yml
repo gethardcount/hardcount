@@ -41,10 +41,11 @@ services:
   redis:
     # Rate limiting backend. APP_ENV=production fail-closes the general
     # and hosted-invoice limiters, so the stack ships Redis in-stack —
-    # without it /v1/bootstrap and most API surfaces would 429. /v1/auth
-    # and usage ingest ride deliberately fail-OPEN limiters (a Redis blip
-    # must not lock out login or drop billable events — see
-    # internal/api/router.go). Used for rate limiting only.
+    # without it /v1/bootstrap and most API surfaces would 429. Usage
+    # ingest rides a deliberately fail-OPEN limiter (a Redis blip must not
+    # drop billable events), and /v1/auth counts in the velox-api process
+    # while Redis is down (a blip must not lock out login or lift its
+    # limit) — see internal/api/router.go. Used for rate limiting only.
     image: redis:7-alpine
     restart: unless-stopped
     healthcheck:
@@ -85,6 +86,8 @@ services:
       APP_ENV: ${APP_ENV:-production}
       PORT: "8080"
       RUN_MIGRATIONS_ON_BOOT: "true"
+      # How long a database upgrade waits for a table lock (empty = 5s, 0 = no limit).
+      MIGRATION_LOCK_TIMEOUT: ${MIGRATION_LOCK_TIMEOUT:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # How long after a billing period ends its invoice is built (0 to 72h).
       # Delays every period-end invoice; see docs/self-host.md.
@@ -122,11 +125,17 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-billing@example.com}
+      # Optional — Basic-auth pair for the Postmark bounce webhook
+      # (POST /v1/webhooks/postmark). Unset: Velox rejects every post.
+      POSTMARK_WEBHOOK_USER: ${POSTMARK_WEBHOOK_USER:-}
+      POSTMARK_WEBHOOK_PASS: ${POSTMARK_WEBHOOK_PASS:-}
       # Optional — public URLs the engine renders into invoice emails / portal redirects
       HOSTED_INVOICE_BASE_URL: ${HOSTED_INVOICE_BASE_URL:-}
       PAYMENT_UPDATE_URL: ${PAYMENT_UPDATE_URL:-}
       PAYMENT_UPDATE_RETURN_URL: ${PAYMENT_UPDATE_RETURN_URL:-}
       CUSTOMER_PORTAL_URL: ${CUSTOMER_PORTAL_URL:-}
+      # Optional — public API origin for shareable cost-dashboard links
+      VELOX_API_BASE_URL: ${VELOX_API_BASE_URL:-}
       # Optional — dashboard origin for password-reset email links
       DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-}
       # Optional — cookie domain for dashboard sessions in production
@@ -140,6 +149,8 @@ services:
       # Optional — OpenTelemetry export
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-velox}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1.0}
     healthcheck:
       # The image is distroless (no shell, no curl); use the binary's own
       # zero-arg `version` exit-0 as a process-level liveness probe. The

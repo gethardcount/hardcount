@@ -20,7 +20,7 @@ func (r *recordingDeliverer) SendPaymentReceipt(_ context.Context, _, _ string, 
 	r.sent = append(r.sent, TypePaymentReceipt)
 	return nil
 }
-func (r *recordingDeliverer) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, _, _ string) error {
+func (r *recordingDeliverer) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, _, _ string, _ bool) error {
 	r.sent = append(r.sent, TypeDunningWarning)
 	return nil
 }

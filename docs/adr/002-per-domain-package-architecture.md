@@ -9,6 +9,10 @@ Accepted
 ## Date
 2026-04-14
 
+## Summary
+
+Each business domain (invoice, credit, dunning, payment, pricing, subscription, usage, customer and the ones added later) is its own package under `internal/`, with its own store, service and HTTP handler. A domain never calls another domain's service or store, so a change in one domain cannot quietly break another. The `billing` engine coordinates domains through small interfaces it defines, and `api.NewServer` wires the adapters that satisfy them. `internal/arch/boundaries_test.go` enforces the rule: a new cross-domain import fails CI unless its allowlist entry gives a reason (shared infrastructure, shared value types, or the billing coordinator). Status: active.
+
 ## Context
 Billing systems accumulate complex cross-cutting concerns: invoices reference subscriptions, subscriptions reference pricing, payments reference invoices and customers, dunning references payments and subscriptions. A naive approach — shared models or a single `billing` package — quickly becomes a dependency hairball where every change risks cascading breakage.
 

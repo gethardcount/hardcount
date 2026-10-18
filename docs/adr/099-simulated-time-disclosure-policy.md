@@ -5,6 +5,10 @@
 **Extends:** ADR-030 (simulated time on clock-pinned entities), ADR-086 §4 (FE relative-time anchors).
 **Supersedes (partially):** the per-row Activity chip clause of ADR-030's 2026-07-18 amendment — its sim-primary / wall-subline rendering rule stands; only the redundant chip is gone (noted in place there).
 
+## Summary
+
+Velox marks simulated data (dates from a test clock) once per scope, with the word "Simulated" and a flask icon. A detail page for one clock-pinned customer, subscription or invoice says it once, in its page banner; in a list where rows can differ, each simulated row gets a chip. One flag per scope avoids both failures seen before: simulated dates that read as real, and repeated flags that operators learn to ignore. Amended 2026-10-15: the banner is a single neutral line with the clock time and a View clock link, and its explanation sits in a collapsed Details. Status: active, amended 2026-10-15; it partly supersedes [ADR-030](030-simulated-time-everywhere-on-clock-pinned-entities.md) by removing the per-row Activity chip.
+
 ## Context
 
 The clock-design review (2026-07-21) closed four surfaces that showed

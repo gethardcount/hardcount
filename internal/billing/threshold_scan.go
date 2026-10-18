@@ -44,7 +44,11 @@ type thresholdEval struct {
 	// the line rules below: a non-additive bucket under reset=false belongs
 	// to the period close (its full-window pass reports it), so it is left
 	// out here; everything else is this invoice's to report (#981).
-	Unpriced []unpricedBucket
+	Unpriced []leftOutBucket
+	// BelowZero is the usage this threshold invoice counts as 0 because it
+	// was below zero after corrections (#1193), under the same rules as
+	// Unpriced. The fire writes it on its transaction (net_negative.go).
+	BelowZero []leftOutBucket
 }
 
 // nonAdditiveMode reports whether a rule bucket's aggregation cannot be split
@@ -330,6 +334,12 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 		unpriced.add(u.MeterID, u.Quantity)
 	}
 	unpriced.record(ctx, sub)
+	// Usage below zero: its audit row committed with the fire (#1193).
+	for _, b := range eval.BelowZero {
+		slog.Warn("threshold: usage below zero after corrections — billed as 0",
+			"meter", b.MeterKey, "quantity", b.Quantity.String(),
+			"subscription_id", sub.ID)
+	}
 	return true, nil
 }
 
@@ -633,11 +643,15 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		LineItems:       lineItems,
 		InvoiceCurrency: currency,
 	}
-	for _, u := range preview.unpriced {
+	for _, u := range preview.leftOut {
 		if nonAdditiveMode(u.Mode) && !reset {
 			continue
 		}
-		eval.Unpriced = append(eval.Unpriced, u)
+		if u.BelowZero {
+			eval.BelowZero = append(eval.BelowZero, u)
+		} else {
+			eval.Unpriced = append(eval.Unpriced, u)
+		}
 	}
 
 	// Amount cap: committed running spend vs the configured cap.
@@ -850,6 +864,10 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	// External calls (CommitTax, charge) stay post-commit — the tx never
 	// spans network I/O.
 	expected := subscription.SnapshotOf(sub)
+	belowZero := netNegativeUsage{}
+	for _, b := range eval.BelowZero {
+		belowZero.add(b.MeterID, b.MeterKey, b.Quantity, periodStart, now) // the window the fire priced
+	}
 	var inv domain.Invoice
 	err = e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
 		if sub.BillingThresholds.ResetBillingCycle {
@@ -874,7 +892,11 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		}
 		inv = created
 		// The finalize audit row rides the fire tx (ADR-090 shared fate).
-		return e.emitFinalizeAuditTx(ctx, tx, created)
+		if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
+			return err
+		}
+		// So does the row for usage below zero this invoice counts as 0.
+		return e.noteNetNegativeTx(ctx, tx, sub, belowZero, domain.BillingReasonThreshold, periodStart, now, created)
 	})
 	if err != nil {
 		if errors.Is(err, errs.ErrAlreadyExists) {
@@ -894,7 +916,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	}
 
 	// The finalize AUDIT row already committed inside the fire tx above (same
-	// finalize-row contract as the cycle path; feeds TTFI + the audit log). Here
+	// finalize-row contract as the cycle path). Here
 	// only the post-commit WEBHOOK fires.
 	e.dispatchInvoiceFinalized(ctx, sub, inv)
 

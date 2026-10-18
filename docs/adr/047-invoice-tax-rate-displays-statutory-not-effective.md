@@ -3,6 +3,10 @@
 **Date:** 2026-06-05
 **Status:** Accepted
 
+## Summary
+
+The invoice-level `tax_rate` is the statutory rate when every taxed line has the same rate, for example 8.875% in New York City. Only when taxed lines carry different rates does it fall back to the blended effective rate (tax divided by subtotal). The effective rate is distorted by cent rounding (8.88% instead of 8.875%), so it is not shown as the rate when a real one exists. Rates print with up to four decimals on the dashboard, the hosted page and the PDFs. Status: active; multi-component taxes such as Canada's GST plus QST still show one blended rate until a design partner needs them itemized.
+
 ## Context
 
 A $100 invoice taxed by `stripe_tax` for a New York customer (combined NYC

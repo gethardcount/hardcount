@@ -62,6 +62,8 @@ func main() {
 			runMigrateStatus()
 		case "rollback":
 			runMigrateRollback()
+		case "force":
+			runMigrateForce()
 		case "":
 			runMigrate()
 		default:
@@ -181,7 +183,8 @@ func serve() {
 	// traffic — including hosted-invoice pay pages — while /health/ready
 	// stays ok). config.validateFatal already rejects an UNSET REDIS_URL
 	// in production; this catches invalid/unreachable. Other environments
-	// warn and run fail-open.
+	// warn and run fail-open, except /v1/auth, whose limiter counts in the
+	// process.
 	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
 	rdb, err := mw.OpenRedis(pingCtx, cfg.RedisURL)
 	cancelPing()
@@ -190,12 +193,15 @@ func serve() {
 		os.Exit(1)
 	}
 	if err != nil {
-		slog.Warn("redis unavailable — rate limiting fails open in this environment", "env", cfg.Env, "error", err)
+		slog.Warn("redis unavailable — rate limiting fails open in this environment, except /v1/auth, which counts in this process", "env", cfg.Env, "error", err)
 	} else if rdb != nil {
 		slog.Info("redis connected for rate limiting")
 	}
 
-	server := api.NewServer(db, nil, rdb, api.WithInvoiceGrace(cfg.InvoiceGracePeriod))
+	server := api.NewServer(db, nil, rdb,
+		api.WithInvoiceGrace(cfg.InvoiceGracePeriod),
+		api.WithAppEnv(cfg.Env),
+		api.WithRateLimits(cfg.RateLimits))
 
 	billingInterval := 1 * time.Hour
 	if cfg.Env == "local" {
@@ -213,6 +219,7 @@ func serve() {
 	// exactly that in theory until the 2026-08-11 module audit.)
 	scheduler.SetTokenCleaner(server.TokenSvc)
 	scheduler.SetIdempotencyCleaner(mw.NewIdempotencyCleaner(db))
+	scheduler.SetLoginThrottleCleaner(server.LoginThrottle)
 	scheduler.SetTaxRetrier(server.InvoiceSvc)
 	// Re-issue clawback credit-note drafts whose post-commit Issue() failed
 	// (created atomically with a subscription downgrade/removal). ADR-056
@@ -268,7 +275,7 @@ func serve() {
 	// Shutdown is a published three-stage budget — 90s worst case, typically
 	// under two seconds — and every stage's bound abandons only work that is
 	// designed to be resumed. Configure the orchestrator's grace period at
-	// 120s (deploy/README.md 'Rolling deploys and shutdown'; compose sets
+	// 120s (docs/ops/high-availability.md 'What happens when a copy stops'; compose sets
 	// stop_grace_period). Docker's 10s default SIGKILLs mid-drain.
 	const (
 		shutdownHTTPDrain   = 30 * time.Second // stage 1: in-flight requests
@@ -319,7 +326,7 @@ func serve() {
 	// → *email.Sender. Each tick is one leader lease (ADR-114) so multi-
 	// replica deploys drain from one replica at a time. Operators pause a
 	// role with `SELECT leader_pause('webhook_outbox', 'oncall', 'why')` (docs/ops/
-	// runbook-leader-leases.md); restart isn't required.
+	// runbook/background-job-stuck.md); restart isn't required.
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
@@ -380,7 +387,7 @@ func serve() {
 	// ha-9. (Was CatchupTimeout = 10 min, which blew every orchestrator
 	// grace period.)
 	if !catchupWorker.Stop(shutdownCatchupWait) {
-		slog.Warn("test-clock catchup worker still busy — abandoning the in-flight advance; the clock stays 'advancing' until a replica restarts (docs/ops/runbook.md, test clocks)")
+		slog.Warn("test-clock catchup worker still busy — abandoning the in-flight advance; the clock stays 'advancing' until a replica restarts (docs/ops/runbook/test-clock-advance-hung.md)")
 	}
 
 	// Stage 3 (≤ 30s): scheduler + dispatchers. Their ticks run on ctx
@@ -421,21 +428,45 @@ func runMigrate() {
 	fmt.Println("migrations applied successfully")
 }
 
+// runMigrateStatus prints the upgrade plan: the database's version, this
+// release's, the state, the files still to apply and whether a migration
+// is running now. It reads only, takes no lock and creates nothing, so it
+// is safe to run with the new release before an upgrade. It exits 0 when
+// it could read the state, refused states included.
 func runMigrateStatus() {
-	v, dirty, err := migrate.Status(loadDSN())
+	p, err := migrate.ReadPlan(loadDSN())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "status failed: %v\n", err)
 		os.Exit(1)
 	}
-	if v == 0 {
-		fmt.Println("no migrations applied")
-		return
-	}
-	fmt.Printf("version: %d, dirty: %v\n", v, dirty)
+	fmt.Print(migrate.FormatPlan(p, version.Version))
 }
 
+// migrateForceRemoved is what `velox migrate force` prints since v0.9.0.
+// The stub stays for one release, so a script or habit that still runs it
+// gets a pointer instead of "unknown subcommand".
+const migrateForceRemoved = `velox migrate force was removed in v0.9.0: goose leaves no half-applied state, so there is nothing to force.
+After a failed upgrade, fix the cause and run "velox migrate" again. Steps: ` + migrate.RunbookPath + `
+For a dirty v0.8.x database, repair it with Velox v0.8.1: https://github.com/getvelox/velox/blob/v0.8.1/docs/ops/runbook/migration-failed-midway.md`
+
+func runMigrateForce() {
+	fmt.Fprintln(os.Stderr, migrateForceRemoved)
+	os.Exit(2)
+}
+
+// rollbackRefused is what `velox migrate rollback` prints outside local.
+const rollbackRefused = `velox migrate rollback runs only with APP_ENV=local.
+Rolling back in staging or production loses data the newer release wrote. To go back, restore the backup taken before the upgrade: docs/production-one-vm.md#going-back`
+
+// runMigrateRollback undoes the latest migration, one step, on a local
+// database: the loop for writing a new migration. Migration 180, the
+// v0.8.1 baseline, never rolls back.
 func runMigrateRollback() {
-	v, err := migrate.Rollback(loadDSN(), 1)
+	if config.AppEnv() != "local" {
+		fmt.Fprintln(os.Stderr, rollbackRefused)
+		os.Exit(2)
+	}
+	v, err := migrate.Down(loadDSN())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rollback failed: %v\n", err)
 		os.Exit(1)
@@ -449,8 +480,10 @@ func printUsage() {
 Commands:
   serve                Start the API server (default)
   migrate              Apply pending migrations
-  migrate status       Show current migration version
-  migrate rollback     Rollback the latest migration
+  migrate status       Show the upgrade plan: the database's version, the
+                       migrations still to apply, and whether one is running
+  migrate rollback     Undo the latest migration (APP_ENV=local only; never
+                       below 180, the v0.8.1 baseline)
   version              Print version
   help                 Show this help
 

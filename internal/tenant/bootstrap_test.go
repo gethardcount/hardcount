@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -23,7 +24,7 @@ import (
 // the same rows user.PostgresStore.CreateInTx does. The REAL wiring
 // (user.HashPassword + CreateInTx via the router) is exercised by the
 // api-level e2e test (bootstrap → dashboard login → live-key call).
-func testDeps() BootstrapDeps {
+func testDeps(db *postgres.DB) BootstrapDeps {
 	return BootstrapDeps{
 		HashPassword: func(plaintext string) (string, error) {
 			if len(plaintext) < 12 {
@@ -45,11 +46,14 @@ func testDeps() BootstrapDeps {
 				u.ID, tenantID, role)
 			return u, err
 		},
+		// The real seed writer: the tenant package may not import dunning,
+		// but its tests may (the arch boundary skips _test files).
+		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
 	}
 }
 
 func newTestHandler(db *postgres.DB) *BootstrapHandler {
-	return &BootstrapHandler{db: db, deps: testDeps(), token: "test-token"}
+	return &BootstrapHandler{db: db, deps: testDeps(db), token: "test-token"}
 }
 
 // countRows counts via a bypass tx — SetupTestDB returns the
@@ -232,7 +236,7 @@ func TestBootstrap_GuardOrder(t *testing.T) {
 		{"valid token", h, `{"token":"test-token"}`},
 		{"wrong token", h, `{"token":"wrong"}`},
 		{"no token", h, `{}`},
-		{"endpoint disabled", &BootstrapHandler{db: db, deps: testDeps(), token: ""}, `{"token":"anything"}`},
+		{"endpoint disabled", &BootstrapHandler{db: db, deps: testDeps(db), token: ""}, `{"token":"anything"}`},
 	}
 	for _, p := range probes {
 		req := httptest.NewRequest("POST", "/", strings.NewReader(p.body))
@@ -246,7 +250,7 @@ func TestBootstrap_GuardOrder(t *testing.T) {
 
 func TestBootstrap_TokenRequired(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	h := &BootstrapHandler{db: db, deps: testDeps(), token: "my-secret-token"}
+	h := &BootstrapHandler{db: db, deps: testDeps(db), token: "my-secret-token"}
 
 	// Without token
 	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"tenant_name":"Test"}`))

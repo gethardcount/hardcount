@@ -17,10 +17,10 @@ export default function NotFoundPage() {
         </div>
         <h1 className="text-lg font-semibold text-foreground">Page not found</h1>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          This link doesn't match any page. Check the address, or go to the Dashboard.
+          This link doesn't match any page. Check the address, or go to Home.
         </p>
         <Button size="sm" className="mt-4" render={<Link to="/" />}>
-          Go to Dashboard
+          Go to Home
         </Button>
       </div>
     </Layout>

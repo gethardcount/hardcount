@@ -15,12 +15,12 @@ import (
 	"github.com/sagarsuperuser/velox/internal/tenantstripe"
 )
 
-// stripeHTTPClient bounds every Stripe API call. stripe-go's default backend
-// uses an http.Client with no Timeout (0 = unbounded), so a stalled Stripe or
-// network call would hang the caller indefinitely — and the background workers
-// (payment reconciler, tax retrier) run on the long-lived process context with
-// no request deadline to bail them out, holding the scheduler's leader lease
-// and a DB connection. One shared, bounded client fixes that everywhere.
+// stripeHTTPClient bounds every Stripe API call at 30s. stripe-go's default
+// http.Client allows 80s per request (defaultHTTPTimeout), and the background
+// workers (payment reconciler, tax retrier) run on the long-lived process
+// context with no request deadline of their own, so each stalled Stripe or
+// network call would hold the scheduler's leader lease and a DB connection
+// for up to 80s. One shared client with a shorter bound covers every caller.
 var stripeHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 // StripeCredentials resolves decrypted Stripe secrets for a (tenant, mode).

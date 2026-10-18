@@ -9,6 +9,10 @@
 
 **Amends (when built)** [ADR-077](077-org-level-billing-timezone.md) — org-level single-zone billing stands; this would refine the one zone into two org-level roles. Keeps [ADR-058](058-billing-date-math-tenant-timezone.md) (civil-midnight DST-exact anchoring) and [ADR-076](076-enforcing-the-timezone-invariant.md) (FE required-zone types); [ADR-074](074-subscription-billing-timezone-snapshot.md) stays dead.
 
+## Summary
+
+Proposed and not built: split the org timezone into a billing timezone, which alone anchors billing dates, and a display timezone for the dashboard. A change made only for display could then never move a billing boundary, as most billing platforms surveyed here behave. Today one org timezone ([ADR-077](077-org-level-billing-timezone.md)) does both jobs, and [ADR-091](091-org-timezone-change-seam-absorb.md) keeps a change to it from overbilling. The design below (a `billing_timezone` column on `tenant_settings`, changed only after a confirm step) is kept ready to build. Status: proposed, deferred until a design partner needs to bill customers in different timezones, or to change the display timezone without moving billing.
+
 ## Context
 
 `tenant_settings.timezone` served two conflicting roles: the LIVE zone every

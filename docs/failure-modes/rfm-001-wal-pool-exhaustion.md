@@ -1,5 +1,9 @@
 # A 0.3-second freeze every 5 seconds — and the one Postgres setting that ends it
 
+> - **Decided:** the stall is a commit writing a new WAL segment file because Postgres's pool of recycled ones ran dry. The fix is a setting: `min_wal_size = max_wal_size ≥ wal_keep_size + 1.9 × WAL rate × checkpoint_timeout`.
+> - **Shipped:** as guidance, not code, in v0.4.0 by [#852](https://github.com/getvelox/velox/pull/852). Velox and its Compose file set no WAL settings, so you apply the fix on your own Postgres.
+> - **Current docs:** the operator page is the runbook [Commits stall after a quiet spell on RDS](../ops/runbook/rds-wal-pool.md).
+
 **RFM-001 — WAL recycled-pool exhaustion.** Your database looks healthy on
 every dashboard. It is stalling every few seconds anyway.
 

@@ -8,6 +8,10 @@ removed. ADR-110's core decision (public pages closed) is untouched.
 **Relates to:** [ADR-111](111-a-write-off-has-no-tax-leg.md),
 [ADR-112](112-dunning-exhaustion-settles-two-questions.md)
 
+## Summary
+
+Nothing starts a charge against a written-off invoice (status `uncollectible`), whether automatic or started by an operator. It can still be settled by recording money that already moved: an offline payment the operator records, or a succeeded charge that the Stripe search finds ([ADR-108](108-parked-invoices-search-and-adopt.md)). A tenant who still wants the money leaves the invoice open, and a customer who returns later gets a fresh recovery invoice on the normal payment paths. This removed the charge-in-place recovery that [ADR-110](110-written-off-invoices-close-self-service-payment.md) had added a day earlier; only one of six billing platforms checked, Stripe, charges a written-off invoice. Status: active.
+
 ## Decision
 
 **A written-off invoice is settled by RECORDING writers only** — an offline

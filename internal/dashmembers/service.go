@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/mail"
 	"strings"
 	"time"
 
@@ -150,8 +149,11 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 	if email == "" {
 		return Invitation{}, errs.Required("email")
 	}
-	if _, err := mail.ParseAddress(email); err != nil {
-		return Invitation{}, errs.Invalid("email", "not a valid email address")
+	// The address becomes the member's sign-in email and the invite's To
+	// address, so it gets the same check as a customer's email.
+	email, err := domain.ValidateEmail("email", email)
+	if err != nil {
+		return Invitation{}, err
 	}
 	if s.dashboardBaseURL == "" {
 		// Same fail-loud posture as password reset: without a canonical

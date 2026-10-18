@@ -1,7 +1,11 @@
 # ADR-065: Threshold-scan kernel — boundary-skip, fire-once probe, full drain
 
 **Date:** 2026-07-02
-**Status:** Accepted
+**Status:** Accepted (amended 2026-08-30)
+
+## Summary
+
+The threshold scan checks each subscription's spend cap on every scheduler tick. Once the billing period has ended, it skips the subscription and leaves the whole period to the cycle close, so usage is never billed twice across the boundary. It checks for a threshold invoice already issued this cycle before doing any costly work, and it pages through every subscription with thresholds by id, so none is missed. A partial unique index stays the guarantee of one threshold invoice per cycle, and since [ADR-115](115-one-closer-for-the-billing-period.md) every fire and cycle close also locks the subscription and rechecks its period. Status: active, amended 2026-08-30.
 
 ## Context
 

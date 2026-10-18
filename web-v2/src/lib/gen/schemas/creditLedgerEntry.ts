@@ -10,6 +10,7 @@
 import type { CreditLedgerEntryEntryType } from './creditLedgerEntryEntryType';
 import type { CreditLedgerEntryGrantKind } from './creditLedgerEntryGrantKind';
 import type { CreditLedgerEntryMetadata } from './creditLedgerEntryMetadata';
+import type { ItemChangeType } from './itemChangeType';
 
 export interface CreditLedgerEntry {
   id: string;
@@ -30,4 +31,17 @@ export interface CreditLedgerEntry {
   grant_kind?: CreditLedgerEntryGrantKind;
   /** For a `commit` grant, the invoice that paid for it. */
   source_invoice_id?: string;
+  /**
+     * With `source_subscription_item_id`, `source_plan_changed_at` and
+     * `source_change_type`, set on a proration credit: the subscription
+     * change that produced it.
+     */
+  source_subscription_id?: string;
+  source_subscription_item_id?: string;
+  source_plan_changed_at?: string;
+  source_change_type?: ItemChangeType;
+  /** The credit note that granted this credit to the balance. */
+  source_credit_note_id?: string;
+  /** The voided invoice whose applied credit this entry gave back. */
+  source_invoice_reversal_id?: string;
 }

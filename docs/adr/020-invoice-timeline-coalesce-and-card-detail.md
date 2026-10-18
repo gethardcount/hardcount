@@ -1,7 +1,11 @@
 # ADR-020: Invoice timeline coalesces redundant rows and surfaces the charged card
 
-**Status:** Accepted
+**Status:** Accepted (partly superseded by [ADR-103](103-single-payment-source.md) on 2026-07-28: the payment-row dedup rules)
 **Date:** 2026-05-04
+
+## Summary
+
+The "Invoice paid" row on the invoice timeline names the card that was charged, for example "via Visa •••• 4242". When a payment settles, Velox looks the card up from the PaymentIntent at Stripe and stamps `payment_card_brand` and `payment_card_last4` on the invoice, so one-off Checkout cards show too. The rules below that drop duplicate Stripe webhook rows are superseded by [ADR-103](103-single-payment-source.md): payment rows now come only from charge-attempt records. Status: active for the card detail, superseded for the timeline rules.
 
 ## Context
 

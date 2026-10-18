@@ -23,7 +23,7 @@ import (
 //     JSON number that would lose precision on large fractional values.
 //
 // This is the merge gate for /v1/invoices/create_preview. See
-// docs/design-create-preview.md.
+// docs/design/create-preview.md.
 func TestWireShape_SnakeCase(t *testing.T) {
 	t.Run("FullyPopulated", func(t *testing.T) {
 		result := PreviewResult{

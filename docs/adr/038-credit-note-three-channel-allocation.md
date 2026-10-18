@@ -3,6 +3,10 @@
 **Date:** 2026-05-24
 **Status:** Accepted
 
+## Summary
+
+A credit note (a document that reduces or refunds an invoice) on a paid invoice splits its amount across three channels that must add up to its total. `refund_amount_cents` goes back to the card through Stripe, `credit_amount_cents` goes to the customer's credit balance, and `out_of_band_amount_cents` records money refunded outside Velox. The refund part is capped at what was paid minus earlier refunds, and a note that names no channel goes wholly to credit balance. On an unpaid invoice the channels are ignored and the note reduces the amount due. Status: active; the older single-channel `refund_type` field still works.
+
 ## Context
 
 Velox's credit-note dialog presented a binary `Type: Credit | Refund` dropdown. When the operator picked Refund on a paid invoice with a mix of card and credit-balance payment, the server's auto-routing logic silently allocated part of the refund to credit balance — which contradicted the explicit UI choice. We initially shipped a strict-reject (2026-05-22) that flagged subtotal > pmRefundable and refused the request; the operator then had to either lower the amount, pick the other type, or split into two CNs. The strict-reject created the symptom in a live demo: an operator hit it, gave up, and used Credit type for an $80 CN where $62.60 should have gone to the card.

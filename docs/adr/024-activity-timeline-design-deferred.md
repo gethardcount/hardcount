@@ -3,6 +3,10 @@
 **Status:** Accepted
 **Date:** 2026-05-05
 
+## Summary
+
+The invoice activity timeline is still assembled at read time from several sources (lifecycle columns, charge attempts, dunning, emails, credit notes), with no dedicated `invoice_events` table. Most billing systems work this way, and an events table would be a multi-week refactor with no current need behind it. Cursor fetch, ETag responses, a raw-payload endpoint, a generalized coalescer and an events table each wait for the trigger named below. Shipped since: a `source` field on every row (now `lifecycle`, `payment`, `dunning`, `email`, `credit_note`) and a server-set `is_simulated` flag. Status: active; [ADR-103](103-single-payment-source.md) and [ADR-104](104-one-activity-lane-entity-calendar.md) later reshaped the payment rows and the timeline layout.
+
 ## Context
 
 Operator review of the invoice detail activity card surfaced visual heft

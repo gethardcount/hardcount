@@ -19,6 +19,9 @@ interface TrendCardProps {
   // Tone of the value text (e.g. destructive when a counter > 0).
   valueTone?: 'default' | 'danger' | 'warning'
   className?: string
+  // What the number counts, shown as small text at the bottom of the card
+  // (never only on hover, which touch screens and keyboards can't reach).
+  definition?: string
 }
 
 // TrendCard is the standard KPI card: label, value, period-over-period delta,
@@ -35,6 +38,7 @@ export function TrendCard({
   sparklineTone = 'primary',
   valueTone = 'default',
   className,
+  definition,
 }: TrendCardProps) {
   const showDelta = typeof current === 'number' && typeof previous === 'number'
 
@@ -59,6 +63,7 @@ export function TrendCard({
             <Sparkline data={sparkline} tone={sparklineTone} ariaLabel={`${label} trend`} />
           </div>
         )}
+        {definition && <p className="text-xs text-muted-foreground/80 mt-2">{definition}</p>}
       </CardContent>
     </Card>
   )

@@ -7,8 +7,8 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { GetV1TestClocksIdSubscriptions200DataItem } from './getV1TestClocksIdSubscriptions200DataItem';
+import type { Subscription } from './subscription';
 
 export type GetV1TestClocksIdSubscriptions200 = {
-  data?: GetV1TestClocksIdSubscriptions200DataItem[];
+  data?: Subscription[];
 };

@@ -8,6 +8,10 @@ an unknown outcome), migration 0167 (provider observation columns).
 2026-08-02 amendment. The conclusion survives on a corrected ground; this ADR
 is the constructive half.
 
+## Summary
+
+A parked invoice is one whose charge ended with an unclear result and no PaymentIntent id ([ADR-107](107-unknown-is-terminal-until-a-human.md)). Once it has been parked for an hour, a reconciler sweep searches Stripe for PaymentIntents carrying the invoice's id in their metadata, including parked invoices already written off. A succeeded PaymentIntent settles the invoice paid, and a live one is attached to the invoice, only if it is still parked, so the normal sweeps and webhooks finish it. Finding nothing, only failed attempts, or a search error writes no money outcome, because search results can lag and cannot prove that no charge exists. Status: active; an invoice the search cannot resolve stays parked, and writing it off remains the manual exit.
+
 ## Context
 
 ADR-107 parks an invoice whose charge attempt returned an ambiguous outcome with

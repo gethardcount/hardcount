@@ -281,10 +281,10 @@ export default function CreditNotesPage() {
   return (
     <Layout>
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Credit Notes</h1>
-          <p className="text-sm text-muted-foreground mt-1">Issue refunds and adjustments on invoices{notes.length > 0 ? ` · ${notes.length} total` : ''}</p>
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <div className="min-w-0 flex-1 basis-72">
+          <h1 className="text-2xl font-semibold text-foreground">Credit notes</h1>
+          <p className="text-sm text-muted-foreground mt-1">A credit note takes money off an invoice. If the invoice is unpaid, the customer owes less; if it's paid, the money goes back as a refund or as credit on their balance{notes.length > 0 ? ` · ${notes.length} total` : ''}</p>
         </div>
         <div className="flex items-center gap-2">
           {notes.length > 0 && (
@@ -293,7 +293,7 @@ export default function CreditNotesPage() {
             </Button>
           )}
           <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus size={16} className="mr-2" /> Issue Credit Note
+            <Plus size={16} className="mr-2" /> Issue credit note
           </Button>
         </div>
       </div>
@@ -303,7 +303,7 @@ export default function CreditNotesPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
           <Card>
             <CardContent className="px-5 py-4">
-              <p className="text-xs font-medium text-muted-foreground">Total Credited</p>
+              <p className="text-xs font-medium text-muted-foreground">Total credited</p>
               <p className="text-xl font-semibold text-foreground mt-1 tabular-nums">{formatCents(stats.totalAmount)}</p>
             </CardContent>
           </Card>
@@ -410,9 +410,9 @@ export default function CreditNotesPage() {
               <EmptyState
                 icon={FileMinus}
                 title="No credit notes yet"
-                description="Issue a credit note to apply credits or refunds against invoices."
+                description="Open an invoice and issue a credit note to lower what it charges."
                 action={{
-                  label: 'Issue Credit Note',
+                  label: 'Issue credit note',
                   icon: Plus,
                   onClick: () => setShowCreate(true),
                 }}
@@ -620,7 +620,7 @@ export default function CreditNotesPage() {
       <AlertDialog open={confirmIssue !== null} onOpenChange={(open) => { if (!open) setConfirmIssue(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Issue Credit Note</AlertDialogTitle>
+            <AlertDialogTitle>Issue credit note</AlertDialogTitle>
             <AlertDialogDescription>
               Issue this credit note? This will apply the credit or initiate the refund. Once issued, it cannot be reversed.
             </AlertDialogDescription>
@@ -628,7 +628,7 @@ export default function CreditNotesPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => { if (confirmIssue) issueMutation.mutate(confirmIssue); setConfirmIssue(null) }}>
-              Issue Credit Note
+              Issue credit note
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -638,10 +638,10 @@ export default function CreditNotesPage() {
       <TypedConfirmDialog
         open={confirmVoid !== null}
         onOpenChange={(open) => { if (!open) setConfirmVoid(null) }}
-        title="Void Credit Note"
+        title="Void credit note"
         description="Voiding this credit note reverses its effect permanently. This action cannot be undone."
         confirmWord="VOID"
-        confirmLabel="Void Credit Note"
+        confirmLabel="Void credit note"
         onConfirm={() => { if (confirmVoid) voidMutation.mutate(confirmVoid); setConfirmVoid(null) }}
         loading={voidMutation.isPending}
       />
@@ -705,7 +705,7 @@ function SendCreditNoteDialog({ note, onClose, onSent }: {
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <label htmlFor="cn-email" className="text-sm font-medium">Recipient Email</label>
+            <label htmlFor="cn-email" className="text-sm font-medium">Recipient email</label>
             <Input id="cn-email" type="email" value={email}
               onChange={e => { setEmail(e.target.value); setTouched(true) }}
               placeholder="customer@example.com" />
@@ -721,7 +721,7 @@ function SendCreditNoteDialog({ note, onClose, onSent }: {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button onClick={handleSend} disabled={sending || !email.trim()}>
-              {sending ? <><Loader2 size={14} className="animate-spin mr-2" />Sending...</> : 'Send Email'}
+              {sending ? <><Loader2 size={14} className="animate-spin mr-2" />Sending...</> : 'Send email'}
             </Button>
           </DialogFooter>
         </div>
@@ -816,7 +816,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
     }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Issue Credit Note</DialogTitle>
+          <DialogTitle>Issue credit note</DialogTitle>
           <DialogDescription>
             Create a credit note against an invoice.
           </DialogDescription>
@@ -869,11 +869,11 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
                       <p className="font-medium text-foreground mt-0.5">{customerMap[selectedInvoice.customer_id]?.display_name || 'Unknown'}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">{isPaid ? 'Amount Paid' : 'Amount Due'}</p>
+                      <p className="text-muted-foreground">{isPaid ? 'Amount paid' : 'Amount due'}</p>
                       <p className="font-medium text-foreground mt-0.5">{formatCents(maxAmount)}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">Invoice Status</p>
+                      <p className="text-muted-foreground">Invoice status</p>
                       <div className="mt-0.5">
                         <Badge variant={statusBadgeVariant(selectedInvoice.status)}>{selectedInvoice.status}</Badge>
                       </div>
@@ -943,7 +943,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
                     name="refundType"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Credit Type</FormLabel>
+                        <FormLabel>Credit type</FormLabel>
                         <FormControl>
                           <select
                             value={field.value}
@@ -988,7 +988,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
                       Issuing...
                     </>
                   ) : (
-                    'Issue Credit Note'
+                    'Issue credit note'
                   )}
                 </Button>
               </DialogFooter>

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenant"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -27,9 +28,10 @@ func TestBootstrap_AuditsItsProvisioning(t *testing.T) {
 	userStore := user.NewPostgresStore(db)
 
 	res, err := tenant.RunBootstrap(ctx, db, tenant.BootstrapDeps{
-		HashPassword: user.HashPassword,
-		CreateUserTx: userStore.CreateInTx,
-		Audit:        logger,
+		HashPassword:  user.HashPassword,
+		CreateUserTx:  userStore.CreateInTx,
+		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
+		Audit:         logger,
 	}, tenant.BootstrapOpts{
 		TenantName: "Bootstrap Audit Co",
 		OwnerEmail: "owner@bootstrap-audit.test",
@@ -64,6 +66,18 @@ func TestBootstrap_AuditsItsProvisioning(t *testing.T) {
 	// key must not appear in a running system with no record of its birth.
 	if got := byResource["api_key"]; len(got) != 3 {
 		t.Errorf("api_key rows: got %d, want 3 (test secret, LIVE secret, test publishable)", len(got))
+	}
+	// The seeded dunning policies (ADR-123): one row per mode, each in its
+	// own mode's log. The live one is here; the test-mode one below.
+	if got := byResource["dunning_policy"]; len(got) != 1 {
+		t.Errorf("live dunning_policy rows: got %d, want 1", len(got))
+	}
+	testRows, _, err := logger.Query(postgres.WithLivemode(ctx, false), res.Tenant.ID, audit.QueryFilter{ResourceType: "dunning_policy"})
+	if err != nil {
+		t.Fatalf("query test-mode audit log: %v", err)
+	}
+	if len(testRows) != 1 || testRows[0].Metadata["action"] != "bootstrap_provisioned" {
+		t.Errorf("test-mode dunning_policy rows: got %+v, want exactly one bootstrap_provisioned row", testRows)
 	}
 
 	// The key MATERIAL must never reach the append-only log.

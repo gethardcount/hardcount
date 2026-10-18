@@ -4,6 +4,10 @@
 **Originally accepted:** 2026-07-11
 **Context:** design review 2026-07-10, redesign #4 ("CollectAfterFinalize"); executed after an 8-agent site census verified 18 divergence dimensions across the seven finalize paths.
 
+## Summary
+
+This ADR moved the steps after an invoice is finalized (find the card, charge it, or queue the invoice and email a card-setup link) into one engine method shared by four finalize sites. It left the per-site checks, such as credit apply and decline handling, at each site, and kept operator finalize, proration and tax-retry invoices on their own paths. [ADR-116](116-collection-intent-at-finalize-one-collector.md) replaced it on 2026-10-08: every finalize now queues the invoice in the same write, and one collector (`processAutoCharge`) applies credits, charges, and hands declines to dunning (the payment retry process). The per-site checks and the flag-on-decline analysis below are history. Status: superseded by [ADR-116](116-collection-intent-at-finalize-one-collector.md).
+
 ## Decision
 
 Extract the post-finalize collection **pipeline** — resolve payment setup →

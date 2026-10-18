@@ -33,11 +33,30 @@ type MeterResolver interface {
 	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
 }
 
-type Handler struct {
-	svc       *Service
-	customers CustomerResolver
-	meters    MeterResolver
+// MeterLister lists the tenant's meters and their pricing rules. The
+// aggregate endpoint works out each meter's aggregation from them (see
+// BillingModes) so a Maximum meter reports its peak, not a sum of
+// readings. Wired in router.go (pricing.Service).
+type MeterLister interface {
+	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
+	ListMeterPricingRules(ctx context.Context, tenantID string) ([]domain.MeterPricingRule, error)
 }
+
+type Handler struct {
+	svc        *Service
+	customers  CustomerResolver
+	meters     MeterResolver
+	meterModes MeterLister
+	// Held-usage routes only (#1044); see SetHeldDeps.
+	heldCustomers CustomerLookup
+	heldSubs      SubscriptionLister
+	heldPlans     PlanReader
+}
+
+// SetMeterLister wires the meter list the aggregate endpoint reads modes
+// from. Unwired, every by_meter value is the plain sum with an empty
+// aggregation.
+func (h *Handler) SetMeterLister(l MeterLister) { h.meterModes = l }
 
 func NewHandler(svc *Service, customers CustomerResolver, meters MeterResolver) *Handler {
 	return &Handler{svc: svc, customers: customers, meters: meters}
@@ -54,6 +73,12 @@ func (h *Handler) Routes() chi.Router {
 	// semantics match the list query exactly. See internal/usage/store.go
 	// (Aggregate type) for the response shape.
 	r.Get("/aggregate", h.aggregate)
+	// Held usage (#1044, ADR-122): rows the LiteLLM callback could not
+	// ingest because their customer or meter did not exist. GET needs
+	// usage read, the POSTs usage write (RequireMethod in router.go).
+	r.Get("/held", h.listHeld)
+	r.Post("/held/release", h.releaseHeld)
+	r.Post("/held/discard", h.discardHeld)
 	return r
 }
 
@@ -69,7 +94,7 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 // Quantity accepts both number (5) and string ("5.5") forms via shopspring's
 // UnmarshalJSON; the response side serializes as a string for precision.
 //
-// Dimensions: per docs/design-multi-dim-meters.md, AI-native ingest uses
+// Dimensions: per docs/design/multi-dim-meters.md, AI-native ingest uses
 // `dimensions` as the field name for the JSONB filter that pricing rules
 // dispatch on. Properties is the original name and is kept as an alias
 // for backward compatibility — if both are present, dimensions wins (it
@@ -464,8 +489,36 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 	// filtered set, not a 100-row page.
 	filter.Limit = 0
 	filter.Offset = 0
+	// tz buckets the per-meter daily series by calendar day (the tenant's
+	// timezone on the dashboard). Unknown names are refused, not ignored,
+	// so a typo never silently re-buckets the chart to UTC.
+	if tz := r.URL.Query().Get("tz"); tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil || tz == "Local" {
+			respond.Validation(w, r, fmt.Sprintf("tz: unknown time zone %q (use an IANA name such as Europe/Berlin)", tz))
+			return
+		}
+		filter.DayLoc = loc
+	}
 
-	agg, err := h.svc.Aggregate(r.Context(), filter)
+	modes := map[string]string{}
+	if h.meterModes != nil {
+		meters, err := h.meterModes.ListMeters(r.Context(), filter.TenantID)
+		if err != nil {
+			respond.InternalError(w, r)
+			slog.ErrorContext(r.Context(), "aggregate usage events: list meters", "error", err)
+			return
+		}
+		rules, err := h.meterModes.ListMeterPricingRules(r.Context(), filter.TenantID)
+		if err != nil {
+			respond.InternalError(w, r)
+			slog.ErrorContext(r.Context(), "aggregate usage events: list pricing rules", "error", err)
+			return
+		}
+		modes = BillingModes(meters, rules)
+	}
+
+	agg, err := h.svc.Aggregate(r.Context(), filter, modes)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "aggregate usage events", "error", err)
@@ -580,6 +633,11 @@ func respondBatchRejected(w http.ResponseWriter, r *http.Request, errStrings []s
 		"total":    total,
 	})
 }
+
+// ParseDimensionsParam parses the `dimensions` query value ("k=v,k2=v2")
+// the same way the list and aggregate endpoints do. Exported for the CSV
+// export, which takes the same filter.
+func ParseDimensionsParam(raw string) (map[string]any, error) { return parseDimensionsParam(raw) }
 
 // parseDimensionsParam parses the `dimensions` query param: comma-
 // separated key=value pairs ("model=gpt-4o,token_type=input"). Values

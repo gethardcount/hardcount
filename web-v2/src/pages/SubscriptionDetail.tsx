@@ -16,14 +16,17 @@ import { Callout } from '@/components/Callout'
 import { NoticeRow } from '@/components/NoticeRow'
 import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
 import {
-  NO_CARD_SENTENCE, NO_CARD_TITLE, billingFailureNextLine, billingFailureTitle, cancelScheduledSentence,
-  collectionPausedSentence, hasScheduledCancel, subscriptionNoticeLayout, type SubscriptionNoticeKind,
+  NO_CARD_TITLE, billingFailureNextLine, billingFailureTitle, cancelScheduledSentence,
+  collectionPausedSentence, hasScheduledCancel, noCardSentence, subscriptionNoticeLayout, type SubscriptionNoticeKind,
 } from '@/lib/subscriptionNotices'
+import { cancelAtPeriodEndText, periodLabels, trialLength } from '@/lib/subscriptionPeriod'
+import { previewView } from '@/lib/invoicePreview'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant } from '@/lib/status'
 import { subscriptionWillAutoCharge, hasUsableCard } from '@/lib/paymentReadiness'
+import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -138,12 +141,16 @@ export default function SubscriptionDetailPage() {
     enabled: !!sub?.test_clock_id,
   })
 
-  const { data: preview, error: previewError } = useQuery({
+  // Only a subscription with a current period and items has a next invoice
+  // to preview; asking for any other is a server error, not a load failure.
+  const previewable = !!sub && !!sub.current_billing_period_start && !!sub.current_billing_period_end && (sub.items?.length ?? 0) > 0
+  const { data: preview, error: previewError, refetch: refetchPreview, isFetching: previewFetching } = useQuery({
     queryKey: ['subscription-preview', id],
     queryFn: () => api.invoicePreview(id!),
-    enabled: !!id,
+    enabled: !!id && previewable,
     retry: false,
   })
+  const previewNotes = preview ? invoicePreviewNotes(preview) : null
 
   // Simulated "now" as a Date (the clock's frozen_time when this sub is pinned,
   // else wall time) — the single anchor for the lifecycle timeline's past/future
@@ -192,10 +199,9 @@ export default function SubscriptionDetailPage() {
     // CustomerDetail page stale until a hard refresh.
     if (sub?.customer_id) {
       queryClient.invalidateQueries({ queryKey: ['customer-overview', sub.customer_id] })
-      queryClient.invalidateQueries({ queryKey: ['customer-subscriptions', sub.customer_id] })
+      queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', sub.customer_id] })
     }
     queryClient.invalidateQueries({ queryKey: ['subscriptions-for-test-clock-chip'] })
-    queryClient.invalidateQueries({ queryKey: ['subscriptions-for-trial-badge'] })
     // Plan/quantity changes can credit the customer's balance via
     // proration — refresh the balance-bearing families (2026-07-21 audit).
     invalidateMoneySurfaces(queryClient, { customerId: sub?.customer_id })
@@ -342,6 +348,15 @@ export default function SubscriptionDetailPage() {
 
   const firstItemPlan = items[0] ? planById(items[0].plan_id) : undefined
 
+  // Every date below comes from one helper: the last covered day reads
+  // "through Nov 15", the boundary after it "Renews/Cancels Nov 16", and a
+  // canceled subscription never "renews" (lib/subscriptionPeriod).
+  const labels = periodLabels(
+    sub,
+    { date: (iso) => formatDate(iso), lastDay: (iso) => formatCivilDate(iso, undefined) },
+    firstItemPlan?.base_bill_timing,
+  )
+
   const cancelScheduled = hasScheduledCancel(sub)
   const noticeLayout = subscriptionNoticeLayout({
     billingFailure: !!sub.billing_failure,
@@ -383,8 +398,8 @@ export default function SubscriptionDetailPage() {
           </Button>
         )
         return as === 'box'
-          ? <Callout tone="amber" title={NO_CARD_TITLE} actions={action}>{NO_CARD_SENTENCE}</Callout>
-          : <NoticeRow tone="amber" title={NO_CARD_TITLE} action={action}>{NO_CARD_SENTENCE}</NoticeRow>
+          ? <Callout tone="amber" title={NO_CARD_TITLE} actions={action}>{noCardSentence(sub, labels.firstChargeOn)}</Callout>
+          : <NoticeRow tone="amber" title={NO_CARD_TITLE} action={action}>{noCardSentence(sub, labels.firstChargeOn)}</NoticeRow>
       }
       case 'cancel_scheduled': {
         const action = (
@@ -395,7 +410,11 @@ export default function SubscriptionDetailPage() {
         // cancel_effective_at is the backend's authoritative answer — on a
         // TRIALING sub the flag means trial end (free), NOT the first paid
         // period's end (ADR-069).
-        const sentence = cancelScheduledSentence(sub, sub.cancel_effective_at ? formatDateTime(sub.cancel_effective_at) : undefined)
+        const sentence = cancelScheduledSentence(sub, {
+          effectiveLabel: sub.cancel_effective_at ? formatDateTime(sub.cancel_effective_at) : undefined,
+          accessThrough: labels.accessThrough,
+          cancelsOn: labels.cancelsOn,
+        })
         return as === 'box'
           ? <Callout tone="amber" title="Cancellation scheduled" actions={action}>{sentence}</Callout>
           : <NoticeRow tone="amber" title="Cancellation scheduled" action={action}>{sentence}</NoticeRow>
@@ -459,8 +478,8 @@ export default function SubscriptionDetailPage() {
                   button and the Resume Collection banner would render
                   simultaneously. */}
               {!sub.pause_collection && (
-                <Button variant="outline" className="border-amber-300 text-amber-600 hover:bg-amber-50" onClick={() => setShowPauseConfirm(true)} disabled={acting}>
-                  Pause
+                <Button variant="outline" onClick={() => setShowPauseConfirm(true)} disabled={acting}>
+                  Pause collection…
                 </Button>
               )}
               <Button variant="outline" className="border-destructive text-destructive hover:bg-destructive/10" onClick={() => setShowCancelChoice(true)} disabled={acting}>
@@ -541,118 +560,52 @@ export default function SubscriptionDetailPage() {
           isPast: true,
         })
 
-        if (sub.status === 'trialing') {
-          // Trialing subs get distinct dots: Trial ends + First charge.
-          // Pre-fix the period_start/period_end labels read "Last Period"
-          // and "Period End" for trialing subs — misleading, because
-          // there's no "last" period yet (the sub is still trialing) and
-          // the period_end IS the first chargeable cycle close. Stripe /
-          // Lago surface trial dates explicitly in trialing state.
+        // The dots read from periodLabels, the same dates as the summary
+        // and the list. A canceled subscription ends on its cancel; a
+        // scheduled cancel replaces the renewal; a trial shows its end and
+        // its first charge (or the cancel that replaces it).
+        if (sub.status === 'canceled') {
+          if ((labels.canceledAtTrialEnd || labels.canceledDuringTrial) && sub.trial_start_at) {
+            timelinePoints.push({ label: 'Trial start', date: formatDate(sub.trial_start_at), isPast: true })
+          } else if (sub.current_billing_period_start) {
+            timelinePoints.push({ label: 'Last period', date: formatDate(sub.current_billing_period_start), isPast: true })
+          }
+          if (labels.next) {
+            timelinePoints.push({ label: labels.next.label, date: labels.next.value, isPast: true })
+          }
+        } else if (sub.status === 'trialing') {
           if (sub.trial_end_at) {
-            const trialEnd = new Date(sub.trial_end_at)
             timelinePoints.push({
               label: 'Trial ends',
               date: formatDate(sub.trial_end_at),
-              isPast: trialEnd <= now,
+              isPast: new Date(sub.trial_end_at) <= now,
             })
           }
-          // First charge fires at trial_end_at for in_advance plans (Phase 0.5's
-          // BillOnCreate covers the just-opened paid period at activation) and at
-          // the post-trial cycle close (next_billing_at) for in_arrears. Reading
-          // base_bill_timing from the first item's plan because the sub itself
-          // doesn't expose it directly; mixed-interval-or-timing items on one sub
-          // are rejected at Create / AddItem / UpdateItem so first-item-wins is
-          // the durable answer.
-          const firstItemPlan = items.length > 0 ? planById(items[0].plan_id) : undefined
-          const inAdvance = firstItemPlan?.base_bill_timing === 'in_advance'
-          const firstChargeAt = inAdvance ? sub.trial_end_at : sub.next_billing_at
-          if (firstChargeAt) {
-            const firstCharge = new Date(firstChargeAt)
-            timelinePoints.push({
-              label: 'First charge',
-              date: formatDate(firstChargeAt),
-              isPast: firstCharge <= now,
-            })
+          if (labels.next && labels.next.label !== 'Trial ends') {
+            timelinePoints.push({ label: labels.next.label, date: labels.next.value, isPast: false })
           }
-        } else if (
-          // A trial canceled at trial end never billed its "first paid
-          // period" — the bar shows the trial instead of phantom period
-          // dates (ADR-069).
-          sub.status === 'canceled' && sub.trial_end_at && sub.canceled_at &&
-          new Date(sub.canceled_at) <= new Date(sub.trial_end_at)
-        ) {
-          if (sub.trial_start_at) {
-            timelinePoints.push({
-              label: 'Trial start',
-              date: formatDate(sub.trial_start_at),
-              isPast: true,
-            })
-          }
-          timelinePoints.push({
-            label: 'Canceled at trial end',
-            date: formatDate(sub.canceled_at),
-            isPast: true,
-          })
         } else {
           if (sub.current_billing_period_start) {
             const periodStart = new Date(sub.current_billing_period_start)
             timelinePoints.push({
-              label: sub.status === 'active' ? 'Period Start' : 'Last Period',
-              // Inclusive period-start boundary — render its civil date in the
-              // org billing TZ (formatDate, NOT formatCivilDate: no step-back),
-              // so it matches the Period range. A sub bills in the one org TZ (=
-              // the live tenant setting, ADR-077), so undefined → tenant TZ is
-              // the anchor.
+              label: sub.status === 'active' ? 'Period start' : 'Last period',
               date: formatDate(sub.current_billing_period_start, undefined),
               isPast: periodStart <= now,
             })
           }
-
-          if (sub.current_billing_period_end) {
-            const periodEnd = new Date(sub.current_billing_period_end)
-            timelinePoints.push({
-              label: 'Period End',
-              // Last day the period covers (inclusive), not the exclusive
-              // boundary instant — distinct from the "Next Billing" dot and
-              // consistent with the "Current period" range below (ADR-058).
-              date: formatCivilDate(sub.current_billing_period_end, undefined),
-              isPast: periodEnd <= now,
-            })
-          }
-
-          if (sub.cancel_at_period_end || sub.cancel_at) {
-            // A scheduled cancel replaces "Next Billing" — billing the
-            // next period is exactly what won't happen. The bar reads
-            // Period Start → Period End → Cancels.
-            // cancel_effective_at is the backend's authoritative answer
-            // (ADR-069); re-deriving from the flag shows the wrong date on
-            // trialing subs.
-            const cancelAt = sub.cancel_effective_at || sub.cancel_at || sub.current_billing_period_end
-            if (cancelAt) {
-              timelinePoints.push({
-                label: 'Cancels',
-                date: formatDate(cancelAt),
-                isPast: new Date(cancelAt) <= now,
-              })
-            }
+          if (labels.cancelsOn) {
+            timelinePoints.push({ label: 'Cancels', date: labels.cancelsOn, isPast: false })
           } else if (sub.pause_collection) {
-            // Collection paused: invoices draft but don't charge — the
-            // honest next point is the resume, not "Next Billing". With no
-            // resume date (keep_as_draft, e.g. dunning-exhausted) the pause
-            // is open-ended, so say "Indefinite" — a bare "—" in the date
-            // column reads as missing data next to the "paused" banner.
+            // Collection paused: invoices draft but don't charge, so the
+            // next point is the resume. With no resume date the pause is
+            // open-ended ("Indefinite").
             timelinePoints.push({
               label: sub.pause_collection.resumes_at ? 'Collection resumes' : 'Collection paused',
               date: sub.pause_collection.resumes_at ? formatDate(sub.pause_collection.resumes_at) : 'Indefinite',
               isPast: false,
             })
-          } else if (sub.next_billing_at) {
-            const nextBilling = new Date(sub.next_billing_at)
-            timelinePoints.push({
-              label: 'Next Billing',
-              date: formatDate(sub.next_billing_at),
-              isPast: nextBilling <= now,
-            })
+          } else if (labels.renewsOn) {
+            timelinePoints.push({ label: 'Renews', date: labels.renewsOn, isPast: false })
           }
         }
 
@@ -737,51 +690,26 @@ export default function SubscriptionDetailPage() {
             <div className="flex-1 min-w-0 px-6 py-4">
               {sub.status === 'trialing' && sub.trial_start_at && sub.trial_end_at ? (
                 <>
-                  <p className="text-sm text-muted-foreground">Trial period</p>
+                  <p className="text-sm text-muted-foreground">Trial</p>
                   <p className="text-lg font-semibold text-foreground mt-1">
-                    {formatDate(sub.trial_start_at)} {'\u2014'} {formatDate(sub.trial_end_at)}
+                    {trialLength(sub.trial_start_at, sub.trial_end_at)}-day trial · ends {labels.trialEndsOn}
                   </p>
-                  {sub.current_billing_period_start && sub.current_billing_period_end && (
+                  {labels.next && labels.next.label !== 'Trial ends' && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      First billing: {sub.current_billing_period_display}
+                      {labels.next.label} {labels.next.value}
                     </p>
                   )}
                 </>
               ) : (
                 <>
-                  {/* Industry-standard pattern (Recurly "Renews On",
-                      Chargebee "Next Billing Date", Stripe's
-                      current_period_end). Surfacing the next-renewal
-                      date as a concrete primary label eliminates the
-                      "is this a bug?" confusion when the period
-                      anchor doesn't match `billing_time` (e.g., a
-                      sub that started yearly and swapped to monthly
-                      preserves its day-of-month anchor \u2014 industry-
-                      standard behavior, but the dates alone don't
-                      explain it). The full period range stays as a
-                      muted secondary line for completeness. */}
                   <p className="text-sm text-muted-foreground">Billing cycle</p>
                   <p className="text-lg font-semibold text-foreground mt-1">
-                    {/* A scheduled cancel has to win here for the same
-                        reason it replaces "Next Billing" in the timeline
-                        bar above: renewal is exactly what won't happen.
-                        Pre-fix this row said "Renews <date>" on the very
-                        date the bar said "Cancels <date>" \u2014 one page
-                        stating both outcomes for one date. Uses the
-                        backend's authoritative cancel_effective_at
-                        (ADR-069), matching the bar. */}
-                    {(() => {
-                      const cancelAt =
-                        sub.cancel_at_period_end || sub.cancel_at
-                          ? sub.cancel_effective_at || sub.cancel_at || sub.current_billing_period_end
-                          : null
-                      if (cancelAt) return `Cancels ${formatDate(cancelAt)}`
-                      return sub.current_billing_period_end
-                        ? `Renews ${formatDate(sub.current_billing_period_end)}`
-                        : '\u2014'
-                    })()}
+                    {/* One answer from periodLabels: Renews, Cancels (a
+                        scheduled cancel), or Canceled — never "Renews" on a
+                        canceled subscription. */}
+                    {labels.next ? `${labels.next.label} ${labels.next.value}` : '\u2014'}
                   </p>
-                  {sub.current_billing_period_start && sub.current_billing_period_end && (
+                  {sub.status !== 'canceled' && sub.current_billing_period_start && sub.current_billing_period_end && (
                     <p className="text-xs text-muted-foreground mt-0.5">
                       Period: {sub.current_billing_period_display}
                     </p>
@@ -806,7 +734,7 @@ export default function SubscriptionDetailPage() {
             <CardTitle className="text-sm">Items ({items.length})</CardTitle>
             {sub.status === 'active' && plansData && (
               <Button size="sm" variant="outline" onClick={() => setItemDialog({ kind: 'add' })}>
-                <Plus size={14} className="mr-1" /> Add Item
+                <Plus size={14} className="mr-1" /> Add item
               </Button>
             )}
           </div>
@@ -822,7 +750,7 @@ export default function SubscriptionDetailPage() {
                 <TableRow>
                   <TableHead>Plan</TableHead>
                   <TableHead className="text-right">Quantity</TableHead>
-                  <TableHead>Pending Change</TableHead>
+                  <TableHead>Pending change</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -876,10 +804,10 @@ export default function SubscriptionDetailPage() {
                         {sub.status === 'active' && (
                           <div className="flex items-center gap-2 justify-end">
                             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setItemDialog({ kind: 'change-quantity', item })}>
-                              Change Qty
+                              Change quantity
                             </Button>
                             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setItemDialog({ kind: 'change-plan', item })}>
-                              Change Plan
+                              Change plan
                             </Button>
                             <Button size="sm" variant="outline" className="h-7 text-xs border-destructive text-destructive hover:bg-destructive/10" onClick={() => setItemDialog({ kind: 'remove', item })}>
                               Remove
@@ -997,25 +925,17 @@ export default function SubscriptionDetailPage() {
                 {formatDate(sub.trial_start_at)} {'\u2014'} {formatDate(sub.trial_end_at)}
               </DetailRow>
             )}
-            {/* Third surface that has to respect a scheduled cancel — the
-                timeline bar and the Billing-cycle summary are the other two.
-                All three keyed off the period end alone, so one page could
-                say "Cancels Sep 1" and "Renews on Sep 1" at the same time. */}
-            {sub.status !== 'trialing' && sub.status !== 'canceled' && sub.current_billing_period_end && (
-              <DetailRow label={sub.cancel_at_period_end || sub.cancel_at ? 'Cancels on' : 'Renews on'} labelClassName="sm:w-40">
-                {formatDate(
-                  sub.cancel_at_period_end || sub.cancel_at
-                    ? sub.cancel_effective_at || sub.cancel_at || sub.current_billing_period_end
-                    : sub.current_billing_period_end,
-                )}
+            {labels.next && sub.status !== 'trialing' && (
+              <DetailRow label={labels.next.label} labelClassName="sm:w-40">
+                {labels.next.value}
               </DetailRow>
             )}
             {/* A trial canceled at trial end never billed its "first paid
                 period" — showing those dates reads as a period that existed.
                 Render the trial range instead (ADR-069). */}
-            {sub.status === 'canceled' && sub.trial_end_at && sub.canceled_at && new Date(sub.canceled_at) <= new Date(sub.trial_end_at) ? (
+            {labels.canceledAtTrialEnd || labels.canceledDuringTrial ? (
               <DetailRow label="Trial" labelClassName="sm:w-40">
-                {formatCivilPeriod(sub.trial_start_at, sub.trial_end_at, undefined) || '\u2014'} — canceled at trial end
+                {formatCivilPeriod(sub.trial_start_at, sub.trial_end_at, undefined) || '\u2014'} — {labels.canceledAtTrialEnd ? 'canceled at trial end' : 'canceled during the trial'}
               </DetailRow>
             ) : (
               <DetailRow label={sub.status === 'trialing' ? 'First billing period' : 'Current period'} labelClassName="sm:w-40">
@@ -1023,7 +943,7 @@ export default function SubscriptionDetailPage() {
               </DetailRow>
             )}
             {sub.usage_cap_units != null && (
-              <DetailRow label="Usage Cap" labelClassName="sm:w-40">
+              <DetailRow label="Usage cap" labelClassName="sm:w-40">
                 <span>{sub.usage_cap_units.toLocaleString()} units / period</span>
                 <span className="text-xs text-muted-foreground">({sub.overage_action === 'block' ? 'hard cap' : 'charge overage'})</span>
               </DetailRow>
@@ -1040,50 +960,87 @@ export default function SubscriptionDetailPage() {
       {/* Invoice Preview. Hidden on terminal subs — a canceled sub has no
           next invoice, and the full-period estimate read as a real upcoming
           charge (found in the FLOW B14 walk: canceled sub advertising $490). */}
-      {sub.status !== 'canceled' && sub.status !== 'archived' && (
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="text-sm">Next Invoice Preview</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {preview ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Quantity</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {preview.lines.map((line, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{line.description}</TableCell>
-                    <TableCell className="text-right tabular-nums">{Number(line.quantity).toLocaleString(undefined, { maximumFractionDigits: 6 })}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCents(line.amount_cents, line.currency)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-              <tfoot>
-                {preview.totals.map(t => (
-                  <TableRow key={t.currency} className="border-t-2">
-                    <TableCell colSpan={2} className="text-right font-semibold">Subtotal{preview.totals.length > 1 ? ` (${t.currency})` : ''}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatCents(t.amount_cents, t.currency)}</TableCell>
-                  </TableRow>
-                ))}
-              </tfoot>
-            </Table>
-          ) : previewError ? (
-            <div className="px-6 py-8 text-center">
-              <p className="text-sm text-muted-foreground">Preview not available</p>
-              <p className="text-sm text-muted-foreground mt-1">Activate the subscription and set a billing period to see a preview</p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground text-center py-8">Invoice preview will appear once a billing period is set</p>
-          )}
-        </CardContent>
-      </Card>
-      )}
+      {sub.status !== 'canceled' && sub.status !== 'archived' && (() => {
+        const view = previewable
+          ? previewView(preview, previewError, firstItemPlan?.currency ?? 'USD')
+          : { kind: 'none' as const, message: 'Activate the subscription to see its next invoice.' }
+        return (
+          <Card className="mt-6">
+            <CardHeader>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <div className="min-w-0">
+                  <CardTitle className="text-sm">Upcoming invoice</CardTitle>
+                  {preview && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {formatCivilPeriod(preview.billing_period_start, preview.billing_period_end, undefined)}
+                      {' · '}estimate as of {formatDateTime(preview.generated_at)}
+                    </p>
+                  )}
+                </div>
+                {(view.kind === 'lines' || view.kind === 'empty') && (
+                  <p className="text-lg font-semibold tabular-nums">
+                    {formatCents(view.total, view.currency)}
+                  </p>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className={view.kind === 'lines' ? 'p-0' : undefined}>
+              {view.kind === 'lines' && preview ? (
+                <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Description</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preview.lines.map((line, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="whitespace-normal">{line.description}</TableCell>
+                        <TableCell className="text-right tabular-nums">{Number(line.quantity).toLocaleString(undefined, { maximumFractionDigits: 6 })}</TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">{formatCents(line.amount_cents, line.currency)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                  {view.multiCurrency && (
+                    <tfoot>
+                      {preview.totals.map(t => (
+                        <TableRow key={t.currency} className="border-t-2">
+                          <TableCell colSpan={2} className="text-right font-semibold">Subtotal ({t.currency})</TableCell>
+                          <TableCell className="text-right font-semibold">{formatCents(t.amount_cents, t.currency)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </tfoot>
+                  )}
+                </Table>
+                {previewNotes && previewNotes.notes.length > 0 && (
+                  <ul className="border-t px-6 py-3 space-y-1 text-xs text-muted-foreground">
+                    {previewNotes.notes.map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                )}
+                </>
+              ) : view.kind === 'empty' ? (
+                <div className="space-y-1">
+                  {(previewNotes?.notes ?? []).map((n, i) => <p key={i} className="text-sm text-muted-foreground">{n}</p>)}
+                </div>
+              ) : view.kind === 'none' ? (
+                <p className="text-sm text-muted-foreground">{view.message}</p>
+              ) : view.kind === 'error' ? (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-muted-foreground">Couldn&apos;t load the upcoming invoice.</p>
+                  <Button size="sm" variant="outline" onClick={() => refetchPreview()} disabled={previewFetching}>
+                    {previewFetching && <Loader2 size={14} className="mr-1.5 animate-spin" />}Retry
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Loading…</p>
+              )}
+            </CardContent>
+          </Card>
+        )
+      })()}
 
       {/* Related Invoices */}
       <Card className="mt-6">
@@ -1276,7 +1233,8 @@ export default function SubscriptionDetailPage() {
         title="Cancel subscription now"
         description={cancelImmediatelyText(sub.status)}
         confirmWord="CANCEL"
-        confirmLabel="Cancel subscription"
+        confirmLabel="Cancel subscription now"
+        cancelLabel="Keep subscription"
         onConfirm={() => cancelMutation.mutate()}
         loading={cancelMutation.isPending}
       />
@@ -1295,10 +1253,10 @@ export default function SubscriptionDetailPage() {
             <AlertDialogTitle>Cancel subscription</AlertDialogTitle>
             <AlertDialogDescription>
               Choose when this subscription should stop billing.
-              {sub.status === 'trialing' && sub.trial_end_at
-                ? <> The trial ends on {formatDate(sub.trial_end_at)}.</>
-                : sub.current_billing_period_end && (
-                  <> The current period ends on {formatDate(sub.current_billing_period_end)}.</>
+              {sub.status === 'trialing' && labels.trialEndsOn
+                ? <> The trial ends on {labels.trialEndsOn}.</>
+                : labels.accessThrough && (
+                  <> The current period runs through {labels.accessThrough}.</>
                 )}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1312,11 +1270,9 @@ export default function SubscriptionDetailPage() {
                 // ADR-069: on a trialing sub the flag cancels FREE at trial
                 // end — say so; the old copy showed the first PAID period's
                 // end date, promising a month the customer would have paid for.
-                sub.status === 'trialing' && sub.trial_end_at
-                  ? `Trial runs until ${formatDate(sub.trial_end_at)}, then the subscription cancels — the customer won't be charged. Reversible until then.`
-                  : sub.current_billing_period_end
-                    ? `Customer keeps access until ${formatDate(sub.current_billing_period_end)}. Reversible until then.`
-                    : 'Customer keeps access until the current period ends. Reversible until then.'
+                sub.status === 'trialing' && labels.trialEndsOn
+                  ? `The trial runs until ${labels.trialEndsOn}, then the subscription cancels and the customer isn't charged. You can undo this until then.`
+                  : cancelAtPeriodEndText(labels)
               }
             />
             <RadioCard
@@ -1394,7 +1350,7 @@ export default function SubscriptionDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Item */}
+      {/* Add item */}
       {itemDialog?.kind === 'add' && plansData && (
         <AddItemDialog
           subscription={sub}
@@ -1448,7 +1404,7 @@ export default function SubscriptionDetailPage() {
         />
       )}
 
-      {/* Remove Item */}
+      {/* Remove item */}
       {itemDialog?.kind === 'remove' && (
         <RemoveItemConfirm
           subscriptionID={sub.id}
@@ -1556,7 +1512,7 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Item</DialogTitle>
+          <DialogTitle>Add item</DialogTitle>
           <DialogDescription>
             Add a plan to this subscription. Added mid-period, it's billed only for the rest of the period.
           </DialogDescription>
@@ -1596,7 +1552,7 @@ function AddItemDialog({ subscription, plans, existingPlanIDs, onClose, onAdded,
             <Button type="submit" disabled={submitting || !selectedPlan}>
               {submitting ? (
                 <><Loader2 size={14} className="animate-spin mr-2" />Adding...</>
-              ) : 'Add Item'}
+              ) : 'Add item'}
             </Button>
           </DialogFooter>
         </form>
@@ -1662,7 +1618,7 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Change Plan</DialogTitle>
+          <DialogTitle>Change plan</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div>
@@ -1673,7 +1629,7 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
           </div>
 
           <div className="space-y-2">
-            <Label>New Plan</Label>
+            <Label>New plan</Label>
             <Combobox
               value={selectedPlan}
               onChange={setSelectedPlan}
@@ -1716,7 +1672,7 @@ function ChangeItemPlanDialog({ subscriptionID, item, plans, existingPlanIDs, on
             <Button type="submit" disabled={submitting || !selectedPlan}>
               {submitting ? (
                 <><Loader2 size={14} className="animate-spin mr-2" />Changing...</>
-              ) : 'Change Plan'}
+              ) : 'Change plan'}
             </Button>
           </DialogFooter>
         </form>
@@ -1769,7 +1725,7 @@ function ChangeItemQuantityDialog({ subscriptionID, item, plan, onClose, onChang
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Change Quantity</DialogTitle>
+          <DialogTitle>Change quantity</DialogTitle>
           <DialogDescription>
             {changeQuantityText(plan?.base_bill_timing)}
           </DialogDescription>
@@ -1843,7 +1799,7 @@ function RemoveItemConfirm({ subscriptionID, item, plan, onClose, onRemoved, onF
         <AlertDialogFooter>
           <AlertDialogCancel disabled={submitting}>Cancel</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={handleConfirm} disabled={submitting}>
-            {submitting ? 'Removing...' : 'Remove Item'}
+            {submitting ? 'Removing...' : 'Remove item'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

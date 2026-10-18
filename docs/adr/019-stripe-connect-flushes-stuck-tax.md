@@ -3,6 +3,10 @@
 **Status:** Accepted
 **Date:** 2026-05-04
 
+## Summary
+
+When an operator connects Stripe (`POST /v1/settings/stripe`), Velox retries tax on every draft invoice stuck on `provider_not_configured` or `provider_auth` in that mode, because connecting means the credentials are fixed. The response returns the count as `retries_queued`. A background goroutine with a 5-minute limit runs each retry through `Service.RetryTax`, which also finalizes invoices the engine made ([ADR-017](017-tax-retry-and-auto-finalize.md)). There is no durable queue: if the process stops mid-run, connecting again or a per-invoice Retry tax finishes the job. Status: active.
+
 ## Context
 
 Two earlier ADRs frame this:

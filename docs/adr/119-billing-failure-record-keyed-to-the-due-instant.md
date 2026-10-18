@@ -316,4 +316,4 @@ invoice.
   [ADR-115](115-one-closer-for-the-billing-period.md): the leader lease and the period
   compare-and-swap that exactly-once billing rests on.
 - Migration `0176_subscription_billing_failure`.
-- Runbook: [14. Subscriptions whose billing is failing](../ops/runbook.md#14-subscriptions-whose-billing-is-failing).
+- Runbook: [14. Subscriptions whose billing is failing](../ops/runbook/billing-failing.md).

@@ -1,7 +1,11 @@
 # ADR-023: Post-decline rendering — one banner, distinct emails, interactive suppression
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-11)
 **Date:** 2026-05-05
+
+## Summary
+
+Each moment after a failed payment has its own email and its own timeline label. A finalized invoice with no card sends `payment_setup_request`, and a declined charge sends `payment_failed`, which links to the hosted invoice page. The invoice page shows one attention banner for a decline, with Update payment method and Retry payment. A decline on the hosted Pay page sends no email, because the customer already sees the error. Amended 2026-10-11: such a hosted-page decline also no longer marks the invoice failed or starts dunning; only its own charge-attempt row records it. Status: active, amended.
 
 ## Context
 

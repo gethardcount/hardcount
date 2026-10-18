@@ -308,7 +308,7 @@ export default function MeterDetailPage() {
             <div>
               <CardTitle className="text-sm">Prices for specific values</CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Each prices the events whose values match, such as model = gpt-4. Higher priority matches first.
+                Each prices the events whose values match, such as model = gpt-4. When an event matches more than one, the higher priority prices it.
               </p>
             </div>
             <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -328,7 +328,7 @@ export default function MeterDetailPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-xs font-medium w-20">Priority</TableHead>
-                  <TableHead className="text-xs font-medium">Dimension match</TableHead>
+                  <TableHead className="text-xs font-medium">Only for events with these values</TableHead>
                   <TableHead className="text-xs font-medium w-40">Aggregation</TableHead>
                   <TableHead className="text-xs font-medium">Price</TableHead>
                   <TableHead className="text-xs font-medium w-12 text-right" />
@@ -643,7 +643,7 @@ function CreatePricingRuleDialog({
 
         <div className="space-y-5">
           <div>
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Dimension match</Label>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Only for events with these values</Label>
             <div className="space-y-2 mt-2">
               {dimensions.map((row, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -731,7 +731,7 @@ function CreatePricingRuleDialog({
                 onChange={(e) => setPriority(parseInt(e.target.value || '0', 10) || 0)}
                 className="mt-2 font-mono"
               />
-              <p className="text-xs text-muted-foreground mt-1">Higher priority claims events first.</p>
+              <p className="text-xs text-muted-foreground mt-1">When an event matches more than one price, the higher number prices it.</p>
             </div>
           </div>
 

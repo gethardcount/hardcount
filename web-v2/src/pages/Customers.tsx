@@ -213,9 +213,9 @@ export default function CustomersPage() {
     <Layout>
       {/* Page header. Wraps on a phone so the actions stay on screen. */}
       <div className="flex flex-wrap justify-between items-center gap-3">
-        <div>
+        <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Customers</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage customers and billing profiles{total > 0 ? ` · ${total} total` : ''}</p>
+          <p className="text-sm text-muted-foreground mt-1">The people and companies you bill. Open one to see their subscriptions, invoices and credits{total > 0 ? ` · ${total} total` : ''}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {total > 0 && (
@@ -226,7 +226,7 @@ export default function CustomersPage() {
           )}
           <Button size="sm" onClick={() => setShowCreate(true)}>
             <Plus size={16} className="mr-2" />
-            Add Customer
+            Add customer
           </Button>
         </div>
       </div>
@@ -296,7 +296,7 @@ export default function CustomersPage() {
                 title="No customers yet"
                 description="Add your first customer to start billing."
                 action={{
-                  label: 'Add Customer',
+                  label: 'Add customer',
                   icon: Plus,
                   onClick: () => setShowCreate(true),
                 }}
@@ -423,16 +423,16 @@ export default function CustomersPage() {
         </CardContent>
       </Card>
 
-      {/* Create Customer Dialog */}
+      {/* Create customer Dialog */}
       <Dialog open={showCreate} onOpenChange={(open) => {
         setShowCreate(open)
         if (!open) { form.reset() }
       }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Create Customer</DialogTitle>
+            <DialogTitle>Create customer</DialogTitle>
             <DialogDescription>
-              Add a new customer to start billing. The external ID is your unique identifier.
+              Add someone you want to bill.
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
@@ -442,7 +442,7 @@ export default function CustomersPage() {
                 name="display_name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Display Name</FormLabel>
+                    <FormLabel>Display name</FormLabel>
                     <FormControl>
                       <Input placeholder="Acme Corporation" maxLength={255} {...field} />
                     </FormControl>
@@ -460,7 +460,7 @@ export default function CustomersPage() {
                       <Input placeholder="acme_corp" maxLength={100} className="font-mono" {...field} />
                     </FormControl>
                     <FormDescription>
-                      Only letters, numbers, hyphens, and underscores
+                      Your own ID for this customer, e.g. the user ID in your database. Your app can send usage with it. Letters, numbers, hyphens and underscores.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -528,7 +528,7 @@ export default function CustomersPage() {
                       Creating...
                     </>
                   ) : (
-                    'Create Customer'
+                    'Create customer'
                   )}
                 </Button>
               </DialogFooter>

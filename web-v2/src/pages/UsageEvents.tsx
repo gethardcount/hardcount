@@ -1,20 +1,27 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, formatDateTime } from '@/lib/api'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
-import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_ROWS, exportCapNotice, parseRange, rangeCaption, windowQueryBounds, usageEmptyKind, needsAnyEventCheck } from '@/lib/usageRange'
-import type { Customer, Meter, UsageEvent, UsageEventsAggregate } from '@/lib/api'
-import { downloadCSV } from '@/lib/csv'
+import { RANGES, RANGE_KEYS, DEFAULT_RANGE, EXPORT_MAX_DAYS, parseDimensionFilter, parseRange, rangeCaption, windowQueryBounds, usageEmptyKind, usageExportWindow, needsAnyEventCheck } from '@/lib/usageRange'
+import type { Customer, Meter, UsageEvent, UsageEventsAggregate, UsageMeterTotal } from '@/lib/api'
+import { downloadServerCSV } from '@/lib/csv'
 import { formatQuantity, quantityWithUnit } from '@/lib/usageQuantity'
 import { usageNoneYet } from '@/lib/homeNotices'
+import { formatYMDInTZ, startOfDayInTZ, endOfDayInTZ } from '@/lib/dates'
+import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { toast } from 'sonner'
 import { TestClockBadge } from '@/components/TestClockBadge'
+import { HeldUsageNotice } from '@/components/HeldUsageNotice'
 import { cn } from '@/lib/utils'
+import { fillDays, meterModeBadge, meterValueCaption, sparklinePoints } from '@/lib/usageSummary'
+import { KpiStrip } from '@/components/page/KpiStrip'
+import { Section } from '@/components/page/Section'
+import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { DatePicker } from '@/components/ui/date-picker'
@@ -36,7 +43,7 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination'
 
-import { Download, Activity, Hash, Gauge, Users } from 'lucide-react'
+import { Download, Activity } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { TableSkeleton } from '@/components/ui/TableSkeleton'
 import { useUrlState } from '@/hooks/useUrlState'
@@ -44,6 +51,7 @@ const PAGE_SIZE = 25
 
 export default function UsageEventsPage() {
   usePageTitle('Usage events')
+  const queryClient = useQueryClient()
   const [urlState, setUrlState] = useUrlState({
     customer: '',
     meter: '',
@@ -55,6 +63,9 @@ export default function UsageEventsPage() {
   })
   const { customer: filterCustomer, meter: filterMeter, from: filterFrom, to: filterTo, dim: filterDim } = urlState
   const range = parseRange(urlState.range)
+  // Stable so the dimension box's 400ms wait is not restarted by unrelated
+  // re-renders (data arriving) while the operator types.
+  const commitDim = useCallback((v: string) => setUrlState({ dim: v, page: '1' }), [setUrlState])
 
   // The window is memoised on the filters AND the tenant timezone. On a cold
   // load the page renders before /v1/settings arrives, so the first bounds use
@@ -70,6 +81,9 @@ export default function UsageEventsPage() {
     [range, filterFrom, filterTo, tz],
   )
   const activeWindow = bounds.window
+  // The sparklines end on today in the tenant zone when the window has no
+  // end date (fillDays). Like the bounds, it is recomputed when tz changes.
+  const today = useMemo(() => formatYMDInTZ(new Date(wallClockNow()).toISOString(), tz), [tz])
   const { from: fromInstant, to: toInstant } = bounds
   const page = Math.max(1, parseInt(urlState.page) || 1)
   const [events, setEvents] = useState<UsageEvent[]>([])
@@ -154,9 +168,11 @@ export default function UsageEventsPage() {
   // breakdown. Same filter scope as the events table but no limit/offset
   // — page navigation must NOT shift the totals (issue #7). Decimal
   // precision is preserved end-to-end via string-encoded NUMERIC(38,12).
+  // tz (the tenant timezone, above) buckets each meter's daily sparkline by
+  // the tenant's calendar day, the same days the date filters use.
   const { data: aggregate } = useQuery<UsageEventsAggregate>({
-    queryKey: ['usage-events-aggregate', filterQs],
-    queryFn: () => api.aggregateUsageEvents(filterQs || undefined),
+    queryKey: ['usage-events-aggregate', filterQs, tz],
+    queryFn: () => api.aggregateUsageEvents([filterQs, `tz=${encodeURIComponent(tz)}`].filter(Boolean).join('&')),
   })
 
   // Empty page under a time window: does the workspace have any event at
@@ -192,77 +208,37 @@ export default function UsageEventsPage() {
     [events, filterDim],
   )
 
-  // Meter breakdown enriched with display name + unit from the customer's
-  // meter list (the aggregate endpoint deliberately returns IDs only —
-  // joining client-side avoids a JOIN at SQL time and keeps the response
-  // tight). pct is computed from total_units so the bar sums to 100%.
-  const meterBreakdown = useMemo(() => {
+  // One row per meter, in its own unit and under its own aggregation (the
+  // server computes `value`). Sorted by name: values in different units
+  // have no common order.
+  const meterRows = useMemo(() => {
     const rows = aggregate?.by_meter ?? []
-    const grandTotal = Number(aggregate?.total_units ?? '0')
-    return rows.map(r => {
-      const totalNum = Number(r.total)
-      return {
-        id: r.meter_id,
-        name: meterMap[r.meter_id]?.name || r.meter_id.slice(0, 12) + '...',
-        unit: meterMap[r.meter_id]?.unit || 'unit',
-        total: r.total,
-        totalNum,
-        pct: grandTotal > 0 ? (totalNum / grandTotal) * 100 : 0,
-      }
-    })
+    return rows
+      .map(r => ({ ...r, meter: meterMap[r.meter_id] as Meter | undefined }))
+      .sort((a, b) => (a.meter?.name ?? a.meter_id).localeCompare(b.meter?.name ?? b.meter_id))
   }, [aggregate, meterMap])
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
-  // Export pages through ALL filtered events (capped), not just the server's
-  // default page — pre-fix this called listUsageEvents with no limit and silently
-  // truncated the CSV to one page.
-  //
-  // This does NOT mirror AuditLog.tsx any more: that export became a SERVER-side
-  // stream with no cap (GET /v1/exports/audit-log.csv, ADR-090 §7) precisely
-  // because a browser page-walk with a row cap hands the operator a file that
-  // looks complete and is not. This page still page-walks, and still caps at
-  // EXPORT_MAX_ROWS — the same latent truncation, on a smaller artifact. Use
-  // /v1/exports/usage-events.csv (server-side, uncapped, snapshot-consistent)
-  // when that matters; wiring this button to it is the obvious follow-up.
-  // When the cap is hit the operator is told (exportCapNotice), using the
-  // filtered total the first page reports.
-  const EXPORT_PAGE_SIZE = 1000
+  // Export streams from the server (GET /v1/exports/usage-events.csv) with
+  // the page's filters: every matching row, uncapped, with event ids,
+  // customer and meter ids and ISO 8601 timestamps. One file covers at most
+  // 365 days; when the window is longer (or All time) the file holds the
+  // last 365 days and a toast says where it starts.
   const handleExport = async () => {
     setExporting(true)
     try {
-      const all: UsageEvent[] = []
-      let offset = 0
-      let matching = 0
-      while (all.length < EXPORT_MAX_ROWS) {
-        const parts = [`limit=${EXPORT_PAGE_SIZE}`, `offset=${offset}`]
-        if (filterQs) parts.push(filterQs)
-        const res = await api.listUsageEvents(parts.join('&'))
-        const batch = res.data || []
-        if (offset === 0) matching = res.total || 0
-        all.push(...batch)
-        if (batch.length < EXPORT_PAGE_SIZE) break
-        offset += EXPORT_PAGE_SIZE
+      const win = usageExportWindow(activeWindow, today)
+      const parts = [`from=${encodeURIComponent(startOfDayInTZ(win.from, tz))}`, `to=${encodeURIComponent(endOfDayInTZ(win.to, tz))}`]
+      if (filterCustomer) parts.push(`customer_id=${encodeURIComponent(filterCustomer)}`)
+      if (filterMeter) parts.push(`meter_id=${encodeURIComponent(filterMeter)}`)
+      if (filterDim) parts.push(`dimensions=${encodeURIComponent(filterDim)}`)
+      await downloadServerCSV(`/v1/exports/usage-events.csv?${parts.join('&')}`, 'usage-events.csv')
+      if (win.clamped) {
+        toast.info(`Exported ${win.from} to ${win.to}`, {
+          description: `One export covers up to ${EXPORT_MAX_DAYS} days. Pick a custom range to export earlier events.`,
+        })
       }
-      // Resolve names for exactly the exported rows via ids= (the old
-      // full-list fetch was itself capped at 50 — exported rows beyond
-      // it fell back to raw IDs anyway).
-      const exportIds = Array.from(new Set(all.map(ev => ev.customer_id).filter(Boolean)))
-      const nameById: Record<string, string> = {}
-      if (exportIds.length > 0) {
-        const res = await api.listCustomers(`ids=${exportIds.join(',')}&limit=${exportIds.length}`)
-        res.data.forEach(c => { nameById[c.id] = c.display_name })
-      }
-      const rows = all.slice(0, EXPORT_MAX_ROWS).map(ev => [
-        formatDateTime(ev.timestamp),
-        nameById[ev.customer_id] || customerMap[ev.customer_id]?.display_name || ev.customer_id,
-        meterMap[ev.meter_id]?.name || ev.meter_id,
-        ev.quantity,
-        ev.dimensions && Object.keys(ev.dimensions).length > 0 ? JSON.stringify(ev.dimensions) : '',
-      ])
-      downloadCSV('usage-events.csv', ['Timestamp', 'Customer', 'Meter', 'Value', 'Dimensions'], rows)
-      const capped = exportCapNotice(matching)
-      if (capped) toast.warning(capped.title, { description: capped.description })
     } catch (err) {
       showApiError(err, 'Export failed')
     } finally {
@@ -270,32 +246,22 @@ export default function UsageEventsPage() {
     }
   }
 
-  // Stat-card values come from the server-side aggregate so that they
-  // reflect ALL filtered rows, not just the current page. Pagination
-  // must not shift these numbers (issue #7). total_units is formatted from
-  // the decimal string (separators, trailing zeros dropped, never through a
-  // float); the integer counts pass through .toLocaleString().
+  // Headline counts come from the server-side aggregate so they reflect
+  // ALL filtered rows, not the current page (issue #7). There is no
+  // cross-meter unit total: tokens, calls and GB don't add up.
   const totalEvents = aggregate?.total_events ?? total
-  const totalUnitsDisplay = aggregate ? formatQuantity(aggregate.total_units) : '—'
   const activeMeters = aggregate?.active_meters ?? 0
   const activeCustomers = aggregate?.active_customers ?? 0
 
   const scopeCaption = rangeCaption(range, activeWindow)
 
-  const statCards = [
-    { label: 'Total Events', value: totalEvents.toLocaleString(), icon: Activity, color: 'text-primary' },
-    { label: 'Total Units', value: totalUnitsDisplay, icon: Hash, color: 'text-blue-600' },
-    { label: 'Active Meters', value: activeMeters.toLocaleString(), icon: Gauge, color: 'text-amber-600' },
-    { label: 'Active Customers', value: activeCustomers.toLocaleString(), icon: Users, color: 'text-emerald-600' },
-  ]
-
   return (
     <Layout>
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Usage Events</h1>
-          <p className="text-sm text-muted-foreground mt-1">Track and analyze usage across customers and meters</p>
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <div className="min-w-0 flex-1 basis-72">
+          <h1 className="text-2xl font-semibold text-foreground">Usage</h1>
+          <p className="text-sm text-muted-foreground mt-1">What each customer used, as your app reported it. Velox adds it up and prices it on their invoices.</p>
         </div>
         {total > 0 && (
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
@@ -305,10 +271,23 @@ export default function UsageEventsPage() {
         )}
       </div>
 
+      {/* Usage LiteLLM sent for a customer or meter that does not exist yet:
+          kept, not billed, until released (#1044). */}
+      <HeldUsageNotice
+        className="mt-6"
+        onReleased={() => {
+          // Released rows are usage events now: refresh the list and the totals.
+          loadEvents()
+          queryClient.invalidateQueries({ queryKey: ['usage-events-aggregate'] })
+        }}
+      />
+
       {/* Filter bar */}
       {/* Wraps: 'custom' adds two date pickers, and six controls overflow a
           1440px viewport, clipping the dimension field. */}
-      <div className="flex flex-wrap items-center gap-3 mt-6">
+      {/* items-start: the dimension hint grows its own column only, so the
+          other filters stay put when it appears. */}
+      <div className="flex flex-wrap items-start gap-3 mt-6">
         <div className="w-52">
           <CustomerCombobox
             value={filterCustomer}
@@ -356,13 +335,7 @@ export default function UsageEventsPage() {
             />
           </>
         )}
-        <input
-          type="text"
-          value={filterDim}
-          onChange={(e) => setUrlState({ dim: e.target.value, page: '1' })}
-          placeholder="dimension (e.g. model=gpt-4)"
-          className="flex h-9 w-56 rounded-md border border-input bg-transparent px-3 py-1 text-sm font-mono shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring placeholder:text-muted-foreground placeholder:font-sans"
-        />
+        <DimensionFilter value={filterDim} onCommit={commitDim} />
       </div>
 
       {error ? (
@@ -408,49 +381,34 @@ export default function UsageEventsPage() {
               operator lands on the 30-day default. */}
           <p className="text-xs text-muted-foreground mt-6">{scopeCaption}</p>
 
-          {/* Stat cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-            {statCards.map(card => (
-              <Card key={card.label}>
-                <CardContent className="px-5 py-4">
-                  <div className="flex items-center gap-3">
-                    <div className={cn('p-2 rounded-lg bg-muted', card.color)}>
-                      <card.icon size={18} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground">{card.label}</p>
-                      <p className="text-xl font-semibold text-foreground tabular-nums mt-0.5">{card.value}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <KpiStrip
+            className="mt-2"
+            items={[
+              { label: 'Events', value: totalEvents.toLocaleString() },
+              { label: 'Meters with usage', value: activeMeters.toLocaleString() },
+              { label: 'Customers with usage', value: activeCustomers.toLocaleString() },
+            ]}
+          />
 
-          {/* Meter breakdown */}
-          {meterBreakdown.length > 0 && (
-            <Card className="mt-6">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Usage by Meter</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {meterBreakdown.map(m => (
-                  <div key={m.id} className="flex items-center gap-3">
-                    <span className="text-sm text-foreground w-32 shrink-0 truncate" title={m.name}>{m.name}</span>
-                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full bg-primary rounded-full" style={{ width: `${m.pct}%` }} />
-                    </div>
-                    <span className="text-sm font-medium text-foreground tabular-nums shrink-0 text-right">{quantityWithUnit(m.total, m.unit)}</span>
-                  </div>
+          {meterRows.length > 0 && (
+            <Section
+              className="mt-6"
+              title="Usage by meter"
+              description="Each meter in its own unit and aggregation. Maximum and Latest value take one reading per customer in this window; billing takes one per billing period."
+              flush
+            >
+              <ul className="divide-y divide-border">
+                {meterRows.map(r => (
+                  <MeterSummaryRow key={r.meter_id} row={r} meter={r.meter} from={activeWindow.from} to={activeWindow.to} today={today} />
                 ))}
-              </CardContent>
-            </Card>
+              </ul>
+            </Section>
           )}
 
           {/* Events table */}
           <Card className="mt-6">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Event Log</CardTitle>
+              <CardTitle className="text-sm">Event log</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
@@ -566,5 +524,101 @@ export default function UsageEventsPage() {
         </>
       )}
     </Layout>
+  )
+}
+
+// MeterSummaryRow is one meter on the Usage page: name and aggregation,
+// the value in the meter's unit with a caption saying what it is, and a
+// daily sparkline over the selected window.
+function MeterSummaryRow({ row, meter, from, to, today }: { row: UsageMeterTotal; meter?: Meter; from?: string; to?: string; today: string }) {
+  const name = meter?.name ?? row.meter_id
+  const unit = row.aggregation === 'count' ? 'event' : (meter?.unit ?? '')
+  const values = fillDays(row.daily ?? [], from || undefined, to || undefined, today)
+  const W = 160
+  const H = 32
+  // A single day has no shape to draw.
+  const points = values.length > 1 ? sparklinePoints(values, W, H) : ''
+  return (
+    <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
+      <div className="min-w-0 sm:w-56 sm:shrink-0">
+        {/* The full name wraps; a cut-off name could not be read anywhere. */}
+        <div className="flex items-start gap-2">
+          {meter ? (
+            <Link to={`/meters/${meter.id}`} className="min-w-0 break-words text-sm font-medium text-foreground hover:underline">{name}</Link>
+          ) : (
+            <span className="min-w-0 break-words text-sm font-medium text-foreground">{name}</span>
+          )}
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">{meterModeBadge(row.aggregation)}</span>
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {row.events.toLocaleString()} {row.events === 1 ? 'event' : 'events'} · {row.customers.toLocaleString()} {row.customers === 1 ? 'customer' : 'customers'}
+        </p>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-lg font-semibold tabular-nums text-foreground">{quantityWithUnit(row.value, unit)}</p>
+        <p className="text-xs text-muted-foreground">{meterValueCaption(row.aggregation, row.customers)}</p>
+      </div>
+      {points && (
+        <svg
+          width={W}
+          height={H}
+          viewBox={`-1 -2 ${W + 2} ${H + 4}`}
+          className="shrink-0 text-primary"
+          role="img"
+          aria-label={`${name}: daily usage, ${values.length} days`}
+        >
+          <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+      )}
+    </li>
+  )
+}
+
+// DimensionFilter keeps what the operator types locally and sends it to the
+// URL (and the server) only after typing pauses and the text is valid
+// key=value pairs. A half-typed "model" shows an inline hint instead of
+// replacing the page with a load error.
+function DimensionFilter({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value)
+  const [error, setError] = useState('')
+  // Follow outside changes (Clear filters, back button): adjust during
+  // render when the committed value moves.
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(value)
+    setError('')
+  }
+  useEffect(() => {
+    if (draft === value) return
+    const t = setTimeout(() => {
+      const parsed = parseDimensionFilter(draft)
+      if (parsed.ok) {
+        setError('')
+        if (parsed.value !== value) onCommit(parsed.value)
+      } else {
+        setError(parsed.error)
+      }
+    }, 400)
+    return () => clearTimeout(t)
+  }, [draft, value, onCommit])
+  return (
+    <div className="w-64">
+      <label htmlFor="usage-dimension-filter" className="sr-only">Dimension filter</label>
+      <input
+        id="usage-dimension-filter"
+        type="text"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        placeholder="Dimension, e.g. model=gpt-4o"
+        aria-invalid={!!error}
+        aria-describedby={error ? 'usage-dimension-error' : undefined}
+        className={cn(
+          'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm font-mono shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring placeholder:text-muted-foreground placeholder:font-sans',
+          error && 'border-danger focus-visible:ring-danger',
+        )}
+      />
+      {error && <p id="usage-dimension-error" className="mt-1 text-xs text-danger-foreground">{error}</p>}
+    </div>
   )
 }

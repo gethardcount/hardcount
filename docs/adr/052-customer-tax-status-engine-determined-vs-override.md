@@ -3,6 +3,10 @@
 **Date:** 2026-06-15
 **Status:** Accepted
 
+## Summary
+
+The tax engine decides a customer's tax treatment by default. For B2B reverse charge, the operator leaves the customer `standard` and adds a tax ID, and Stripe Tax applies reverse charge only where it is valid (cross-border sales). The `reverse_charge` and `exempt` statuses stay as manual overrides that always force zero tax, and they are the only option with the `manual` and `none` providers. When `reverse_charge` is set on a customer in the seller's own country, Velox logs a warning but does not block the invoice. Status: active.
+
 ## Context
 
 The customer billing-profile tax override (`customer_billing_profiles.tax_status` ∈ `standard | exempt | reverse_charge`, plus `tax_id` / `tax_id_type` / `tax_exempt_reason`) was audited end-to-end. The data model is sound and matches industry, but the **interaction between the manual `reverse_charge` flag and the tax engine** had a real correctness gap.

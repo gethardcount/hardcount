@@ -1,6 +1,6 @@
 # ADR-104: One activity lane — the entity's calendar
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-07-29)
 **Date:** 2026-07-29
 **Supersedes:** the invoice page's two-lane timeline (the "Real-time
 activity" card and its classification rules; #649's constant-identity

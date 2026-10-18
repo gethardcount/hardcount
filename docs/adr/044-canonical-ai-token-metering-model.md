@@ -4,6 +4,10 @@
 **Date:** 2026-06-01
 **Related:** ADR-033 (LiteLLM spend adapter), multi-dimensional metering (`internal/usage` `AggregateByPricingRules`), pricing recipes (`internal/recipe`), `project_positioning_wedge.md`
 
+## Summary
+
+All AI token usage is metered on one `tokens` meter (aggregation `sum`), with the token role in a `token_type` dimension: `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`, and more as needed. `model` and `provider` are dimensions too, and prices are pricing rules on that meter that match `{model, token_type}`, so a new model or role adds rules, never meters. Each ingestion mapper must turn a provider's counts into separate, non-overlapping roles (input is prompt tokens minus cached tokens), so the rating engine only sums. Today the LiteLLM mapper emits `input`, `output` and `cache_read`, and no cache-write role, because LiteLLM does not report the 5-minute and 1-hour split. Cache-write tokens bill as `input` only when LiteLLM counts them in prompt tokens, as it does for Anthropic and Bedrock. Status: active.
+
 ## Context
 
 Velox has two incompatible shapes for LLM token usage today, and they don't connect:

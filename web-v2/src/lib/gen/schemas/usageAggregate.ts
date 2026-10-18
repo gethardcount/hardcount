@@ -11,7 +11,11 @@ import type { UsageAggregateByMeterItem } from './usageAggregateByMeterItem';
 
 export interface UsageAggregate {
   total_events: number;
-  /** Sum of all matching quantities across meters, as a decimal string. */
+  /**
+     * Sum of all matching quantities across meters, as a decimal
+     * string. It adds different units and ignores each meter's
+     * aggregation; use `by_meter[].value` instead.
+     */
   total_units: string;
   /** Distinct meters among the matching events. */
   active_meters: number;

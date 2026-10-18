@@ -6,6 +6,10 @@
 `Coupons.tsx` / `CouponDetail.tsx`, migrations 0025 / 0042-0046)
 shipped between Week 4 and Week 8.
 
+## Summary
+
+Coupons are removed: the `internal/coupon` package, its API endpoints, its billing-engine hooks and its dashboard pages were deleted. Velox targets AI and usage-based billing, where peers use credits rather than promo codes, and the credit ledger already covers every discount need seen so far. The `coupons`, `coupon_redemptions` and `customer_discounts` tables stay, so a rebuild can start from them if a signed design partner needs promo codes. Status: active.
+
 ## Context
 
 Velox positions as an **AI-native billing engine you can self-host**.

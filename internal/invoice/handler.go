@@ -110,11 +110,6 @@ type DunningResolver interface {
 	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
 
-// WebhookEventLister lists webhook events for payment timeline.
-type WebhookEventLister interface {
-	ListByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.StripeWebhookEvent, error)
-}
-
 // DunningTimelineFetcher fetches dunning data for payment timeline.
 type DunningTimelineFetcher interface {
 	ListRunsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDunningRun, error)
@@ -226,10 +221,8 @@ type Handler struct {
 	paymentSetups   PaymentSetupGetter
 	paymentCancel   PaymentCanceler
 	dunning         DunningResolver
-	webhookEvents   WebhookEventLister
 	emailEvents     EmailEventLister
 	dunningTimeline DunningTimelineFetcher
-	events          domain.EventDispatcher
 	emailSender     EmailSender
 	refundIssuer    RefundIssuer
 	auditLogger     auditWriter
@@ -258,10 +251,8 @@ type HandlerDeps struct {
 	PaymentSetups   PaymentSetupGetter
 	PaymentCancel   PaymentCanceler
 	Dunning         DunningResolver
-	WebhookEvents   WebhookEventLister
 	EmailEvents     EmailEventLister
 	DunningTimeline DunningTimelineFetcher
-	Events          domain.EventDispatcher
 	RefundIssuer    RefundIssuer
 }
 
@@ -273,10 +264,8 @@ func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter,
 		h.paymentSetups = deps[0].PaymentSetups
 		h.paymentCancel = deps[0].PaymentCancel
 		h.dunning = deps[0].Dunning
-		h.webhookEvents = deps[0].WebhookEvents
 		h.emailEvents = deps[0].EmailEvents
 		h.dunningTimeline = deps[0].DunningTimeline
-		h.events = deps[0].Events
 		h.refundIssuer = deps[0].RefundIssuer
 	}
 	return h
@@ -308,7 +297,7 @@ func (h *Handler) SetCollector(c Collector) { h.collector = c }
 // SetEmailEvents wires the email_outbox lister used by the timeline
 // to surface customer-notification events. Optional — when nil, the
 // timeline omits the email rows but the rest of it (lifecycle,
-// stripe webhooks, dunning) renders unchanged.
+// charge attempts, credit notes, dunning) renders unchanged.
 func (h *Handler) SetEmailEvents(lister EmailEventLister) {
 	h.emailEvents = lister
 }
@@ -316,9 +305,6 @@ func (h *Handler) SetEmailEvents(lister EmailEventLister) {
 // SetAuditLogger configures audit logging for financial operations.
 func (h *Handler) SetAuditLogger(l auditWriter) { h.auditLogger = l }
 
-// fireEvent dispatches a webhook event. Synchronous: with the outbox
-// (RES-1) Dispatch is a short DB insert that must persist-before-return,
-// and logging any failure is preferred to silently losing the event.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)
@@ -904,6 +890,12 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		respond.BadRequest(w, r, "email is required")
 		return
 	}
+	// The To address gets the same check as a customer's stored email.
+	to, err := domain.ValidateEmail("email", body.Email)
+	if err != nil {
+		respond.FromError(w, r, err, "invoice_email")
+		return
+	}
 
 	inv, items, err := h.svc.GetWithLineItems(r.Context(), tenantID, id)
 	if errors.Is(err, errs.ErrNotFound) {
@@ -934,7 +926,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// 2026-07-29 walk caught after the anchor shipped.
 	ctx := h.svc.bindForInvoice(r.Context(), tenantID, inv.ID)
 
-	cc, err := resolveSendCC(ctx, h.customers, tenantID, inv.CustomerID, body.Email, body.AdditionalEmails)
+	cc, err := resolveSendCC(ctx, h.customers, tenantID, inv.CustomerID, to, body.AdditionalEmails)
 	if err != nil {
 		respond.FromError(w, r, err, "invoice_email")
 		return
@@ -955,7 +947,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// AmountDueCents, not Total: the email template labels this figure
 	// "Amount due", and credits/partial payments make the two differ —
 	// telling a customer they owe the pre-credit total is wrong.
-	if err := h.emailSender.SendInvoice(ctx, tenantID, body.Email, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken); err != nil {
+	if err := h.emailSender.SendInvoice(ctx, tenantID, to, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken); err != nil {
 		// Sanitize at the boundary — SMTP errors / outbox-store errors
 		// would otherwise leak to the operator toast. ADR-026.
 		respond.FromError(w, r, err, "invoice_email")
@@ -1911,6 +1903,10 @@ func describeDunningEvent(eventType, reason string, attemptCount int) (desc, sta
 			// — claimed here it would assert a send this function
 			// can't see.
 			return desc, "scheduled", "No payment method"
+		case domain.DunningRetryReasonCardRefused:
+			// Nothing was charged either: the bank had refused the default
+			// card for good on this invoice, and the retry skipped it (#966).
+			return desc, "scheduled", "Not charged: the bank refused this card, so a different card is needed"
 		}
 		return desc, "processing", ""
 	case "resolved":
@@ -1988,6 +1984,10 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 
 	var events []timelineEvent
 
+	// Lane-degradation disclosure (2026-07-19 audit, finding 4): a
+	// side-lane fetch failure used to be swallowed (`if err == nil`) — the
+	// lane silently vanished, and a timeline missing its dunning rows is
+	// indistinguishable from an invoice that never saw dunning. The core
 	// lifecycle rows come from the invoice row itself (a failure there
 	// 500s above); side lanes degrade LOUDLY instead: named in `degraded`,
 	// logged, and bannered by the UI. `truncated` discloses the one capped
@@ -2122,11 +2122,6 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Lane-degradation disclosure (2026-07-19 audit, finding 4): a
-	// side-lane fetch failure used to be swallowed (`if err == nil`) — the
-	// lane silently vanished, and a timeline missing its dunning rows is
-	// indistinguishable from an invoice that never saw dunning. The core
-
 	// Credit-note chronology rows. The settlement waterfall on the page
 	// already shows credit notes channel-by-channel; these rows give the
 	// SAME facts a place in the chronology ("Invoice paid" then silence
@@ -2193,6 +2188,14 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 						if !full {
 							desc = "Credit note issued — card refund pending"
 						}
+					case domain.RefundUnknown:
+						// Stripe gave no clear answer (#965). "Not processed"
+						// would say nothing moved, which invites a second
+						// refund by hand; the customer may already be refunded.
+						desc = "Refund result unknown"
+						if !full {
+							desc = "Credit note issued — card refund result unknown"
+						}
 					default:
 						desc = "Refund not processed"
 						if !full {
@@ -2218,8 +2221,9 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 					case domain.RefundFailed:
 						cnStatus = "failed"
 					default:
-						// pending, and none-with-allocation ("not
-						// processed"): money has not moved — never green.
+						// pending, unknown, and none-with-allocation ("not
+						// processed"): money has not been seen to move —
+						// never green.
 						cnStatus = "pending"
 					}
 				}

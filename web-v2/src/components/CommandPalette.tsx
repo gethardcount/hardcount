@@ -3,10 +3,12 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import {
-  LayoutDashboard, Users, FileText, CreditCard, Tag, Wallet, Settings,
-  Receipt, AlertTriangle, ScrollText, Globe, Key, BarChart3,
-  User, Hash, Zap, type LucideIcon,
+  FileText, User, Hash, Zap, type LucideIcon,
 } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { allNavItems, isTestMode } from '@/lib/navigation'
+import { invoiceStatus } from '@/lib/statusLabels'
+import { wallClockNow } from '@/lib/effectiveNow'
 import { api, type Customer, type Invoice, type Plan, type Subscription, formatCents } from '@/lib/api'
 import {
   Command,
@@ -32,24 +34,29 @@ interface NavItem {
   href: string
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { id: 'nav-dashboard', title: 'Dashboard', subtitle: 'Overview & analytics', icon: LayoutDashboard, href: '/' },
-  { id: 'nav-customers', title: 'Customers', subtitle: 'Manage customers', icon: Users, href: '/customers' },
-  { id: 'nav-invoices', title: 'Invoices', subtitle: 'View invoices', icon: FileText, href: '/invoices' },
-  { id: 'nav-subscriptions', title: 'Subscriptions', subtitle: 'Manage subscriptions', icon: CreditCard, href: '/subscriptions' },
-  { id: 'nav-usage', title: 'Usage Events', subtitle: 'Usage metering', icon: BarChart3, href: '/usage' },
-  { id: 'nav-pricing', title: 'Pricing', subtitle: 'Plans, meters, rules', icon: Tag, href: '/pricing' },
-  { id: 'nav-credits', title: 'Credits', subtitle: 'Customer credits', icon: Wallet, href: '/credits' },
-  { id: 'nav-credit-notes', title: 'Credit Notes', subtitle: 'Refunds & adjustments', icon: Receipt, href: '/credit-notes' },
-  { id: 'nav-dunning', title: 'Dunning', subtitle: 'Payment recovery', icon: AlertTriangle, href: '/dunning' },
-  { id: 'nav-audit', title: 'Audit Log', subtitle: 'Activity history', icon: ScrollText, href: '/audit-log' },
-  { id: 'nav-webhooks', title: 'Webhooks', subtitle: 'Endpoint management', icon: Globe, href: '/webhooks' },
-  { id: 'nav-api-keys', title: 'API Keys', subtitle: 'Authentication', icon: Key, href: '/api-keys' },
-  { id: 'nav-settings', title: 'Settings', subtitle: 'Tenant configuration', icon: Settings, href: '/settings' },
-]
+// Pages come from the shared navigation config, so the palette lists exactly
+// what the sidebar does (it had drifted and missed four pages).
+function navItems(testMode: boolean): NavItem[] {
+  return allNavItems(testMode).map(i => ({
+    id: `nav-${i.to}`,
+    title: i.label,
+    subtitle: i.hint,
+    icon: i.icon,
+    href: i.to,
+  }))
+}
+
+// The palette doesn't load test clocks, so it can only judge "Past due" for
+// real-time invoices. A simulated invoice gets no "now" (NaN) and reads Open
+// rather than Past due by the wall clock, which its test clock may not have
+// reached.
+function paletteNow(inv: Invoice): number {
+  return inv.is_simulated ? NaN : wallClockNow()
+}
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   // Controlled input → debounced server-side search. With no query the
   // palette shows the 50 most recent rows per entity (jump-to-recent);
@@ -119,14 +126,14 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         <CommandEmpty>No results found</CommandEmpty>
 
         <CommandGroup heading="Navigation">
-          {NAV_ITEMS.map(item => {
+          {navItems(isTestMode(user)).map(item => {
             const Icon = item.icon
             return (
               <CommandItem
                 key={item.id}
                 value={item.title}
                 onSelect={() => go(item.href)}
-                className="py-2.5 px-3 data-selected:bg-primary data-selected:text-primary-foreground"
+                className="py-2.5 px-3 data-selected:bg-accent data-selected:text-accent-foreground"
               >
                 <Icon className="mr-2 h-4 w-4" />
                 <div className="flex flex-col">
@@ -147,7 +154,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   key={`cust-${c.id}`}
                   value={`customer ${c.display_name} ${c.external_id} ${c.email || ''} ${c.id}`}
                   onSelect={() => go(`/customers/${c.id}`)}
-                  className="py-2.5 px-3 data-selected:bg-primary data-selected:text-primary-foreground"
+                  className="py-2.5 px-3 data-selected:bg-accent data-selected:text-accent-foreground"
                 >
                   <User className="mr-2 h-4 w-4" />
                   <div className="flex flex-col">
@@ -175,12 +182,12 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   key={`inv-${inv.id}`}
                   value={`invoice ${inv.invoice_number} ${inv.status}`}
                   onSelect={() => go(`/invoices/${inv.id}`)}
-                  className="py-2.5 px-3 data-selected:bg-primary data-selected:text-primary-foreground"
+                  className="py-2.5 px-3 data-selected:bg-accent data-selected:text-accent-foreground"
                 >
                   <FileText className="mr-2 h-4 w-4" />
                   <div className="flex flex-col">
                     <span>{inv.invoice_number}</span>
-                    <span className="text-xs opacity-60">{inv.status} -- {formatCents(inv.amount_due_cents, inv.currency)}</span>
+                    <span className="text-xs opacity-60">{invoiceStatus(inv, paletteNow(inv)).label} · {formatCents(inv.amount_due_cents, inv.currency)} due</span>
                   </div>
                 </CommandItem>
               ))}
@@ -197,7 +204,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   key={`plan-${p.id}`}
                   value={`plan ${p.name} ${p.code}`}
                   onSelect={() => go(`/plans/${p.id}`)}
-                  className="py-2.5 px-3 data-selected:bg-primary data-selected:text-primary-foreground"
+                  className="py-2.5 px-3 data-selected:bg-accent data-selected:text-accent-foreground"
                 >
                   <Zap className="mr-2 h-4 w-4" />
                   <div className="flex flex-col">
@@ -219,12 +226,12 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   key={`sub-${s.id}`}
                   value={`subscription ${s.display_name} ${s.code} ${s.status}`}
                   onSelect={() => go(`/subscriptions/${s.id}`)}
-                  className="py-2.5 px-3 data-selected:bg-primary data-selected:text-primary-foreground"
+                  className="py-2.5 px-3 data-selected:bg-accent data-selected:text-accent-foreground"
                 >
                   <Hash className="mr-2 h-4 w-4" />
                   <div className="flex flex-col">
                     <span>{s.display_name}</span>
-                    <span className="text-xs opacity-60">{s.code} -- {s.status}</span>
+                    <span className="text-xs opacity-60">{s.code} · {s.status}</span>
                   </div>
                 </CommandItem>
               ))}

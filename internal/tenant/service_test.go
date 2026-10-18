@@ -3,6 +3,7 @@ package tenant
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -67,8 +68,64 @@ func (m *memoryStore) UpdateStatus(_ context.Context, id string, status domain.T
 	return t, nil
 }
 
+// newTestService wires a no-op dunning seeder: Create refuses to run
+// without one. The real seed is pinned against Postgres in
+// create_audit_integration_test.go.
+func newTestService(store Store) *Service {
+	svc := NewService(store)
+	svc.SetDunningSeeder(func(context.Context, *sql.Tx, string, func(domain.DunningPolicy, bool) error) error { return nil })
+	return svc
+}
+
+// Create must not make an account without its dunning policies (ADR-123):
+// an unwired seeder is refused, and a failing seed creates nothing.
+func TestService_Create_DunningSeedRequired(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("unwired seeder refuses", func(t *testing.T) {
+		store := newMemoryStore()
+		svc := NewService(store)
+		if _, err := svc.Create(ctx, CreateInput{Name: "Acme"}); err == nil {
+			t.Fatal("Create must fail when the dunning seeder is not wired")
+		}
+		if len(store.tenants) != 0 {
+			t.Fatalf("no tenant may be created without the seed; got %d", len(store.tenants))
+		}
+	})
+
+	t.Run("seed failure creates nothing", func(t *testing.T) {
+		store := newMemoryStore()
+		svc := NewService(store)
+		svc.SetDunningSeeder(func(context.Context, *sql.Tx, string, func(domain.DunningPolicy, bool) error) error {
+			return errors.New("injected seed failure")
+		})
+		if _, err := svc.Create(ctx, CreateInput{Name: "Acme"}); err == nil {
+			t.Fatal("Create must fail when the seed fails")
+		}
+		if len(store.tenants) != 0 {
+			t.Fatalf("tenant leaked from a failed seed: %d", len(store.tenants))
+		}
+	})
+
+	t.Run("seed runs for the new tenant", func(t *testing.T) {
+		svc := NewService(newMemoryStore())
+		var seededFor string
+		svc.SetDunningSeeder(func(_ context.Context, _ *sql.Tx, tenantID string, _ func(domain.DunningPolicy, bool) error) error {
+			seededFor = tenantID
+			return nil
+		})
+		created, err := svc.Create(ctx, CreateInput{Name: "Acme"})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if seededFor != created.ID {
+			t.Fatalf("seed ran for %q, want the new tenant %q", seededFor, created.ID)
+		}
+	})
+}
+
 func TestService_Create(t *testing.T) {
-	svc := NewService(newMemoryStore())
+	svc := newTestService(newMemoryStore())
 	ctx := context.Background()
 
 	t.Run("valid name", func(t *testing.T) {
@@ -101,7 +158,7 @@ func TestService_Create(t *testing.T) {
 
 func TestService_Get(t *testing.T) {
 	store := newMemoryStore()
-	svc := NewService(store)
+	svc := newTestService(store)
 	ctx := context.Background()
 
 	created, _ := svc.Create(ctx, CreateInput{Name: "Test"})
@@ -133,7 +190,7 @@ func TestService_Get(t *testing.T) {
 
 func TestService_UpdateStatus(t *testing.T) {
 	store := newMemoryStore()
-	svc := NewService(store)
+	svc := newTestService(store)
 	ctx := context.Background()
 
 	created, _ := svc.Create(ctx, CreateInput{Name: "Test"})

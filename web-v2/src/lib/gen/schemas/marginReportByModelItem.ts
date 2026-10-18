@@ -14,4 +14,6 @@ export type MarginReportByModelItem = {
   revenue_cents?: number;
   /** True only when a pricing rule pins this model — margin is never heuristically allocated. */
   attributed: boolean;
+  /** This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own. */
+  margin_bps?: number;
 };

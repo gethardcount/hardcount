@@ -8,17 +8,13 @@
 // times before it was centralised.
 
 /** What exhaustion does to the subscription. */
-export type DunningSubscriptionAction = 'none' | 'pause' | 'cancel'
-
-/** What exhaustion does to the unpaid invoice. */
-export type DunningInvoiceAction = 'none' | 'mark_uncollectible'
-
 const SUB_LABEL: Record<string, string> = {
   pause: 'pause collection',
   cancel: 'cancel subscription',
   none: '',
 }
 
+/** What exhaustion does to the unpaid invoice. */
 const INV_LABEL: Record<string, string> = {
   mark_uncollectible: 'write off invoice',
   none: '',

@@ -43,11 +43,16 @@ import type {
   CheckPasswordResetTokenParams,
   ConnectStripeBody,
   CreateApiKeyBody,
+  CreateCheckoutSetupSession201,
+  CreateCheckoutSetupSessionBody,
   CreateCustomerPaymentSetupSession201,
   CreateCustomerPaymentSetupSessionBody,
+  CreateHostedInvoiceCheckout200,
   CreatePriceOverrideBody,
+  CreatePublicPaymentUpdateCheckout201,
   CreateTenantBody,
   CreditBalance,
+  CreditGrants,
   CreditLedgerEntry,
   CreditLiveBalance,
   CreditNote,
@@ -55,10 +60,15 @@ import type {
   CustomerBillingProfile,
   CustomerBillingProfileInput,
   CustomerOverview,
+  CustomerPaymentSetup,
   CustomerPriceOverride,
   CustomerUsage,
   DeleteDunningPolicy200,
   DeletePriceOverride200,
+  DeleteV1TestClocksId200,
+  DeleteV1WebhookEndpointsEndpointsId200,
+  DiscardHeldUsage200,
+  DiscardHeldUsageBody,
   DunningPolicy,
   DunningPolicyInput,
   DunningRun,
@@ -79,24 +89,37 @@ import type {
   GetAnalyticsUsage200,
   GetAnalyticsUsageParams,
   GetCustomerUsageParams,
+  GetEmailSettings200,
+  GetHealth200,
   GetPlan200,
   GetSubscriptionTimeline200,
   GetUsageSummary500,
   GetUsageSummaryParams,
   GetV1AuthInviteToken200,
   GetV1CreditsGrantsCustomerIdParams,
+  GetV1Customers200,
   GetV1CustomersIdMarginParams,
   GetV1CustomersParams,
+  GetV1Invoices200,
   GetV1InvoicesParams,
+  GetV1Meters200,
+  GetV1Plans200,
   GetV1ProviderCosts200,
   GetV1PublicCostDashboardToken200,
+  GetV1RatingRules200,
+  GetV1RatingRulesParams,
+  GetV1Subscriptions200,
   GetV1SubscriptionsParams,
   GetV1TestClocks200,
-  GetV1TestClocksId200,
   GetV1TestClocksIdSubscriptions200,
+  GetV1UsageEvents200,
   GetV1UsageEventsParams,
+  GetV1WebhookEndpointsEndpoints200,
+  GetV1WebhookEndpointsEvents200,
   GetV1Whoami200,
   GetWebhookEndpointStats200,
+  HeldUsageReleaseResult,
+  HostedInvoice,
   IngestLitellmSpendBody,
   InstantiateRecipeBody,
   InviteMemberBody,
@@ -105,6 +128,7 @@ import type {
   InvoiceLineItem,
   InvoiceLineItemInput,
   InvoicePaymentTimeline,
+  InvoicePreview,
   InvoiceWithLineItems,
   ListAllMeterPricingRules200,
   ListApiKeys200,
@@ -123,6 +147,7 @@ import type {
   ListDunningPolicies200,
   ListDunningRuns200,
   ListDunningRunsParams,
+  ListHeldUsage200,
   ListMembers200,
   ListMeterPricingRules200,
   ListPriceOverrides200,
@@ -135,6 +160,7 @@ import type {
   ListTestClockCustomers200,
   ListWebhookEndpointDeliveries200,
   ListWebhookEventDeliveries200,
+  ListWebhookEventDeliveriesLegacy200,
   LitellmSpendResult,
   MarginReport,
   MemberInvitation,
@@ -156,41 +182,51 @@ import type {
   PostV1AuthPasswordResetRequestBody,
   PostV1BillingRun200,
   PostV1CreditNotesBody,
+  PostV1CreditNotesIdSend200,
   PostV1CreditNotesIdSendBody,
   PostV1CreditsGrantBody,
   PostV1CustomersBody,
   PostV1CustomersIdRotateCostDashboardToken200,
   PostV1InvoicesCreatePreviewBody,
+  PostV1InvoicesIdSend200,
   PostV1InvoicesIdSendBody,
   PostV1MetersBody,
   PostV1PlansBody,
   PostV1RatingRulesBody,
   PostV1SubscriptionsBody,
   PostV1SubscriptionsIdRetryBilling200,
-  PostV1TestClocks201,
   PostV1TestClocksBody,
-  PostV1TestClocksIdAdvance200,
   PostV1TestClocksIdAdvanceBody,
-  PostV1TestClocksIdRetryAdvance200,
   PostV1UsageEventsBatch201,
   PostV1UsageEventsBatchBodyItem,
   PostV1UsageEventsBody,
   PostV1WebhookEndpointsEndpointsBody,
   PreviewRecipeBody,
   ProviderCostRate,
+  PublicPaymentUpdate,
   PutV1ProviderCostsBody,
   RatingRule,
+  ReadinessReport,
+  ReceivePostmarkWebhook200,
+  ReceivePostmarkWebhook401,
+  ReceivePostmarkWebhook500,
+  ReceivePostmarkWebhookBody,
+  ReceiveStripeWebhook200,
+  ReceiveStripeWebhookBody,
   RecipeDetail,
   RecipeInstance,
   RecipePreviewResult,
   RecordInvoicePaymentBody,
   RefundInvoiceBody,
+  ReleaseHeldUsageBody,
+  ReplayWebhookEventLegacy200,
   ResendInvoiceSetupLink200,
   ResolveDunningRunBody,
   RotateApiKeyBody,
   ScheduleSubscriptionCancelBody,
   SendCustomerPaymentSetupEmail202,
   SendCustomerPaymentSetupEmailBody,
+  SendTestEmail200,
   SetDefaultDunningPolicy200,
   SetStripeWebhookSecretBody,
   SetSubscriptionBillingThresholdsBody,
@@ -201,6 +237,7 @@ import type {
   Tenant,
   TenantSettings,
   TenantSettingsInput,
+  TestClock,
   UpdateCustomerBody,
   UpdatePlanBody,
   UpdateSubscriptionItemBody,
@@ -209,7 +246,10 @@ import type {
   UsageEvent,
   UsageSummary,
   WebhookDeliveryReplayResult,
-  WebhookReplayResult
+  WebhookEndpoint,
+  WebhookEndpointCreated,
+  WebhookReplayResult,
+  WebhookSecretRotation
 } from './schemas';
 
 import { orvalClient } from '../orvalClient';
@@ -243,9 +283,9 @@ export const getGetHealthUrl = () => {
 /**
  * @summary Health check
  */
-export const getHealth = async ( options?: RequestInit): Promise<void> => {
+export const getHealth = async ( options?: RequestInit): Promise<GetHealth200> => {
 
-  return orvalClient<void>(getGetHealthUrl(),
+  return orvalClient<GetHealth200>(getGetHealthUrl(),
   {
     ...options,
     method: 'GET'
@@ -321,6 +361,218 @@ export function useGetHealth<TData = Awaited<ReturnType<typeof getHealth>>, TErr
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetHealthReadyUrl = () => {
+
+
+
+
+  return `/health/ready`
+}
+
+/**
+ * Tells a load balancer whether this server can take requests. It
+ * returns 503 when the server is shutting down (`draining`) or cannot
+ * reach the database. A late billing scheduler shows as `degraded` in
+ * the body but keeps the status at 200: taking the server out of the
+ * balancer would not restart the scheduler. Alert on the scheduler
+ * metrics instead (see docs/ops/runbook/monitoring.md).
+ * @summary Readiness check for load balancers
+ */
+export const getHealthReady = async ( options?: RequestInit): Promise<ReadinessReport> => {
+
+  return orvalClient<ReadinessReport>(getGetHealthReadyUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHealthReadyQueryKey = () => {
+    return [
+    `/health/ready`
+    ] as const;
+    }
+
+
+export const getGetHealthReadyQueryOptions = <TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHealthReadyQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealthReady>>> = () => getHealthReady(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHealthReadyQueryResult = NonNullable<Awaited<ReturnType<typeof getHealthReady>>>
+export type GetHealthReadyQueryError = ReadinessReport
+
+
+export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHealthReady>>,
+          TError,
+          Awaited<ReturnType<typeof getHealthReady>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHealthReady>>,
+          TError,
+          Awaited<ReturnType<typeof getHealthReady>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Readiness check for load balancers
+ */
+
+export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = ReadinessReport>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetHealthReadyQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMetricsUrl = () => {
+
+
+
+
+  return `/metrics`
+}
+
+/**
+ * Metrics in the Prometheus text format, for a Prometheus scrape.
+ * When `METRICS_TOKEN` is set, send it as a Bearer token. When it is
+ * not set, the route is open, except with `APP_ENV=production`, where
+ * it answers 401. This is not an API key route.
+ * @summary Prometheus metrics
+ */
+export const getMetrics = async ( options?: RequestInit): Promise<string> => {
+
+  return orvalClient<string>(getGetMetricsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMetricsQueryKey = () => {
+    return [
+    `/metrics`
+    ] as const;
+    }
+
+
+export const getGetMetricsQueryOptions = <TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMetricsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMetrics>>> = () => getMetrics(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetMetricsQueryResult = NonNullable<Awaited<ReturnType<typeof getMetrics>>>
+export type GetMetricsQueryError = string
+
+
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMetrics>>,
+          TError,
+          Awaited<ReturnType<typeof getMetrics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMetrics>>,
+          TError,
+          Awaited<ReturnType<typeof getMetrics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Prometheus metrics
+ */
+
+export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetMetricsQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -422,9 +674,9 @@ export const getGetV1CustomersUrl = (params?: GetV1CustomersParams,) => {
 /**
  * @summary List customers
  */
-export const getV1Customers = async (params?: GetV1CustomersParams, options?: RequestInit): Promise<void> => {
+export const getV1Customers = async (params?: GetV1CustomersParams, options?: RequestInit): Promise<GetV1Customers200> => {
 
-  return orvalClient<void>(getGetV1CustomersUrl(params),
+  return orvalClient<GetV1Customers200>(getGetV1CustomersUrl(params),
   {
     ...options,
     method: 'GET'
@@ -1970,6 +2222,195 @@ export const useSetCustomerDefaultPaymentMethod = <TError = Error,
       return useMutation(getSetCustomerDefaultPaymentMethodMutationOptions(options), queryClient);
     }
 
+export const getCreateCheckoutSetupSessionUrl = () => {
+
+
+
+
+  return `/v1/checkout/setup`
+}
+
+/**
+ * An older route the dashboard no longer uses. Prefer
+ * `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
+ *
+ * Creates the Stripe customer if there is none, or copies
+ * `customer_name`, `email` and the address to the existing one. It
+ * then returns a Stripe Checkout URL in setup mode (card only, no
+ * charge). Stripe sends the customer back to `return_url` with
+ * `?payment=success` or `?payment=cancel` added. Without
+ * `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
+ * which works only in local development. Writes an audit row. Needs
+ * the `customer:write` permission.
+ * @summary Start a card setup in Stripe Checkout (older route)
+ */
+export const createCheckoutSetupSession = async (createCheckoutSetupSessionBody: CreateCheckoutSetupSessionBody, options?: RequestInit): Promise<CreateCheckoutSetupSession201> => {
+
+  return orvalClient<CreateCheckoutSetupSession201>(getCreateCheckoutSetupSessionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createCheckoutSetupSessionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateCheckoutSetupSessionMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSetupSession>>, TError,{data: CreateCheckoutSetupSessionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSetupSession>>, TError,{data: CreateCheckoutSetupSessionBody}, TContext> => {
+
+const mutationKey = ['createCheckoutSetupSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCheckoutSetupSession>>, {data: CreateCheckoutSetupSessionBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCheckoutSetupSession(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCheckoutSetupSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createCheckoutSetupSession>>>
+    export type CreateCheckoutSetupSessionMutationBody = CreateCheckoutSetupSessionBody
+    export type CreateCheckoutSetupSessionMutationError = Error
+
+    /**
+ * @summary Start a card setup in Stripe Checkout (older route)
+ */
+export const useCreateCheckoutSetupSession = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSetupSession>>, TError,{data: CreateCheckoutSetupSessionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createCheckoutSetupSession>>,
+        TError,
+        {data: CreateCheckoutSetupSessionBody},
+        TContext
+      > => {
+      return useMutation(getCreateCheckoutSetupSessionMutationOptions(options), queryClient);
+    }
+
+export const getGetCheckoutSetupStatusUrl = (customerID: string,) => {
+
+
+
+
+  return `/v1/checkout/status/${customerID}`
+}
+
+/**
+ * An older route the dashboard no longer uses. Prefer
+ * `GET /v1/customers/{customer_id}/payment-methods`.
+ *
+ * Any read error, an unknown customer included, returns 200 with
+ * `setup_status: missing` and zero timestamps. Needs the
+ * `customer:write` permission.
+ * @summary Get a customer's card setup status (older route)
+ */
+export const getCheckoutSetupStatus = async (customerID: string, options?: RequestInit): Promise<CustomerPaymentSetup> => {
+
+  return orvalClient<CustomerPaymentSetup>(getGetCheckoutSetupStatusUrl(customerID),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCheckoutSetupStatusQueryKey = (customerID: string,) => {
+    return [
+    `/v1/checkout/status/${customerID}`
+    ] as const;
+    }
+
+
+export const getGetCheckoutSetupStatusQueryOptions = <TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(customerID: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCheckoutSetupStatusQueryKey(customerID);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCheckoutSetupStatus>>> = () => getCheckoutSetupStatus(customerID, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: customerID !== null && customerID !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetCheckoutSetupStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getCheckoutSetupStatus>>>
+export type GetCheckoutSetupStatusQueryError = unknown
+
+
+export function useGetCheckoutSetupStatus<TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(
+ customerID: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCheckoutSetupStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getCheckoutSetupStatus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCheckoutSetupStatus<TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(
+ customerID: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCheckoutSetupStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getCheckoutSetupStatus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCheckoutSetupStatus<TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(
+ customerID: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get a customer's card setup status (older route)
+ */
+
+export function useGetCheckoutSetupStatus<TData = Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError = unknown>(
+ customerID: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCheckoutSetupStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetCheckoutSetupStatusQueryOptions(customerID,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetV1PublicCostDashboardTokenUrl = (token: string,) => {
 
 
@@ -2080,6 +2521,472 @@ export function useGetV1PublicCostDashboardToken<TData = Awaited<ReturnType<type
 
 
 
+export const getGetHostedInvoiceUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/invoices/${token}`
+}
+
+/**
+ * Unauthenticated. The invoice's public token in the URL is the only
+ * credential. Paid and voided invoices stay viewable. A draft is
+ * never shown: it returns 404 like an unknown token. Share the page
+ * link with customers instead of calling this route.
+ * @summary Data behind the hosted invoice page
+ */
+export const getHostedInvoice = async (token: string, options?: RequestInit): Promise<HostedInvoice> => {
+
+  return orvalClient<HostedInvoice>(getGetHostedInvoiceUrl(token),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHostedInvoiceQueryKey = (token: string,) => {
+    return [
+    `/v1/public/invoices/${token}`
+    ] as const;
+    }
+
+
+export const getGetHostedInvoiceQueryOptions = <TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHostedInvoiceQueryKey(token);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHostedInvoice>>> = () => getHostedInvoice(token, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: token !== null && token !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHostedInvoiceQueryResult = NonNullable<Awaited<ReturnType<typeof getHostedInvoice>>>
+export type GetHostedInvoiceQueryError = Error | void
+
+
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHostedInvoice>>,
+          TError,
+          Awaited<ReturnType<typeof getHostedInvoice>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHostedInvoice>>,
+          TError,
+          Awaited<ReturnType<typeof getHostedInvoice>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Data behind the hosted invoice page
+ */
+
+export function useGetHostedInvoice<TData = Awaited<ReturnType<typeof getHostedInvoice>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoice>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetHostedInvoiceQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetHostedInvoicePdfUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/invoices/${token}/pdf`
+}
+
+/**
+ * Unauthenticated, like the hosted invoice page. Returns the same PDF
+ * as `GET /v1/invoices/{id}/pdf`, shown inline and named after the
+ * invoice number.
+ * @summary Download the hosted invoice PDF
+ */
+export const getHostedInvoicePdf = async (token: string, options?: RequestInit): Promise<Blob> => {
+
+  return orvalClient<Blob>(getGetHostedInvoicePdfUrl(token),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHostedInvoicePdfQueryKey = (token: string,) => {
+    return [
+    `/v1/public/invoices/${token}/pdf`
+    ] as const;
+    }
+
+
+export const getGetHostedInvoicePdfQueryOptions = <TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHostedInvoicePdfQueryKey(token);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHostedInvoicePdf>>> = () => getHostedInvoicePdf(token, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: token !== null && token !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHostedInvoicePdfQueryResult = NonNullable<Awaited<ReturnType<typeof getHostedInvoicePdf>>>
+export type GetHostedInvoicePdfQueryError = Error | void
+
+
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHostedInvoicePdf>>,
+          TError,
+          Awaited<ReturnType<typeof getHostedInvoicePdf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHostedInvoicePdf>>,
+          TError,
+          Awaited<ReturnType<typeof getHostedInvoicePdf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Download the hosted invoice PDF
+ */
+
+export function useGetHostedInvoicePdf<TData = Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHostedInvoicePdf>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetHostedInvoicePdfQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateHostedInvoiceCheckoutUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/invoices/${token}/checkout`
+}
+
+/**
+ * The hosted page's Pay button. Returns a Stripe Checkout URL for the
+ * amount due. Velox has already worked out the tax, so Stripe adds
+ * none. After paying, Stripe sends the customer back to the hosted
+ * page with `?paid=1`. The Stripe webhook, not this redirect, marks
+ * the invoice paid.
+ * @summary Start paying the invoice in Stripe Checkout
+ */
+export const createHostedInvoiceCheckout = async (token: string, options?: RequestInit): Promise<CreateHostedInvoiceCheckout200> => {
+
+  return orvalClient<CreateHostedInvoiceCheckout200>(getCreateHostedInvoiceCheckoutUrl(token),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateHostedInvoiceCheckoutMutationOptions = <TError = Error | void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext> => {
+
+const mutationKey = ['createHostedInvoiceCheckout'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, {token: string}> = (props) => {
+          const {token} = props ?? {};
+
+          return  createHostedInvoiceCheckout(token,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateHostedInvoiceCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>>
+
+    export type CreateHostedInvoiceCheckoutMutationError = Error | void
+
+    /**
+ * @summary Start paying the invoice in Stripe Checkout
+ */
+export const useCreateHostedInvoiceCheckout = <TError = Error | void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createHostedInvoiceCheckout>>,
+        TError,
+        {token: string},
+        TContext
+      > => {
+      return useMutation(getCreateHostedInvoiceCheckoutMutationOptions(options), queryClient);
+    }
+
+export const getGetPublicPaymentUpdateUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/payment-updates/${token}`
+}
+
+/**
+ * Unauthenticated. The token from the payment-update email is the only
+ * credential. It is valid for 24 hours, and starting checkout uses it
+ * up. Share the page link with customers instead of calling this
+ * route.
+ * @summary Data behind the payment-update page
+ */
+export const getPublicPaymentUpdate = async (token: string, options?: RequestInit): Promise<PublicPaymentUpdate> => {
+
+  return orvalClient<PublicPaymentUpdate>(getGetPublicPaymentUpdateUrl(token),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPublicPaymentUpdateQueryKey = (token: string,) => {
+    return [
+    `/v1/public/payment-updates/${token}`
+    ] as const;
+    }
+
+
+export const getGetPublicPaymentUpdateQueryOptions = <TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPublicPaymentUpdateQueryKey(token);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublicPaymentUpdate>>> = () => getPublicPaymentUpdate(token, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: token !== null && token !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPublicPaymentUpdateQueryResult = NonNullable<Awaited<ReturnType<typeof getPublicPaymentUpdate>>>
+export type GetPublicPaymentUpdateQueryError = Error | void
+
+
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublicPaymentUpdate>>,
+          TError,
+          Awaited<ReturnType<typeof getPublicPaymentUpdate>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublicPaymentUpdate>>,
+          TError,
+          Awaited<ReturnType<typeof getPublicPaymentUpdate>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Data behind the payment-update page
+ */
+
+export function useGetPublicPaymentUpdate<TData = Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError = Error | void>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublicPaymentUpdate>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPublicPaymentUpdateQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreatePublicPaymentUpdateCheckoutUrl = (token: string,) => {
+
+
+
+
+  return `/v1/public/payment-updates/${token}/checkout`
+}
+
+/**
+ * Returns a Stripe Checkout URL in setup mode (card only, no charge).
+ * Creates the Stripe customer if there is none. This call uses up the
+ * token. If Stripe fails to create the session, the token works again.
+ * Stripe sends the customer to the payment-method-added page with
+ * `?status=success` or `?status=cancel`. Writes an audit row.
+ * @summary Start adding a card in Stripe Checkout
+ */
+export const createPublicPaymentUpdateCheckout = async (token: string, options?: RequestInit): Promise<CreatePublicPaymentUpdateCheckout201> => {
+
+  return orvalClient<CreatePublicPaymentUpdateCheckout201>(getCreatePublicPaymentUpdateCheckoutUrl(token),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreatePublicPaymentUpdateCheckoutMutationOptions = <TError = Error | void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext> => {
+
+const mutationKey = ['createPublicPaymentUpdateCheckout'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, {token: string}> = (props) => {
+          const {token} = props ?? {};
+
+          return  createPublicPaymentUpdateCheckout(token,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePublicPaymentUpdateCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>>
+
+    export type CreatePublicPaymentUpdateCheckoutMutationError = Error | void
+
+    /**
+ * @summary Start adding a card in Stripe Checkout
+ */
+export const useCreatePublicPaymentUpdateCheckout = <TError = Error | void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>,
+        TError,
+        {token: string},
+        TContext
+      > => {
+      return useMutation(getCreatePublicPaymentUpdateCheckoutMutationOptions(options), queryClient);
+    }
+
 export const getPostV1MetersUrl = () => {
 
 
@@ -2091,9 +2998,9 @@ export const getPostV1MetersUrl = () => {
 /**
  * @summary Create meter
  */
-export const postV1Meters = async (postV1MetersBody: PostV1MetersBody, options?: RequestInit): Promise<void> => {
+export const postV1Meters = async (postV1MetersBody: PostV1MetersBody, options?: RequestInit): Promise<Meter> => {
 
-  return orvalClient<void>(getPostV1MetersUrl(),
+  return orvalClient<Meter>(getPostV1MetersUrl(),
   {
     ...options,
     method: 'POST',
@@ -2162,9 +3069,9 @@ export const getGetV1MetersUrl = () => {
 /**
  * @summary List meters
  */
-export const getV1Meters = async ( options?: RequestInit): Promise<void> => {
+export const getV1Meters = async ( options?: RequestInit): Promise<GetV1Meters200> => {
 
-  return orvalClient<void>(getGetV1MetersUrl(),
+  return orvalClient<GetV1Meters200>(getGetV1MetersUrl(),
   {
     ...options,
     method: 'GET'
@@ -2273,9 +3180,9 @@ export const getPatchV1MetersIdUrl = (id: string,) => {
  * @summary Update meter (incl. the default rating-rule binding)
  */
 export const patchV1MetersId = async (id: string,
-    patchV1MetersIdBody: PatchV1MetersIdBody, options?: RequestInit): Promise<void> => {
+    patchV1MetersIdBody: PatchV1MetersIdBody, options?: RequestInit): Promise<Meter> => {
 
-  return orvalClient<void>(getPatchV1MetersIdUrl(id),
+  return orvalClient<Meter>(getPatchV1MetersIdUrl(id),
   {
     ...options,
     method: 'PATCH',
@@ -2929,9 +3836,9 @@ export const getPostV1CreditNotesUrl = () => {
  * instead.
  * @summary Create a credit note (line-based, or commit relief)
  */
-export const postV1CreditNotes = async (postV1CreditNotesBody: PostV1CreditNotesBody, options?: RequestInit): Promise<void> => {
+export const postV1CreditNotes = async (postV1CreditNotesBody: PostV1CreditNotesBody, options?: RequestInit): Promise<CreditNote> => {
 
-  return orvalClient<void>(getPostV1CreditNotesUrl(),
+  return orvalClient<CreditNote>(getPostV1CreditNotesUrl(),
   {
     ...options,
     method: 'POST',
@@ -3121,13 +4028,19 @@ export const getGetV1CreditsGrantsCustomerIdUrl = (customerId: string,
  * drawn / remaining per grant, expiry, and remaining split by
  * cost-basis class (commit = money-backed, promotional = free,
  * other = legacy/adjustments). include_exhausted=true adds
- * fully-drawn blocks for history.
+ * fully-drawn blocks for history. Each grant's `consumed_cents`
+ * also counts credit no invoice used: `expired_cents`, the part that
+ * expired unused; `retired_cents`, commit credit taken back when the
+ * invoice that funded it was voided or refunded by a credit note; and
+ * `deducted_cents`, the part an operator deduction (a negative
+ * adjustment) drew from this grant. The credit invoices actually used
+ * is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
  * @summary Per-grant burndown + kind subtotals
  */
 export const getV1CreditsGrantsCustomerId = async (customerId: string,
-    params?: GetV1CreditsGrantsCustomerIdParams, options?: RequestInit): Promise<void> => {
+    params?: GetV1CreditsGrantsCustomerIdParams, options?: RequestInit): Promise<CreditGrants> => {
 
-  return orvalClient<void>(getGetV1CreditsGrantsCustomerIdUrl(customerId,params),
+  return orvalClient<CreditGrants>(getGetV1CreditsGrantsCustomerIdUrl(customerId,params),
   {
     ...options,
     method: 'GET'
@@ -3541,9 +4454,9 @@ export const getPostV1WebhookEndpointsEndpointsUrl = () => {
  * supported.
  * @summary Create webhook endpoint
  */
-export const postV1WebhookEndpointsEndpoints = async (postV1WebhookEndpointsEndpointsBody: PostV1WebhookEndpointsEndpointsBody, options?: RequestInit): Promise<void> => {
+export const postV1WebhookEndpointsEndpoints = async (postV1WebhookEndpointsEndpointsBody: PostV1WebhookEndpointsEndpointsBody, options?: RequestInit): Promise<WebhookEndpointCreated> => {
 
-  return orvalClient<void>(getPostV1WebhookEndpointsEndpointsUrl(),
+  return orvalClient<WebhookEndpointCreated>(getPostV1WebhookEndpointsEndpointsUrl(),
   {
     ...options,
     method: 'POST',
@@ -3612,9 +4525,9 @@ export const getGetV1WebhookEndpointsEndpointsUrl = () => {
 /**
  * @summary List webhook endpoints
  */
-export const getV1WebhookEndpointsEndpoints = async ( options?: RequestInit): Promise<void> => {
+export const getV1WebhookEndpointsEndpoints = async ( options?: RequestInit): Promise<GetV1WebhookEndpointsEndpoints200> => {
 
-  return orvalClient<void>(getGetV1WebhookEndpointsEndpointsUrl(),
+  return orvalClient<GetV1WebhookEndpointsEndpoints200>(getGetV1WebhookEndpointsEndpointsUrl(),
   {
     ...options,
     method: 'GET'
@@ -3720,9 +4633,9 @@ export const getPatchV1WebhookEndpointsEndpointsIdUrl = (id: string,) => {
  * @summary Update webhook endpoint (no secret rotation)
  */
 export const patchV1WebhookEndpointsEndpointsId = async (id: string,
-    patchV1WebhookEndpointsEndpointsIdBody: PatchV1WebhookEndpointsEndpointsIdBody, options?: RequestInit): Promise<void> => {
+    patchV1WebhookEndpointsEndpointsIdBody: PatchV1WebhookEndpointsEndpointsIdBody, options?: RequestInit): Promise<WebhookEndpoint> => {
 
-  return orvalClient<void>(getPatchV1WebhookEndpointsEndpointsIdUrl(id),
+  return orvalClient<WebhookEndpoint>(getPatchV1WebhookEndpointsEndpointsIdUrl(id),
   {
     ...options,
     method: 'PATCH',
@@ -3791,9 +4704,9 @@ export const getDeleteV1WebhookEndpointsEndpointsIdUrl = (id: string,) => {
 /**
  * @summary Delete (disable) webhook endpoint
  */
-export const deleteV1WebhookEndpointsEndpointsId = async (id: string, options?: RequestInit): Promise<void> => {
+export const deleteV1WebhookEndpointsEndpointsId = async (id: string, options?: RequestInit): Promise<DeleteV1WebhookEndpointsEndpointsId200> => {
 
-  return orvalClient<void>(getDeleteV1WebhookEndpointsEndpointsIdUrl(id),
+  return orvalClient<DeleteV1WebhookEndpointsEndpointsId200>(getDeleteV1WebhookEndpointsEndpointsIdUrl(id),
   {
     ...options,
     method: 'DELETE'
@@ -3862,9 +4775,9 @@ export const getPostV1WebhookEndpointsEndpointsIdRotateSecretUrl = (id: string,)
 /**
  * @summary Rotate signing secret (72h dual-signing grace)
  */
-export const postV1WebhookEndpointsEndpointsIdRotateSecret = async (id: string, options?: RequestInit): Promise<void> => {
+export const postV1WebhookEndpointsEndpointsIdRotateSecret = async (id: string, options?: RequestInit): Promise<WebhookSecretRotation> => {
 
-  return orvalClient<void>(getPostV1WebhookEndpointsEndpointsIdRotateSecretUrl(id),
+  return orvalClient<WebhookSecretRotation>(getPostV1WebhookEndpointsEndpointsIdRotateSecretUrl(id),
   {
     ...options,
     method: 'POST'
@@ -4220,9 +5133,9 @@ export const getGetV1WebhookEndpointsEventsUrl = () => {
 /**
  * @summary List recent outbound events (newest 50)
  */
-export const getV1WebhookEndpointsEvents = async ( options?: RequestInit): Promise<void> => {
+export const getV1WebhookEndpointsEvents = async ( options?: RequestInit): Promise<GetV1WebhookEndpointsEvents200> => {
 
-  return orvalClient<void>(getGetV1WebhookEndpointsEventsUrl(),
+  return orvalClient<GetV1WebhookEndpointsEvents200>(getGetV1WebhookEndpointsEventsUrl(),
   {
     ...options,
     method: 'GET'
@@ -4309,6 +5222,191 @@ export function useGetV1WebhookEndpointsEvents<TData = Awaited<ReturnType<typeof
 
 
 
+
+export const getListWebhookEventDeliveriesLegacyUrl = (id: string,) => {
+
+
+
+
+  return `/v1/webhook-endpoints/events/${id}/deliveries`
+}
+
+/**
+ * An older route the dashboard no longer uses. Prefer
+ * `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
+ * an unknown event.
+ *
+ * Returns the deliveries of the event and of its replays, oldest
+ * first. An unknown id returns 200 with an empty list. Needs the
+ * `apikey:write` permission.
+ * @summary List an event's deliveries (older route)
+ */
+export const listWebhookEventDeliveriesLegacy = async (id: string, options?: RequestInit): Promise<ListWebhookEventDeliveriesLegacy200> => {
+
+  return orvalClient<ListWebhookEventDeliveriesLegacy200>(getListWebhookEventDeliveriesLegacyUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListWebhookEventDeliveriesLegacyQueryKey = (id: string,) => {
+    return [
+    `/v1/webhook-endpoints/events/${id}/deliveries`
+    ] as const;
+    }
+
+
+export const getListWebhookEventDeliveriesLegacyQueryOptions = <TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListWebhookEventDeliveriesLegacyQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>> = () => listWebhookEventDeliveriesLegacy(id, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListWebhookEventDeliveriesLegacyQueryResult = NonNullable<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>>
+export type ListWebhookEventDeliveriesLegacyQueryError = unknown
+
+
+export function useListWebhookEventDeliveriesLegacy<TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>,
+          TError,
+          Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListWebhookEventDeliveriesLegacy<TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>,
+          TError,
+          Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListWebhookEventDeliveriesLegacy<TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List an event's deliveries (older route)
+ */
+
+export function useListWebhookEventDeliveriesLegacy<TData = Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWebhookEventDeliveriesLegacy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListWebhookEventDeliveriesLegacyQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReplayWebhookEventLegacyUrl = (id: string,) => {
+
+
+
+
+  return `/v1/webhook-endpoints/events/${id}/replay`
+}
+
+/**
+ * An older route the dashboard no longer uses. Prefer
+ * `POST /v1/webhook_events/{id}/replay`.
+ *
+ * Does the same replay. The response always says `replayed`, even
+ * when no endpoint will receive the copy. Writes an audit row. Needs
+ * the `apikey:write` permission.
+ * @summary Replay an event to all matching endpoints (older route)
+ */
+export const replayWebhookEventLegacy = async (id: string, options?: RequestInit): Promise<ReplayWebhookEventLegacy200> => {
+
+  return orvalClient<ReplayWebhookEventLegacy200>(getReplayWebhookEventLegacyUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getReplayWebhookEventLegacyMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEventLegacy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEventLegacy>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['replayWebhookEventLegacy'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replayWebhookEventLegacy>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  replayWebhookEventLegacy(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplayWebhookEventLegacyMutationResult = NonNullable<Awaited<ReturnType<typeof replayWebhookEventLegacy>>>
+
+    export type ReplayWebhookEventLegacyMutationError = Error
+
+    /**
+ * @summary Replay an event to all matching endpoints (older route)
+ */
+export const useReplayWebhookEventLegacy = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEventLegacy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof replayWebhookEventLegacy>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getReplayWebhookEventLegacyMutationOptions(options), queryClient);
+    }
 
 export const getListWebhookEventDeliveriesUrl = (id: string,) => {
 
@@ -4612,6 +5710,168 @@ export function useStreamWebhookEvents<TData = Awaited<ReturnType<typeof streamW
 
 
 
+export const getReceiveStripeWebhookUrl = (endpointId: string,) => {
+
+
+
+
+  return `/v1/webhooks/stripe/${endpointId}`
+}
+
+/**
+ * Stripe calls this route; your code does not. Point a webhook in your
+ * Stripe dashboard at it for each connected mode. `endpoint_id` is the
+ * `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
+ * The request is checked against the `Stripe-Signature` header and
+ * that mode's signing secret. The body can be at most 64 KB.
+ *
+ * Events for objects Velox did not create are answered 200 with
+ * `status: skipped`. A 500 means a temporary failure, and Stripe
+ * sends the event again.
+ * @summary Receive a Stripe webhook
+ */
+export const receiveStripeWebhook = async (endpointId: string,
+    receiveStripeWebhookBody: ReceiveStripeWebhookBody, options?: RequestInit): Promise<ReceiveStripeWebhook200> => {
+
+  return orvalClient<ReceiveStripeWebhook200>(getReceiveStripeWebhookUrl(endpointId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(receiveStripeWebhookBody)
+  }
+);}
+
+
+
+
+
+export const getReceiveStripeWebhookMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receiveStripeWebhook>>, TError,{endpointId: string;data: ReceiveStripeWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof receiveStripeWebhook>>, TError,{endpointId: string;data: ReceiveStripeWebhookBody}, TContext> => {
+
+const mutationKey = ['receiveStripeWebhook'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof receiveStripeWebhook>>, {endpointId: string;data: ReceiveStripeWebhookBody}> = (props) => {
+          const {endpointId,data} = props ?? {};
+
+          return  receiveStripeWebhook(endpointId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReceiveStripeWebhookMutationResult = NonNullable<Awaited<ReturnType<typeof receiveStripeWebhook>>>
+    export type ReceiveStripeWebhookMutationBody = ReceiveStripeWebhookBody
+    export type ReceiveStripeWebhookMutationError = Error
+
+    /**
+ * @summary Receive a Stripe webhook
+ */
+export const useReceiveStripeWebhook = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receiveStripeWebhook>>, TError,{endpointId: string;data: ReceiveStripeWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof receiveStripeWebhook>>,
+        TError,
+        {endpointId: string;data: ReceiveStripeWebhookBody},
+        TContext
+      > => {
+      return useMutation(getReceiveStripeWebhookMutationOptions(options), queryClient);
+    }
+
+export const getReceivePostmarkWebhookUrl = () => {
+
+
+
+
+  return `/v1/webhooks/postmark`
+}
+
+/**
+ * Postmark calls this route; your code does not. Velox reads
+ * `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
+ * record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
+ * `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
+ * docs/ops/email-setup.md.
+ *
+ * Error bodies are `{"error": "<reason>"}`, not the usual error
+ * object. A body that a retry cannot fix is answered 200, so Postmark
+ * stops retrying: over 64 KB, invalid JSON, or no known Velox email
+ * id in its metadata.
+ * @summary Receive a Postmark delivery webhook
+ */
+export const receivePostmarkWebhook = async (receivePostmarkWebhookBody: ReceivePostmarkWebhookBody, options?: RequestInit): Promise<ReceivePostmarkWebhook200> => {
+
+  return orvalClient<ReceivePostmarkWebhook200>(getReceivePostmarkWebhookUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(receivePostmarkWebhookBody)
+  }
+);}
+
+
+
+
+
+export const getReceivePostmarkWebhookMutationOptions = <TError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext> => {
+
+const mutationKey = ['receivePostmarkWebhook'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof receivePostmarkWebhook>>, {data: ReceivePostmarkWebhookBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  receivePostmarkWebhook(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReceivePostmarkWebhookMutationResult = NonNullable<Awaited<ReturnType<typeof receivePostmarkWebhook>>>
+    export type ReceivePostmarkWebhookMutationBody = ReceivePostmarkWebhookBody
+    export type ReceivePostmarkWebhookMutationError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500
+
+    /**
+ * @summary Receive a Postmark delivery webhook
+ */
+export const useReceivePostmarkWebhook = <TError = ReceivePostmarkWebhook401 | ReceivePostmarkWebhook500,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receivePostmarkWebhook>>, TError,{data: ReceivePostmarkWebhookBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof receivePostmarkWebhook>>,
+        TError,
+        {data: ReceivePostmarkWebhookBody},
+        TContext
+      > => {
+      return useMutation(getReceivePostmarkWebhookMutationOptions(options), queryClient);
+    }
+
 export const getPostV1PlansUrl = () => {
 
 
@@ -4623,9 +5883,9 @@ export const getPostV1PlansUrl = () => {
 /**
  * @summary Create plan
  */
-export const postV1Plans = async (postV1PlansBody: PostV1PlansBody, options?: RequestInit): Promise<void> => {
+export const postV1Plans = async (postV1PlansBody: PostV1PlansBody, options?: RequestInit): Promise<Plan> => {
 
-  return orvalClient<void>(getPostV1PlansUrl(),
+  return orvalClient<Plan>(getPostV1PlansUrl(),
   {
     ...options,
     method: 'POST',
@@ -4694,9 +5954,9 @@ export const getGetV1PlansUrl = () => {
 /**
  * @summary List plans
  */
-export const getV1Plans = async ( options?: RequestInit): Promise<void> => {
+export const getV1Plans = async ( options?: RequestInit): Promise<GetV1Plans200> => {
 
-  return orvalClient<void>(getGetV1PlansUrl(),
+  return orvalClient<GetV1Plans200>(getGetV1PlansUrl(),
   {
     ...options,
     method: 'GET'
@@ -4979,9 +6239,9 @@ export const getPostV1RatingRulesUrl = () => {
 /**
  * @summary Create rating rule
  */
-export const postV1RatingRules = async (postV1RatingRulesBody: PostV1RatingRulesBody, options?: RequestInit): Promise<void> => {
+export const postV1RatingRules = async (postV1RatingRulesBody: PostV1RatingRulesBody, options?: RequestInit): Promise<RatingRule> => {
 
-  return orvalClient<void>(getPostV1RatingRulesUrl(),
+  return orvalClient<RatingRule>(getPostV1RatingRulesUrl(),
   {
     ...options,
     method: 'POST',
@@ -5039,20 +6299,27 @@ export const usePostV1RatingRules = <TError = unknown,
       return useMutation(getPostV1RatingRulesMutationOptions(options), queryClient);
     }
 
-export const getGetV1RatingRulesUrl = () => {
+export const getGetV1RatingRulesUrl = (params?: GetV1RatingRulesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/rating-rules`
+  return stringifiedParams.length > 0 ? `/v1/rating-rules?${stringifiedParams}` : `/v1/rating-rules`
 }
 
 /**
  * @summary List rating rules
  */
-export const getV1RatingRules = async ( options?: RequestInit): Promise<void> => {
+export const getV1RatingRules = async (params?: GetV1RatingRulesParams, options?: RequestInit): Promise<GetV1RatingRules200> => {
 
-  return orvalClient<void>(getGetV1RatingRulesUrl(),
+  return orvalClient<GetV1RatingRules200>(getGetV1RatingRulesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -5065,23 +6332,23 @@ export const getV1RatingRules = async ( options?: RequestInit): Promise<void> =>
 
 
 
-export const getGetV1RatingRulesQueryKey = () => {
+export const getGetV1RatingRulesQueryKey = (params?: GetV1RatingRulesParams,) => {
     return [
-    `/v1/rating-rules`
+    `/v1/rating-rules`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetV1RatingRulesQueryOptions = <TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1RatingRulesQueryOptions = <TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetV1RatingRulesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetV1RatingRulesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1RatingRules>>> = () => getV1RatingRules(requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1RatingRules>>> = () => getV1RatingRules(params, requestOptions);
 
 
 
@@ -5095,7 +6362,7 @@ export type GetV1RatingRulesQueryError = unknown
 
 
 export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
+ params: undefined |  GetV1RatingRulesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1RatingRules>>,
           TError,
@@ -5105,7 +6372,7 @@ export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1Ratin
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
+ params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1RatingRules>>,
           TError,
@@ -5115,7 +6382,7 @@ export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1Ratin
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -5123,11 +6390,11 @@ export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1Ratin
  */
 
 export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetV1RatingRulesQueryOptions(options)
+  const queryOptions = getGetV1RatingRulesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -5253,9 +6520,9 @@ export const getPostV1SubscriptionsUrl = () => {
 /**
  * @summary Create subscription
  */
-export const postV1Subscriptions = async (postV1SubscriptionsBody: PostV1SubscriptionsBody, options?: RequestInit): Promise<void> => {
+export const postV1Subscriptions = async (postV1SubscriptionsBody: PostV1SubscriptionsBody, options?: RequestInit): Promise<Subscription> => {
 
-  return orvalClient<void>(getPostV1SubscriptionsUrl(),
+  return orvalClient<Subscription>(getPostV1SubscriptionsUrl(),
   {
     ...options,
     method: 'POST',
@@ -5331,9 +6598,9 @@ export const getGetV1SubscriptionsUrl = (params?: GetV1SubscriptionsParams,) => 
 /**
  * @summary List subscriptions
  */
-export const getV1Subscriptions = async (params?: GetV1SubscriptionsParams, options?: RequestInit): Promise<void> => {
+export const getV1Subscriptions = async (params?: GetV1SubscriptionsParams, options?: RequestInit): Promise<GetV1Subscriptions200> => {
 
-  return orvalClient<void>(getGetV1SubscriptionsUrl(params),
+  return orvalClient<GetV1Subscriptions200>(getGetV1SubscriptionsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -5432,9 +6699,9 @@ export const getPostV1SubscriptionsIdActivateUrl = (id: string,) => {
 /**
  * @summary Activate draft subscription
  */
-export const postV1SubscriptionsIdActivate = async (id: string, options?: RequestInit): Promise<void> => {
+export const postV1SubscriptionsIdActivate = async (id: string, options?: RequestInit): Promise<Subscription> => {
 
-  return orvalClient<void>(getPostV1SubscriptionsIdActivateUrl(id),
+  return orvalClient<Subscription>(getPostV1SubscriptionsIdActivateUrl(id),
   {
     ...options,
     method: 'POST'
@@ -6863,9 +8130,9 @@ export const getPostV1UsageEventsUrl = () => {
 /**
  * @summary Ingest usage event
  */
-export const postV1UsageEvents = async (postV1UsageEventsBody: PostV1UsageEventsBody, options?: RequestInit): Promise<void> => {
+export const postV1UsageEvents = async (postV1UsageEventsBody: PostV1UsageEventsBody, options?: RequestInit): Promise<UsageEvent> => {
 
-  return orvalClient<void>(getPostV1UsageEventsUrl(),
+  return orvalClient<UsageEvent>(getPostV1UsageEventsUrl(),
   {
     ...options,
     method: 'POST',
@@ -6941,9 +8208,9 @@ export const getGetV1UsageEventsUrl = (params?: GetV1UsageEventsParams,) => {
 /**
  * @summary List usage events
  */
-export const getV1UsageEvents = async (params?: GetV1UsageEventsParams, options?: RequestInit): Promise<void> => {
+export const getV1UsageEvents = async (params?: GetV1UsageEventsParams, options?: RequestInit): Promise<GetV1UsageEvents200> => {
 
-  return orvalClient<void>(getGetV1UsageEventsUrl(params),
+  return orvalClient<GetV1UsageEvents200>(getGetV1UsageEventsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -7198,6 +8465,273 @@ export const useBackfillUsageEvent = <TError = Error,
       return useMutation(getBackfillUsageEventMutationOptions(options), queryClient);
     }
 
+export const getListHeldUsageUrl = () => {
+
+
+
+
+  return `/v1/usage-events/held`
+}
+
+/**
+ * Usage rows the LiteLLM integration received for a customer or meter
+ * that did not exist yet. They are kept with their idempotency keys,
+ * not billed, until you release or discard them. Grouped by external
+ * customer ID, meter key and reason, most recent arrival first. Lists
+ * the 200 external customer IDs with the most recent arrivals, with
+ * every group for each; `total_customers` and `total_rows` count all
+ * held rows, listed or not. Requires usage read permission.
+ * @summary List held usage
+ */
+export const listHeldUsage = async ( options?: RequestInit): Promise<ListHeldUsage200> => {
+
+  return orvalClient<ListHeldUsage200>(getListHeldUsageUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListHeldUsageQueryKey = () => {
+    return [
+    `/v1/usage-events/held`
+    ] as const;
+    }
+
+
+export const getListHeldUsageQueryOptions = <TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListHeldUsageQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listHeldUsage>>> = () => listHeldUsage(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListHeldUsageQueryResult = NonNullable<Awaited<ReturnType<typeof listHeldUsage>>>
+export type ListHeldUsageQueryError = unknown
+
+
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listHeldUsage>>,
+          TError,
+          Awaited<ReturnType<typeof listHeldUsage>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listHeldUsage>>,
+          TError,
+          Awaited<ReturnType<typeof listHeldUsage>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List held usage
+ */
+
+export function useListHeldUsage<TData = Awaited<ReturnType<typeof listHeldUsage>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listHeldUsage>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListHeldUsageQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReleaseHeldUsageUrl = () => {
+
+
+
+
+  return `/v1/usage-events/held/release`
+}
+
+/**
+ * Writes the held rows for one external customer ID as usage events
+ * for a customer, each under its original idempotency key and time,
+ * marked `origin: backfill`, in one transaction. A row that is already
+ * a usage event under the same key is not written again. Releasing
+ * twice writes nothing the second time.
+ *
+ * Rows whose meter still does not exist, or whose time is after the
+ * customer's current time, stay held. One call releases at most 5,000
+ * rows; `more_to_release` counts the rest, and another call takes
+ * them. A released row counts toward
+ * the billing period its time falls in only if that period's invoice
+ * has not been built yet; Velox does not move it onto a later
+ * invoice. Writes an audit log entry. Requires usage write permission.
+ * @summary Release held usage
+ */
+export const releaseHeldUsage = async (releaseHeldUsageBody: ReleaseHeldUsageBody, options?: RequestInit): Promise<HeldUsageReleaseResult> => {
+
+  return orvalClient<HeldUsageReleaseResult>(getReleaseHeldUsageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(releaseHeldUsageBody)
+  }
+);}
+
+
+
+
+
+export const getReleaseHeldUsageMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext> => {
+
+const mutationKey = ['releaseHeldUsage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof releaseHeldUsage>>, {data: ReleaseHeldUsageBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  releaseHeldUsage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReleaseHeldUsageMutationResult = NonNullable<Awaited<ReturnType<typeof releaseHeldUsage>>>
+    export type ReleaseHeldUsageMutationBody = ReleaseHeldUsageBody
+    export type ReleaseHeldUsageMutationError = Error
+
+    /**
+ * @summary Release held usage
+ */
+export const useReleaseHeldUsage = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof releaseHeldUsage>>,
+        TError,
+        {data: ReleaseHeldUsageBody},
+        TContext
+      > => {
+      return useMutation(getReleaseHeldUsageMutationOptions(options), queryClient);
+    }
+
+export const getDiscardHeldUsageUrl = () => {
+
+
+
+
+  return `/v1/usage-events/held/discard`
+}
+
+/**
+ * Marks the held rows for one external customer ID (and one meter
+ * key, when given) as discarded. They are never billed. The rows stay
+ * stored as a record. Writes an audit log entry. Requires usage write
+ * permission.
+ * @summary Discard held usage
+ */
+export const discardHeldUsage = async (discardHeldUsageBody: DiscardHeldUsageBody, options?: RequestInit): Promise<DiscardHeldUsage200> => {
+
+  return orvalClient<DiscardHeldUsage200>(getDiscardHeldUsageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(discardHeldUsageBody)
+  }
+);}
+
+
+
+
+
+export const getDiscardHeldUsageMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext> => {
+
+const mutationKey = ['discardHeldUsage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof discardHeldUsage>>, {data: DiscardHeldUsageBody}> = (props) => {
+          const {data} = props ?? {};
+
+          return  discardHeldUsage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DiscardHeldUsageMutationResult = NonNullable<Awaited<ReturnType<typeof discardHeldUsage>>>
+    export type DiscardHeldUsageMutationBody = DiscardHeldUsageBody
+    export type DiscardHeldUsageMutationError = Error
+
+    /**
+ * @summary Discard held usage
+ */
+export const useDiscardHeldUsage = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof discardHeldUsage>>,
+        TError,
+        {data: DiscardHeldUsageBody},
+        TContext
+      > => {
+      return useMutation(getDiscardHeldUsageMutationOptions(options), queryClient);
+    }
+
 export const getAggregateUsageEventsUrl = (params?: AggregateUsageEventsParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -7215,10 +8749,14 @@ export const getAggregateUsageEventsUrl = (params?: AggregateUsageEventsParams,)
 
 /**
  * Event count, quantity totals, and a per-meter breakdown over every
- * usage event matching the filters (no paging). Quantities are plain
- * sums of event quantities, whatever the meter's aggregation, and
- * `total_units` adds quantities across all meters. A `from` or `to`
- * value that is not RFC 3339 is ignored, not rejected.
+ * usage event matching the filters (no paging). Each `by_meter` row
+ * carries `value`, the meter's usage under its own aggregation: a
+ * sum, an event count, each customer's peak (Maximum) or each
+ * customer's latest reading (Latest value), added across customers.
+ * `total` stays the plain sum of reported quantities. `total_units`
+ * adds quantities across all meters whatever their units, and is kept
+ * for compatibility only. A `from` or `to` value that is not RFC 3339
+ * is ignored, not rejected.
  * @summary Usage totals
  */
 export const aggregateUsageEvents = async (params?: AggregateUsageEventsParams, options?: RequestInit): Promise<UsageAggregate> => {
@@ -7450,9 +8988,9 @@ export const getGetV1InvoicesUrl = (params?: GetV1InvoicesParams,) => {
 /**
  * @summary List invoices
  */
-export const getV1Invoices = async (params?: GetV1InvoicesParams, options?: RequestInit): Promise<void> => {
+export const getV1Invoices = async (params?: GetV1InvoicesParams, options?: RequestInit): Promise<GetV1Invoices200> => {
 
-  return orvalClient<void>(getGetV1InvoicesUrl(params),
+  return orvalClient<GetV1Invoices200>(getGetV1InvoicesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -7634,23 +9172,28 @@ export const getPostV1InvoicesCreatePreviewUrl = () => {
 }
 
 /**
- * Answers "what is my next bill going to look like?" as a
- * full-period ESTIMATE. Usage lines are rated through the same
- * per-meter aggregation path as the cycle scan, but the estimate
- * deliberately does NOT replicate usage-cap scaling or mid-period
- * segment proration (ADR-045) — for capped or mid-period-changed
- * subscriptions the response carries `warnings[]` naming the
- * divergence and the finalized invoice can differ (lower, for
- * capped usage). Composes across customer / subscription / pricing;
+ * Answers "what is my next bill going to look like?" from the usage
+ * recorded so far. Without `period`, the preview mirrors the cycle
+ * close for the subscription's current period: base fees prorate for
+ * a short first period and per segment after a mid-period item add,
+ * quantity change, plan swap or removal, and each meter's usage counts
+ * only while a plan carrying it was on the subscription. For a
+ * trialing subscription it is the first invoice after the trial: the
+ * trial-end invoice when a plan bills in advance, otherwise the close
+ * of the first paid period, prorated the same way. With an
+ * explicit `period`, it is a flat estimate over that window and warns
+ * when a mid-period change makes the invoice differ. Neither applies
+ * usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
+ * says the invoice can be lower. Composes across customer / subscription / pricing;
  * registered as a sibling of `/v1/invoices` (chi picks the more
  * specific pattern, otherwise `/{id}` would capture
  * `create_preview` as an invoice ID). See
- * [`docs/design-create-preview.md`](../docs/design-create-preview.md).
+ * [`docs/design/create-preview.md`](../docs/design/create-preview.md).
  * @summary Preview the next invoice for a customer (Stripe-equivalent)
  */
-export const postV1InvoicesCreatePreview = async (postV1InvoicesCreatePreviewBody: PostV1InvoicesCreatePreviewBody, options?: RequestInit): Promise<void> => {
+export const postV1InvoicesCreatePreview = async (postV1InvoicesCreatePreviewBody: PostV1InvoicesCreatePreviewBody, options?: RequestInit): Promise<InvoicePreview> => {
 
-  return orvalClient<void>(getPostV1InvoicesCreatePreviewUrl(),
+  return orvalClient<InvoicePreview>(getPostV1InvoicesCreatePreviewUrl(),
   {
     ...options,
     method: 'POST',
@@ -7928,9 +9471,9 @@ export const getPostV1InvoicesIdSendUrl = (id: string,) => {
  * @summary Email the invoice (PDF attached) to a recipient
  */
 export const postV1InvoicesIdSend = async (id: string,
-    postV1InvoicesIdSendBody: PostV1InvoicesIdSendBody, options?: RequestInit): Promise<void> => {
+    postV1InvoicesIdSendBody: PostV1InvoicesIdSendBody, options?: RequestInit): Promise<PostV1InvoicesIdSend200> => {
 
-  return orvalClient<void>(getPostV1InvoicesIdSendUrl(id),
+  return orvalClient<PostV1InvoicesIdSend200>(getPostV1InvoicesIdSendUrl(id),
   {
     ...options,
     method: 'POST',
@@ -8554,8 +10097,10 @@ export const getRefundInvoiceUrl = (id: string,) => {
  *
  * Leave out `amount_cents`, or send 0, to refund everything not yet
  * refunded. The response is the credit note. Check its
- * `refund_status`: if Stripe failed, it is `failed` and can be retried
- * with `POST /v1/credit-notes/{id}/retry-refund`.
+ * `refund_status`: if Stripe refused the refund, it is `failed`. If
+ * Stripe gave no clear answer, it is `unknown`: the customer may
+ * already be refunded, so don't refund again in the Stripe Dashboard.
+ * Retry either with `POST /v1/credit-notes/{id}/retry-refund`.
  *
  * Only invoices paid by card through Stripe can be refunded here. For
  * an invoice paid outside Stripe, create a credit note with
@@ -8751,9 +10296,9 @@ export const getPostV1CreditNotesIdSendUrl = (id: string,) => {
  * @summary Email the credit-note document (PDF attached)
  */
 export const postV1CreditNotesIdSend = async (id: string,
-    postV1CreditNotesIdSendBody: PostV1CreditNotesIdSendBody, options?: RequestInit): Promise<void> => {
+    postV1CreditNotesIdSendBody: PostV1CreditNotesIdSendBody, options?: RequestInit): Promise<PostV1CreditNotesIdSend200> => {
 
-  return orvalClient<void>(getPostV1CreditNotesIdSendUrl(id),
+  return orvalClient<PostV1CreditNotesIdSend200>(getPostV1CreditNotesIdSendUrl(id),
   {
     ...options,
     method: 'POST',
@@ -8928,8 +10473,10 @@ export const getIssueCreditNoteUrl = (id: string,) => {
  *   part is added to the customer's credit balance.
  *
  * Check the returned `status` and `refund_status`:
- * - A failed Stripe refund still returns 200, with `refund_status`
- *   `failed`. Retry it with `POST /v1/credit-notes/{id}/retry-refund`.
+ * - A refund Stripe refused still returns 200, with `refund_status`
+ *   `failed`. A refund with no clear answer from Stripe returns 200
+ *   with `unknown`: the customer may already be refunded. Retry either
+ *   with `POST /v1/credit-notes/{id}/retry-refund`.
  * - If the invoice's charge is still running, or the invoice is still
  *   a draft, nothing changes and the note stays `draft`. Velox issues
  *   it later.
@@ -9007,10 +10554,13 @@ export const getRetryCreditNoteRefundUrl = (id: string,) => {
 
 /**
  * Sends the refund part of an `issued` credit note to Stripe again,
- * when its `refund_status` is `failed`, `pending` or `none`. Before
- * creating a refund, Velox asks Stripe for one already made for this
- * note and records it if found, so a retry does not refund the
- * customer twice.
+ * when its `refund_status` is `failed`, `unknown`, `pending` or
+ * `none`. Before creating a refund, Velox asks Stripe for one already
+ * made for this note and records it if found. For `unknown` and
+ * `none`, Velox then resends the earlier request whose result it
+ * never recorded, with the same idempotency key. While Stripe keeps
+ * that key (at least 24 hours), Stripe returns the earlier request's
+ * result instead of making a second refund.
  * @summary Retry a failed credit-note refund
  */
 export const retryCreditNoteRefund = async (id: string, options?: RequestInit): Promise<CreditNote> => {
@@ -9261,9 +10811,9 @@ export const getPostV1InvoicesIdFinalizeUrl = (id: string,) => {
 /**
  * @summary Finalize draft invoice
  */
-export const postV1InvoicesIdFinalize = async (id: string, options?: RequestInit): Promise<void> => {
+export const postV1InvoicesIdFinalize = async (id: string, options?: RequestInit): Promise<Invoice> => {
 
-  return orvalClient<void>(getPostV1InvoicesIdFinalizeUrl(id),
+  return orvalClient<Invoice>(getPostV1InvoicesIdFinalizeUrl(id),
   {
     ...options,
     method: 'POST'
@@ -9422,6 +10972,11 @@ export const getPostV1AuthLoginUrl = () => {
  * Subsequent dashboard requests authenticate via the cookie; sessions
  * are bound to `users.id` and are independent of API key lifecycle.
  * See ADR-011.
+ *
+ * A successful sign-in also sets `velox_device` (HttpOnly,
+ * `Path=/v1/auth`, 180 days). It marks the browser as one that signed
+ * in to this email, so the sign-in throttle counts its attempts on
+ * their own. It never replaces the password.
  * @summary Sign in with email and password; mint an httpOnly session cookie
  */
 export const postV1AuthLogin = async (postV1AuthLoginBody: PostV1AuthLoginBody, options?: RequestInit): Promise<PostV1AuthLogin200> => {
@@ -10430,7 +11985,7 @@ export const getGetV1WhoamiUrl = () => {
  * `Authorization: Bearer` (SDK / curl). Cookie path returns
  * `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
  * All callers get `tenant_id`, `livemode`,
- * `can_email_setup_links` and `can_send_invites`.
+ * `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
  * @summary Resolve the current credential to its tenant context
  */
 export const getV1Whoami = async ( options?: RequestInit): Promise<GetV1Whoami200> => {
@@ -10605,9 +12160,9 @@ export const getGetV1BillingPreviewSubscriptionIdUrl = (subscriptionId: string,)
 /**
  * @summary Invoice preview (dry run)
  */
-export const getV1BillingPreviewSubscriptionId = async (subscriptionId: string, options?: RequestInit): Promise<void> => {
+export const getV1BillingPreviewSubscriptionId = async (subscriptionId: string, options?: RequestInit): Promise<InvoicePreview> => {
 
-  return orvalClient<void>(getGetV1BillingPreviewSubscriptionIdUrl(subscriptionId),
+  return orvalClient<InvoicePreview>(getGetV1BillingPreviewSubscriptionIdUrl(subscriptionId),
   {
     ...options,
     method: 'GET'
@@ -11080,9 +12635,9 @@ export const getPostV1CreditsGrantUrl = () => {
 /**
  * @summary Grant credits to customer
  */
-export const postV1CreditsGrant = async (postV1CreditsGrantBody: PostV1CreditsGrantBody, options?: RequestInit): Promise<void> => {
+export const postV1CreditsGrant = async (postV1CreditsGrantBody: PostV1CreditsGrantBody, options?: RequestInit): Promise<CreditLedgerEntry> => {
 
-  return orvalClient<void>(getPostV1CreditsGrantUrl(),
+  return orvalClient<CreditLedgerEntry>(getPostV1CreditsGrantUrl(),
   {
     ...options,
     method: 'POST',
@@ -11473,9 +13028,9 @@ export const getPostV1TestClocksUrl = () => {
  * `frozen_time`. Use `/advance` to move it forward.
  * @summary Create a test clock
  */
-export const postV1TestClocks = async (postV1TestClocksBody: PostV1TestClocksBody, options?: RequestInit): Promise<PostV1TestClocks201> => {
+export const postV1TestClocks = async (postV1TestClocksBody: PostV1TestClocksBody, options?: RequestInit): Promise<TestClock> => {
 
-  return orvalClient<PostV1TestClocks201>(getPostV1TestClocksUrl(),
+  return orvalClient<TestClock>(getPostV1TestClocksUrl(),
   {
     ...options,
     method: 'POST',
@@ -11544,9 +13099,9 @@ export const getGetV1TestClocksIdUrl = (id: string,) => {
 /**
  * @summary Get a test clock by id
  */
-export const getV1TestClocksId = async (id: string, options?: RequestInit): Promise<GetV1TestClocksId200> => {
+export const getV1TestClocksId = async (id: string, options?: RequestInit): Promise<TestClock> => {
 
-  return orvalClient<GetV1TestClocksId200>(getGetV1TestClocksIdUrl(id),
+  return orvalClient<TestClock>(getGetV1TestClocksIdUrl(id),
   {
     ...options,
     method: 'GET'
@@ -11645,9 +13200,9 @@ export const getDeleteV1TestClocksIdUrl = (id: string,) => {
 /**
  * @summary Delete a test clock (cascades to pinned subscriptions)
  */
-export const deleteV1TestClocksId = async (id: string, options?: RequestInit): Promise<void> => {
+export const deleteV1TestClocksId = async (id: string, options?: RequestInit): Promise<DeleteV1TestClocksId200> => {
 
-  return orvalClient<void>(getDeleteV1TestClocksIdUrl(id),
+  return orvalClient<DeleteV1TestClocksId200>(getDeleteV1TestClocksIdUrl(id),
   {
     ...options,
     method: 'DELETE'
@@ -11826,9 +13381,9 @@ export const getPostV1TestClocksIdAdvanceUrl = (id: string,) => {
  * @summary Advance the clock to a new frozen_time
  */
 export const postV1TestClocksIdAdvance = async (id: string,
-    postV1TestClocksIdAdvanceBody: PostV1TestClocksIdAdvanceBody, options?: RequestInit): Promise<PostV1TestClocksIdAdvance200> => {
+    postV1TestClocksIdAdvanceBody: PostV1TestClocksIdAdvanceBody, options?: RequestInit): Promise<TestClock> => {
 
-  return orvalClient<PostV1TestClocksIdAdvance200>(getPostV1TestClocksIdAdvanceUrl(id),
+  return orvalClient<TestClock>(getPostV1TestClocksIdAdvanceUrl(id),
   {
     ...options,
     method: 'POST',
@@ -11905,9 +13460,9 @@ export const getPostV1TestClocksIdRetryAdvanceUrl = (id: string,) => {
  * ADR-018.
  * @summary Retry catchup on a clock parked in internal_failure
  */
-export const postV1TestClocksIdRetryAdvance = async (id: string, options?: RequestInit): Promise<PostV1TestClocksIdRetryAdvance200> => {
+export const postV1TestClocksIdRetryAdvance = async (id: string, options?: RequestInit): Promise<TestClock> => {
 
-  return orvalClient<PostV1TestClocksIdRetryAdvance200>(getPostV1TestClocksIdRetryAdvanceUrl(id),
+  return orvalClient<TestClock>(getPostV1TestClocksIdRetryAdvanceUrl(id),
   {
     ...options,
     method: 'POST'
@@ -12903,7 +14458,8 @@ export const getExportUsageEventsCsvUrl = (params: ExportUsageEventsCsvParams,) 
 /**
  * Streams usage events whose `timestamp` falls in the window,
  * newest first, from one consistent snapshot. `from` and `to` are
- * both required and may span at most 366 days. Columns: id,
+ * both required and may span at most 366 days. `customer_id`,
+ * `meter_id` and `dimensions` narrow it like the event list. Columns: id,
  * customer_id, meter_id, quantity, timestamp, idempotency_key,
  * origin, dimensions_json, provider_cost_micros,
  * provider_cost_source.
@@ -14103,12 +15659,16 @@ export const getCreateDunningPolicyUrl = () => {
 
 /**
  * A dunning policy decides how failed payments are retried and what
- * happens when the retries run out. The first policy created in a
- * tenant and mode becomes the default; later ones do not (use
- * set-default). Customers without an assigned policy use the default.
+ * happens when the retries run out. Every account starts with one
+ * policy per mode, "Default retries", as the default. The first
+ * enabled policy you create in a mode takes the default from it,
+ * unless you have edited it or made it the default yourself; later
+ * ones do not (use set-default). Customers without an assigned policy
+ * use the default, so check `is_default` in the response.
  *
  * `enabled` defaults to false. A disabled policy starts no dunning, so
- * send `enabled: true` for the policy to take effect.
+ * send `enabled: true` for the policy to take effect. A policy created
+ * disabled never takes the default from "Default retries".
  * @summary Create dunning policy
  */
 export const createDunningPolicy = async (dunningPolicyInput: DunningPolicyInput, options?: RequestInit): Promise<DunningPolicy> => {
@@ -14784,11 +16344,14 @@ export const getIngestLitellmSpendUrl = () => {
  * `id` plus the token type, so a resent record is counted as
  * `deduplicated`, not billed twice.
  *
- * A problem with one record (no customer, unknown customer or meter,
- * invalid event) is listed in `errors` and the rest of the batch
- * still goes in, with status 200. If the usage store cannot be
- * reached, the whole request fails with 503 so LiteLLM retries it.
- * Requires usage write permission.
+ * A token row whose customer or meter does not exist yet is held,
+ * not billed and not lost: it is counted in `held` and listed by
+ * `GET /v1/usage-events/held` until you release or discard it. A
+ * resent row that is already held is counted as `deduplicated`. A
+ * record with no `user` or no `id`, or an invalid event, is listed in
+ * `errors` and the rest of the batch still goes in, with status 200.
+ * If the usage store cannot be reached, the whole request fails with
+ * 503 so LiteLLM retries it. Requires usage write permission.
  * @summary Ingest LiteLLM spend logs
  */
 export const ingestLitellmSpend = async (ingestLitellmSpendBody: IngestLitellmSpendBody, options?: RequestInit): Promise<LitellmSpendResult> => {
@@ -15381,6 +16944,184 @@ export const useUpdateTenantSettings = <TError = Error,
         TContext
       > => {
       return useMutation(getUpdateTenantSettingsMutationOptions(options), queryClient);
+    }
+
+export const getGetEmailSettingsUrl = () => {
+
+
+
+
+  return `/v1/settings/email`
+}
+
+/**
+ * Read-only. Email is configured in the server environment, not per
+ * workspace: `SMTP_HOST` and friends, plus the base URLs email links
+ * are built from. Never returns credentials.
+ * @summary Email setup status
+ */
+export const getEmailSettings = async ( options?: RequestInit): Promise<GetEmailSettings200> => {
+
+  return orvalClient<GetEmailSettings200>(getGetEmailSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEmailSettingsQueryKey = () => {
+    return [
+    `/v1/settings/email`
+    ] as const;
+    }
+
+
+export const getGetEmailSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEmailSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEmailSettings>>> = () => getEmailSettings(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetEmailSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getEmailSettings>>>
+export type GetEmailSettingsQueryError = unknown
+
+
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getEmailSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getEmailSettings>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getEmailSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getEmailSettings>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Email setup status
+ */
+
+export function useGetEmailSettings<TData = Awaited<ReturnType<typeof getEmailSettings>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEmailSettings>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetEmailSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSendTestEmailUrl = () => {
+
+
+
+
+  return `/v1/settings/email/test`
+}
+
+/**
+ * Dashboard sessions only. Sends one plain-text email to the signed-in
+ * member's own address, directly over SMTP (not queued), and returns
+ * the server's answer. Writes an audit row on success.
+ * @summary Send a test email
+ */
+export const sendTestEmail = async ( options?: RequestInit): Promise<SendTestEmail200> => {
+
+  return orvalClient<SendTestEmail200>(getSendTestEmailUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSendTestEmailMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext> => {
+
+const mutationKey = ['sendTestEmail'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendTestEmail>>, void> = () => {
+
+
+          return  sendTestEmail(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendTestEmailMutationResult = NonNullable<Awaited<ReturnType<typeof sendTestEmail>>>
+
+    export type SendTestEmailMutationError = Error
+
+    /**
+ * @summary Send a test email
+ */
+export const useSendTestEmail = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof sendTestEmail>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getSendTestEmailMutationOptions(options), queryClient);
     }
 
 export const getConnectStripeUrl = () => {

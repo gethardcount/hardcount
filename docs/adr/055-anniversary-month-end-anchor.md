@@ -3,6 +3,10 @@
 **Date:** 2026-06-18
 **Status:** Accepted (supersedes the ADR-058 §"Explicitly NOT a bug" note on anniversary month-end overflow)
 
+## Summary
+
+Anniversary and yearly billing keep the operator's day of month, clamped to each month's last day: an anchor on the 31st bills Jan 31, Feb 28, Mar 31, Apr 30. The day is stored in `subscriptions.billing_anchor_day` (migration 0120), and every advance starts from it, so a short month no longer shifts later periods. The old code advanced from the previous boundary and drifted for good (Jan 31, Mar 3, Apr 3). A cross-interval swap or a threshold reset recomputes the anchor day, and calendar billing (always the 1st) is unchanged. Status: active; this replaces the "not a bug" note in [ADR-058](058-billing-date-math-tenant-timezone.md).
+
 ## Context
 
 An adversarial e2e audit of the billing date-math (2026-06-18) found a real, high-severity correctness bug in **anniversary** monthly/yearly billing for anchor days **29/30/31**.

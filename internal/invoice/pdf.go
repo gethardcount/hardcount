@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/signintech/gopdf"
@@ -213,7 +214,9 @@ func cnChannelDescription(cn CreditNoteInfo, symbol string) string {
 		case string(domain.RefundFailed):
 			note = " (refund failed)"
 		default:
-			// pending, or empty on legacy rows: either way, not settled.
+			// pending, unknown (#965), or empty on legacy rows: not settled.
+			// A customer document says "pending" for unknown on purpose:
+			// the refund is either made or still to be made by the retry.
 			note = " (refund pending)"
 		}
 		channels = append(channels, formatCentsIn(symbol, cn.RefundAmountCents)+" to card"+note)
@@ -257,13 +260,15 @@ func buyerTaxID(inv domain.Invoice, billTo BillToInfo) string {
 	return strings.TrimSpace(billTo.TaxID)
 }
 
-// Currency symbol map
+// Currency symbol map. Every symbol must have a glyph in the embedded font
+// (internal/pdffonts), or the amount prints with no currency mark. THB
+// prints as "THB " because the font has no ฿ (U+0E3F).
 var currencySymbols = map[string]string{
 	"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "CNY": "¥",
 	"INR": "₹", "BRL": "R$", "CAD": "CA$", "AUD": "A$", "CHF": "CHF ",
 	"SGD": "S$", "HKD": "HK$", "NZD": "NZ$", "MXN": "MX$",
 	"KRW": "₩", "ZAR": "R", "PLN": "zł", "AED": "AED ", "SAR": "SAR ",
-	"THB": "฿", "MYR": "RM ", "IDR": "Rp ", "PHP": "₱", "VND": "₫",
+	"THB": "THB ", "MYR": "RM ", "IDR": "Rp ", "PHP": "₱", "VND": "₫",
 }
 
 // currencySymbolFor maps an ISO currency to its display symbol,
@@ -297,6 +302,10 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		return nil, err
 	}
 
+	// measuring is true while keep (below) works out how tall a block is:
+	// the block runs with drawing switched off and only y moves.
+	measuring := false
+
 	// Helper functions
 	setFont := func(bold bool, size int) {
 		name := "noto"
@@ -311,37 +320,81 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	}
 
 	textAt := func(x, y float64, text string) {
+		if measuring {
+			return
+		}
 		pdf.SetXY(x, y)
 		_ = pdf.Cell(nil, text)
 	}
 
 	rightAlignAt := func(x, y, width float64, text string) {
+		if measuring {
+			return
+		}
 		tw, _ := pdf.MeasureTextWidth(text)
 		pdf.SetXY(x+width-tw, y)
 		_ = pdf.Cell(nil, text)
 	}
 
-	// ── VOID watermark ──
-	if inv.Status == domain.InvoiceVoided {
-		setFont(true, 72)
-		setColor(230, 230, 230)
-		textAt(55, 400, "VOID")
+	hline := func(x1, x2, y float64) {
+		if measuring {
+			return
+		}
+		pdf.Line(x1, y, x2, y)
 	}
 
+	// wrap splits text into lines no wider than width in the current font.
+	// If it cannot, the render fails rather than print a line that runs
+	// out of its column.
+	var wrapErr error
+	wrap := func(text string, width float64) []string {
+		lines, err := pdffonts.WrapText(pdf, text, width)
+		if err != nil {
+			if wrapErr == nil {
+				wrapErr = err
+			}
+			return []string{text}
+		}
+		return lines
+	}
+
+	// ── VOID / DRAFT watermark ──
+	// A draft is a preview, not a document the customer owes on. Without the
+	// mark a downloaded draft read as an issued invoice. Drawn on every page,
+	// so no page of a voided or draft invoice reads as a live one.
+	drawWatermark := func() {
+		if wm := watermarkFor(inv.Status); wm != "" {
+			setFont(true, 72)
+			setColor(230, 230, 230)
+			textAt(55, 400, wm)
+		}
+	}
+	drawWatermark()
+
 	pageW := 595.28 // A4 width in points
+	pageH := 841.89 // A4 height in points
 	margin := 40.0
 	contentW := pageW - margin*2
+	// Content stops here; below it is the band that holds "Page N of M".
+	bottomLimit := pageH - 44
 	y := 40.0
+	// pageTop is where content starts on the current page. A block that
+	// does not fit is moved to a new page only when it is not already at
+	// the top of one; a block taller than a whole page then flows row by row.
+	pageTop := y
 
 	// ── Header ──
-	companyName := "Velox"
+	// The seller block prints only what the tenant entered. It used to fall
+	// back to "Velox", which put a made-up seller on a customer document; an
+	// unset company name now prints no name at all, and the dashboard warns
+	// the operator to fill in Settings → Business details.
+	companyName := sellerName(company...)
 	var companyAddrLines []string
 	companyContact := ""
 	var brandR, brandG, brandB uint8
 	brandSet := false
-	if len(company) > 0 && company[0].Name != "" {
+	if len(company) > 0 {
 		c := company[0]
-		companyName = c.Name
 		if c.AddressLine1 != "" {
 			companyAddrLines = append(companyAddrLines, c.AddressLine1)
 		}
@@ -376,7 +429,9 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	} else {
 		setColor(30, 30, 30)
 	}
-	textAt(margin, y, companyName)
+	if companyName != "" {
+		textAt(margin, y, companyName)
+	}
 
 	setFont(true, 18)
 	setColor(100, 100, 100)
@@ -446,11 +501,8 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	docLoc := domain.LoadLocationOrUTC(inv.BillingTimezone)
 
 	detailRow("Number", inv.InvoiceNumber)
-	if inv.IssuedAt != nil {
-		detailRow("Issued", inv.IssuedAt.In(docLoc).Format("January 2, 2006"))
-	}
-	if inv.DueAt != nil {
-		detailRow("Due Date", inv.DueAt.In(docLoc).Format("January 2, 2006"))
+	for _, row := range issueDateRows(inv, docLoc) {
+		detailRow(row[0], row[1])
 	}
 	// Inclusive last-day period ("Jun 1 – Jun 30"), authored once via
 	// domain.FormatInclusivePeriod (ADR-058 follow-up) and carried on
@@ -523,28 +575,103 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	// ── Line items table ──
 	colX := []float64{margin, margin + 240, margin + 320, margin + 400}
 	colEnd := margin + contentW
+	// A description wraps inside its column, which stops a gap short of
+	// the Qty column, and is never cut (#1228). Each extra line adds
+	// descLineH to its row.
+	descW := colX[1] - colX[0] - 8
+	const descLineH = 12.0
 
-	// Header row
-	setFont(true, 9)
-	setColor(80, 80, 80)
-	pdf.SetFillColor(245, 245, 245)
-	pdf.RectFromUpperLeftWithStyle(margin, y-2, contentW, 20, "F")
+	drawTableHeader := func() {
+		setFont(true, 9)
+		setColor(80, 80, 80)
+		pdf.SetFillColor(245, 245, 245)
+		pdf.RectFromUpperLeftWithStyle(margin, y-2, contentW, 20, "F")
 
-	textAt(colX[0], y, "Description")
-	rightAlignAt(colX[1], y, colX[2]-colX[1], "Qty")
-	rightAlignAt(colX[2], y, colX[3]-colX[2], "Unit Price")
-	rightAlignAt(colX[3], y, colEnd-colX[3], "Amount")
-	y += 22
+		textAt(colX[0], y, "Description")
+		rightAlignAt(colX[1], y, colX[2]-colX[1], "Qty")
+		rightAlignAt(colX[2], y, colX[3]-colX[2], "Unit Price")
+		rightAlignAt(colX[3], y, colEnd-colX[3], "Amount")
+		y += 22
+	}
+
+	// ── Page breaks ──
+	// Every page after the first opens with "Invoice <number> (continued)";
+	// a page that carries more line items repeats the table header too.
+	continued := "Invoice"
+	if inv.InvoiceNumber != "" {
+		continued += " " + inv.InvoiceNumber
+	}
+	continued += " (continued)"
+	newPage := func(withTableHeader bool) {
+		pdf.AddPage()
+		drawWatermark()
+		setFont(false, 8)
+		setColor(150, 150, 150)
+		textAt(margin, margin, continued)
+		y = margin + 20
+		pageTop = y
+		if withTableHeader {
+			drawTableHeader()
+		}
+	}
+	// need starts a new page when the next h points would cross bottomLimit.
+	need := func(h float64, withTableHeader bool) {
+		if measuring || y+h <= bottomLimit || y <= pageTop {
+			return
+		}
+		newPage(withTableHeader)
+	}
+	// keep draws a block on one page: it measures the block with drawing
+	// switched off, starts a new page if the block does not fit in what is
+	// left of this one, then draws it. A block taller than a whole page
+	// then breaks inside, at its own need calls.
+	keep := func(draw func()) {
+		if measuring {
+			draw()
+			return
+		}
+		start := y
+		measuring = true
+		draw()
+		measuring = false
+		h := y - start
+		y = start
+		need(h, false)
+		draw()
+	}
+
+	// descLines is a line item's description as it prints.
+	descLines := func(item domain.InvoiceLineItem) []string {
+		setFont(false, 9)
+		return wrap(item.Description, descW)
+	}
+	// rowHeight is the height a row of n description lines needs on one
+	// page. A row taller than a continued page holds under its table
+	// header cannot stay on one page, so it needs only its first line's
+	// room: it starts where it is and breaks between its lines.
+	rowHeight := func(n int) float64 {
+		h := 18 + float64(n-1)*descLineH
+		if h > bottomLimit-(margin+20+22) {
+			return 18
+		}
+		return h
+	}
+
+	// Header row, kept with the first line item.
+	firstRow := 18.0
+	if len(lineItems) > 0 {
+		firstRow = rowHeight(len(descLines(lineItems[0])))
+	}
+	need(22+firstRow, false)
+	drawTableHeader()
 
 	// Line items
-	setFont(false, 9)
-	setColor(40, 40, 40)
 	for _, item := range lineItems {
-		desc := item.Description
-		if len([]rune(desc)) > 50 {
-			desc = string([]rune(desc)[:47]) + "..."
-		}
-		textAt(colX[0], y, desc)
+		lines := descLines(item)
+		need(rowHeight(len(lines)), true)
+		setFont(false, 9)
+		setColor(40, 40, 40)
+		textAt(colX[0], y, lines[0])
 		rightAlignAt(colX[1], y, colX[2]-colX[1], formatQuantity(item))
 		// Token lines quote per 1M on every provider rate card — mirror the
 		// dashboard's convention (domain.MeterUnitDisplayScale) so the PDF,
@@ -558,282 +685,405 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		}
 		rightAlignAt(colX[2], y, colX[3]-colX[2], unitPrice)
 		rightAlignAt(colX[3], y, colEnd-colX[3], formatCents(item.AmountCents))
+		for _, line := range lines[1:] {
+			// Only a row taller than a page reaches the foot of one here.
+			if y+descLineH+18 > bottomLimit {
+				newPage(true)
+				setFont(false, 9)
+				setColor(40, 40, 40)
+			} else {
+				y += descLineH
+			}
+			textAt(colX[0], y, line)
+		}
 		y += 18
 	}
 
-	// Separator
-	y += 4
-	pdf.SetLineWidth(0.5)
-	pdf.SetStrokeColor(200, 200, 200)
-	pdf.Line(margin, y, margin+contentW, y)
-	y += 8
-
 	// ── Totals ──
+	// Amounts right-align with the Amount column. A label starts at x and
+	// stops totalsGap short of its amount, wrapping onto more lines when
+	// longer, so no amount runs into its label however large (#1178).
 	totalsX := 340.0
-	totalsW := 140.0
-	labelW := 90.0
+	totalsEnd := colEnd
+	const totalsGap = 12.0
 
+	// totalsLine draws one row of the totals block in the given font and
+	// colors. y moves down rowH, and size+3 more for each extra label line.
+	totalsLine := func(x float64, label, value string, bold bool, size int, rowH float64, labelRGB, valueRGB [3]uint8) {
+		setFont(bold, size)
+		vw, _ := pdf.MeasureTextWidth(value)
+		lines := wrap(label, totalsEnd-totalsGap-vw-x)
+		lineH := float64(size + 3)
+		h := rowH + float64(len(lines)-1)*lineH
+		need(h, false)
+		setFont(bold, size) // a new page sets its own font
+		setColor(labelRGB[0], labelRGB[1], labelRGB[2])
+		for i, line := range lines {
+			textAt(x, y+float64(i)*lineH, line)
+		}
+		setColor(valueRGB[0], valueRGB[1], valueRGB[2])
+		rightAlignAt(x, y, totalsEnd-x, value)
+		y += h
+	}
 	totalsRow := func(label string, amount string, bold bool, labelR, labelG, labelB, valR, valG, valB uint8) {
-		if bold {
-			setFont(true, 10)
-		} else {
-			setFont(false, 10)
-		}
-		setColor(labelR, labelG, labelB)
-		textAt(totalsX, y, label)
-		setColor(valR, valG, valB)
-		rightAlignAt(totalsX+labelW, y, totalsW-labelW, amount)
-		y += 16
+		totalsLine(totalsX, label, amount, bold, 10, 16, [3]uint8{labelR, labelG, labelB}, [3]uint8{valR, valG, valB})
 	}
+	green := [3]uint8{0, 128, 80}
+	dark := [3]uint8{30, 30, 30}
 
-	totalsRow("Subtotal", formatCents(inv.SubtotalCents), false, 80, 80, 80, 40, 40, 40)
-
-	if inv.DiscountCents > 0 {
-		totalsRow("Discount", "-"+formatCents(inv.DiscountCents), false, 80, 80, 80, 40, 40, 40)
-	}
-
-	if inv.TaxAmountCents > 0 {
-		taxLabel := "Tax"
-		if inv.TaxName != "" {
-			taxLabel = inv.TaxName
-		}
-		if inv.TaxRate > 0 {
-			taxLabel = fmt.Sprintf("%s (%s%%)", taxLabel, formatTaxRate(inv.TaxRate))
-		}
-		if inv.TaxCountry != "" {
-			taxLabel = fmt.Sprintf("%s [%s]", taxLabel, inv.TaxCountry)
-		}
-		totalsRow(taxLabel, formatCents(inv.TaxAmountCents), false, 80, 80, 80, 40, 40, 40)
-
-		// Per-jurisdiction breakdown. Rendered indented under the aggregate
-		// Tax row when lines span multiple jurisdictions (EU cross-state,
-		// India CGST+SGST, US state+local). Single-jurisdiction invoices
-		// skip this — the aggregate row already tells the whole story.
-		jurisdictionAgg := aggregateTaxByJurisdiction(lineItems)
-		if len(jurisdictionAgg) > 1 {
-			setFont(false, 8)
-			setColor(120, 120, 120)
-			for _, row := range jurisdictionAgg {
-				textAt(totalsX+12, y, row.label)
-				rightAlignAt(totalsX+labelW, y, totalsW-labelW, formatCents(row.amount))
-				y += 12
-			}
-			y += 4
-		}
-
-		// The buyer's tax ID is printed once, in the bill-to block (see
-		// buyerTaxID). It used to be drawn here as well, 4pt below the tax
-		// row's baseline at the same left edge, which put it on top of the
-		// tax label (#164).
-	} else if inv.TaxReverseCharge {
-		// Even with zero-amount tax, surface the reverse-charge row so the
-		// invoice reads as a deliberate tax treatment rather than a bug.
-		totalsRow("Tax (reverse charge)", formatCents(0), false, 80, 80, 80, 120, 120, 120)
-	}
-
-	// Total line
-	pdf.SetStrokeColor(220, 220, 220)
-	pdf.Line(totalsX, y-4, totalsX+totalsW, y-4)
-	y += 2
-	totalsRow("Total", formatCents(inv.TotalAmountCents), true, 30, 30, 30, 30, 30, 30)
-
-	// Credit notes (pre-payment). A CN is "post-payment" if any of
-	// the three channels is populated — refund-to-PM, credit-balance,
+	// Credit notes split by when they apply. A CN is "post-payment" if any
+	// of the three channels is populated — refund-to-PM, credit-balance,
 	// or out-of-band. Pre-payment CNs reduce the invoice subtotal
 	// directly (unpaid-invoice path). Out-of-band-only CNs must NOT
 	// be treated as pre-payment, otherwise they'd reduce the invoice
 	// total even though the operator already handled the refund
 	// externally.
-	var postPaymentCNs []CreditNoteInfo
+	var prePaymentCNs, postPaymentCNs []CreditNoteInfo
 	for _, cn := range creditNotes {
 		if cn.RefundAmountCents > 0 || cn.CreditAmountCents > 0 || cn.OutOfBandAmountCents > 0 {
 			postPaymentCNs = append(postPaymentCNs, cn)
 			continue
 		}
-		setFont(false, 8)
-		setColor(0, 128, 80)
-		label := cn.Number
-		if cn.Reason != "" {
-			r := []rune(cn.Reason)
-			if len(r) > 20 {
-				r = append(r[:17], []rune("...")...)
-			}
-			label += " - " + string(r)
-		}
-		textAt(totalsX, y, label)
-		rightAlignAt(totalsX+labelW, y, totalsW-labelW, "-"+formatCents(cn.Amount))
-		y += 16
+		prePaymentCNs = append(prePaymentCNs, cn)
 	}
 
-	if inv.Status == domain.InvoiceVoided {
-		pdf.SetStrokeColor(200, 200, 200)
-		pdf.Line(totalsX, y-4, totalsX+totalsW, y-4)
+	// Everything below the table (totals, adjustments, legends, footer)
+	// goes on the last page together, so Amount Due is never split from the
+	// rows that make it up. Only a block taller than a page (dozens of
+	// adjustments or tax rows) breaks inside, row by row.
+	keep(func() {
+		// Separator
 		y += 4
-		setFont(true, 12)
-		setColor(30, 30, 30)
-		textAt(totalsX, y, "Amount Due")
-		rightAlignAt(totalsX+labelW, y, totalsW-labelW, formatCents(0))
-		y += 20
-	} else {
-		if inv.CreditsAppliedCents > 0 {
-			setFont(false, 9)
-			setColor(0, 128, 80)
-			textAt(totalsX, y, "Prepaid credits")
-			rightAlignAt(totalsX+labelW, y, totalsW-labelW, "-"+formatCents(inv.CreditsAppliedCents))
-			y += 16
-		}
-
-		if inv.AmountPaidCents > 0 {
-			totalsRow("Amount Paid", "-"+formatCents(inv.AmountPaidCents), false, 80, 80, 80, 40, 40, 40)
-		}
-
+		pdf.SetLineWidth(0.5)
 		pdf.SetStrokeColor(200, 200, 200)
-		pdf.Line(totalsX, y-4, totalsX+totalsW, y-4)
-		y += 4
-		setFont(true, 12)
-		setColor(30, 30, 30)
-		textAt(totalsX, y, "Amount Due")
-		rightAlignAt(totalsX+labelW, y, totalsW-labelW, formatCents(inv.AmountDueCents))
-		y += 20
-
-		// Post-payment adjustments. A CN is "completed" when at least
-		// one channel has settled — credit-balance and out-of-band
-		// are immediate at Issue time; the Stripe refund leg is
-		// considered settled only on refund_status=succeeded so a
-		// pending/failed refund doesn't render as if it landed.
-		var completedCNs []CreditNoteInfo
-		for _, cn := range postPaymentCNs {
-			switch {
-			case cn.CreditAmountCents > 0:
-				completedCNs = append(completedCNs, cn)
-			case cn.OutOfBandAmountCents > 0:
-				completedCNs = append(completedCNs, cn)
-			case cn.RefundAmountCents > 0 && cn.RefundStatus == string(domain.RefundSucceeded):
-				completedCNs = append(completedCNs, cn)
-			}
-		}
-		if len(completedCNs) > 0 {
-			y += 8
-			setFont(false, 7)
-			setColor(150, 150, 150)
-			textAt(margin, y, "POST-PAYMENT ADJUSTMENTS")
-			y += 12
-			for _, cn := range completedCNs {
-				channelDesc := cnChannelDescription(cn, symbol)
-				reason := cn.Reason
-				if len([]rune(reason)) > 40 {
-					reason = string([]rune(reason)[:37]) + "..."
-				}
-				setFont(false, 8)
-				setColor(120, 120, 120)
-				textAt(margin, y, fmt.Sprintf("%s - %s", cn.Number, reason))
-				rightAlignAt(totalsX+labelW, y, totalsW-labelW, formatCents(cn.Amount))
-				y += 11
-				// Channel breakdown line — smaller, indented, matches
-				// dashboard layout.
-				setFont(false, 7)
-				setColor(140, 140, 140)
-				textAt(margin+8, y, channelDesc)
-				y += 10
-				// Tax reversal sub-fact — same content as the dashboard
-				// row but ASCII-safe (no ↳ — Noto Sans subset doesn't
-				// cover the Arrows block).
-				if cn.TaxAmountCents > 0 {
-					var taxLine string
-					if cn.TaxTransactionID != "" {
-						taxLine = fmt.Sprintf("Tax reversed %s (Stripe Tax)", formatCents(cn.TaxAmountCents))
-					} else {
-						taxLine = fmt.Sprintf("Tax: %s (no upstream provider)", formatCents(cn.TaxAmountCents))
-					}
-					setColor(160, 160, 160)
-					textAt(margin+12, y, taxLine)
-					y += 10
-				}
-				y += 2
-			}
-		}
-	}
-
-	// Tax treatment legend. Compliance-sensitive disclosure: reverse-charge
-	// invoices must state who accounts for the tax, and exempt invoices
-	// must carry the reason text (EU OSS, nonprofit certificate, etc.).
-	// The per-line `taxability_reason` data persisted from Stripe Tax
-	// (issue #4) lets us distinguish customer-exempt and product-exempt
-	// lines from reverse-charge lines and append a separate legend; the
-	// reverse-charge wording itself still comes from the calc-level
-	// inv.TaxReverseCharge so issue #9's India/EU split is preserved
-	// untouched.
-	exemption := exemptionLegend(lineItems)
-	if inv.TaxReverseCharge || inv.TaxExemptReason != "" || exemption != "" {
+		hline(margin, margin+contentW, y)
 		y += 8
-		setFont(true, 8)
-		setColor(80, 80, 80)
-		if inv.TaxReverseCharge {
-			var supplier CompanyInfo
-			if len(company) > 0 {
-				supplier = company[0]
-			}
-			textAt(margin, y, reverseChargeLegend(inv, supplier, billTo, lineItems))
-			y += 12
+
+		totalsRow("Subtotal", formatCents(inv.SubtotalCents), false, 80, 80, 80, 40, 40, 40)
+
+		if inv.DiscountCents > 0 {
+			totalsRow("Discount", "-"+formatCents(inv.DiscountCents), false, 80, 80, 80, 40, 40, 40)
 		}
-		if exemption != "" {
-			// Small vertical gap above the per-line exemption legend when a
-			// reverse-charge legend was just rendered, so the two read as
-			// distinct disclosures rather than one wrapped paragraph.
-			if inv.TaxReverseCharge {
+
+		if inv.TaxAmountCents > 0 {
+			taxLabel := "Tax"
+			if inv.TaxName != "" {
+				taxLabel = inv.TaxName
+			}
+			if inv.TaxRate > 0 {
+				taxLabel = fmt.Sprintf("%s (%s%%)", taxLabel, formatTaxRate(inv.TaxRate))
+			}
+			if inv.TaxCountry != "" {
+				taxLabel = fmt.Sprintf("%s [%s]", taxLabel, inv.TaxCountry)
+			}
+			totalsRow(taxLabel, formatCents(inv.TaxAmountCents), false, 80, 80, 80, 40, 40, 40)
+
+			// Per-jurisdiction breakdown. Rendered indented under the aggregate
+			// Tax row when lines span multiple jurisdictions (EU cross-state,
+			// India CGST+SGST, US state+local). Single-jurisdiction invoices
+			// skip this — the aggregate row already tells the whole story.
+			jurisdictionAgg := aggregateTaxByJurisdiction(lineItems)
+			if len(jurisdictionAgg) > 1 {
+				gray := [3]uint8{120, 120, 120}
+				for _, row := range jurisdictionAgg {
+					totalsLine(totalsX+12, row.label, formatCents(row.amount), false, 8, 12, gray, gray)
+				}
 				y += 4
 			}
-			setFont(false, 8)
-			setColor(100, 100, 100)
-			for _, line := range strings.Split(exemption, "\n") {
-				textAt(margin, y, line)
-				y += 12
+
+			// The buyer's tax ID is printed once, in the bill-to block (see
+			// buyerTaxID). It used to be drawn here as well, 4pt below the tax
+			// row's baseline at the same left edge, which put it on top of the
+			// tax label (#164).
+		} else if inv.TaxReverseCharge {
+			// Even with zero-amount tax, surface the reverse-charge row so the
+			// invoice reads as a deliberate tax treatment rather than a bug.
+			totalsRow("Tax (reverse charge)", formatCents(0), false, 80, 80, 80, 120, 120, 120)
+		}
+
+		// Total line
+		need(18, false)
+		pdf.SetStrokeColor(220, 220, 220)
+		hline(totalsX, totalsEnd, y-4)
+		y += 2
+		totalsRow("Total", formatCents(inv.TotalAmountCents), true, 30, 30, 30, 30, 30, 30)
+
+		// Credit notes (pre-payment).
+		for _, cn := range prePaymentCNs {
+			label := cn.Number
+			if cn.Reason != "" {
+				r := []rune(cn.Reason)
+				if len(r) > 20 {
+					r = append(r[:17], []rune("...")...)
+				}
+				label += " - " + string(r)
+			}
+			totalsLine(totalsX, label, "-"+formatCents(cn.Amount), false, 8, 16, green, green)
+		}
+
+		if inv.Status == domain.InvoiceVoided {
+			need(24, false)
+			pdf.SetStrokeColor(200, 200, 200)
+			hline(totalsX, totalsEnd, y-4)
+			y += 4
+			totalsLine(totalsX, "Amount Due", formatCents(0), true, 12, 20, dark, dark)
+		} else {
+			if inv.CreditsAppliedCents > 0 {
+				totalsLine(totalsX, "Prepaid credits", "-"+formatCents(inv.CreditsAppliedCents), false, 9, 16, green, green)
+			}
+
+			if inv.AmountPaidCents > 0 {
+				totalsRow("Amount Paid", "-"+formatCents(inv.AmountPaidCents), false, 80, 80, 80, 40, 40, 40)
+			}
+
+			need(24, false)
+			pdf.SetStrokeColor(200, 200, 200)
+			hline(totalsX, totalsEnd, y-4)
+			y += 4
+			totalsLine(totalsX, "Amount Due", formatCents(inv.AmountDueCents), true, 12, 20, dark, dark)
+		}
+
+		if inv.Status != domain.InvoiceVoided {
+			// Post-payment adjustments. A CN is "completed" when at least
+			// one channel has settled — credit-balance and out-of-band
+			// are immediate at Issue time; the Stripe refund leg is
+			// considered settled only on refund_status=succeeded so a
+			// pending/failed refund doesn't render as if it landed.
+			var completedCNs []CreditNoteInfo
+			for _, cn := range postPaymentCNs {
+				switch {
+				case cn.CreditAmountCents > 0:
+					completedCNs = append(completedCNs, cn)
+				case cn.OutOfBandAmountCents > 0:
+					completedCNs = append(completedCNs, cn)
+				case cn.RefundAmountCents > 0 && cn.RefundStatus == string(domain.RefundSucceeded):
+					completedCNs = append(completedCNs, cn)
+				}
+			}
+			// Each adjustment stays on one page, and the heading stays with
+			// the first.
+			for i, cn := range completedCNs {
+				keep(func() {
+					if i == 0 {
+						y += 8
+						setFont(false, 7)
+						setColor(150, 150, 150)
+						textAt(margin, y, "POST-PAYMENT ADJUSTMENTS")
+						y += 12
+					}
+					channelDesc := cnChannelDescription(cn, symbol)
+					reason := cn.Reason
+					if len([]rune(reason)) > 40 {
+						reason = string([]rune(reason)[:37]) + "..."
+					}
+					gray := [3]uint8{120, 120, 120}
+					totalsLine(margin, fmt.Sprintf("%s - %s", cn.Number, reason), formatCents(cn.Amount), false, 8, 11, gray, gray)
+					// Channel breakdown line — smaller, indented, matches
+					// dashboard layout.
+					setFont(false, 7)
+					setColor(140, 140, 140)
+					textAt(margin+8, y, channelDesc)
+					y += 10
+					// Tax reversal sub-fact — same content as the dashboard
+					// row but ASCII-safe (no ↳ — Noto Sans subset doesn't
+					// cover the Arrows block).
+					if cn.TaxAmountCents > 0 {
+						var taxLine string
+						if cn.TaxTransactionID != "" {
+							taxLine = fmt.Sprintf("Tax reversed %s (Stripe Tax)", formatCents(cn.TaxAmountCents))
+						} else {
+							taxLine = fmt.Sprintf("Tax: %s (no upstream provider)", formatCents(cn.TaxAmountCents))
+						}
+						setColor(160, 160, 160)
+						textAt(margin+12, y, taxLine)
+						y += 10
+					}
+					y += 2
+				})
 			}
 		}
-		if inv.TaxExemptReason != "" {
-			setFont(false, 8)
-			setColor(100, 100, 100)
-			textAt(margin, y, "Tax-exempt: "+inv.TaxExemptReason)
-			y += 12
+
+		// Tax treatment legend. Compliance-sensitive disclosure: reverse-charge
+		// invoices must state who accounts for the tax, and exempt invoices
+		// must carry the reason text (EU OSS, nonprofit certificate, etc.).
+		// The per-line `taxability_reason` data persisted from Stripe Tax
+		// (issue #4) lets us distinguish customer-exempt and product-exempt
+		// lines from reverse-charge lines and append a separate legend; the
+		// reverse-charge wording itself still comes from the calc-level
+		// inv.TaxReverseCharge so issue #9's India/EU split is preserved
+		// untouched.
+		exemption := exemptionLegend(lineItems)
+		if inv.TaxReverseCharge || inv.TaxExemptReason != "" || exemption != "" {
+			keep(func() {
+				y += 8
+				setFont(true, 8)
+				setColor(80, 80, 80)
+				if inv.TaxReverseCharge {
+					var supplier CompanyInfo
+					if len(company) > 0 {
+						supplier = company[0]
+					}
+					textAt(margin, y, reverseChargeLegend(inv, supplier, billTo, lineItems))
+					y += 12
+				}
+				if exemption != "" {
+					// Small vertical gap above the per-line exemption legend when a
+					// reverse-charge legend was just rendered, so the two read as
+					// distinct disclosures rather than one wrapped paragraph.
+					if inv.TaxReverseCharge {
+						y += 4
+					}
+					setFont(false, 8)
+					setColor(100, 100, 100)
+					for _, line := range strings.Split(exemption, "\n") {
+						textAt(margin, y, line)
+						y += 12
+					}
+				}
+				if inv.TaxExemptReason != "" {
+					setFont(false, 8)
+					setColor(100, 100, 100)
+					textAt(margin, y, "Tax-exempt: "+inv.TaxExemptReason)
+					y += 12
+				}
+			})
 		}
-	}
 
-	// ── Footer ──
-	y += 16
-	setFont(false, 9)
-	setColor(120, 120, 120)
-	if inv.Status == domain.InvoiceVoided {
-		voidDate := "N/A"
-		if inv.VoidedAt != nil {
-			voidDate = inv.VoidedAt.In(docLoc).Format("January 2, 2006")
-		}
-		setColor(200, 80, 80)
-		textAt(margin, y, fmt.Sprintf("This invoice was voided on %s. No payment is due.", voidDate))
-	} else if inv.PaymentStatus == domain.PaymentSucceeded && inv.PaidAt != nil {
-		textAt(margin, y, fmt.Sprintf("Paid on %s - Thank you!", inv.PaidAt.In(docLoc).Format("January 2, 2006")))
-	} else {
-		textAt(margin, y, paymentTermsLine(inv.NetPaymentTermDays))
-	}
+		// ── Footer ──
+		// Kept on one page, after the totals.
+		keep(func() {
+			y += 16
+			setFont(false, 9)
+			setColor(120, 120, 120)
+			if inv.Status == domain.InvoiceVoided {
+				voidDate := "N/A"
+				if inv.VoidedAt != nil {
+					voidDate = inv.VoidedAt.In(docLoc).Format("January 2, 2006")
+				}
+				setColor(200, 80, 80)
+				textAt(margin, y, fmt.Sprintf("This invoice was voided on %s. No payment is due.", voidDate))
+			} else if inv.Status == domain.InvoiceDraft {
+				textAt(margin, y, "Draft preview. This invoice has not been issued and nothing is owed on it yet.")
+			} else if inv.PaymentStatus == domain.PaymentSucceeded && inv.PaidAt != nil {
+				textAt(margin, y, fmt.Sprintf("Paid on %s - Thank you!", inv.PaidAt.In(docLoc).Format("January 2, 2006")))
+			} else {
+				textAt(margin, y, paymentTermsLine(inv.NetPaymentTermDays))
+			}
 
-	if inv.Memo != "" {
-		y += 12
-		setFont(false, 9)
-		setColor(120, 120, 120)
-		textAt(margin, y, inv.Memo)
-	}
+			if inv.Memo != "" {
+				y += 12
+				setFont(false, 9)
+				setColor(120, 120, 120)
+				textAt(margin, y, inv.Memo)
+			}
 
-	y += 24
-	setFont(false, 7)
-	setColor(170, 170, 170)
-	footer := fmt.Sprintf("Generated on %s  |  %s", clock.Now(ctx).Format("Jan 2, 2006 15:04 UTC"), inv.ID)
-	fw, _ := pdf.MeasureTextWidth(footer)
-	textAt((pageW-fw)/2, y, footer)
+			y += 24
+			setFont(false, 7)
+			setColor(170, 170, 170)
+			footer := fmt.Sprintf("Generated on %s  |  %s", clock.Now(ctx).Format("Jan 2, 2006 15:04 UTC"), inv.ID)
+			fw, _ := pdf.MeasureTextWidth(footer)
+			textAt((pageW-fw)/2, y, footer)
+			y += 10 // the 7pt line's height, so keep measures the whole footer
+		})
+	})
+
+	if wrapErr != nil {
+		return nil, fmt.Errorf("render pdf: %w", wrapErr)
+	}
+	if err := stampPageNumbers(pdf, margin, contentW, pageH-34); err != nil {
+		return nil, err
+	}
 
 	var buf bytes.Buffer
 	if _, err := pdf.WriteTo(&buf); err != nil {
 		return nil, fmt.Errorf("render pdf: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// stampPageNumbers prints "Page N of M" at the foot of every page, right
+// aligned to x+width at y. It runs once the document is complete, because M
+// is known only then. A one-page document gets no number.
+func stampPageNumbers(pdf *gopdf.GoPdf, x, width, y float64) error {
+	n := pdf.GetNumberOfPages()
+	if n < 2 {
+		return nil
+	}
+	if err := pdf.SetFont(pdffonts.FamilyRegular, "", 8); err != nil {
+		return fmt.Errorf("render pdf: page numbers: %w", err)
+	}
+	pdf.SetTextColor(150, 150, 150)
+	for i := 1; i <= n; i++ {
+		if err := pdf.SetPage(i); err != nil {
+			return fmt.Errorf("render pdf: page %d of %d: %w", i, n, err)
+		}
+		label := fmt.Sprintf("Page %d of %d", i, n)
+		tw, err := pdf.MeasureTextWidth(label)
+		if err != nil {
+			return fmt.Errorf("render pdf: page numbers: %w", err)
+		}
+		pdf.SetXY(x+width-tw, y)
+		if err := pdf.Cell(nil, label); err != nil {
+			return fmt.Errorf("render pdf: page numbers: %w", err)
+		}
+	}
+	return nil
+}
+
+// watermarkFor is the large background word a document carries: VOID on a
+// voided invoice, DRAFT on one not yet issued, none otherwise.
+func watermarkFor(status domain.InvoiceStatus) string {
+	switch status {
+	case domain.InvoiceVoided:
+		return "VOID"
+	case domain.InvoiceDraft:
+		return "DRAFT"
+	}
+	return ""
+}
+
+// sellerName is the seller name the PDF header prints: the tenant's company
+// name, or "" when it is unset. Never a placeholder.
+func sellerName(company ...CompanyInfo) string {
+	if len(company) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(company[0].Name)
+}
+
+// issueDateRows are the date rows under "Number" in the details block. A
+// draft has not been issued, so it prints "Draft — not issued" in place of
+// an issue date. Its due row follows what finalize will do, the same rule
+// the invoice page uses: an operator-composed draft gets its due date at
+// finalize (Net N from then), so it prints the terms; an engine draft (a
+// cycle invoice held as a draft) keeps the due date it was built with, so
+// that date is printed. An engine draft with no due date prints the terms,
+// as the page does (lib/invoiceDocument issueDates), rather than no due row.
+func issueDateRows(inv domain.Invoice, loc *time.Location) [][2]string {
+	if inv.Status == domain.InvoiceDraft {
+		rows := [][2]string{{"Status", "Draft — not issued"}}
+		if isOperatorComposed(inv) || inv.DueAt == nil {
+			return append(rows, [2]string{"Due", draftDueTerms(inv.NetPaymentTermDays)})
+		}
+		return append(rows, [2]string{"Due Date", inv.DueAt.In(loc).Format("January 2, 2006")})
+	}
+	var rows [][2]string
+	if inv.IssuedAt != nil {
+		rows = append(rows, [2]string{"Issued", inv.IssuedAt.In(loc).Format("January 2, 2006")})
+	}
+	if inv.DueAt != nil {
+		rows = append(rows, [2]string{"Due Date", inv.DueAt.In(loc).Format("January 2, 2006")})
+	}
+	return rows
+}
+
+// draftDueTerms is the due row of a composed draft, worded as the invoice
+// page words it.
+func draftDueTerms(netDays int) string {
+	if netDays == 0 {
+		return "Due on receipt once finalized"
+	}
+	return fmt.Sprintf("Net %d from finalizing", netDays)
 }
 
 // formatCityStatePostal joins "City, State Postal" with graceful handling

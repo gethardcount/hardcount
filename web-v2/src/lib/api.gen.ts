@@ -26,10 +26,63 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "ok";
+                        };
+                    };
                 };
             };
         };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness check for load balancers
+         * @description Tells a load balancer whether this server can take requests. It
+         *     returns 503 when the server is shutting down (`draining`) or cannot
+         *     reach the database. A late billing scheduler shows as `degraded` in
+         *     the body but keeps the status at 200: taking the server out of the
+         *     balancer would not restart the scheduler. Alert on the scheduler
+         *     metrics instead (see docs/ops/runbook/monitoring.md).
+         */
+        get: operations["getHealthReady"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Prometheus metrics
+         * @description Metrics in the Prometheus text format, for a Prometheus scrape.
+         *     When `METRICS_TOKEN` is set, send it as a Bearer token. When it is
+         *     not set, the route is open, except with `APP_ENV=production`, where
+         *     it answers 401. This is not an API key route.
+         */
+        get: operations["getMetrics"];
         put?: never;
         post?: never;
         delete?: never;
@@ -78,7 +131,12 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Customer"][];
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -87,7 +145,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -147,7 +214,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -523,6 +599,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/checkout/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a card setup in Stripe Checkout (older route)
+         * @description An older route the dashboard no longer uses. Prefer
+         *     `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
+         *
+         *     Creates the Stripe customer if there is none, or copies
+         *     `customer_name`, `email` and the address to the existing one. It
+         *     then returns a Stripe Checkout URL in setup mode (card only, no
+         *     charge). Stripe sends the customer back to `return_url` with
+         *     `?payment=success` or `?payment=cancel` added. Without
+         *     `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
+         *     which works only in local development. Writes an audit row. Needs
+         *     the `customer:write` permission.
+         */
+        post: operations["createCheckoutSetupSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/checkout/status/{customerID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a customer's card setup status (older route)
+         * @description An older route the dashboard no longer uses. Prefer
+         *     `GET /v1/customers/{customer_id}/payment-methods`.
+         *
+         *     Any read error, an unknown customer included, returns 200 with
+         *     `setup_status: missing` and zero timestamps. Needs the
+         *     `customer:write` permission.
+         */
+        get: operations["getCheckoutSetupStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/public/cost-dashboard/{token}": {
         parameters: {
             query?: never;
@@ -660,6 +791,122 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/public/invoices/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data behind the hosted invoice page
+         * @description Unauthenticated. The invoice's public token in the URL is the only
+         *     credential. Paid and voided invoices stay viewable. A draft is
+         *     never shown: it returns 404 like an unknown token. Share the page
+         *     link with customers instead of calling this route.
+         */
+        get: operations["getHostedInvoice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/invoices/{token}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the hosted invoice PDF
+         * @description Unauthenticated, like the hosted invoice page. Returns the same PDF
+         *     as `GET /v1/invoices/{id}/pdf`, shown inline and named after the
+         *     invoice number.
+         */
+        get: operations["getHostedInvoicePdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/invoices/{token}/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start paying the invoice in Stripe Checkout
+         * @description The hosted page's Pay button. Returns a Stripe Checkout URL for the
+         *     amount due. Velox has already worked out the tax, so Stripe adds
+         *     none. After paying, Stripe sends the customer back to the hosted
+         *     page with `?paid=1`. The Stripe webhook, not this redirect, marks
+         *     the invoice paid.
+         */
+        post: operations["createHostedInvoiceCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/payment-updates/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data behind the payment-update page
+         * @description Unauthenticated. The token from the payment-update email is the only
+         *     credential. It is valid for 24 hours, and starting checkout uses it
+         *     up. Share the page link with customers instead of calling this
+         *     route.
+         */
+        get: operations["getPublicPaymentUpdate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/payment-updates/{token}/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start adding a card in Stripe Checkout
+         * @description Returns a Stripe Checkout URL in setup mode (card only, no charge).
+         *     Creates the Stripe customer if there is none. This call uses up the
+         *     token. If Stripe fails to create the session, the token works again.
+         *     Stripe sends the customer to the payment-method-added page with
+         *     `?status=success` or `?status=cancel`. Writes an audit row.
+         */
+        post: operations["createPublicPaymentUpdateCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/meters": {
         parameters: {
             query?: never;
@@ -682,7 +929,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Meter"][];
+                        };
+                    };
                 };
             };
         };
@@ -691,7 +942,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -717,7 +977,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Meter"];
+                    };
                 };
             };
         };
@@ -756,7 +1018,16 @@ export interface paths {
         patch: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -780,7 +1051,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Meter"];
+                    };
                 };
                 /** @description Meter not found */
                 404: {
@@ -924,7 +1197,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -961,7 +1243,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["CreditNote"];
+                    };
                 };
                 /** @description State gate (unpaid commit → void; fully-consumed commit; in-flight charge) */
                 409: {
@@ -998,7 +1282,13 @@ export interface paths {
          *     drawn / remaining per grant, expiry, and remaining split by
          *     cost-basis class (commit = money-backed, promotional = free,
          *     other = legacy/adjustments). include_exhausted=true adds
-         *     fully-drawn blocks for history.
+         *     fully-drawn blocks for history. Each grant's `consumed_cents`
+         *     also counts credit no invoice used: `expired_cents`, the part that
+         *     expired unused; `retired_cents`, commit credit taken back when the
+         *     invoice that funded it was voided or refunded by a credit note; and
+         *     `deducted_cents`, the part an operator deduction (a negative
+         *     adjustment) drew from this grant. The credit invoices actually used
+         *     is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
          */
         get: {
             parameters: {
@@ -1018,7 +1308,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["CreditGrants"];
+                    };
                 };
             };
         };
@@ -1125,7 +1417,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["WebhookEndpoint"][];
+                        };
+                    };
                 };
             };
         };
@@ -1141,7 +1437,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -1160,7 +1465,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["WebhookEndpointCreated"];
+                    };
                 };
                 /** @description Invalid URL or unknown event type */
                 422: {
@@ -1204,7 +1511,12 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "deleted";
+                        };
+                    };
                 };
             };
         };
@@ -1222,7 +1534,16 @@ export interface paths {
         patch: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -1244,7 +1565,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["WebhookEndpoint"];
+                    };
                 };
                 /** @description Endpoint not found */
                 404: {
@@ -1277,7 +1600,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -1290,7 +1622,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["WebhookSecretRotation"];
+                    };
                 };
             };
         };
@@ -1391,12 +1725,67 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["WebhookEvent"][];
+                        };
+                    };
                 };
             };
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook-endpoints/events/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an event's deliveries (older route)
+         * @description An older route the dashboard no longer uses. Prefer
+         *     `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
+         *     an unknown event.
+         *
+         *     Returns the deliveries of the event and of its replays, oldest
+         *     first. An unknown id returns 200 with an empty list. Needs the
+         *     `apikey:write` permission.
+         */
+        get: operations["listWebhookEventDeliveriesLegacy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook-endpoints/events/{id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay an event to all matching endpoints (older route)
+         * @description An older route the dashboard no longer uses. Prefer
+         *     `POST /v1/webhook_events/{id}/replay`.
+         *
+         *     Does the same replay. The response always says `replayed`, even
+         *     when no endpoint will receive the copy. Writes an audit row. Needs
+         *     the `apikey:write` permission.
+         */
+        post: operations["replayWebhookEventLegacy"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1489,6 +1878,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/webhooks/stripe/{endpoint_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a Stripe webhook
+         * @description Stripe calls this route; your code does not. Point a webhook in your
+         *     Stripe dashboard at it for each connected mode. `endpoint_id` is the
+         *     `id` of that mode's Stripe connection (`GET /v1/settings/stripe`).
+         *     The request is checked against the `Stripe-Signature` header and
+         *     that mode's signing secret. The body can be at most 64 KB.
+         *
+         *     Events for objects Velox did not create are answered 200 with
+         *     `status: skipped`. A 500 means a temporary failure, and Stripe
+         *     sends the event again.
+         */
+        post: operations["receiveStripeWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/postmark": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a Postmark delivery webhook
+         * @description Postmark calls this route; your code does not. Velox reads
+         *     `Delivery`, `Bounce` and `SpamComplaint` records and ignores other
+         *     record types and soft bounces. Without `POSTMARK_WEBHOOK_USER` and
+         *     `POSTMARK_WEBHOOK_PASS` set, every request gets 401. See
+         *     docs/ops/email-setup.md.
+         *
+         *     Error bodies are `{"error": "<reason>"}`, not the usual error
+         *     object. A body that a retry cannot fix is answered 200, so Postmark
+         *     stops retrying: over 64 KB, invalid JSON, or no known Velox email
+         *     id in its metadata.
+         */
+        post: operations["receivePostmarkWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/plans": {
         parameters: {
             query?: never;
@@ -1511,7 +1957,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Plan"][];
+                        };
+                    };
                 };
             };
         };
@@ -1520,7 +1970,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -1549,7 +2008,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Plan"];
+                    };
                 };
             };
         };
@@ -1600,7 +2061,13 @@ export interface paths {
         /** List rating rules */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Only versions of this rule. */
+                    rule_key?: string;
+                    lifecycle_state?: "draft" | "active" | "archived";
+                    /** @description When true, only the newest version of each rule. */
+                    latest?: boolean;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -1612,7 +2079,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["RatingRule"][];
+                        };
+                    };
                 };
             };
         };
@@ -1621,7 +2092,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -1653,7 +2133,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["RatingRule"];
+                    };
                 };
             };
         };
@@ -1723,7 +2205,12 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Subscription"][];
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -1732,7 +2219,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -1764,7 +2260,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Subscription"];
+                    };
                 };
             };
         };
@@ -1787,7 +2285,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -1800,7 +2307,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Subscription"];
+                    };
                 };
             };
         };
@@ -1851,7 +2360,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -2304,6 +2822,14 @@ export interface paths {
                      *     `model=gpt-4o,token_type=input`.
                      */
                     dimensions?: string;
+                    /** @description Only events at or after this time (RFC 3339). A value that does not parse is ignored. */
+                    from?: string;
+                    /** @description Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored. */
+                    to?: string;
+                    limit?: number;
+                    offset?: number;
+                    /** @description Opaque cursor from `next_cursor`. Takes precedence over `offset`. */
+                    after?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2316,7 +2842,17 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["UsageEvent"][];
+                            /** @description Number of matching events. Left out when the page was read with an `after` cursor. */
+                            total?: number;
+                            /** @description Sent only when the page was read with an `after` cursor. True when another page follows. */
+                            has_more?: boolean;
+                            /** @description Pass it as `after` to read the next page. Sent only when `has_more` is true. */
+                            next_cursor?: string;
+                        };
+                    };
                 };
                 /** @description Malformed dimensions filter */
                 422: {
@@ -2332,7 +2868,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -2382,14 +2927,18 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["UsageEvent"];
+                    };
                 };
                 /** @description Event ingested */
                 201: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["UsageEvent"];
+                    };
                 };
                 /**
                  * @description Validation failed and nothing was stored. `param` names the
@@ -2436,7 +2985,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -2548,6 +3106,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/usage-events/held": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List held usage
+         * @description Usage rows the LiteLLM integration received for a customer or meter
+         *     that did not exist yet. They are kept with their idempotency keys,
+         *     not billed, until you release or discard them. Grouped by external
+         *     customer ID, meter key and reason, most recent arrival first. Lists
+         *     the 200 external customer IDs with the most recent arrivals, with
+         *     every group for each; `total_customers` and `total_rows` count all
+         *     held rows, listed or not. Requires usage read permission.
+         */
+        get: operations["listHeldUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/usage-events/held/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release held usage
+         * @description Writes the held rows for one external customer ID as usage events
+         *     for a customer, each under its original idempotency key and time,
+         *     marked `origin: backfill`, in one transaction. A row that is already
+         *     a usage event under the same key is not written again. Releasing
+         *     twice writes nothing the second time.
+         *
+         *     Rows whose meter still does not exist, or whose time is after the
+         *     customer's current time, stay held. One call releases at most 5,000
+         *     rows; `more_to_release` counts the rest, and another call takes
+         *     them. A released row counts toward
+         *     the billing period its time falls in only if that period's invoice
+         *     has not been built yet; Velox does not move it onto a later
+         *     invoice. Writes an audit log entry. Requires usage write permission.
+         */
+        post: operations["releaseHeldUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/usage-events/held/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard held usage
+         * @description Marks the held rows for one external customer ID (and one meter
+         *     key, when given) as discarded. They are never billed. The rows stay
+         *     stored as a record. Writes an audit log entry. Requires usage write
+         *     permission.
+         */
+        post: operations["discardHeldUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage-events/aggregate": {
         parameters: {
             query?: never;
@@ -2558,10 +3197,14 @@ export interface paths {
         /**
          * Usage totals
          * @description Event count, quantity totals, and a per-meter breakdown over every
-         *     usage event matching the filters (no paging). Quantities are plain
-         *     sums of event quantities, whatever the meter's aggregation, and
-         *     `total_units` adds quantities across all meters. A `from` or `to`
-         *     value that is not RFC 3339 is ignored, not rejected.
+         *     usage event matching the filters (no paging). Each `by_meter` row
+         *     carries `value`, the meter's usage under its own aggregation: a
+         *     sum, an event count, each customer's peak (Maximum) or each
+         *     customer's latest reading (Latest value), added across customers.
+         *     `total` stays the plain sum of reported quantities. `total_units`
+         *     adds quantities across all meters whatever their units, and is kept
+         *     for compatibility only. A `from` or `to` value that is not RFC 3339
+         *     is ignored, not rejected.
          */
         get: operations["aggregateUsageEvents"];
         put?: never;
@@ -2651,7 +3294,17 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Invoice"][];
+                            /** @description Number of matching invoices. Left out when the page was read with an `after` cursor. */
+                            total?: number;
+                            /** @description Sent only when the page was read with an `after` cursor. True when another page follows. */
+                            has_more?: boolean;
+                            /** @description Pass it as `after` to read the next page. Sent only when `has_more` is true. */
+                            next_cursor?: string;
+                        };
+                    };
                 };
             };
         };
@@ -2691,23 +3344,37 @@ export interface paths {
         put?: never;
         /**
          * Preview the next invoice for a customer (Stripe-equivalent)
-         * @description Answers "what is my next bill going to look like?" as a
-         *     full-period ESTIMATE. Usage lines are rated through the same
-         *     per-meter aggregation path as the cycle scan, but the estimate
-         *     deliberately does NOT replicate usage-cap scaling or mid-period
-         *     segment proration (ADR-045) — for capped or mid-period-changed
-         *     subscriptions the response carries `warnings[]` naming the
-         *     divergence and the finalized invoice can differ (lower, for
-         *     capped usage). Composes across customer / subscription / pricing;
+         * @description Answers "what is my next bill going to look like?" from the usage
+         *     recorded so far. Without `period`, the preview mirrors the cycle
+         *     close for the subscription's current period: base fees prorate for
+         *     a short first period and per segment after a mid-period item add,
+         *     quantity change, plan swap or removal, and each meter's usage counts
+         *     only while a plan carrying it was on the subscription. For a
+         *     trialing subscription it is the first invoice after the trial: the
+         *     trial-end invoice when a plan bills in advance, otherwise the close
+         *     of the first paid period, prorated the same way. With an
+         *     explicit `period`, it is a flat estimate over that window and warns
+         *     when a mid-period change makes the invoice differ. Neither applies
+         *     usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
+         *     says the invoice can be lower. Composes across customer / subscription / pricing;
          *     registered as a sibling of `/v1/invoices` (chi picks the more
          *     specific pattern, otherwise `/{id}` would capture
          *     `create_preview` as an invoice ID). See
-         *     [`docs/design-create-preview.md`](../docs/design-create-preview.md).
+         *     [`docs/design/create-preview.md`](../docs/design/create-preview.md).
          */
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -2742,7 +3409,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["InvoicePreview"];
+                    };
                 };
                 /** @description Invalid request body */
                 400: {
@@ -2821,7 +3490,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/pdf": unknown;
+                        "application/pdf": string;
                     };
                 };
             };
@@ -2855,7 +3524,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -2876,7 +3554,12 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "sent";
+                        };
+                    };
                 };
                 /** @description Invoice not found */
                 404: {
@@ -3115,8 +3798,10 @@ export interface paths {
          *
          *     Leave out `amount_cents`, or send 0, to refund everything not yet
          *     refunded. The response is the credit note. Check its
-         *     `refund_status`: if Stripe failed, it is `failed` and can be retried
-         *     with `POST /v1/credit-notes/{id}/retry-refund`.
+         *     `refund_status`: if Stripe refused the refund, it is `failed`. If
+         *     Stripe gave no clear answer, it is `unknown`: the customer may
+         *     already be refunded, so don't refund again in the Stripe Dashboard.
+         *     Retry either with `POST /v1/credit-notes/{id}/retry-refund`.
          *
          *     Only invoices paid by card through Stripe can be refunded here. For
          *     an invoice paid outside Stripe, create a credit note with
@@ -3178,7 +3863,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -3199,7 +3893,12 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "sent";
+                        };
+                    };
                 };
                 /** @description Credit note not found */
                 404: {
@@ -3272,8 +3971,10 @@ export interface paths {
          *       part is added to the customer's credit balance.
          *
          *     Check the returned `status` and `refund_status`:
-         *     - A failed Stripe refund still returns 200, with `refund_status`
-         *       `failed`. Retry it with `POST /v1/credit-notes/{id}/retry-refund`.
+         *     - A refund Stripe refused still returns 200, with `refund_status`
+         *       `failed`. A refund with no clear answer from Stripe returns 200
+         *       with `unknown`: the customer may already be refunded. Retry either
+         *       with `POST /v1/credit-notes/{id}/retry-refund`.
          *     - If the invoice's charge is still running, or the invoice is still
          *       a draft, nothing changes and the note stays `draft`. Velox issues
          *       it later.
@@ -3299,10 +4000,13 @@ export interface paths {
         /**
          * Retry a failed credit-note refund
          * @description Sends the refund part of an `issued` credit note to Stripe again,
-         *     when its `refund_status` is `failed`, `pending` or `none`. Before
-         *     creating a refund, Velox asks Stripe for one already made for this
-         *     note and records it if found, so a retry does not refund the
-         *     customer twice.
+         *     when its `refund_status` is `failed`, `unknown`, `pending` or
+         *     `none`. Before creating a refund, Velox asks Stripe for one already
+         *     made for this note and records it if found. For `unknown` and
+         *     `none`, Velox then resends the earlier request whose result it
+         *     never recorded, with the same idempotency key. While Stripe keeps
+         *     that key (at least 24 hours), Stripe returns the earlier request's
+         *     result instead of making a second refund.
          */
         post: operations["retryCreditNoteRefund"];
         delete?: never;
@@ -3367,7 +4071,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -3380,7 +4093,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Invoice"];
+                    };
                 };
             };
         };
@@ -3421,7 +4136,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -3479,6 +4203,11 @@ export interface paths {
          *     Subsequent dashboard requests authenticate via the cookie; sessions
          *     are bound to `users.id` and are independent of API key lifecycle.
          *     See ADR-011.
+         *
+         *     A successful sign-in also sets `velox_device` (HttpOnly,
+         *     `Path=/v1/auth`, 180 days). It marks the browser as one that signed
+         *     in to this email, so the sign-in throttle counts its attempts on
+         *     their own. It never replaces the password.
          */
         post: {
             parameters: {
@@ -3523,11 +4252,34 @@ export interface paths {
                     };
                 };
                 /**
-                 * @description Rate limited — the shared per-IP request limit on `/v1/auth`
-                 *     was exceeded. There is no per-account lockout or login
-                 *     throttle in v1 (ADR-094).
+                 * @description Too many attempts. Two limits answer 429, and neither locks
+                 *     the account:
+                 *
+                 *     - Code `login_throttled`: the sign-in throttle. Repeated wrong
+                 *       passwords for one email, from one address or from many,
+                 *       start a wait of 1 to 15 minutes. The message names the wait
+                 *       in minutes and `Retry-After` gives it in seconds. The answer
+                 *       is the same for an email with no account. A browser that
+                 *       signed in to the email before is counted on its own.
+                 *     - Code `rate_limited`: the shared per-address request limit on
+                 *       `/v1/auth`.
                  */
                 429: {
+                    headers: {
+                        /** @description Seconds until an attempt is counted again. */
+                        "Retry-After"?: number;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description Code `authentication_unavailable`: the sign-in throttle could not
+                 *     read the database, so the attempt was refused before the password
+                 *     check. Try again shortly.
+                 */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -4023,7 +4775,7 @@ export interface paths {
          *     `Authorization: Bearer` (SDK / curl). Cookie path returns
          *     `user_id` + `email`; Bearer path returns `key_id` + `key_type`.
          *     All callers get `tenant_id`, `livemode`,
-         *     `can_email_setup_links` and `can_send_invites`.
+         *     `can_email_setup_links`, `can_send_invites` and `smtp_configured`.
          */
         get: {
             parameters: {
@@ -4056,6 +4808,12 @@ export interface paths {
                              *     up; inviting then fails with 409.
                              */
                             can_send_invites: boolean;
+                            /**
+                             * @description Whether this server has SMTP set up (SMTP_HOST). False
+                             *     means no email of any kind is sent. Settings → Email
+                             *     (`GET /v1/settings/email`) has the details.
+                             */
+                            smtp_configured?: boolean;
                             user_id?: string;
                             email?: string;
                             key_id?: string;
@@ -4096,7 +4854,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -4146,7 +4913,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["InvoicePreview"];
+                    };
                 };
             };
         };
@@ -4197,7 +4966,16 @@ export interface paths {
         put: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -4370,7 +5148,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -4404,7 +5191,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["CreditLedgerEntry"];
+                    };
                 };
             };
         };
@@ -4542,7 +5331,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            data?: Record<string, never>[];
+                            data?: components["schemas"]["TestClock"][];
                         };
                     };
                 };
@@ -4566,7 +5355,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -4586,7 +5384,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": Record<string, never>;
+                        "application/json": components["schemas"]["TestClock"];
                     };
                 };
             };
@@ -4622,7 +5420,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": Record<string, never>;
+                        "application/json": components["schemas"]["TestClock"];
                     };
                 };
                 /** @description Clock not found */
@@ -4653,7 +5451,12 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "deleted";
+                        };
+                    };
                 };
             };
         };
@@ -4688,7 +5491,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            data?: Record<string, never>[];
+                            data?: components["schemas"]["Subscription"][];
                         };
                     };
                 };
@@ -4732,7 +5535,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -4753,7 +5565,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": Record<string, never>;
+                        "application/json": components["schemas"]["TestClock"];
                     };
                 };
                 /** @description Clock is not in `ready` state */
@@ -4801,7 +5613,16 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                     *     the same value on every retry. For 24 hours, a repeat with the same
+                     *     key, method, path and body gets the first response again, with an
+                     *     `Idempotent-Replayed: true` header, instead of running again. The
+                     *     error cases are in docs/api-surface.md.
+                     */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -4815,7 +5636,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": Record<string, never>;
+                        "application/json": components["schemas"]["TestClock"];
                     };
                 };
                 /** @description Clock not found */
@@ -5068,7 +5889,8 @@ export interface paths {
          * Export usage events as CSV
          * @description Streams usage events whose `timestamp` falls in the window,
          *     newest first, from one consistent snapshot. `from` and `to` are
-         *     both required and may span at most 366 days. Columns: id,
+         *     both required and may span at most 366 days. `customer_id`,
+         *     `meter_id` and `dimensions` narrow it like the event list. Columns: id,
          *     customer_id, meter_id, quantity, timestamp, idempotency_key,
          *     origin, dimensions_json, provider_cost_micros,
          *     provider_cost_source.
@@ -5337,12 +6159,16 @@ export interface paths {
         /**
          * Create dunning policy
          * @description A dunning policy decides how failed payments are retried and what
-         *     happens when the retries run out. The first policy created in a
-         *     tenant and mode becomes the default; later ones do not (use
-         *     set-default). Customers without an assigned policy use the default.
+         *     happens when the retries run out. Every account starts with one
+         *     policy per mode, "Default retries", as the default. The first
+         *     enabled policy you create in a mode takes the default from it,
+         *     unless you have edited it or made it the default yourself; later
+         *     ones do not (use set-default). Customers without an assigned policy
+         *     use the default, so check `is_default` in the response.
          *
          *     `enabled` defaults to false. A disabled policy starts no dunning, so
-         *     send `enabled: true` for the policy to take effect.
+         *     send `enabled: true` for the policy to take effect. A policy created
+         *     disabled never takes the default from "Default retries".
          */
         post: operations["createDunningPolicy"];
         delete?: never;
@@ -5484,11 +6310,14 @@ export interface paths {
          *     `id` plus the token type, so a resent record is counted as
          *     `deduplicated`, not billed twice.
          *
-         *     A problem with one record (no customer, unknown customer or meter,
-         *     invalid event) is listed in `errors` and the rest of the batch
-         *     still goes in, with status 200. If the usage store cannot be
-         *     reached, the whole request fails with 503 so LiteLLM retries it.
-         *     Requires usage write permission.
+         *     A token row whose customer or meter does not exist yet is held,
+         *     not billed and not lost: it is counted in `held` and listed by
+         *     `GET /v1/usage-events/held` until you release or discard it. A
+         *     resent row that is already held is counted as `deduplicated`. A
+         *     record with no `user` or no `id`, or an invalid event, is listed in
+         *     `errors` and the rest of the batch still goes in, with status 200.
+         *     If the usage store cannot be reached, the whole request fails with
+         *     503 so LiteLLM retries it. Requires usage write permission.
          */
         post: operations["ingestLitellmSpend"];
         delete?: never;
@@ -5618,6 +6447,50 @@ export interface paths {
          */
         put: operations["updateTenantSettings"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Email setup status
+         * @description Read-only. Email is configured in the server environment, not per
+         *     workspace: `SMTP_HOST` and friends, plus the base URLs email links
+         *     are built from. Never returns credentials.
+         */
+        get: operations["getEmailSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/email/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test email
+         * @description Dashboard sessions only. Sends one plain-text email to the signed-in
+         *     member's own address, directly over SMTP (not queued), and returns
+         *     the server's answer. Writes an audit row on success.
+         */
+        post: operations["sendTestEmail"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5935,6 +6808,7 @@ export interface components {
         };
         Meter: {
             id?: string;
+            tenant_id?: string;
             key?: string;
             name?: string;
             unit?: string;
@@ -5948,6 +6822,7 @@ export interface components {
         };
         Plan: {
             id?: string;
+            tenant_id?: string;
             code?: string;
             name?: string;
             currency?: string;
@@ -5977,6 +6852,7 @@ export interface components {
         };
         RatingRule: {
             id?: string;
+            tenant_id?: string;
             rule_key?: string;
             name?: string;
             version?: number;
@@ -6109,15 +6985,40 @@ export interface components {
             parked: boolean;
         };
         UsageEvent: {
-            id?: string;
-            customer_id?: string;
-            meter_id?: string;
-            /** Format: int64 */
-            quantity?: number;
-            properties?: Record<string, never>;
+            id: string;
+            tenant_id?: string;
+            customer_id: string;
+            meter_id: string;
+            /** @description Exact quantity as a decimal string (e.g. "1.5"). */
+            quantity: string;
+            /** @description The dimension values sent with the event. Absent when none were sent. */
+            dimensions?: {
+                [key: string]: unknown;
+            };
             idempotency_key?: string;
             /** Format: date-time */
-            timestamp?: string;
+            timestamp: string;
+            /**
+             * @description How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
+             * @enum {string}
+             */
+            origin?: "api" | "backfill";
+            /**
+             * Format: int64
+             * @description What serving this event cost you at your provider, in millionths
+             *     of a dollar, priced from your provider cost rates when the event
+             *     arrived. Absent when no rate matched or the event has no costed
+             *     dimensions.
+             */
+            provider_cost_micros?: number;
+            /**
+             * @description Where `provider_cost_micros` came from: `table` (your provider
+             *     cost rates), `observed` (the cost the sender reported), or
+             *     `not_applicable` (the meter has no costed dimensions). Absent when
+             *     the cost is unknown.
+             * @enum {string}
+             */
+            provider_cost_source?: "table" | "not_applicable" | "observed";
         };
         /**
          * @description What an issued invoice or credit note prints about its buyer, copied
@@ -6338,6 +7239,19 @@ export interface components {
              *     overdue; updated_at as a proxy for payment failures.
              */
             since?: string;
+            /**
+             * Format: date-time
+             * @description When Velox will next retry on its own. Today only a tax
+             *     retry sets it. Absent when no automatic retry is scheduled.
+             */
+            next_attempt_at?: string;
+            /**
+             * Format: date-time
+             * @description The invoice's payment deadline (its `due_at`). Velox does not
+             *     act on this date; it is shown so the operator knows it.
+             *     Absent when the invoice has no due date.
+             */
+            due_by?: string;
         };
         /**
          * @description Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
@@ -6423,6 +7337,37 @@ export interface components {
              *     0067).
              */
             tax_error_code?: string;
+            /**
+             * Format: date-time
+             * @description The earliest time the background retry may calculate tax again,
+             *     after a failed attempt. Absent when a retry may run now.
+             */
+            tax_next_retry_at?: string;
+            /**
+             * Format: date-time
+             * @description When the provider's tax transaction was reversed after a void or
+             *     write-off, or found to need no reversal. Absent while the
+             *     reversal is not confirmed.
+             */
+            tax_reversed_at?: string;
+            /**
+             * @description Set when a payment arrived that the invoice did not expect. The
+             *     webhook event name of the cause: `payment.duplicate_charge`,
+             *     `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+             *     Only the latest one is kept.
+             */
+            payment_anomaly_kind?: string;
+            /** @description The Stripe PaymentIntent of that unexpected payment. */
+            payment_anomaly_payment_intent_id?: string;
+            /**
+             * Format: int64
+             * @description The amount Stripe took in that unexpected payment.
+             */
+            payment_anomaly_captured_cents?: number;
+            /** @description Brand of the saved card that paid the invoice. Absent when the card is unknown. */
+            payment_card_brand?: string;
+            /** @description Last four digits of the saved card that paid the invoice. */
+            payment_card_last4?: string;
             attention?: components["schemas"]["Attention"];
             /**
              * @description What an operator must know BEFORE recording an OFFLINE payment on a
@@ -6473,9 +7418,31 @@ export interface components {
             paid_at?: string | null;
             /** Format: date-time */
             voided_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When the invoice was marked uncollectible.
+             */
+            uncollectible_at?: string;
             stripe_payment_intent_id?: string;
             last_payment_error?: string;
             auto_charge_pending?: boolean;
+            /**
+             * Format: date-time
+             * @description When the customer was emailed a link to add a payment method for
+             *     this invoice. The email is sent once.
+             */
+            no_pm_notified_at?: string;
+            /**
+             * @description Stripe's PaymentIntent status the last time Velox checked it,
+             *     word for word. For information only: `payment_status` is the
+             *     invoice's payment state. Absent until Velox has checked.
+             */
+            provider_payment_status?: string;
+            /**
+             * Format: date-time
+             * @description When Velox last checked `provider_payment_status`.
+             */
+            provider_synced_at?: string;
             /**
              * @description Hosted-invoice-URL credential (Stripe-parity
              *     `hosted_invoice_url`). Generated at finalize; drafts have an
@@ -6585,6 +7552,7 @@ export interface components {
         };
         ProviderCostRate: {
             id: string;
+            tenant_id?: string;
             provider: string;
             model: string;
             token_type: string;
@@ -6618,7 +7586,7 @@ export interface components {
             cost_currency: string;
             /**
              * Format: int64
-             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0, or when revenue_currency is not cost_currency.
+             * @description (revenue − cost) / revenue in basis points. Omitted when revenue is 0, when revenue_currency is not cost_currency, when costed_events is 0 (no provider cost known), or when unresolved_events is above 0 (part of the cost unknown, so the margin would read too high).
              */
             margin_bps?: number;
             by_model: {
@@ -6629,6 +7597,11 @@ export interface components {
                 revenue_cents?: number;
                 /** @description True only when a pricing rule pins this model — margin is never heuristically allocated. */
                 attributed: boolean;
+                /**
+                 * Format: int64
+                 * @description This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
+                 */
+                margin_bps?: number;
             }[];
             /** Format: int64 */
             unattributed_revenue_cents: number;
@@ -6637,6 +7610,13 @@ export interface components {
              * @description Token events with costable dims but no matching rate — add a rate to cost new events.
              */
             unresolved_events: number;
+            /**
+             * Format: int64
+             * @description Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown.
+             */
+            costed_events: number;
+            /** @description Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up. */
+            cost_rates_configured: boolean;
             cache_write_excluded?: boolean;
         };
         /**
@@ -6649,19 +7629,36 @@ export interface components {
             invoice: components["schemas"]["Invoice"];
             line_items: components["schemas"]["InvoiceLineItem"][];
         };
+        /** @description A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
         CreditBalance: {
             customer_id: string;
             /** Format: int64 */
             balance_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Every credit added: grants, positive adjustments, and credit given back when an invoice it was applied to was voided.
+             */
             total_granted: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Credit applied to invoices.
+             */
             total_used: number;
             /**
              * Format: int64
              * @description Credit written off by expiry.
              */
             total_expired: number;
+            /**
+             * Format: int64
+             * @description Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note.
+             */
+            total_retired: number;
+            /**
+             * Format: int64
+             * @description Credit an operator deducted (a negative adjustment).
+             */
+            total_deducted: number;
         };
         /** @description A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero. */
         CreditLiveBalance: {
@@ -7019,6 +8016,30 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        CustomerPaymentSetup: {
+            customer_id: string;
+            tenant_id?: string;
+            /**
+             * @description `ready`: the customer has a default payment method. `pending`:
+             *     a Stripe customer exists but there is no default payment method
+             *     yet. `missing`: there is no Stripe customer.
+             * @enum {string}
+             */
+            setup_status: "missing" | "pending" | "ready";
+            default_payment_method_present: boolean;
+            /** @example card */
+            payment_method_type?: string;
+            stripe_customer_id?: string;
+            stripe_payment_method_id?: string;
+            card_brand?: string;
+            card_last4?: string;
+            card_exp_month?: number;
+            card_exp_year?: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         CreditLedgerEntry: {
             id: string;
             tenant_id?: string;
@@ -7053,10 +8074,25 @@ export interface components {
             grant_kind?: "commit" | "promotional";
             /** @description For a `commit` grant, the invoice that paid for it. */
             source_invoice_id?: string;
+            /**
+             * @description With `source_subscription_item_id`, `source_plan_changed_at` and
+             *     `source_change_type`, set on a proration credit: the subscription
+             *     change that produced it.
+             */
+            source_subscription_id?: string;
+            source_subscription_item_id?: string;
+            /** Format: date-time */
+            source_plan_changed_at?: string;
+            source_change_type?: components["schemas"]["ItemChangeType"];
+            /** @description The credit note that granted this credit to the balance. */
+            source_credit_note_id?: string;
+            /** @description The voided invoice whose applied credit this entry gave back. */
+            source_invoice_reversal_id?: string;
         };
         /** @description One priced line of a subscription. It pairs a plan with a quantity. */
         SubscriptionItem: {
             id: string;
+            tenant_id?: string;
             subscription_id: string;
             plan_id: string;
             /** Format: int64 */
@@ -7298,27 +8334,39 @@ export interface components {
              * @description Sum of all customers' credit balances. Not limited to `currency`.
              */
             credit_balance_total: number;
+            /**
+             * @description Customer records with status `active`. Includes customers with
+             *     no subscription or only canceled ones; `live_customers` counts
+             *     the customers you bill.
+             */
             active_customers: number;
             /** @description Customers created in the window. */
             new_customers: number;
-            active_subscriptions: number;
+            /** @description Customers with at least one `active` or `trialing` subscription now. */
+            live_customers: number;
             /**
-             * @description Subscriptions with status `active` whose `trial_end_at` is in
-             *     the future. Subscriptions with status `trialing` are not
-             *     counted.
+             * @description `live_customers` at the start of the window, rebuilt from
+             *     subscription start and cancel times.
              */
+            live_customers_prev: number;
+            /** @description Subscriptions with status `active`. */
+            active_subscriptions: number;
+            /** @description Subscriptions with status `trialing`. */
             trialing_subscriptions: number;
             /** @description Invoices paid in the window. */
             paid_invoices: number;
             /** @description Invoices created in the window whose payment failed. All currencies. */
             failed_payments: number;
+            /** @description `failed_payments` for the previous window. */
+            failed_payments_prev: number;
             /** @description Finalized invoices whose payment has not succeeded. All currencies. */
             open_invoices: number;
             /** @description Dunning runs (automatic payment retries) still in progress. */
             dunning_active: number;
             /**
-             * @description Issued credit notes whose refund failed, has been pending for
-             *     more than 72 hours, or has not started an hour after issue.
+             * @description Issued credit notes whose refund failed, has an unknown result,
+             *     has been pending for more than 72 hours, or has not started an
+             *     hour after issue.
              */
             refunds_needing_attention: number;
             /**
@@ -7433,8 +8481,17 @@ export interface components {
             issued_at?: string;
             /** Format: date-time */
             voided_at?: string;
-            /** @enum {string} */
-            refund_status: "none" | "pending" | "succeeded" | "failed";
+            /**
+             * @description The refund part's state at Stripe. `unknown`: Stripe gave no
+             *     clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
+             *     a 429), so the customer may already be refunded. Don't refund it
+             *     again in the Stripe Dashboard. Retry it with
+             *     `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+             *     refund at Stripe first and then resends the same request with
+             *     the same idempotency key.
+             * @enum {string}
+             */
+            refund_status: "none" | "pending" | "succeeded" | "failed" | "unknown";
             stripe_refund_id?: string;
             bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
             supplier_snapshot?: components["schemas"]["DocumentSupplier"];
@@ -7588,6 +8645,7 @@ export interface components {
         };
         MeterPricingRule: {
             id: string;
+            tenant_id?: string;
             meter_id: string;
             rating_rule_version_id: string;
             /** @description Dimensions an event must have for this rule to bill it. `{}` matches every event. */
@@ -7606,6 +8664,7 @@ export interface components {
         CustomerPriceOverride: {
             /** @example vlx_cpo_1a2b3c4d5e6f7890 */
             id: string;
+            tenant_id?: string;
             /** @description The rating rule this override replaces the price of, across all its versions. */
             rule_key: string;
             customer_id: string;
@@ -7680,10 +8739,18 @@ export interface components {
         DunningPolicy: {
             /** @example vlx_dpol_1a2b3c4d5e6f7890 */
             id: string;
+            tenant_id?: string;
             name: string;
             enabled: boolean;
             /** @description Customers without an assigned policy use the default. */
             is_default: boolean;
+            /**
+             * @description True for the "Default retries" policy the account was created
+             *     with, until you edit it or make it the default. While it is
+             *     true, the next enabled policy you create (by hand or from a
+             *     recipe) becomes the default instead. Ignored in request bodies.
+             */
+            seeded: boolean;
             retry_schedule: string[] | null;
             max_retry_attempts: number;
             /** @enum {string} */
@@ -7702,7 +8769,11 @@ export interface components {
         };
         UsageAggregate: {
             total_events: number;
-            /** @description Sum of all matching quantities across meters, as a decimal string. */
+            /**
+             * @description Sum of all matching quantities across meters, as a decimal
+             *     string. It adds different units and ignores each meter's
+             *     aggregation; use `by_meter[].value` instead.
+             */
             total_units: string;
             /** @description Distinct meters among the matching events. */
             active_meters: number;
@@ -7711,8 +8782,38 @@ export interface components {
             /** @description One row per meter, largest total first. */
             by_meter: {
                 meter_id: string;
-                /** @description Sum of quantities, as a decimal string. */
+                /** @description Plain sum of reported quantities, as a decimal string. */
                 total: string;
+                /**
+                 * @description The aggregation billing uses for this meter's events (`sum`,
+                 *     `count`, `max`, `last`), read from its pricing rules and, for
+                 *     events no rule claims, the meter's own aggregation. `mixed`
+                 *     when those differ, or when a `max` or `last` meter is billed
+                 *     in more than one part (several rules, or a rule plus the
+                 *     events no rule claims), since peaks of the parts added up
+                 *     are not one peak: `value` is then the plain sum, which
+                 *     billing may not use. Empty when unknown.
+                 */
+                aggregation: string;
+                /**
+                 * @description Usage under the meter's aggregation, as a decimal string.
+                 *     `max` and `last` take each customer's peak or latest
+                 *     reading in the window and add them across customers.
+                 *     Billing applies them per billing period.
+                 */
+                value: string;
+                events: number;
+                /** @description Distinct customers with events on this meter. */
+                customers: number;
+                /** @description Highest single reported quantity, as a decimal string. */
+                peak: string;
+                /** @description One entry per calendar day (in `tz`) with events, oldest first. */
+                daily: {
+                    /** Format: date */
+                    date: string;
+                    /** @description The day's usage under the meter's aggregation. */
+                    value: string;
+                }[];
             }[];
         };
         UsageSummary: {
@@ -7808,11 +8909,87 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** @description The usage rows still held for one external customer ID, meter key and reason. */
+        HeldUsageGroup: {
+            /** @description The LiteLLM `user` value the rows carried. */
+            external_customer_id: string;
+            meter_key: string;
+            /**
+             * @description What was missing when the rows arrived.
+             * @enum {string}
+             */
+            reason: "customer_not_found" | "meter_not_found";
+            rows: number;
+            /** @description Sum of the held quantities, as a decimal string. */
+            total_quantity: string;
+            /** Format: date-time */
+            first_event_at: string;
+            /** Format: date-time */
+            last_event_at: string;
+            /**
+             * Format: date-time
+             * @description When Velox last received a row for this group.
+             */
+            last_received_at: string;
+            /** @description The customer whose external ID now matches, or empty when none does yet. */
+            customer_id: string;
+            /** @description Whether a meter with this key exists now. */
+            meter_exists: boolean;
+        };
+        HeldUsageReleaseResult: {
+            /** @description The customer the rows were ingested for. */
+            customer_id: string;
+            /** @description Rows newly written as usage events. */
+            released: number;
+            /**
+             * @description Rows that were already usage events under the same idempotency
+             *     key (LiteLLM resent the call after the customer existed). Marked
+             *     released, not written again.
+             */
+            deduplicated: number;
+            /**
+             * @description Rows for this external ID still held that a release cannot take
+             *     yet: their meter does not exist yet, or their time is after the
+             *     customer's current time (a customer on a test clock).
+             */
+            still_held: number;
+            /**
+             * @description Rows for this external ID still held only because one release
+             *     takes at most 5,000 rows. Release again to take them.
+             */
+            more_to_release: number;
+            /**
+             * @description Released rows inside an active subscription's current billing
+             *     period whose meter the subscription's plan prices. That period's
+             *     invoice counts them.
+             */
+            in_open_period: number;
+            /**
+             * @description Released rows inside an active subscription's current billing
+             *     period whose meter no plan on that subscription prices. No
+             *     invoice charges them.
+             */
+            not_on_plan: number;
+            /**
+             * @description Released rows outside every current billing period: before the
+             *     subscription started, or in an earlier period. A subscription
+             *     invoice does not count them unless that period's invoice has not
+             *     been built yet. Bill them with a one-off invoice if they should
+             *     be charged.
+             */
+            outside_open_period: number;
+        };
         LitellmSpendResult: {
             /** @description Usage events newly recorded. */
             accepted: number;
-            /** @description Usage events already recorded by an earlier delivery. */
+            /** @description Usage events already recorded, or already held, by an earlier delivery. */
             deduplicated: number;
+            /**
+             * @description Usage events kept because their customer or meter does not
+             *     exist yet. Not billed until released with
+             *     `POST /v1/usage-events/held/release`.
+             */
+            held: number;
             /** @description Records that carry no billable tokens. */
             skipped: number;
             /** @description One entry per event or record that was not recorded. A record can appear more than once. */
@@ -8167,15 +9344,444 @@ export interface components {
             livemode: boolean;
             replay_of_event_id: string | null;
         };
+        /** @description One delivery of an event to one endpoint, as the older events routes return it. */
+        WebhookDelivery: {
+            id: string;
+            tenant_id?: string;
+            livemode: boolean;
+            webhook_endpoint_id: string;
+            /** @description The event this delivery sent. A replay's own id for a replay's delivery. */
+            webhook_event_id: string;
+            /** @enum {string} */
+            status: "pending" | "succeeded" | "failed";
+            /** @description HTTP status from the receiver. Left out when there was no response. */
+            http_status_code?: number;
+            response_body?: string;
+            error_message?: string;
+            attempt_count: number;
+            /** Format: date-time */
+            next_retry_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            completed_at?: string;
+            /** @description The endpoint's URL, kept after the endpoint is deleted. */
+            endpoint_url?: string;
+            endpoint_description?: string;
+        };
+        /**
+         * @description What the hosted invoice page shows. It leaves out internal ids and
+         *     Stripe details. `bill_to` and the company details in `branding`
+         *     come from the same place as the invoice PDF's.
+         */
+        HostedInvoice: {
+            invoice: {
+                invoice_number: string;
+                status: components["schemas"]["InvoiceStatus"];
+                payment_status: components["schemas"]["InvoicePaymentStatus"];
+                currency: string;
+                /** Format: int64 */
+                subtotal_cents: number;
+                /** Format: int64 */
+                discount_cents: number;
+                /** Format: int64 */
+                tax_amount_cents: number;
+                /** @description Tax rate in percent, for example `18` for 18%. */
+                tax_rate: number;
+                tax_name?: string;
+                tax_reverse_charge?: boolean;
+                tax_exempt_reason?: string;
+                /** Format: int64 */
+                total_amount_cents: number;
+                /** Format: int64 */
+                amount_due_cents: number;
+                /** Format: int64 */
+                amount_paid_cents: number;
+                /** Format: int64 */
+                credits_applied_cents: number;
+                /** Format: date-time */
+                issued_at?: string;
+                /** Format: date-time */
+                due_at?: string;
+                /** Format: date-time */
+                paid_at?: string;
+                /** Format: date-time */
+                voided_at?: string;
+                /**
+                 * @description The time zone to show the dates in, so they match the PDF.
+                 * @example Asia/Kolkata
+                 */
+                billing_timezone?: string;
+                memo?: string;
+                footer?: string;
+            };
+            line_items: {
+                description: string;
+                /** Format: int64 */
+                quantity: number;
+                /** @description The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities. */
+                quantity_decimal?: string;
+                /** Format: int64 */
+                unit_amount_cents: number;
+                /** @description The unit price in cents at full precision, for example `0.3` for $0.003. */
+                unit_amount_decimal?: string;
+                meter_unit?: string;
+                /** Format: int64 */
+                amount_cents: number;
+                /** Format: int64 */
+                tax_amount_cents?: number;
+                /** Format: int64 */
+                total_amount_cents: number;
+                currency: string;
+            }[];
+            bill_to: {
+                name?: string;
+                email?: string;
+                address_line1?: string;
+                address_line2?: string;
+                city?: string;
+                state?: string;
+                postal_code?: string;
+                country?: string;
+            };
+            branding: {
+                company_name?: string;
+                company_email?: string;
+                company_phone?: string;
+                company_address_line1?: string;
+                company_address_line2?: string;
+                company_city?: string;
+                company_state?: string;
+                company_postal_code?: string;
+                company_country?: string;
+                logo_url?: string;
+                brand_color?: string;
+                support_url?: string;
+            };
+            /**
+             * @description True when the customer can pay online now: the invoice is
+             *     finalized, something is owed, no payment is in progress, and the
+             *     seller has Stripe connected for the invoice's mode.
+             */
+            pay_enabled: boolean;
+            /**
+             * @description Sent only when money is owed but the seller has no payment
+             *     provider connected for this mode.
+             * @enum {string}
+             */
+            pay_unavailable_reason?: "online_payment_unavailable";
+            /** @description False for a test-mode invoice. The page shows a test-mode banner. */
+            livemode: boolean;
+        };
+        /** @description What the payment-update page shows before the customer adds a card. */
+        PublicPaymentUpdate: {
+            customer_name: string;
+            invoice_number: string;
+            invoice_status: components["schemas"]["InvoiceStatus"];
+            /**
+             * Format: int64
+             * @description Not cleared when the invoice is voided. Check `invoice_status` before asking for payment.
+             */
+            amount_due_cents: number;
+            currency: string;
+            branding: {
+                company_name?: string;
+                company_email?: string;
+                logo_url?: string;
+                brand_color?: string;
+                support_url?: string;
+            };
+        };
+        ReadinessReport: {
+            /** @enum {string} */
+            status: "ok" | "degraded" | "draining";
+            /**
+             * @description One entry per check. `api` is `ok` or `draining`. `database` is
+             *     `ok` or `error`. `scheduler` starts with `ok` or `degraded`,
+             *     followed by detail such as `ok: last run 12s ago`. While
+             *     draining, only `api` is sent.
+             */
+            checks: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description One block of credit on a customer's balance (a grant or a positive
+         *     adjustment) and how much of it is left.
+         */
+        CreditGrantBlock: {
+            /** @description The ledger entry that added the credit. */
+            id: string;
+            /** @description `grant` or `adjustment`. */
+            entry_type: string;
+            /**
+             * @description Absent for unclassified credit.
+             * @enum {string}
+             */
+            grant_kind?: "commit" | "promotional";
+            description: string;
+            /**
+             * Format: int64
+             * @description The credit the block started with.
+             */
+            amount_cents: number;
+            /**
+             * Format: int64
+             * @description Everything drawn from the block: used by invoices, expired,
+             *     retired and deducted.
+             */
+            consumed_cents: number;
+            /** Format: int64 */
+            remaining_cents: number;
+            /**
+             * Format: int64
+             * @description The part that expired unused.
+             */
+            expired_cents: number;
+            /**
+             * Format: int64
+             * @description Commit credit taken back when the invoice that paid for it was
+             *     voided, or refunded by a credit note.
+             */
+            retired_cents: number;
+            /**
+             * Format: int64
+             * @description The part an operator removed with a negative adjustment.
+             */
+            deducted_cents: number;
+            /** Format: date-time */
+            expires_at?: string;
+            /** @description For a `commit` block, the invoice that paid for it. */
+            source_invoice_id?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /**
+         * @description A customer's credit blocks, newest first, with the remaining credit
+         *     added up by kind.
+         */
+        CreditGrants: {
+            grants: components["schemas"]["CreditGrantBlock"][];
+            /**
+             * Format: int64
+             * @description Remaining credit the customer paid for (`commit`).
+             */
+            commit_remaining_cents: number;
+            /**
+             * Format: int64
+             * @description Remaining free credit (`promotional`).
+             */
+            promotional_remaining_cents: number;
+            /**
+             * Format: int64
+             * @description Remaining credit with no kind, such as adjustments and proration credits.
+             */
+            other_remaining_cents: number;
+        };
+        /** @description A new webhook endpoint and its signing secret. The secret is shown only here. */
+        WebhookEndpointCreated: {
+            endpoint: components["schemas"]["WebhookEndpoint"];
+            /** @description The signing secret (`whsec_…`). Store it now; Velox does not show it again. */
+            secret: string;
+        };
+        /** @description The endpoint's new signing secret. It is shown only here. */
+        WebhookSecretRotation: {
+            secret: string;
+            /**
+             * Format: date-time
+             * @description Until this time, deliveries are also signed with the old secret.
+             */
+            secondary_valid_until?: string;
+        };
+        /** @description One outbound webhook event, as Velox created it. */
+        WebhookEvent: {
+            id: string;
+            tenant_id?: string;
+            livemode: boolean;
+            /** @example invoice.finalized */
+            event_type: string;
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** @description Set on a replay. The event the replay was made from. */
+            replay_of_event_id?: string;
+        };
+        /**
+         * @description A clock for test mode. Customers and subscriptions attached to it
+         *     are billed on its time, not the real time.
+         */
+        TestClock: {
+            id: string;
+            tenant_id?: string;
+            name: string;
+            /**
+             * Format: date-time
+             * @description The clock's current time.
+             */
+            frozen_time: string;
+            /**
+             * @description `ready`: it can be advanced or deleted. `advancing`: billing is
+             *     catching up to the new time. `internal_failure`: the last advance
+             *     failed partway; resume it with `POST /v1/test-clocks/{id}/retry-advance`.
+             * @enum {string}
+             */
+            status: "ready" | "advancing" | "internal_failure";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Why the last advance failed. Cleared by the next successful advance. */
+            last_failure_reason?: string;
+            last_advance_summary?: components["schemas"]["TestClockAdvanceSummary"];
+        };
+        /**
+         * @description What the latest advance did: the time span it covered and how many
+         *     of each billing step it ran. Absent until the clock is first
+         *     advanced.
+         */
+        TestClockAdvanceSummary: {
+            /** Format: date-time */
+            advanced_from: string;
+            /** Format: date-time */
+            advanced_to: string;
+            invoices_generated: number;
+            trials_activated: number;
+            pauses_resumed: number;
+            thresholds_fired: number;
+            tax_retried: number;
+            charges_retried: number;
+            clawbacks_issued: number;
+            credits_expired: number;
+            dunning_advanced: number;
+            /** @description True when a step failed. The counts then cover only the work done before the failure. */
+            had_errors: boolean;
+        };
+        /**
+         * @description A dry-run invoice built from the usage recorded so far. Nothing is
+         *     saved.
+         */
+        InvoicePreview: {
+            customer_id: string;
+            subscription_id: string;
+            /** @description The names of the subscription's plans, comma-separated. */
+            plan_name: string;
+            /** Format: date-time */
+            billing_period_start: string;
+            /** Format: date-time */
+            billing_period_end: string;
+            lines: components["schemas"]["InvoicePreviewLine"][];
+            /** @description One total per currency on the lines. */
+            totals: components["schemas"]["InvoicePreviewTotal"][];
+            /** @description Ways the real invoice can differ from this preview. */
+            warnings: string[];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        InvoicePreviewLine: {
+            /** @enum {string} */
+            line_type: "base_fee" | "usage";
+            description: string;
+            meter_id?: string;
+            meter_unit?: string;
+            rating_rule_version_id?: string;
+            rule_key?: string;
+            /** @description For a meter with several pricing rules, the dimension values this line's rule matches. */
+            dimension_match?: {
+                [key: string]: unknown;
+            };
+            currency: string;
+            /** @description Exact quantity as a decimal string. */
+            quantity: string;
+            /** Format: int64 */
+            unit_amount_cents: number;
+            /** Format: int64 */
+            amount_cents: number;
+            /** @enum {string} */
+            pricing_mode?: "flat" | "graduated" | "package";
+        };
+        InvoicePreviewTotal: {
+            currency: string;
+            /** Format: int64 */
+            amount_cents: number;
+        };
     };
     responses: never;
-    parameters: never;
+    parameters: {
+        /**
+         * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+         *     the same value on every retry. For 24 hours, a repeat with the same
+         *     key, method, path and body gets the first response again, with an
+         *     `Idempotent-Replayed: true` header, instead of running again. The
+         *     error cases are in docs/api-surface.md.
+         */
+        IdempotencyKey: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getHealthReady: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ready. `status` is `ok`, or `degraded` when only the scheduler is late. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessReport"];
+                };
+            };
+            /** @description Not ready. `status` is `draining`, or `degraded` when the database cannot be reached. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessReport"];
+                };
+            };
+        };
+    };
+    getMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Metrics in the Prometheus text format. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description The token is missing or wrong, or `METRICS_TOKEN` is not set in production. The body is the plain text `unauthorized`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
     getCustomer: {
         parameters: {
             query?: never;
@@ -8210,7 +9816,16 @@ export interface operations {
     updateCustomer: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -8314,7 +9929,16 @@ export interface operations {
     upsertCustomerBillingProfile: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -8580,7 +10204,16 @@ export interface operations {
     sendCustomerPaymentSetupEmail: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 customer_id: string;
             };
@@ -8695,7 +10328,16 @@ export interface operations {
     createCustomerPaymentSetupSession: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 customer_id: string;
             };
@@ -8774,7 +10416,16 @@ export interface operations {
     setCustomerDefaultPaymentMethod: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 customer_id: string;
                 /** @description Velox payment method ID. */
@@ -8795,6 +10446,362 @@ export interface operations {
             };
             /** @description No such active payment method for this customer. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createCheckoutSetupSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    customer_id: string;
+                    customer_name?: string;
+                    email?: string;
+                    address_line1?: string;
+                    address_city?: string;
+                    address_state?: string;
+                    address_postal_code?: string;
+                    address_country?: string;
+                    /** @description The page Stripe sends the customer back to. Always send it, because the default works only in local development. */
+                    return_url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Setup session created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Stripe Checkout Session ID. */
+                        session_id: string;
+                        /** @description Stripe Checkout URL. */
+                        url: string;
+                        stripe_customer_id: string;
+                    };
+                };
+            };
+            /** @description The body is not valid JSON. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such customer in this mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `customer_id` is missing. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Stripe is not connected for this mode, or a Stripe call failed. Code `stripe_error`. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCheckoutSetupStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Setup status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerPaymentSetup"];
+                };
+            };
+        };
+    };
+    getHostedInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invoice as the page shows it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedInvoice"];
+                };
+            };
+            /** @description Unknown token, or the invoice is a draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getHostedInvoicePdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PDF file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description Unknown token, or the invoice is a draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createHostedInvoiceCheckout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Checkout session created. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Stripe Checkout URL. */
+                        url: string;
+                    };
+                };
+            };
+            /** @description Unknown token, or the invoice is a draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description The invoice cannot be paid now. The code says why:
+             *     `not_payable` when it is not finalized, nothing is owed, or its
+             *     payment status is `processing` or `unknown`.
+             *     `payment_in_progress` when another payment for it has started.
+             *     `online_payment_unavailable` when the seller has no Stripe keys
+             *     for the invoice's mode.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stripe could not create the session. Code `stripe_error`. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The server runs without a Stripe adapter. Code `stripe_unavailable`. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicPaymentUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the page shows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicPaymentUpdate"];
+                };
+            };
+            /** @description The token is unknown, expired or already used. Code `invalid_token`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The invoice or customer the token names is gone. Code `invoice_not_found` or `customer_not_found`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createPublicPaymentUpdateCheckout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Checkout session created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Stripe Checkout URL. */
+                        url: string;
+                    };
+                };
+            };
+            /** @description The token is unknown, expired or already used. Code `invalid_token`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited (60/min/IP) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stripe is not connected for this mode, or Stripe could not create the session. Code `stripe_error`. */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8862,7 +10869,16 @@ export interface operations {
     upsertMeterPricingRule: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 meter_id: string;
             };
@@ -9046,10 +11062,11 @@ export interface operations {
                 status?: "draft" | "issued" | "voided";
                 /**
                  * @description `needs_attention` returns issued, non-test-clock notes whose
-                 *     refund failed, has been pending more than 72 hours, or has a
-                 *     refund amount still at `none` after 1 hour.
+                 *     refund failed or has an unknown result, has been pending more
+                 *     than 72 hours, or has a refund amount still at `none` after 1
+                 *     hour.
                  */
-                refund_status?: "none" | "pending" | "succeeded" | "failed" | "needs_attention";
+                refund_status?: "none" | "pending" | "succeeded" | "failed" | "unknown" | "needs_attention";
                 /** @description One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default). */
                 sort?: string;
                 dir?: "asc" | "desc";
@@ -9080,7 +11097,16 @@ export interface operations {
     adjustCredits: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -9229,7 +11255,16 @@ export interface operations {
     replayWebhookDelivery: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description Endpoint id. */
                 id: string;
@@ -9291,6 +11326,77 @@ export interface operations {
             };
         };
     };
+    listWebhookEventDeliveriesLegacy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deliveries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WebhookDelivery"][];
+                    };
+                };
+            };
+        };
+    };
+    replayWebhookEventLegacy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replay created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "replayed";
+                        /** @description The new event created by the replay. */
+                        event_id: string;
+                        /** @description The original event. */
+                        replay_of: string;
+                    };
+                };
+            };
+            /** @description No such event in this mode */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listWebhookEventDeliveries: {
         parameters: {
             query?: never;
@@ -9339,7 +11445,16 @@ export interface operations {
     replayWebhookEvent: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -9417,6 +11532,129 @@ export interface operations {
             };
         };
     };
+    receiveStripeWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                "Stripe-Signature": string;
+            };
+            path: {
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Processed, or skipped. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "processed" | "skipped";
+                        /** @description Why the event was skipped. */
+                        reason?: string;
+                    };
+                };
+            };
+            /** @description Bad signature, an unreadable body or invalid JSON, or the event's mode or Velox account does not match the endpoint. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No Stripe connection has this `endpoint_id`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body is over 64 KB. Code `payload_too_large`. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Temporary failure. Stripe retries. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    receivePostmarkWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Processed, skipped or ignored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "processed" | "skipped" | "ignored";
+                        reason?: string;
+                    };
+                };
+            };
+            /** @description Wrong or missing Basic auth, or the credentials are not set on the server. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                    };
+                };
+            };
+            /** @description Temporary failure. Postmark retries. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                    };
+                };
+            };
+        };
+    };
     getPlan: {
         parameters: {
             query?: never;
@@ -9459,7 +11697,16 @@ export interface operations {
     updatePlan: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -9623,7 +11870,16 @@ export interface operations {
     cancelSubscription: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -9667,7 +11923,16 @@ export interface operations {
     scheduleSubscriptionCancel: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -9790,7 +12055,16 @@ export interface operations {
     pauseSubscriptionCollection: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -9910,7 +12184,16 @@ export interface operations {
     endSubscriptionTrial: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -9953,7 +12236,16 @@ export interface operations {
     extendSubscriptionTrial: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -10028,7 +12320,16 @@ export interface operations {
     setSubscriptionBillingThresholds: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -10146,7 +12447,16 @@ export interface operations {
     addSubscriptionItem: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -10195,12 +12505,13 @@ export interface operations {
             /**
              * @description Code `already_exists`: the subscription already has an item for
              *     this plan. Code `invalid_state`: the subscription is `canceled`
-             *     or `archived`; the plan's meters overlap another live
-             *     subscription of the customer; or the plan's currency differs
-             *     from the subscription's. Code `unpaid_invoice_blocks_change`:
-             *     the invoice for the current period is unpaid; settle or void it
-             *     first. Code `unbilled_period`: a billing period ended and could
-             *     not be invoiced; retry billing first.
+             *     or `archived`; the plan is archived; the plan's meters overlap
+             *     another live subscription of the customer; or the plan's
+             *     currency differs from the subscription's. Code
+             *     `unpaid_invoice_blocks_change`: the invoice for the current
+             *     period is unpaid; settle or void it first. Code
+             *     `unbilled_period`: a billing period ended and could not be
+             *     invoiced; retry billing first.
              */
             409: {
                 headers: {
@@ -10271,7 +12582,16 @@ export interface operations {
     updateSubscriptionItem: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
                 itemID: string;
@@ -10442,7 +12762,16 @@ export interface operations {
     backfillUsageEvent: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -10545,6 +12874,131 @@ export interface operations {
             };
         };
     };
+    listHeldUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Held groups */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["HeldUsageGroup"][];
+                        /** @description External customer IDs with rows held, including those not listed in `data`. */
+                        total_customers: number;
+                        /** @description Rows held, including those not listed in `data`. */
+                        total_rows: number;
+                    };
+                };
+            };
+        };
+    };
+    releaseHeldUsage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The external ID the rows were held under. */
+                    external_customer_id: string;
+                    /**
+                     * @description Release into this customer (a `vlx_cus_` id) instead of
+                     *     the one whose external ID matches, for a `user` value
+                     *     that had a typo.
+                     */
+                    customer_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Release result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeldUsageReleaseResult"];
+                };
+            };
+            /** @description `validation_error`: no customer has that external ID yet and no `customer_id` was given, or `customer_id` was not found. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    discardHeldUsage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    external_customer_id: string;
+                    /** @description Discard only this meter's rows. Omit for all. */
+                    meter_key?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Rows discarded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        discarded: number;
+                    };
+                };
+            };
+            /** @description `validation_error`: `external_customer_id` is missing. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     aggregateUsageEvents: {
         parameters: {
             query?: {
@@ -10560,6 +13014,11 @@ export interface operations {
                  *     `model=gpt-4o,token_type=input`.
                  */
                 dimensions?: string;
+                /**
+                 * @description IANA time zone for the calendar days of `by_meter[].daily`
+                 *     (default UTC). An unknown name returns 422.
+                 */
+                tz?: string;
             };
             header?: never;
             path?: never;
@@ -10576,7 +13035,7 @@ export interface operations {
                     "application/json": components["schemas"]["UsageAggregate"];
                 };
             };
-            /** @description `validation_error`: a malformed `dimensions` pair. */
+            /** @description `validation_error`: a malformed `dimensions` pair or an unknown `tz`. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10642,7 +13101,16 @@ export interface operations {
     createInvoice: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -10739,7 +13207,16 @@ export interface operations {
     addInvoiceLineItem: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -10795,7 +13272,16 @@ export interface operations {
     voidInvoice: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -10841,7 +13327,16 @@ export interface operations {
     resendInvoiceSetupLink: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -10890,7 +13385,16 @@ export interface operations {
     markInvoiceUncollectible: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -10934,7 +13438,16 @@ export interface operations {
     recordInvoicePayment: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -10994,7 +13507,16 @@ export interface operations {
     rotateInvoicePublicToken: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -11034,7 +13556,16 @@ export interface operations {
     collectInvoicePayment: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -11106,7 +13637,16 @@ export interface operations {
     refundInvoice: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -11247,7 +13787,16 @@ export interface operations {
     issueCreditNote: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -11287,7 +13836,16 @@ export interface operations {
     retryCreditNoteRefund: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -11329,9 +13887,10 @@ export interface operations {
                 };
             };
             /**
-             * @description Stripe refused the refund again (code `provider_error`). The
-             *     note keeps `refund_status` `failed`; retry later. A Stripe error
-             *     without a safe message returns 500 instead.
+             * @description Stripe refused the refund (code `provider_error`): the note's
+             *     `refund_status` is `failed`. Or Stripe gave no clear answer (code
+             *     `payment_outcome_unknown`): it is `unknown`, and the customer may
+             *     already be refunded. Retry later in both cases.
              */
             502: {
                 headers: {
@@ -11346,7 +13905,16 @@ export interface operations {
     voidCreditNote: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -11507,7 +14075,16 @@ export interface operations {
     inviteMember: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -11740,7 +14317,16 @@ export interface operations {
     previewRecipe: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 key: string;
             };
@@ -11784,7 +14370,16 @@ export interface operations {
     instantiateRecipe: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 key: string;
             };
@@ -11968,6 +14563,12 @@ export interface operations {
                 from: string;
                 /** @description Upper bound on the event timestamp, inclusive. RFC 3339 or `YYYY-MM-DD` (end of that day, UTC). */
                 to: string;
+                /** @description Only this customer's events. */
+                customer_id?: string;
+                /** @description Only this meter's events. */
+                meter_id?: string;
+                /** @description Comma-separated key=value pairs, same syntax as `GET /v1/usage-events`. */
+                dimensions?: string;
             };
             header?: never;
             path?: never;
@@ -11993,7 +14594,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `from` or `to` is malformed, or `to` is before `from`. */
+            /** @description `from` or `to` is malformed, `to` is before `from`, or a `dimensions` pair is malformed. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -12238,7 +14839,16 @@ export interface operations {
     resolveDunningRun: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -12355,7 +14965,16 @@ export interface operations {
     createDunningPolicy: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -12471,7 +15090,16 @@ export interface operations {
     updateDunningPolicy: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -12515,7 +15143,16 @@ export interface operations {
     setDefaultDunningPolicy: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -12574,7 +15211,16 @@ export interface operations {
     createPriceOverride: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -12705,7 +15351,16 @@ export interface operations {
     ingestLitellmSpend: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -12784,7 +15439,16 @@ export interface operations {
     createApiKey: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -12880,7 +15544,16 @@ export interface operations {
     rotateApiKey: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -12987,7 +15660,16 @@ export interface operations {
     updateTenantSettings: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -13035,6 +15717,94 @@ export interface operations {
             };
         };
     };
+    getEmailSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Email setup */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description False when `SMTP_HOST` is unset; every email then fails. */
+                        smtp_configured: boolean;
+                        /** @description The SMTP relay host name, without port or credentials. Empty when not configured. */
+                        smtp_host: string;
+                        /** @description The envelope sender (`SMTP_FROM`). */
+                        from_address: string;
+                        /** @enum {string} */
+                        tls_mode: "starttls" | "implicit" | "none";
+                        /** @description Every environment variable an email link is built from, set or not. */
+                        links: {
+                            /** @enum {string} */
+                            env: "HOSTED_INVOICE_BASE_URL" | "PAYMENT_UPDATE_URL" | "DASHBOARD_BASE_URL";
+                            set: boolean;
+                            /** @description What doesn't work while it is unset. */
+                            effect: string;
+                        }[];
+                        can_email_setup_links: boolean;
+                        can_send_invites: boolean;
+                    };
+                };
+            };
+        };
+    };
+    sendTestEmail: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sent_to: string;
+                    };
+                };
+            };
+            /** @description `email_not_configured`: SMTP_HOST is not set. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `smtp_error`: the SMTP server refused the email or could not be reached. The message carries its answer. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listStripeConnections: {
         parameters: {
             query?: never;
@@ -13060,7 +15830,16 @@ export interface operations {
     connectStripe: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -13111,7 +15890,16 @@ export interface operations {
     setStripeWebhookSecret: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
+                 *     the same value on every retry. For 24 hours, a repeat with the same
+                 *     key, method, path and body gets the first response again, with an
+                 *     `Idempotent-Replayed: true` header, instead of running again. The
+                 *     error cases are in docs/api-surface.md.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 mode: "test" | "live";
             };
@@ -13376,7 +16164,7 @@ export interface operations {
                      * @default admin@velox.local
                      */
                     owner_email?: string;
-                    /** @description 12 or more characters, at most 72 bytes. Omit to have Velox generate one. */
+                    /** @description 12 or more characters, at most 72 bytes, and not a common password from a leaked-password list. Omit to have Velox generate one. */
                     owner_password?: string;
                 };
             };

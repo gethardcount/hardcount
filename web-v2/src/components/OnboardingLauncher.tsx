@@ -3,22 +3,46 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Check, X, ChevronUp, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useOnboardingSteps, type OnboardingStep } from '@/hooks/useOnboardingSteps'
-import { useStickyActionBarShown } from '@/hooks/useStickyActionBar'
+import {
+  useOnboardingSteps, openSetupChecklist, onOpenSetupChecklist, type OnboardingStep,
+} from '@/hooks/useOnboardingSteps'
+import { useAuth } from '@/contexts/AuthContext'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
-// OnboardingLauncher — floating bottom-right pill that expands into a
-// 360px side panel. Mirrors the dominant 2026 dev-tool pattern (Intercom,
-// Appcues, Chameleon defaults) rather than an in-page card. Self-hides when
-// the user completes the checklist or dismisses it; state lives in the
-// shared useOnboardingSteps hook. Hidden while a page shows a sticky action
-// bar (useStickyActionBar), which occupies the same corner.
-export function OnboardingLauncher() {
+// OnboardingLauncher — the "Setup n/N" row in the sidebar footer. It opens
+// the checklist panel (SetupChecklistPanel), which Layout renders once,
+// outside the sidebar: the sidebar is drawn twice (desktop and phone menu),
+// and on a phone the closed menu is moved off screen, which took a panel
+// inside it along. Self-hides when the user completes the checklist or
+// dismisses it; state lives in the shared useOnboardingSteps hook.
+export function OnboardingLauncher({ onOpen }: { onOpen?: () => void }) {
+  const { complete, total, show } = useOnboardingSteps()
+  if (!show) return null
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        onOpen?.()
+        openSetupChecklist()
+      }}
+      aria-label={`Setup: ${complete} of ${total} complete. Open checklist.`}
+      className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
+    >
+      <ProgressRing value={complete} max={total} />
+      <span className="flex-1 text-left">Setup</span>
+      <span className="text-xs tabular-nums">{complete}/{total}</span>
+    </button>
+  )
+}
+
+// SetupChecklistPanel — the checklist itself, opened by the sidebar row or
+// the Home welcome card. Non-modal: it doesn't block the page.
+export function SetupChecklistPanel() {
   const [open, setOpen] = useState(false)
+  const { user } = useAuth()
   const { steps, complete, total, show, setDismissed } = useOnboardingSteps()
-  // A sticky action bar (Settings' Save Changes) sits in the same corner; at
-  // phone width the pill covered its Save button. Step aside while one shows.
-  const barShown = useStickyActionBarShown()
+
+  useEffect(() => onOpenSetupChecklist(() => setOpen(true)), [])
 
   // Close on Escape while the panel is open. No focus-trap because the panel
   // is non-modal — it doesn't block page interaction.
@@ -31,41 +55,30 @@ export function OnboardingLauncher() {
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
-  if (!show || barShown) return null
+  if (!show || !open) return null
 
   const next = steps.find(s => !s.done)
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label={`Setup: ${complete} of ${total} complete. Open checklist.`}
-        className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium shadow-lg transition-all hover:border-primary/40 hover:shadow-xl"
-      >
-        <ProgressRing value={complete} max={total} />
-        <span className="text-foreground">
-          <span className="tabular-nums">{complete} of {total}</span>
-          <span className="text-muted-foreground"> · Setup</span>
-        </span>
-        <ChevronUp size={13} className="text-muted-foreground" aria-hidden />
-      </button>
-    )
-  }
-
   const percent = total > 0 ? (complete / total) * 100 : 0
 
   return (
     <div
       role="dialog"
       aria-labelledby="onboarding-launcher-title"
-      className="fixed bottom-5 right-5 z-30 w-[360px] max-w-[calc(100vw-2.5rem)] rounded-xl border border-border bg-card shadow-2xl"
+      // Sits beside the sidebar (above the mobile menu's overlay).
+      className="fixed bottom-4 left-4 z-50 w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-2xl md:left-64"
     >
       <div className="flex items-start gap-3 px-4 pt-4 pb-2">
         <div className="flex-1 min-w-0">
           <p id="onboarding-launcher-title" className="text-sm font-semibold text-foreground">
-            Get Velox ready
+            Bill your first customer
           </p>
+          {user && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {user.livemode
+                ? "You're in live mode, so charges here are real."
+                : "You're in test mode, so nothing here charges real money."}
+            </p>
+          )}
           <p className="mt-0.5 text-xs text-muted-foreground">
             <span className="tabular-nums">{complete} of {total}</span> complete
           </p>
@@ -166,9 +179,8 @@ function StepRow({
         )}>
           {step.label}
         </p>
-        {isNext && (
-          <p className="mt-0.5 text-xs text-muted-foreground">{step.desc}</p>
-        )}
+        {/* Every step says what it is for, not only the next one. */}
+        <p className="mt-0.5 text-xs text-muted-foreground">{step.desc}</p>
       </div>
       {isNext && (
         <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary">

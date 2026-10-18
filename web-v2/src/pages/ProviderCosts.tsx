@@ -82,10 +82,9 @@ export default function ProviderCostsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Provider costs</h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            What you pay your AI providers, per token. Every new usage event is
-            stamped with its cost as it arrives, and the customer margin view
-            compares it with what you bill. Add rates before sending usage —
-            events that arrive first stay uncosted (they're never backfilled).
+            Enter what each AI provider charges you per token, and Velox shows your
+            margin on each customer. Add rates before you send usage: Velox works
+            out each event's cost when it arrives and never goes back to older events.
           </p>
         </div>
       </div>
@@ -94,10 +93,10 @@ export default function ProviderCostsPage() {
         <CardHeader>
           <CardTitle>Add or update a rate</CardTitle>
           <CardDescription>
-            Same provider + model + token type overwrites the existing rate.
-            Use the exact model id your gateway reports (e.g.
-            claude-sonnet-4-5-20250929) or the model family (claude-sonnet-4.5)
-            — exact ids match first.
+            Saving the same provider, model and token type again replaces that
+            rate. For the model, use the exact name your gateway reports (e.g.
+            claude-sonnet-4-5-20250929) or the family (claude-sonnet-4.5); an
+            exact name wins over a family.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -129,7 +128,7 @@ export default function ProviderCostsPage() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Token type matches your usage events' <code>token_type</code> dimension:
+            Token type is the <code>token_type</code> value your usage events carry:
             input, output, or cache_read.
           </p>
         </CardContent>

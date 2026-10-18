@@ -3,11 +3,13 @@
 **Date:** 2026-05-01
 **Status:** Accepted — amended by ADR-081 (2026-07-06): multi-user invites
 shipped (tokenized accept, no RBAC); the "invite flow comes when it's
-needed" deferrals below are partially resolved.
+needed" deferrals below are partially resolved. Corrected 2026-10-18: the
+common-password list was never the top 1,000; see the
+[amendment](#amendment-2026-10-18-the-common-password-list-has-10-entries).
 
 ## Summary
 
-The dashboard signs in with email and password, and API keys are only for SDK and curl callers, as on every surveyed platform. A dashboard session (`dashboard_sessions`) belongs to a user, not to an API key. This let us delete every safeguard that existed only because the API key was also the dashboard login: the guard against revoking the tenant's last active secret or platform key, the refusal to revoke or rotate the key making the request, and the revocation of dashboard sessions when their key was revoked. API keys now have a plain create, list, revoke and rotate lifecycle. Password reset uses single-use tokens that expire after 1 hour. Amended 2026-07-06 (ADR-081): team invites shipped with tokenized acceptance and no RBAC, so a tenant can have several users. Amended 2026-07-17 (ADR-094): the failed-login counter and lockout were removed, and the per-IP `/v1/auth` rate limiter is the only brute-force limit in v1.
+The dashboard signs in with email and password, and API keys are only for SDK and curl callers, as on every surveyed platform. A dashboard session (`dashboard_sessions`) belongs to a user, not to an API key. This let us delete every safeguard that existed only because the API key was also the dashboard login: the guard against revoking the tenant's last active secret or platform key, the refusal to revoke or rotate the key making the request, and the revocation of dashboard sessions when their key was revoked. API keys now have a plain create, list, revoke and rotate lifecycle. Password reset uses single-use tokens that expire after 1 hour. Amended 2026-07-06 (ADR-081): team invites shipped with tokenized acceptance and no RBAC, so a tenant can have several users. Amended 2026-07-17 (ADR-094): the failed-login counter and lockout were removed, and the per-IP `/v1/auth` rate limiter is the only brute-force limit in v1. Amended 2026-10-18 (ADR-094): a sign-in throttle in Postgres now slows repeated wrong passwords instead of locking the account.
 
 ## Status
 Accepted
@@ -167,7 +169,7 @@ Already-existing Redis rate limiter gets a new key shape: `auth:login:<email_low
 - Minimum 12 characters
 - No maximum (avoid the bcrypt 72-byte cliff by pre-hashing if needed; bcrypt accepts up to 72 bytes which covers 12-char passwords by orders of magnitude)
 - No required-character classes (NIST SP 800-63B says these reduce security)
-- Reject the most-common-1000 password list (built into the validator)
+- Reject the most-common-1000 password list (built into the validator) *(Never built: the validator held a 10-entry stub until the breached-password list of ADR-095 replaced it on 2026-10-18. See the [amendment](#amendment-2026-10-18-the-common-password-list-has-10-entries).)*
 
 ### Email infrastructure for password reset
 
@@ -284,3 +286,11 @@ Per `feedback_pre_launch_scoping`:
 **Known, accepted limit.** Behind N app instances during a Redis outage, the effective global threshold is ~`5 × N` (each instance counts independently). Bounded and acceptable for the threat (online guessing against bcrypt-cost-12 hashes), and vastly better than the prior unbounded gap. If a deployment needs a hard global limit during Redis outages, that's a future toggle, not a v1 requirement.
 
 **Out of scope (unchanged from this ADR's posture):** general/IP HTTP rate limiter keeps fail-open-in-nonprod; no operator-configurable lockout policy; no exponential backoff / CAPTCHA; no per-IP `/v1/auth` throttle.
+
+## Amendment 2026-10-18: the common-password list has 10 entries
+
+"Password complexity" above says the validator rejects the most-common-1000 password list. It never did. `commonPasswords` in `internal/user/service.go` holds 10 hand-picked entries, and three of them are shorter than the 12-character minimum, so the length check already refuses them. The code comment called it a top-1000 list from a breach corpus, which was also false; it is corrected in the same change.
+
+A longer common list would add little: most of a top-1000 list is shorter than 12 characters. The real fix is the embedded breached-password set in [ADR-095](095-login-security-roadmap-and-mfa.md), still an open item before the first deployment. Found by the build-vs-library audit of 2026-10-17.
+
+Later the same day the embedded breached-password list in [ADR-095](095-login-security-roadmap-and-mfa.md#amendment-2026-10-18-the-breached-password-list-shipped) replaced the stub (#1222).

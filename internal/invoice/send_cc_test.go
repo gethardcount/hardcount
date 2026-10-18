@@ -108,9 +108,10 @@ func TestSendEmail_CCTriState(t *testing.T) {
 		t.Errorf("explicit [] must send primary-only, got cc=%v", sender.cc)
 	}
 
-	// Explicit override → exact validated list (normalized).
+	// Explicit override → exact validated list (normalized). A display-name
+	// entry is refused (send_recipient_test.go).
 	h, sender = newHandler()
-	if rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test","additional_emails":["Boss <Boss@Acme.Test>"]}`); rr.Code != http.StatusOK {
+	if rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test","additional_emails":[" Boss@Acme.Test "]}`); rr.Code != http.StatusOK {
 		t.Fatalf("override: status %d", rr.Code)
 	}
 	if !reflect.DeepEqual(sender.cc, []string{"boss@acme.test"}) {

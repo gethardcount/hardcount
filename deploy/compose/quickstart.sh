@@ -14,14 +14,16 @@
 # Go, Node and jq are not needed. To build from this checkout instead, run
 # `./quickstart.sh --build`.
 #
-# This is for trying Velox on your own machine. For a server, follow README.md
-# in this directory: it explains each setting this script fills in for you.
+# This is for trying Velox on your own machine. It runs with APP_ENV=local, so
+# the dashboard works over plain HTTP at http://localhost in every browser.
+# For a server, follow README.md in this directory: it explains each setting
+# this script fills in for you, and runs in production mode.
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
 # The release this script starts. Bumped with each release.
-VELOX_VERSION="v0.7.0"
+VELOX_VERSION="v0.8.2"
 # The dashboard and API are served on this port. Override: VELOX_PORT=9000 ./quickstart.sh
 PORT_DEFAULT="${VELOX_PORT:-8080}"
 CREDS=quickstart-credentials.json
@@ -55,6 +57,10 @@ write_env() {
     # with another Velox stack on this machine (a development checkout, or an
     # install made by hand from this directory).
     echo "COMPOSE_PROJECT_NAME=velox-quickstart"
+    # Local mode, because this install is served over plain HTTP. Production
+    # mode always marks the sign-in cookie Secure, and Safari does not keep a
+    # Secure cookie at http://localhost, so sign-in would fail there.
+    echo "APP_ENV=local"
     echo "NGINX_HTTP_PORT=${PORT_DEFAULT}"
     # Where Stripe returns a customer after they save a card.
     echo "CUSTOMER_PORTAL_URL=http://localhost:${PORT_DEFAULT}"
@@ -126,10 +132,17 @@ show_login() {
   say "  Password    $(json_field owner_password)"
   say "  Test key    $(json_field secret_key_test)"
   say ""
+  say "Open the dashboard address in your browser and sign in with this email and"
+  say "password. The password is shown only once. The dashboard opens in test mode,"
+  say "where no real money moves."
+  say ""
   say "These are also saved in deploy/compose/${CREDS}. Keep that file private:"
   say "it also holds a live key, which can charge real cards once Stripe is connected."
   say ""
-  say "Next: ./quickstart.sh demo    (records token usage and produces a first invoice)"
+  say "Next: ./quickstart.sh demo"
+  say "  It bills a demo customer for one month of AI token usage in about two"
+  say "  minutes, then prints links to the invoice and the customer."
+  say "  What each demo step does: docs/quick-start.md"
 }
 
 cmd_up() {
@@ -140,6 +153,7 @@ cmd_up() {
     docker compose up -d --build
   else
     say "Starting Velox ${VELOX_VERSION} from the published images."
+    say "The first start downloads them, which can take a few minutes."
     docker compose up -d --no-build
   fi || fail "Docker could not start the stack. If the message above says a port is already in use, run './quickstart.sh destroy', then 'VELOX_PORT=9000 ./quickstart.sh'."
   say "Waiting for Velox to be ready..."

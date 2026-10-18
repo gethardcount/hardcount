@@ -11,7 +11,7 @@ const badgeVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         secondary:
-          "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 [a]:hover:bg-gray-200 dark:hover:bg-gray-700",
+          "bg-muted text-muted-foreground [a]:hover:bg-muted/80",
         destructive:
           "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
         outline:
@@ -19,14 +19,12 @@ const badgeVariants = cva(
         ghost:
           "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-primary underline-offset-4 hover:underline",
-        success:
-          "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-        info:
-          "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-        warning:
-          "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-        danger:
-          "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+        // Status tones read the semantic tokens in index.css, so light and
+        // dark contrast is tuned in one place.
+        success: "bg-success-subtle text-success-foreground",
+        info: "bg-info-subtle text-info-foreground",
+        warning: "bg-warning-subtle text-warning-foreground",
+        danger: "bg-danger-subtle text-danger-foreground",
       },
     },
     defaultVariants: {

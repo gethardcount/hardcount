@@ -142,6 +142,22 @@ func (m *memStore) Detach(_ context.Context, tenantID, customerID, pmID string) 
 	return row, nil
 }
 
+func (m *memStore) CustomersWithDefault(_ context.Context, tenantID string, customerIDs []string) (map[string]bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	want := make(map[string]bool, len(customerIDs))
+	for _, id := range customerIDs {
+		want[id] = true
+	}
+	out := map[string]bool{}
+	for _, row := range m.rows {
+		if row.TenantID == tenantID && want[row.CustomerID] && row.IsDefault && row.DetachedAt == nil {
+			out[row.CustomerID] = true
+		}
+	}
+	return out, nil
+}
+
 func (m *memStore) DetachAndRebalance(_ context.Context, tenantID, customerID, pmID string) (PaymentMethod, *PaymentMethod, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

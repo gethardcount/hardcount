@@ -3,6 +3,10 @@
 **Status:** SUPERSEDED by [ADR-086](086-simulated-data-lifecycle.md) (2026-07-09) — clock-delete becomes a hard `DELETE` with an FK cascade keyed on `sim_clock_id` (teardown of the whole simulated sandbox, customer included), replacing the soft-delete + cancel-subs + detach-customers design below. The soft-delete's residual leakage (a detached customer's stranded simulated rows swept against wall-clock) is exactly what ADR-086 dissolves.
 **Date:** 2026-05-04
 
+## Summary
+
+Superseded by [ADR-086](086-simulated-data-lifecycle.md) on 2026-07-09. This ADR made deleting a test clock a soft delete: set `deleted_at`, cancel the clock's subscriptions and, from 2026-06-13, detach its customers. That left simulated rows behind for real-time jobs to pick up. Deleting a clock now hard-deletes the clock, its customers and every row they own in one transaction, and keeps only the audit log.
+
 ## Context
 
 Velox's other entities are uniformly soft-deleted: tenants, customers,

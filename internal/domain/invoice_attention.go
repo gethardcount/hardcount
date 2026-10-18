@@ -90,7 +90,7 @@ const (
 	// permanently lost. Nothing surfaced the state, so nobody could void in
 	// time — observed live on VLX-000060: $96.52 invoiced, $0.00 collected,
 	// $100.00 still drawable, dunning since Jul 30, and no surface said so.
-	// docs/design-prepaid-commits.md D3 named this exact surfacing a
+	// docs/design/prepaid-commits.md D3 named this exact surfacing a
 	// "fast-follow candidate"; this is that fast-follow.
 	//
 	// This reason is only ever SYNTHESIZED when nothing else fired — see
@@ -464,6 +464,27 @@ type AttentionContext struct {
 	// offer a button that is refused. The invoice service reads it for
 	// finalized, unpaid invoices only.
 	PaymentPageOpen bool
+
+	// RefusedCardDeclineCode is set when the bank refused the customer's
+	// current default card for good on this invoice: Stripe's decline code
+	// (one IsHardDecline accepts), recorded on one of the invoice's charge
+	// attempts with that card. Dunning retries skip that card, so the
+	// payment-failure notice says the customer needs a different card and
+	// does not offer Retry. Empty once another card is the default — a card
+	// the customer saves now becomes the default by itself (ADR-126) — and
+	// the ordinary decline notice comes back. The invoice service reads it
+	// for failed invoices only.
+	RefusedCardDeclineCode string
+
+	// DunningRetrying is true when the invoice's dunning run is active and
+	// not paused, so a scheduled retry is still to come. Read only by the
+	// refused-card notice: "dunning keeps its schedule" is true only then.
+	// After the run exhausts, while it is paused, or with no run at all
+	// (dunning off), no retry runs whatever card becomes the default. The
+	// invoice service reads it for invoices with RefusedCardDeclineCode set.
+	// Zero value (false) gives the no-retry copy, which still sends the
+	// operator to get a new card rather than to wait on a retry.
+	DunningRetrying bool
 
 	// LastFailedChargeAt is the simulated instant of the invoice's latest
 	// failed charge, for a clock-pinned invoice only (nil otherwise). The
@@ -962,6 +983,9 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	if atc.LastFailedChargeAt != nil {
 		since = *atc.LastFailedChargeAt
 	}
+	if atc.RefusedCardDeclineCode != "" {
+		return classifyRefusedCard(inv, atc.RefusedCardDeclineCode, atc.DunningRetrying, since)
+	}
 	// Update Payment Method is the primary action: the card on file
 	// is broken, retrying with the same card will decline again.
 	// Retry Payment is offered as secondary for transient declines
@@ -982,6 +1006,47 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionUpdatePaymentMethod, Label: "Update payment method"},
 			{Code: AttentionActionRetryPayment, Label: "Retry payment"},
+		},
+		ProviderResponse: inv.LastPaymentError,
+		Since:            &since,
+	}
+}
+
+// classifyRefusedCard is the payment-failure notice when the bank refused the
+// customer's default card for good (#966): lost, stolen, revoked and the rest
+// of IsHardDecline. Dunning retries skip that card until another card is the
+// default, so the notice asks for a different card and drops Retry payment —
+// a manual retry would charge the card the bank just refused, and the card
+// networks charge merchants for retrying these declines.
+//
+// What the notice says about retries follows the dunning run: only an active,
+// unpaused run has a retry to come. A card the customer saves now replaces
+// the refused default by itself (ADR-126); a card saved before the refusal
+// stays beside it, so the operator is told to make that one the default.
+func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since time.Time) *Attention {
+	const (
+		final     = "Stripe's decline code is %s, which Stripe and the card networks treat as final. "
+		newCard   = "A card the customer saves now, through a setup link or the hosted invoice page, becomes the default by itself; a card saved before the refusal needs Set as default on the customer page. "
+		hostedPay = "The customer can also pay on the hosted invoice page."
+	)
+	message := "The customer's bank refused this card for good, so automatic retries won't charge it; the customer needs a different card."
+	detail := fmt.Sprintf(final, declineCode) +
+		"Dunning keeps its schedule and counts each retry; the next retry charges a different card once it is the customer's default. " +
+		newCard + hostedPay
+	if !retrying {
+		message = "The customer's bank refused this card for good, and no automatic retry is scheduled; the customer needs a different card."
+		detail = fmt.Sprintf(final, declineCode) + newCard +
+			"Once another card is the default, Retry payment charges it. " + hostedPay
+	}
+	return &Attention{
+		Severity: AttentionSeverityCritical,
+		Reason:   AttentionReasonPaymentFailed,
+		Code:     "payment.card_refused",
+		Message:  message,
+		Detail:   detail,
+		DocURL:   docURL("payment-failed"),
+		Actions: []AttentionActionItem{
+			{Code: AttentionActionUpdatePaymentMethod, Label: "Update payment method"},
 		},
 		ProviderResponse: inv.LastPaymentError,
 		Since:            &since,

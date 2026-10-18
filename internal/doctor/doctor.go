@@ -8,7 +8,7 @@
 // was found by exactly one ad-hoc query of this kind, months after the rows
 // went bad. This package makes that query class permanent.
 //
-// The one rule (docs/dev/product-stability-plan.md): a check ships only as an
+// The one rule (docs/records/product-stability-plan.md): a check ships only as an
 // EXACT predicate — zero legal false positives — or it does not ship. Every
 // check below survived an adversarial pass hunting legal counterexamples
 // (grandfathered rows, deliberate states like ADR-107 parking, simulated

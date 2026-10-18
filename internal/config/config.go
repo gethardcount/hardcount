@@ -26,7 +26,8 @@ type Config struct {
 	// limiters fail CLOSED without it (every covered request 429) and a
 	// replica would boot green and serve 1/N of traffic that way, so
 	// production refuses to start without a reachable Redis (validateFatal +
-	// cmd/velox/main.go). Optional elsewhere: limiters fail open.
+	// cmd/velox/main.go). Optional elsewhere: limiters fail open, except
+	// /v1/auth's, which counts in the process.
 	RedisURL string
 	// TrustProxy is the TRUST_PROXY CIDR list the router honours forwarded
 	// client addresses from. Required in production: behind a balancer with
@@ -51,8 +52,30 @@ type Config struct {
 	// 1h, 0 to 72h; 0 closes a period as soon as it is due.
 	InvoiceGracePeriod time.Duration
 
+	// RateLimits are the VELOX_RATE_LIMIT_* request limits (internal/api).
+	RateLimits RateLimits
+
 	// Bootstrap
 	BootstrapToken string
+}
+
+// RateLimits are the request limits the API enforces per API key, per
+// tenant for dashboard sessions, or per client address before sign-in. Each must be a
+// whole number of 1 or more; anything else stops start-up. A bad value used
+// to fall back to the default without a word, so the install ran on a limit
+// nobody chose.
+type RateLimits struct {
+	// GeneralPerMinute is VELOX_RATE_LIMIT_GENERAL_PER_MIN, default 100: the
+	// general API bucket, and the per-address limit on /v1/auth.
+	GeneralPerMinute int
+	// IngestPerSecond is VELOX_RATE_LIMIT_INGEST_PER_SEC, default 1000: usage
+	// events and LiteLLM callbacks.
+	IngestPerSecond int
+}
+
+// DefaultRateLimits are the limits when no VELOX_RATE_LIMIT_* is set.
+func DefaultRateLimits() RateLimits {
+	return RateLimits{GeneralPerMinute: 100, IngestPerSecond: 1000}
 }
 
 type DBConfig struct {
@@ -71,8 +94,16 @@ type DBConfig struct {
 	QueryTimeout    time.Duration
 }
 
+// AppEnv is APP_ENV, trimmed and lower-cased, and "local" when unset. Load
+// and the `velox migrate rollback` check read it through this one function,
+// so both see the same environment. Nothing else reads APP_ENV: the server
+// hands Config.Env to the code that depends on it.
+func AppEnv() string {
+	return strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "local")))
+}
+
 func Load() (Config, error) {
-	env := strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "local")))
+	env := AppEnv()
 
 	dbURL, err := loadDatabaseURL()
 	if err != nil {
@@ -85,13 +116,23 @@ func Load() (Config, error) {
 	}
 	db.AppURL = strings.TrimSpace(os.Getenv("APP_DATABASE_URL"))
 
+	migrateOnBoot, err := boolEnv("RUN_MIGRATIONS_ON_BOOT", false)
+	if err != nil {
+		return Config{}, err
+	}
+	rateLimits, err := loadRateLimits()
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Port:           envOr("PORT", "8080"),
 		Env:            env,
-		Migrate:        boolEnv("RUN_MIGRATIONS_ON_BOOT", false),
+		Migrate:        migrateOnBoot,
 		DB:             db,
 		RedisURL:       strings.TrimSpace(os.Getenv("REDIS_URL")),
 		TrustProxy:     strings.TrimSpace(os.Getenv("TRUST_PROXY")),
+		RateLimits:     rateLimits,
 		BootstrapToken: strings.TrimSpace(os.Getenv("VELOX_BOOTSTRAP_TOKEN")),
 	}
 	drain, err := loadShutdownDrainDelay(env)
@@ -125,8 +166,8 @@ func Load() (Config, error) {
 func (c Config) validateFatal() error {
 	encKey := strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY"))
 
-	// The production checks below, and every other APP_ENV reader in the
-	// binary, test for exactly "production". A near-miss such as "prod" or
+	// The production checks below, and everything the server hands Config.Env
+	// to, test for exactly "production". A near-miss such as "prod" or
 	// "production-eu" would pass them all and run with those checks off, so
 	// it is refused. Any other unrecognised name keeps its Validate warning.
 	if c.Env != "production" && strings.HasPrefix(c.Env, "prod") {
@@ -140,14 +181,21 @@ func (c Config) validateFatal() error {
 		return fmt.Errorf("REDIS_URL is required in production — the general and hosted-invoice rate limiters fail CLOSED without Redis, so every dashboard, export, bootstrap and hosted-invoice request would answer 429 while /health/ready reports ok; point REDIS_URL at a managed Redis (docs/self-host.md)")
 	}
 	if c.Env == "production" && c.TrustProxy == "" {
-		return fmt.Errorf("TRUST_PROXY is required in production — behind a load balancer or ingress every request's client address is the balancer's, so the per-IP limits on the public pay pages (60/min) and on /v1/auth (100/min) become ONE bucket shared by every customer and operator of the install; set TRUST_PROXY to the balancer/ingress CIDR(s), or TRUST_PROXY=none if replicas accept client connections directly (deploy/README.md)")
+		return fmt.Errorf("TRUST_PROXY is required in production — behind a load balancer or ingress every request's client address is the balancer's, so the per-IP limits on the public pay pages (60/min) and on /v1/auth (100/min) become ONE bucket shared by every customer and operator of the install; set TRUST_PROXY to the balancer/ingress CIDR(s), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)")
 	}
 
 	// A set value must mean what it says in every environment: the router
 	// skips an entry it cannot parse, so a typo would pass the check above
 	// and then behave exactly as unset.
 	if _, err := ParseTrustProxy(c.TrustProxy); err != nil {
-		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (deploy/README.md)", err)
+		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)", err)
+	}
+
+	// Otherwise a pattern meant to allow a dashboard would allow nothing, or
+	// a * beside it would keep it from signing in, and the operator would
+	// not know why. Checked in every environment.
+	if _, err := ParseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); err != nil {
+		return fmt.Errorf("%w (docs/self-host.md)", err)
 	}
 
 	if encKey != "" {
@@ -171,6 +219,18 @@ func (c Config) validateFatal() error {
 	// Webhook signature secrets are resolved per endpoint id at request time.
 
 	return nil
+}
+
+// publicAddressSettings are the settings that hold Velox's own public
+// addresses: the dashboard, the customer pages and the API. internal/api
+// and internal/email read them; Validate only checks their scheme.
+var publicAddressSettings = []string{
+	"DASHBOARD_BASE_URL",
+	"CUSTOMER_PORTAL_URL",
+	"HOSTED_INVOICE_BASE_URL",
+	"PAYMENT_UPDATE_URL",
+	"PAYMENT_UPDATE_RETURN_URL",
+	"VELOX_API_BASE_URL",
 }
 
 // Validate checks the config for common misconfigurations.
@@ -201,6 +261,20 @@ func (c Config) Validate() []string {
 	case "local", "staging", "production":
 	default:
 		warnings = append(warnings, fmt.Sprintf("APP_ENV=%q is not a recognized environment (expected: local, staging, production)", c.Env))
+	}
+
+	// Staging and production always mark the sign-in cookie Secure
+	// (session.DefaultCookieConfig), so they are meant to be served over
+	// HTTPS (ADR-095 Phase 0(b)). An address setting that starts with
+	// http:// says one is not. Velox cannot see the browser's scheme at
+	// start-up; these settings are what it can see.
+	if c.Env == "production" || c.Env == "staging" {
+		for _, name := range publicAddressSettings {
+			u, err := neturl.Parse(strings.TrimSpace(os.Getenv(name)))
+			if err == nil && strings.EqualFold(u.Scheme, "http") {
+				warnings = append(warnings, fmt.Sprintf("%s is an http:// address, so Velox is served without TLS there. In %s the sign-in cookie is always Secure, and the pages at this address and the links to them are not encrypted. Serve Velox over HTTPS and set %s to its https:// address (docs/production-one-vm.md#3-add-https-with-caddy)", name, c.Env, name))
+			}
+		}
 	}
 
 	if port, err := strconv.Atoi(c.Port); err != nil || port < 1 || port > 65535 {
@@ -375,16 +449,84 @@ func ParseTrustProxy(spec string) ([]*net.IPNet, error) {
 	return nets, nil
 }
 
-func boolEnv(key string, fallback bool) bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	switch v {
-	case "1", "true", "yes":
-		return true
-	case "0", "false", "no":
-		return false
-	default:
-		return fallback
+// ParseCORSOrigins parses a CORS_ALLOWED_ORIGINS value: browser origins,
+// comma-separated, such as https://billing.example.com, or a bare "*" on its
+// own. Entries are trimmed and blank ones skipped. It is the one parser behind
+// the boot check and the router, which hands the list to both CORS and the
+// CSRF guard, so a value cannot pass the first and mean something else to
+// the others.
+//
+// Two values are errors:
+//   - An entry with a * inside it, such as https://*.example.com. Both
+//     consumers match origins exactly, so it would allow nothing.
+//   - "*" beside other origins. "*" allows every origin without the sign-in
+//     cookie, which would stop a listed dashboard from signing in.
+//
+// The error names the entries; the usable entries are returned with it.
+func ParseCORSOrigins(spec string) ([]string, error) {
+	var origins, patterns []string
+	wildcard := false
+	for _, o := range strings.Split(spec, ",") {
+		switch o = strings.TrimSpace(o); {
+		case o == "":
+		case o == "*":
+			wildcard = true
+		case strings.Contains(o, "*"):
+			patterns = append(patterns, strconv.Quote(o))
+		default:
+			origins = append(origins, o)
+		}
 	}
+	if len(patterns) > 0 {
+		return origins, fmt.Errorf("CORS_ALLOWED_ORIGINS has entries with a * inside: %s. Velox matches origins exactly, so list each one in full, such as https://billing.example.com", strings.Join(patterns, ", "))
+	}
+	if wildcard && len(origins) > 0 {
+		return origins, fmt.Errorf("CORS_ALLOWED_ORIGINS has * beside other origins. * allows every origin without the sign-in cookie, so the listed ones could not sign in either: list only the origins, or set * on its own")
+	}
+	if wildcard {
+		return []string{"*"}, nil
+	}
+	return origins, nil
+}
+
+// boolEnv reads a true/false setting: unset → fallback. Any value other than
+// true, false, yes, no, 1 or 0 is a configuration error, not the fallback:
+// RUN_MIGRATIONS_ON_BOOT=ture would otherwise start without the upgrades.
+func boolEnv(key string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	switch strings.ToLower(raw) {
+	case "":
+		return fallback, nil
+	case "1", "true", "yes":
+		return true, nil
+	case "0", "false", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s=%q must be true or false", key, raw)
+	}
+}
+
+// loadRateLimits reads VELOX_RATE_LIMIT_*: unset → DefaultRateLimits; a
+// value that is not a whole number of 1 or more stops start-up.
+func loadRateLimits() (RateLimits, error) {
+	def := DefaultRateLimits()
+	general, err := rateLimitEnv("VELOX_RATE_LIMIT_GENERAL_PER_MIN", def.GeneralPerMinute)
+	if err != nil {
+		return RateLimits{}, err
+	}
+	ingest, err := rateLimitEnv("VELOX_RATE_LIMIT_INGEST_PER_SEC", def.IngestPerSecond)
+	if err != nil {
+		return RateLimits{}, err
+	}
+	return RateLimits{GeneralPerMinute: general, IngestPerSecond: ingest}, nil
+}
+
+func rateLimitEnv(key string, fallback int) (int, error) {
+	n, err := intEnv(key, fallback)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s=%q must be a whole number of 1 or more; unset it for the default, %d", key, strings.TrimSpace(os.Getenv(key)), fallback)
+	}
+	return n, nil
 }
 
 // DefaultInvoiceGracePeriod and MaxInvoiceGracePeriod bound

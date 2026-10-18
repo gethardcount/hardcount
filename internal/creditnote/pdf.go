@@ -85,13 +85,14 @@ type OriginalInvoiceInfo struct {
 	ExemptReason  string
 }
 
-// Currency symbol map. Kept in sync with the invoice PDF's map.
+// Currency symbol map. Kept in sync with the invoice PDF's map, including
+// its rule that every symbol has a glyph in the embedded font.
 var cnCurrencySymbols = map[string]string{
 	"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "CNY": "¥",
 	"INR": "₹", "BRL": "R$", "CAD": "CA$", "AUD": "A$", "CHF": "CHF ",
 	"SGD": "S$", "HKD": "HK$", "NZD": "NZ$", "MXN": "MX$",
 	"KRW": "₩", "ZAR": "R", "PLN": "zł", "AED": "AED ", "SAR": "SAR ",
-	"THB": "฿", "MYR": "RM ", "IDR": "Rp ", "PHP": "₱", "VND": "₫",
+	"THB": "THB ", "MYR": "RM ", "IDR": "Rp ", "PHP": "₱", "VND": "₫",
 }
 
 // RenderPDF renders a standalone credit note PDF. The caller supplies the
@@ -140,6 +141,10 @@ func RenderPDF(
 		return nil, err
 	}
 
+	// measuring is true while keep (below) works out how tall a block is:
+	// the block runs with drawing switched off and only y moves.
+	measuring := false
+
 	setFont := func(bold bool, size int) {
 		name := pdffonts.FamilyRegular
 		if bold {
@@ -151,33 +156,71 @@ func RenderPDF(
 		pdf.SetTextColor(r, g, b)
 	}
 	textAt := func(x, y float64, text string) {
+		if measuring {
+			return
+		}
 		pdf.SetXY(x, y)
 		_ = pdf.Cell(nil, text)
 	}
 	rightAlignAt := func(x, y, width float64, text string) {
+		if measuring {
+			return
+		}
 		tw, _ := pdf.MeasureTextWidth(text)
 		pdf.SetXY(x+width-tw, y)
 		_ = pdf.Cell(nil, text)
 	}
-
-	// ── VOID watermark ──
-	if cn.Status == domain.CreditNoteVoided {
-		setFont(true, 72)
-		setColor(230, 230, 230)
-		textAt(55, 400, "VOID")
+	hline := func(x1, x2, y float64) {
+		if measuring {
+			return
+		}
+		pdf.Line(x1, y, x2, y)
 	}
 
+	// wrap splits text into lines no wider than width in the current font.
+	// If it cannot, the render fails rather than print a line that runs
+	// out of its column.
+	var wrapErr error
+	wrap := func(text string, width float64) []string {
+		lines, err := pdffonts.WrapText(pdf, text, width)
+		if err != nil {
+			if wrapErr == nil {
+				wrapErr = err
+			}
+			return []string{text}
+		}
+		return lines
+	}
+
+	// ── VOID watermark ── on every page.
+	drawWatermark := func() {
+		if cn.Status == domain.CreditNoteVoided {
+			setFont(true, 72)
+			setColor(230, 230, 230)
+			textAt(55, 400, "VOID")
+		}
+	}
+	drawWatermark()
+
 	pageW := 595.28 // A4 width in points
+	pageH := 841.89 // A4 height in points
 	margin := 40.0
 	contentW := pageW - margin*2
+	// Content stops here; below it is the band that holds "Page N of M".
+	bottomLimit := pageH - 44
 	y := 40.0
+	// pageTop is where content starts on the current page. A block that
+	// does not fit is moved to a new page only when it is not already at
+	// the top of one; a block taller than a whole page then flows row by row.
+	pageTop := y
 
 	// ── Header: company (left), "CREDIT NOTE" label (right) ──
-	companyName := "Velox"
+	// Only what the tenant entered: an unset company name prints no name,
+	// never a made-up "Velox" seller (same rule as the invoice PDF).
+	companyName := strings.TrimSpace(company.Name)
 	var companyAddrLines []string
 	companyContact := ""
-	if company.Name != "" {
-		companyName = company.Name
+	{
 		if company.AddressLine1 != "" {
 			companyAddrLines = append(companyAddrLines, company.AddressLine1)
 		}
@@ -204,7 +247,9 @@ func RenderPDF(
 
 	setFont(true, 18)
 	setColor(30, 30, 30)
-	textAt(margin, y, companyName)
+	if companyName != "" {
+		textAt(margin, y, companyName)
+	}
 
 	setFont(true, 18)
 	setColor(100, 100, 100)
@@ -320,77 +365,164 @@ func RenderPDF(
 	}
 	y += 16
 
+	// ── Line items table ──
+	colX := []float64{margin, margin + 240, margin + 320, margin + 400}
+	colEnd := margin + contentW
+	// A description wraps inside its column, which stops a gap short of
+	// the Qty column, and is never cut (#1228). Each extra line adds
+	// descLineH to its row. Same as the invoice PDF.
+	descW := colX[1] - colX[0] - 8
+	const descLineH = 12.0
+
+	drawTableHeader := func() {
+		setFont(true, 9)
+		setColor(80, 80, 80)
+		pdf.SetFillColor(245, 245, 245)
+		pdf.RectFromUpperLeftWithStyle(margin, y-2, contentW, 20, "F")
+
+		textAt(colX[0], y, "Description")
+		rightAlignAt(colX[1], y, colX[2]-colX[1], "Qty")
+		rightAlignAt(colX[2], y, colX[3]-colX[2], "Unit Price")
+		rightAlignAt(colX[3], y, colEnd-colX[3], "Amount")
+		y += 22
+	}
+
+	// ── Page breaks ── (the invoice PDF does the same)
+	// Every page after the first opens with "Credit note <number>
+	// (continued)"; a page that carries more line items repeats the table
+	// header too.
+	continued := "Credit note"
+	if cn.CreditNoteNumber != "" {
+		continued += " " + cn.CreditNoteNumber
+	}
+	continued += " (continued)"
+	newPage := func(withTableHeader bool) {
+		pdf.AddPage()
+		drawWatermark()
+		setFont(false, 8)
+		setColor(150, 150, 150)
+		textAt(margin, margin, continued)
+		y = margin + 20
+		pageTop = y
+		if withTableHeader {
+			drawTableHeader()
+		}
+	}
+	// need starts a new page when the next h points would cross bottomLimit.
+	need := func(h float64, withTableHeader bool) {
+		if measuring || y+h <= bottomLimit || y <= pageTop {
+			return
+		}
+		newPage(withTableHeader)
+	}
+	// keep draws a block on one page: it measures the block with drawing
+	// switched off, starts a new page if the block does not fit in what is
+	// left of this one, then draws it.
+	keep := func(draw func()) {
+		if measuring {
+			draw()
+			return
+		}
+		start := y
+		measuring = true
+		draw()
+		measuring = false
+		h := y - start
+		y = start
+		need(h, false)
+		draw()
+	}
+
 	// ── Reason block ──
 	// Credit notes carry a mandatory reason on every jurisdiction's compliance
 	// checklist (EU VAT Implementing Regulation Art. 226(a), India CGST Rule
 	// 53(1A)(d)). Printed prominently above the line items so the customer and
-	// auditor both see it without scrolling.
+	// auditor both see it without scrolling. The reason has no length limit,
+	// so a long one breaks across pages line by line.
 	if strings.TrimSpace(cn.Reason) != "" {
+		need(14+14, false)
 		setFont(true, 9)
 		setColor(100, 100, 100)
 		textAt(margin, y, "REASON FOR CREDIT")
 		y += 14
-		setFont(false, 10)
-		setColor(40, 40, 40)
 		reasonLines := wrapText(cn.Reason, 90)
 		for _, line := range reasonLines {
+			need(14, false)
+			setFont(false, 10)
+			setColor(40, 40, 40)
 			textAt(margin, y, line)
 			y += 14
 		}
 		y += 6
 	}
 
-	// ── Line items table ──
-	colX := []float64{margin, margin + 240, margin + 320, margin + 400}
-	colEnd := margin + contentW
-
-	setFont(true, 9)
-	setColor(80, 80, 80)
-	pdf.SetFillColor(245, 245, 245)
-	pdf.RectFromUpperLeftWithStyle(margin, y-2, contentW, 20, "F")
-
-	textAt(colX[0], y, "Description")
-	rightAlignAt(colX[1], y, colX[2]-colX[1], "Qty")
-	rightAlignAt(colX[2], y, colX[3]-colX[2], "Unit Price")
-	rightAlignAt(colX[3], y, colEnd-colX[3], "Amount")
-	y += 22
-
-	setFont(false, 9)
-	setColor(40, 40, 40)
-	for _, item := range lineItems {
-		desc := item.Description
-		if len([]rune(desc)) > 50 {
-			desc = string([]rune(desc)[:47]) + "..."
+	// descLines is a line's description as it prints.
+	descLines := func(item domain.CreditNoteLineItem) []string {
+		setFont(false, 9)
+		return wrap(item.Description, descW)
+	}
+	// rowHeight is the height a row of n description lines needs on one
+	// page. A row taller than a continued page holds under its table
+	// header cannot stay on one page, so it needs only its first line's
+	// room: it starts where it is and breaks between its lines.
+	rowHeight := func(n int) float64 {
+		h := 18 + float64(n-1)*descLineH
+		if h > bottomLimit-(margin+20+22) {
+			return 18
 		}
-		textAt(colX[0], y, desc)
+		return h
+	}
+
+	// Header row, kept with the first line item.
+	firstRow := 18.0
+	if len(lineItems) > 0 {
+		firstRow = rowHeight(len(descLines(lineItems[0])))
+	}
+	need(22+firstRow, false)
+	drawTableHeader()
+
+	for _, item := range lineItems {
+		lines := descLines(item)
+		need(rowHeight(len(lines)), true)
+		setFont(false, 9)
+		setColor(40, 40, 40)
+		textAt(colX[0], y, lines[0])
 		rightAlignAt(colX[1], y, colX[2]-colX[1], cnFormatNumber(item.Quantity))
 		rightAlignAt(colX[2], y, colX[3]-colX[2], cnFormatCents(item.UnitAmountCents, symbol))
 		rightAlignAt(colX[3], y, colEnd-colX[3], cnFormatCents(item.AmountCents, symbol))
+		for _, line := range lines[1:] {
+			// Only a row taller than a page reaches the foot of one here.
+			if y+descLineH+18 > bottomLimit {
+				newPage(true)
+				setFont(false, 9)
+				setColor(40, 40, 40)
+			} else {
+				y += descLineH
+			}
+			textAt(colX[0], y, line)
+		}
 		y += 18
 	}
 
-	y += 4
-	pdf.SetLineWidth(0.5)
-	pdf.SetStrokeColor(200, 200, 200)
-	pdf.Line(margin, y, margin+contentW, y)
-	y += 8
-
 	// ── Totals ──
+	// Amounts right-align with the Amount column. A label stops totalsGap
+	// short of its amount and wraps onto more lines when longer, so no
+	// amount runs into its label however large (#1178).
 	totalsX := 340.0
-	totalsW := 140.0
-	labelW := 90.0
+	totalsEnd := colEnd
+	const totalsGap = 12.0
 
 	totalsRow := func(label string, amount string, bold bool, labelR, labelG, labelB, valR, valG, valB uint8) {
-		if bold {
-			setFont(true, 10)
-		} else {
-			setFont(false, 10)
-		}
+		setFont(bold, 10)
+		vw, _ := pdf.MeasureTextWidth(amount)
+		lines := wrap(label, totalsEnd-totalsGap-vw-totalsX)
 		setColor(labelR, labelG, labelB)
-		textAt(totalsX, y, label)
+		for i, line := range lines {
+			textAt(totalsX, y+float64(i)*13, line)
+		}
 		setColor(valR, valG, valB)
-		rightAlignAt(totalsX+labelW, y, totalsW-labelW, amount)
-		y += 16
+		rightAlignAt(totalsX, y, totalsEnd-totalsX, amount)
+		y += 16 + float64(len(lines)-1)*13
 	}
 
 	// Line amounts above are GROSS (tax-inclusive — ADR-048 anchors the
@@ -401,103 +533,152 @@ func RenderPDF(
 	// render it when there IS tax to exclude (or a reverse-charge row to
 	// explain). On a zero-tax CN net == gross, and printing the same figure
 	// twice ("Total excluding tax" then "Credit Total") reads as a bug.
-	if cn.TaxAmountCents > 0 || orig.ReverseCharge {
-		totalsRow("Total excluding tax", cnFormatCents(cn.SubtotalCents, symbol), false, 80, 80, 80, 40, 40, 40)
-	}
-
-	if cn.TaxAmountCents > 0 {
-		taxLabel := "Tax"
-		if orig.TaxName != "" {
-			taxLabel = orig.TaxName
-		}
-		if orig.TaxRate > 0 {
-			taxLabel = fmt.Sprintf("%s (%s%%)", taxLabel, cnFormatTaxRate(orig.TaxRate))
-		}
-		if orig.TaxCountry != "" {
-			taxLabel = fmt.Sprintf("%s [%s]", taxLabel, orig.TaxCountry)
-		}
-		totalsRow(taxLabel, cnFormatCents(cn.TaxAmountCents, symbol), false, 80, 80, 80, 40, 40, 40)
-	} else if orig.ReverseCharge {
-		// Even with zero-amount tax, surface the reverse-charge row so
-		// the CN reads as a deliberate treatment, not a bug.
-		totalsRow("Tax (reverse charge)", cnFormatCents(0, symbol), false, 80, 80, 80, 120, 120, 120)
-	}
-
-	pdf.SetStrokeColor(220, 220, 220)
-	pdf.Line(totalsX, y-4, totalsX+totalsW, y-4)
-	y += 2
-	totalsRow("Credit Total", cnFormatCents(cn.TotalCents, symbol), true, 30, 30, 30, 30, 30, 30)
-
-	// ── Refund destination ──
-	// Tells the reader where the money went. Three cases map to the three
-	// ways Velox settles a CN (see service.go Issue()):
-	//   - refund_amount > 0:  Stripe refund back to the original payment
-	//   - credit_amount > 0:  Added to the customer's prepaid balance
-	//   - both zero:          Applied to an unpaid invoice's amount_due
-	y += 8
-	setFont(true, 9)
-	setColor(100, 100, 100)
-	textAt(margin, y, "SETTLEMENT")
-	y += 14
-	setFont(false, 9)
-	setColor(60, 60, 60)
-	for _, line := range settlementLines(cn, symbol) {
-		textAt(margin, y, line)
-		y += 12
-	}
-
-	// ── Compliance legend ──
-	// Mirrors the invoice's legend so the two documents carry matching
-	// disclosures. Required for reverse-charge and exempt treatments; any
-	// mismatch between the invoice and its credit note flags a compliance
-	// error on the buyer's side.
-	if orig.ReverseCharge || orig.ExemptReason != "" {
+	//
+	// Everything below the table (totals, settlement, legend, footer) goes
+	// on one page. It is at most about 15 short rows, so it always fits.
+	keep(func() {
+		y += 4
+		pdf.SetLineWidth(0.5)
+		pdf.SetStrokeColor(200, 200, 200)
+		hline(margin, margin+contentW, y)
 		y += 8
-		setFont(true, 8)
-		setColor(80, 80, 80)
-		if orig.ReverseCharge {
-			textAt(margin, y, "Reverse charge — VAT to be accounted for by the recipient.")
+
+		if cn.TaxAmountCents > 0 || orig.ReverseCharge {
+			totalsRow("Total excluding tax", cnFormatCents(cn.SubtotalCents, symbol), false, 80, 80, 80, 40, 40, 40)
+		}
+
+		if cn.TaxAmountCents > 0 {
+			taxLabel := "Tax"
+			if orig.TaxName != "" {
+				taxLabel = orig.TaxName
+			}
+			if orig.TaxRate > 0 {
+				taxLabel = fmt.Sprintf("%s (%s%%)", taxLabel, cnFormatTaxRate(orig.TaxRate))
+			}
+			if orig.TaxCountry != "" {
+				taxLabel = fmt.Sprintf("%s [%s]", taxLabel, orig.TaxCountry)
+			}
+			totalsRow(taxLabel, cnFormatCents(cn.TaxAmountCents, symbol), false, 80, 80, 80, 40, 40, 40)
+		} else if orig.ReverseCharge {
+			// Even with zero-amount tax, surface the reverse-charge row so
+			// the CN reads as a deliberate treatment, not a bug.
+			totalsRow("Tax (reverse charge)", cnFormatCents(0, symbol), false, 80, 80, 80, 120, 120, 120)
+		}
+
+		pdf.SetStrokeColor(220, 220, 220)
+		hline(totalsX, totalsEnd, y-4)
+		y += 2
+		totalsRow("Credit Total", cnFormatCents(cn.TotalCents, symbol), true, 30, 30, 30, 30, 30, 30)
+
+		// ── Refund destination ──
+		// Tells the reader where the money went. Three cases map to the three
+		// ways Velox settles a CN (see service.go Issue()):
+		//   - refund_amount > 0:  Stripe refund back to the original payment
+		//   - credit_amount > 0:  Added to the customer's prepaid balance
+		//   - both zero:          Applied to an unpaid invoice's amount_due
+		y += 8
+		setFont(true, 9)
+		setColor(100, 100, 100)
+		textAt(margin, y, "SETTLEMENT")
+		y += 14
+		setFont(false, 9)
+		setColor(60, 60, 60)
+		for _, line := range settlementLines(cn, symbol) {
+			textAt(margin, y, line)
 			y += 12
 		}
-		if orig.ExemptReason != "" {
-			setFont(false, 8)
-			setColor(100, 100, 100)
-			textAt(margin, y, "Tax-exempt: "+orig.ExemptReason)
-			y += 12
-		}
-	}
 
-	// ── Footer ──
-	y += 16
-	setFont(false, 9)
-	setColor(120, 120, 120)
-	switch cn.Status {
-	case domain.CreditNoteVoided:
-		voidDate := "N/A"
-		if cn.VoidedAt != nil {
-			voidDate = cn.VoidedAt.In(docLoc).Format("January 2, 2006")
+		// ── Compliance legend ──
+		// Mirrors the invoice's legend so the two documents carry matching
+		// disclosures. Required for reverse-charge and exempt treatments; any
+		// mismatch between the invoice and its credit note flags a compliance
+		// error on the buyer's side.
+		if orig.ReverseCharge || orig.ExemptReason != "" {
+			y += 8
+			setFont(true, 8)
+			setColor(80, 80, 80)
+			if orig.ReverseCharge {
+				textAt(margin, y, "Reverse charge — VAT to be accounted for by the recipient.")
+				y += 12
+			}
+			if orig.ExemptReason != "" {
+				setFont(false, 8)
+				setColor(100, 100, 100)
+				textAt(margin, y, "Tax-exempt: "+orig.ExemptReason)
+				y += 12
+			}
 		}
-		setColor(200, 80, 80)
-		textAt(margin, y, fmt.Sprintf("This credit note was voided on %s.", voidDate))
-	case domain.CreditNoteDraft:
-		setColor(180, 120, 0)
-		textAt(margin, y, "DRAFT — not yet issued.")
-	default:
-		textAt(margin, y, "This credit note reduces the taxable supply originally invoiced above. Retain for your records.")
-	}
 
-	y += 24
-	setFont(false, 7)
-	setColor(170, 170, 170)
-	footer := fmt.Sprintf("Generated on %s  |  %s", clock.Now(ctx).Format("Jan 2, 2006 15:04 UTC"), cn.ID)
-	fw, _ := pdf.MeasureTextWidth(footer)
-	textAt((pageW-fw)/2, y, footer)
+		// ── Footer ──
+		y += 16
+		setFont(false, 9)
+		setColor(120, 120, 120)
+		switch cn.Status {
+		case domain.CreditNoteVoided:
+			voidDate := "N/A"
+			if cn.VoidedAt != nil {
+				voidDate = cn.VoidedAt.In(docLoc).Format("January 2, 2006")
+			}
+			setColor(200, 80, 80)
+			textAt(margin, y, fmt.Sprintf("This credit note was voided on %s.", voidDate))
+		case domain.CreditNoteDraft:
+			setColor(180, 120, 0)
+			textAt(margin, y, "DRAFT — not yet issued.")
+		default:
+			textAt(margin, y, "This credit note reduces the taxable supply originally invoiced above. Retain for your records.")
+		}
+
+		y += 24
+		setFont(false, 7)
+		setColor(170, 170, 170)
+		footer := fmt.Sprintf("Generated on %s  |  %s", clock.Now(ctx).Format("Jan 2, 2006 15:04 UTC"), cn.ID)
+		fw, _ := pdf.MeasureTextWidth(footer)
+		textAt((pageW-fw)/2, y, footer)
+		y += 10 // the 7pt line's height, so keep measures the whole footer
+	})
+
+	if wrapErr != nil {
+		return nil, fmt.Errorf("render pdf: %w", wrapErr)
+	}
+	if err := stampPageNumbers(pdf, margin, contentW, pageH-34); err != nil {
+		return nil, err
+	}
 
 	var buf bytes.Buffer
 	if _, err := pdf.WriteTo(&buf); err != nil {
 		return nil, fmt.Errorf("render pdf: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// stampPageNumbers prints "Page N of M" at the foot of every page, right
+// aligned to x+width at y. It runs once the document is complete, because M
+// is known only then. A one-page document gets no number. Same as the
+// invoice PDF's.
+func stampPageNumbers(pdf *gopdf.GoPdf, x, width, y float64) error {
+	n := pdf.GetNumberOfPages()
+	if n < 2 {
+		return nil
+	}
+	if err := pdf.SetFont(pdffonts.FamilyRegular, "", 8); err != nil {
+		return fmt.Errorf("render pdf: page numbers: %w", err)
+	}
+	pdf.SetTextColor(150, 150, 150)
+	for i := 1; i <= n; i++ {
+		if err := pdf.SetPage(i); err != nil {
+			return fmt.Errorf("render pdf: page %d of %d: %w", i, n, err)
+		}
+		label := fmt.Sprintf("Page %d of %d", i, n)
+		tw, err := pdf.MeasureTextWidth(label)
+		if err != nil {
+			return fmt.Errorf("render pdf: page numbers: %w", err)
+		}
+		pdf.SetXY(x+width-tw, y)
+		if err := pdf.Cell(nil, label); err != nil {
+			return fmt.Errorf("render pdf: page numbers: %w", err)
+		}
+	}
+	return nil
 }
 
 // settlementLines describes where the credited amount went, one line per
@@ -522,6 +703,8 @@ func settlementLines(cn domain.CreditNote, symbol string) []string {
 				fmt.Sprintf("%s refund attempt failed.", cnFormatCents(cn.RefundAmountCents, symbol)),
 				"Our team will reach out to resolve the refund manually.")
 		default:
+			// none, and unknown (#965): the refund is either made or still to
+			// be made by Retry refund, so the customer reads "scheduled".
 			lines = append(lines, fmt.Sprintf("Refund of %s scheduled to the original payment method.", cnFormatCents(cn.RefundAmountCents, symbol)))
 		}
 	}

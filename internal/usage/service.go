@@ -25,10 +25,17 @@ type Service struct {
 	store    Store
 	resolver clock.Resolver
 	audit    AuditEmitter
+	// held keeps usage rows that could not be ingested yet (#1044). Taken
+	// from the store when it implements HeldStore (PostgresStore does).
+	held HeldStore
 }
 
 func NewService(store Store) *Service {
-	return &Service{store: store}
+	s := &Service{store: store}
+	if h, ok := store.(HeldStore); ok {
+		s.held = h
+	}
+	return s
 }
 
 // SetAuditLogger wires in-tx audit emission for BACKFILL. Live ingest stays
@@ -402,8 +409,18 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.UsageEv
 // stat cards reflect filtered totals rather than a reduce over the current
 // page of paginated events. Limit/Offset on the filter are intentionally
 // ignored — the whole point is the unbounded total.
-func (s *Service) Aggregate(ctx context.Context, filter ListFilter) (Aggregate, error) {
-	return s.store.Aggregate(ctx, filter)
+//
+// modes maps meter id to the meter's aggregation (sum, count, max, last);
+// each by_meter row's Value follows it. A meter missing from modes keeps
+// Value = Total (plain sum) and an empty Aggregation, so the caller can
+// tell the value was not mode-aware.
+func (s *Service) Aggregate(ctx context.Context, filter ListFilter, modes map[string]string) (Aggregate, error) {
+	agg, err := s.store.Aggregate(ctx, filter)
+	if err != nil {
+		return Aggregate{}, err
+	}
+	agg.ApplyMeterModes(modes)
+	return agg, nil
 }
 
 func (s *Service) AggregateForBillingPeriod(ctx context.Context, tenantID, customerID string, meterIDs []string, from, to time.Time) (map[string]decimal.Decimal, error) {
@@ -424,7 +441,7 @@ func (s *Service) AggregateDailyBuckets(ctx context.Context, tenantID, customerI
 // as a meter-default is rejected because it would silently break the
 // "current state" semantics for unclaimed events.
 //
-// See docs/design-multi-dim-meters.md for the resolution semantics; this
+// See docs/design/multi-dim-meters.md for the resolution semantics; this
 // method is the runtime entry point that billing-finalize will call.
 func (s *Service) AggregateByPricingRules(
 	ctx context.Context,

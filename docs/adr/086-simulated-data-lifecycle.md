@@ -1,6 +1,7 @@
 # ADR-086: Simulated-data lifecycle — durable `is_simulated` sweep-gates + clock-delete teardown
 
 **Status:** Accepted 2026-07-09; **revised 2026-07-09** after the design-B pivot — this file replaces the original "immutable `sim_clock_id` discriminator on every sim-bearing table" plan (see *Alternatives considered — why not a durable discriminator on every table*).
+**Amended:** 2026-07-13 (the audit log's simulated-time fields became filterable columns; see the amendment below).
 **Supersedes:** ADR-016 (test-clock soft-delete + cancel-subs + detach-customers → **complete hard-delete teardown**).
 **Extends:** ADR-029 (fully-disjoint test-clock flows).
 **Reaffirms:** ADR-030 (simulated time on clock-pinned entities stays; `created_at` is domain time) **and its audit exception** (the audit log is always wall-clock).

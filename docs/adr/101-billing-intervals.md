@@ -3,6 +3,10 @@
 Date: 2026-07-27
 Status: Accepted (owner decision; phased — see Rollout)
 
+## Summary
+
+Each subscription item's billable date ranges are stored in a `billing_intervals` table, written in the same transaction as the item change that opens or closes them. Billing a period, a cancel or a usage window intersects those ranges with the period, instead of re-reading the `subscription_item_changes` log and applying day rules at billing time. Reading the log that way had caused a run of proration bugs (wrong charges for part of a period), and deciding each range once, when the change is written, removes that class. Database constraints refuse overlapping or duplicate open ranges, and a live item with no range makes its subscription's billing fail with an error instead of billing zero. Status: active; fully rolled out on 2026-07-28, when the old log reader and the `VELOX_BILLING_INTERVALS_READER` switch were deleted.
+
 ## Context
 
 Cycle billing derives item lifetimes by **interpreting** the

@@ -145,6 +145,13 @@ const (
 	DunningCauseNoPaymentMethod DunningStartCause = "no_payment_method"
 )
 
+// DunningRetryReasonCardRefused is the reason on a retry_attempted event for
+// a scheduled retry that charged nothing: the bank had refused the
+// customer's default card for good on this invoice (ErrCardNeedsReplacing,
+// #966). The attempt counts, and the timeline shows it as not charged, the
+// way it shows a retry with no card (DunningCauseNoPaymentMethod).
+const DunningRetryReasonCardRefused = "card_refused"
+
 // Valid reports whether the cause is a known enum value — StartDunning
 // refuses anything else (no-silent-fallbacks: an unlabeled run would
 // re-introduce the hardcoded-reason lie this type exists to end).
@@ -214,11 +221,15 @@ const (
 // the Lago / Recurly named-campaigns shape verified during the 2026-
 // 05-16 industry research.
 type DunningPolicy struct {
-	ID               string   `json:"id"`
-	TenantID         string   `json:"tenant_id,omitempty"`
-	Name             string   `json:"name"`
-	Enabled          bool     `json:"enabled"`
-	IsDefault        bool     `json:"is_default"`
+	ID        string `json:"id"`
+	TenantID  string `json:"tenant_id,omitempty"`
+	Name      string `json:"name"`
+	Enabled   bool   `json:"enabled"`
+	IsDefault bool   `json:"is_default"`
+	// Seeded is true for the policy the account was created with, until
+	// the operator edits it or makes it the default. While it is true, the
+	// next policy created takes over the default slot (ADR-123).
+	Seeded           bool     `json:"seeded"`
 	RetrySchedule    []string `json:"retry_schedule"`
 	MaxRetryAttempts int      `json:"max_retry_attempts"`
 	// The two terminal decisions (ADR-112). Both are always present; the

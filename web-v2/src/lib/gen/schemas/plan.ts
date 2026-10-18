@@ -13,6 +13,7 @@ import type { PlanStatus } from './planStatus';
 
 export interface Plan {
   id?: string;
+  tenant_id?: string;
   code?: string;
   name?: string;
   currency?: string;

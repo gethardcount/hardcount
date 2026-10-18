@@ -67,3 +67,54 @@ func TestStreamForExport_CarriesOrigin(t *testing.T) {
 		t.Errorf("%d exported rows carry an EMPTY origin — this is the bug: the column was promised and never filled", byOrigin[""])
 	}
 }
+
+// The dashboard's Export CSV now streams from the server with the page's
+// filters. Each filter must narrow the file exactly as it narrows the list,
+// or the operator downloads rows the page never showed.
+func TestStreamForExportFiltered_MatchesPageFilters(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	store := usage.NewPostgresStore(db)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Export Filters")
+	custA := insertTestCustomer(t, db, tenantID, "cus_exp_a")
+	custB := insertTestCustomer(t, db, tenantID, "cus_exp_b")
+	mX := insertTestMeter(t, db, tenantID, "mtr_exp_x", "exp_x")
+	mY := insertTestMeter(t, db, tenantID, "mtr_exp_y", "exp_y")
+
+	at := time.Now().UTC().Add(-time.Hour)
+	n := decimal.NewFromInt
+	ingestAt(t, ctx, store, tenantID, custA, mX, n(1), map[string]any{"model": "gpt-4o", "token_type": "input"}, at)
+	ingestAt(t, ctx, store, tenantID, custA, mX, n(2), map[string]any{"model": "gpt-4o", "token_type": "output"}, at)
+	ingestAt(t, ctx, store, tenantID, custA, mY, n(3), nil, at)
+	ingestAt(t, ctx, store, tenantID, custB, mX, n(4), map[string]any{"model": "gpt-4o-mini"}, at)
+
+	from := time.Now().UTC().Add(-24 * time.Hour)
+	to := time.Now().UTC().Add(time.Hour)
+	sum := func(f usage.ExportFilter) string {
+		total := decimal.Zero
+		if err := store.StreamForExportFiltered(ctx, tenantID, from, to, f, func(e domain.UsageEvent) error {
+			total = total.Add(e.Quantity)
+			return nil
+		}); err != nil {
+			t.Fatalf("export %+v: %v", f, err)
+		}
+		return total.String()
+	}
+	cases := []struct {
+		name string
+		f    usage.ExportFilter
+		want string
+	}{
+		{"no filter", usage.ExportFilter{}, "10"},
+		{"customer", usage.ExportFilter{CustomerID: custA}, "6"},
+		{"meter", usage.ExportFilter{MeterID: mX}, "7"},
+		{"dimension", usage.ExportFilter{Dimensions: map[string]any{"model": "gpt-4o"}}, "3"},
+		{"dimensions AND", usage.ExportFilter{Dimensions: map[string]any{"model": "gpt-4o", "token_type": "output"}}, "2"},
+		{"all three", usage.ExportFilter{CustomerID: custB, MeterID: mX, Dimensions: map[string]any{"model": "gpt-4o-mini"}}, "4"},
+	}
+	for _, c := range cases {
+		if got := sum(c.f); got != c.want {
+			t.Errorf("%s: exported sum %s, want %s", c.name, got, c.want)
+		}
+	}
+}

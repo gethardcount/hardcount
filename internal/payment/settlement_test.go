@@ -105,11 +105,16 @@ func (r *recordingReceiptEmail) SendPaymentReceipt(_ context.Context, _, _ strin
 	return nil
 }
 
-// recordingFailedEmail counts payment-failed enqueues.
-type recordingFailedEmail struct{ sends int }
+// recordingFailedEmail counts payment-failed enqueues and keeps the reason
+// each one gave the customer.
+type recordingFailedEmail struct {
+	sends   int
+	reasons []string
+}
 
-func (r *recordingFailedEmail) SendPaymentFailed(_ context.Context, _, _ string, _ []string, _, _, _, _ string) error {
+func (r *recordingFailedEmail) SendPaymentFailed(_ context.Context, _, _ string, _ []string, _, _, reason, _ string) error {
 	r.sends++
+	r.reasons = append(r.reasons, reason)
 	return nil
 }
 

@@ -1,8 +1,12 @@
 # ADR-031: Per-plan base bill_timing (in_advance vs in_arrears)
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-06-01)
 **Date:** 2026-05-14
 **Related**: ADR-028 (period loop), `project_billing_timing_model.md`, `feedback_stripe_parity_framing.md`
+
+## Summary
+
+Each plan has a `base_bill_timing`: `in_arrears` (the default) bills the base fee at the end of each period, and `in_advance` bills it at the start, with a first invoice when the subscription is created. Usage always bills in arrears, because its quantity is unknown until the period ends. On a mid-period cancel of an `in_advance` plan, the unused base of a paid invoice is credited back. Amended 2026-06-01: an unpaid prebilled invoice is voided when no time was used, or else reduced to the used part with a credit note. Status: active, amended; [ADR-048](048-credit-clawback-tax-reversal.md) and [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) later changed how this relief is written.
 
 ## Context
 

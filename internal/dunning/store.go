@@ -13,6 +13,10 @@ type Store interface {
 	// interface for the multi-policy-per-tenant resolution path).
 	UpsertPolicy(ctx context.Context, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error)
 	UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error)
+	// SeedDefaultPoliciesTx writes the policy a new account starts with,
+	// once per mode, as that mode's seeded default (ADR-123). onSeeded runs
+	// after each insert with app.livemode still set to that mode.
+	SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error
 
 	// Runs
 	//

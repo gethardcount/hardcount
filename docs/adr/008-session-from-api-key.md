@@ -9,6 +9,10 @@ Superseded by [ADR-011](./011-email-password-auth-and-clean-api-keys.md) — the
 ## Date
 2026-04-29
 
+## Summary
+
+Superseded by [ADR-011](011-email-password-auth-and-clean-api-keys.md). This ADR kept the API key as the credential but moved the browser to a short-lived httpOnly `velox_session` cookie, minted by `POST /v1/auth/exchange`. That way XSS could not read the key, and logout could revoke the session on the server. ADR-011 kept the cookie and the `internal/session` package, but binds sessions to `users.id` and mints them at `POST /v1/auth/login` after an email and password check. The XSS reasoning below still applies.
+
 ## Context
 
 ADR-007 reverted the dashboard from email+password sessions to bearer-key auth: the operator pastes a `vlx_secret_…` key into `/login`, the browser stores it in `localStorage`, and every request rides `Authorization: Bearer <key>`. That correctly aligned with `project_auth_decision.md` ("API keys custom-built; user auth via WorkOS/Clerk later") and removed ~2k LOC of password / session / invitation surface.

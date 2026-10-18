@@ -4,6 +4,10 @@
 - Date: 2026-06-09
 - Relates: ADR-039 (coupons cut — same retain-schema pattern), the B2B-not-B2B2C auth stance, the positioning wedge (AI-native, self-host)
 
+## Summary
+
+The customer self-serve portal (magic-link login and the `/v1/me/*` API) was removed. Self-serve billing portals are a consumer and small-business pattern, while Velox's B2B users build their own billing UI and route lifecycle changes through the operator. Customers still add cards on a Stripe-hosted setup page, pay through the hosted invoice link and see usage through the cost-dashboard token. The portal session and magic-link tables are kept in case a future customer group needs a portal. Status: active.
+
 ## Context
 
 Velox shipped a customer **self-serve portal**: a magic-link login (`/portal`) where an operator's end-customer authenticates via an operator-issued session (`vlx_cps_…` / magic-link `vlx_cpml_…`) and self-manages their subscription — view/pay invoices, cancel/resume, manage payment methods, edit profile. Backend: `internal/portalapi` (the `/v1/me/*` handler) + `internal/customerportal` (sessions + magic-links). Frontend: `Portal.tsx` / `PortalLogin.tsx` / `PortalMagic.tsx` + `portalAuth.ts`. ~3,000 LOC.

@@ -387,7 +387,8 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"usage backfill [external_customer_id]", "POST", fixed("/v1/usage-events/backfill"), func(o, f scopeRefs) any {
 			return map[string]any{"external_customer_id": f.ext, "event_name": o.meterKey, "quantity": 1, "timestamp": "2026-02-01T00:00:00Z", "idempotency_key": "scope-backfill-ext-" + f.ext}
 		}, 422, "", 201},
-		// LiteLLM reports an unmapped customer per row inside a 200.
+		// LiteLLM holds an unmapped customer's rows inside a 200 (#1044): the
+		// other tenant's customer is never matched.
 		{"litellm spend [user]", "POST", fixed("/v1/integrations/litellm/spend"), func(_, f scopeRefs) any {
 			return map[string]any{
 				"id": "req-" + f.ext, "call_type": "acompletion", "model": "gpt-4o", "custom_llm_provider": "openai", "user": f.ext,
@@ -527,7 +528,13 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"api key revoke [path key]", "DELETE", at("/v1/api-keys/%s", func(f scopeRefs) string { return f.apiKey }), none, 404, "", 0},
 	}
 
-	refuse := func(t *testing.T, method, path, auth string, body any, ids []string, status int, message string) {
+	// holdsUnknown names the cases whose door keeps an unknown reference
+	// instead of refusing it: LiteLLM holds a row for a `user` it cannot
+	// resolve in the caller's tenant and mode (#1044, ADR-122). For those,
+	// the held row is the expected write; every other table must still be
+	// untouched, so the foreign customer is never resolved or billed.
+	holdsUnknown := map[string]bool{"litellm spend [user]": true}
+	refuse := func(t *testing.T, method, path, auth string, body any, ids []string, status int, message string, holds bool) {
 		t.Helper()
 		before := snapshot(ids)
 		code, out := call(method, path, auth, body)
@@ -537,14 +544,27 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		if !strings.Contains(errMessage(out), message) {
 			t.Errorf("error message = %q, want it to contain %q", errMessage(out), message)
 		}
-		if diff := changed(before, snapshot(ids)); diff != "" {
+		diff := changed(before, snapshot(ids))
+		if holds {
+			var rest []string
+			for _, d := range strings.Split(diff, "; ") {
+				if d != "" && !strings.HasPrefix(d, "usage_held_events ") {
+					rest = append(rest, d)
+				}
+			}
+			if !strings.Contains(diff, "usage_held_events ") {
+				t.Errorf("the unknown reference was not held: %v", out)
+			}
+			diff = strings.Join(rest, "; ")
+		}
+		if diff != "" {
 			t.Errorf("a refused request changed the database: %s", diff)
 		}
 	}
 	for _, c := range cases {
 		for _, f := range foreign {
 			t.Run(c.name+"/"+f.name, func(t *testing.T) {
-				refuse(t, c.method, c.path(own, f.refs), aLive, c.body(own, f.refs), f.refs.ids(), c.refused, c.message)
+				refuse(t, c.method, c.path(own, f.refs), aLive, c.body(own, f.refs), f.refs.ids(), c.refused, c.message, holdsUnknown[c.name])
 			})
 		}
 		if c.control != 0 {
@@ -611,13 +631,13 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 	} {
 		ids := []string{c.clockID}
 		t.Run("customer create [test_clock_id]/"+c.name, func(t *testing.T) {
-			refuse(t, "POST", "/v1/customers", c.auth, map[string]any{"external_id": "clock_" + suffix(c.clockID), "display_name": "c", "test_clock_id": c.clockID}, ids, c.customer, "")
+			refuse(t, "POST", "/v1/customers", c.auth, map[string]any{"external_id": "clock_" + suffix(c.clockID), "display_name": "c", "test_clock_id": c.clockID}, ids, c.customer, "", false)
 		})
 		t.Run("test clock advance [path clock]/"+c.name, func(t *testing.T) {
-			refuse(t, "POST", "/v1/test-clocks/"+c.clockID+"/advance", c.auth, map[string]any{"frozen_time": "2026-03-02T00:00:00Z"}, ids, c.path, "")
+			refuse(t, "POST", "/v1/test-clocks/"+c.clockID+"/advance", c.auth, map[string]any{"frozen_time": "2026-03-02T00:00:00Z"}, ids, c.path, "", false)
 		})
 		t.Run("test clock delete [path clock]/"+c.name, func(t *testing.T) {
-			refuse(t, "DELETE", "/v1/test-clocks/"+c.clockID, c.auth, nil, ids, c.path, "")
+			refuse(t, "DELETE", "/v1/test-clocks/"+c.clockID, c.auth, nil, ids, c.path, "", false)
 		})
 	}
 	t.Run("customer create [test_clock_id]/own", func(t *testing.T) {
@@ -654,7 +674,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		for _, f := range foreign {
 			t.Run(f.name, func(t *testing.T) {
 				stripeCalls = 0
-				refuse(t, "POST", "/v1/checkout/setup", aLive, map[string]any{"customer_id": f.refs.cus, "customer_name": "x"}, f.refs.ids(), 404, "customer not found")
+				refuse(t, "POST", "/v1/checkout/setup", aLive, map[string]any{"customer_id": f.refs.cus, "customer_name": "x"}, f.refs.ids(), 404, "customer not found", false)
 				if stripeCalls != 0 {
 					t.Errorf("made %d Stripe call(s) for a customer outside the caller's tenant and mode, want 0", stripeCalls)
 				}

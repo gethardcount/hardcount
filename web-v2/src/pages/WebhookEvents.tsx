@@ -182,7 +182,7 @@ export default function WebhookEventsPage() {
           is the only events surface. */}
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Webhooks</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage outbound webhook endpoints and events</p>
+        <p className="text-sm text-muted-foreground mt-1">Velox calls a URL in your app when something happens, such as an invoice paid or a payment failed, so your app can react.</p>
       </div>
 
       <Tabs value="events" onValueChange={(t) => { if (t === 'endpoints') navigate('/webhooks') }} className="mt-6">
@@ -194,7 +194,7 @@ export default function WebhookEventsPage() {
 
       <div className="flex items-start justify-between gap-4 mt-4">
         <p className="text-sm text-muted-foreground">
-          Real-time tail of every event dispatched to your endpoints. Click a row to see per-attempt delivery history and replay.
+          Every message sent to your URLs, newest first. Open one to see each try and to send it again.
         </p>
         <ConnectionPill status={status} count={sortedFrames.length} />
       </div>
@@ -208,7 +208,7 @@ export default function WebhookEventsPage() {
               description={
                 status === 'live'
                   ? 'No webhook events yet. Trigger an event from your account and it will appear here in real time.'
-                  : 'Establishing live-tail connection\u2026'
+                  : 'Loading events\u2026'
               }
             />
           ) : (

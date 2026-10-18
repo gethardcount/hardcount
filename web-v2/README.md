@@ -21,7 +21,8 @@ Node 22+ (CI runs 22; anything below 20.19 breaks Vite).
 ```bash
 npx tsc -b         # strict typecheck. NOT `tsc --noEmit` — that silently
                    # checks nothing here (composite project references).
-npm run lint       # eslint
+npm run lint       # eslint, then knip: unused files, exports and
+                   # dependencies fail (knip.jsonc says what is ignored)
 npm test           # vitest
 npm run build      # tsc -b + vite build — the strictest of the four
 npm run test:e2e   # Playwright browser tests; needs a running API (e2e/README.md)

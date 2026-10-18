@@ -3,6 +3,10 @@
 **Status:** Accepted
 **Date:** 2026-05-05
 
+## Summary
+
+An attention banner keeps two kinds of detail apart. `detail` is Velox's own explanation, and `provider_response` is text a provider such as Stripe actually returned. A check that fails before any provider call, such as `provider_not_configured`, leaves both empty, so the operator never mistakes Velox's text for a Stripe reply. The split is made from the typed `tax_error_code` when the response is built, and storage is unchanged. Status: active.
+
 ## Context
 
 Operator-reported confusion on the invoice attention banner with the

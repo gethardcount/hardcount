@@ -494,15 +494,15 @@ func diffSettings(before, after domain.TenantSettings) map[string]any {
 // errors so respond.FromError can route each message to the right input in the
 // UI.
 func validateSettings(ts *domain.TenantSettings) error {
-	if email := strings.TrimSpace(ts.CompanyEmail); email != "" {
-		at := strings.Index(email, "@")
-		if at < 1 {
-			return errs.Invalid("company_email", "must contain @")
+	// Shown on invoices, credit notes and the hosted pages as the address to
+	// contact, so it gets the same check as every other address.
+	ts.CompanyEmail = strings.TrimSpace(ts.CompanyEmail)
+	if ts.CompanyEmail != "" {
+		addr, err := domain.ValidateEmail("company_email", ts.CompanyEmail)
+		if err != nil {
+			return err
 		}
-		host := email[at+1:]
-		if !strings.Contains(host, ".") || strings.HasSuffix(host, ".") {
-			return errs.Invalid("company_email", "domain must contain a dot")
-		}
+		ts.CompanyEmail = addr
 	}
 	if phone := strings.TrimSpace(ts.CompanyPhone); phone != "" {
 		if !settingsPhonePattern.MatchString(phone) {

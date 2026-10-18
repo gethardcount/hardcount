@@ -10,6 +10,10 @@ engineer, the billing operator, and finance on one shared password within
 30 days, and the append-only audit log becomes attribution-blind with one
 user, undercutting a feature the README sells.
 
+## Summary
+
+Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves or the last member. Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
+
 ## Decision
 
 Ship the smallest thing that kills the shared password; keep RBAC cut.

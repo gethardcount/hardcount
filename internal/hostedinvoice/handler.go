@@ -89,12 +89,25 @@ type CheckoutSessionCreator interface {
 	CreateInvoicePaymentSession(ctx context.Context, tenantID string, inv domain.Invoice, successURL, cancelURL string) (string, error)
 }
 
+// StripeReadiness reports whether a tenant has Stripe keys for a mode.
+// Implemented by *payment.StripeClients (HasFor). The page offers Pay only
+// when it is true: without keys the checkout create fails, and the customer
+// used to see a Pay button that answered "failed to create checkout session".
+type StripeReadiness interface {
+	HasFor(ctx context.Context, tenantID string, livemode bool) bool
+}
+
+// PayUnavailableOnline is pay_unavailable_reason when the invoice is owed
+// but the seller has no payment provider connected for its mode.
+const PayUnavailableOnline = "online_payment_unavailable"
+
 type Handler struct {
 	invoices    InvoiceResolver
 	customers   CustomerGetter
 	settings    SettingsGetter
 	creditNotes CreditNoteLister
 	stripe      CheckoutSessionCreator
+	stripeReady StripeReadiness
 	// baseURL is the customer-facing SPA origin, e.g. https://app.example.com.
 	// Used to build Stripe Checkout return URLs. If empty, the handler
 	// falls back to localhost for dev. Kept as a config value rather than
@@ -109,6 +122,8 @@ type Deps struct {
 	Settings    SettingsGetter
 	CreditNotes CreditNoteLister
 	Stripe      CheckoutSessionCreator
+	// StripeReady is optional; nil treats a wired Stripe adapter as ready.
+	StripeReady StripeReadiness
 	BaseURL     string
 }
 
@@ -119,6 +134,7 @@ func New(deps Deps) *Handler {
 		settings:    deps.Settings,
 		creditNotes: deps.CreditNotes,
 		stripe:      deps.Stripe,
+		stripeReady: deps.StripeReady,
 		baseURL:     deps.BaseURL,
 	}
 }
@@ -147,6 +163,10 @@ type hostedInvoicePayload struct {
 	// "invoice.status == finalized && amount_due > 0", but computed
 	// server-side so the rule lives in one place.
 	PayEnabled bool `json:"pay_enabled"`
+	// PayUnavailableReason says why an owed invoice has no Pay button:
+	// "online_payment_unavailable" when the seller has no payment provider
+	// connected. Empty when Pay is enabled, or when nothing is owed.
+	PayUnavailableReason string `json:"pay_unavailable_reason,omitempty"`
 	// Livemode marks whether this invoice is real money. The SPA shows a
 	// "Test mode" banner when false — an unmarked test invoice is
 	// indistinguishable from a real one to the customer it's sent to
@@ -326,12 +346,15 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	owed := payEnabled(inv)
+	online := owed && h.onlinePaymentReady(r.Context(), inv)
 	respond.JSON(w, r, http.StatusOK, hostedInvoicePayload{
-		Invoice:    toViewInvoice(inv),
-		LineItems:  toViewLineItems(items),
-		BillTo:     billTo,
-		Branding:   branding,
-		PayEnabled: payEnabled(inv),
+		Invoice:              toViewInvoice(inv),
+		LineItems:            toViewLineItems(items),
+		BillTo:               billTo,
+		Branding:             branding,
+		PayEnabled:           owed && online,
+		PayUnavailableReason: payUnavailableReason(owed, online),
 		// resolveToken pinned the row's livemode onto the request ctx.
 		Livemode: postgres.Livemode(r.Context()),
 	})
@@ -361,6 +384,14 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		// not a bug.
 		respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "stripe_unavailable",
 			"payment processing is not configured")
+		return
+	}
+	if !h.onlinePaymentReady(r.Context(), inv) {
+		// The tenant has no Stripe keys for this mode. The page hides Pay in
+		// this state; a direct POST gets the same answer as a 409 the page
+		// can explain, not a 502 "failed to create checkout session".
+		respond.Error(w, r, http.StatusConflict, "invalid_request_error", PayUnavailableOnline,
+			"online payment is not set up for this invoice")
 		return
 	}
 
@@ -461,6 +492,28 @@ func payEnabled(inv domain.Invoice) bool {
 	return inv.Status == domain.InvoiceFinalized &&
 		inv.AmountDueCents > 0 &&
 		!inv.PaymentStatus.IsInFlight()
+}
+
+// onlinePaymentReady: the seller can take this invoice's payment online —
+// a Stripe adapter is wired and the tenant has keys for the invoice's mode
+// (pinned on ctx by resolveInvoice).
+func (h *Handler) onlinePaymentReady(ctx context.Context, inv domain.Invoice) bool {
+	if h.stripe == nil {
+		return false
+	}
+	if h.stripeReady == nil {
+		return true
+	}
+	return h.stripeReady.HasFor(ctx, inv.TenantID, postgres.Livemode(ctx))
+}
+
+// payUnavailableReason is set only when money is owed but can't be paid
+// online, so the page can say "contact the seller" instead of nothing.
+func payUnavailableReason(owed, online bool) string {
+	if owed && !online {
+		return PayUnavailableOnline
+	}
+	return ""
 }
 
 func toViewInvoice(inv domain.Invoice) viewInvoice {

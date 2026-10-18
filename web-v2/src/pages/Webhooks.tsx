@@ -79,7 +79,7 @@ export default function WebhooksPage() {
     <Layout>
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Webhooks</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage outbound webhook endpoints and events</p>
+        <p className="text-sm text-muted-foreground mt-1">Velox calls a URL in your app when something happens, such as an invoice paid or a payment failed, so your app can react.</p>
       </div>
 
       <Tabs value="endpoints" onValueChange={(t) => { if (t === 'events') navigate('/webhooks/events') }} className="mt-6">
@@ -149,7 +149,7 @@ function EndpointsTab() {
       <div className="flex justify-end mt-4">
         <Button size="sm" onClick={() => setShowCreate(true)}>
           <Plus size={16} className="mr-2" />
-          Add Endpoint
+          Add endpoint
         </Button>
       </div>
 
@@ -163,9 +163,9 @@ function EndpointsTab() {
             <EmptyState
               icon={Webhook}
               title="No webhook endpoints"
-              description="Add an endpoint to receive real-time event notifications for your account."
+              description="Add your app's URL and pick the events it should hear about."
               action={{
-                label: 'Add Endpoint',
+                label: 'Add endpoint',
                 icon: Plus,
                 onClick: () => setShowCreate(true),
               }}
@@ -178,7 +178,7 @@ function EndpointsTab() {
                   <TableHead>Description</TableHead>
                   <TableHead>Events</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Success Rate</TableHead>
+                  <TableHead>Success rate</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right"></TableHead>
                 </TableRow>
@@ -253,7 +253,7 @@ function EndpointsTab() {
                               setRotatingId(null)
                             }
                           }}>
-                          {rotatingId === ep.id ? <><Loader2 size={12} className="animate-spin mr-1" />Rotating…</> : 'Rotate Secret'}
+                          {rotatingId === ep.id ? <><Loader2 size={12} className="animate-spin mr-1" />Rotating…</> : 'Rotate secret'}
                         </Button>
                         <Button variant="outline" size="sm" className="h-7 text-xs"
                           onClick={() => setEditTarget(ep)}>
@@ -306,7 +306,7 @@ function EndpointsTab() {
         <Dialog open onOpenChange={() => setCreatedSecret(null)}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Signing Secret</DialogTitle>
+              <DialogTitle>Signing secret</DialogTitle>
               {createdSecret.secondary_valid_until ? (
                 <DialogDescription>
                   Save this secret now. It won't be shown again. The previous secret stays valid in parallel during the rollout window below.
@@ -319,7 +319,7 @@ function EndpointsTab() {
             </DialogHeader>
             <div className="space-y-3">
               <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-lg p-4">
-                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mb-1">New Signing Secret</p>
+                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mb-1">New signing secret</p>
                 <div className="flex items-start gap-2">
                   <p className="font-mono text-sm text-amber-900 dark:text-amber-300 break-all select-all flex-1">{createdSecret.secret}</p>
                   <Button variant="outline" size="sm" className="shrink-0"
@@ -354,10 +354,10 @@ function EndpointsTab() {
       <TypedConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
-        title="Delete Endpoint"
+        title="Delete endpoint"
         description={deleteTarget ? `Deleting "${deleteTarget.url}" will stop all future event deliveries to this URL. This action cannot be undone.` : ''}
         confirmWord="DELETE"
-        confirmLabel="Delete Endpoint"
+        confirmLabel="Delete endpoint"
         onConfirm={handleDelete}
       />
     </>
@@ -572,7 +572,7 @@ function EndpointEditDialog({ endpoint, onClose, onSaved }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Edit Webhook Endpoint</DialogTitle>
+          <DialogTitle>Edit webhook endpoint</DialogTitle>
           <DialogDescription>
             URL, events, and status change without rotating the signing secret.
           </DialogDescription>
@@ -626,7 +626,7 @@ function EndpointEditDialog({ endpoint, onClose, onSaved }: {
   )
 }
 
-/* ─── Create Endpoint Dialog ─── */
+/* ─── Create endpoint Dialog ─── */
 
 function CreateEndpointDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (secret: string) => void }) {
   const [listenMode, setListenMode] = useState<'all' | 'specific'>('all')
@@ -663,7 +663,7 @@ function CreateEndpointDialog({ onClose, onCreated }: { onClose: () => void; onC
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add Webhook Endpoint</DialogTitle>
+          <DialogTitle>Add webhook endpoint</DialogTitle>
           <DialogDescription>Configure a URL to receive event notifications</DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -725,7 +725,7 @@ function CreateEndpointDialog({ onClose, onCreated }: { onClose: () => void; onC
               {form.formState.isSubmitting ? (
                 <><Loader2 size={14} className="animate-spin mr-2" /> Creating...</>
               ) : (
-                'Create Endpoint'
+                'Create endpoint'
               )}
             </Button>
           </DialogFooter>

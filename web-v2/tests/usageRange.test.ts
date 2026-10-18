@@ -16,9 +16,12 @@ import {
   parseRange,
   rangeCaption,
   resolveWindow,
+  usageExportWindow,
+  parseDimensionFilter,
   type RangeKey,
   type Window,
 } from '../src/lib/usageRange.ts'
+import { startOfDayInTZ, endOfDayInTZ } from '../src/lib/dates.ts'
 
 // Deterministic stand-in for the tenant-TZ date helper.
 const fakeAgo = (amount: number, unit: 'day' | 'month') => `ago:${amount}${unit === 'day' ? 'd' : 'm'}`
@@ -82,9 +85,8 @@ test('the caption names the window, and never reads back the word "custom"', () 
 })
 
 // An empty page under the default 30-day window said "No usage events yet"
-// to operators whose events were older; and an export over 50,000 rows
-// stopped silently.
-import { usageEmptyKind, needsAnyEventCheck, exportCapNotice } from '../src/lib/usageRange.ts'
+// to operators whose events were older.
+import { usageEmptyKind, needsAnyEventCheck } from '../src/lib/usageRange.ts'
 
 test('empty Usage page: the default 30-day window on a workspace with no events says none yet', () => {
   // The common first-use path: DEFAULT_RANGE, no filters, nothing ever sent.
@@ -114,13 +116,34 @@ test('empty Usage page: a customer, meter or dimension filter always reads as no
   assert.equal(needsAnyEventCheck('30d', { customer: 'cus_1' }), false)
 })
 
-test('export cap: a notice only when more events match than the file holds', () => {
-  assert.equal(exportCapNotice(50_000), null)
-  assert.equal(exportCapNotice(12), null)
-  assert.deepEqual(exportCapNotice(73_210), {
-    title: 'Exported the newest 50,000 events',
-    description: '73,210 events match. Export a shorter date range to get the rest.',
-  })
+test('export window: the page window when it fits in 365 days', () => {
+  assert.deepEqual(usageExportWindow({ from: '2026-09-16', to: '' }, '2026-10-16'), { from: '2026-09-16', to: '2026-10-16', clamped: false })
+  assert.deepEqual(usageExportWindow({ from: '2026-01-01', to: '2026-03-31' }, '2026-10-16'), { from: '2026-01-01', to: '2026-03-31', clamped: false })
+})
+
+test('export window: All time and longer windows keep the last 365 days and say so', () => {
+  assert.deepEqual(usageExportWindow({ from: '', to: '' }, '2026-10-16'), { from: '2025-10-17', to: '2026-10-16', clamped: true })
+  assert.deepEqual(usageExportWindow({ from: '2020-01-01', to: '2024-02-29' }, '2026-10-16'), { from: '2023-03-02', to: '2024-02-29', clamped: true })
+})
+
+// The server refuses an export longer than 366 x 24 hours. On 2026-11-01 a
+// New York tenant's last year of days holds two autumn clock changes
+// (2025-11-02 and 2026-11-01) and one spring change, so it is an hour longer
+// than its day count. The window must still fit.
+test('export window: the bounds sent fit the server limit across clock changes', () => {
+  const tz = 'America/New_York'
+  const win = usageExportWindow({ from: '', to: '' }, '2026-11-01')
+  const span = Date.parse(endOfDayInTZ(win.to, tz)) - Date.parse(startOfDayInTZ(win.from, tz))
+  assert.ok(span <= 366 * 24 * 3600 * 1000, `span ${span / 3600000}h is over 366 days`)
+})
+
+test('dimension filter: key=value pairs pass, half-typed input is refused', () => {
+  assert.deepEqual(parseDimensionFilter(''), { ok: true, value: '' })
+  assert.deepEqual(parseDimensionFilter(' model = gpt-4o , token_type=input '), { ok: true, value: 'model=gpt-4o,token_type=input' })
+  assert.equal(parseDimensionFilter('model').ok, false)
+  assert.equal(parseDimensionFilter('model=').ok, false)
+  assert.equal(parseDimensionFilter('=gpt').ok, false)
+  assert.equal(parseDimensionFilter('model=a,token_type').ok, false)
 })
 
 // Backs MANUAL_TEST FLOW TZ1 (date filters on a cold load): the bounds the

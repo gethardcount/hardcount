@@ -38,7 +38,7 @@ type DispatcherConfig struct {
 type EmailDeliverer interface {
 	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string) error
 	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
-	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error
+	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
 	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents int64, currency string, pdfBytes []byte) error
@@ -126,12 +126,6 @@ type InvoiceSettledChecker interface {
 // SetSettledChecker wires the staleness gate (see handle).
 func (d *Dispatcher) SetSettledChecker(c InvoiceSettledChecker) { d.settled = c }
 
-// actionRequiredTypes are the email types whose ENTIRE purpose collapses
-// once the invoice settles: "update your payment method", "payment
-// failed", "we'll retry on <date>", "action taken — balance due". The
-// informational types (invoice document, receipt, credit note) stay
-// deliverable regardless — a paid invoice's document is still the
-// customer's record.
 // escalationAnnounces reports the one case where a terminal invoice must
 // NOT mute its email: a dunning escalation whose final action is
 // mark_uncollectible marks the invoice uncollectible in the same breath
@@ -166,6 +160,12 @@ func setupLinkServesRecovery(emailType, terminalState string) bool {
 	return emailType == TypePaymentSetupRequest && terminalState == "uncollectible"
 }
 
+// actionRequiredTypes are the email types whose ENTIRE purpose collapses
+// once the invoice settles: "update your payment method", "payment
+// failed", "we'll retry on <date>", "action taken — balance due". The
+// informational types (invoice document, receipt, credit note) stay
+// deliverable regardless — a paid invoice's document is still the
+// customer's record.
 var actionRequiredTypes = map[string]bool{
 	TypePaymentSetupRequest: true,
 	TypePaymentFailed:       true,
@@ -227,7 +227,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 			msg.AmountCents, msg.Currency, msg.PublicToken)
 	case TypeDunningWarning:
 		return d.sender.SendDunningWarning(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
-			msg.AttemptNumber, msg.MaxAttempts, msg.NextRetryDate, msg.FailureReason, msg.PublicToken)
+			msg.AttemptNumber, msg.MaxAttempts, msg.NextRetryDate, msg.FailureReason, msg.PublicToken, msg.CardNeedsReplacing)
 	case TypeDunningEscalation:
 		return d.sender.SendDunningEscalation(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.EscalationOutcome, msg.PublicToken)

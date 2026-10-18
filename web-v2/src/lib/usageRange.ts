@@ -127,19 +127,41 @@ export function needsAnyEventCheck(
   return range !== 'all' && !(filters.customer || filters.meter || filters.dim)
 }
 
-export const EXPORT_MAX_ROWS = 50_000
+// The server export (GET /v1/exports/usage-events.csv) streams every
+// matching row, with event ids and ISO 8601 timestamps, but one file covers
+// at most 366 x 24 hours. usageExportWindow picks the civil dates to send:
+// the page's window, or its last 365 days when the window is longer or open
+// ("All time"). 365, not 366: a year of tenant-zone days that holds two
+// autumn clock changes is 366 days and one hour long, and the server refuses
+// it. `clamped` says the file starts later than the page's window, so the
+// page can say so instead of handing over a file that looks complete.
+export const EXPORT_MAX_DAYS = 365
 
-// exportCapNotice is the warning shown when an export stopped at the row
-// cap: the file holds the newest `cap` events (the list is newest first),
-// and saying nothing handed operators a file that looked complete.
-export function exportCapNotice(
-  totalMatching: number,
-  cap: number = EXPORT_MAX_ROWS,
-): { title: string; description: string } | null {
-  if (totalMatching <= cap) return null
-  const n = cap.toLocaleString('en-US')
-  return {
-    title: `Exported the newest ${n} events`,
-    description: `${totalMatching.toLocaleString('en-US')} events match. Export a shorter date range to get the rest.`,
+export function usageExportWindow(window: Window, today: string): { from: string; to: string; clamped: boolean } {
+  const to = window.to || today
+  const earliest = civilAddDays(to, -(EXPORT_MAX_DAYS - 1))
+  if (!window.from || window.from < earliest) return { from: earliest, to, clamped: true }
+  return { from: window.from, to, clamped: false }
+}
+
+function civilAddDays(date: string, n: number): string {
+  const [y, m, d] = date.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+
+// parseDimensionFilter checks the dimension box before it reaches the URL:
+// "key=value" pairs separated by commas, the syntax the server accepts. A
+// half-typed "model" used to be sent on every keystroke and swapped the
+// whole page for a load error.
+export function parseDimensionFilter(raw: string): { ok: true; value: string } | { ok: false; error: string } {
+  const trimmed = raw.trim()
+  if (trimmed === '') return { ok: true, value: '' }
+  const parts = trimmed.split(',').map(p => p.trim()).filter(Boolean)
+  for (const part of parts) {
+    const eq = part.indexOf('=')
+    if (eq <= 0 || part.slice(eq + 1).trim() === '') {
+      return { ok: false, error: `"${part}" needs a value: use key=value, for example model=gpt-4o` }
+    }
   }
+  return { ok: true, value: parts.map(p => p.split('=').map(x => x.trim()).join('=')).join(',') }
 }

@@ -1,7 +1,11 @@
 # ADR-072: Outbox transport — claim-lease with detached CAS marks, derived constants
 
 **Date:** 2026-07-03
-**Status:** Accepted (shipped in P5; designed by the P5 adversarial panel — 2 lenses, both SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.5)
+**Status:** Accepted (shipped in P5; designed by the P5 adversarial panel — 2 lenses, both SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.5) (amended 2026-08-30, 2026-10-13)
+
+## Summary
+
+The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update that applies only to a row still `pending`, so a rollback never re-sends a delivered email. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
 
 ## Context
 

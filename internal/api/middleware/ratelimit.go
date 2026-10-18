@@ -35,6 +35,9 @@ type RateLimiter struct {
 	// — a request to one surface would consume another's allowance and the
 	// conflicting rate/period would corrupt the smoothing state.
 	name string
+	// local, when set, counts requests in this process whenever Redis is
+	// not configured or a Redis call fails. See SetLocalFallback.
+	local *localLimiter
 }
 
 // OpenRedis parses url, opens a client and verifies it with a Ping bounded
@@ -68,12 +71,23 @@ func (rl *RateLimiter) SetFailClosed(v bool) {
 	rl.failClosed = v
 }
 
+// SetLocalFallback makes the limiter count requests in this process whenever
+// Redis is not configured or a Redis call fails, in place of the fail-open or
+// fail-closed choice. The in-process count uses the same rate and burst, but
+// it is per replica: with N replicas behind a balancer, one key gets up to N
+// times the limit while Redis is down. Call it after NewRateLimiter and
+// before serving.
+func (rl *RateLimiter) SetLocalFallback() {
+	rl.local = newLocalLimiter(rl.limit)
+}
+
 // NewRateLimiter creates a Redis-backed GCRA rate limiter. name namespaces the
 // limiter's Redis keys so distinct limiters with different parameters don't
 // collide on a shared bucket (e.g. "general", "hosted_invoice", "setup_link").
 // Example: NewRateLimiter(rdb, "general", 100, time.Minute) = 100 requests per
 // minute with smooth distribution (no boundary bursts).
-// If rdb is nil, the limiter fails open (all requests allowed).
+// If rdb is nil, the limiter fails open (all requests allowed), unless
+// SetFailClosed or SetLocalFallback says otherwise.
 func NewRateLimiter(rdb *goredis.Client, name string, rate int, window time.Duration) *RateLimiter {
 	rl := &RateLimiter{rdb: rdb, name: name}
 
@@ -110,7 +124,7 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 			}
 
 			key := rateLimitKey(r)
-			remaining, resetAt, allowed := rl.allow(r, key)
+			remaining, resetAt, allowed := rl.allow(r.Context(), key)
 
 			// Set rate limit headers (Stripe convention)
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.limit.Rate))
@@ -136,45 +150,39 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 // to enforce a custom-keyed bucket from within a handler (vs. as
 // middleware). Used by paymentmethods.send-setup-email to enforce a
 // per-customer cooldown — prevents double-click double-emails.
-// Returns (remaining, resetAt, allowed); same fail-open / fail-closed
-// semantics as the middleware path.
+// Returns (remaining, resetAt, allowed); same fail-open / fail-closed /
+// local-fallback semantics as the middleware path.
 func (rl *RateLimiter) AllowKey(ctx context.Context, key string) (int, time.Time, bool) {
-	now := time.Now().UTC()
-	if rl.limiter == nil {
-		if rl.failClosed {
-			return 0, now.Add(rl.limit.Period), false
-		}
-		return rl.limit.Rate - 1, now.Add(rl.limit.Period), true
-	}
-	res, err := rl.limiter.Allow(ctx, rl.bucketKey(key), rl.limit)
-	if err != nil {
-		if rl.failClosed {
-			slog.Error("rate_limiter: redis error on AllowKey, failing closed", "error", err, "key", key)
-			return 0, now.Add(rl.limit.Period), false
-		}
-		slog.Warn("rate_limiter: redis error on AllowKey, failing open", "error", err, "key", key)
-		return rl.limit.Rate - 1, now.Add(rl.limit.Period), true
-	}
-	return res.Remaining, now.Add(res.ResetAfter), res.Allowed > 0
+	return rl.allow(ctx, key)
 }
 
 // allow checks the rate limit for the given key.
 // Returns (remaining, resetAt, allowed). On Redis absence or error, behavior
-// depends on failClosed — see SetFailClosed.
-func (rl *RateLimiter) allow(r *http.Request, key string) (int, time.Time, bool) {
+// depends on SetLocalFallback and SetFailClosed.
+func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, bool) {
 	now := time.Now().UTC()
 
 	if rl.limiter == nil {
-		if rl.failClosed {
+		switch {
+		case rl.local != nil:
+			return rl.local.allow(key, now)
+		case rl.failClosed:
 			slog.Error("rate_limiter: no redis configured, failing closed", "key", key)
 			return 0, now.Add(rl.limit.Period), false
 		}
 		return rl.limit.Rate - 1, now.Add(rl.limit.Period), true
 	}
 
-	res, err := rl.limiter.Allow(r.Context(), rl.bucketKey(key), rl.limit)
+	res, err := rl.limiter.Allow(ctx, rl.bucketKey(key), rl.limit)
 	if err != nil {
-		if rl.failClosed {
+		switch {
+		case rl.local != nil:
+			slog.Warn("rate_limiter: redis error, counting in this process",
+				"error", err,
+				"key", key,
+			)
+			return rl.local.allow(key, now)
+		case rl.failClosed:
 			slog.Error("rate_limiter: redis error, failing closed",
 				"error", err,
 				"key", key,

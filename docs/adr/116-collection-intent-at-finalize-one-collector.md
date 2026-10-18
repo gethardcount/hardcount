@@ -1,6 +1,6 @@
 # ADR-116: Finalize records the collection intent; one collector does the work
 
-**Status:** Accepted (2026-10-08)
+**Status:** Accepted (2026-10-08; amended 2026-10-08, 2026-10-10)
 **Supersedes:** [ADR-087](087-collect-after-finalize-pipeline.md)'s per-site collection (the shared pipeline, the per-site gates, and §3's flag-on-decline analysis).
 **Closes:** [ADR-115](115-one-closer-for-the-billing-period.md)'s "named crash-point loss" (the born-$0 / fully-credited `MarkPaid` window).
 
@@ -53,7 +53,7 @@ The inline code also existed in several copies: an engine pipeline, a cycle/thre
 
 **What was wrong.** The sweep read the 50 oldest queued invoices per mode, across all tenants, once per tick. Card-less invoices stay queued by design, and some never leave on their own:
 - one-off invoices, and invoices of canceled subscriptions (dunning's pause has nothing to act on, and the default final invoice action is none);
-- every card-less invoice of a tenant with no dunning policy (bootstrap seeds none).
+- every card-less invoice of a tenant with no dunning policy (accounts created before ADR-123; new accounts start with one).
 
 Fifty of them filled the page for good, and nothing newer was retried. That includes the invoices that rely only on the sweep:
 - proration charges;

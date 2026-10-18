@@ -7,10 +7,10 @@
  * `uncollectible`, so a written-off invoice keeps demanding payment:
  *
  *   1. #651 relabelled the figure on the hosted invoice's totals block and
- *      left its twin in the header saying "Amount Due" — that page's own
+ *      left its twin in the header saying "Amount due" — that page's own
  *      comment records the fix as "Same rule, both places."
  *   2. The public payment-update page never read invoice status at all: a
- *      VOIDED invoice rendered "Payment method needed · Amount Due $25.00"
+ *      VOIDED invoice rendered "Payment method needed · Amount due $25.00"
  *      (found on the FLOW D4 walk, 2026-07-28).
  *   3. That fix covered `paid || voided` and stopped there, so a WRITTEN-OFF
  *      invoice still showed the amber demand — while the hosted invoice page,
@@ -54,5 +54,5 @@ export function isTerminalInvoiceStatus(status: string | undefined | null): bool
  */
 export function invoiceAmountLabel(status: string | undefined | null): string {
   if (status === 'paid') return 'Amount due'
-  return isTerminalInvoiceStatus(status) ? 'Invoice amount' : 'Amount Due'
+  return isTerminalInvoiceStatus(status) ? 'Invoice amount' : 'Amount due'
 }

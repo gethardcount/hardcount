@@ -13,6 +13,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/config"
+	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/platform/migrate"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenant"
@@ -69,6 +70,9 @@ func main() {
 	result, err := tenant.RunBootstrap(ctx, db, tenant.BootstrapDeps{
 		HashPassword: user.HashPassword,
 		CreateUserTx: userStore.CreateInTx,
+		// Same default dunning policies as the HTTP route (ADR-123).
+		// Seeding needs only the store, so no retrier or clock is wired.
+		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
 		// Same provisioning rows as the HTTP bootstrap route (ADR-090): the
 		// CLI path must not be the one that mints a live key unrecorded.
 		Audit: audit.NewLogger(db),
@@ -116,7 +120,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("  Need a second tenant for cross-tenant tests? Re-run with a")
 	fmt.Println("  different email:")
-	fmt.Println(`    make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@local \`)
+	fmt.Println(`    make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@velox.local \`)
 	fmt.Println(`      VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \`)
 	fmt.Println(`      VELOX_BOOTSTRAP_TENANT='Tenant B'`)
 	fmt.Println("========================================")
@@ -126,11 +130,11 @@ func main() {
 // differ from the one that just collided, so the printed remedy is always
 // runnable as-is.
 func suggestFreeEmail(taken string) string {
-	const preferred = "tenant-b@local"
+	const preferred = "tenant-b@velox.local"
 	if !strings.EqualFold(strings.TrimSpace(taken), preferred) {
 		return preferred
 	}
-	return "tenant-c@local"
+	return "tenant-c@velox.local"
 }
 
 // printEmailExistsGuidance keeps the CLI's actionable re-run options on

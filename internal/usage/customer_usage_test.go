@@ -815,3 +815,64 @@ func TestCustomerUsageService_Get_HonorsOverridesAndPeriodPin(t *testing.T) {
 		t.Errorf("list customer amount: got %d, want 1000 (v1 at period open; 5000 means the mid-period publish repriced the window)", res2.Meters[0].TotalAmountCents)
 	}
 }
+
+// A bucket whose usage is below zero after corrections (#1193) is counted as
+// 0, as the invoice bills it, with a warning that names the meter. Before, its
+// negative quantity reached the rater, which refuses it, and the whole usage
+// view failed.
+func TestCustomerUsageService_Get_NetNegativeBucketCountsAsZero(t *testing.T) {
+	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
+		"t1/cus_1": {ID: "cus_1", TenantID: "t1"},
+	}}
+	subs := &fakeSubLister{subs: []domain.Subscription{{
+		ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionActive,
+		CurrentBillingPeriodStart: &apr1, CurrentBillingPeriodEnd: &may1,
+		Items: []domain.SubscriptionItem{{ID: "itm_1", PlanID: "pln_1", Quantity: 1}},
+	}}}
+	pricing := &fakePricingReader{
+		plans: map[string]domain.Plan{
+			"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD", MeterIDs: []string{"mtr_calls", "mtr_seats"}},
+		},
+		meters: map[string]domain.Meter{
+			"mtr_calls": {ID: "mtr_calls", Key: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_calls"},
+			"mtr_seats": {ID: "mtr_seats", Key: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seats"},
+		},
+		rules: map[string]domain.RatingRuleVersion{
+			"rrv_calls": {ID: "rrv_calls", RuleKey: "calls_flat", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1)},
+			"rrv_seats": {ID: "rrv_seats", RuleKey: "seats_flat", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(5)},
+		},
+		pricingMap: map[string][]domain.MeterPricingRule{},
+	}
+	store := newAggStore()
+	store.aggs["mtr_calls"] = []domain.RuleAggregation{
+		{RatingRuleVersionID: "rrv_calls", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(300)},
+	}
+	store.aggs["mtr_seats"] = []domain.RuleAggregation{
+		{RatingRuleVersionID: "rrv_seats", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(-7)},
+	}
+	svc := NewCustomerUsageService(NewService(store), customers, subs, pricing)
+
+	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{})
+	if err != nil {
+		t.Fatalf("Get: %v (usage below zero must not fail the usage view)", err)
+	}
+	if len(res.Totals) != 1 || res.Totals[0].AmountCents != 300 {
+		t.Errorf("totals = %+v, want 300¢ (calls; seats at 0, as the invoice bills it)", res.Totals)
+	}
+	for _, m := range res.Meters {
+		if m.MeterKey == "seats" && (m.TotalAmountCents != 0 || len(m.Rules) != 0) {
+			t.Errorf("seats meter = %+v, want no priced rows and 0¢", m)
+		}
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, `"seats"`) && strings.Contains(w, "-7") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %q, want one naming seats and -7", res.Warnings)
+	}
+}

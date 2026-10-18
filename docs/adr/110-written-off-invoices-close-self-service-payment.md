@@ -1,6 +1,6 @@
 # ADR-110: A written-off invoice closes the customer's self-service payment route
 
-**Status:** Accepted (2026-08-05)
+**Status:** Accepted (2026-08-05; its 2026-08-05 amendment was superseded by [ADR-113](113-nothing-charges-a-written-off-invoice.md) on 2026-08-06)
 **Relates to:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns),
 [ADR-112](112-dunning-exhaustion-settles-two-questions.md) (`mark_uncollectible`
 is the terminal INVOICE action, set independently of the subscription's),

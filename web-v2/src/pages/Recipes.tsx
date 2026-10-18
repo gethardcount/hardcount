@@ -9,6 +9,7 @@ import type { RecipeDetail } from '@/lib/gen/schemas/recipeDetail'
 import type { RecipeOverride } from '@/lib/gen/schemas/recipeOverride'
 import type { RecipePreviewResult } from '@/lib/gen/schemas/recipePreviewResult'
 import { money, priceRate } from '@/lib/priceDisplay'
+import { recipeRetryNote } from '@/lib/dunningCoverage'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
@@ -50,9 +51,9 @@ export default function RecipesPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Pricing recipes</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Recipes</h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Set up billing for a common AI usage model in one click. Each recipe creates the usage meter, prices, and a plan you need — pre-filled with a provider's public rates so you go from zero to a working setup in seconds, then tune the numbers to your own pricing.
+            Ready-made pricing for common AI products. One click creates the meter, prices and plan, filled in with a provider's public rates; change the numbers after.
           </p>
         </div>
       </div>
@@ -205,6 +206,8 @@ function RecipeDialog({ recipe, onClose }: { recipe: RecipeListItem; onClose: ()
     onSuccess: (res) => {
       toast.success(`Installed ${recipe.name}`)
       queryClient.invalidateQueries({ queryKey: ['recipes'] })
+      // A recipe's retry policy can take over the default (ADR-123).
+      queryClient.invalidateQueries({ queryKey: ['dunning-policies'] })
       onClose()
       // Send the operator straight to the catalog — the new plan is the
       // most likely next thing they want to look at. plan_ids is omitted
@@ -368,6 +371,12 @@ function OverrideField({
 }
 
 function ObjectsList({ preview }: { preview: RecipePreviewResult }) {
+  const { data: policiesData } = useQuery({
+    queryKey: ['dunning-policies'],
+    queryFn: () => api.listDunningPolicies(),
+    enabled: (preview.objects.dunning_policies?.length ?? 0) > 0,
+  })
+  const currentPolicies = policiesData?.data
   // Rules don't carry their meter; the bindings do. rule key → meter unit so
   // each price renders in that meter's units (tokens vs seconds vs calls).
   const unitByMeterKey = new Map((preview.objects.meters ?? []).map(m => [m.key, m.unit]))
@@ -387,7 +396,15 @@ function ObjectsList({ preview }: { preview: RecipePreviewResult }) {
       `${p.name} — ${p.billing_interval}, ${p.currency}` + (p.base_amount_cents > 0 ? `, ${money(String(p.base_amount_cents), 0, p.currency)} base` : ''),
     ),
   })
-  if (preview.objects.dunning_policies?.length) sections.push({ label: 'Payment retries', items: preview.objects.dunning_policies.map(d => `${d.name} — up to ${d.max_retries} retries`) })
+  // Whether the recipe's policy takes the default: it does when the current
+  // default is the one the account was created with (ADR-123), and the
+  // preview should say so before anything is created.
+  if (preview.objects.dunning_policies?.length) sections.push({
+    label: 'Payment retries',
+    items: preview.objects.dunning_policies.map(d =>
+      `${d.name} — up to ${d.max_retries} retries` + (currentPolicies ? `, ${recipeRetryNote(currentPolicies)}` : ''),
+    ),
+  })
   if (preview.objects.webhook_endpoints?.length) sections.push({ label: 'Notifications', items: preview.objects.webhook_endpoints.map(w => `${w.url_placeholder} — set your real URL after install`) })
 
   if (sections.length === 0) {

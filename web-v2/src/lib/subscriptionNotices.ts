@@ -74,16 +74,33 @@ export const NO_CARD_SENTENCE = "Renewals can't be charged until the customer ad
 
 // The scheduled-cancel sentence. cancel_effective_at is the server's own
 // answer (ADR-069): on a trialing subscription the flag cancels at trial end,
-// free. effectiveLabel is the formatted cancel_effective_at.
+// free. An at-period-end cancel names the last day with access and the
+// renewal that won't happen, the convention every date on the page follows
+// (lib/subscriptionPeriod): "through Nov 15", "doesn't renew on Nov 16".
+// An explicit cancel_at can fall mid-day, so it keeps its time.
 export function cancelScheduledSentence(
   sub: { status: string; cancel_at_period_end?: boolean },
-  effectiveLabel?: string,
+  d: { effectiveLabel?: string; accessThrough?: string | null; cancelsOn?: string | null },
 ): string | null {
-  if (!effectiveLabel) return null
   if (sub.status === 'trialing' && sub.cancel_at_period_end) {
-    return `At trial end (${effectiveLabel}); the customer won't be charged.`
+    return d.cancelsOn ? `At trial end, ${d.cancelsOn}; the customer won't be charged.` : null
   }
-  return `${sub.cancel_at_period_end ? 'At end of current period' : 'On'} ${effectiveLabel}.`
+  if (sub.cancel_at_period_end) {
+    if (d.accessThrough && d.cancelsOn) return `The customer keeps access through ${d.accessThrough}; it doesn't renew on ${d.cancelsOn}.`
+    return d.cancelsOn ? `It doesn't renew on ${d.cancelsOn}.` : null
+  }
+  return d.effectiveLabel ? `Cancels on ${d.effectiveLabel}.` : null
+}
+
+// The no-card notice on the subscription page. A trialing subscription has
+// no renewal yet, only its first charge, so it names that instead (M-SUB-13).
+export function noCardSentence(sub: { status: string }, firstChargeOn?: string | null): string {
+  if (sub.status === 'trialing') {
+    return firstChargeOn
+      ? `The first charge on ${firstChargeOn} can't be collected until the customer adds a card.`
+      : "The first charge after the trial can't be collected until the customer adds a card."
+  }
+  return NO_CARD_SENTENCE
 }
 
 // The collection-paused sentence. resumesLabel is the formatted resumes_at.

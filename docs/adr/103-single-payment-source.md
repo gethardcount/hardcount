@@ -4,6 +4,10 @@ Date: 2026-07-28
 Status: Accepted
 Supersedes the payment half of: ADR-020 (timeline dedup), ADR-102 §Rendering
 
+## Summary
+
+The invoice timeline shows payments from one source only: the charge-attempt rows in `invoice_charge_attempts` ([ADR-102](102-invoice-charge-attempts.md)). Stripe webhook rows are still stored for idempotency and replay, but they are no longer displayed. Both settle paths write the attempt's outcome in the same transaction that marks the invoice paid or failed, so the two cannot disagree. This replaced four overlapping rules for matching webhook rows to charges, two of them guesses by time window or list position, which had already caused duplicate rows. Status: active; it supersedes the payment-row rules of [ADR-020](020-invoice-timeline-coalesce-and-card-detail.md) and the rendering part of ADR-102.
+
 ## Context
 
 ADR-102 made a charge attempt a first-class fact, but kept the Stripe

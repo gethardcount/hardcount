@@ -17,12 +17,12 @@ export interface Invoice {
   public_token?: string
 }
 
-export function createPlan(): Promise<Plan> {
+export function createPlan(currency = 'USD'): Promise<Plan> {
   const id = uniq()
   return api<Plan>('POST', '/plans', {
     code: `e2e-plan-${id}`,
     name: `E2E Plan ${id}`,
-    currency: 'USD',
+    currency,
     billing_interval: 'monthly',
     base_amount_cents: 4900,
   })

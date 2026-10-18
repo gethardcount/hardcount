@@ -9,6 +9,10 @@ Accepted
 ## Date
 2026-04-14
 
+## Summary
+
+Money amounts are stored and computed as `int64` cents (the currency's smallest unit), never as floats, so sums and comparisons are exact. This covers invoice and line amounts and totals, fixed fees and credit-ledger amounts. Amended 2026-06-01: per-unit price rates are now decimals, so sub-cent prices such as $3 per million tokens can be expressed ([ADR-045](045-decimal-per-unit-pricing-rates.md)). The charged amount is still rounded to a whole cent, and tax rates are `NUMERIC(7,4)` decimals ([ADR-042](042-tax-rate-decimal-precision.md)), so the float tax formula below is no longer used. Status: active, amended.
+
 ## Context
 A billing engine performs thousands of arithmetic operations on monetary values: multiplying unit prices by quantities, computing tiered/graduated pricing, applying tax rates, summing line items, applying credits. The representation of money must be correct under all these operations.
 

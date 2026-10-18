@@ -1,6 +1,7 @@
 import { setLastRequestId } from './lastRequestId'
 import { reportUnauthorized } from './sessionEnd'
 import { getCurrencySymbol } from './money'
+import type { EmailSettingsStatus } from './emailSettings'
 // Recipe wire types are GENERATED from api/openapi.yaml (single source of
 // truth) — the hand-written versions drifted from the server (`key` vs
 // `recipe_key`, a phantom `products` role) until the 2026-07-26 recipe
@@ -439,7 +440,7 @@ export const api = {
   // Pass {customer_id} and the server picks the primary active sub +
   // current cycle. Pass {customer_id, subscription_id} to preview a
   // specific sub. Pass {customer_id, period: {from, to}} to preview an
-  // explicit window. See docs/design-create-preview.md.
+  // explicit window. See docs/design/create-preview.md.
   createInvoicePreview: (data: { customer_id: string; subscription_id?: string; period?: { from: string; to: string } }) =>
     apiRequest<InvoicePreview>('POST', '/invoices/create_preview', data),
 
@@ -454,6 +455,12 @@ export const api = {
     apiRequest<TenantSettings>('GET', '/settings'),
   updateSettings: (data: Partial<TenantSettings>) =>
     apiRequest<TenantSettings>('PUT', '/settings', data),
+  // Settings → Email: read-only server email setup, and a test send to the
+  // signed-in member (dashboard session only).
+  getEmailSettings: () =>
+    apiRequest<EmailSettingsStatus>('GET', '/settings/email'),
+  sendTestEmail: () =>
+    apiRequest<{ sent_to: string }>('POST', '/settings/email/test'),
 
   // Dunning
   // Dunning policies (campaigns model, ADR-036). Multi-policy-per-
@@ -491,7 +498,7 @@ export const api = {
   voidCreditNote: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/void`),
   retryCreditNoteRefund: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/retry-refund`),
 
-  // Recipes (pricing templates) — see docs/design-recipes.md
+  // Recipes (pricing templates) — see docs/design/recipes.md
   listRecipes: () => apiRequest<ListRecipes200>('GET', '/recipes'),
   getRecipe: (key: string) => apiRequest<RecipeDetail>('GET', `/recipes/${key}`),
   previewRecipe: (key: string, overrides: Record<string, string | number>) =>
@@ -1075,6 +1082,10 @@ export interface CreditBalance {
   total_granted: number
   total_used: number
   total_expired: number
+  // Commit credit taken back with its voided or refunded invoice, and credit
+  // an operator deducted. granted = used + expired + retired + deducted + balance.
+  total_retired: number
+  total_deducted: number
 }
 
 // Per-grant burndown row (commit/promo drawdown surfaces, 2026-07-06).
@@ -1086,6 +1097,13 @@ export interface CreditGrantSummary {
   amount_cents: number
   consumed_cents: number
   remaining_cents: number
+  // Parts of consumed_cents no invoice used: expired_cents ran out of time;
+  // retired_cents was commit credit taken back when its invoice was voided
+  // or refunded; deducted_cents an operator deducted.
+  // used = consumed - expired - retired - deducted.
+  expired_cents: number
+  retired_cents: number
+  deducted_cents: number
   expires_at?: string
   source_invoice_id?: string
   created_at: string
@@ -1225,7 +1243,7 @@ export interface UsageEvent {
   // String-encoded NUMERIC(38, 12) — decimal precision for fractional GPU-hours
   // and partial tokens. Coerce via Number() / parseFloat() at display time.
   quantity: string
-  // Free-form dimensions per docs/design-multi-dim-meters.md, subset-matched
+  // Free-form dimensions per docs/design/multi-dim-meters.md, subset-matched
   // by pricing rules.
   dimensions?: Record<string, string | number | boolean>
   idempotency_key: string
@@ -1241,10 +1259,25 @@ export interface UsageEvent {
 // internal/usage/store.go (Aggregate, MeterTotal).
 export interface UsageEventsAggregate {
   total_events: number
+  // Adds every meter's quantities whatever the unit; not shown anywhere.
   total_units: string
   active_meters: number
   active_customers: number
-  by_meter: { meter_id: string; total: string }[]
+  by_meter: UsageMeterTotal[]
+}
+
+// One meter in the aggregate. `value` is the meter's usage under its own
+// aggregation (sum, count, per-customer peak or latest reading); `total`
+// is the plain sum of reported values. `daily` lists only days with events.
+export interface UsageMeterTotal {
+  meter_id: string
+  total: string
+  aggregation: string
+  value: string
+  events: number
+  customers: number
+  peak: string
+  daily: { date: string; value: string }[]
 }
 
 export type MeterAggregationMode =
@@ -1460,6 +1493,10 @@ export interface DunningPolicy {
   name: string
   enabled: boolean
   is_default: boolean
+  // True for the "Default retries" policy the account was created with,
+  // until it is edited or made the default (ADR-123). While true, the next
+  // policy created takes over the default.
+  seeded: boolean
   retry_schedule: string[]
   max_retry_attempts: number
   // The two terminal decisions (ADR-112): 'none' | 'pause' | 'cancel' and
@@ -1637,19 +1674,6 @@ export interface EndpointDelivery {
   next_retry_at: string | null
 }
 
-export interface WebhookEvent {
-  id: string
-  event_type: string
-  payload: Record<string, unknown>
-  created_at: string
-  // Week 6: replay-tree pivot. Original events leave this nil; replay
-  // clones point at the root original (single-pivot rule — the chain is
-  // collapsed at create time so it's always one hop). Optional in the TS
-  // type because legacy events written before migration 0058 don't carry
-  // it.
-  replay_of_event_id?: string | null
-}
-
 // SSE-shaped projection of a webhook event the live tail consumes via
 // EventSource on /v1/webhook_events/stream. Snake_case keys pinned by
 // TestWireShape_WebhookEventsStream_SnakeCase.
@@ -1725,12 +1749,19 @@ export interface AnalyticsOverview {
   outstanding_by_currency: { currency: string; amount_cents: number }[]
   avg_invoice_value: number
   credit_balance_total: number
+  // Customer records with status active (includes customers with no live
+  // subscription). Home shows live_customers instead.
   active_customers: number
   new_customers: number
+  // Customers with an active or trialing subscription, now and at the
+  // window start.
+  live_customers: number
+  live_customers_prev: number
   active_subscriptions: number
   trialing_subscriptions: number
   paid_invoices: number
   failed_payments: number
+  failed_payments_prev: number
   open_invoices: number
   dunning_active: number
   refunds_needing_attention: number
@@ -1833,7 +1864,7 @@ export async function downloadCreditNotePDF(creditNoteId: string, creditNoteNumb
 
 // Money formatting lives in lib/money (dependency-free, so the unit tests can
 // import it); re-exported here so every existing call site keeps working.
-export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, amountsByCurrencyText, atRiskText, prorationText } from './money'
+export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, amountsByCurrencyText, prorationText } from './money'
 
 // formatTaxRate renders a tax-rate percent (without the % sign) at up to 4
 // decimal places, trailing zeros trimmed: 8.875 → "8.875", 18 → "18",

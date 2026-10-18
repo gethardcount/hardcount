@@ -3,6 +3,10 @@
 **Status:** Accepted
 **Date:** 2026-05-04
 
+## Summary
+
+Stripe Checkout started from the operator's `/checkout/setup` returns to the page the operator came from, not a fixed URL. The dashboard sends that page as `return_url`, and the server adds `?payment=success` or `?payment=cancel` so the page can show the result. `STRIPE_CHECKOUT_SUCCESS_URL` and `STRIPE_CHECKOUT_CANCEL_URL` were removed, so every Checkout flow now uses a contextual return URL. The webhook, not the redirect, records the saved card. Status: active.
+
 ## Context
 
 Operator-reported bug: setting up a payment method from the customer

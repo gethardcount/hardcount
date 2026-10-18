@@ -5,6 +5,10 @@
 **Supersedes:** the `tax_on_failure=fallback_manual` setting introduced
 by migration 0039 (`internal/platform/migrate/sql/0039_tax_block_retry.up.sql`).
 
+## Summary
+
+If tax calculation fails, the invoice stays a draft until the tax retry job ([ADR-017](017-tax-retry-and-auto-finalize.md)) or the operator resolves it; Velox never substitutes another rate. The `tax_on_failure=fallback_manual` option was removed, because it silently charged zero tax wherever no manual rate was set. Migration 0103 moved every tenant to `block`, the only value its CHECK constraint allows. Choosing `tax_provider=stripe_tax` without a Stripe client is an explicit error, and an operator who wants manual tax sets `tax_provider=manual`. Status: active.
+
 ## Context
 
 Migration 0039 introduced `tenant_settings.tax_on_failure` with two

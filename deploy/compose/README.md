@@ -2,7 +2,9 @@
 
 This guide takes you from a fresh VM to a working Velox with a dashboard login and API keys.
 
-Just trying Velox on your own machine? Run `./quickstart.sh` in this directory instead. It does steps 1 to 4 for you, on port 8080, with the published images. This guide explains each of those steps, for a server you will keep.
+Just trying Velox on your own machine? Run `./quickstart.sh` in this directory instead. It does steps 1 to 4 for you, on port 8080, with the published images. It runs in local mode (`APP_ENV=local`), so sign-in works at `http://localhost` in every browser. This guide explains each of those steps, for a server you will keep, and runs in production mode.
+
+Going to production? [Production on one VM](../../docs/production-one-vm.md) does the same install with a pinned release, then adds HTTPS, email, Stripe, nightly backups and a go-live checklist.
 
 You get five containers: Postgres, Redis, the Velox API, the dashboard, and nginx in front of them on port 80.
 
@@ -87,7 +89,7 @@ curl -X POST http://localhost/v1/bootstrap \
   -d '{"tenant_name":"Acme","owner_email":"you@example.com","owner_password":"a-strong-password-12ch"}'
 ```
 
-The email and password are optional. Without them the owner is `admin@velox.local`, with a generated password. A password needs at least 12 characters.
+The email and password are optional. Without them the owner is `admin@velox.local`, with a generated password. A password needs at least 12 characters, and Velox refuses common passwords from leaked-password lists.
 
 **Save the reply. It is shown once.** Velox stores only hashes, so none of it can be recovered later. It contains:
 
@@ -100,16 +102,16 @@ Calling it a second time returns `409 already_bootstrapped`.
 
 ## 5. Sign in to the dashboard
 
-Open `http://localhost/` on the VM and sign in with the owner login.
+In production mode the sign-in cookie is always marked `Secure`. Browsers keep a `Secure` cookie on HTTPS. At `http://localhost`, Chrome and Firefox keep it too; Safari does not. At any other plain-HTTP address, no browser keeps it.
 
-**From your laptop, use an SSH tunnel:**
+Until you add [TLS](#tls), sign in at `http://localhost` in Chrome or Firefox. Open `http://localhost/` on the VM, or use an SSH tunnel from your laptop:
 
 ```bash
 ssh -L 8080:localhost:80 you@server
 # then open http://localhost:8080/
 ```
 
-**Sign-in does not work at `http://<server-ip>/`.** Browsers keep the sign-in cookie only on HTTPS or on localhost, and the sign-in page tells you so. Once you add [TLS](#tls), sign in at your HTTPS address.
+**Sign-in does not work at `http://<server-ip>/`,** in any browser, and the sign-in page tells you so. Once you add TLS, sign in at your HTTPS address.
 
 ## 6. Make a first API call
 
@@ -134,10 +136,11 @@ VELOX_BASE=http://localhost VELOX_DASHBOARD_URL=http://localhost ./scripts/demo.
 |---|---|
 | See logs | `docker compose logs -f` |
 | Restart the API | `docker compose restart velox-api` |
-| Upgrade | `git pull`, then `docker compose up -d --build` |
+| Upgrade, built from source | `git pull`, then `docker compose up -d --build` |
+| Upgrade, published release image | See [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release) |
 | Stop, keeping data | `docker compose stop` |
 | Stop and delete all data | `docker compose down -v` |
-| See which database upgrades have run | `docker compose run --rm velox-api migrate status` |
+| See the database's version and the upgrades still to apply | `docker compose run --rm velox-api migrate status` |
 | Open a database shell | `docker compose exec postgres psql -U velox -d velox` |
 
 Read the upgrade notes in the [changelog](../../CHANGELOG.md) before upgrading.
@@ -149,7 +152,9 @@ This stack serves plain HTTP. Before real use, put TLS in front of it. Two commo
 - **A managed load balancer**, such as AWS ALB or Cloudflare. It handles TLS and forwards to port 80 on this VM over a private network.
 - **nginx and certbot on the VM**, outside this stack. It handles TLS and forwards to `localhost:80`.
 
-Keep `APP_ENV=production`, the default. It marks cookies as secure and turns on HSTS.
+[Production on one VM](../../docs/production-one-vm.md#3-add-https-with-caddy) has a copy-paste example with Caddy, a web server that gets and renews the certificate by itself.
+
+Keep `APP_ENV=production`, the default. It always marks the sign-in cookie `Secure` and turns on HSTS. If an address setting such as `DASHBOARD_BASE_URL` starts with `http://`, Velox logs a warning at start-up that names it.
 
 ## Backups
 
@@ -177,6 +182,9 @@ If the user does not exist at all, create it with the SQL in [Self-host, "The tw
 **The API exits with `role can BYPASS row-level security`.**
 `APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `velox_app`.
 
+**The API exits with `migration … failed`, or names `schema_migrations` or `goose_db_version`.**
+A database upgrade stopped. A failed migration leaves nothing to repair: fix the cause the error names, then start the API again. `docker compose run --rm velox-api migrate status` shows the plan. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
+
 **`/health/ready` shows `scheduler: degraded`.**
 The API is up and still answers 200 here, but its background jobs have stopped running. Check the API logs. To see which copy last ran each job, run `SELECT * FROM leader_status;` in the database shell.
 
@@ -189,8 +197,12 @@ Set `NGINX_HTTP_PORT=8080`, or any free port, in `.env` and start the stack agai
 **Sign-in says it does not work at this address.**
 You opened the dashboard over plain HTTP at an address other than localhost. See [step 5](#5-sign-in-to-the-dashboard).
 
+**In Safari, sign-in at `http://localhost` says the browser did not keep you signed in.**
+Safari does not keep the `Secure` sign-in cookie over plain HTTP, even at localhost. Use Chrome or Firefox until you add [TLS](#tls). To try Velox on your own Mac, use `./quickstart.sh`, which runs in local mode.
+
 ## Next
 
+- [Production on one VM](../../docs/production-one-vm.md): HTTPS, email, Stripe, backups and a go-live checklist.
 - [Self-host](../../docs/self-host.md): settings, Postgres, production setup, and what to monitor.
 - [Backups](../../docs/ops/backup-considerations.md).
 

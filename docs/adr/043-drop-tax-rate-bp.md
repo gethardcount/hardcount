@@ -5,6 +5,10 @@
 **Supersedes:** the "retain `tax_rate_bp` during transition" wording
 in ADR-042. The `tax_rate_bp` storage is removed entirely.
 
+## Summary
+
+`tax_rate NUMERIC(7,4)` is the only tax-rate storage: migration 0105 dropped the `tax_rate_bp` basis-point columns at once instead of keeping both during a transition. With no deployments there was no staged rollout to protect, so a second column was only debt. The Settings tax rate takes a decimal percent (for example 8.875), and the manual provider computes in integer parts per million to keep four decimal places. Status: active.
+
 ## Context
 
 ADR-042 added `tax_rate NUMERIC(7,4)` columns alongside the legacy

@@ -172,7 +172,7 @@ export function CreateSubscriptionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Create Subscription</DialogTitle>
+          <DialogTitle>Create subscription</DialogTitle>
           <DialogDescription>
             Add a new subscription to start billing a customer.
           </DialogDescription>
@@ -186,7 +186,7 @@ export function CreateSubscriptionDialog({
                 name="display_name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Display Name</FormLabel>
+                    <FormLabel>Display name</FormLabel>
                     <FormControl>
                       <Input placeholder="Acme Pro Monthly" maxLength={255} {...field} />
                     </FormControl>
@@ -252,7 +252,7 @@ export function CreateSubscriptionDialog({
                   onClick={() => itemsArray.append({ plan_id: '', quantity: '1' })}
                 >
                   <Plus size={14} className="mr-1.5" />
-                  Add Item
+                  Add item
                 </Button>
               </div>
               <div className="space-y-2">
@@ -344,7 +344,7 @@ export function CreateSubscriptionDialog({
                 name="billing_time"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Billing Cycle</FormLabel>
+                    <FormLabel>Billing cycle</FormLabel>
                     <FormControl>
                       <select
                         value={field.value}
@@ -363,7 +363,7 @@ export function CreateSubscriptionDialog({
                 name="trial_days"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Trial Period</FormLabel>
+                    <FormLabel>Trial period</FormLabel>
                     <FormControl>
                       <Input type="number" min={0} placeholder="0 days" {...field} />
                     </FormControl>
@@ -399,7 +399,7 @@ export function CreateSubscriptionDialog({
                 name="usage_cap_units"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Usage Cap</FormLabel>
+                    <FormLabel>Usage cap</FormLabel>
                     <FormControl>
                       <Input type="number" min={0} placeholder="Unlimited" {...field} />
                     </FormControl>
@@ -439,7 +439,7 @@ export function CreateSubscriptionDialog({
                     Creating...
                   </>
                 ) : (
-                  'Create Subscription'
+                  'Create subscription'
                 )}
               </Button>
             </DialogFooter>

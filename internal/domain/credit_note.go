@@ -21,6 +21,15 @@ const (
 	RefundPending   RefundStatus = "pending"
 	RefundSucceeded RefundStatus = "succeeded"
 	RefundFailed    RefundStatus = "failed"
+	// RefundUnknown: Velox asked Stripe for the refund and got no clear
+	// answer (a timeout, a network error, a Stripe 5xx, a key already in
+	// use, a rate limit), so the customer may or may not have been refunded.
+	// Never mapped from a Stripe status. Retry refund settles it: it looks
+	// for the refund at Stripe, then resends the same request under the same
+	// idempotency key, so Stripe answers with the first request's result
+	// instead of making a second refund (#965; ADR-107 names the 24-hour key
+	// limit).
+	RefundUnknown RefundStatus = "unknown"
 )
 
 type CreditNote struct {
@@ -47,6 +56,11 @@ type CreditNote struct {
 	VoidedAt           *time.Time   `json:"voided_at,omitempty"`
 	RefundStatus       RefundStatus `json:"refund_status"`
 	StripeRefundID     string       `json:"stripe_refund_id,omitempty"`
+	// RefundUnknownKey is the idempotency key of the refund request whose
+	// result is unknown. It is set exactly while RefundStatus is
+	// RefundUnknown, and Retry refund resends that request with it. Internal:
+	// never sent to API callers.
+	RefundUnknownKey string `json:"-"`
 	// BillToSnapshot and SupplierSnapshot are the buyer and seller details
 	// this credit note was issued with (ADR-109), taken from the live
 	// customer and company rows in the transaction that issued it. Nil on

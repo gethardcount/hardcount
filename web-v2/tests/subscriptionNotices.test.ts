@@ -11,6 +11,7 @@ import {
   cancelScheduledSentence,
   collectionPausedSentence,
   hasScheduledCancel,
+  noCardSentence,
   subscriptionNoticeLayout,
 } from '../src/lib/subscriptionNotices.ts'
 
@@ -85,15 +86,24 @@ test('no-card notice: one title on both pages, no "manual follow-up" promise', (
   assert.doesNotMatch(NO_CARD_SENTENCE, /manual/)
 })
 
-test('scheduled cancel: trial end is free, otherwise period end or the explicit date', () => {
+test('scheduled cancel: trial end is free; period end names the last day and the renewal that stops', () => {
   assert.equal(
-    cancelScheduledSentence({ status: 'trialing', cancel_at_period_end: true }, 'Nov 1'),
-    "At trial end (Nov 1); the customer won't be charged.",
+    cancelScheduledSentence({ status: 'trialing', cancel_at_period_end: true }, { cancelsOn: 'Nov 1' }),
+    "At trial end, Nov 1; the customer won't be charged.",
   )
-  assert.equal(cancelScheduledSentence({ status: 'active', cancel_at_period_end: true }, 'Nov 1'), 'At end of current period Nov 1.')
-  assert.equal(cancelScheduledSentence({ status: 'active', cancel_at_period_end: false }, 'Nov 1'), 'On Nov 1.')
-  assert.equal(cancelScheduledSentence({ status: 'trialing', cancel_at_period_end: false }, 'Nov 1'), 'On Nov 1.')
-  assert.equal(cancelScheduledSentence({ status: 'active', cancel_at_period_end: true }), null)
+  assert.equal(
+    cancelScheduledSentence({ status: 'active', cancel_at_period_end: true }, { accessThrough: 'Oct 31', cancelsOn: 'Nov 1' }),
+    "The customer keeps access through Oct 31; it doesn't renew on Nov 1.",
+  )
+  assert.equal(cancelScheduledSentence({ status: 'active', cancel_at_period_end: false }, { effectiveLabel: 'Nov 1, 3:00 PM' }), 'Cancels on Nov 1, 3:00 PM.')
+  assert.equal(cancelScheduledSentence({ status: 'trialing', cancel_at_period_end: false }, { effectiveLabel: 'Nov 1' }), 'Cancels on Nov 1.')
+  assert.equal(cancelScheduledSentence({ status: 'active', cancel_at_period_end: true }, {}), null)
+})
+
+test('no card: a trialing subscription names its first charge, not a renewal', () => {
+  assert.equal(noCardSentence({ status: 'active' }), NO_CARD_SENTENCE)
+  assert.equal(noCardSentence({ status: 'trialing' }, 'Nov 30, 2026'), "The first charge on Nov 30, 2026 can't be collected until the customer adds a card.")
+  assert.doesNotMatch(noCardSentence({ status: 'trialing' }), /Renewal/)
 })
 
 test('collection paused: names the auto-resume date only when there is one', () => {

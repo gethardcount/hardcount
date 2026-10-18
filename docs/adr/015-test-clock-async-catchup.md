@@ -3,6 +3,10 @@
 **Status:** Accepted
 **Date:** 2026-05-04
 
+## Summary
+
+Advancing a test clock (a pretend clock for test customers) returns at once with status `advancing`, so a long jump never hits an HTTP timeout. A background worker then runs the catch-up: it bills every period the jump skipped and sets the clock back to `ready`. Each replica has one in-process worker with a 100-job queue and a 10-minute limit per advance, and a failure sets `internal_failure` ([ADR-018](018-test-clock-retry-and-failure-reason.md) adds retry). At boot, each replica re-queues clocks left in `advancing`. Status: active.
+
 ## Context
 
 Velox test clocks let an operator fast-forward simulated time on a

@@ -92,7 +92,7 @@ function formatActorName(entry: AuditEntry): string {
     // join). Falls back to a truncated key id for rows written before the
     // name was set, or for keys that have since been deleted.
     if (entry.actor_name) return entry.actor_name
-    return entry.actor_id.startsWith('vlx_') ? `Key ${middleTruncate(entry.actor_id, 20)}` : 'API Key'
+    return entry.actor_id.startsWith('vlx_') ? `Key ${middleTruncate(entry.actor_id, 20)}` : 'API key'
   }
   if (entry.actor_type === 'user') {
     // Dashboard session operators (#225 actor identity). actor_name is the
@@ -375,10 +375,10 @@ export default function AuditLogPage() {
   return (
     <Layout>
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Audit Log</h1>
-          <p className="text-sm text-muted-foreground mt-1">Review all changes and actions{total > 0 ? ` · ${formatTotal(total)} total` : ''}</p>
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <div className="min-w-0 flex-1 basis-72">
+          <h1 className="text-2xl font-semibold text-foreground">Audit log</h1>
+          <p className="text-sm text-muted-foreground mt-1">Who changed what, and when{total > 0 ? ` · ${formatTotal(total)} total` : ''}</p>
         </div>
         {entries.length > 0 && (
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
@@ -479,7 +479,7 @@ export default function AuditLogPage() {
             <EmptyState
               icon={History}
               title="No audit entries"
-              description="Actions will be recorded here automatically as you use the platform"
+              description="Changes you and your team make show up here."
             />
           ) : (
             <>
@@ -554,7 +554,7 @@ export default function AuditLogPage() {
                               <div className="bg-muted/50 px-6 py-3 border-t border-border">
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
                                   <div>
-                                    <p className="text-xs text-muted-foreground">Resource Type</p>
+                                    <p className="text-xs text-muted-foreground">Resource type</p>
                                     <p className="text-foreground mt-0.5">{entry.resource_type.replace(/_/g, ' ')}</p>
                                   </div>
                                   <div>

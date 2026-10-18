@@ -9,6 +9,10 @@ Accepted
 ## Date
 2026-05-01
 
+## Summary
+
+Instants are stored as `timestamptz` and sent on the API as UTC RFC 3339 strings ([ADR-075](075-canonical-utc-api-timestamps.md) pins the process to UTC). The dashboard shows dates and times in the org timezone (`tenant_settings.timezone`, an IANA name, default `UTC`) and reads dates the operator picks in that zone. There is no per-user timezone. The sub-decision that billing math stays in UTC is superseded: billing date math now anchors in the same org timezone ([ADR-058](058-billing-date-math-tenant-timezone.md), [ADR-077](077-org-level-billing-timezone.md)). Status: active for display, superseded for billing.
+
 ## Context
 
 Until this commit, every date input on the Velox dashboard interpreted picks

@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { invoiceLineRate } from '@/lib/priceDisplay'
-import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type TenantSettings, type DunningRun, type TimelineEvent, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
+import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type DunningRun, type TimelineEvent, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
 import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD } from '@/lib/dates'
 import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
@@ -19,6 +19,7 @@ import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { TestClockBanner } from '@/components/TestClockBanner'
 import { Callout } from '@/components/Callout'
 import { pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
+import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
 import { classifyError } from '@/lib/errorCopy'
 import { useGetInvoice } from '@/lib/gen/queries.gen'
@@ -29,9 +30,11 @@ import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { taxReasonLabel } from '@/lib/taxReasons'
 import { DueBadge } from '@/components/DueBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
+import { invoiceStatus } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
-import { statusBadgeVariant, creditNoteReasonLabel, paymentIsUnresolved } from '@/lib/status'
+import { creditNoteReasonLabel, paymentIsUnresolved } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -62,8 +65,6 @@ import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 
-const statusVariant = statusBadgeVariant
-
 // TaxReversedLine renders the "↳ Tax reversed $X (Stripe Tax)" sub-fact for a
 // credit note, shared by the pre-payment and post-payment settlement blocks so
 // the disclosure can't drift (pre-fix it lived only in the post-payment block,
@@ -85,75 +86,15 @@ function TaxReversedLine({ cn, currency }: { cn: CreditNote; currency: string })
 }
 
 const LINE_TYPE_LABELS: Record<string, string> = {
-  base_fee: 'Base Fee',
+  base_fee: 'Base fee',
   usage: 'Usage',
   add_on: 'Add-On',
   discount: 'Discount',
   tax: 'Tax',
 }
 
-interface SellerBlock {
-  name?: string
-  email?: string
-  phone?: string
-  addressLines: string[]
-}
-
-function formatAddressLines(a: {
-  line1?: string; line2?: string; city?: string; state?: string; postal?: string; country?: string
-}): string[] {
-  const lines: string[] = []
-  if (a.line1) lines.push(a.line1)
-  if (a.line2) lines.push(a.line2)
-  const cityStatePostal = [a.city, a.state].filter(Boolean).join(', ')
-    + (a.postal ? ` ${a.postal}` : '')
-  if (cityStatePostal.trim()) lines.push(cityStatePostal.trim())
-  if (a.country) lines.push(a.country)
-  return lines
-}
-
-// sellerBlock is the "From" content. An issued invoice shows the company
-// details it was issued with (ADR-109), so a later settings edit does not
-// change it. A draft, or an invoice issued before the copy existed, shows the
-// current settings.
-function sellerBlock(invoice: Invoice, s?: TenantSettings | null): SellerBlock {
-  const snap = invoice.supplier_snapshot
-  if (snap) {
-    return {
-      name: snap.name, email: snap.email, phone: snap.phone,
-      addressLines: formatAddressLines({
-        line1: snap.address_line1, line2: snap.address_line2, city: snap.city,
-        state: snap.state, postal: snap.postal_code, country: snap.country,
-      }),
-    }
-  }
-  if (!s) return { addressLines: [] }
-  return {
-    name: s.company_name, email: s.company_email, phone: s.company_phone,
-    addressLines: formatAddressLines({
-      line1: s.company_address_line1, line2: s.company_address_line2, city: s.company_city,
-      state: s.company_state, postal: s.company_postal_code, country: s.company_country,
-    }),
-  }
-}
-
 function formatLineType(raw: string): string {
   return LINE_TYPE_LABELS[raw] || raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
-
-// humaniseInvoiceStatus maps the persisted enum to operator-facing
-// copy. Server-side codes (draft/finalized/paid/voided/uncollectible)
-// are stable; UI owns its own labels so wording changes don't require
-// a server roll. Keep matches Stripe Dashboard's column copy.
-function humaniseInvoiceStatus(raw: string): string {
-  const map: Record<string, string> = {
-    draft: 'Draft',
-    finalized: 'Open',
-    paid: 'Paid',
-    voided: 'Voided',
-    uncollectible: 'Uncollectible',
-  }
-  return map[raw] ?? raw
 }
 
 // aggregateTaxByJurisdiction rolls up per-line-item tax amounts into a single
@@ -343,6 +284,12 @@ export default function InvoiceDetailPage() {
     enabled: !!id && invoice?.status !== 'draft',
     refetchInterval: pollIntervalForInvoice(invoice as ApiInvoice | undefined),
   })
+  // ONE lane (ADR-104). Every row's primary timestamp is on the
+  // invoice's own calendar — simulated when clock-pinned, since every
+  // fact is anchored at write time (outbox sim anchor for emails,
+  // ADR-102 dual stamps for attempts, entity-derived stamps for the
+  // rest). Rows whose two calendars differ carry recorded_at and render
+  // a "Recorded <wall>" subline (operator contract, Invariant A).
   const timeline = timelineData?.events ?? []
   // Lane-degradation disclosure: the server names any side-source
   // (credit notes, emails, payment events, payment recovery) whose
@@ -350,56 +297,10 @@ export default function InvoiceDetailPage() {
   // rows is indistinguishable from an invoice that never saw dunning.
   const timelineDegraded = timelineData?.degraded ?? []
   const timelineTruncated = timelineData?.truncated ?? false
-  // Two time-domains must NOT be interleaved in one chronological list:
-  // billing rows ride the customer's (possibly simulated) timeline, while
-  // wall-clock external events (notification emails; Stripe payment-processor
-  // outcomes) happen in real time. Sorting them together makes a real-time row
-  // sort by its wall-clock instant and land out of place among simulated
-  // billing rows — e.g. a "receipt sent" or "payment failed" at today's date
-  // before a finalize at the simulated future cycle date.
-  //
-  // Routing:
-  //   - email rows → always the external lane (a notification log reads
-  //     cleanly on its own; matches Stripe's "email log" placement).
-  //   - stripe rows → external lane ONLY when the invoice is simulated, where
-  //     their wall-clock occurred_at would mis-sort. On a normal (one-clock)
-  //     invoice they stay in Activity, where operators expect payment outcomes
-  //     in the billing story. (Most stripe rows are already folded into the
-  //     simulated paid/dunning rows upstream; only standalone failed/canceled
-  //     events without a dunning twin reach here.)
-  //   - credit_note rows → external lane ONLY when the CN itself is
-  //     wall-clock (operator-issued via HTTP). Engine clawbacks
-  //     (downgrade/cancel proration) issue under the clock-pinned sub's
-  //     bound time → e.is_simulated → they belong in Activity, sorted with
-  //     the other simulated rows. Routing them externally showed a
-  //     simulated timestamp in the wall-clock lane (the bug this fixes).
-  //   - charge-attempt rows (ADR-102) → routed by their OWN axis: a
-  //     sim-stamped attempt is a billing fact and belongs in Activity;
-  //     a wall-stamped attempt on a simulated invoice (interactive
-  //     checkout, webhook-resolved) joins the wall-clock lane.
-  //
-  // The second lane exists for ONE reason: to stop two time domains from
-  // interleaving. A wall-clock invoice has exactly one clock, so there is
-  // nothing to separate — emails sort into Activity with everything else
-  // and the operator reads one chronological story instead of checking two
-  // cards. Splitting there would separate CONTENT TYPES, a distinction the
-  // page never claimed to make, and it made the lane caption promise
-  // payment events that structurally never appear on a live invoice
-  // (2026-07-28 review). So: the whole external lane is gated on
-  // is_simulated.
-  // ONE lane (ADR-104). Every row's primary timestamp is on the
-  // invoice's own calendar — simulated when clock-pinned, since every
-  // fact is anchored at write time (outbox sim anchor for emails,
-  // ADR-102 dual stamps for attempts, entity-derived stamps for the
-  // rest). Rows whose two calendars differ carry recorded_at and render
-  // a "Recorded <wall>" subline (operator contract, Invariant A) — the
-  // second "Real-time activity" card this replaced was a residue of
-  // emails lacking a billing anchor, not a design.
-  const billingTimeline = timeline
 
   // Payment-method snapshot serves two purposes on this page:
   //   1. The success-state card on paid invoices (brand •••• last4).
-  //   2. The Collect Payment button's disabled state — when no PM is
+  //   2. The Collect payment button's disabled state — when no PM is
   //      ready, charging will fail, so the button gates on
   //      paymentSetup.setup_status === 'ready'. Mirrors the disable-
   //      with-tooltip pattern Velox uses for Finalize-on-tax-failure.
@@ -451,7 +352,7 @@ export default function InvoiceDetailPage() {
     (dunningRunsData ?? []).find(r => r.state === 'active') ??
     (dunningRunsData ?? []).find(r => r.state === 'escalated')
 
-  const { data: settings } = useQuery({
+  const { data: settings, isSuccess: settingsLoaded } = useQuery({
     queryKey: ['settings'],
     queryFn: () => api.getSettings(),
   })
@@ -570,10 +471,19 @@ export default function InvoiceDetailPage() {
     },
     onSuccess: (pause) => {
       invalidateAll()
+      const subId = invoice?.subscription_id
+      // The pause changed the subscription. This page's written-off notice
+      // and the subscription page both read ['subscription', id]; without
+      // this they kept showing it as still billing.
+      if (pause === 'paused' && subId) {
+        queryClient.invalidateQueries({ queryKey: ['subscription', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscription-preview', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscription-activity-timeline', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
+      }
       setShowMarkUncollectibleConfirm(false)
       setPauseSubOnWriteOff(false)
       const outcome = writeOffOutcome(invoice?.invoice_number ?? '', pause)
-      const subId = invoice?.subscription_id
       showOutcome(outcome, outcome.openSubscription && subId
         ? { label: 'Open subscription', onClick: () => navigate(`/subscriptions/${subId}`) }
         : undefined)
@@ -683,6 +593,8 @@ export default function InvoiceDetailPage() {
   }
 
   const seller = sellerBlock(invoice, settings)
+  const noSeller = sellerMissing(invoice, settings, settingsLoaded)
+  const dates = issueDates(invoice, (iso) => formatInvoiceDate(iso, invoice.billing_timezone))
   const notice = pickInvoiceNotice(invoice)
 
   return (
@@ -714,7 +626,7 @@ export default function InvoiceDetailPage() {
             else. Replaces the prior 8-10 buttons flowing across the
             header which crowded the page and obscured the next action.
 
-            Draft is the exception: Add Line Item is an inline EDIT
+            Draft is the exception: Add line item is an inline EDIT
             action (mutating the line items table just below); keeping
             it as a flat header button preserves the "you're editing
             this draft" affordance. Everything else sits in the
@@ -727,7 +639,7 @@ export default function InvoiceDetailPage() {
           </Button>
           {invoice.status === 'draft' && (
             <Button variant="outline" size="sm" onClick={() => setShowAddLineItem(true)} disabled={acting}>
-              Add Line Item
+              Add line item
             </Button>
           )}
 
@@ -748,7 +660,7 @@ export default function InvoiceDetailPage() {
               )
             }
             const reason = invoice.tax_status === 'pending'
-              ? 'Tax calculation is still pending — retry in progress. Finalize unblocks once tax_status = ok.'
+              ? 'Tax is still being calculated, and Velox keeps retrying. You can finalize once it\'s done.'
               : 'Tax calculation has failed after retries. Resolve the customer billing profile or retry tax before finalizing.'
             return (
               <Tooltip>
@@ -769,7 +681,7 @@ export default function InvoiceDetailPage() {
               null
             ) : (
               <Button size="sm" onClick={() => collectMutation.mutate()} disabled={acting}>
-                {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect Payment'}
+                {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect payment'}
               </Button>
             )
           )}
@@ -792,7 +704,7 @@ export default function InvoiceDetailPage() {
               convention for destructive actions in menus).
 
               Items are grouped by intent:
-                1. Recovery / state-change (Record Payment, Mark
+                1. Recovery / state-change (Record payment, Mark
                    Uncollectible) — operator drives the invoice
                    toward a terminal state.
                 2. Customer-facing (Email, Copy Link, Rotate) —
@@ -1053,16 +965,25 @@ export default function InvoiceDetailPage() {
 
       {/* Invoice Document */}
       <Card className={cn(
-        'overflow-hidden',
+        'relative overflow-hidden',
         invoice.status === 'voided' && 'border-destructive/30'
       )}>
-        <CardContent className="p-8 sm:p-10">
+        {/* Same mark the PDF carries: a draft is a preview, not an invoice
+            anyone owes on. Smaller on a phone so the whole word fits. */}
+        {invoice.status === 'draft' && (
+          <span aria-hidden data-testid="draft-watermark" className="pointer-events-none absolute inset-0 flex items-center justify-center select-none text-[4.5rem] sm:text-[7rem] font-bold tracking-widest text-foreground/[0.04] -rotate-12">
+            DRAFT
+          </span>
+        )}
+        <CardContent className="relative p-8 sm:p-10">
           {/* Document Header */}
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-2xl font-bold tracking-tight text-foreground">
-                {seller.name || 'VELOX'}
-              </p>
+              {/* The tenant's company name, or nothing: never a placeholder
+                  seller (the PDF used to print "Velox", this page "VELOX"). */}
+              {seller.name && (
+                <p className="text-2xl font-bold tracking-tight text-foreground">{seller.name}</p>
+              )}
               {seller.addressLines.map((line, i) => (
                 <p key={i} className="text-sm text-muted-foreground mt-1">{line}</p>
               ))}
@@ -1078,7 +999,15 @@ export default function InvoiceDetailPage() {
               below; duplicating "payment_awaiting" up here was leaky
               domain-code and visually noisy. */}
           <div className="flex items-center gap-2 mt-5">
-            <Badge variant={statusVariant(invoice.status)}>{humaniseInvoiceStatus(invoice.status)}</Badge>
+            <StatusBadge status={invoiceStatus(invoice, effectiveNow(testClock?.frozen_time))} />
+            {noSeller && (
+              <Link
+                to={SELLER_SETTINGS_PATH}
+                className="inline-flex items-center gap-1 rounded-md bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning-foreground hover:underline"
+              >
+                Missing seller details <ArrowRight size={11} aria-hidden /> Settings
+              </Link>
+            )}
             {/* Simulated disclosure lives in the page banner alone
                 (ADR-099: once per scope) — the header pill duplicated it. */}
             {/* Bare date — the badge already says "Paid"/"Voided", so
@@ -1098,7 +1027,14 @@ export default function InvoiceDetailPage() {
           <div className="grid grid-cols-2 gap-8">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">From</p>
-              <p className="text-sm font-medium text-foreground">{seller.name || 'Your Company'}</p>
+              {seller.name ? (
+                <p className="text-sm font-medium text-foreground">{seller.name}</p>
+              ) : noSeller ? (
+                <p className="text-sm text-warning-foreground">
+                  No business name set. <Link to={SELLER_SETTINGS_PATH} className="underline">Add it in Settings</Link> so
+                  the PDF and payment page name who is billing.
+                </p>
+              ) : null}
               {seller.addressLines.map((line, i) => (
                 <p key={i} className="text-sm text-muted-foreground mt-0.5">{line}</p>
               ))}
@@ -1110,7 +1046,7 @@ export default function InvoiceDetailPage() {
               )}
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Bill To</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Bill to</p>
               {/* An issued invoice shows the buyer it was issued to (ADR-109);
                   a draft or a pre-copy invoice shows the current customer.
                   Both print the display name, so finalizing does not change
@@ -1150,12 +1086,12 @@ export default function InvoiceDetailPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Issued</p>
-              <p className="text-sm text-foreground">{formatInvoiceDate(invoice.issued_at || invoice.created_at, invoice.billing_timezone)}</p>
+              <p className="text-sm text-foreground">{dates.issued}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Due</p>
               <div className="flex items-center gap-2">
-                <p className="text-sm text-foreground">{invoice.due_at ? formatInvoiceDate(invoice.due_at, invoice.billing_timezone) : '\u2014'}</p>
+                <p className="text-sm text-foreground">{dates.due}</p>
                 {/* Due-date countdown only applies while the invoice
                     is open (finalized). status='paid' or 'voided'
                     are terminal — countdown becomes meaningless. The
@@ -1167,6 +1103,7 @@ export default function InvoiceDetailPage() {
                   <DueBadge dueAt={invoice.due_at} warningDays={3} now={effectiveNow(testClock?.frozen_time)} />
                 )}
               </div>
+              {dates.dueHint && <p className="text-xs text-muted-foreground mt-0.5">{dates.dueHint}</p>}
             </div>
             {/* A billing period is a subscription-cycle concept. A manual
                 one-off invoice has no cycle, so the backend defaults
@@ -1210,7 +1147,7 @@ export default function InvoiceDetailPage() {
                 <TableRow>
                   <TableHead className="w-[50%]">Item</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-right">Unit price</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1238,7 +1175,7 @@ export default function InvoiceDetailPage() {
                                 {item.description}
                               </TooltipTrigger>
                               <TooltipContent className="max-w-xs">
-                                {`Subscription started mid-cycle. Charge covers ${prorationMatch[1]} of ${prorationMatch[2]} days in the period. Period boundaries snap to start-of-day in tenant timezone (signup day inclusive).`}
+                                {`Started mid-period, so this charge covers ${prorationMatch[1]} of ${prorationMatch[2]} days. Days count in your account's timezone, including the start day.`}
                               </TooltipContent>
                             </Tooltip>
                           ) : (
@@ -1367,7 +1304,7 @@ export default function InvoiceDetailPage() {
                 <>
                   <Separator />
                   <div className="flex justify-between text-sm font-semibold">
-                    <span>Amount Due</span>
+                    <span>Amount due</span>
                     <span className="font-mono tabular-nums">$0.00</span>
                   </div>
                 </>
@@ -1400,21 +1337,21 @@ export default function InvoiceDetailPage() {
 
                     {invoice.credits_applied_cents > 0 && (
                       <div className="flex justify-between text-sm text-emerald-600">
-                        <span>Credits Applied</span>
+                        <span>Credits applied</span>
                         <span className="font-mono tabular-nums">-{formatCents(invoice.credits_applied_cents, invoice.currency)}</span>
                       </div>
                     )}
 
                     {invoice.amount_paid_cents > 0 && (
                       <div className="flex justify-between text-sm text-muted-foreground">
-                        <span>Amount Paid</span>
+                        <span>Amount paid</span>
                         <span className="font-mono tabular-nums">-{formatCents(invoice.amount_paid_cents, invoice.currency)}</span>
                       </div>
                     )}
 
                     <Separator />
                     <div className="flex justify-between font-semibold text-base pt-1">
-                      <span>Amount Due</span>
+                      <span>Amount due</span>
                       <span className="font-mono tabular-nums">{formatCents(invoice.amount_due_cents, invoice.currency)}</span>
                     </div>
 
@@ -1471,11 +1408,19 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
 
+          {/* Memo: the note printed on the PDF and the payment page. */}
+          {invoice.memo && (
+            <div className="mt-6 pt-4 border-t border-dashed border-border">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Memo</p>
+              <p className="text-sm text-foreground whitespace-pre-line">{invoice.memo}</p>
+            </div>
+          )}
+
           {/* Tax treatment legend — shown when invoice carries a non-standard tax disposition */}
           {(invoice.tax_reverse_charge || invoice.tax_exempt_reason) && (
             <div className="mt-6 pt-4 border-t border-dashed border-border space-y-1.5 text-xs text-muted-foreground">
               {invoice.tax_reverse_charge && (
-                <p><span className="font-medium text-foreground">Reverse charge</span> — VAT to be accounted for by the recipient in their jurisdiction.</p>
+                <p><span className="font-medium text-foreground">Reverse charge</span> — no tax on this invoice; the business customer pays the VAT/GST themselves.</p>
               )}
               {invoice.tax_exempt_reason && !invoice.tax_reverse_charge && (
                 <p><span className="font-medium text-foreground">Tax-exempt</span> — {invoice.tax_exempt_reason}</p>
@@ -1526,7 +1471,7 @@ export default function InvoiceDetailPage() {
           Replaces the older "Payment Activity" framing now that
           lifecycle anchors (created, finalized, scheduled) sit
           alongside Stripe + dunning events. */}
-      {(billingTimeline.length > 0 || timelineDegraded.length > 0) && invoice.status !== 'draft' && (
+      {(timeline.length > 0 || timelineDegraded.length > 0) && invoice.status !== 'draft' && (
         <Card className={cn('mt-6', invoice.status === 'voided' && 'opacity-60')}>
           <CardHeader>
             <CardTitle className="text-sm">Activity</CardTitle>
@@ -1544,7 +1489,7 @@ export default function InvoiceDetailPage() {
               </p>
             )}
             <div className="relative">
-              {billingTimeline.map((event, i) => {
+              {timeline.map((event, i) => {
                 return (
                 <div key={event.id ?? `${event.source}:${event.event_type}:${event.timestamp}:${event.payment_intent_id ?? ''}`} className="flex gap-4 pb-2 last:pb-0">
                   <div className="flex flex-col items-center">
@@ -1556,7 +1501,7 @@ export default function InvoiceDetailPage() {
                       event.status === 'escalated' ? 'bg-violet-500' :
                       'bg-amber-500'
                     )} />
-                    {i < billingTimeline.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
+                    {i < timeline.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
@@ -1634,10 +1579,10 @@ export default function InvoiceDetailPage() {
       <TypedConfirmDialog
         open={showMarkUncollectibleConfirm}
         onOpenChange={setShowMarkUncollectibleConfirm}
-        title="Mark Invoice Uncollectible"
+        title="Mark invoice uncollectible"
         description="Records this invoice as bad debt. The invoice stays on the books for audit, but dunning automation halts and no further collection is attempted. If the payment provider later confirms the charge did go through, the invoice still settles as paid on its own."
         confirmWord="WRITE OFF"
-        confirmLabel="Mark Uncollectible"
+        confirmLabel="Mark uncollectible"
         onConfirm={() => markUncollectibleMutation.mutate()}
         loading={markUncollectibleMutation.isPending}
       >
@@ -1677,12 +1622,12 @@ export default function InvoiceDetailPage() {
         title="Rotate public link"
         description="This invalidates the current public URL for this invoice and mints a new one. Any email, message, or page still linking to the old URL will stop working. Use this if the current link was shared somewhere it shouldn't have been."
         confirmWord="ROTATE"
-        confirmLabel="Rotate Link"
+        confirmLabel="Rotate link"
         onConfirm={() => rotatePublicTokenMutation.mutate()}
         loading={rotatePublicTokenMutation.isPending}
       />
 
-      {/* Record Payment Dialog — Stripe-parity operator path for
+      {/* Record payment Dialog — Stripe-parity operator path for
           out-of-band collection. Amount is implicit (full amount_due);
           the optional note captures the operator's recording method
           (cheque #, wire reference, etc) for the audit trail. */}
@@ -1732,7 +1677,7 @@ export default function InvoiceDetailPage() {
             <DialogFooter>
               <Button variant="outline" onClick={() => { setShowRecordPaymentDialog(false); setRecordPaymentNote('') }} disabled={recordPaymentMutation.isPending}>Cancel</Button>
               <Button onClick={() => recordPaymentMutation.mutate()} disabled={recordPaymentMutation.isPending}>
-                {recordPaymentMutation.isPending ? 'Recording…' : 'Record Payment'}
+                {recordPaymentMutation.isPending ? 'Recording…' : 'Record payment'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1760,7 +1705,7 @@ export default function InvoiceDetailPage() {
         />
       )}
 
-      {/* Add Line Item Modal */}
+      {/* Add line item Modal */}
       {showAddLineItem && (
         <AddLineItemDialog
           invoiceId={invoice.id}
@@ -1785,7 +1730,7 @@ export default function InvoiceDetailPage() {
                 Close
               </Button>
             </div>
-            <iframe src={pdfPreviewUrl} className="w-full flex-1 min-h-0" title="Invoice PDF Preview" />
+            <iframe src={pdfPreviewUrl} className="w-full flex-1 min-h-0" title="Invoice PDF preview" />
           </div>
         </div>
       )}
@@ -1963,7 +1908,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Line Item</DialogTitle>
+          <DialogTitle>Add line item</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
@@ -1994,7 +1939,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
               <Input id="quantity" type="number" min={1} value={quantity} onChange={e => setQuantity(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="unitAmount">Unit Price ({getCurrencySymbol(currency)})</Label>
+              <Label htmlFor="unitAmount">Unit price ({getCurrencySymbol(currency)})</Label>
               <Input id="unitAmount" type="number" step="0.01" min={0.01} value={unitAmount} onChange={e => { setUnitAmount(e.target.value); setAmountError('') }} placeholder="10.00" />
               {amountError && <p className="text-xs text-destructive">{amountError}</p>}
             </div>
@@ -2009,7 +1954,7 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
-              {saving ? <><Loader2 size={14} className="animate-spin mr-2" />Adding...</> : 'Add Line Item'}
+              {saving ? <><Loader2 size={14} className="animate-spin mr-2" />Adding...</> : 'Add line item'}
             </Button>
           </DialogFooter>
         </form>
@@ -2043,11 +1988,11 @@ function EmailInvoiceDialog({ invoiceId, defaultEmail, defaultCc, onClose, onSen
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Email Invoice</DialogTitle>
+          <DialogTitle>Email invoice</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="email">Recipient Email</Label>
+            <Label htmlFor="email">Recipient email</Label>
             <Input id="email" type="email" placeholder="customer@example.com" maxLength={254} {...register('email')} />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
           </div>
@@ -2060,7 +2005,7 @@ function EmailInvoiceDialog({ invoiceId, defaultEmail, defaultCc, onClose, onSen
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? <><Loader2 size={14} className="animate-spin mr-2" />Sending...</> : 'Send Email'}
+              {isSubmitting ? <><Loader2 size={14} className="animate-spin mr-2" />Sending...</> : 'Send email'}
             </Button>
           </DialogFooter>
         </form>

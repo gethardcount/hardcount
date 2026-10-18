@@ -13,35 +13,45 @@ import (
 // count entries.
 const MaxAdditionalEmails = 10
 
-// ValidateEmail is the shared tier-1 syntax check for recipient
-// addresses: RFC-parseable plus a hard requirement that the domain
-// contains a dot (ParseAddress alone allows local-only addresses like
-// `foo@bar` — RFC-fine, useless for SMTP delivery). Tier-6
-// (bounce-driven suppression) catches what survives.
-func ValidateEmail(field, email string) error {
+// ValidateEmail is the one syntax check for every email address Velox
+// accepts or sends to. It returns the address net/mail parsed, which
+// callers store and send to.
+//
+// The value, trimmed, must be exactly one bare address (an RFC 5322
+// addr-spec), so the address parsed is the address typed. net/mail also
+// accepts a display name ("Bob <bob@x.com>"), angle brackets, a comment
+// and a quoted local part, and returns an Address that differs from the
+// input. A quoted local part comes back unquoted, so the address in the
+// SMTP envelope could differ from the one typed and shown in the Cc
+// header. All of these are refused.
+//
+// The domain must also contain a dot: net/mail allows `foo@bar`, which is
+// valid RFC syntax but no use for delivery. Bounce-driven suppression
+// catches the addresses that pass and still do not deliver.
+func ValidateEmail(field, email string) (string, error) {
+	email = strings.TrimSpace(email)
 	addr, err := mail.ParseAddress(email)
 	if err != nil {
-		return errs.Invalid(field, "invalid email")
+		return "", errs.Invalid(field, "invalid email")
 	}
-	at := strings.LastIndex(addr.Address, "@")
-	if at < 0 {
-		return errs.Invalid(field, "invalid email")
+	if addr.Address != email {
+		return "", errs.Invalid(field, "invalid email: enter one address, such as name@example.com, with no name, quotes or angle brackets")
 	}
-	domainPart := addr.Address[at+1:]
+	// net/mail always returns local@domain.
+	domainPart := addr.Address[strings.LastIndex(addr.Address, "@")+1:]
 	if !strings.Contains(domainPart, ".") || strings.HasSuffix(domainPart, ".") {
-		return errs.Invalid(field, "invalid email: domain must contain a dot")
+		return "", errs.Invalid(field, "invalid email: domain must contain a dot")
 	}
-	return nil
+	return addr.Address, nil
 }
 
 // NormalizeAdditionalEmails validates and canonicalizes a CC list
-// (ADR-082): trim → ValidateEmail → keep the BARE lowercased addr-spec
-// (mail.ParseAddress accepts display-name forms like "Bob <bob@x.com>";
-// keeping raw input would let display-name/CRLF material reach the Cc
-// header builder) → case-insensitive dedupe → reject entries equal to
-// the primary → cap. Returns nil for an effectively-empty list. Shared
-// by the customer service (stored list) and the send handlers
-// (per-send override) so both enforce identical rules.
+// (ADR-082): trim → ValidateEmail (one bare address each; a display
+// name, quotes or angle brackets are refused) → lowercase →
+// case-insensitive dedupe → reject entries equal to the primary → cap.
+// Returns nil for an effectively-empty list. Shared by the customer
+// service (stored list) and the send handlers (per-send override) so
+// both enforce identical rules.
 func NormalizeAdditionalEmails(list []string, primaryEmail string) ([]string, error) {
 	if len(list) == 0 {
 		return nil, nil
@@ -54,11 +64,11 @@ func NormalizeAdditionalEmails(list []string, primaryEmail string) ([]string, er
 		if e == "" {
 			continue
 		}
-		if err := ValidateEmail("additional_emails", e); err != nil {
+		addr, err := ValidateEmail("additional_emails", e)
+		if err != nil {
 			return nil, err
 		}
-		addr, _ := mail.ParseAddress(e)
-		norm := strings.ToLower(addr.Address)
+		norm := strings.ToLower(addr)
 		if norm == primary && primary != "" {
 			return nil, errs.Invalid("additional_emails", "must not repeat the primary email — it always receives billing emails")
 		}

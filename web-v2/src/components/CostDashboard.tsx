@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
 import { useEffectiveNow, useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
 import { fetchCustomerUsageOrNull, useCurrentCycleUsage, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
+import { useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
 import { DEFAULT_ACTIVITY_PRESET, isOutsideWindow, rangeIncluding, usageWindowIsEmpty } from '@/lib/usageWindow'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -36,6 +37,8 @@ import { Callout } from '@/components/Callout'
 import { Button } from '@/components/ui/button'
 import { activityCyclePeriodLabel } from '@/lib/activityPeriod'
 import { UNPRICED_SENTENCE, UNPRICED_TITLE, meterQuantityLine, unpricedLine, unpricedMeters } from '@/lib/unpricedUsage'
+import { previewView } from '@/lib/invoicePreview'
+import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-react'
@@ -49,11 +52,14 @@ import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-re
 // from the clock's frozen_time instead of wall-clock, so the cycle bar,
 // last-invoice "X ago", and activity window all track simulation time. Omitted /
 // undefined for wall-clock customers, which fall back to Date.now() unchanged.
-export function CostDashboard({ customerId, customerTestClockId }: { customerId: string; customerTestClockId?: string }) {
+// currency: the customer's currency (useCustomerCurrency), used for a figure
+// the server sent without one, such as an empty window's $0. Undefined while
+// it loads, and such a figure reads "—" until then.
+export function CostDashboard({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
   return (
     <div className="space-y-6">
       <UpcomingInvoicesSection customerId={customerId} />
-      <ActivitySection customerId={customerId} customerTestClockId={customerTestClockId} />
+      <ActivitySection customerId={customerId} customerTestClockId={customerTestClockId} currency={currency} />
     </div>
   )
 }
@@ -63,10 +69,7 @@ export function CostDashboard({ customerId, customerTestClockId }: { customerId:
 // ============================================================================
 
 function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
-  const { data: subsRes, isLoading } = useQuery({
-    queryKey: ['customer-subs-upcoming', customerId],
-    queryFn: () => api.listSubscriptions(`customer_id=${encodeURIComponent(customerId)}`),
-  })
+  const { data: subsRes, isLoading } = useCustomerSubscriptions(customerId)
 
   // Per-sub effective-now — the "now" baseline for this sub's cycle bar and
   // last-invoice "X ago". Resolved per subscription (not customer) because the
@@ -149,22 +152,19 @@ function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
 function UpcomingInvoiceCard({ sub, customerId, effectiveNow }: { sub: Subscription; customerId: string; effectiveNow: EffectiveNow }) {
   // Projected next invoice — Stripe Tier 1 create_preview parity.
   // Per-sub call so multi-sub customers see their projections
-  // independently rather than rolled-up. Failures are silent — the
-  // cycle progress still renders and the operator can click into the
-  // sub itself for diagnostic detail.
-  const { data: preview } = useQuery({
+  // independently rather than rolled-up. A failure is shown with Retry,
+  // and an empty preview as $0.00 with the server's notes — both used
+  // to read "Projection unavailable".
+  const { data: preview, error: previewError, refetch: refetchPreview, isFetching: previewFetching } = useQuery({
     queryKey: ['upcoming-preview', customerId, sub.id],
-    queryFn: async () => {
-      try {
-        return await api.createInvoicePreview({
-          customer_id: customerId,
-          subscription_id: sub.id,
-        })
-      } catch {
-        return null
-      }
-    },
+    queryFn: () => api.createInvoicePreview({
+      customer_id: customerId,
+      subscription_id: sub.id,
+    }),
+    retry: false,
   })
+  const view = previewView(preview, previewError, preview?.totals[0]?.currency ?? 'USD')
+  const notes = preview ? invoicePreviewNotes(preview).notes : []
 
   // Last finalized / paid invoice for this sub. Renders inline as the
   // rollover-transparency line (Stripe Dashboard pattern). Fetched
@@ -208,10 +208,27 @@ function UpcomingInvoiceCard({ sub, customerId, effectiveNow }: { sub: Subscript
         </div>
 
         {/* Projection */}
-        {preview && preview.totals.length > 0 ? (
+        {view.kind === 'lines' && preview ? (
           <ProjectionBreakdown preview={preview} />
-        ) : (
-          <p className="text-xs text-muted-foreground italic">Projection unavailable for this cycle.</p>
+        ) : view.kind === 'empty' ? (
+          <div className="flex items-baseline justify-between pt-1">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Projected total</p>
+            <p className="text-2xl font-semibold tabular-nums">
+              {formatCents(0, view.currency)}
+            </p>
+          </div>
+        ) : view.kind === 'none' ? (
+          <p className="text-xs text-muted-foreground">{view.message}</p>
+        ) : view.kind === 'error' ? (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">Couldn&apos;t load the projection.</p>
+            <Button size="sm" variant="outline" onClick={() => refetchPreview()} disabled={previewFetching}>Retry</Button>
+          </div>
+        ) : null}
+        {notes.length > 0 && (view.kind === 'lines' || view.kind === 'empty') && (
+          <div className="space-y-1 text-xs text-muted-foreground">
+            {notes.map((w, i) => <p key={i}>{w}</p>)}
+          </div>
         )}
 
         {/* Last invoice — rollover transparency */}
@@ -361,7 +378,7 @@ function activityPresetToParams(p: ActivityPreset, now: EffectiveNow): { from?: 
   return rollingWindow(days, now)
 }
 
-function ActivitySection({ customerId, customerTestClockId }: { customerId: string; customerTestClockId?: string }) {
+function ActivitySection({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
   // Opens on the current billing cycle, the window the Upcoming card and the
   // invoice use (ADR-121). A rolling 30 days never matched a cycle, so its
   // total disagreed with the invoice above it.
@@ -405,7 +422,8 @@ function ActivitySection({ customerId, customerTestClockId }: { customerId: stri
   // them would mix currencies. No "N events" line: total_quantity is billed
   // quantity in each meter's own unit, not an event count; the meter rows
   // below show each quantity with its unit.
-  const totalText = data ? (amountsByCurrencyText(data.totals) ?? formatCents(0, data.totals[0]?.currency)) : ''
+  const zeroCurrency = data?.totals[0]?.currency ?? currency
+  const totalText = data ? (amountsByCurrencyText(data.totals) ?? (zeroCurrency ? formatCents(0, zeroCurrency) : '—')) : ''
 
   return (
     <section>

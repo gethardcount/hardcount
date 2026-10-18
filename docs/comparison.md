@@ -29,7 +29,7 @@ Velox is pre-1.0 and has no production users yet. The other four are in producti
 
 | | Velox | Lago | OpenMeter | Flexprice | Kill Bill |
 |---|---|---|---|---|---|
-| **Licence** | MIT, one edition | AGPL-3.0. A licence key unlocks premium features. | Apache-2.0. No operator UI in the open-source distribution. | AGPL-3.0 at the root. `internal/ee`, which holds the billing, invoice and subscription services, is under an enterprise licence. | Apache-2.0. A commercial plugin, Aviate, adds metering, wallets and coupons. |
+| **Licence** | MIT, one edition | AGPL-3.0. A licence key unlocks premium features. | Apache-2.0. No operator UI in the open-source distribution. | AGPL-3.0 at the root. `internal/ee`, which holds the billing, invoice and subscription services, is under an enterprise licence. | Apache-2.0. A commercial plugin, Aviate, adds raw-event metering (aggregation), wallets and coupons. The open-source core bills usage you have already added up. |
 | **Services in the Compose file** | 5, including a front proxy that the others' files do not have | 8, one of them a one-off migration step | 11, described as "not a production topology" | 9 by default, plus a separate dashboard | 3 |
 | **Price by model × token type on one meter** | Yes: pricing rules match on event dimensions | Yes: charge filters on a billable metric | One filtered feature per combination¹ | A meter filters events by property, and a price references one meter. No per-dimension rate found. | No dimensions on usage; one unit per combination¹ |
 | **Prepaid credits** | Yes. Credit from a prepaid commit is usable before its invoice is paid. | Wallets are free. Recurring top-ups and real-time balance need a premium licence. | Usage grants on entitlements. Monetary credits sit behind a config flag that defaults to off; the quickstart config turns it on. | Wallets with prepaid and promotional credits, auto top-up, expiry and a real-time balance | Account credits. Wallets are in Aviate. |
@@ -53,9 +53,9 @@ Links to other projects are pinned to the commit that was read.
 **Velox**
 
 - Licence: [`LICENSE`](../LICENSE). Services: [`deploy/compose/docker-compose.yml`](../deploy/compose/docker-compose.yml).
-- Pricing by dimension: [`design-multi-dim-meters.md`](design-multi-dim-meters.md). Prepaid commits: [ADR-078](adr/078-prepaid-commits-phase-1.md).
+- Pricing by dimension: [`docs/design/multi-dim-meters.md`](design/multi-dim-meters.md). Prepaid commits: [ADR-078](adr/078-prepaid-commits-phase-1.md).
 - Webhooks: [`webhooks.md`](webhooks.md). Throughput: [`benchmarks/sustained-throughput.md`](benchmarks/sustained-throughput.md).
-- Invoice preview: [`design-create-preview.md`](design-create-preview.md). Card-only checkout: [`internal/payment/checkout.go`](../internal/payment/checkout.go).
+- Invoice preview: [`docs/design/create-preview.md`](design/create-preview.md). Card-only checkout: [`internal/payment/checkout.go`](../internal/payment/checkout.go).
 
 **Lago**
 

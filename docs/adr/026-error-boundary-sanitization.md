@@ -1,7 +1,11 @@
 # ADR-026: HTTP error responses are sanitized at a single boundary
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-07-20)
 **Date:** 2026-05-05
+
+## Summary
+
+`respond.FromError` is the one place that turns a service error into an HTTP response, so raw SDK, database and runtime errors never reach a response body. Typed Velox errors pass through with their status, and errors that implement `SafeMessageError` show only their `OperatorSafeMessage()`, such as "Card was declined: Insufficient funds.". Any other error becomes a generic 500 and is logged in full with the request ID. One legacy fallback remains: an untyped error worded like validation ("invalid …") gets a 422 with its text. Amended 2026-07-20: when the auth lookup cannot reach a verdict, for example because the database is down, the auth middleware returns `503 authentication_unavailable` instead of a misleading 401. Status: active, amended.
 
 ## Context
 

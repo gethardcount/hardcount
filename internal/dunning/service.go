@@ -24,6 +24,11 @@ import (
 type RetryError struct {
 	PaymentIntentID string
 	Err             error
+	// CardNeedsReplacing marks a decline after which the card must not be
+	// charged again for this invoice (domain.IsHardDecline, #966). The
+	// attempt counts as usual; what changes is the customer's warning email,
+	// which asks for a different card instead of promising a retry.
+	CardNeedsReplacing bool
 }
 
 func (e *RetryError) Error() string { return e.Err.Error() }
@@ -120,7 +125,12 @@ type EmailNotifier interface {
 	// reason renders without the diagnostic block. No final-attempt
 	// tone exists: the exhausting attempt sends the escalation email
 	// instead of a warning (see the warning-enqueue gate in processRun).
-	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error
+	//
+	// cardNeedsReplacing selects the "use a different card" copy: the bank
+	// refused the card for good, so dunning will not charge it again and
+	// the email must not promise a retry on a date (#966). failureReason is
+	// empty then.
+	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
 	// outcome is what exhaustion actually did to THIS invoice, not what
 	// the policy asked for — the copy is composed from it (ADR-112).
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
@@ -129,7 +139,7 @@ type EmailNotifier interface {
 	// so a failover between the two can no longer lose the email with the
 	// state standing. The store wraps the call in a SAVEPOINT — returning an
 	// error skips the email, never the money write.
-	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error
+	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
 	SendDunningEscalationTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 }
 
@@ -770,11 +780,15 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		}
 		// A card-less "attempt" records the same no_payment_method cause
 		// vocabulary the start event uses — the timeline renders it as a
-		// reminder tick, not a charge failure. Real declines keep their
-		// provider reason text.
+		// reminder tick, not a charge failure. A retry that skipped a card
+		// the bank refused for good charged nothing either, and says so
+		// (#966). Real declines keep their provider reason text.
 		evtReason := retryErr.Error()
-		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) {
+		switch {
+		case errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry):
 			evtReason = string(domain.DunningCauseNoPaymentMethod)
+		case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
+			evtReason = domain.DunningRetryReasonCardRefused
 		}
 		_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
 			RunID:        run.ID,
@@ -866,13 +880,19 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// failure is internal phrasing — mapped to empty so the warning renders
 	// without the diagnostic callout (2026-07-22 payment-surfacing audit,
 	// P2-3); real decline reasons pass through.
+	//
+	// A card the bank refused for good (#966) gets the "use a different
+	// card" copy, on the retry that drew the decline and on every retry that
+	// then skips the card: "we'll try again on <date>" would promise a charge
+	// that cannot succeed.
 	var warnTx func(tx *sql.Tx) error
 	if run.AttemptCount < policy.MaxRetryAttempts && s.emailNotifier != nil && s.customerEmail != nil {
+		needsNewCard := cardNeedsReplacing(retryErr)
 		reason := retryErr.Error()
-		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) {
+		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || needsNewCard {
 			reason = ""
 		}
-		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason)
+		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason, needsNewCard)
 	}
 	if applied, err := s.store.UpdateRunIfActive(ctx, tenantID, run, run.AttemptCount, warnTx); err != nil {
 		return err
@@ -1508,6 +1528,43 @@ func (s *Service) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID strin
 	return s.store.UpsertPolicyTx(ctx, tx, tenantID, policy)
 }
 
+// DefaultSeedPolicy is the policy every new account starts with, once per
+// mode (ADR-123, #1152). Three retries on day 3, 7 and 14 after the failed
+// payment: Stripe's recommended two-week window, and its limit of three
+// retries on a custom schedule. When retries run out it changes nothing:
+// the subscription keeps billing and the invoice stays open and due
+// (Stripe's "leave the subscription overdue"). A machine should not pause,
+// cancel or write off on an account's behalf before the operator has chosen
+// to. Both final actions are written explicitly, because an empty value
+// normalizes to pause.
+func DefaultSeedPolicy() domain.DunningPolicy {
+	return domain.DunningPolicy{
+		Name:                    "Default retries",
+		Enabled:                 true,
+		MaxRetryAttempts:        3,
+		GracePeriodDays:         3,
+		RetrySchedule:           []string{"96h", "168h"},
+		FinalSubscriptionAction: domain.SubActionNone,
+		FinalInvoiceAction:      domain.InvActionNone,
+	}
+}
+
+// SeedDefaultPoliciesTx creates DefaultSeedPolicy in test and live mode on
+// the caller's account-creation tx, as each mode's default (ADR-123). It is
+// the one writer of seeded policies; both account-creation paths
+// (tenant.RunBootstrap and tenant.Service.Create) call it, so an account
+// that exists has retries on from its first failed payment. The policy goes
+// through the same normalize+validate as every other writer. onSeeded runs
+// after each insert in that insert's mode (the callers write an audit row
+// there); an error from it, or from either insert, fails account creation.
+func (s *Service) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
+	policy, err := normalizeAndValidatePolicy(DefaultSeedPolicy())
+	if err != nil {
+		return fmt.Errorf("default dunning policy: %w", err)
+	}
+	return s.store.SeedDefaultPoliciesTx(ctx, tx, tenantID, policy, onSeeded)
+}
+
 // normalizeAndValidatePolicy applies the save-time defaults and enforces the
 // policy invariants. The single chokepoint shared by UpsertPolicy and
 // UpsertPolicyTx so no writer can persist a policy another path would reject.
@@ -1593,7 +1650,7 @@ func (s *Service) GetStats(ctx context.Context, tenantID string) (Stats, error) 
 // hook that enqueues the dunning-warning email on the reschedule's own tx
 // (ADR-040). nil when the recipient cannot be resolved — logged, best-effort,
 // exactly the old posture.
-func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string) func(tx *sql.Tx) error {
+func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string, cardNeedsReplacing bool) func(tx *sql.Tx) error {
 	email, name, cc, err := s.customerEmail.GetCustomerEmail(ctx, tenantID, run.CustomerID)
 	if err != nil || email == "" {
 		slog.Warn("skip dunning warning email — cannot resolve customer email",
@@ -1619,8 +1676,20 @@ func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, ru
 		nextRetry = run.NextActionAt.In(domain.LoadLocationOrUTC(billTZ)).Format("January 2, 2006")
 	}
 	return func(tx *sql.Tx) error {
-		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.MaxRetryAttempts, nextRetry, retryErrMsg, publicToken)
+		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.MaxRetryAttempts, nextRetry, retryErrMsg, publicToken, cardNeedsReplacing)
 	}
+}
+
+// cardNeedsReplacing reports whether a failed retry leaves the customer
+// needing a different card (#966): the retry skipped a card the bank had
+// refused for good (domain.ErrCardNeedsReplacing), or its charge drew such a
+// refusal (RetryError.CardNeedsReplacing).
+func cardNeedsReplacing(retryErr error) bool {
+	if errors.Is(retryErr, domain.ErrCardNeedsReplacing) {
+		return true
+	}
+	var re *RetryError
+	return errors.As(retryErr, &re) && re.CardNeedsReplacing
 }
 
 // buildDunningEscalationTx is the escalation counterpart of

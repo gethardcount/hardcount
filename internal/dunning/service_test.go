@@ -124,6 +124,21 @@ func (m *memStore) UpsertPolicyTx(ctx context.Context, _ *sql.Tx, tenantID strin
 	return m.UpsertPolicy(ctx, tenantID, p)
 }
 
+// SeedDefaultPoliciesTx records the policy it was handed (one mode only —
+// the in-memory store has no modes) so a unit test can check what the
+// service passed down; the per-mode writes are pinned against Postgres.
+func (m *memStore) SeedDefaultPoliciesTx(_ context.Context, _ *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(domain.DunningPolicy, bool) error) error {
+	p.ID = fmt.Sprintf("dpol_%d", len(m.policies)+1)
+	p.TenantID = tenantID
+	p.IsDefault = true
+	p.Seeded = true
+	m.policies[p.ID] = p
+	if onSeeded != nil {
+		return onSeeded(p, false)
+	}
+	return nil
+}
+
 func (m *memStore) CreateRun(_ context.Context, tenantID string, run domain.InvoiceDunningRun) (domain.InvoiceDunningRun, error) {
 	run.ID = fmt.Sprintf("drun_%d", len(m.runs)+1)
 	run.TenantID = tenantID
@@ -681,18 +696,23 @@ type recordingEmailNotifier struct {
 	warnings     int
 	escalations  int
 	paymentFails int
+	// What the latest warning said (#966): its decline reason, and whether
+	// it was the "use a different card" variant.
+	lastWarnReason      string
+	lastWarnCardRefused bool
 }
 
 func (r *recordingEmailNotifier) SendPaymentFailed(context.Context, string, string, []string, string, string, string, string) error {
 	r.paymentFails++
 	return nil
 }
-func (r *recordingEmailNotifier) SendDunningWarning(context.Context, string, string, []string, string, string, int, int, string, string, string) error {
+func (r *recordingEmailNotifier) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, failureReason, _ string, cardNeedsReplacing bool) error {
 	r.warnings++
+	r.lastWarnReason, r.lastWarnCardRefused = failureReason, cardNeedsReplacing
 	return nil
 }
-func (r *recordingEmailNotifier) SendDunningWarningTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error {
-	return r.SendDunningWarning(ctx, tenantID, to, cc, customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, publicToken)
+func (r *recordingEmailNotifier) SendDunningWarningTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
+	return r.SendDunningWarning(ctx, tenantID, to, cc, customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, publicToken, cardNeedsReplacing)
 }
 
 func (r *recordingEmailNotifier) SendDunningEscalation(context.Context, string, string, []string, string, string, domain.DunningEscalationOutcome, string) error {

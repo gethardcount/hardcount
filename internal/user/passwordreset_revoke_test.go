@@ -89,9 +89,13 @@ func (f *fakeUserStore) LookupResetToken(ctx context.Context, tokenHash string) 
 // reset flow actually fans out the revoke.
 type recordingSessionStore struct {
 	revokeAllForUser []string
+	inserted         []session.Session
 }
 
-func (r *recordingSessionStore) Insert(ctx context.Context, s session.Session) error { return nil }
+func (r *recordingSessionStore) Insert(ctx context.Context, s session.Session) error {
+	r.inserted = append(r.inserted, s)
+	return nil
+}
 func (r *recordingSessionStore) GetByIDHash(ctx context.Context, idHash string) (session.Session, error) {
 	return session.Session{}, session.ErrNotFound
 }
@@ -132,7 +136,7 @@ func TestConfirmPasswordResetRevokesSessions(t *testing.T) {
 	sessStore := &recordingSessionStore{}
 	sessSvc := session.NewService(sessStore)
 
-	h := NewHandler(userSvc, sessSvc, session.DefaultCookieConfig(), stubEmailSender{}, "", false)
+	h := NewHandler(userSvc, sessSvc, session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
 
 	body, _ := json.Marshal(confirmResetReq{
 		Token:    plaintext,

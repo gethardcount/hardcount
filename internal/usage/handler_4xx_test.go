@@ -51,3 +51,18 @@ func TestUsageHandler_Batch_ShapeGuards(t *testing.T) {
 		})
 	}
 }
+
+// An unknown tz on the aggregate is refused, not ignored: ignoring it
+// would silently bucket the daily series in UTC.
+func TestUsageHandler_Aggregate_UnknownTZ_Returns422(t *testing.T) {
+	h := NewHandler(nil, nil, nil)
+	for _, tz := range []string{"Mars/Olympus", "Local"} {
+		req := httptest.NewRequest(http.MethodGet, "/aggregate?tz="+tz, nil)
+		req = req.WithContext(auth.WithTenantID(req.Context(), "tnt_test"))
+		rr := httptest.NewRecorder()
+		h.aggregate(rr, req)
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Errorf("tz=%s: got %d, want 422; body=%s", tz, rr.Code, rr.Body.String())
+		}
+	}
+}

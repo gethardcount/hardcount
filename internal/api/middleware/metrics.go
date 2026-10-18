@@ -47,15 +47,18 @@ var (
 	)
 
 	// idempotencyCacheErrors counts idempotency-layer DB failures by stage.
-	// Non-zero means the idempotency guarantee lapsed: a "reserve" failure
-	// fell open (the handler ran without a claim, so a concurrent/retried
-	// request could re-execute the side effect), and a "finalize" failure
-	// means the response wasn't cached (a retry under the same key re-runs the
-	// handler). Operators should alert on any sustained rate here.
+	// None of them runs a handler twice:
+	//   - reserve: the key could not be claimed, so the request was refused
+	//     with a retryable 503 and the handler did not run.
+	//   - finalize: the handler ran but its response was not stored; the key
+	//     stays pending and retries with it get 409.
+	//   - release: a 409/422 (or an ingest 5xx) could not free the key; it
+	//     stays pending and retries with it get 409 instead of running again.
+	// A sustained rate means clients are being refused or stuck on 409s.
 	idempotencyCacheErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_idempotency_cache_errors_total",
-			Help: "Idempotency cache DB errors by stage (reserve|finalize).",
+			Help: "Idempotency-key DB errors by stage: reserve (request refused with 503), finalize (response not stored; retries get 409), release (key not freed; retries get 409).",
 		},
 		[]string{"stage"},
 	)

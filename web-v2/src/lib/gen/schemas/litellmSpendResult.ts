@@ -12,8 +12,14 @@ import type { LitellmSpendResultErrorsItem } from './litellmSpendResultErrorsIte
 export interface LitellmSpendResult {
   /** Usage events newly recorded. */
   accepted: number;
-  /** Usage events already recorded by an earlier delivery. */
+  /** Usage events already recorded, or already held, by an earlier delivery. */
   deduplicated: number;
+  /**
+     * Usage events kept because their customer or meter does not
+     * exist yet. Not billed until released with
+     * `POST /v1/usage-events/held/release`.
+     */
+  held: number;
   /** Records that carry no billable tokens. */
   skipped: number;
   /** One entry per event or record that was not recorded. A record can appear more than once. */

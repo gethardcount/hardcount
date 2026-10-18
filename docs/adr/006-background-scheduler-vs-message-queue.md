@@ -1,13 +1,17 @@
 # ADR-006: Background Scheduler vs. Message Queue
 
 **Date:** 2026-04-15
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-10, 2026-10-12)
 
 ## Status
 Accepted
 
 ## Date
 2026-04-14
+
+## Summary
+
+Background work (billing cycles, dunning, outbox delivery) runs in-process on a ticker in the `velox` binary, with no message queue or workflow engine, so jobs need no service beyond PostgreSQL. Each of these loops runs on one replica at a time under a leader lease row ([ADR-114](114-leader-leases-tick-scoped-fencing.md)), so a second replica adds availability, not billing throughput. Amended 2026-10-10: a billing run bills every due subscription, page by page, instead of stopping at a per-tick cap. Amended 2026-10-12: a subscription whose billing fails waits on a retry ladder and parks after eight failures until an operator retries it ([ADR-119](119-billing-failure-record-keyed-to-the-due-instant.md)). Status: active, amended.
 
 ## Context
 Velox needs to run periodic background work: billing cycle execution (find due subscriptions, generate invoices, charge payments), dunning retry processing (retry failed payments on schedule), and outbound webhook delivery (retry failed deliveries). These workloads are periodic, not event-driven — they poll for work on a timer.

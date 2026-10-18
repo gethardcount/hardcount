@@ -3,6 +3,10 @@
 **Status:** Accepted
 **Date:** 2026-05-05
 
+## Summary
+
+Test clocks attach to the customer, as in Stripe: a customer is pinned to a clock when it is created, and the pin never changes. Every subscription of that customer runs on the customer's clock, so credits, payment methods and billing share one "now". `subscriptions.test_clock_id` stays as a copy written at creation, and `GET /v1/test-clocks/{id}/customers` lists a clock's customers. The cascade described below is gone: deleting a clock now deletes its customers and all their rows ([ADR-086](086-simulated-data-lifecycle.md)). Status: active.
+
 ## Context
 
 Velox originally attached test clocks at the **subscription** level

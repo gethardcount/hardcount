@@ -26,12 +26,6 @@ func (f *cnLaneFake) List(context.Context, string, string) ([]domain.CreditNote,
 	return f.cns, f.err
 }
 
-type webhookLaneFake struct{ err error }
-
-func (f *webhookLaneFake) ListByInvoice(context.Context, string, string) ([]domain.StripeWebhookEvent, error) {
-	return nil, f.err
-}
-
 type emailLaneFake struct{ err error }
 
 func (f *emailLaneFake) ListByInvoice(context.Context, string, string) ([]EmailEventRow, error) {
@@ -103,7 +97,6 @@ func TestPaymentTimeline_DegradationDisclosure(t *testing.T) {
 		boom := fmt.Errorf("lane down")
 		h.creditNotes = &cnLaneFake{err: boom}
 		h.emailEvents = &emailLaneFake{err: boom}
-		h.webhookEvents = &webhookLaneFake{err: boom}
 		h.dunningTimeline = &dunningLaneFake{runsErr: boom}
 
 		resp := fetch(t, h, inv.ID)

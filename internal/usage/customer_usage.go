@@ -45,7 +45,7 @@ type PricingReader interface {
 }
 
 // CustomerUsageService composes the per-domain reads behind GET
-// /v1/customers/{id}/usage. See docs/design-customer-usage.md.
+// /v1/customers/{id}/usage. See docs/design/customer-usage.md.
 //
 // The hard work — dimension-match-aware aggregation in
 // usage.AggregateByPricingRules — already exists. This service is a
@@ -323,7 +323,7 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now f
 		}
 		// Explicit windows are capped at one CALENDAR year (from + 1y), so
 		// the LATERAL JOIN cost stays bounded — see
-		// docs/design-customer-usage.md. Calendar, not 365×24h: a leap
+		// docs/design/customer-usage.md. Calendar, not 365×24h: a leap
 		// year (2028-01-01..2028-12-31) and a 366-day yearly billing cycle
 		// are both one year and must be accepted.
 		if period.To.After(period.From.AddDate(1, 0, 0)) {
@@ -439,6 +439,13 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 	var totalCents int64
 
 	for _, agg := range aggs {
+		// A bucket below zero after corrections bills 0 on the invoice
+		// (#1193), so it counts as 0 here, with a warning. Pricing it would
+		// fail: the rater refuses a negative quantity.
+		if agg.Quantity.IsNegative() {
+			warnings = append(warnings, fmt.Sprintf("meter %q: usage below zero (%s) after corrections — counted as 0, as on the invoice", meter.Key, agg.Quantity.String()))
+			continue
+		}
 		ratingRuleID := agg.RatingRuleVersionID
 		if ratingRuleID == "" {
 			ratingRuleID = meter.RatingRuleVersionID

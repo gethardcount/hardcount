@@ -22,9 +22,13 @@ engineering work, and carries its evidence rather than asking for trust.
 
 ## Entries
 
-| ID | Failure mode | Layer |
-|---|---|---|
-| [RFM-001](rfm-001-wal-pool-exhaustion.md) | WAL recycled-pool exhaustion | PostgreSQL write path |
+Each entry opens with three lines: the cause and fix that were decided,
+whether Velox shipped a change for it, and the operator page that
+describes the fix today.
+
+| ID | Failure mode | Layer | Shipped | Operator page |
+|---|---|---|---|---|
+| [RFM-001](rfm-001-wal-pool-exhaustion.md) | WAL recycled-pool exhaustion | PostgreSQL write path | Guidance only, v0.4.0 | [Runbook](../ops/runbook/rds-wal-pool.md) |
 
 More entries land as they are diagnosed and reproduced. An entry without a
 reproduction does not ship.
