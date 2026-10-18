@@ -27,12 +27,12 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.8.1`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.1`.
+A release is a tested version with a number, such as `v0.8.2`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.2`.
 
 1. Get the files for that release.
 
    ```bash
-   VELOX_VERSION=v0.8.1
+   VELOX_VERSION=v0.8.2
    sudo git clone --branch "$VELOX_VERSION" https://github.com/getvelox/velox.git /opt/velox
    sudo chown -R "$USER" /opt/velox
    cd /opt/velox/deploy/compose
@@ -78,7 +78,7 @@ A release is a tested version with a number, such as `v0.8.1`. Production runs a
    docker compose exec velox-api /usr/local/bin/velox version
    ```
 
-   **You see:** five containers start, then `velox v0.8.1`.
+   **You see:** five containers start, then `velox v0.8.2`.
 
 4. Check that it is healthy. On the first start Velox sets up its database (runs its migrations), which takes about 10 seconds. Until then the check fails with a 502, so this command retries every 2 seconds and gives up after 2 minutes.
 

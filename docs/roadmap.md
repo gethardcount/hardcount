@@ -4,8 +4,9 @@ What changed lately, and what is being worked on next. Every change, with its da
 
 ## Shipped recently
 
-October 2026 (v0.6.1, v0.7.0, v0.8.0 and v0.8.1):
+October 2026 (v0.6.1, v0.7.0, v0.8.0, v0.8.1 and v0.8.2):
 
+- **Long invoices print in full, and emails look standard to mail servers.** Long invoice and credit-note PDFs go onto more pages, and every email has a `Date` and a `Message-ID`.
 - **Safer upgrades.** By default a migration waits at most 5 seconds for a table lock (`MIGRATION_LOCK_TIMEOUT` changes it). In v0.8.x, `velox migrate force` repairs an upgrade that stopped halfway; from v0.9.0 (not yet released) migrations run with goose, a failed one leaves nothing to repair, and `force` is gone.
 - **LiteLLM usage for a customer that does not exist yet is kept.** Velox holds it and shows it on the Usage page. Create the customer, then release it once.
 - **New accounts retry failed payments.** Each new account starts with a "Default retries" policy.
