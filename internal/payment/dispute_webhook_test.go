@@ -186,7 +186,7 @@ func TestHandleDispute_Outcomes(t *testing.T) {
 			if len(rec.snaps) != tc.wantCalls {
 				t.Errorf("recorder calls %d, want %d", len(rec.snaps), tc.wantCalls)
 			}
-			if tc.wantCalls == 1 && rec.snaps[0].StripePaymentIntentID == "" {
+			if len(rec.snaps) == 1 && rec.snaps[0].StripePaymentIntentID == "" {
 				t.Errorf("snapshot has no payment intent: %+v", rec.snaps[0])
 			}
 			if got := webhooks.ingestCalls == 1; got != tc.wantIngest {

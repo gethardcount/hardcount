@@ -17,4 +17,5 @@ export const InvoiceTimelineEventSource = {
   dunning: 'dunning',
   email: 'email',
   credit_note: 'credit_note',
+  dispute: 'dispute',
 } as const;

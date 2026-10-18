@@ -8,4 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The event's data. docs/webhooks.md lists what each event carries;
+ * `payment.dispute_opened` and `payment.dispute_closed` carry a
+ * `DisputeWebhookEventData`.
+ */
 export type WebhookEventPayload = { [key: string]: unknown };

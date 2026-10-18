@@ -57,6 +57,7 @@ row-level-security role you see only one tenant's rows, or none.
 | `velox migrate` or the start-up stops with `migration … failed`, `schema_migrations`, `goose_db_version` or `another Velox process is migrating` | [A database upgrade stopped](migration-failed-midway.md) |
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade waited for a table lock](migration-lock-timeout.md) |
 | `velox_parked_invoices` above zero | [Parked invoices](parked-invoices.md) |
+| An invoice says "after a lost dispute", a `payment.dispute_opened` or `payment.dispute_closed` webhook, or Stripe emails about a dispute | [Card disputes](card-disputes.md) |
 | `velox_creditnote_pending_issue_drafts` growing over days | [Clawback drafts not issuing](clawback-drafts-not-issuing.md) |
 | `velox_audit_write_errors_total` rising | [Audit write errors](audit-write-errors.md) |
 | `velox_audit_uncovered_mutation_total` rising | [Mutation without an audit row](mutation-without-audit-row.md) |

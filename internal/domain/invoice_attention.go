@@ -45,7 +45,7 @@ const (
 //	payment_action_required     — 3DS / SCA pending
 //	payment_method_required     — no PM on file
 //	dunning_exhausted           — shipped 2026-07-22 (payment-surfacing audit)
-//	dispute_lost                — Lago parity
+//	dispute_lost                — shipped 2026-10-19 (#979)
 type AttentionReason string
 
 const (
@@ -172,7 +172,13 @@ const (
 	// parity: the end-of-dunning terminal is an explicit, visible state.
 	AttentionReasonDunningExhausted AttentionReason = "dunning_exhausted"
 
-	// AttentionReasonDisputeLost: failing-first skeleton, never set yet.
+	// AttentionReasonDisputeLost: the customer disputed a payment on this
+	// invoice with their bank and the dispute closed as lost, so the bank
+	// took the money back (#979). Velox leaves the invoice paid and moves no
+	// money; the operator decides what the loss means for the invoice (a
+	// credit note for money returned outside Velox, or a write-off in their
+	// own books). Critical, and surfaced on paid invoices, which is where
+	// every dispute lands. Lago parity.
 	AttentionReasonDisputeLost AttentionReason = "dispute_lost"
 )
 
@@ -489,7 +495,12 @@ type AttentionContext struct {
 	// operator to get a new card rather than to wait on a retry.
 	DunningRetrying bool
 
-	// LostDispute: failing-first skeleton, never read yet.
+	// LostDispute is a dispute on one of this invoice's payments that closed
+	// as lost (#979), the newest one when there are several; nil when none
+	// did. The invoice service reads it for every non-draft invoice, from the
+	// invoice's dispute records. A read error leaves it nil: the notice is
+	// display-only, and the dispute stays visible on the invoice's timeline
+	// and in GET /v1/invoices/{id}/disputes.
 	LostDispute *InvoiceDispute
 
 	// LastFailedChargeAt is the simulated instant of the invoice's latest
@@ -574,6 +585,11 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	// refund it.
 	if inv.PaymentAnomalyKind != "" {
 		return classifyPaymentAnomaly(inv)
+	}
+	// A lost dispute pierces it too: disputes land on paid invoices, so the
+	// early return would hide every one of them.
+	if atc.LostDispute != nil {
+		return classifyDisputeLost(inv, *atc.LostDispute)
 	}
 	// A BAD-DEBT RECOVERY charge in flight pierces the early-return, for the
 	// same reason the anomaly does: the state lives only on a row the return
@@ -1447,6 +1463,36 @@ func classifyPaymentAnomaly(inv Invoice) *Attention {
 		att.Actions = []AttentionActionItem{{Code: AttentionActionReconcilePayment, Label: "Open in Stripe"}}
 	}
 	return att
+}
+
+// classifyDisputeLost reports a payment the customer's bank took back after a
+// lost dispute (#979). Velox records the loss and changes nothing else, so the
+// invoice still reads paid and its books overstate what was collected until
+// the operator acts. No action button: the decision is the operator's (a
+// credit note, or a write-off in their own books), and none of the existing
+// actions makes it. The Stripe dispute id goes in Detail, where the Stripe
+// dashboard search needs it.
+func classifyDisputeLost(inv Invoice, d InvoiceDispute) *Attention {
+	since := inv.UpdatedAt
+	if d.ClosedAt != nil {
+		since = *d.ClosedAt
+	}
+	detail := "Stripe dispute " + d.StripeDisputeID + " closed as lost"
+	if d.Reason != "" {
+		detail += "; the customer's reason was " + d.Reason
+	}
+	detail += ". Velox leaves the invoice paid and moves no money. " +
+		"To record the loss, issue a credit note with the amount as money returned outside Velox, not as a card refund: the bank already returned it."
+	return &Attention{
+		Severity: AttentionSeverityCritical,
+		Reason:   AttentionReasonDisputeLost,
+		Code:     "payment.dispute_lost",
+		Message: "The customer's bank took back " + FormatMoneyMinor(d.AmountCents, d.Currency) +
+			" after a lost dispute, so record it with a credit note or write it off in your books.",
+		Detail: detail,
+		DocURL: docURL("dispute-lost"),
+		Since:  &since,
+	}
 }
 
 // joinDetail appends one Detail paragraph to another, blank-line separated.

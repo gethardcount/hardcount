@@ -25,14 +25,37 @@ const (
 
 // Valid reports whether s is one of the eight statuses Velox stores.
 func (s DisputeStatus) Valid() bool {
-	return false // failing-first skeleton: not implemented
+	return s.stage() > 0
 }
 
 // Closed reports whether the dispute has ended. Stripe sends
 // charge.dispute.closed for won, lost and warning_closed; prevented (stopped
 // before it became a chargeback) is an end state too.
 func (s DisputeStatus) Closed() bool {
-	return false // failing-first skeleton: not implemented
+	return s.stage() == disputeStageClosed
+}
+
+const disputeStageClosed = 5
+
+// stage orders statuses along the dispute's life, so two snapshots stamped in
+// the same second apply in the order they happened: an inquiry before the
+// chargeback it became, an open dispute before its close. Statuses at the
+// same stage do not order each other. 0 means not a status Velox knows.
+func (s DisputeStatus) stage() int {
+	switch s {
+	case DisputeWarningNeedsResponse:
+		return 1
+	case DisputeWarningUnderReview:
+		return 2
+	case DisputeNeedsResponse:
+		return 3
+	case DisputeUnderReview:
+		return 4
+	case DisputeWarningClosed, DisputeWon, DisputeLost, DisputePrevented:
+		return disputeStageClosed
+	default:
+		return 0
+	}
 }
 
 // InvoiceDispute is a card dispute (chargeback) Stripe reported against one
@@ -101,7 +124,13 @@ type DisputeSnapshot struct {
 // event the row already holds is never newer than itself, which makes a
 // redelivery a no-op.
 func (d InvoiceDispute) SupersededBy(s DisputeSnapshot) bool {
-	return false // failing-first skeleton: not implemented
+	if s.StripeEventID != "" && s.StripeEventID == d.LastStripeEventID {
+		return false
+	}
+	if !s.EventAt.Equal(d.LastEventAt) {
+		return s.EventAt.After(d.LastEventAt)
+	}
+	return s.Status.stage() > d.Status.stage()
 }
 
 // DisputeRecordResult says what one snapshot did.

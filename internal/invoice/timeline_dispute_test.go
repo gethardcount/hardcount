@@ -56,7 +56,7 @@ func TestDisputeTimelineEvents(t *testing.T) {
 	if !rows[0].sortAt.Equal(opened) || !rows[2].sortAt.Equal(closed) {
 		t.Errorf("rows sit at %s and %s, want Stripe's opened %s and closed %s", rows[0].sortAt, rows[2].sortAt, opened, closed)
 	}
-	if !strings.Contains(rows[0].Detail, "respond in Stripe by Oct 15, 2026") || !strings.Contains(rows[0].Detail, "du_open") {
+	if !strings.Contains(rows[0].Detail, "respond in Stripe by Oct 15, 2026 09:00 UTC") || !strings.Contains(rows[0].Detail, "du_open") {
 		t.Errorf("open dispute detail %q, want the dispute id and the respond-by date", rows[0].Detail)
 	}
 	if strings.Contains(rows[1].Detail, "respond in Stripe") {

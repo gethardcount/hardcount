@@ -109,6 +109,7 @@ type Stripe struct {
 	pmAttacher         PaymentMethodAttacher
 	customerResolver   CustomerByStripeIDResolver // optional; resolves SetupIntent.customer → velox id
 	refundUpdater      RefundStatusUpdater        // optional; applies async refund-webhook status to a CN
+	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	resolver           clock.Resolver             // optional; binds effective-now from invoice
 	anomalies          PaymentAnomalyRecorder     // optional; durable marker for the attention banner (ADR-068)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
@@ -422,13 +423,20 @@ func (s *Stripe) SetRefundStatusUpdater(u RefundStatusUpdater) {
 	s.refundUpdater = u
 }
 
-// DisputeRecorder: failing-first skeleton for #979, never called yet.
+// DisputeRecorder records a card dispute snapshot against the invoice whose
+// payment was disputed (#979), queuing payment.dispute_opened / .closed in
+// the same transaction. Returns errs.ErrNotFound when no Velox invoice holds
+// the disputed PaymentIntent (a charge the tenant made outside Velox).
+// payment imports nothing from invoice; *invoice.PostgresStore satisfies it.
 type DisputeRecorder interface {
 	RecordStripeDispute(ctx context.Context, tenantID string, snap domain.DisputeSnapshot) (domain.DisputeRecordResult, error)
 }
 
-// SetDisputeRecorder: failing-first skeleton for #979.
-func (s *Stripe) SetDisputeRecorder(DisputeRecorder) {}
+// SetDisputeRecorder wires the charge.dispute.* handler's store. Optional:
+// nil logs and acknowledges dispute events (test default).
+func (s *Stripe) SetDisputeRecorder(r DisputeRecorder) {
+	s.disputes = r
+}
 
 // IsUnknownPaymentFailure classifies an error returned from ChargeInvoice
 // as a Stripe-side unknown outcome (5xx, timeout, network) — the failure
@@ -1253,6 +1261,11 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 		// One status-driven handler for all three: each carries a Refund object;
 		// the source event is irrelevant once we read Refund.status.
 		return s.handleRefundUpdated(ctx, tenantID, event)
+	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
+		// One status-driven handler for all three, like refunds: each event
+		// carries the whole Dispute object as it stood when the event was
+		// created.
+		return s.handleDispute(ctx, tenantID, event)
 	default:
 		slog.Debug("unhandled webhook event type", "type", event.EventType)
 		return nil
@@ -1444,6 +1457,106 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 	}
 	slog.Info("refund status reconciled from webhook",
 		"refund_id", rf.ID, "stripe_status", rf.Status, "velox_status", status, "type", event.EventType)
+	return nil
+}
+
+// handleDispute records a charge.dispute.* event against the Velox invoice
+// whose payment was disputed (#979). It records and reports; it never changes
+// the invoice's payment status and never moves money. Re-parses the raw
+// payload: data.object is a Dispute (https://docs.stripe.com/api/disputes/object),
+// whose own metadata is empty, so the event arrives without velox_tenant_id
+// and the handler admits it on the endpoint's tenant (endpointAuthoritativeEvent).
+//
+// Outcomes:
+//   - recorded, or already recorded (a redelivery, or an older event arriving
+//     after a newer one): nil, and HandleWebhook writes the dedup row;
+//   - no Velox invoice holds the disputed PaymentIntent: an ErrNotFound
+//     error, which HandleWebhook acknowledges with its audit row. The tenant
+//     can charge cards outside Velox on the same Stripe account;
+//   - a status Velox does not know (Stripe added one) or a body it cannot
+//     read: an error, so the delivery fails and Stripe redelivers it, which
+//     shows on Stripe's webhook page, instead of the dispute being dropped;
+//   - a store error: an error, so Stripe redelivers.
+func (s *Stripe) handleDispute(ctx context.Context, tenantID string, event domain.StripeWebhookEvent) error {
+	if s.disputes == nil {
+		slog.Debug("dispute webhook: no DisputeRecorder wired, skipping", "type", event.EventType)
+		return nil
+	}
+	raw, ok := event.Payload["raw"].(string)
+	if !ok {
+		return fmt.Errorf("%s: missing raw payload", event.EventType)
+	}
+	var parsed struct {
+		Data struct {
+			Object struct {
+				ID              string          `json:"id"`
+				Object          string          `json:"object"`
+				Amount          int64           `json:"amount"`
+				Currency        string          `json:"currency"`
+				Charge          json.RawMessage `json:"charge"`
+				PaymentIntent   json.RawMessage `json:"payment_intent"`
+				Reason          string          `json:"reason"`
+				Status          string          `json:"status"`
+				Created         int64           `json:"created"`
+				EvidenceDetails *struct {
+					DueBy *int64 `json:"due_by"`
+				} `json:"evidence_details"`
+			} `json:"object"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return fmt.Errorf("%s: parse payload: %w", event.EventType, err)
+	}
+	dp := parsed.Data.Object
+	if dp.ID == "" || dp.Object != "dispute" {
+		return fmt.Errorf("%s: data.object is not a dispute (object %q, id %q)", event.EventType, dp.Object, dp.ID)
+	}
+	status := domain.DisputeStatus(dp.Status)
+	if !status.Valid() {
+		slog.ErrorContext(ctx, "dispute webhook carries a status Velox does not know — failing the delivery so Stripe redelivers it; add the status to domain.DisputeStatus and the invoice_disputes CHECK",
+			"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID, "status", dp.Status)
+		return fmt.Errorf("%s: dispute %s has unknown status %q", event.EventType, dp.ID, dp.Status)
+	}
+	if dp.Currency == "" || dp.Amount < 0 {
+		return fmt.Errorf("%s: dispute %s has no currency or a negative amount", event.EventType, dp.ID)
+	}
+	pi := stripeObjectID(dp.PaymentIntent)
+	if pi == "" {
+		// Velox charges only through PaymentIntents (ADR-001), so a dispute
+		// on a charge without one is not on a Velox payment.
+		return fmt.Errorf("%s: dispute %s names no payment intent: %w", event.EventType, dp.ID, errs.ErrNotFound)
+	}
+	snap := domain.DisputeSnapshot{
+		StripeEventID:         event.StripeEventID,
+		EventAt:               event.OccurredAt,
+		StripeDisputeID:       dp.ID,
+		StripeChargeID:        stripeObjectID(dp.Charge),
+		StripePaymentIntentID: pi,
+		Status:                status,
+		Reason:                dp.Reason,
+		AmountCents:           dp.Amount,
+		Currency:              dp.Currency,
+		OpenedAt:              time.Unix(dp.Created, 0).UTC(),
+	}
+	if dp.EvidenceDetails != nil && dp.EvidenceDetails.DueBy != nil && *dp.EvidenceDetails.DueBy > 0 {
+		due := time.Unix(*dp.EvidenceDetails.DueBy, 0).UTC()
+		snap.EvidenceDueBy = &due
+	}
+
+	res, err := s.disputes.RecordStripeDispute(ctx, tenantID, snap)
+	if errors.Is(err, errs.ErrNotFound) {
+		slog.WarnContext(ctx, "dispute webhook names a payment no Velox invoice holds — acknowledged; if it is a Velox charge, find the invoice by this payment intent",
+			"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID,
+			"stripe_payment_intent_id", pi, "status", dp.Status)
+		return fmt.Errorf("%s: dispute %s: %w", event.EventType, dp.ID, err)
+	}
+	if err != nil {
+		return fmt.Errorf("%s: record dispute %s: %w", event.EventType, dp.ID, err)
+	}
+	slog.InfoContext(ctx, "dispute recorded from webhook",
+		"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID,
+		"invoice_id", res.Dispute.InvoiceID, "status", res.Dispute.Status,
+		"applied", res.Applied, "opened", res.Opened, "closed", res.Closed)
 	return nil
 }
 
