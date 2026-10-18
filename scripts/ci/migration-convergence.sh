@@ -20,7 +20,9 @@
 #
 # Then two more checks:
 #   restore drill  back up a v0.8.1 database, let HEAD take it over, restore
-#                  the backup over it with scripts/restore.sh: HEAD must
+#                  the backup over it with scripts/restore.sh. Either the
+#                  restore is refused and rolled back, leaving the database
+#                  exactly as HEAD left it, or it goes through and HEAD must
 #                  refuse and change nothing.
 #   Postgres 14    HEAD applies on postgres:14 and reports up to date.
 #
@@ -236,9 +238,32 @@ restore_drill() {
   backup=$(find "$WORK/backups" -type f -name 'velox_*.dump' | head -1) # not the latest.dump link
   head_velox "$url" migrate
   before=$(versions "$c" compose)
-  DATABASE_URL="$url" VELOX_RESTORE_CONFIRM=yes \
+  dump "$c" compose schema > "$OUT/restore-before-schema.sql"
+  dump "$c" compose data > "$OUT/restore-before-data.sql"
+  if ! DATABASE_URL="$url" VELOX_RESTORE_CONFIRM=yes \
     PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
-    "$ROOT/scripts/restore.sh" "$backup" | tee "$OUT/restore.txt"
+    "$ROOT/scripts/restore.sh" "$backup" 2>&1 | tee "$OUT/restore.txt"; then
+    # pg_restore --clean drops each object the backup holds before it
+    # recreates it. Once a migration after 180 adds a table with a foreign
+    # key into one of them (invoice_disputes, migration 185), that drop
+    # fails, and the single-transaction restore is rolled back. That is the
+    # other safe outcome: nothing changed, and HEAD runs on the database it
+    # took over.
+    grep -q 'single-transaction restore was rolled back' "$OUT/restore.txt" \
+      || fail "restore drill: the restore failed without rolling back"
+    after=$(versions "$c" compose)
+    [ "$before" = "$after" ] || fail "restore drill: goose_db_version changed ($before -> $after)"
+    for kind in schema data; do
+      dump "$c" compose "$kind" > "$OUT/restore-after-$kind.sql"
+      diff -u "$OUT/restore-before-$kind.sql" "$OUT/restore-after-$kind.sql" > "$OUT/restore-$kind.diff" \
+        || fail "restore drill: the refused restore changed the $kind"
+    done
+    head_velox "$url" migrate status | tee "$OUT/restore-status.txt"
+    grep -q 'up to date, nothing to apply' "$OUT/restore-status.txt" \
+      || fail "restore drill: status after the refused restore is not up to date"
+    echo "restore drill: the restore was refused and rolled back, nothing changed"
+    return
+  fi
   if out=$(head_velox "$url" migrate 2>&1); then
     echo "$out"
     fail "restore drill: HEAD migrate accepted a v0.8.x backup restored over a database it had taken over"

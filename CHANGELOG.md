@@ -24,7 +24,7 @@ original text.
 - **With `RUN_MIGRATIONS_ON_BOOT=false`, run `velox migrate` once before you start this release.** It changes no table, so v0.8.x copies keep serving meanwhile. Until it has run, this release refuses to start.
 - **`velox migrate status` prints a plan now.** A script that reads its old `version: N, dirty: …` line must change.
 - **`velox migrate force` is removed, and `velox migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade ([Going back](docs/production-one-vm.md#going-back)).
-- **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, Velox refuses to start and says why.
+- **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, the restore stops and changes nothing (from migration 185, whose new table refers to backed-up tables), or Velox refuses to start and says why.
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
 - **Migration 181 adds two columns to `invoice_charge_attempts` ([#1225](https://github.com/getvelox/velox/pull/1225)).** It is instant (a constant default, no table rewrite), and copies of the previous release ignore the columns, so they keep serving while it runs.
 - **Migration 182 adds one table, `login_throttle` ([#1254](https://github.com/getvelox/velox/pull/1254)).** It is new and empty, so it is instant, and copies of the previous release never read it: they keep serving while it runs.
