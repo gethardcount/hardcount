@@ -211,6 +211,40 @@ One invoice can hold at most one commit line. To stop a customer's usage
 when the credit runs out, see [Stop usage when credit runs
 out](stop-usage-when-credit-runs-out.md).
 
+### Tax on prepaid credit
+
+With a tax provider on, Velox charges tax once: on the usage, not on the
+credit purchase. It treats buying credit as an advance payment, as Lago
+does. The usage the credit pays for is taxed when it is invoiced.
+
+At 10% tax, the commit above is invoiced at $9,000 with no tax. A later
+usage invoice of $1,000 carries $100 of tax, and the credit pays all $1,100
+of it.
+
+- **You see:** the commit line has tax 0 and `"tax_reason":
+  "prepaid_credit_purchase"`. The dashboard marks it "Prepaid credit, not
+  taxed", and the PDF says why there is no tax.
+- **Refunds:** refunding unused credit
+  ([ADR-080](adr/080-paid-commit-cn-relief.md)) reverses no tax, because the
+  purchase carried none. A commit invoiced before this change carried tax,
+  and its refund still reverses that tax.
+- **Free (promotional) credit** pays usage invoices the same way, tax
+  included. This change does not affect it.
+
+Tax rules for prepayments differ by country. Some tax a prepayment when it
+is received, others when the service is used. Before you sell commits with
+tax on, check with your tax adviser:
+
+- whether your country taxes prepaid credit when it is bought or when it is
+  used;
+- whether that depends on what the credit can be spent on;
+- what your invoices must say about an untaxed prepayment.
+
+Velox has no setting to tax the purchase instead. If your country requires
+it, [open an issue](https://github.com/getvelox/velox/issues) before you
+sell commits with tax on. The decision and its reasons are in
+[ADR-078](adr/078-prepaid-commits-phase-1.md#amendment-2026-10-19--the-purchase-is-not-taxed-the-usage-it-pays-for-is).
+
 ## See your margin
 
 Your margin on a customer is what you billed them, against what their

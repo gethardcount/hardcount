@@ -504,10 +504,11 @@ type InvoiceLineItem struct {
 	TaxCode         string          `json:"tax_code,omitempty"`
 	// TaxabilityReason carries the Stripe-canonical structured reason
 	// (e.g. "standard_rated", "reverse_charge", "not_collecting",
-	// "customer_exempt", "product_exempt", "zero_rated"). The dashboard
-	// renders a badge for non-trivial values, and the PDF appends an
-	// exemption legend when at least one line is customer- or
-	// product-exempt. Empty for non-Stripe providers.
+	// "customer_exempt", "product_exempt", "zero_rated"), or Velox's own
+	// TaxReasonPrepaidCreditPurchase on a prepaid-commit purchase line under
+	// any provider. The dashboard renders a badge for non-trivial values, and
+	// the PDF appends a legend when a line is customer- or product-exempt or
+	// a prepaid credit purchase. Otherwise empty for non-Stripe providers.
 	TaxabilityReason    string `json:"tax_reason,omitempty"`
 	TotalAmountCents    int64  `json:"total_amount_cents"`
 	Currency            string `json:"currency"`
@@ -553,6 +554,12 @@ type InvoiceLineItem struct {
 func (li InvoiceLineItem) IsCommitLine() bool {
 	return li.CommitGrantedCents != nil && *li.CommitGrantedCents > 0
 }
+
+// TaxReasonPrepaidCreditPurchase is the tax_reason on a prepaid-commit
+// purchase line. The purchase is an advance payment: the line is left out of
+// the tax request and carries no tax, and the usage the credit pays for is
+// taxed when it is invoiced (ADR-078 amendment 2026-10-19).
+const TaxReasonPrepaidCreditPurchase = "prepaid_credit_purchase"
 
 // EffectiveUnitAmountDecimal is the per-unit price in DECIMAL CENTS, derived
 // from the line's amount and quantity (amount_cents / quantity). It is the

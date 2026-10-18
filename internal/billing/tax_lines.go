@@ -25,17 +25,29 @@ import (
 // exactly what the create path asked it. groups[k] lists the original
 // line-item indexes behind request line k (absorber first); singleton groups
 // are the untouched fast path.
+//
+// It is also where a prepaid-commit purchase line is left out of the
+// request: buying credit is an advance payment, and the usage the credit
+// pays for is taxed on its own invoice (ADR-078 amendment 2026-10-19,
+// #1271). A commit line is in no group, so it gets no provider result; the
+// caller stamps it untaxed. It never absorbs a negative line either.
 func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode string) (reqLines []tax.RequestLine, groups [][]int, err error) {
 	negatives := []int{}
+	hasCommit := false
 	for i := range lineItems {
+		if lineItems[i].IsCommitLine() {
+			hasCommit = true
+			continue
+		}
 		if lineItems[i].AmountCents < 0 {
 			negatives = append(negatives, i)
 		}
 	}
 
-	// Fast path — no negative lines (every path except a stored ADR-048
-	// split pair): one request line per item, positionally aligned.
-	if len(negatives) == 0 {
+	// Fast path — no negative and no commit lines (every path except a
+	// stored ADR-048 split pair and a commit purchase): one request line per
+	// item, positionally aligned.
+	if len(negatives) == 0 && !hasCommit {
 		reqLines = make([]tax.RequestLine, len(lineItems))
 		groups = make([][]int, len(lineItems))
 		for i, li := range lineItems {
@@ -66,7 +78,7 @@ func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode 
 	for _, n := range negatives {
 		best := -1
 		for i := range lineItems {
-			if lineItems[i].AmountCents <= 0 || lineCode(i) != lineCode(n) {
+			if lineItems[i].AmountCents <= 0 || lineItems[i].IsCommitLine() || lineCode(i) != lineCode(n) {
 				continue
 			}
 			if best == -1 || lineItems[i].AmountCents > lineItems[best].AmountCents {
@@ -85,7 +97,7 @@ func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode 
 	}
 
 	for i, li := range lineItems {
-		if absorbed[i] {
+		if absorbed[i] || li.IsCommitLine() {
 			continue
 		}
 		group := append([]int{i}, absorberOf[i]...)
@@ -105,6 +117,39 @@ func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode 
 		groups = append(groups, group)
 	}
 	return reqLines, groups, nil
+}
+
+// stampUntaxedCommitLine marks a prepaid-commit purchase line, which
+// collapseTaxRequestLines left out of the request: no tax, the price is the
+// line total, and the reason says why.
+func stampUntaxedCommitLine(li *domain.InvoiceLineItem) {
+	li.TaxRate = 0
+	li.TaxAmountCents = 0
+	li.TaxJurisdiction = ""
+	li.TaxabilityReason = domain.TaxReasonPrepaidCreditPurchase
+	li.TotalAmountCents = li.AmountCents
+}
+
+// taxRequestDiscount is the share of an invoice-level discount that falls on
+// the lines sent to the provider. A discount covers every line in proportion
+// to its amount, so a commit line left out of the request takes its share
+// with it; otherwise the whole discount would lower the taxable base. Without
+// commit lines it is the discount unchanged.
+func taxRequestDiscount(lineItems []domain.InvoiceLineItem, discount int64) int64 {
+	if discount <= 0 {
+		return discount
+	}
+	var all, taxable int64
+	for _, li := range lineItems {
+		all += li.AmountCents
+		if !li.IsCommitLine() {
+			taxable += li.AmountCents
+		}
+	}
+	if taxable == all || all <= 0 {
+		return discount
+	}
+	return money.RoundHalfToEven(discount*taxable, all)
 }
 
 // expandTaxResultLines maps the provider's per-request-line results back onto
