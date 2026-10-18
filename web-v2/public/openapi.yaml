@@ -6816,12 +6816,13 @@ paths:
           description: |
             Code `already_exists`: the subscription already has an item for
             this plan. Code `invalid_state`: the subscription is `canceled`
-            or `archived`; the plan's meters overlap another live
-            subscription of the customer; or the plan's currency differs
-            from the subscription's. Code `unpaid_invoice_blocks_change`:
-            the invoice for the current period is unpaid; settle or void it
-            first. Code `unbilled_period`: a billing period ended and could
-            not be invoiced; retry billing first.
+            or `archived`; the plan is archived; the plan's meters overlap
+            another live subscription of the customer; or the plan's
+            currency differs from the subscription's. Code
+            `unpaid_invoice_blocks_change`: the invoice for the current
+            period is unpaid; settle or void it first. Code
+            `unbilled_period`: a billing period ended and could not be
+            invoiced; retry billing first.
           content:
             application/json:
               schema:

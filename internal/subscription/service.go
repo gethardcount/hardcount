@@ -431,6 +431,24 @@ func (s *Service) rejectMixedItemIntervals(ctx context.Context, tenantID string,
 	return nil
 }
 
+// rejectArchivedPlans refuses plans that are archived, for the writes that
+// put new business on a plan: Create and both add-item paths (ADR-067). An
+// archived plan keeps billing the items already on it (archive is not
+// cancel); it only takes no new ones. The two plan-swap paths keep their own
+// check on the plan they have already read. Callers check s.plans != nil.
+func (s *Service) rejectArchivedPlans(ctx context.Context, tenantID string, planIDs []string) error {
+	for _, pid := range planIDs {
+		plan, err := s.plans.GetPlan(ctx, tenantID, pid)
+		if err != nil {
+			return errs.Invalid("items", fmt.Sprintf("plan %q not found", pid))
+		}
+		if plan.Status == domain.PlanArchived {
+			return errs.InvalidState(fmt.Sprintf("plan %q is archived — unarchive it or pick an active plan", pid))
+		}
+	}
+	return nil
+}
+
 // guardSwapCurrency assembles the currency-pin inputs for a plan swap: the
 // incoming plan, the sub's OTHER items' plans, and the outgoing plan of the
 // swapped item (raw-cents proration makes a cross-currency swap wrong even
@@ -733,22 +751,16 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// remained fully subscribable via the API — archive only hid it from
 	// the picker. Skipped when PlanReader isn't wired (narrow unit tests).
 	if s.plans != nil {
-		for _, it := range items {
-			plan, err := s.plans.GetPlan(ctx, tenantID, it.PlanID)
-			if err != nil {
-				return domain.Subscription{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", it.PlanID))
-			}
-			if plan.Status == domain.PlanArchived {
-				return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("plan %q is archived — unarchive it or pick an active plan", it.PlanID))
-			}
-		}
-
-		// Double-billing guard: the new sub's meters must be disjoint from
-		// every other live sub of this customer (and from each other).
 		planIDs := make([]string, 0, len(items))
 		for _, it := range items {
 			planIDs = append(planIDs, it.PlanID)
 		}
+		if err := s.rejectArchivedPlans(ctx, tenantID, planIDs); err != nil {
+			return domain.Subscription{}, err
+		}
+
+		// Double-billing guard: the new sub's meters must be disjoint from
+		// every other live sub of this customer (and from each other).
 		if err := s.rejectMeterOverlap(ctx, tenantID, input.CustomerID, "", "", planIDs); err != nil {
 			return domain.Subscription{}, err
 		}
@@ -1095,57 +1107,80 @@ type ClawbackPiece struct {
 	GrossCents int64
 }
 
-func (s *Service) AddItem(ctx context.Context, tenantID, subscriptionID string, input AddItemInput) (domain.SubscriptionItem, error) {
+// validateAddItem is the one validation both add paths run: AddItem (own
+// tx) and AddItemTx (the handler's atomic add-with-proration tx). It
+// returns the quantity to write. Keeping one copy means a guard cannot
+// land on one path and miss the other.
+//
+// The reads run in their own transactions, not the caller's, and that is
+// enough. The unique index on (subscription, plan) is the write-time gate
+// for duplicates. Archiving a plan writes only the plan row, so an archive
+// that commits between this check and the insert orders as "added, then
+// archived": an existing item on an archived plan, which keeps billing
+// (ADR-067).
+func (s *Service) validateAddItem(ctx context.Context, tenantID, subscriptionID string, input AddItemInput) (int64, error) {
 	if input.PlanID == "" {
-		return domain.SubscriptionItem{}, errs.Required("plan_id")
+		return 0, errs.Required("plan_id")
 	}
 	qty := input.Quantity
 	if qty == 0 {
 		qty = 1
 	}
 	if qty < 1 {
-		return domain.SubscriptionItem{}, errs.Invalid("quantity", "must be >= 1")
+		return 0, errs.Invalid("quantity", "must be >= 1")
 	}
 
 	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
 	if err != nil {
-		return domain.SubscriptionItem{}, err
+		return 0, err
 	}
 	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
-		return domain.SubscriptionItem{}, errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
+		return 0, errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
 	}
 
-	// Mixed-interval guard: new item's plan must match the sub's
-	// existing item intervals. Same rationale as Create — the period
-	// anchor is per-sub, so adding a yearly item to a monthly sub
-	// would have no coherent cycle. Skipped when PlanReader isn't
-	// wired (narrow unit tests).
-	if s.plans != nil && len(sub.Items) > 0 {
-		newPlusExisting := append([]domain.SubscriptionItem{{PlanID: input.PlanID}}, sub.Items...)
-		if err := s.rejectMixedItemIntervals(ctx, tenantID, newPlusExisting); err != nil {
-			return domain.SubscriptionItem{}, err
+	// Skipped when PlanReader isn't wired (narrow unit tests).
+	if s.plans != nil {
+		// An archived plan takes no new business (ADR-067), and an added
+		// item is new business on its plan. Same refusal as Create.
+		if err := s.rejectArchivedPlans(ctx, tenantID, []string{input.PlanID}); err != nil {
+			return 0, err
+		}
+		// Mixed-interval guard: new item's plan must match the sub's
+		// existing item intervals. Same rationale as Create — the period
+		// anchor is per-sub, so adding a yearly item to a monthly sub
+		// would have no coherent cycle.
+		if len(sub.Items) > 0 {
+			newPlusExisting := append([]domain.SubscriptionItem{{PlanID: input.PlanID}}, sub.Items...)
+			if err := s.rejectMixedItemIntervals(ctx, tenantID, newPlusExisting); err != nil {
+				return 0, err
+			}
 		}
 	}
 
 	// Double-billing guard: the added plan's meters must be disjoint from
 	// every live sub of the customer — including this sub's other items.
 	if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, "", []string{input.PlanID}); err != nil {
-		return domain.SubscriptionItem{}, err
+		return 0, err
 	}
 	// Currency pin (ADR-100): the added plan + this sub's existing items
 	// must share one currency (and match profile + the customer's other
 	// subs — this sub is excluded from the cross-sub query, so its own
 	// items ride in planIDs).
-	{
-		pin := []string{input.PlanID}
-		for _, it := range sub.Items {
-			pin = append(pin, it.PlanID)
-		}
-		if err := s.rejectCurrencyMismatch(ctx, tenantID, sub.CustomerID, subscriptionID, pin, ""); err != nil {
-			return domain.SubscriptionItem{}, err
-		}
+	pin := []string{input.PlanID}
+	for _, it := range sub.Items {
+		pin = append(pin, it.PlanID)
 	}
+	if err := s.rejectCurrencyMismatch(ctx, tenantID, sub.CustomerID, subscriptionID, pin, ""); err != nil {
+		return 0, err
+	}
+	return qty, nil
+}
 
+func (s *Service) AddItem(ctx context.Context, tenantID, subscriptionID string, input AddItemInput) (domain.SubscriptionItem, error) {
+	qty, err := s.validateAddItem(ctx, tenantID, subscriptionID, input)
+	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	return s.store.AddItem(ctx, tenantID, domain.SubscriptionItem{
 		SubscriptionID: subscriptionID,
@@ -1156,60 +1191,15 @@ func (s *Service) AddItem(ctx context.Context, tenantID, subscriptionID string, 
 
 // AddItemTx is the in-transaction variant used by the handler's atomic
 // AddItem-with-proration flow. Runs the same validation as AddItem
-// (required fields, status gate, mixed-interval guard) but writes the
-// item via the store's AddItemTx so the insert shares the caller's tx.
-// Without this, the item committed in its own tx and a subsequent
-// proration failure left an orphan item (the bug fixed by ADR-030
-// atomic-proration follow-through, 2026-05-29).
+// (validateAddItem) but writes the item via the store's AddItemTx so the
+// insert shares the caller's tx. Without this, the item committed in its
+// own tx and a subsequent proration failure left an orphan item (the bug
+// fixed by ADR-030 atomic-proration follow-through, 2026-05-29).
 func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, input AddItemInput) (domain.SubscriptionItem, error) {
-	if input.PlanID == "" {
-		return domain.SubscriptionItem{}, errs.Required("plan_id")
-	}
-	qty := input.Quantity
-	if qty == 0 {
-		qty = 1
-	}
-	if qty < 1 {
-		return domain.SubscriptionItem{}, errs.Invalid("quantity", "must be >= 1")
-	}
-
-	// Re-read sub for status + mixed-interval guard. The reads happen
-	// in their own tx via store.Get (a snapshot of the pre-tx state is
-	// fine for guard checks — concurrent mutations on the same sub
-	// would race regardless, and the unique index on (sub, plan) is
-	// the real correctness gate at write time).
-	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
+	qty, err := s.validateAddItem(ctx, tenantID, subscriptionID, input)
 	if err != nil {
 		return domain.SubscriptionItem{}, err
 	}
-	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
-		return domain.SubscriptionItem{}, errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
-	}
-
-	if s.plans != nil && len(sub.Items) > 0 {
-		newPlusExisting := append([]domain.SubscriptionItem{{PlanID: input.PlanID}}, sub.Items...)
-		if err := s.rejectMixedItemIntervals(ctx, tenantID, newPlusExisting); err != nil {
-			return domain.SubscriptionItem{}, err
-		}
-	}
-
-	// Double-billing guard — same as the non-Tx AddItem. Runs its own
-	// read tx (like the sub re-read above); the unique index stays the
-	// write-time gate for same-plan duplicates.
-	if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, "", []string{input.PlanID}); err != nil {
-		return domain.SubscriptionItem{}, err
-	}
-	// Currency pin (ADR-100) — same as the non-Tx AddItem.
-	{
-		pin := []string{input.PlanID}
-		for _, it := range sub.Items {
-			pin = append(pin, it.PlanID)
-		}
-		if err := s.rejectCurrencyMismatch(ctx, tenantID, sub.CustomerID, subscriptionID, pin, ""); err != nil {
-			return domain.SubscriptionItem{}, err
-		}
-	}
-
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
 	return s.store.AddItemTx(ctx, tx, tenantID, domain.SubscriptionItem{
 		SubscriptionID: subscriptionID,
