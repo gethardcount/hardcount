@@ -36,6 +36,9 @@ type fakeRefunder struct {
 	// Stripe". A test passes a context's cancel func to end the caller's
 	// context in the middle of the call.
 	duringCreate func()
+	// afterAnswer runs once Stripe has made the refund and answered, just
+	// before CreateRefund returns: the caller's context can end right then.
+	afterAnswer func()
 }
 
 type fakeRefundCall struct {
@@ -72,6 +75,9 @@ func (f *fakeRefunder) CreateRefund(ctx context.Context, paymentIntentID string,
 	status := f.returnStatus
 	if status == "" {
 		status = domain.RefundSucceeded
+	}
+	if f.afterAnswer != nil {
+		f.afterAnswer()
 	}
 	return fmt.Sprintf("re_fake_%d", len(f.calls)), status, nil
 }

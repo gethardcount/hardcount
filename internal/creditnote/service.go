@@ -95,9 +95,10 @@ func refundOutcomeUnknown(err error) bool {
 }
 
 // refundRequestNotRun reports whether a CreateRefund error says Stripe ran
-// nothing for the request: it refused the API key before running it (a
-// 401 invalid key, a 403 key without refund permission), or nothing was sent. Stripe saves no result for such a
-// request (https://docs.stripe.com/error-low-level#content-errors), so when
+// nothing for the request: it refused the API key before running it (a 401
+// invalid key, a 403 key without refund permission), or nothing was sent.
+// Stripe saves no result for such a request
+// (https://docs.stripe.com/error-low-level#content-errors), so when
 // RetryRefund resends an unclear request, this error says nothing about that
 // earlier request.
 func refundRequestNotRun(err error) bool {
@@ -125,8 +126,11 @@ func (e *refundStillUnknownError) OperatorErrorCode() string { return "payment_o
 // no recorded outcome.
 func issueRefundKey(creditNoteID string) string { return "velox_cn_" + creditNoteID }
 
-// refundOutcomeWriteTimeout bounds the database work that records what a
-// Stripe refund call did, once it runs detached (afterRefundCall).
+// refundOutcomeWriteTimeout bounds the work that records what a Stripe refund
+// call did, once it runs detached (afterRefundCall): the database write and,
+// after a resend, the read of the refund's current status at Stripe. If the
+// limit runs out, nothing is recorded and the note keeps its status, which
+// the next retry settles by search or by the same resend.
 const refundOutcomeWriteTimeout = 10 * time.Second
 
 // afterRefundCall is the context for recording what a Stripe refund call

@@ -370,6 +370,36 @@ func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
 		}
 	})
 
+	t.Run("Retry refund records a refund Stripe made just before the request ended", func(t *testing.T) {
+		t.Parallel()
+		svc, store, _, refunder := setupRefundSvc(t)
+		cn, err := store.Create(context.Background(), "t1", domain.CreditNote{
+			TenantID: "t1", InvoiceID: "inv_paid", CustomerID: "cus_1",
+			CreditNoteNumber: "CN-RETRY-LATE-ANSWER", Status: domain.CreditNoteIssued,
+			Reason: "retry", SubtotalCents: 5000, TotalCents: 5000,
+			RefundAmountCents: 5000, Currency: "USD", RefundStatus: domain.RefundFailed,
+		})
+		if err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		svc.SetAuditLogger(ctxAudit{})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		refunder.afterAnswer = cancel
+
+		out, err := svc.RetryRefund(ctx, "t1", cn.ID)
+		if err != nil {
+			t.Fatalf("RetryRefund: %v (want the note with the refund Stripe made)", err)
+		}
+		got := store.notes[cn.ID]
+		if got.RefundStatus != domain.RefundSucceeded || got.StripeRefundID != "re_fake_1" {
+			t.Fatalf("stored refund leg = (%q, %q), want (succeeded, re_fake_1)", got.RefundStatus, got.StripeRefundID)
+		}
+		if out.StripeRefundID != "re_fake_1" {
+			t.Fatalf("returned refund id = %q, want re_fake_1", out.StripeRefundID)
+		}
+	})
+
 	t.Run("Issue records unknown with its key and returns the issued note", func(t *testing.T) {
 		t.Parallel()
 		svc, store, _, refunder := setupRefundSvc(t)
