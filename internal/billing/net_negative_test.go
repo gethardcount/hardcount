@@ -39,17 +39,55 @@ func netNegativeRows(t *testing.T, a *fakeEngineAudit) []auditRow {
 // noteMeters returns the meter_id → quantity pairs of one row's metadata.
 func noteMeters(t *testing.T, r auditRow) map[string]string {
 	t.Helper()
-	ms, ok := r.entry.Metadata["meters"].([]map[string]any)
-	if !ok {
-		t.Fatalf("meters metadata: got %T, want []map[string]any", r.entry.Metadata["meters"])
-	}
 	out := map[string]string{}
-	for _, m := range ms {
-		id, _ := m["meter_id"].(string)
+	for id, m := range noteMeterEntries(t, r) {
 		qty, _ := m["quantity"].(string)
 		out[id] = qty
 	}
 	return out
+}
+
+// noteMeterEntries returns one row's meters entries by meter_id.
+func noteMeterEntries(t *testing.T, r auditRow) map[string]map[string]any {
+	t.Helper()
+	ms, ok := r.entry.Metadata["meters"].([]map[string]any)
+	if !ok {
+		t.Fatalf("meters metadata: got %T, want []map[string]any", r.entry.Metadata["meters"])
+	}
+	out := map[string]map[string]any{}
+	for _, m := range ms {
+		id, _ := m["meter_id"].(string)
+		out[id] = m
+	}
+	return out
+}
+
+// wantNoteWindow checks the window one meter's usage below zero was priced
+// over, as the row records it.
+func wantNoteWindow(t *testing.T, r auditRow, meterID string, from, to time.Time) {
+	t.Helper()
+	m, ok := noteMeterEntries(t, r)[meterID]
+	if !ok {
+		t.Fatalf("row has no entry for %s", meterID)
+	}
+	if got, want := m["from"], from.UTC().Format(time.RFC3339); got != want {
+		t.Errorf("%s from = %v, want %s (the window the invoice priced)", meterID, got, want)
+	}
+	if got, want := m["to"], to.UTC().Format(time.RFC3339); got != want {
+		t.Errorf("%s to = %v, want %s", meterID, got, want)
+	}
+}
+
+// meterBilled sums the quantity and amount of one meter's invoice lines.
+func meterBilled(lines []domain.InvoiceLineItem, meterID string) (decimal.Decimal, int64) {
+	qty, amount := decimal.Zero, int64(0)
+	for _, li := range lines {
+		if li.MeterID == meterID {
+			qty = qty.Add(li.QuantityDecimal)
+			amount += li.AmountCents
+		}
+	}
+	return qty, amount
 }
 
 // A single-rule meter whose period total is -50 bills nothing; the base fee
@@ -292,4 +330,311 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 	if got := rows[0].entry.Metadata["invoice_id"]; got != inv.ID {
 		t.Errorf("invoice_id = %v, want %s", got, inv.ID)
 	}
+}
+
+// capTokensMeter makes mtr_tok a meter priced by two pricing rules at 1¢ a
+// token, with buckets of +150 (rrv_in) and -50 (rrv_out). Its total nets the
+// two to +100; the invoice bills the +150 bucket only.
+func capTokensMeter(pricing *mockPricing, usage *mockUsage) {
+	pricing.meters["mtr_tok"] = domain.Meter{ID: "mtr_tok", Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"}
+	pricing.rules["rrv_in"] = domain.RatingRuleVersion{ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)}
+	pricing.rules["rrv_out"] = domain.RatingRuleVersion{ID: "rrv_out", RuleKey: "tok_out", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)}
+	pricing.meterPricingRules = map[string][]domain.MeterPricingRule{
+		"mtr_tok": {
+			{ID: "mpr_in", MeterID: "mtr_tok", RatingRuleVersionID: "rrv_in", DimensionMatch: map[string]any{"type": "in"}},
+			{ID: "mpr_out", MeterID: "mtr_tok", RatingRuleVersionID: "rrv_out", DimensionMatch: map[string]any{"type": "out"}},
+		},
+	}
+	usage.ruleAggs = map[string][]domain.RuleAggregation{
+		"mtr_tok": {
+			{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(150)},
+			{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(-50)},
+		},
+	}
+	usage.totals["mtr_tok"] = 100
+}
+
+// A block usage cap totals what the invoice bills. A meter priced by pricing
+// rules bills its buckets, so its bucket below zero counts as 0 in the cap's
+// total too. Taking the meter's total (+100) instead put the scale at 80/100
+// and billed 120 tokens against a cap of 80.
+func TestRunCycle_NetNegativeBucket_UsageCapCountsWhatBills(t *testing.T) {
+	engine, subs, usage, pricing, invoices := setupEngine()
+	aud := &fakeEngineAudit{}
+	engine.SetAuditLogger(aud)
+	sub := subs.subs["sub_1"]
+	capUnits := int64(80)
+	sub.UsageCapUnits = &capUnits
+	sub.OverageAction = "block"
+	subs.subs["sub_1"] = sub
+	plan := pricing.plans["pln_1"]
+	plan.MeterIDs = []string{"mtr_tok"}
+	pricing.plans["pln_1"] = plan
+	usage.totals = map[string]int64{}
+	capTokensMeter(pricing, usage)
+
+	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+		t.Fatalf("RunCycle errors: %v", errs)
+	}
+	qty, amount := meterBilled(invoices.lineItems, "mtr_tok")
+	if !qty.Round(6).Equal(decimal.NewFromInt(80)) || amount != 80 {
+		t.Errorf("block cap 80: tokens billed %s for %d¢, want 80 for 80¢", qty, amount)
+	}
+	rows := netNegativeRows(t, aud)
+	if len(rows) != 1 {
+		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+	}
+	if got := noteMeters(t, rows[0]); got["mtr_tok"] != "-50" {
+		t.Errorf("meters = %v, want mtr_tok: -50 (the cap does not scale usage below zero)", got)
+	}
+}
+
+// The cancel's final invoice: the same cap total as the period close.
+func TestBillFinalOnImmediateCancel_NetNegativeBucket_UsageCapCountsWhatBills(t *testing.T) {
+	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	capUnits := int64(80)
+	sub := domain.Subscription{
+		ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", Code: "neg",
+		Status:                    domain.SubscriptionCanceled,
+		Items:                     []domain.SubscriptionItem{{ID: "si_1", PlanID: "pln_1", Quantity: 1}},
+		CurrentBillingPeriodStart: &periodStart,
+		CurrentBillingPeriodEnd:   &periodEnd,
+		CanceledAt:                &cancelAt,
+		UsageCapUnits:             &capUnits,
+		OverageAction:             "block",
+	}
+	pricing := &mockPricing{
+		plans: map[string]domain.Plan{
+			"pln_1": {ID: "pln_1", Name: "P", Currency: "USD", BillingInterval: domain.BillingMonthly,
+				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_tok"}},
+		},
+		meters: map[string]domain.Meter{},
+		rules:  map[string]domain.RatingRuleVersion{},
+	}
+	usage := &mockUsage{totals: map[string]int64{}}
+	capTokensMeter(pricing, usage)
+	invoices := &mockInvoices{}
+	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
+	aud := &fakeEngineAudit{}
+	engine.SetAuditLogger(aud)
+
+	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
+	}
+	if inv.SubtotalCents != 80 {
+		t.Errorf("subtotal = %d, want 80 (80 tokens at the block cap)", inv.SubtotalCents)
+	}
+	rows := netNegativeRows(t, aud)
+	if len(rows) != 1 {
+		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+	}
+	if got := noteMeters(t, rows[0]); got["mtr_tok"] != "-50" {
+		t.Errorf("meters = %v, want mtr_tok: -50 (the cap does not scale usage below zero)", got)
+	}
+}
+
+// Cycle close, cap re-derivation in buildLineItems: a pricing-rule meter is
+// priced from raw buckets x the re-derived capScale, so the re-derivation
+// must count a meter below zero as 0 too.
+func TestRunCycle_NetNegativeMeter_CapRederivationCountsItAsZero(t *testing.T) {
+	engine, subs, usage, pricing, invoices := setupEngine()
+	sub := subs.subs["sub_1"]
+	capUnits := int64(80)
+	sub.UsageCapUnits = &capUnits
+	sub.OverageAction = "block"
+	subs.subs["sub_1"] = sub
+	plan := pricing.plans["pln_1"]
+	plan.MeterIDs = []string{"mtr_api", "mtr_tok"}
+	pricing.plans["pln_1"] = plan
+	pricing.meters["mtr_tok"] = domain.Meter{ID: "mtr_tok", Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"}
+	pricing.rules["rrv_in"] = domain.RatingRuleVersion{ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)}
+	pricing.meterPricingRules = map[string][]domain.MeterPricingRule{
+		"mtr_tok": {{ID: "mpr_in", MeterID: "mtr_tok", RatingRuleVersionID: "rrv_in"}},
+	}
+	usage.ruleAggs = map[string][]domain.RuleAggregation{
+		"mtr_tok": {{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(150)}},
+	}
+	delete(usage.totals, "mtr_storage")
+	usage.totals["mtr_tok"] = 150
+	usage.totals["mtr_api"] = -50
+
+	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+		t.Fatalf("RunCycle errors: %v", errs)
+	}
+	if billed, _ := meterBilled(invoices.lineItems, "mtr_tok"); !billed.Round(6).Equal(decimal.NewFromInt(80)) {
+		t.Errorf("block cap 80: tokens billed %s, want 80", billed)
+	}
+}
+
+// Cancel final invoice: its cap total counts a meter below zero as 0, and the
+// row reports that meter's own quantity, not a cap-scaled share of it.
+func TestBillFinalOnImmediateCancel_NetNegativeMeter_UsageCapCountsItAsZero(t *testing.T) {
+	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	capUnits := int64(80)
+	sub := domain.Subscription{
+		ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", Code: "neg",
+		Status:                    domain.SubscriptionCanceled,
+		Items:                     []domain.SubscriptionItem{{ID: "si_1", PlanID: "pln_1", Quantity: 1}},
+		CurrentBillingPeriodStart: &periodStart,
+		CurrentBillingPeriodEnd:   &periodEnd,
+		CanceledAt:                &cancelAt,
+		UsageCapUnits:             &capUnits,
+		OverageAction:             "block",
+	}
+	pricing := &mockPricing{
+		plans: map[string]domain.Plan{
+			"pln_1": {ID: "pln_1", Name: "P", Currency: "USD", BillingInterval: domain.BillingMonthly,
+				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api", "mtr_storage"}},
+		},
+		meters: map[string]domain.Meter{
+			"mtr_api":     {ID: "mtr_api", Key: "api_calls", Name: "API", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+			"mtr_storage": {ID: "mtr_storage", Key: "storage", Name: "Storage", Unit: "GB", Aggregation: "sum", RatingRuleVersionID: "rrv_storage"},
+		},
+		rules: map[string]domain.RatingRuleVersion{
+			"rrv_api":     {ID: "rrv_api", RuleKey: "api", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)},
+			"rrv_storage": {ID: "rrv_storage", RuleKey: "storage", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(100)},
+		},
+	}
+	usage := &mockUsage{totals: map[string]int64{"mtr_storage": 150, "mtr_api": -50}}
+	invoices := &mockInvoices{}
+	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
+	aud := &fakeEngineAudit{}
+	engine.SetAuditLogger(aud)
+
+	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
+	}
+	if inv.SubtotalCents != 8000 {
+		t.Errorf("subtotal = %d, want 8000 (80 GB at the block cap)", inv.SubtotalCents)
+	}
+	rows := netNegativeRows(t, aud)
+	if len(rows) != 1 {
+		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+	}
+	if got := noteMeters(t, rows[0]); got["mtr_api"] != "-50" {
+		t.Errorf("meters = %v, want mtr_api: -50 (the cap does not scale usage below zero)", got)
+	}
+}
+
+// After a spend-threshold invoice (reset_billing_cycle=false) the close
+// prices usage from that invoice's end, so the -40 is the net of
+// [Apr 10, May 1), not of the whole period. The row names that window for
+// each meter: it is the range of events that netted below zero.
+func TestCycleClose_AfterThresholdFire_NetNegativeRowNamesItsWindow(t *testing.T) {
+	_, usage, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: false})
+	seedThresholdInvoice(invoices, domain.InvoiceFinalized)
+	aud := &fakeEngineAudit{}
+	engine.SetAuditLogger(aud)
+	fireEnd := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	usage.perInterval[mockIntervalKey("mtr_api", fireEnd, periodEnd)] = -40
+
+	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+		t.Fatalf("RunCycle errors: %v", errs)
+	}
+	rows := netNegativeRows(t, aud)
+	if len(rows) != 1 {
+		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+	}
+	if got := noteMeters(t, rows[0]); got["mtr_api"] != "-40" {
+		t.Errorf("meters = %v, want mtr_api: -40", got)
+	}
+	wantNoteWindow(t, rows[0], "mtr_api", fireEnd, periodEnd)
+}
+
+// The same window under a block cap: a sub-period quantity is scaled by the
+// cap only when it bills, so the row keeps the -40.
+func TestCycleClose_AfterThresholdFire_NetNegativeUnderCap_RowKeepsItsQuantity(t *testing.T) {
+	subs, usage, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: false})
+	seedThresholdInvoice(invoices, domain.InvoiceFinalized)
+	aud := &fakeEngineAudit{}
+	engine.SetAuditLogger(aud)
+	sub := subs.subs["sub_1"]
+	capUnits := int64(500) // the period's 1000 calls scale by 0.5
+	sub.UsageCapUnits = &capUnits
+	sub.OverageAction = "block"
+	subs.subs["sub_1"] = sub
+	fireEnd := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	usage.perInterval[mockIntervalKey("mtr_api", fireEnd, periodEnd)] = -40
+
+	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+		t.Fatalf("RunCycle errors: %v", errs)
+	}
+	rows := netNegativeRows(t, aud)
+	if len(rows) != 1 {
+		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+	}
+	if got := noteMeters(t, rows[0]); got["mtr_api"] != "-40" {
+		t.Errorf("meters = %v, want mtr_api: -40 (the cap does not scale usage below zero)", got)
+	}
+}
+
+// The cancel after a threshold invoice prices [fire end, cancel). The row
+// names that window and keeps the quantity under a block cap.
+func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing.T) {
+	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	fireEnd := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+	cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	capUnits := int64(80)
+	sub := domain.Subscription{
+		ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", Code: "neg",
+		Status:                    domain.SubscriptionCanceled,
+		Items:                     []domain.SubscriptionItem{{ID: "si_1", PlanID: "pln_1", Quantity: 1}},
+		CurrentBillingPeriodStart: &periodStart,
+		CurrentBillingPeriodEnd:   &periodEnd,
+		CanceledAt:                &cancelAt,
+		UsageCapUnits:             &capUnits,
+		OverageAction:             "block",
+	}
+	pricing := &mockPricing{
+		plans: map[string]domain.Plan{
+			"pln_1": {ID: "pln_1", Name: "P", Currency: "USD", BillingInterval: domain.BillingMonthly,
+				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api", "mtr_storage"}},
+		},
+		meters: map[string]domain.Meter{
+			"mtr_api":     {ID: "mtr_api", Key: "api_calls", Name: "API", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+			"mtr_storage": {ID: "mtr_storage", Key: "storage", Name: "Storage", Unit: "GB", Aggregation: "sum", RatingRuleVersionID: "rrv_storage"},
+		},
+		rules: map[string]domain.RatingRuleVersion{
+			"rrv_api":     {ID: "rrv_api", RuleKey: "api", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)},
+			"rrv_storage": {ID: "rrv_storage", RuleKey: "storage", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(100)},
+		},
+	}
+	usage := &mockUsage{
+		// [Mar 1, Mar 15): 150 GB, so the cap of 80 scales by 80/150.
+		totals: map[string]int64{"mtr_storage": 150},
+		perInterval: map[string]int64{
+			mockIntervalKey("mtr_storage", fireEnd, cancelAt): 30,
+			mockIntervalKey("mtr_api", fireEnd, cancelAt):     -40,
+		},
+	}
+	invoices := &mockInvoices{invoices: []domain.Invoice{{
+		ID: "inv_thr", TenantID: "t1", CustomerID: "cus_1", SubscriptionID: "sub_1",
+		InvoiceNumber: "VLX-THR-1", BillingReason: domain.BillingReasonThreshold,
+		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentSucceeded,
+		BillingPeriodStart: periodStart, BillingPeriodEnd: fireEnd,
+	}}}
+	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
+	aud := &fakeEngineAudit{}
+	engine.SetAuditLogger(aud)
+
+	if _, err := engine.BillFinalOnImmediateCancel(context.Background(), sub); err != nil {
+		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
+	}
+	rows := netNegativeRows(t, aud)
+	if len(rows) != 1 {
+		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+	}
+	if got := noteMeters(t, rows[0]); got["mtr_api"] != "-40" {
+		t.Errorf("meters = %v, want mtr_api: -40 (the cap does not scale usage below zero)", got)
+	}
+	wantNoteWindow(t, rows[0], "mtr_api", fireEnd, cancelAt)
 }

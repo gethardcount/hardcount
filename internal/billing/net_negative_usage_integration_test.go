@@ -55,6 +55,22 @@ func noteQuantities(t *testing.T, e domain.AuditEntry) map[string]string {
 	return out
 }
 
+// noteFrom returns the start of the window one meter's usage below zero was
+// priced over, from one row's metadata.
+func noteFrom(t *testing.T, e domain.AuditEntry, meterKey string) string {
+	t.Helper()
+	ms, _ := e.Metadata["meters"].([]any)
+	for _, m := range ms {
+		mm, _ := m.(map[string]any)
+		if mm["meter_key"] == meterKey {
+			from, _ := mm["from"].(string)
+			return from
+		}
+	}
+	t.Fatalf("row has no entry for %s: %v", meterKey, e.Metadata["meters"])
+	return ""
+}
+
 // seatsMeter creates a single-rule sum meter priced at 5c a seat.
 func seatsMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key string) domain.Meter {
 	t.Helper()
@@ -266,6 +282,9 @@ func TestNetNegativeUsage_ThresholdFire_RecordedOnce(t *testing.T) {
 	if notes[0].Metadata["invoice_id"] != fire.ID || notes[0].Metadata["billing_reason"] != string(domain.BillingReasonThreshold) {
 		t.Errorf("row metadata = %v, want invoice_id %s and billing_reason threshold", notes[0].Metadata, fire.ID)
 	}
+	if from := noteFrom(t, notes[0], "tok_thr"); from != f.cycleStart.UTC().Format(time.RFC3339) {
+		t.Errorf("tok_thr from = %q, want the period start %s (the fire priced the period so far)", from, f.cycleStart.UTC().Format(time.RFC3339))
+	}
 
 	time.Sleep(10 * time.Millisecond)
 	endPeriodNow(t, ctx, f, subID)
@@ -274,5 +293,63 @@ func TestNetNegativeUsage_ThresholdFire_RecordedOnce(t *testing.T) {
 	}
 	if n := len(netNegativeNotes(t, ctx, logger, f.tenantID, subID)); n != 1 {
 		t.Fatalf("after the close: rows = %d, want 1 (the close bills only after the fire)", n)
+	}
+}
+
+// TestNetNegativeUsage_CycleClose_UsageCapCountsWhatBills: a block usage cap
+// totals what the close bills. The tokens meter's model=a bucket is +150 and
+// its bucket of events no rule matched is -50, so the meter's total is +100.
+// The invoice bills the +150 bucket only; with a cap of 80 it must bill 80
+// tokens, not 120 (the +150 bucket scaled by 80/100).
+func TestNetNegativeUsage_CycleClose_UsageCapCountsWhatBills(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: skipped in -short mode")
+	}
+	f := newThresholdFixture(t, "Net Negative Cap")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
+	defer cancel()
+	logger := audit.NewLogger(f.db)
+	f.engine.SetAuditLogger(logger)
+
+	tokens := tokensMeter(t, ctx, f, "tok_cap")
+	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+		Code: "pln_neg_cap", Name: "Neg cap", Currency: "USD",
+		BillingInterval: domain.BillingMonthly, MeterIDs: []string{tokens.ID},
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	custID, subID := seedUnpricedSub(t, ctx, f, "cus_neg_cap", plan.ID, 0)
+	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET usage_cap_units = 80, overage_action = 'block' WHERE id = $1`, subID); err != nil {
+		postgres.Rollback(tx)
+		t.Fatalf("set cap: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	ingestUnpricedAt(t, ctx, f, custID, tokens.ID, 150, f.cycleStart.Add(time.Minute), map[string]any{"model": "a"})
+	ingestUnpricedAt(t, ctx, f, custID, tokens.ID, -50, f.cycleStart.Add(2*time.Minute), map[string]any{"model": "b"})
+
+	endPeriodNow(t, ctx, f, subID)
+	if _, failures := f.engine.RunCycleForTenant(ctx, f.tenantID, 50); len(failures) > 0 {
+		t.Fatalf("cycle failures: %v", failures)
+	}
+	invs, _, err := f.invStore.List(ctx, invoice.ListFilter{TenantID: f.tenantID, SubscriptionID: subID})
+	if err != nil || len(invs) != 1 {
+		t.Fatalf("invoices = %d (err %v), want 1", len(invs), err)
+	}
+	if invs[0].SubtotalCents != 80 {
+		t.Errorf("subtotal = %d, want 80 (80 tokens at the block cap of 80)", invs[0].SubtotalCents)
+	}
+	notes := netNegativeNotes(t, ctx, logger, f.tenantID, subID)
+	if len(notes) != 1 {
+		t.Fatalf("net-negative rows = %d, want 1", len(notes))
+	}
+	if got := noteQuantities(t, notes[0]); got["tok_cap"] != "-50" {
+		t.Errorf("meters = %v, want tok_cap: -50", got)
 	}
 }
