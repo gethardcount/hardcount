@@ -39,13 +39,14 @@ type intervalSubCtx struct {
 	loc         *time.Location
 }
 
-// intervalSubContext loads the policy context FOR SHARE: item-level
-// writers hold a share lock on the subscription row for the rest of
-// their tx, so a concurrent cancel (which takes the exclusive row lock
-// first, via its status UPDATE) serializes against them — an item
+// intervalSubContext loads the policy context FOR SHARE. Every item writer
+// already holds the subscription row FOR NO KEY UPDATE from its first
+// statement (lockSubscriptionRow, #1270), so a concurrent cancel (which
+// takes the row via its status UPDATE) serializes against it: an item
 // mutation can't thread an open interval under a committing cancel's
-// close-all sweep. Lock order everywhere is subscription row → interval
-// rows, so the share lock adds no deadlock cycle.
+// close-all sweep. The share lock here is then the tx's own row and does
+// not wait. Lock order everywhere is subscription row → item rows →
+// interval rows.
 func intervalSubContext(ctx context.Context, tx *sql.Tx, subscriptionID string) (intervalSubCtx, error) {
 	ic := intervalSubCtx{subID: subscriptionID}
 	var status, tz string

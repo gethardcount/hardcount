@@ -1148,9 +1148,11 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture the pre-change item/plan only when we're about to drive proration
-	// — the old plan id, old quantity, and the subscription's remaining period
-	// all come from a snapshot taken before UpdateItem mutates the row.
+	// Read the item and subscription only when the change may prorate. On the
+	// atomic path this read only routes the request (does it prorate, is it a
+	// cross-interval swap); the proration is priced from the state
+	// UpdateItemTx reads under the subscription row lock (#1270). Only the
+	// legacy path with no database wired prices from this read.
 	var oldPlanID string
 	var oldQuantity int64
 	var prorationRemainingDays, prorationTotalDays int64
@@ -1232,10 +1234,14 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		atomicErr error
 	)
 	if atomic {
-		result, atomicErr = h.atomicUpdateItemWithProration(ctx, tenantID, subID, itemID, input, subBefore, oldPlanID, oldQuantity, prorationRemainingDays, prorationTotalDays)
+		result, atomicErr = h.atomicUpdateItemWithProration(ctx, tenantID, subID, itemID, input)
 		if errors.Is(atomicErr, errAtomicNotApplicable) {
 			atomic = false
 			atomicErr = nil
+		}
+		if atomicErr == nil && result.pricedFrom.item.ID != "" {
+			// The plan the change moved from, read under the lock (#1270).
+			oldPlanID = result.pricedFrom.item.PlanID
 		}
 	}
 	if !atomic {
@@ -1453,10 +1459,11 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture the pre-delete item + sub for proration. Removing mid-period
-	// should credit back the unused portion of what the customer already paid
-	// for this item. RemoveItem is a hard delete so the snapshot must be
-	// taken before the call.
+	// Read the item and subscription to decide whether the removal credits
+	// the unused portion of what the customer already paid for this item. On
+	// the atomic path the credit is priced from the state RemoveItemTx reads
+	// under the subscription row lock (#1270); only the legacy path with no
+	// database wired prices from this read.
 	var removedPlanID string
 	var removedQuantity int64
 	var subBefore domain.Subscription
@@ -1492,12 +1499,14 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	atomic := h.db != nil && wantProration
 	var removeProration *ProrationDetail
 	if atomic {
-		detail, err := h.atomicRemoveItemWithProration(ctx, tenantID, subID, itemID, subBefore, removedPlanID, removedQuantity, prorationRemainingDays, prorationTotalDays)
+		removed, detail, err := h.atomicRemoveItemWithProration(ctx, tenantID, subID, itemID)
 		if err != nil {
 			respond.FromError(w, r, err, "subscription item")
 			return
 		}
 		removeProration = detail
+		// The plan the removal credited, read under the lock (#1270).
+		removedPlanID = removed.PlanID
 	} else {
 		if err := h.svc.RemoveItem(ctx, tenantID, subID, itemID); err != nil {
 			respond.FromError(w, r, err, "subscription item")
@@ -1698,13 +1707,16 @@ func (h *Handler) atomicAddItemWithProration(
 // proration in the same tx, commit on success. Returns
 // errAtomicNotApplicable if the input routes to the cross-interval or
 // scheduled path (caller falls back to legacy non-atomic flow).
+//
+// The proration is priced from result.pricedFrom: the subscription and the
+// item as UpdateItemTx read them under the subscription row lock (#1270).
+// Never from updateItem's read before the tx, which a change to the same
+// item that committed in between makes stale: two overlapping changes would
+// both be priced from the state they started from.
 func (h *Handler) atomicUpdateItemWithProration(
 	ctx context.Context,
 	tenantID, subID, itemID string,
 	input UpdateItemInput,
-	subBefore domain.Subscription,
-	oldPlanID string, oldQuantity int64,
-	remainingDays, totalDays int64,
 ) (ItemChangeResult, error) {
 	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1716,6 +1728,7 @@ func (h *Handler) atomicUpdateItemWithProration(
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
+	base := result.pricedFrom
 
 	// Cross-interval swap: UpdateItemTx restructured the cycle atomically on
 	// this tx (plan write + watermark + new in_advance invoice). It did its OWN
@@ -1727,11 +1740,11 @@ func (h *Handler) atomicUpdateItemWithProration(
 		if err := tx.Commit(); err != nil {
 			return ItemChangeResult{}, fmt.Errorf("commit atomic cross-interval swap tx: %w", err)
 		}
-		h.svc.FinalizeCrossIntervalSwap(ctx, tenantID, subBefore, result)
+		h.svc.FinalizeCrossIntervalSwap(ctx, tenantID, base.sub, result)
 		return result, nil
 	}
 
-	// Build the proration spec mirroring the legacy handler logic.
+	remainingDays, totalDays := remainingPeriodRatio(base.sub, result.EffectiveAt)
 	var spec itemProrationSpec
 	if input.NewPlanID != "" && input.Immediate {
 		var changeAt time.Time
@@ -1746,7 +1759,7 @@ func (h *Handler) atomicUpdateItemWithProration(
 			remainingDays: remainingDays,
 			totalDays:     totalDays,
 			itemID:        result.Item.ID,
-			oldPlanID:     oldPlanID,
+			oldPlanID:     base.item.PlanID,
 			oldQuantity:   result.Item.Quantity,
 			newPlanID:     result.Item.PlanID,
 			newQuantity:   result.Item.Quantity,
@@ -1762,13 +1775,13 @@ func (h *Handler) atomicUpdateItemWithProration(
 			remainingDays: remainingDays,
 			totalDays:     totalDays,
 			itemID:        result.Item.ID,
-			oldPlanID:     oldPlanID,
-			oldQuantity:   oldQuantity,
+			oldPlanID:     base.item.PlanID,
+			oldQuantity:   base.item.Quantity,
 			newPlanID:     result.Item.PlanID,
 			newQuantity:   result.Item.Quantity,
 		}
 	}
-	detail, err := h.handleItemProration(ctx, tenantID, subBefore, spec, tx)
+	detail, err := h.handleItemProration(ctx, tenantID, base.sub, spec, tx)
 	if err != nil {
 		// A deliberate ADR-050 block (charge against an unpaid source) is an
 		// operator-facing 409, not an internal failure — pass it through
@@ -1816,37 +1829,46 @@ func (h *Handler) atomicUpdateItemWithProration(
 // side rolls back the item delete — customer keeps the item (and its
 // future cycle billing) but at least there's no orphan-credit gap.
 // ADR-030 atomic-proration follow-through (2026-05-29).
+//
+// The credit is priced from the item and subscription RemoveItemTx read
+// under the subscription row lock (#1270), so a quantity change that
+// committed while this request was reading is credited too. Returns the
+// item as it was removed.
 func (h *Handler) atomicRemoveItemWithProration(
 	ctx context.Context,
 	tenantID, subID, itemID string,
-	subBefore domain.Subscription,
-	oldPlanID string, oldQuantity int64,
-	remainingDays, totalDays int64,
-) (*ProrationDetail, error) {
+) (domain.SubscriptionItem, *ProrationDetail, error) {
 	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("begin atomic removeItem tx: %w", err)
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("begin atomic removeItem tx: %w", err)
 	}
 	defer postgres.Rollback(tx)
 
-	if err := h.svc.RemoveItemTx(ctx, tx, tenantID, subID, itemID); err != nil {
-		return nil, err
+	result, err := h.svc.RemoveItemTx(ctx, tx, tenantID, subID, itemID)
+	if err != nil {
+		return domain.SubscriptionItem{}, nil, err
 	}
+	base := result.pricedFrom
 
+	// Only an active subscription's unused prebill is credited.
+	var remainingDays, totalDays int64
+	if base.sub.Status == domain.SubscriptionActive {
+		remainingDays, totalDays = remainingPeriodRatio(base.sub, result.EffectiveAt)
+	}
 	spec := itemProrationSpec{
 		changeType:    domain.ItemChangeTypeRemove,
-		changeAt:      clock.Now(ctx),
+		changeAt:      result.EffectiveAt,
 		remainingDays: remainingDays,
 		totalDays:     totalDays,
 		itemID:        itemID,
-		oldPlanID:     oldPlanID,
-		oldQuantity:   oldQuantity,
+		oldPlanID:     base.item.PlanID,
+		oldQuantity:   base.item.Quantity,
 		newPlanID:     "",
 		newQuantity:   0,
 	}
-	detail, err := h.handleItemProration(ctx, tenantID, subBefore, spec, tx)
+	detail, err := h.handleItemProration(ctx, tenantID, base.sub, spec, tx)
 	if err != nil {
-		return nil, fmt.Errorf("proration in atomic removeItem tx: %w", err)
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("proration in atomic removeItem tx: %w", err)
 	}
 
 	// Create the item-removal clawback credit-note DRAFT(s) IN this tx so the
@@ -1855,10 +1877,10 @@ func (h *Handler) atomicRemoveItemWithProration(
 	// "a credit failure rolls back the delete" contract actually hold). Issued
 	// post-commit below.
 	if err := h.createClawbackDraftsTx(ctx, tx, tenantID, detail); err != nil {
-		return nil, fmt.Errorf("create clawback draft in atomic removeItem tx: %w", err)
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("create clawback draft in atomic removeItem tx: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit atomic removeItem tx: %w", err)
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("commit atomic removeItem tx: %w", err)
 	}
 	// Remove proration is a credit (no invoice/tax) so commitProrationTax
 	// no-ops, but keep the post-tx commit uniform across the atomic wrappers.
@@ -1870,7 +1892,7 @@ func (h *Handler) atomicRemoveItemWithProration(
 	h.issueClawbackDrafts(ctx, tenantID, detail)
 	// Return the credit detail so removeItem's audit row can show the
 	// clawback amount (see atomicUpdateItemWithProration).
-	return detail, nil
+	return base.item, detail, nil
 }
 
 // commitProrationTax turns the proration invoice's provider tax calculation

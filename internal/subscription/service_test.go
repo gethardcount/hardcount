@@ -589,6 +589,13 @@ func (m *memStore) ListItems(ctx context.Context, tenantID, subscriptionID strin
 	return m.hydrateItems(subscriptionID), nil
 }
 
+// LockForItemChangeTx: the in-memory store has no locks or transactions, so
+// it returns the subscription as Get does. The lock is proven against real
+// Postgres in item_change_race_integration_test.go.
+func (m *memStore) LockForItemChangeTx(ctx context.Context, _ *sql.Tx, tenantID, subscriptionID string) (domain.Subscription, error) {
+	return m.Get(ctx, tenantID, subscriptionID)
+}
+
 func (m *memStore) GetItem(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {
 	it, ok := m.items[itemID]
 	if !ok || it.TenantID != tenantID {
