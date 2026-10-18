@@ -158,7 +158,7 @@ What changes:
 
 The "Do NOT build" list above rules out Redis as a hard dependency for throttling. Production already has one. Since #863 (2026-08-30), a production copy refuses to start without a reachable Redis (`internal/config/config.go`, `cmd/velox/main.go`), because the general and hosted-invoice limiters refuse every request without it. Sign-in was the other way round: its per-address limiter let every request through while Redis was down, so an outage made password guessing unlimited.
 
-Fixed in #PRNUM. The per-address limiter on `/v1/auth` now behaves like this:
+Fixed in #1255. The per-address limiter on `/v1/auth` now behaves like this:
 
 | Redis | What the sign-in limiter does |
 |---|---|

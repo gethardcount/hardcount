@@ -28,7 +28,7 @@ original text.
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
 - **A password on the built-in leaked-password list is refused when it is set ([#1222](https://github.com/getvelox/velox/pull/1222)).** Passwords already in use keep working. If a script bootstraps or resets with a fixed password, check that it still works; a refused password gets a 422.
 - **In staging and production, sign in over HTTPS ([#1226](https://github.com/getvelox/velox/pull/1226)).** The sign-in cookie is now always `Secure`. Over plain HTTP only Chrome and Firefox at `http://localhost` keep it; Safari does not. A quickstart `deploy/compose/.env` written before this has no `APP_ENV`, so it runs in production mode: add `APP_ENV=local` to it, or run `./quickstart.sh destroy` and start again.
-- **Without Redis, sign-in is now rate-limited ([#PRNUM](https://github.com/getvelox/velox/pull/PRNUM)).** Outside production with no Redis, `/v1/auth` now answers 429 after `VELOX_RATE_LIMIT_GENERAL_PER_MIN` requests a minute (default 100) from one address; before, it allowed every request. A test script that signs in more often from one address needs that setting raised.
+- **Without Redis, sign-in is now rate-limited ([#1255](https://github.com/getvelox/velox/pull/1255)).** Outside production with no Redis, `/v1/auth` now answers 429 after `VELOX_RATE_LIMIT_GENERAL_PER_MIN` requests a minute (default 100) from one address; before, it allowed every request. A test script that signs in more often from one address needs that setting raised.
 
 ### Added
 
@@ -57,7 +57,7 @@ original text.
 
 ### Security
 
-- **Sign-in stays rate-limited while Redis is down (2026-10-18).** The per-address limit on `/v1/auth` used to allow every request when a Redis call failed, so an outage made password guessing unlimited. Each copy now counts in memory with the same limit until Redis answers again ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md#amendment-2026-10-18-the-sign-in-limiter-without-redis), [#PRNUM](https://github.com/getvelox/velox/pull/PRNUM)).
+- **Sign-in stays rate-limited while Redis is down (2026-10-18).** The per-address limit on `/v1/auth` used to allow every request when a Redis call failed, so an outage made password guessing unlimited. Each copy now counts in memory with the same limit until Redis answers again ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md#amendment-2026-10-18-the-sign-in-limiter-without-redis), [#1255](https://github.com/getvelox/velox/pull/1255)).
 - **The sign-in cookie is always `Secure` in staging and production (2026-10-18).** It dropped `Secure` when the browser was on plain http at localhost, for Safari on the quickstart. The quickstart now runs with `APP_ENV=local` instead. An `http://` address setting, such as `DASHBOARD_BASE_URL`, logs a start-up warning ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md) Phase 0(b), [#1226](https://github.com/getvelox/velox/pull/1226)).
 
 ## [0.8.2] - 2026-10-18
