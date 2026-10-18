@@ -8,7 +8,10 @@
 #   B  roles, then HEAD's `velox migrate` on the empty database (the
 #      baseline).
 # and compares their schema (owners and access rights included), their
-# data and their applied versions.
+# data and their applied versions. It also checks that each setup gives its
+# limited user the idle-transaction timeout (docs/ops/postgres-requirements.md,
+# "Timeouts on the limited user"). That is a role setting, which lives outside
+# the database, so the dumps cannot compare it.
 #
 #   compose  superuser velox; velox_app made by deploy/compose/postgres-init.sh
 #   managed  velox_owner, not a superuser, owns the database; the three
@@ -90,14 +93,15 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 SQL
-      # docs/ops/postgres-requirements.md, "The two database users", run
-      # as the admin user.
+      # docs/ops/postgres-requirements.md, "The two database users" and
+      # "Timeouts on the limited user", run as the admin user.
       docker exec -i "$name" psql -v ON_ERROR_STOP=1 -q -U velox_owner -d velox >&2 <<'SQL'
 CREATE ROLE velox_app WITH LOGIN PASSWORD 'velox-app-ci';
 GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
 GRANT ALL ON SCHEMA public TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
 SQL
       ;;
     citest)
@@ -137,6 +141,19 @@ dump() {
 
 versions() { q "$1" "$2" "SELECT string_agg(version_id::text, ',' ORDER BY version_id) FROM public.goose_db_version"; }
 
+# check_app_timeout CONTAINER SETUP: the limited user must start every
+# session with a 30s idle-transaction timeout, the value
+# docs/ops/postgres-requirements.md gives. Without it, a Velox process that
+# freezes mid-transaction keeps its locks until something ends the session.
+# It asks as that user, so it sees what the API's connections get.
+check_app_timeout() {
+  local c=$1 setup=$2 role=velox_app got
+  [ "$setup" = citest ] && role=velox_test_app
+  got=$(docker exec -i "$c" psql -v ON_ERROR_STOP=1 -qAt -U "$role" -d "$(dbname "$setup")" \
+        -c "SHOW idle_in_transaction_session_timeout")
+  [ "$got" = 30s ] || fail "$c: $role starts with idle_in_transaction_session_timeout = $got, want 30s"
+}
+
 # 0174's seed takes each row's token from clock_timestamp(), so the five
 # tokens can straddle a millisecond: they are checked for age, not equality.
 check_leases() {
@@ -155,6 +172,8 @@ converge() {
   start_pg "$b" "$POSTGRES16_IMAGE" "$setup"; pb=$PG_PORT
   local ua ub
   ua=$(dsn "$setup" "$pa"); ub=$(dsn "$setup" "$pb")
+  check_app_timeout "$a" "$setup"
+  check_app_timeout "$b" "$setup"
 
   echo "A: v0.8.1 migrate"
   v081_migrate "$ua"
@@ -239,6 +258,7 @@ pg14() {
   local c=mig-pg14 port url
   CONTAINERS+=("$c")
   start_pg "$c" "$POSTGRES14_IMAGE" compose; port=$PG_PORT
+  check_app_timeout "$c" compose
   url=$(dsn compose "$port")
   head_velox "$url" migrate
   head_velox "$url" migrate status | tee "$OUT/pg14-status.txt"
