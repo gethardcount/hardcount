@@ -61,12 +61,13 @@ payment failures, and the gaps still open.
 | Credit note while a charge is running | Refused while the payment is `processing` or `unknown`; allowed while the charge call itself is in flight. | Wait for the charge result before issuing one. |
 | Stripe failing | Circuit breaker, one for the whole process: after 5 unclear failures in a row, no charges or reconciler reads for 30 s. A skipped dunning retry is not counted. | Usually nothing: [runbook](ops/runbook/stripe-circuit-breaker-open.md). |
 | Refund pending or failed at the bank | Status follows Stripe's refund webhooks; failed never moves back to succeeded. Failed, or pending over 72 hours, shows on the home page. | **Retry refund** on the credit note. It looks the refund up in Stripe first and reuses it. |
-| Refund timeout, Stripe 5xx, or 409 (no clear answer) | Refund `unknown`: the customer may already be refunded. It shows on the home page at once. Webhooks do not change it. | Don't refund in the Stripe dashboard. Retry the refund: Velox looks for the refund in Stripe, then resends the same request with the same idempotency key, so Stripe returns the first result instead of making a second refund. |
+| Refund timeout, Stripe 5xx, 409 or 429 (no clear answer) | Refund `unknown`: the customer may already be refunded. It shows on the home page at once. Webhooks do not change it. | Don't refund in the Stripe dashboard. Retry the refund: Velox looks for the refund in Stripe, then resends the same request with the same idempotency key, so Stripe returns the first result instead of making a second refund. |
 
 ## Not handled yet
 
 - **The dashboard shows an `unknown` refund as "refund pending"**, with no
-  **Retry refund** button. Retry it with
+  **Retry refund** button, and the "Refunded to Card" card leaves its amount
+  out. Retry it with
   `POST /v1/credit-notes/{id}/retry-refund` until the dashboard shows it.
 - **A refund still `unknown` after 24 hours is resent**, after a search in
   Stripe finds nothing. Stripe may drop the idempotency key by then, so a

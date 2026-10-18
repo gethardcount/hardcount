@@ -2,10 +2,12 @@ package creditnote
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
@@ -334,6 +336,8 @@ func safeMessage(err error) string {
 // "failed" (the #965 label) and an issued one at "none".
 func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
 	t.Parallel()
+	// The audit row rides the same write, so it must not use the ended
+	// context either.
 
 	t.Run("Retry refund on a failed note records unknown and keeps the key", func(t *testing.T) {
 		t.Parallel()
@@ -347,6 +351,7 @@ func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed: %v", err)
 		}
+		svc.SetAuditLogger(ctxAudit{})
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		refunder.duringCreate = cancel
@@ -368,6 +373,7 @@ func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
 	t.Run("Issue records unknown with its key and returns the issued note", func(t *testing.T) {
 		t.Parallel()
 		svc, store, _, refunder := setupRefundSvc(t)
+		svc.SetAuditLogger(ctxAudit{})
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		refunder.duringCreate = cancel
@@ -387,6 +393,12 @@ func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
 		}
 	})
 }
+
+// ctxAudit is an audit logger whose insert is refused once its context has
+// ended, as the real one's is (it writes in the caller's transaction).
+type ctxAudit struct{}
+
+func (ctxAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.Entry) error { return ctx.Err() }
 
 // seedIssuedNoneRefund is an issued note whose refund leg has no recorded
 // outcome: Issue sent velox_cn_<id> to Stripe (or was about to), then crashed

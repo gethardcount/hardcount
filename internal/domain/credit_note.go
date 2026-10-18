@@ -23,11 +23,12 @@ const (
 	RefundFailed    RefundStatus = "failed"
 	// RefundUnknown: Velox asked Stripe for the refund and got no clear
 	// answer (a timeout, a network error, a Stripe 5xx, a key already in
-	// use), so the customer may or may not have been refunded. Never mapped
-	// from a Stripe status. Retry refund settles it: it looks for the refund
-	// at Stripe, then resends the same request under the same idempotency
-	// key, so Stripe answers with the first request's result instead of
-	// making a second refund (#965; ADR-107 names the 24-hour key limit).
+	// use, a rate limit), so the customer may or may not have been refunded.
+	// Never mapped from a Stripe status. Retry refund settles it: it looks
+	// for the refund at Stripe, then resends the same request under the same
+	// idempotency key, so Stripe answers with the first request's result
+	// instead of making a second refund (#965; ADR-107 names the 24-hour key
+	// limit).
 	RefundUnknown RefundStatus = "unknown"
 )
 

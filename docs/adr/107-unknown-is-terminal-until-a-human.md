@@ -360,14 +360,22 @@ production cutover, fired: the first design partners go live with real
 cards.
 
 - **An unclear refund result is `unknown`.** A credit-note refund whose
-  Stripe call times out, loses its connection, gets a Stripe 5xx, or gets a
-  409 is recorded as `refund_status='unknown'`. A 409 means another request
-  with the same idempotency key is still running. A refusal Stripe ran, such
-  as a card error or an invalid request, is still `failed`.
-  `classifyRefundError` is `classifyStripeError` with two rules read from
-  the HTTP status: a 409 is unclear, and a 429 or 401 is a refusal Stripe
-  never ran.
-- **The key is kept, so a retry cannot start a second refund.** The write
+  Stripe call times out, loses its connection, gets a Stripe 5xx, a 409 or
+  a 429 is recorded as `refund_status='unknown'`. A 409 means another
+  request with the same idempotency key is still running. A 429 is
+  unclear because stripe-go resends a request lost on the wire, under the
+  same key, and stops at a 429, so the 429 can follow an attempt that ran.
+  A refusal Stripe ran, such as a card error or an invalid request, is
+  still `failed`. So is a 401 or 403: Stripe refused the API key before
+  running anything, and every attempt of one call carries the same key.
+  `classifyRefundError` is `classifyStripeError` with these rules read from
+  the HTTP status.
+- **The result is recorded even when the caller has gone.** A refund asked
+  for through the API runs on the request context, which ends after 30
+  seconds; when Stripe hangs, that happens during the call. The write that
+  records the result runs detached from that context, with its own
+  10-second limit, as the card settle does.
+- **The key is kept, so a retry resends the same request.** The write
   that records `unknown` also stores the request's idempotency key in
   `credit_notes.refund_unknown_key`. That is the handle the charge path
   could not keep (amendment of 2026-08-01).
@@ -378,11 +386,13 @@ cards.
   request still runs. Only a key Stripe never ran makes a new refund
   ([Stripe](https://docs.stripe.com/error-low-level#content-errors): "A new
   key can start a second operation"). A saved result can be days old, so
-  Retry refund then reads the refund's current status.
+  Retry refund then reads the refund's current status. A note still at
+  `none` is resent the same way, under Issue's key `velox_cn_<id>`: Issue
+  may have sent it, and its result was never recorded.
 - **A resend Stripe never ran stays `unknown`.** Stripe saves no result for
-  a request it refused before running it, such as a 429 or a 401. On a
+  a request it refused before running it, such as a 401 or a 403. On a
   resend, that answer says nothing about the earlier request, so the note
-  keeps `unknown` and its key.
+  keeps (or, from `none`, gets) `unknown` and the earlier request's key.
 - **Only Retry refund moves `unknown`.** Refund webhooks match a stored
   refund id. An unknown note stores either no id or the id of a refund that
   Stripe already reported failed, so webhooks leave it alone. No sweep

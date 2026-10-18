@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/invoice"
@@ -259,6 +260,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		refunder := &keyRecordingRefunder{}
 		svc := creditnote.NewService(store, invStore, refunder)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "UNKDLISSUE"})
+		svc.SetAuditLogger(audit.NewLogger(db)) // its row rides the same write
 		reqCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		refunder.during = cancel
@@ -280,6 +282,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		cn := seedCardRefund(t, "unk-deadline-retry", domain.RefundFailed, "")
 		refunder := &keyRecordingRefunder{}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetAuditLogger(audit.NewLogger(db)) // its row rides the same write
 		reqCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		refunder.during = cancel

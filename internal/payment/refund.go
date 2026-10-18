@@ -14,17 +14,18 @@ import (
 // split classifyStripeError makes for charges (#965):
 //
 //   - true: Stripe's answer was lost or unclear (a timeout, a network error,
-//     a Stripe 5xx, a key already in use). Stripe may have made the refund.
-//     Stripe calls a 5xx result indeterminate
+//     a Stripe 5xx, a key already in use, a rate limit). Stripe may have made
+//     the refund. Stripe calls a 5xx result indeterminate
 //     (https://docs.stripe.com/error-low-level#server-errors).
-//   - false: Stripe refused (card_error, invalid_request_error, a 429), so no
-//     refund was made.
+//   - false: Stripe refused (card_error, invalid_request_error, a 401 or
+//     403), so no refund was made.
 //
-// NotRun narrows false: Stripe ran nothing for this request. It refused
-// before running it (a 429 rate limit, a 401 invalid API key), or Velox sent
-// nothing (Stripe not configured for the mode). Stripe saves no result for
-// such a request: "Errors that occur before execution begins, such as invalid
-// parameters, an invalid API key or rate limiting, don't cache a result"
+// NotRun narrows false: Stripe ran nothing for this request. It refused the
+// API key before running it (a 401 invalid key, a 403 key without refund
+// permission), or Velox sent nothing (Stripe not configured for the mode).
+// Stripe saves no result for such a request: "Errors that occur before
+// execution begins, such as invalid parameters, an invalid API key or rate
+// limiting, don't cache a result"
 // (https://docs.stripe.com/error-low-level#content-errors). So when Retry
 // refund resends an unclear request, a NotRun error says nothing about that
 // earlier request.
@@ -49,7 +50,7 @@ func (e *RefundError) RequestNotRun() bool { return e.NotRun }
 // curated sentence, never Stripe's raw text.
 func (e *RefundError) OperatorSafeMessage() string {
 	if e.Unknown {
-		return "Stripe didn't confirm whether the refund went through. Don't refund this payment in Stripe. Retry the refund later: Velox checks Stripe first and resends the same request, so the customer is refunded once."
+		return "Stripe didn't confirm whether the refund went through. Don't refund this payment in Stripe. Retry the refund later: Velox looks for the refund in Stripe first, then resends the same request."
 	}
 	return "Stripe didn't make the refund, so the customer was not refunded. Check the payment in Stripe, then retry the refund."
 }
@@ -64,7 +65,7 @@ func (e *RefundError) OperatorErrorCode() string {
 }
 
 // classifyRefundError sorts a refund create error with classifyStripeError,
-// plus two rules read from the HTTP status:
+// plus three rules read from the HTTP status:
 //
 //   - 409 is unclear, whatever its type. Stripe answers 409 while another
 //     request with the same idempotency key is still running, and Retry
@@ -76,18 +77,28 @@ func (e *RefundError) OperatorErrorCode() string {
 //     the same key is still executing, wait and retry with that key"
 //     (https://docs.stripe.com/error-low-level#content-errors). #1264 adds
 //     the same rule to classifyStripeError for charges.
-//   - 429 and 401 are refusals Stripe makes before it runs a request, so it
-//     saves no result for them (same page): NotRun. A 429's real type,
-//     rate_limit_error, is one classifyStripeError does not know, so alone it
-//     would read as unclear. The charge path makes the same exception for
-//     429 (CreatePaymentIntent).
+//   - 429 is unclear. Stripe refuses it before running the request, but the
+//     error is only the last attempt's: stripe-go resends a request lost on
+//     the wire, under the same key, and stops at a 429 (stripe-go v82
+//     shouldRetry and Error.canRetry; Velox keeps its default of 2
+//     retries). So a 429 can follow an attempt that ran, and Velox cannot
+//     tell. Retry refund then resends under the same key, which is safe
+//     either way.
+//   - 401 and 403 are refusals of the API key, made before the request runs
+//     ("No valid API key provided"; "The API key doesn't have permissions to
+//     perform the request", https://docs.stripe.com/api/errors), so Stripe
+//     saves no result: NotRun. Every attempt of one call carries the same
+//     key, so any earlier attempt that reached Stripe was refused the same
+//     way, and nothing ran.
 func classifyRefundError(err error) *RefundError {
 	var se *stripe.Error
 	if errors.As(err, &se) {
 		switch se.HTTPStatusCode {
 		case http.StatusConflict:
 			return &RefundError{Message: "stripe refund: conflict: " + stripeErrorMessage(err), Unknown: true}
-		case http.StatusTooManyRequests, http.StatusUnauthorized:
+		case http.StatusTooManyRequests:
+			return &RefundError{Message: "stripe refund: rate limited: " + stripeErrorMessage(err), Unknown: true}
+		case http.StatusUnauthorized, http.StatusForbidden:
 			return &RefundError{Message: "stripe refund: not run: " + stripeErrorMessage(err), NotRun: true}
 		}
 	}
