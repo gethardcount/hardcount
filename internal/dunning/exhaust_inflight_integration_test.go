@@ -10,6 +10,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/sagarsuperuser/velox/internal/payment"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/leader"
 	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
@@ -500,6 +501,52 @@ func TestExhaust_HeldRun_ReachesAnEnd(t *testing.T) {
 		}
 		if sub.Status != domain.SubscriptionActive {
 			t.Errorf("subscription is %s, want active: the customer paid", sub.Status)
+		}
+	})
+
+	// The production way out for a payment that succeeds: its webhook (or the
+	// reconciler) calls SettleSucceeded, which marks the invoice paid and asks
+	// dunning to resolve the run, as api/router.go wires it. The run is still
+	// active and still carries its lease, and the resolve must close it then,
+	// not wait for a dunning tick.
+	t.Run("payment succeeds through the settle path, which resolves the held run at once", func(t *testing.T) {
+		f, _ := hold(t, "Held then settled", stamp(domain.PaymentProcessing, "pi_racing", ""))
+		settler := payment.NewStripe(nil, f.invoices, payment.NewPostgresWebhookStore(f.db), nil)
+		settler.SetDunningResolver(f.svc)
+		inv, err := f.invoices.Get(f.ctx, f.tenantID, f.invoiceID)
+		if err != nil {
+			t.Fatalf("read invoice: %v", err)
+		}
+		if err := settler.SettleSucceeded(f.ctx, f.tenantID, inv, "pi_racing", inv.AmountDueCents, payment.SourceWebhook); err != nil {
+			t.Fatalf("settle succeeded: %v", err)
+		}
+
+		run, err := f.runs.GetRun(f.ctx, f.tenantID, f.runID)
+		if err != nil {
+			t.Fatalf("read run: %v", err)
+		}
+		if run.State != domain.DunningResolved || run.Resolution != domain.ResolutionPaymentRecovered {
+			t.Errorf("after the settle, before any dunning tick: run state=%s resolution=%q, want resolved / payment_recovered",
+				run.State, run.Resolution)
+		}
+
+		// The clock is past the lease: a dunning tick now must fire nothing.
+		f.tick(t)
+		sub, err := f.subs.Get(f.ctx, f.tenantID, f.subID)
+		if err != nil {
+			t.Fatalf("read subscription: %v", err)
+		}
+		if sub.Status != domain.SubscriptionActive || sub.PauseCollection != nil {
+			t.Errorf("subscription is %s (paused=%v), want active: the customer paid", sub.Status, sub.PauseCollection != nil)
+		}
+		events, err := f.runs.ListEvents(f.ctx, f.tenantID, f.runID)
+		if err != nil {
+			t.Fatalf("list run events: %v", err)
+		}
+		for _, e := range events {
+			if e.EventType == domain.DunningEventEscalated {
+				t.Errorf("an escalated event was written for a paid invoice: %+v", e)
+			}
 		}
 	})
 
