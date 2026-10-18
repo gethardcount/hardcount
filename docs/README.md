@@ -29,7 +29,10 @@ plain meanings first.
    where one Postgres stops being enough.
 4. [How Velox is engineered](ENGINEERING.md): the principles, one page,
    and [the evidence behind them](engineering-evidence.md).
-5. The measured runs in full:
+5. [When card payments go wrong](payments.md): declined cards, unclear
+   results, crashes mid-charge, repeated Stripe messages and refunds, what
+   Velox does about each, and the known gaps.
+6. The measured runs in full:
    [correctness under failure](benchmarks/failure-correctness.md) and
    [sustained throughput](benchmarks/sustained-throughput.md).
 

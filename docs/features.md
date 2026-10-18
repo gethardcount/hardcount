@@ -82,6 +82,7 @@ minutes when `APP_ENV=local`.
 | Feature | What it does for you | Learn more |
 |---|---|---|
 | Safe retries | Send an `Idempotency-Key` header on a POST, PUT or PATCH, and a retry within 24 hours gets the first answer instead of running again. A server error is saved too (except on usage routes, where each event's own key stops double counting), so a retry cannot repeat a charge that may have gone through. | [The Velox API](api-surface.md#sending-usage-safely) |
+| Careful card charges | When Velox cannot tell whether a charge went through, it asks Stripe instead of charging again. Only one charge runs on an invoice at a time, and a second payment that gets through is flagged for you to refund. | [When card payments go wrong](payments.md) |
 | Webhooks that are not lost | Every webhook waits in a database table and is retried for about 26.5 hours. Payment, subscription and credit events are saved together with the change, so a crash cannot drop them. | [Webhooks](webhooks.md#three-rules-for-your-receiver) |
 | Signed webhooks | Every webhook is signed. When you rotate the secret, both the old and the new secret sign each message for 72 hours. | [Webhooks](webhooks.md#verifying-signatures) |
 | Live webhook log | Watch webhooks as they go out, with every delivery attempt. | [Webhooks](webhooks.md#retries) |
