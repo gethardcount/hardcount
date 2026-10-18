@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -36,8 +37,8 @@ import (
 // with its message (https://docs.stripe.com/error-codes) are documented. The
 // error type is not: invalid_request_error is the type the old classifier read
 // as "no charge occurred". The classifier now keys on the status, so the real
-// type cannot change the result. The release checklist records it from test
-// mode.
+// type cannot change the result. The release checklist's "Key in use" step
+// gets the real reply from test mode; record its type here.
 const stripe409KeyInUse = `{"error":{"code":"idempotency_key_in_use","doc_url":"https://stripe.com/docs/error-codes/idempotency-key-in-use","message":"The idempotency key provided is currently being used in another request. This occurs if your integration is making duplicate requests simultaneously.","type":"invalid_request_error"}}`
 
 // stripe409NoCode is a 409 of type invalid_request_error with no code, so the
@@ -45,9 +46,12 @@ const stripe409KeyInUse = `{"error":{"code":"idempotency_key_in_use","doc_url":"
 const stripe409NoCode = `{"error":{"message":"The request conflicts with another request.","type":"invalid_request_error"}}`
 
 // stripe409CardError is a 409 of type card_error, the other type the
-// classifier reads as a definite failure. It pins "whatever its type". It
-// carries no decline code: Stripe sends card declines as 402.
-const stripe409CardError = `{"error":{"code":"card_declined","message":"Your card was declined.","type":"card_error"}}`
+// classifier reads as a definite failure. It pins "whatever its type". Stripe
+// sends card declines as 402, so no real 409 carries a decline code. This one
+// carries a hard-decline code (lost_card, #966) to pin that a 409 never
+// records one: on the unknown attempt row it would stop dunning from charging
+// that card, and the API would say "Card was declined".
+const stripe409CardError = `{"error":{"code":"card_declined","decline_code":"lost_card","message":"Your card was declined.","type":"card_error"}}`
 
 // stripe409ParamsDiffer is the "same key, different parameters" answer
 // (type idempotency_error). It was already an unclear outcome and keeps its
@@ -79,6 +83,9 @@ func TestCreatePaymentIntent_A409IsNeverADefiniteFailure(t *testing.T) {
 			}
 			if errors.Is(err, ErrPaymentTransient) {
 				t.Errorf("a 409 was treated as 'nothing reached Stripe': %v", err)
+			}
+			if pe.DeclineCode != "" {
+				t.Errorf("DeclineCode = %q, want none: a 409 is not a decline, and an unknown attempt row must not record one", pe.DeclineCode)
 			}
 			if stub.calls != 1 {
 				t.Errorf("Stripe was called %d times, want 1 (stripe-go does not retry a 409 Stripe error)", stub.calls)
@@ -172,6 +179,15 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			requests: 2,
 		},
 		{
+			// A hard-decline code on a 409 must not reach the attempt row:
+			// HardDeclineOnCard reads it whatever the outcome, and dunning
+			// would stop charging the card.
+			name:     "dunning retry: network error, then a 409 card_error carrying lost_card",
+			purpose:  piPurposeDunningRetry,
+			steps:    []scriptedStep{{err: connReset}, {status: http.StatusConflict, body: stripe409CardError}},
+			requests: 2,
+		},
+		{
 			// Control: unchanged behavior for the one 409 that keeps it.
 			name:     "409 same key, different parameters",
 			steps:    []scriptedStep{{status: http.StatusConflict, body: stripe409ParamsDiffer}},
@@ -179,6 +195,7 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			logs := captureLogs(t)
 			stub := withScriptedStripe(t, tc.steps...)
 			invoices := newMockInvoiceUpdater()
 			snapshot := pendingSnapshot()
@@ -236,6 +253,24 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			if len(invoices.chargeAttempts) != 1 || invoices.chargeAttempts[0].Outcome != domain.ChargeAttemptUnknown || invoices.chargeAttempts[0].DeclineCode != "" {
 				t.Errorf("charge attempts = %+v, want one unknown attempt with no decline code", invoices.chargeAttempts)
 			}
+
+			// The park's ERROR names the key: a 409 proves an attempt under it
+			// reached Stripe, and the operator looks the attempt up by it.
+			if line := parkAnnouncement(logs.String()); line == "" {
+				t.Errorf("park not announced at ERROR:\n%s", logs)
+			} else if field := "idempotency_key=" + ChargeIdempotencyKey("inv_1", snapshot.ChargeAttemptSeq, tc.purpose); !slices.Contains(strings.Fields(line), field) {
+				t.Errorf("park announcement does not carry %s:\n%s", field, line)
+			}
 		})
 	}
+}
+
+// parkAnnouncement is the log line that announces a parked invoice, or "".
+func parkAnnouncement(logs string) string {
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, "level=ERROR") && strings.Contains(line, "this invoice is parked") {
+			return line
+		}
+	}
+	return ""
 }
