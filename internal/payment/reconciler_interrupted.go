@@ -256,7 +256,7 @@ func (r *Reconciler) settleFoundSucceeded(ctx context.Context, row domain.Interr
 		return false, err
 	}
 	r.recordFoundAttempt(ctx, row, inv, pi, domain.ChargeAttemptPending)
-	if err := r.settler.SettleSucceeded(withFoundAnchor(ctx, pi), row.TenantID, inv, pi.ID, pi.AmountReceivedCents, SourceReconciler); err != nil {
+	if _, err := r.settle(withFoundAnchor(ctx, pi), inv, pi.ID, pi.AmountReceivedCents, pi.Purpose, "", terminalSucceeded, pi.Status, "", ""); err != nil {
 		return false, fmt.Errorf("settle the payment Stripe took (%s): %w", pi.ID, err)
 	}
 	slog.InfoContext(ctx, "interrupted charge found at Stripe, succeeded; payment recorded",

@@ -119,7 +119,7 @@ func PaymentInFlightSQL(alias string) string {
 // after five minutes; the record stays until the charge's result is saved or
 // the reconciler has asked Stripe, so a crash or a timeout cannot reopen the
 // invoice to a second charge.
-const ChargeNotHeldSQL = `(auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now()) AND charge_started_at IS NULL`
+const ChargeNotHeldSQL = `(auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now())`
 
 // ChargeHeldSQL is ChargeNotHeldSQL's opposite, for the hosted page's claim:
 // a Velox charge holds the invoice, so the customer cannot pay it there.
