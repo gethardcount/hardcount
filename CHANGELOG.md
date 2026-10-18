@@ -32,7 +32,7 @@ original text.
 ### Added
 
 - **`make migration` writes the next migration file, and `-short` tests check every file after 180 (2026-10-18).** For contributors: the name and number, an Up and a Down, `SET LOCAL` only, the one index-build shape, and `VALIDATE CONSTRAINT` in a file of its own. Steps: [Writing a database migration](docs/dev/migrations.md). ([#1212](https://github.com/getvelox/velox/pull/1212))
-- **The migration checks now refuse two `ADD COLUMN` forms that break an upgrade with data (2026-10-18).** For contributors: `NOT NULL` with no `DEFAULT`, which fails on a table with rows, and a value computed for each row, such as `DEFAULT gen_random_uuid()`, which rewrites the table under a lock. Safe forms: [Common changes](docs/dev/migrations.md#common-changes). (fixes #1231)
+- **The migration checks now refuse two `ADD COLUMN` forms that break an upgrade with data (2026-10-18).** For contributors: `NOT NULL` with no `DEFAULT`, which fails on a table with rows, and a value computed for each row, such as `DEFAULT gen_random_uuid()`, which rewrites the table under a lock. Safe forms: [Common changes](docs/dev/migrations.md#common-changes). ([#1257](https://github.com/getvelox/velox/pull/1257), fixes #1231)
 
 ### Changed
 
