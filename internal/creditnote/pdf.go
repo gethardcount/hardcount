@@ -177,6 +177,21 @@ func RenderPDF(
 		pdf.Line(x1, y, x2, y)
 	}
 
+	// wrap splits text into lines no wider than width in the current font.
+	// If it cannot, the render fails rather than print a line that runs
+	// out of its column.
+	var wrapErr error
+	wrap := func(text string, width float64) []string {
+		lines, err := pdffonts.WrapText(pdf, text, width)
+		if err != nil {
+			if wrapErr == nil {
+				wrapErr = err
+			}
+			return []string{text}
+		}
+		return lines
+	}
+
 	// ── VOID watermark ── on every page.
 	drawWatermark := func() {
 		if cn.Status == domain.CreditNoteVoided {
@@ -353,6 +368,11 @@ func RenderPDF(
 	// ── Line items table ──
 	colX := []float64{margin, margin + 240, margin + 320, margin + 400}
 	colEnd := margin + contentW
+	// A description wraps inside its column, which stops a gap short of
+	// the Qty column, and is never cut (#1228). Each extra line adds
+	// descLineH to its row. Same as the invoice PDF.
+	descW := colX[1] - colX[0] - 8
+	const descLineH = 12.0
 
 	drawTableHeader := func() {
 		setFont(true, 9)
@@ -436,41 +456,73 @@ func RenderPDF(
 		y += 6
 	}
 
+	// descLines is a line's description as it prints.
+	descLines := func(item domain.CreditNoteLineItem) []string {
+		setFont(false, 9)
+		return wrap(item.Description, descW)
+	}
+	// rowHeight is the height a row of n description lines needs on one
+	// page. A row taller than a continued page holds under its table
+	// header cannot stay on one page, so it needs only its first line's
+	// room: it starts where it is and breaks between its lines.
+	rowHeight := func(n int) float64 {
+		h := 18 + float64(n-1)*descLineH
+		if h > bottomLimit-(margin+20+22) {
+			return 18
+		}
+		return h
+	}
+
 	// Header row, kept with the first line item.
-	need(22+18, false)
+	firstRow := 18.0
+	if len(lineItems) > 0 {
+		firstRow = rowHeight(len(descLines(lineItems[0])))
+	}
+	need(22+firstRow, false)
 	drawTableHeader()
 
 	for _, item := range lineItems {
-		need(18, true)
+		lines := descLines(item)
+		need(rowHeight(len(lines)), true)
 		setFont(false, 9)
 		setColor(40, 40, 40)
-		desc := item.Description
-		if len([]rune(desc)) > 50 {
-			desc = string([]rune(desc)[:47]) + "..."
-		}
-		textAt(colX[0], y, desc)
+		textAt(colX[0], y, lines[0])
 		rightAlignAt(colX[1], y, colX[2]-colX[1], cnFormatNumber(item.Quantity))
 		rightAlignAt(colX[2], y, colX[3]-colX[2], cnFormatCents(item.UnitAmountCents, symbol))
 		rightAlignAt(colX[3], y, colEnd-colX[3], cnFormatCents(item.AmountCents, symbol))
+		for _, line := range lines[1:] {
+			// Only a row taller than a page reaches the foot of one here.
+			if y+descLineH+18 > bottomLimit {
+				newPage(true)
+				setFont(false, 9)
+				setColor(40, 40, 40)
+			} else {
+				y += descLineH
+			}
+			textAt(colX[0], y, line)
+		}
 		y += 18
 	}
 
 	// ── Totals ──
+	// Amounts right-align with the Amount column. A label stops totalsGap
+	// short of its amount and wraps onto more lines when longer, so no
+	// amount runs into its label however large (#1178).
 	totalsX := 340.0
-	totalsW := 140.0
-	labelW := 90.0
+	totalsEnd := colEnd
+	const totalsGap = 12.0
 
 	totalsRow := func(label string, amount string, bold bool, labelR, labelG, labelB, valR, valG, valB uint8) {
-		if bold {
-			setFont(true, 10)
-		} else {
-			setFont(false, 10)
-		}
+		setFont(bold, 10)
+		vw, _ := pdf.MeasureTextWidth(amount)
+		lines := wrap(label, totalsEnd-totalsGap-vw-totalsX)
 		setColor(labelR, labelG, labelB)
-		textAt(totalsX, y, label)
+		for i, line := range lines {
+			textAt(totalsX, y+float64(i)*13, line)
+		}
 		setColor(valR, valG, valB)
-		rightAlignAt(totalsX+labelW, y, totalsW-labelW, amount)
-		y += 16
+		rightAlignAt(totalsX, y, totalsEnd-totalsX, amount)
+		y += 16 + float64(len(lines)-1)*13
 	}
 
 	// Line amounts above are GROSS (tax-inclusive — ADR-048 anchors the
@@ -514,7 +566,7 @@ func RenderPDF(
 		}
 
 		pdf.SetStrokeColor(220, 220, 220)
-		hline(totalsX, totalsX+totalsW, y-4)
+		hline(totalsX, totalsEnd, y-4)
 		y += 2
 		totalsRow("Credit Total", cnFormatCents(cn.TotalCents, symbol), true, 30, 30, 30, 30, 30, 30)
 
@@ -585,6 +637,9 @@ func RenderPDF(
 		y += 10 // the 7pt line's height, so keep measures the whole footer
 	})
 
+	if wrapErr != nil {
+		return nil, fmt.Errorf("render pdf: %w", wrapErr)
+	}
 	if err := stampPageNumbers(pdf, margin, contentW, pageH-34); err != nil {
 		return nil, err
 	}
