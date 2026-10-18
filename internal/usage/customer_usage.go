@@ -439,6 +439,13 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 	var totalCents int64
 
 	for _, agg := range aggs {
+		// A bucket below zero after corrections bills 0 on the invoice
+		// (#1193), so it counts as 0 here, with a warning. Pricing it would
+		// fail: the rater refuses a negative quantity.
+		if agg.Quantity.IsNegative() {
+			warnings = append(warnings, fmt.Sprintf("meter %q: usage below zero (%s) after corrections — counted as 0, as on the invoice", meter.Key, agg.Quantity.String()))
+			continue
+		}
 		ratingRuleID := agg.RatingRuleVersionID
 		if ratingRuleID == "" {
 			ratingRuleID = meter.RatingRuleVersionID

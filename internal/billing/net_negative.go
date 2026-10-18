@@ -1,0 +1,118 @@
+package billing
+
+import (
+	"context"
+	"database/sql"
+	"sort"
+	"time"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/sagarsuperuser/velox/internal/domain"
+)
+
+// Usage below zero (#1193). Ingest accepts negative quantities as usage
+// corrections, so a usage bucket can total below zero over a billing window
+// when the corrections are larger than the usage in that window. A negative
+// quantity has no price (ComputeAmountCents refuses it). Before #1193 the
+// period close and the cancel's final invoice failed on it, so the whole
+// invoice, base fee included, was not made and the close was retried.
+//
+// The rule now, the same in every path that prices usage (period close,
+// cancel final invoice, spend-threshold invoice, preview, live balance,
+// customer usage view): the bucket counts as 0 for that window and the rest
+// of the invoice is built. A block-mode usage cap counts it as 0 too.
+//
+// It is never silent. The preview and the usage view show a warning. Each
+// invoice decision that leaves such a bucket out logs a WARN and writes one
+// subscription.net_negative_usage audit row on its own transaction, so a
+// rolled-back or retried close writes none or one. The row shows on the
+// subscription's activity timeline with each meter and its amount below
+// zero. A correction larger than the window's usage usually means an earlier
+// invoice billed the usage it corrects, so that invoice may need a credit
+// note.
+//
+// Granularity: one usage bucket (a meter, or one pricing rule of a meter)
+// over one billing window, the unit each path prices. A meter whose buckets
+// or windows have different signs bills its positive ones in full.
+
+// auditActionNetNegativeUsage is the audit action of that row.
+const auditActionNetNegativeUsage = "subscription.net_negative_usage"
+
+// netNegativeUsage is the usage below zero, per meter id, that one invoice
+// decision counted as 0. A builder fills it; the caller writes it on the
+// decision's transaction.
+type netNegativeUsage map[string]netNegativeMeter
+
+type netNegativeMeter struct {
+	key string
+	qty decimal.Decimal // below zero
+}
+
+func (n netNegativeUsage) add(meterID, meterKey string, qty decimal.Decimal) {
+	m := n[meterID]
+	m.key = meterKey
+	m.qty = m.qty.Add(qty)
+	n[meterID] = m
+}
+
+// billableUsageTotal is the usage cap's total: the sum of the meters'
+// quantities, with a meter below zero counted as 0, as it bills. Counting it
+// at its value lowered the total, so the cap scaled the other meters above
+// the cap.
+func billableUsageTotal(totals map[string]decimal.Decimal) decimal.Decimal {
+	sum := decimal.Zero
+	for _, q := range totals {
+		if q.IsPositive() {
+			sum = sum.Add(q)
+		}
+	}
+	return sum
+}
+
+// noteNetNegativeTx writes the decision's subscription.net_negative_usage row
+// on tx. reason is the invoice kind the decision builds, [periodStart,
+// periodEnd) the window it billed, and inv the invoice it made (zero when it
+// made none). A no-op when nothing was below zero or no audit logger is
+// wired. An error fails the decision, like the finalize row (ADR-090).
+func (e *Engine) noteNetNegativeTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, n netNegativeUsage, reason domain.InvoiceBillingReason, periodStart, periodEnd time.Time, inv domain.Invoice) error {
+	if len(n) == 0 || e.auditLogger == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(n))
+	for id := range n {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if n[ids[i]].key != n[ids[j]].key {
+			return n[ids[i]].key < n[ids[j]].key
+		}
+		return ids[i] < ids[j]
+	})
+	meters := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		meters = append(meters, map[string]any{
+			"meter_id":  id,
+			"meter_key": n[id].key,
+			"quantity":  n[id].qty.String(),
+		})
+	}
+	meta := map[string]any{
+		"meters":         meters,
+		"billing_reason": string(reason),
+		"period_start":   periodStart.UTC().Format(time.RFC3339),
+		"period_end":     periodEnd.UTC().Format(time.RFC3339),
+	}
+	if inv.ID != "" {
+		meta["invoice_id"] = inv.ID
+		meta["invoice_number"] = inv.InvoiceNumber
+	}
+	return e.auditLogger.LogInTx(ctx, tx, audit.Entry{
+		Action:        auditActionNetNegativeUsage,
+		ResourceType:  "subscription",
+		ResourceID:    sub.ID,
+		ResourceLabel: sub.Code,
+		Metadata:      meta,
+	})
+}

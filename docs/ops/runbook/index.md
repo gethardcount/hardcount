@@ -62,6 +62,7 @@ row-level-security role you see only one tenant's rows, or none.
 | `velox_billing_failing_subscriptions` above zero, or a subscription is not being invoiced | [Subscriptions whose billing is failing](billing-failing.md) |
 | A period ended but its invoice is not built yet, or usage is missing from an invoice | [Invoice timing and late usage](invoice-timing-late-usage.md) |
 | `velox_usage_unpriced_quantity_total` rising, or a WARN with "no rating rule" and "not billed" | [Usage with no price](usage-with-no-price.md) |
+| "Usage below zero billed as zero" on a subscription's timeline, or a WARN with "usage below zero" | [Usage below zero](usage-below-zero.md) |
 | Write I/O high for minutes after a bulk load | [Write I/O after a large backfill](write-io-after-backfill.md) |
 | p99 jumps, p50 flat, after a quiet spell (RDS) | [Commits stall after a quiet spell on RDS](rds-wal-pool.md) |
 | p50 lifts for everyone for seconds on a large table | [Autovacuum stalls every commit](autovacuum-stall.md) |

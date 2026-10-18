@@ -43,13 +43,15 @@ func (u unpricedUsage) record(ctx context.Context, sub domain.Subscription) {
 	}
 }
 
-// unpricedBucket is one meter's unpriced bucket as rateMeterWindow saw it.
-// Mode is the bucket's aggregation mode: the threshold fire needs it to
-// decide whether the bucket is its to report or the period close's (see
-// evaluateThresholds).
-type unpricedBucket struct {
-	MeterID  string
-	MeterKey string
-	Mode     domain.AggregationMode
-	Quantity decimal.Decimal
+// leftOutBucket is one meter's bucket that rateMeterWindow priced at
+// nothing: unpriced, or with BelowZero set, below zero after corrections
+// (net_negative.go). Mode is the bucket's aggregation mode: the threshold
+// fire needs it to decide whether the bucket is its to report or the period
+// close's (see evaluateThresholds).
+type leftOutBucket struct {
+	MeterID   string
+	MeterKey  string
+	Mode      domain.AggregationMode
+	Quantity  decimal.Decimal
+	BelowZero bool
 }

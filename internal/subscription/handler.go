@@ -3322,9 +3322,33 @@ func describeSubscriptionAction(action string, meta map[string]any, planNames ma
 			d = e
 		}
 		return "Proration failed", d, "", "warning"
+	case "subscription.net_negative_usage":
+		// #1193: an invoice decision counted usage that was below zero after
+		// corrections as 0, and built the rest of the invoice.
+		return "Usage below zero billed as zero", netNegativeUsageDetail(meta), "", "warning"
 	default:
 		return action, "", "", "info"
 	}
+}
+
+// netNegativeUsageDetail names each meter of a subscription.net_negative_usage
+// row with its amount below zero, then says what to do about it.
+func netNegativeUsageDetail(meta map[string]any) string {
+	var parts []string
+	ms, _ := meta["meters"].([]any)
+	for _, m := range ms {
+		mm, _ := m.(map[string]any)
+		key, _ := mm["meter_key"].(string)
+		qty, _ := mm["quantity"].(string)
+		if key != "" && qty != "" {
+			parts = append(parts, key+" "+qty)
+		}
+	}
+	d := "Usage corrections were larger than the usage they offset in this period. If an earlier invoice billed that usage, issue a credit note on it."
+	if len(parts) > 0 {
+		d = strings.Join(parts, " · ") + ". " + d
+	}
+	return d
 }
 
 // plural returns "s" for n != 1, else "". Tiny helper to avoid the

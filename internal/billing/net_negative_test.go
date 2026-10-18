@@ -148,9 +148,12 @@ func TestRunCycle_NetNegativeBucket_MultiRuleMeter(t *testing.T) {
 
 // A block-mode usage cap counts a meter below zero as 0, the way it bills.
 // Counting its -50 lowered the cap's total from 150 to 100, so storage was
-// scaled to 120 GB against a cap of 80.
+// scaled to 120 GB against a cap of 80. The row reports the -50 itself, not
+// a cap-scaled share of it.
 func TestRunCycle_NetNegativeMeter_UsageCapCountsItAsZero(t *testing.T) {
 	engine, subs, usage, _, invoices := setupEngine()
+	aud := &fakeEngineAudit{}
+	engine.SetAuditLogger(aud)
 	sub := subs.subs["sub_1"]
 	capUnits := int64(80)
 	sub.UsageCapUnits = &capUnits
@@ -173,6 +176,13 @@ func TestRunCycle_NetNegativeMeter_UsageCapCountsItAsZero(t *testing.T) {
 	}
 	if !storage.QuantityDecimal.Equal(decimal.NewFromInt(80)) || storage.AmountCents != 80*2500 {
 		t.Errorf("storage line = %s GB, %d¢; want 80 GB, %d¢ (the cap)", storage.QuantityDecimal, storage.AmountCents, 80*2500)
+	}
+	rows := netNegativeRows(t, aud)
+	if len(rows) != 1 {
+		t.Fatalf("%s rows = %d, want 1", netNegativeAction, len(rows))
+	}
+	if got := noteMeters(t, rows[0]); got["mtr_api"] != "-50" {
+		t.Errorf("meters = %v, want mtr_api: -50 (the cap does not scale usage below zero)", got)
 	}
 }
 
