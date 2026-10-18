@@ -32,6 +32,7 @@ Database migrations move to goose, before the first partner installs. A new inst
 - **`velox migrate force` is removed, and `velox migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade ([Going back](docs/production-one-vm.md#going-back)).
 - **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, Velox refuses to start and says why.
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
+- **A webhook endpoint saved earlier with a private IPv6 URL still fails every delivery.** New ones are refused when saved; change the old one's URL to a public address ([webhooks](docs/webhooks.md#managing-endpoints)).
 
 ### Added
 
