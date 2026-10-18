@@ -15,7 +15,7 @@ import (
 
 // refundUnknown is the refund status for "Stripe may or may not have made the
 // refund".
-const refundUnknown = domain.RefundStatus("unknown")
+const refundUnknown = domain.RefundUnknown
 
 // outcomeErr is a refund error that says whether Stripe may have made the
 // refund, the way the Stripe refunder's errors do.

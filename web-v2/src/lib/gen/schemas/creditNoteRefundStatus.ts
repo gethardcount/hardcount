@@ -8,6 +8,15 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The refund part's state at Stripe. `unknown`: Stripe gave no
+ * clear answer (a timeout, a network error, a Stripe 5xx), so the
+ * customer may already be refunded. Don't refund it again in the
+ * Stripe Dashboard. Retry it with
+ * `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+ * refund at Stripe first and then resends the same request, so it
+ * never refunds twice.
+ */
 export type CreditNoteRefundStatus = typeof CreditNoteRefundStatus[keyof typeof CreditNoteRefundStatus];
 
 
@@ -16,4 +25,5 @@ export const CreditNoteRefundStatus = {
   pending: 'pending',
   succeeded: 'succeeded',
   failed: 'failed',
+  unknown: 'unknown',
 } as const;

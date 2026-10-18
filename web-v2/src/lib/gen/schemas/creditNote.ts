@@ -39,6 +39,15 @@ export interface CreditNote {
   currency: string;
   issued_at?: string;
   voided_at?: string;
+  /**
+     * The refund part's state at Stripe. `unknown`: Stripe gave no
+     * clear answer (a timeout, a network error, a Stripe 5xx), so the
+     * customer may already be refunded. Don't refund it again in the
+     * Stripe Dashboard. Retry it with
+     * `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+     * refund at Stripe first and then resends the same request, so it
+     * never refunds twice.
+     */
   refund_status: CreditNoteRefundStatus;
   stripe_refund_id?: string;
   bill_to_snapshot?: DocumentBillTo;

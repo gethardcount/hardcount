@@ -233,12 +233,16 @@ func (m *memStore) UpdateRefundStatus(ctx context.Context, tenantID, id string, 
 // a service test passing against a laxer fake would assert nothing about the
 // paths that matter (retry_guard_integration_test.go pins the real SQL).
 func (m *memStore) UpdateRefundStatusAudited(_ context.Context, tenantID, id string, w RefundStatusWrite, emit func(tx *sql.Tx, updated domain.CreditNote, prior domain.RefundStatus, changed bool) error) error {
+	if err := w.validate(); err != nil {
+		return err
+	}
 	cn, ok := m.notes[id]
 	if !ok || cn.TenantID != tenantID {
 		return errs.ErrNotFound
 	}
 	prior := cn.RefundStatus
 	priorRefundID := cn.StripeRefundID
+	priorUnknownKey := cn.RefundUnknownKey
 	skip := false
 	if cn.StripeRefundID != w.ExpectedPriorRefundID {
 		skip = true // stale writer: identity moved
@@ -257,6 +261,7 @@ func (m *memStore) UpdateRefundStatusAudited(_ context.Context, tenantID, id str
 		if w.StripeRefundID != "" {
 			cn.StripeRefundID = w.StripeRefundID
 		}
+		cn.RefundUnknownKey = w.UnknownKey
 		m.notes[id] = cn
 	}
 	changed := cn.RefundStatus != prior || cn.StripeRefundID != priorRefundID
@@ -267,6 +272,7 @@ func (m *memStore) UpdateRefundStatusAudited(_ context.Context, tenantID, id str
 			// roll the fake write back for shared-fate fidelity
 			cn.RefundStatus = prior
 			cn.StripeRefundID = priorRefundID
+			cn.RefundUnknownKey = priorUnknownKey
 			m.notes[id] = cn
 			return err
 		}
@@ -310,7 +316,8 @@ func (m *memStore) ApplyRefundWebhookStatus(_ context.Context, tenantID, stripeR
 		}
 		// failed-absorbing precedence (mirrors the ApplyRefundWebhookStatus SQL):
 		// failed never changes; succeeded yields only to failed; pending yields to any terminal.
-		if cn.RefundStatus == domain.RefundFailed {
+		// unknown is never moved by a webhook: its stored id is a dead refund.
+		if cn.RefundStatus == domain.RefundFailed || cn.RefundStatus == domain.RefundUnknown {
 			return nil
 		}
 		if cn.RefundStatus == domain.RefundSucceeded && status != domain.RefundFailed {

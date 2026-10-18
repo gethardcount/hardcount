@@ -278,6 +278,7 @@ const (
 	CreditNoteRefundStatusNone      CreditNoteRefundStatus = "none"
 	CreditNoteRefundStatusPending   CreditNoteRefundStatus = "pending"
 	CreditNoteRefundStatusSucceeded CreditNoteRefundStatus = "succeeded"
+	CreditNoteRefundStatusUnknown   CreditNoteRefundStatus = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the CreditNoteRefundStatus enum.
@@ -290,6 +291,8 @@ func (e CreditNoteRefundStatus) Valid() bool {
 	case CreditNoteRefundStatusPending:
 		return true
 	case CreditNoteRefundStatusSucceeded:
+		return true
+	case CreditNoteRefundStatusUnknown:
 		return true
 	default:
 		return false
@@ -1381,22 +1384,22 @@ func (e RecoveryWarningCode) Valid() bool {
 
 // Defines values for SentEmailDeliveryState.
 const (
-	Bounced    SentEmailDeliveryState = "bounced"
-	Complained SentEmailDeliveryState = "complained"
-	Delivered  SentEmailDeliveryState = "delivered"
-	Unknown    SentEmailDeliveryState = "unknown"
+	SentEmailDeliveryStateBounced    SentEmailDeliveryState = "bounced"
+	SentEmailDeliveryStateComplained SentEmailDeliveryState = "complained"
+	SentEmailDeliveryStateDelivered  SentEmailDeliveryState = "delivered"
+	SentEmailDeliveryStateUnknown    SentEmailDeliveryState = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the SentEmailDeliveryState enum.
 func (e SentEmailDeliveryState) Valid() bool {
 	switch e {
-	case Bounced:
+	case SentEmailDeliveryStateBounced:
 		return true
-	case Complained:
+	case SentEmailDeliveryStateComplained:
 		return true
-	case Delivered:
+	case SentEmailDeliveryStateDelivered:
 		return true
-	case Unknown:
+	case SentEmailDeliveryStateUnknown:
 		return true
 	default:
 		return false
@@ -1675,19 +1678,19 @@ func (e TenantSettingsInputTaxProvider) Valid() bool {
 
 // Defines values for TestClockStatus.
 const (
-	TestClockStatusAdvancing       TestClockStatus = "advancing"
-	TestClockStatusInternalFailure TestClockStatus = "internal_failure"
-	TestClockStatusReady           TestClockStatus = "ready"
+	Advancing       TestClockStatus = "advancing"
+	InternalFailure TestClockStatus = "internal_failure"
+	Ready           TestClockStatus = "ready"
 )
 
 // Valid indicates whether the value is a known member of the TestClockStatus enum.
 func (e TestClockStatus) Valid() bool {
 	switch e {
-	case TestClockStatusAdvancing:
+	case Advancing:
 		return true
-	case TestClockStatusInternalFailure:
+	case InternalFailure:
 		return true
-	case TestClockStatusReady:
+	case Ready:
 		return true
 	default:
 		return false
@@ -1792,19 +1795,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
-	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
-	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	Failed    WebhookEventDeliveryAttemptStatus = "failed"
+	Pending   WebhookEventDeliveryAttemptStatus = "pending"
+	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case WebhookEventDeliveryAttemptStatusFailed:
+	case Failed:
 		return true
-	case WebhookEventDeliveryAttemptStatusPending:
+	case Pending:
 		return true
-	case WebhookEventDeliveryAttemptStatusSucceeded:
+	case Succeeded:
 		return true
 	default:
 		return false
@@ -1971,6 +1974,7 @@ const (
 	ListCreditNotesParamsRefundStatusNone           ListCreditNotesParamsRefundStatus = "none"
 	ListCreditNotesParamsRefundStatusPending        ListCreditNotesParamsRefundStatus = "pending"
 	ListCreditNotesParamsRefundStatusSucceeded      ListCreditNotesParamsRefundStatus = "succeeded"
+	ListCreditNotesParamsRefundStatusUnknown        ListCreditNotesParamsRefundStatus = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the ListCreditNotesParamsRefundStatus enum.
@@ -1985,6 +1989,8 @@ func (e ListCreditNotesParamsRefundStatus) Valid() bool {
 	case ListCreditNotesParamsRefundStatusPending:
 		return true
 	case ListCreditNotesParamsRefundStatusSucceeded:
+		return true
+	case ListCreditNotesParamsRefundStatusUnknown:
 		return true
 	default:
 		return false
@@ -2590,19 +2596,19 @@ func (e GetEmailSettings200JSONResponseBodyLinksEnv) Valid() bool {
 
 // Defines values for GetEmailSettings200JSONResponseBodyTlsMode.
 const (
-	GetEmailSettings200JSONResponseBodyTlsModeImplicit GetEmailSettings200JSONResponseBodyTlsMode = "implicit"
-	GetEmailSettings200JSONResponseBodyTlsModeNone     GetEmailSettings200JSONResponseBodyTlsMode = "none"
-	GetEmailSettings200JSONResponseBodyTlsModeStarttls GetEmailSettings200JSONResponseBodyTlsMode = "starttls"
+	Implicit GetEmailSettings200JSONResponseBodyTlsMode = "implicit"
+	None     GetEmailSettings200JSONResponseBodyTlsMode = "none"
+	Starttls GetEmailSettings200JSONResponseBodyTlsMode = "starttls"
 )
 
 // Valid indicates whether the value is a known member of the GetEmailSettings200JSONResponseBodyTlsMode enum.
 func (e GetEmailSettings200JSONResponseBodyTlsMode) Valid() bool {
 	switch e {
-	case GetEmailSettings200JSONResponseBodyTlsModeImplicit:
+	case Implicit:
 		return true
-	case GetEmailSettings200JSONResponseBodyTlsModeNone:
+	case None:
 		return true
-	case GetEmailSettings200JSONResponseBodyTlsModeStarttls:
+	case Starttls:
 		return true
 	default:
 		return false
@@ -2999,8 +3005,9 @@ type AnalyticsOverview struct {
 	PaidInvoices int             `json:"paid_invoices"`
 	Period       AnalyticsPeriod `json:"period"`
 
-	// RefundsNeedingAttention Issued credit notes whose refund failed, has been pending for
-	// more than 72 hours, or has not started an hour after issue.
+	// RefundsNeedingAttention Issued credit notes whose refund failed, has an unknown result,
+	// has been pending for more than 72 hours, or has not started an
+	// hour after issue.
 	RefundsNeedingAttention int `json:"refunds_needing_attention"`
 
 	// Revenue Total of invoices paid in the window.
@@ -3494,12 +3501,20 @@ type CreditNote struct {
 	Reason               string                 `json:"reason"`
 
 	// RecordedAt Real-world time the row was written, when `created_at` is test-clock time.
-	RecordedAt        time.Time              `json:"recorded_at,omitempty"`
-	RefundAmountCents int64                  `json:"refund_amount_cents"`
-	RefundStatus      CreditNoteRefundStatus `json:"refund_status"`
-	Status            CreditNoteStatus       `json:"status"`
-	StripeRefundId    string                 `json:"stripe_refund_id,omitempty"`
-	SubtotalCents     int64                  `json:"subtotal_cents"`
+	RecordedAt        time.Time `json:"recorded_at,omitempty"`
+	RefundAmountCents int64     `json:"refund_amount_cents"`
+
+	// RefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
+	// clear answer (a timeout, a network error, a Stripe 5xx), so the
+	// customer may already be refunded. Don't refund it again in the
+	// Stripe Dashboard. Retry it with
+	// `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+	// refund at Stripe first and then resends the same request, so it
+	// never refunds twice.
+	RefundStatus   CreditNoteRefundStatus `json:"refund_status"`
+	Status         CreditNoteStatus       `json:"status"`
+	StripeRefundId string                 `json:"stripe_refund_id,omitempty"`
+	SubtotalCents  int64                  `json:"subtotal_cents"`
 
 	// SupplierSnapshot What an issued invoice or credit note prints about its seller (the
 	// tenant's company), copied when the document was issued (ADR-109).
@@ -3517,7 +3532,13 @@ type CreditNote struct {
 	VoidedAt         time.Time `json:"voided_at,omitempty"`
 }
 
-// CreditNoteRefundStatus defines model for CreditNote.RefundStatus.
+// CreditNoteRefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
+// clear answer (a timeout, a network error, a Stripe 5xx), so the
+// customer may already be refunded. Don't refund it again in the
+// Stripe Dashboard. Retry it with
+// `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+// refund at Stripe first and then resends the same request, so it
+// never refunds twice.
 type CreditNoteRefundStatus string
 
 // CreditNoteStatus defines model for CreditNote.Status.
@@ -6235,8 +6256,9 @@ type ListCreditNotesParams struct {
 	Status     ListCreditNotesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// RefundStatus `needs_attention` returns issued, non-test-clock notes whose
-	// refund failed, has been pending more than 72 hours, or has a
-	// refund amount still at `none` after 1 hour.
+	// refund failed or has an unknown result, has been pending more
+	// than 72 hours, or has a refund amount still at `none` after 1
+	// hour.
 	RefundStatus ListCreditNotesParamsRefundStatus `form:"refund_status,omitempty" json:"refund_status,omitempty"`
 
 	// Sort One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).

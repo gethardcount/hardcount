@@ -63,6 +63,10 @@ type Refunder interface {
 	// Returns the refund id + Stripe's create-time status (mapped to a Velox
 	// refund_status). A pending result settles later via a refund webhook.
 	// creditNoteID is stamped as metadata for later adoption.
+	//
+	// An error says through OutcomeUnknown() (see refundOutcomeUnknown)
+	// whether Stripe may have made the refund anyway. Only an error that
+	// reports false records "failed"; any other records "unknown" (#965).
 	CreateRefund(ctx context.Context, paymentIntentID string, amountCents int64, idempotencyKey, creditNoteID string) (string, domain.RefundStatus, error)
 	// GetRefund returns the refund's CURRENT provider status plus the
 	// provider's failure reason (empty unless failed).
@@ -74,6 +78,47 @@ type Refunder interface {
 	// and a dead attempt returned here would shadow the create leg forever.
 	FindRefundForCreditNote(ctx context.Context, paymentIntentID, creditNoteID string) (string, domain.RefundStatus, error)
 }
+
+// refundOutcomeUnknown reports whether a CreateRefund error leaves open that
+// Stripe made the refund. The refunder's errors answer through
+// OutcomeUnknown(), declared here because this package may not import the
+// payment package. An error that does not answer counts as unknown: a refusal
+// has to be proven, the way classifyStripeError treats charges, because
+// recording "failed" for a refund that went through invites a second refund
+// by hand.
+func refundOutcomeUnknown(err error) bool {
+	var oe interface{ OutcomeUnknown() bool }
+	if errors.As(err, &oe) {
+		return oe.OutcomeUnknown()
+	}
+	return true
+}
+
+// refundRequestNotRun reports whether a CreateRefund error says Stripe ran
+// nothing for the request: it refused before running it (a rate limit, an
+// invalid API key), or nothing was sent. Stripe saves no result for such a
+// request (https://docs.stripe.com/error-low-level#content-errors), so when
+// RetryRefund resends an unclear request, this error says nothing about that
+// earlier request.
+func refundRequestNotRun(err error) bool {
+	var nr interface{ RequestNotRun() bool }
+	return errors.As(err, &nr) && nr.RequestNotRun()
+}
+
+// refundStillUnknownError is RetryRefund's answer when Stripe ran nothing for
+// a resend: the earlier request's result is still unknown, so the refunder's
+// own message ("the customer was not refunded") would be false.
+type refundStillUnknownError struct{ err error }
+
+func (e *refundStillUnknownError) Error() string {
+	return "stripe refund retry did not run; the earlier request's result is still unknown: " + e.err.Error()
+}
+func (e *refundStillUnknownError) Unwrap() error        { return e.err }
+func (e *refundStillUnknownError) OutcomeUnknown() bool { return true }
+func (e *refundStillUnknownError) OperatorSafeMessage() string {
+	return "Stripe didn't run this retry, so the result of the earlier refund request is still unknown. Don't refund this payment in Stripe. Retry the refund later."
+}
+func (e *refundStillUnknownError) OperatorErrorCode() string { return "payment_outcome_unknown" }
 
 // CreditGranter adds credits to a customer's balance.
 //
@@ -1726,21 +1771,32 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 	// network I/O in a DB transaction"). Idempotency contract: the deterministic
 	// `velox_cn_<cn_id>` key makes a retry after a partial failure return the
 	// original refund_id rather than double-refund; refund_status is persisted
-	// immediately, and a failed/pending leg recovers via RetryRefund.
+	// immediately, and a failed, unknown or pending leg recovers via RetryRefund.
 	// HasCardPayment, not `!= ""`: an offline-recorded payment's PI field holds
 	// the synthetic out_of_band marker, and handing that to Stripe as a
 	// PaymentIntent id burns the leg into a permanently-failed state that no
 	// RetryRefund can clear. Validation now refuses such an allocation up
 	// front; this keeps rows written before that guard from reaching Stripe.
 	if inv.PaymentStatus == domain.PaymentSucceeded && cn.RefundAmountCents > 0 && cn.StripeRefundID == "" {
+		unknownKey := ""
 		if s.refunder != nil && inv.HasCardPayment() {
 			idempotencyKey := fmt.Sprintf("velox_cn_%s", cn.ID)
 			refundID, refStatus, err := s.refunder.CreateRefund(ctx, inv.StripePaymentIntentID, cn.RefundAmountCents, idempotencyKey, cn.ID)
-			if err != nil {
-				slog.Warn("stripe refund failed, credit note will be issued with failed refund status",
+			switch {
+			case err != nil && refundOutcomeUnknown(err):
+				// No clear answer: Stripe may have refunded the customer.
+				// "failed" here would invite a second refund by hand in
+				// Stripe (#965). Keep the key: RetryRefund resends this
+				// request with it.
+				slog.ErrorContext(ctx, "stripe refund result unknown: the customer may have been refunded; the credit note's refund is 'unknown' until Retry refund checks Stripe",
+					"credit_note_id", cn.ID, "idempotency_key", idempotencyKey, "error", err)
+				cn.RefundStatus = domain.RefundUnknown
+				unknownKey = idempotencyKey
+			case err != nil:
+				slog.Warn("stripe refused the refund, credit note will be issued with failed refund status",
 					"credit_note_id", cn.ID, "error", err)
 				cn.RefundStatus = domain.RefundFailed
-			} else {
+			default:
 				cn.StripeRefundID = refundID
 				// Record what Stripe actually said — succeeded OR pending (async).
 				// A pending refund settles later via the refund webhook; recording
@@ -1790,7 +1846,7 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 					})
 				}
 			}
-			if err := s.store.UpdateRefundStatusAudited(ctx, tenantID, id, RefundStatusWrite{Status: cn.RefundStatus, StripeRefundID: cn.StripeRefundID, ExpectedPriorRefundID: ""}, emit); err != nil {
+			if err := s.store.UpdateRefundStatusAudited(ctx, tenantID, id, RefundStatusWrite{Status: cn.RefundStatus, StripeRefundID: cn.StripeRefundID, ExpectedPriorRefundID: "", UnknownKey: unknownKey}, emit); err != nil {
 				// The note is issued (committed) and the refund leg already ran, so
 				// failing Issue now would only confuse its callers. The row stays
 				// refund_status='none' with a refund amount, which the needs-attention
@@ -1857,8 +1913,8 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 }
 
 // RetryRefund re-attempts the Stripe refund for an already-issued
-// credit note whose refund_status landed at `failed` (Stripe rejected
-// or network errored at Issue time) or `pending` (no refunder
+// credit note whose refund_status landed at `failed` (Stripe refused),
+// `unknown` (Stripe gave no clear answer, #965) or `pending` (no refunder
 // configured / no PI at Issue time, e.g. Stripe was wired up
 // afterwards). The credit-note itself stays issued — only the Stripe-
 // refund leg retries.
@@ -1870,14 +1926,14 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 // in its final state while the cash-back leg can be re-driven by the
 // operator.
 //
-// Idempotency: uses the same `velox_cn_<id>` key as Issue() so a
-// retry after a previous-attempt-network-failure-but-Stripe-succeeded
-// scenario converges — Stripe returns the existing refund_id and
-// Velox persists it without double-charging the tenant.
+// Idempotency: convergence rests on looking the refund up at Stripe
+// before any create (see the numbered contract below). The key moves
+// only after an outcome is recorded: from `unknown`, the retry resends
+// the unclear request under its own key (refund_unknown_key).
 //
 // Rejects when:
 //   - CN status != issued (drafts use Issue(); voided CNs are terminal)
-//   - refund_status not in (failed, pending) — succeeded is final
+//   - refund_status not in (failed, unknown, pending, none) — succeeded is final
 //   - refund_amount_cents == 0 (credit-only CN; no Stripe leg exists)
 //   - refunder not wired (Stripe not connected)
 //   - invoice has no PaymentIntent (paid via credits only)
@@ -1895,6 +1951,15 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	switch cn.RefundStatus {
 	case domain.RefundFailed, domain.RefundPending:
 		// retry-eligible
+	case domain.RefundUnknown:
+		// Stripe gave no clear answer to the last request. The steps below
+		// look for the refund first, then resend that same request.
+		if cn.RefundUnknownKey == "" {
+			// The store writes the key with the status, so this is a row
+			// written outside it. Resending under any other key could start
+			// a second refund, so refuse.
+			return domain.CreditNote{}, fmt.Errorf("credit note %s: refund_status unknown with no stored request key; check the payment in Stripe before refunding", cn.ID)
+		}
 	case domain.RefundNone:
 		// An issued CN with a refund allocation but NO recorded outcome is
 		// the Issue-crash window: the external leg ran (or was about to)
@@ -2004,7 +2069,15 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	//      ADR-108's pattern). Found → persist and stop; the operator sees
 	//      the adopted state and a second click walks path 1.
 	//   3. Only when the provider confirms nothing viable exists → create.
-	if cn.StripeRefundID != "" {
+	//      From `unknown`, the create is a resend of the unclear request
+	//      under its own key (#965).
+	//
+	// Path 1 is skipped for `unknown`. Its stored id, if any, is a refund
+	// Stripe already reported failed (a create runs only past a failed
+	// one); the unclear request came after it. Reading that refund answers
+	// "failed", which says nothing about the later request, and writing it
+	// would put back the false "failed" that `unknown` replaced.
+	if cn.StripeRefundID != "" && cn.RefundStatus != domain.RefundUnknown {
 		provStatus, provReason, gerr := s.refunder.GetRefund(ctx, cn.StripeRefundID)
 		if gerr != nil {
 			return domain.CreditNote{}, fmt.Errorf("reconcile refund with provider: %w", gerr)
@@ -2058,8 +2131,39 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	// metadata stamp above makes any lost refund findable and adoptable.
 	gen := sha256.Sum256([]byte(cn.StripeRefundID + "|" + string(cn.RefundStatus)))
 	idempotencyKey := fmt.Sprintf("velox_cn_%s_r_%s", cn.ID, hex.EncodeToString(gen[:8]))
+	// The exception is `unknown`: no outcome was recorded for the last
+	// request, so the key must not move (money-path playbook, gate 2). The
+	// search above finds the refund once Stripe has made it; it cannot see
+	// one Stripe is still making, which Stripe's incident recovery can do
+	// later. Resending under the same key covers that: while the first
+	// request runs Stripe answers 409, after it Stripe returns its result,
+	// and only a key Stripe never ran makes a new refund. A new key "can
+	// start a second operation"
+	// (https://docs.stripe.com/error-low-level#content-errors).
+	resend := cn.RefundStatus == domain.RefundUnknown
+	if resend {
+		idempotencyKey = cn.RefundUnknownKey
+	}
 	refundID, refStatus, refundErr := s.refunder.CreateRefund(ctx, inv.StripePaymentIntentID, cn.RefundAmountCents, idempotencyKey, cn.ID)
 	if refundErr != nil {
+		// A refusal is "failed"; no clear answer is "unknown", which keeps
+		// this request's key for the next retry to resend (#965). On a
+		// resend, an error Stripe raised before running it (a rate limit)
+		// is about this request only: the earlier one stays unknown, and so
+		// does its key. Stripe: after such an error, "preserve the
+		// idempotency key" (https://docs.stripe.com/error-low-level#content-errors).
+		status, unknownKey := domain.RefundFailed, ""
+		switch {
+		case refundOutcomeUnknown(refundErr):
+			status, unknownKey = domain.RefundUnknown, idempotencyKey
+			slog.ErrorContext(ctx, "stripe refund retry result unknown: the customer may have been refunded; retry again later, it resends this request",
+				"credit_note_id", id, "idempotency_key", idempotencyKey, "error", refundErr)
+		case resend && refundRequestNotRun(refundErr):
+			status, unknownKey = domain.RefundUnknown, idempotencyKey
+			refundErr = &refundStillUnknownError{err: refundErr}
+			slog.WarnContext(ctx, "stripe did not run the refund resend; the earlier request's result is still unknown",
+				"credit_note_id", id, "idempotency_key", idempotencyKey, "error", refundErr)
+		}
 		// Persist the still-failed state so the next retry has the latest error
 		// context and the dashboard surfaces accurate status. It rides the same
 		// audited write, and that emission is UNCONDITIONAL — a failed→failed
@@ -2078,18 +2182,33 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 		// The persist error is LOGGED, never discarded, and the Stripe error stays
 		// primary.
 		failEmit := retryEmit(map[string]any{"provider_error": refundErr.Error()})
-		if perr := s.store.UpdateRefundStatusAudited(ctx, tenantID, id, RefundStatusWrite{Status: domain.RefundFailed, StripeRefundID: cn.StripeRefundID, ExpectedPriorRefundID: cn.StripeRefundID, ProviderRead: true}, failEmit); perr != nil {
-			slog.ErrorContext(ctx, "persist failed refund status after retry",
-				"credit_note_id", id, "error", perr)
+		if perr := s.store.UpdateRefundStatusAudited(ctx, tenantID, id, RefundStatusWrite{Status: status, StripeRefundID: cn.StripeRefundID, ExpectedPriorRefundID: cn.StripeRefundID, ProviderRead: true, UnknownKey: unknownKey}, failEmit); perr != nil {
+			slog.ErrorContext(ctx, "persist refund status after a failed retry",
+				"credit_note_id", id, "refund_status", status, "error", perr)
 		}
 		return domain.CreditNote{}, fmt.Errorf("stripe refund retry: %w", refundErr)
+	}
+
+	// A resend can be answered from Stripe's saved response to the first
+	// request (https://docs.stripe.com/api/idempotent_requests), so its
+	// status may be days old: a refund that has since failed would read
+	// "succeeded". Read the refund's current status instead. If the read
+	// fails, record nothing: the row stays unknown, and the next retry finds
+	// the refund by search (if live) or gets it back from the resend again.
+	providerRead := false
+	if resend {
+		cur, _, gerr := s.refunder.GetRefund(ctx, refundID)
+		if gerr != nil {
+			return domain.CreditNote{}, fmt.Errorf("refund %s exists at Stripe, but reading its status failed; retry again: %w", refundID, gerr)
+		}
+		refStatus, providerRead = cur, true
 	}
 
 	// Record Stripe's actual status — a re-driven refund can come back `pending`
 	// (still settling), not necessarily succeeded; the refund webhook settles it.
 	// Recording a blanket succeeded here would re-introduce the false-success lie
 	// and permanently 409 a legitimate later retry.
-	if err := s.store.UpdateRefundStatusAudited(ctx, tenantID, id, RefundStatusWrite{Status: refStatus, StripeRefundID: refundID, ExpectedPriorRefundID: cn.StripeRefundID}, retryEmit(nil)); err != nil {
+	if err := s.store.UpdateRefundStatusAudited(ctx, tenantID, id, RefundStatusWrite{Status: refStatus, StripeRefundID: refundID, ExpectedPriorRefundID: cn.StripeRefundID, ProviderRead: providerRead}, retryEmit(nil)); err != nil {
 		// Stripe call succeeded but local persist (or its audit emission —
 		// shared fate) failed. Convergence is the METADATA, not the key: the
 		// next retry's FindRefundForCreditNote finds this refund by

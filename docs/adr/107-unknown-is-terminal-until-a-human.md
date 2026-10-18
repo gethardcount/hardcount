@@ -10,7 +10,7 @@ in #678 and unaffected by this decision), ADR-049 (payment reconciler).
 
 ## Summary
 
-When a Stripe charge ends with an unclear result and no PaymentIntent id, Velox no longer marks the invoice `failed`. That used to make the invoice claimable again under a new idempotency key (`charge_attempt_seq`), so a retry could charge the customer twice. Now the invoice is parked at `payment_status='unknown'`, which no charge path accepts, and `TestUnknownPaymentIsUnchargeableByEveryClaimPath` fails the build if one ever does. That exclusion is the whole safeguard: the write that records `unknown` also bumps `charge_attempt_seq`, so the original attempt cannot be replayed (amendment of 2026-08-01). The parked state is logged as CRITICAL once, the reconciler sweep skips parked rows, and the invoice resolves when a webhook names the PaymentIntent or when Stripe search finds it (ADR-108). An empty search result writes nothing. The only manual exit is `MarkUncollectible`, which leaves `unknown` in place, so a charge that later succeeds still marks the invoice paid.
+When a Stripe charge ends with an unclear result and no PaymentIntent id, Velox no longer marks the invoice `failed`. That used to make the invoice claimable again under a new idempotency key (`charge_attempt_seq`), so a retry could charge the customer twice. Now the invoice is parked at `payment_status='unknown'`, which no charge path accepts, and `TestUnknownPaymentIsUnchargeableByEveryClaimPath` fails the build if one ever does. That exclusion is the whole safeguard: the write that records `unknown` also bumps `charge_attempt_seq`, so the original attempt cannot be replayed (amendment of 2026-08-01). The parked state is logged as CRITICAL once, the reconciler sweep skips parked rows, and the invoice resolves when a webhook names the PaymentIntent or when Stripe search finds it (ADR-108). An empty search result writes nothing. The only manual exit is `MarkUncollectible`, which leaves `unknown` in place, so a charge that later succeeds still marks the invoice paid. Credit-note refunds follow the same rule since 2026-10-18: an unclear refund result is `unknown`, and **Retry refund** resends the same request under the same key (see the last amendment).
 
 ## Context
 
@@ -238,6 +238,8 @@ it is the same one the no-silent-fallbacks rule makes everywhere else in billing
 
 ## Still open: the same defect on the REFUND path
 
+**Closed 2026-10-18** by [the amendment below](#amendment-2026-10-18--the-refund-half-is-done). This section is kept as written.
+
 This ADR closed the "record a definite outcome for something we do not know"
 class on the CHARGE path. The refund path still has it, and it is recorded here
 rather than left in a branch description because an undocumented known defect on
@@ -349,3 +351,50 @@ release, `0009_payment_unknown.down.sql` is no longer in the binary.
 `velox migrate rollback` runs only when `APP_ENV` is `local`, and it never
 goes below version 180. So the warning under "What ships with it" applies
 only to v0.8.1 and older binaries. The invariant itself does not change.
+
+## Amendment 2026-10-18 — the refund half is done
+
+The refund path now makes the charge path's split
+([#965](https://github.com/getvelox/velox/issues/965)). Its trigger,
+production cutover, fired: the first design partners go live with real
+cards.
+
+- **An unclear refund result is `unknown`.** A credit-note refund whose
+  Stripe call times out, loses its connection, gets a Stripe 5xx, or gets a
+  409 is recorded as `refund_status='unknown'`. A 409 means another request
+  with the same idempotency key is still running. A refusal Stripe ran, such
+  as a card error or an invalid request, is still `failed`.
+  `classifyRefundError` is `classifyStripeError` with two rules read from
+  the HTTP status: a 409 is unclear, and a 429 or 401 is a refusal Stripe
+  never ran.
+- **The key is kept, so a retry cannot start a second refund.** The write
+  that records `unknown` also stores the request's idempotency key in
+  `credit_notes.refund_unknown_key`. That is the handle the charge path
+  could not keep (amendment of 2026-08-01).
+- **Retry refund looks first, then resends.** It searches Stripe for a live
+  refund that carries the note's `velox_cn_id` metadata, and adopts one if
+  found. Otherwise it resends the same request under the same key. Stripe
+  then returns the first request's saved result, or answers 409 while that
+  request still runs. Only a key Stripe never ran makes a new refund
+  ([Stripe](https://docs.stripe.com/error-low-level#content-errors): "A new
+  key can start a second operation"). A saved result can be days old, so
+  Retry refund then reads the refund's current status.
+- **A resend Stripe never ran stays `unknown`.** Stripe saves no result for
+  a request it refused before running it, such as a 429 or a 401. On a
+  resend, that answer says nothing about the earlier request, so the note
+  keeps `unknown` and its key.
+- **Only Retry refund moves `unknown`.** Refund webhooks match a stored
+  refund id. An unknown note stores either no id or the id of a refund that
+  Stripe already reported failed, so webhooks leave it alone. No sweep
+  re-drives it, as with a parked invoice. It shows in refunds needing
+  attention at once.
+
+**Still open.** Stripe keeps an idempotency key for at least 24 hours and
+may drop it after that. A resend after that runs as a new request. The
+search before it adopts a refund Stripe already made. It cannot see a
+refund that Stripe makes later, during incident recovery, for a request
+that got a 5xx. For an outcome still unknown after 24 hours, Stripe advises
+to reconcile, not resend
+([Stripe](https://docs.stripe.com/error-low-level#post-requests)). Velox
+does not stop a resend at that age yet. **Trigger:** the first unknown
+refund older than 24 hours in production.

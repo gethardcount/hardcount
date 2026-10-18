@@ -13,7 +13,7 @@ import (
 
 // refundStatusUnknown is the refund status for "Stripe may or may not have
 // made the refund" (#965).
-const refundStatusUnknown = domain.RefundStatus("unknown")
+const refundStatusUnknown = domain.RefundUnknown
 
 // outcomeRefundErr is a refund error that says whether Stripe may have made
 // the refund, the way the Stripe refunder's errors do.
@@ -176,6 +176,43 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 			if got.RefundStatus != refundStatusUnknown {
 				t.Fatalf("after a %s webhook for re_unk_dead, refund_status = %q, want unknown", st, got.RefundStatus)
 			}
+		}
+	})
+
+	// Two retries of one unknown refund read the same row and resend the same
+	// request. Stripe runs it once: one retry gets the refund back, the other
+	// gets 409 (the first was still running), which reads as unknown. Whichever
+	// write lands last, the refund Stripe made stays recorded.
+	t.Run("a late unclear answer never overwrites the refund a concurrent retry recorded", func(t *testing.T) {
+		cn := seedRefundableCN(t, db, tenantID, "unk-race", "", domain.RefundNone)
+		key := "velox_cn_" + cn.ID
+		write := func(w creditnote.RefundStatusWrite) {
+			t.Helper()
+			if err := store.UpdateRefundStatusAudited(ctx, tenantID, cn.ID, w, nil); err != nil {
+				t.Fatalf("write %+v: %v", w, err)
+			}
+		}
+		// The issue-time request got no clear answer.
+		write(creditnote.RefundStatusWrite{Status: refundStatusUnknown, UnknownKey: key})
+		// The winning retry records the refund its resend got back.
+		write(creditnote.RefundStatusWrite{Status: domain.RefundSucceeded, StripeRefundID: "re_unk_race", ProviderRead: true})
+		// The losing retry's 409 lands last, written against the row it read.
+		write(creditnote.RefundStatusWrite{Status: refundStatusUnknown, UnknownKey: key, ProviderRead: true})
+
+		got, err := store.Get(ctx, tenantID, cn.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.RefundStatus != domain.RefundSucceeded || got.StripeRefundID != "re_unk_race" || got.RefundUnknownKey != "" {
+			t.Fatalf("refund leg = (%q, %q, key %q), want (succeeded, re_unk_race, no key)", got.RefundStatus, got.StripeRefundID, got.RefundUnknownKey)
+		}
+
+		// The key goes with unknown and only with it.
+		if err := store.UpdateRefundStatusAudited(ctx, tenantID, cn.ID, creditnote.RefundStatusWrite{Status: refundStatusUnknown, ExpectedPriorRefundID: "re_unk_race"}, nil); err == nil {
+			t.Fatal("store accepted status unknown with no request key")
+		}
+		if err := store.UpdateRefundStatusAudited(ctx, tenantID, cn.ID, creditnote.RefundStatusWrite{Status: domain.RefundFailed, ExpectedPriorRefundID: "re_unk_race", UnknownKey: key}, nil); err == nil {
+			t.Fatal("store accepted a request key with status failed")
 		}
 	})
 

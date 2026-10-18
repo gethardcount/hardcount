@@ -44,6 +44,7 @@ const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	status, reason, subtotal_cents, tax_amount_cents, total_cents,
 	refund_amount_cents, credit_amount_cents, out_of_band_amount_cents,
 	currency, issued_at, voided_at, refund_status, COALESCE(stripe_refund_id,''),
+	COALESCE(refund_unknown_key,''),
 	COALESCE(tax_transaction_id,''), is_simulated, issue_pending,
 	tax_reversal_pending, commit_retired_cents,
 	metadata, created_at, updated_at, recorded_at,
@@ -57,6 +58,7 @@ func (s *PostgresStore) cnScanDest(cn *domain.CreditNote, metaJSON *[]byte) []an
 		&cn.Status, &cn.Reason, &cn.SubtotalCents, &cn.TaxAmountCents, &cn.TotalCents,
 		&cn.RefundAmountCents, &cn.CreditAmountCents, &cn.OutOfBandAmountCents,
 		&cn.Currency, &cn.IssuedAt, &cn.VoidedAt, &cn.RefundStatus, &cn.StripeRefundID,
+		&cn.RefundUnknownKey,
 		&cn.TaxTransactionID, &cn.IsSimulated, &cn.IssuePending,
 		&cn.TaxReversalPending, &cn.CommitRetiredCents,
 		metaJSON, &cn.CreatedAt, &cn.UpdatedAt, &cn.RecordedAt,
@@ -498,6 +500,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	}
 	if filter.RefundStatus == "needs_attention" {
 		// failed (terminal — money returned to the platform, customer un-refunded)
+		// OR unknown (Stripe gave no clear answer; only a retry settles it)
 		// OR a 'pending' that's genuinely STUCK (>72h ≈ 3 business days). Fresh
 		// pending is normal async settlement and must NOT alert (it would flood
 		// the dashboard once true-pending is recorded). is_simulated excluded —
@@ -713,6 +716,12 @@ type RefundStatusWrite struct {
 	// upward to `succeeded` (a locally-misstamped failure); webhook writes
 	// never can.
 	ProviderRead bool
+	// UnknownKey is the idempotency key of the request whose result is
+	// unknown. Required with Status RefundUnknown and forbidden otherwise, so
+	// the stored key is always the one Retry refund must resend (#965). Every
+	// write that changes the row stores it, which clears it on any other
+	// status.
+	UnknownKey string
 }
 
 func (s *PostgresStore) UpdateRefundStatus(ctx context.Context, tenantID, id string, status domain.RefundStatus, stripeRefundID string) error {
@@ -748,6 +757,9 @@ func (s *PostgresStore) UpdateRefundStatus(ctx context.Context, tenantID, id str
 // An emission failure aborts the write (shared fate) — the refund state and its
 // evidence commit together or not at all.
 func (s *PostgresStore) UpdateRefundStatusAudited(ctx context.Context, tenantID, id string, w RefundStatusWrite, emit func(tx *sql.Tx, updated domain.CreditNote, prior domain.RefundStatus, changed bool) error) error {
+	if err := w.validate(); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
@@ -831,15 +843,16 @@ func (s *PostgresStore) UpdateRefundStatusAudited(ctx context.Context, tenantID,
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE credit_notes SET refund_status=$1, stripe_refund_id=COALESCE(NULLIF($2,''), stripe_refund_id),
-			updated_at=$3
-		WHERE id=$4`,
-		w.Status, w.StripeRefundID, clock.Now(ctx), id); err != nil {
+			refund_unknown_key=NULLIF($3,''), updated_at=$4
+		WHERE id=$5`,
+		w.Status, w.StripeRefundID, w.UnknownKey, clock.Now(ctx), id); err != nil {
 		return err
 	}
 
 	updated := cur
 	updated.RefundStatus = w.Status
 	updated.StripeRefundID = newID
+	updated.RefundUnknownKey = w.UnknownKey
 	// The store REPORTS whether the persisted state moved; it does not decide
 	// whether that is audit-worthy. The two callers want opposite semantics:
 	// a webhook no-op is a non-event (no row), while an operator's retry hit
@@ -854,10 +867,23 @@ func (s *PostgresStore) UpdateRefundStatusAudited(ctx context.Context, tenantID,
 	return tx.Commit()
 }
 
+// validate enforces UnknownKey's rule: present exactly with RefundUnknown. A
+// missing key would leave Retry refund nothing to resend; a stray one would
+// make it resend a request whose result is already known.
+func (w RefundStatusWrite) validate() error {
+	if (w.Status == domain.RefundUnknown) != (w.UnknownKey != "") {
+		return fmt.Errorf("refund status write: status %q with unknown key %q: the key goes with status unknown and only with it", w.Status, w.UnknownKey)
+	}
+	return nil
+}
+
 // refundStatusRegression reports whether writing next over prior — for the
 // SAME provider refund — would rewind provider truth. Mirrors the webhook
 // guard's precedence (failed absorbing > succeeded > pending) minus the
 // same-value case, which is a benign re-confirmation, not a regression.
+// unknown is not about any stored refund, so a move out of it is never a
+// regression; a move into it from failed or succeeded is, and only RetryRefund
+// makes one, as a fresh provider answer (ProviderRead).
 func refundStatusRegression(prior, next domain.RefundStatus) bool {
 	if prior == next {
 		return false
@@ -899,13 +925,20 @@ func (s *PostgresStore) ApplyRefundWebhookStatusAudited(ctx context.Context, ten
 	// the two monotonic clauses alone would let through) is a zero-row
 	// no-op — the guard below distinguishes it from an unknown refund id,
 	// and no audit row is emitted for a transition that didn't happen.
+	//
+	// An 'unknown' row is never moved by a webhook (#965). Its status is
+	// about a later request whose refund Velox never learned the id of; the
+	// id it still stores is a refund Stripe already reported failed
+	// (RetryRefund creates only past a failed one). An event for that id is
+	// old news about the dead refund, and writing it would put back the
+	// false "failed" the unknown status replaced. RetryRefund settles it.
 	var cn domain.CreditNote
 	flipped := true
 	err = tx.QueryRowContext(ctx, `
 		UPDATE credit_notes SET refund_status=$1, updated_at=$2
 		WHERE stripe_refund_id=$3
 		  AND refund_status IS DISTINCT FROM $1
-		  AND refund_status <> 'failed'
+		  AND refund_status NOT IN ('failed', 'unknown')
 		  AND ($1 = 'failed' OR refund_status <> 'succeeded')
 		RETURNING id, credit_note_number, customer_id, invoice_id`,
 		status, clock.Now(ctx), stripeRefundID).Scan(&cn.ID, &cn.CreditNoteNumber, &cn.CustomerID, &cn.InvoiceID)
