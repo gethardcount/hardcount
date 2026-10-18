@@ -166,7 +166,7 @@ func classifyStripeError(err error) *PaymentError {
 	// and started dunning, whose next retry sends a new key: a second charge.
 	// The other 409, "same key, different parameters" (idempotency_error),
 	// was already unclear and is handled as before.
-	if false && stripeErr.HTTPStatusCode == http.StatusConflict { // MUTATION: DO NOT MERGE
+	if stripeErr.HTTPStatusCode == http.StatusConflict {
 		pe.Unknown = true
 		return pe
 	}
