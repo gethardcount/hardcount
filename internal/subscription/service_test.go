@@ -1211,6 +1211,9 @@ type fakeBiller struct {
 	// afterCommitCalls counts runs of BillFinalOnImmediateCancelTx's
 	// afterCommit (the unpriced-usage count, #981): post-commit only.
 	afterCommitCalls int
+	// postCommit is the order of the post-commit legs: "relief" per
+	// FinishRelief, "finalize:<invoice id>" per FinalizeOnCreateInvoice.
+	postCommit []string
 }
 
 func (f *fakeBiller) BillOnCreate(_ context.Context, _ domain.Subscription) (domain.Invoice, error) {
@@ -1248,6 +1251,7 @@ func (f *fakeBiller) BillOnPlanSwapDraftsTx(_ context.Context, _ *sql.Tx, _ doma
 func (f *fakeBiller) FinishRelief(_ context.Context, _ domain.Subscription, r domain.Relief) {
 	f.finishCalls++
 	f.finishedDrafts = append(f.finishedDrafts, r.DraftIDs...)
+	f.postCommit = append(f.postCommit, "relief")
 }
 
 func (f *fakeBiller) BillOnCreateTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, _ time.Time) (domain.Invoice, bool, error) {
@@ -1259,8 +1263,9 @@ func (f *fakeBiller) ThresholdBilledThroughTx(_ context.Context, _ *sql.Tx, _ do
 	return f.thresholdBilledThrough, f.thresholdBilledThroughErr
 }
 
-func (f *fakeBiller) FinalizeOnCreateInvoice(_ context.Context, _ domain.Subscription, _ domain.Invoice) {
+func (f *fakeBiller) FinalizeOnCreateInvoice(_ context.Context, _ domain.Subscription, inv domain.Invoice) {
 	f.finalizeCalls++
+	f.postCommit = append(f.postCommit, "finalize:"+inv.ID)
 }
 
 // fakeDispatcher captures outbound-webhook Dispatch calls so tests
