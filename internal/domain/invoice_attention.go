@@ -773,7 +773,7 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 	// the recovery banner (pre-ADR-113 in-flight rows only)
 	// immediately above a Void button that cannot run.
 	var voidAction []AttentionActionItem
-	if drawable > 0 && !inv.PaymentStatus.IsInFlight() {
+	if drawable > 0 && !inv.PaymentInFlight() {
 		voidAction = []AttentionActionItem{{Code: AttentionActionVoidInvoice, Label: "Void invoice"}}
 	}
 

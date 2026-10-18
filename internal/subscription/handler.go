@@ -1961,7 +1961,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		// that matters is what the source could still be credited for
 		// (total − already credited); whether the in-flight charge ultimately
 		// succeeds is decided later, by creditnote.Issue's paid/unpaid branch.
-		if f.PaymentStatus == domain.PaymentSucceeded || f.PaymentStatus.IsInFlight() {
+		if f.PaymentStatus == domain.PaymentSucceeded || f.PaymentInFlight() {
 			credited, cerr := h.creditNotes.CreditedCents(ctx, tenantID, f.ID)
 			if cerr != nil {
 				return nil, fmt.Errorf("read creditable headroom for %s: %w", f.ID, cerr)
@@ -2299,7 +2299,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		// how the source actually resolved. All of that needs one thing from us:
 		// a DRAFT must exist. So an in-flight source falls through to the
 		// draft-creating path below instead of being settled inline.
-		if resolved.PaymentStatus.IsInFlight() {
+		if resolved.PaymentInFlight() {
 			slog.InfoContext(ctx, "item proration: source payment in flight — clawback will be drafted and issued once it settles (ADR-059)",
 				"subscription_id", sub.ID,
 				"item_id", spec.itemID,
