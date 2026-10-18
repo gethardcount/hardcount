@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -772,6 +772,17 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
     ? isPaid ? selectedInvoice.amount_paid_cents : selectedInvoice.amount_due_cents
     : 0
 
+  // One Idempotency-Key per dialog open, sent with every submit from it. A
+  // retry after a lost answer (a timeout while Stripe is slow) then gets the
+  // first request's credit note back instead of making a second one. This
+  // dialog stays mounted while closed, so the key is made each time it opens:
+  // a later note with the same values is a new action and must not get the
+  // earlier note back.
+  const idemKey = useRef('')
+  useEffect(() => {
+    if (open) idemKey.current = crypto.randomUUID()
+  }, [open])
+
   const createMutation = useMutation({
     mutationFn: async (data: CreditNoteFormData) => {
       const amountCents = Math.round(parseFloat(data.amount) * 100)
@@ -781,7 +792,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
         refund_type: data.refundType,
         auto_issue: true,
         lines: [{ description: data.reason, quantity: 1, unit_amount_cents: amountCents }],
-      })
+      }, idemKey.current)
     },
     onSuccess: () => {
       form.reset()
