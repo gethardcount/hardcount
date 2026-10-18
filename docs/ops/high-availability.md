@@ -74,7 +74,7 @@ A grace period shorter than 120 seconds can kill a copy (SIGKILL) halfway throug
 
 ## Upgrades
 
-Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Whether you can upgrade one copy at a time (a rolling upgrade) depends on the release's migrations, below.
+Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Then take a backup, or note the time if your Postgres has point-in-time restore: going back after an upgrade means restoring the database to that point ([Going back](../production-one-vm.md#going-back)). Whether you can upgrade one copy at a time (a rolling upgrade) depends on the release's migrations, below.
 
 **Database upgrades (migrations):** `RUN_MIGRATIONS_ON_BOOT=true` is safe when several copies start at once: they take turns through a Postgres lock, and each one applies only what is still missing. A waiting copy gives up after 30 minutes and is restarted. What is not covered is old code running on a new schema, so the release notes decide the order:
 
