@@ -28,6 +28,11 @@ the screen, and that the main things an operator does work end to end.
   assigns it to a customer, tries to delete it and makes it the default. The
   recipe and dunning journeys run one after the other, because both move the
   default dunning policy. The dunning journey puts the old default back.
+- `invoices.spec.ts` takes invoices through their life on screen: a one-off
+  invoice from draft to finalized (and Save & send), a credit note before and
+  after an offline payment, void and write-off, and the credit notes page.
+  Each journey checks the dashboard and the customer's payment page against
+  the API.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.
