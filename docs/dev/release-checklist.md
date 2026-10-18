@@ -32,6 +32,7 @@ clean.
 - [ ] Hosted invoice page: Pay with `4242` → "Paid" banner within seconds, and the card appears on the customer.
 - [ ] 3-D Secure: Pay with `4000 0027 6000 3184`, fail the challenge → the invoice stays unpaid; pass it → paid.
 - [ ] Refund: a credit note with "Refund to card" → `refund_status=succeeded`, and the refund shows in the Stripe dashboard.
+- [ ] Key in use: start two `stripe payment_intents create -d amount=2000 -d currency=usd -d payment_method=pm_card_visa -d "payment_method_types[]=card" -d confirm=true -i <key>` at once with one new key. Repeat with a fresh key until one answers HTTP 409 with code `idempotency_key_in_use` (identical replies are a replay) → write its error `type` in the comment on `stripe409KeyInUse` in `internal/payment/stripe_409_test.go`. Velox treats every 409 as unclear, whatever the type ([#976](https://github.com/getvelox/velox/issues/976)).
 - [ ] Stripe Tax: with a US state registration in the Stripe test account, tax provider "Stripe Tax", customer with a full US address → the invoice has a tax line that matches Stripe's calculation.
 
 ## Money walk across a renewal

@@ -14,7 +14,10 @@ closing it. Back to the [runbook index](index.md).
 - A parked invoice cannot be charged, on purpose. No sweep, no dunning
   retry and no operator "Collect payment" will touch it. That is what makes
   a double charge impossible.
-- **It will not resolve on its own and needs a human.**
+- **It resolves on its own only when Stripe's answer reaches Velox.** That
+  is the charge's webhook, paid or declined, or Velox's hourly search in
+  Stripe, which adopts a payment that succeeded or is still running. The
+  search never records a decline. Otherwise it needs a human.
 - Alert on presence, not growth. With no customers affected the value is
   zero, and each one is a real invoice a real customer cannot pay.
 
@@ -24,9 +27,17 @@ Find the attempt in Stripe by customer, amount and approximate time.
 
 ## Fix
 
-1. If the charge succeeded, its webhook settles the invoice. No action is
-   needed.
-2. If nothing was charged, mark the invoice uncollectible. This is the only
+1. If the charge succeeded, its webhook or the hourly search settles the
+   invoice. No action is needed.
+2. If the charge was declined, its `payment_intent.payment_failed` webhook
+   marks the invoice failed and dunning starts. If the invoice is still
+   parked, Velox did not apply that webhook. Fix the webhook endpoint if it
+   is failing, then send the event again from the Stripe dashboard. If the
+   invoice stays parked, Velox had already received that event. Mark the
+   invoice uncollectible and ask the customer to pay another way: the
+   write-off stops dunning
+   ([#976](https://github.com/getvelox/velox/issues/976) removes this case).
+3. If nothing was charged, mark the invoice uncollectible. This is the only
    action the invoice page offers. It also releases the invoice's deferred
    clawback draft and closes its dunning run.
 

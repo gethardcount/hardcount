@@ -92,18 +92,27 @@ func humanizeDeclineCode(code string) string {
 	return strings.Join(parts, " ")
 }
 
-// ErrPaymentTransient signals that the payment attempt was short-circuited
-// upstream of Stripe (circuit breaker open, timeout fired before the call)
-// — the Stripe API was not invoked, so the invoice state is unchanged. The
-// scheduler/dunning path should treat this as "skip this tick" and not
-// tick the dunning attempt count, unlike a real payment failure.
+// ErrPaymentTransient signals that this charge request charged nothing, so
+// the invoice state is unchanged: the circuit breaker was open, the
+// credentials could not be read, or Stripe refused the request with 429. The
+// scheduler/dunning path should treat this as "skip this tick" and not tick
+// the dunning attempt count, unlike a real payment failure.
+//
+// A 429 speaks only for the request it answers. When stripe-go resent the
+// request after a network error, the first request under the same key may
+// still be running at Stripe and charge the card (#976). The hold stays, so
+// the same initiator resends the same key; another charge kind or a changed
+// card sends a new one.
 var ErrPaymentTransient = errors.New("payment attempt skipped; upstream breaker open, timeout before Stripe, or Stripe rate limit")
 
 // isRateLimited reports whether Stripe refused the request with HTTP 429. A
 // real test-mode reply (2026-10-14) is status 429, type "rate_limit_error",
 // code "rate_limit", with no PaymentIntent. Stripe sends 429 only before it
-// processes a request, so nothing was charged. A 429 lock_timeout is retried
-// by stripe-go itself and reaches here only once its retries are spent.
+// processes a request, so this request charged nothing. It says nothing about
+// an earlier request under the same key: stripe-go resends after a network
+// error, and a 429 to the resend can follow a first request that Stripe is
+// still running (#976). A 429 lock_timeout is retried by stripe-go itself and
+// reaches here only once its retries are spent.
 func isRateLimited(err error) bool {
 	var se *stripe.Error
 	return errors.As(err, &se) && se.HTTPStatusCode == http.StatusTooManyRequests
@@ -157,10 +166,30 @@ func classifyStripeError(err error) *PaymentError {
 		pe.PaymentIntentID = stripeErr.PaymentIntent.ID
 	}
 
+	// A 409 is never a definite failure, whatever its type (#976). Stripe
+	// answers 409 while another request with the same idempotency key is still
+	// running, and stripe-go retries a network error under the same key. So a
+	// dropped connection on a request Stripe is still running comes back as
+	// 409 "key in use", and the first request can still charge the card.
+	// Read by its type (invalid_request_error), it marked the invoice failed
+	// and started dunning, whose next retry sends a new key: a second charge.
+	// The other 409, "same key, different parameters" (idempotency_error),
+	// was already unclear and is handled as before.
+	if stripeErr.HTTPStatusCode == http.StatusConflict {
+		pe.Unknown = true
+		// Not a decline either, whatever its type: Stripe sends declines as
+		// 402. A decline code here would land on the unknown attempt row,
+		// where HardDeclineOnCard reads it and stops dunning from charging
+		// the card (#966), and the API would say "Card was declined".
+		pe.DeclineCode = ""
+		return pe
+	}
+
 	switch stripeErr.Type {
 	case stripe.ErrorTypeCard,
 		stripe.ErrorTypeInvalidRequest:
-		// Stripe explicitly rejected the request; no charge occurred.
+		// Stripe explicitly rejected the request; no charge occurred. (A 409
+		// of these types returned above.)
 		pe.Unknown = false
 	case stripe.ErrorTypeIdempotency:
 		// AMBIGUOUS, not a rejection — and it used to be grouped with the two
@@ -273,11 +302,13 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 	})
 	if err != nil {
 		if isRateLimited(err) {
-			// Stripe refused the request before processing it, so no charge
-			// happened. Treat it like the breaker short-circuit: no state
-			// write, and the next tick tries again. Classified as an error it
-			// would park the invoice at 'unknown' (an unrecognised type) for
-			// a person to resolve, though there is nothing to resolve.
+			// Stripe refused this request before processing it, so this
+			// request charged nothing (an earlier one that stripe-go resent
+			// may still be running; see isRateLimited). Treat it like the
+			// breaker short-circuit: no state write, the hold stays, and the
+			// next tick tries again. Classified as an error it would park the
+			// invoice at 'unknown' (an unrecognised type) for a person to
+			// resolve.
 			return PaymentIntentResult{}, fmt.Errorf("%w: stripe rate limit: %v", ErrPaymentTransient, errs.Scrub(err.Error()))
 		}
 		return PaymentIntentResult{}, classifyStripeError(err)
