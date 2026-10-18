@@ -49,7 +49,11 @@ async function dropNextCreditNoteAnswer(page: Page) {
   await page.route(url => url.pathname === '/v1/credit-notes', async route => {
     if (dropped || route.request().method() !== 'POST') return route.fallback()
     dropped = true
-    const answer = await route.fetch()
+    // route.fetch sends the request from outside the page, without the
+    // Sec-Fetch-Site header Chrome adds. The server's CSRF check would then
+    // look up the Origin in its allowed list, empty on the test server, and
+    // refuse. Send the header as Chrome does.
+    const answer = await route.fetch({ headers: { ...route.request().headers(), 'sec-fetch-site': 'same-origin' } })
     await route.abort('failed')
     settle(answer.status())
   })
