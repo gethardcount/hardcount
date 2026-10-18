@@ -27,6 +27,10 @@ original text.
 - **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, Velox refuses to start and says why.
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
 
+### Added
+
+- **`make migration` writes the next migration file, and `-short` tests check every file after 180 (2026-10-18).** For contributors: the name and number, an Up and a Down, `SET LOCAL` only, the one index-build shape, and `VALIDATE CONSTRAINT` in a file of its own. Steps: [Writing a database migration](docs/dev/migrations.md). ([#1212](https://github.com/getvelox/velox/pull/1212))
+
 ### Changed
 
 - **Browser tests now set up pricing, recipes, price overrides and dunning policies through the dashboard (2026-10-18).** Contributors: `web-v2/e2e/account-setup.spec.ts` has four journeys, each checked against the API, and the smoke test now opens the six public pages signed out, including links with no or a dead code.
