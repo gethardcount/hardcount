@@ -341,6 +341,21 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		pdf.Line(x1, y, x2, y)
 	}
 
+	// wrap splits text into lines no wider than width in the current font.
+	// If it cannot, the render fails rather than print a line that runs
+	// out of its column.
+	var wrapErr error
+	wrap := func(text string, width float64) []string {
+		lines, err := pdffonts.WrapText(pdf, text, width)
+		if err != nil {
+			if wrapErr == nil {
+				wrapErr = err
+			}
+			return []string{text}
+		}
+		return lines
+	}
+
 	// ── VOID / DRAFT watermark ──
 	// A draft is a preview, not a document the customer owes on. Without the
 	// mark a downloaded draft read as an issued invoice. Drawn on every page,
@@ -558,6 +573,11 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	// ── Line items table ──
 	colX := []float64{margin, margin + 240, margin + 320, margin + 400}
 	colEnd := margin + contentW
+	// A description wraps inside its column, which stops a gap short of
+	// the Qty column, and is never cut (#1228). Each extra line adds
+	// descLineH to its row.
+	descW := colX[1] - colX[0] - 8
+	const descLineH = 12.0
 
 	drawTableHeader := func() {
 		setFont(true, 9)
@@ -618,20 +638,38 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		draw()
 	}
 
+	// descLines is a line item's description as it prints.
+	descLines := func(item domain.InvoiceLineItem) []string {
+		setFont(false, 9)
+		return wrap(item.Description, descW)
+	}
+	// rowHeight is the height a row of n description lines needs on one
+	// page. A row taller than a continued page holds under its table
+	// header cannot stay on one page, so it needs only its first line's
+	// room: it starts where it is and breaks between its lines.
+	rowHeight := func(n int) float64 {
+		h := 18 + float64(n-1)*descLineH
+		if h > bottomLimit-(margin+20+22) {
+			return 18
+		}
+		return h
+	}
+
 	// Header row, kept with the first line item.
-	need(22+18, false)
+	firstRow := 18.0
+	if len(lineItems) > 0 {
+		firstRow = rowHeight(len(descLines(lineItems[0])))
+	}
+	need(22+firstRow, false)
 	drawTableHeader()
 
 	// Line items
 	for _, item := range lineItems {
-		need(18, true)
+		lines := descLines(item)
+		need(rowHeight(len(lines)), true)
 		setFont(false, 9)
 		setColor(40, 40, 40)
-		desc := item.Description
-		if len([]rune(desc)) > 50 {
-			desc = string([]rune(desc)[:47]) + "..."
-		}
-		textAt(colX[0], y, desc)
+		textAt(colX[0], y, lines[0])
 		rightAlignAt(colX[1], y, colX[2]-colX[1], formatQuantity(item))
 		// Token lines quote per 1M on every provider rate card — mirror the
 		// dashboard's convention (domain.MeterUnitDisplayScale) so the PDF,
@@ -645,27 +683,51 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		}
 		rightAlignAt(colX[2], y, colX[3]-colX[2], unitPrice)
 		rightAlignAt(colX[3], y, colEnd-colX[3], formatCents(item.AmountCents))
+		for _, line := range lines[1:] {
+			// Only a row taller than a page reaches the foot of one here.
+			if y+descLineH+18 > bottomLimit {
+				newPage(true)
+				setFont(false, 9)
+				setColor(40, 40, 40)
+			} else {
+				y += descLineH
+			}
+			textAt(colX[0], y, line)
+		}
 		y += 18
 	}
 
 	// ── Totals ──
+	// Amounts right-align with the Amount column. A label starts at x and
+	// stops totalsGap short of its amount, wrapping onto more lines when
+	// longer, so no amount runs into its label however large (#1178).
 	totalsX := 340.0
-	totalsW := 140.0
-	labelW := 90.0
+	totalsEnd := colEnd
+	const totalsGap = 12.0
 
-	totalsRow := func(label string, amount string, bold bool, labelR, labelG, labelB, valR, valG, valB uint8) {
-		need(16, false)
-		if bold {
-			setFont(true, 10)
-		} else {
-			setFont(false, 10)
+	// totalsLine draws one row of the totals block in the given font and
+	// colors. y moves down rowH, and size+3 more for each extra label line.
+	totalsLine := func(x float64, label, value string, bold bool, size int, rowH float64, labelRGB, valueRGB [3]uint8) {
+		setFont(bold, size)
+		vw, _ := pdf.MeasureTextWidth(value)
+		lines := wrap(label, totalsEnd-totalsGap-vw-x)
+		lineH := float64(size + 3)
+		h := rowH + float64(len(lines)-1)*lineH
+		need(h, false)
+		setFont(bold, size) // a new page sets its own font
+		setColor(labelRGB[0], labelRGB[1], labelRGB[2])
+		for i, line := range lines {
+			textAt(x, y+float64(i)*lineH, line)
 		}
-		setColor(labelR, labelG, labelB)
-		textAt(totalsX, y, label)
-		setColor(valR, valG, valB)
-		rightAlignAt(totalsX+labelW, y, totalsW-labelW, amount)
-		y += 16
+		setColor(valueRGB[0], valueRGB[1], valueRGB[2])
+		rightAlignAt(x, y, totalsEnd-x, value)
+		y += h
 	}
+	totalsRow := func(label string, amount string, bold bool, labelR, labelG, labelB, valR, valG, valB uint8) {
+		totalsLine(totalsX, label, amount, bold, 10, 16, [3]uint8{labelR, labelG, labelB}, [3]uint8{valR, valG, valB})
+	}
+	green := [3]uint8{0, 128, 80}
+	dark := [3]uint8{30, 30, 30}
 
 	// Credit notes split by when they apply. A CN is "post-payment" if any
 	// of the three channels is populated — refund-to-PM, credit-balance,
@@ -720,13 +782,9 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 			// skip this — the aggregate row already tells the whole story.
 			jurisdictionAgg := aggregateTaxByJurisdiction(lineItems)
 			if len(jurisdictionAgg) > 1 {
+				gray := [3]uint8{120, 120, 120}
 				for _, row := range jurisdictionAgg {
-					need(12, false)
-					setFont(false, 8)
-					setColor(120, 120, 120)
-					textAt(totalsX+12, y, row.label)
-					rightAlignAt(totalsX+labelW, y, totalsW-labelW, formatCents(row.amount))
-					y += 12
+					totalsLine(totalsX+12, row.label, formatCents(row.amount), false, 8, 12, gray, gray)
 				}
 				y += 4
 			}
@@ -744,15 +802,12 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		// Total line
 		need(18, false)
 		pdf.SetStrokeColor(220, 220, 220)
-		hline(totalsX, totalsX+totalsW, y-4)
+		hline(totalsX, totalsEnd, y-4)
 		y += 2
 		totalsRow("Total", formatCents(inv.TotalAmountCents), true, 30, 30, 30, 30, 30, 30)
 
 		// Credit notes (pre-payment).
 		for _, cn := range prePaymentCNs {
-			need(16, false)
-			setFont(false, 8)
-			setColor(0, 128, 80)
 			label := cn.Number
 			if cn.Reason != "" {
 				r := []rune(cn.Reason)
@@ -761,29 +816,18 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 				}
 				label += " - " + string(r)
 			}
-			textAt(totalsX, y, label)
-			rightAlignAt(totalsX+labelW, y, totalsW-labelW, "-"+formatCents(cn.Amount))
-			y += 16
+			totalsLine(totalsX, label, "-"+formatCents(cn.Amount), false, 8, 16, green, green)
 		}
 
 		if inv.Status == domain.InvoiceVoided {
 			need(24, false)
 			pdf.SetStrokeColor(200, 200, 200)
-			hline(totalsX, totalsX+totalsW, y-4)
+			hline(totalsX, totalsEnd, y-4)
 			y += 4
-			setFont(true, 12)
-			setColor(30, 30, 30)
-			textAt(totalsX, y, "Amount Due")
-			rightAlignAt(totalsX+labelW, y, totalsW-labelW, formatCents(0))
-			y += 20
+			totalsLine(totalsX, "Amount Due", formatCents(0), true, 12, 20, dark, dark)
 		} else {
 			if inv.CreditsAppliedCents > 0 {
-				need(16, false)
-				setFont(false, 9)
-				setColor(0, 128, 80)
-				textAt(totalsX, y, "Prepaid credits")
-				rightAlignAt(totalsX+labelW, y, totalsW-labelW, "-"+formatCents(inv.CreditsAppliedCents))
-				y += 16
+				totalsLine(totalsX, "Prepaid credits", "-"+formatCents(inv.CreditsAppliedCents), false, 9, 16, green, green)
 			}
 
 			if inv.AmountPaidCents > 0 {
@@ -792,13 +836,9 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 
 			need(24, false)
 			pdf.SetStrokeColor(200, 200, 200)
-			hline(totalsX, totalsX+totalsW, y-4)
+			hline(totalsX, totalsEnd, y-4)
 			y += 4
-			setFont(true, 12)
-			setColor(30, 30, 30)
-			textAt(totalsX, y, "Amount Due")
-			rightAlignAt(totalsX+labelW, y, totalsW-labelW, formatCents(inv.AmountDueCents))
-			y += 20
+			totalsLine(totalsX, "Amount Due", formatCents(inv.AmountDueCents), true, 12, 20, dark, dark)
 		}
 
 		if inv.Status != domain.InvoiceVoided {
@@ -834,11 +874,8 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 					if len([]rune(reason)) > 40 {
 						reason = string([]rune(reason)[:37]) + "..."
 					}
-					setFont(false, 8)
-					setColor(120, 120, 120)
-					textAt(margin, y, fmt.Sprintf("%s - %s", cn.Number, reason))
-					rightAlignAt(totalsX+labelW, y, totalsW-labelW, formatCents(cn.Amount))
-					y += 11
+					gray := [3]uint8{120, 120, 120}
+					totalsLine(margin, fmt.Sprintf("%s - %s", cn.Number, reason), formatCents(cn.Amount), false, 8, 11, gray, gray)
 					// Channel breakdown line — smaller, indented, matches
 					// dashboard layout.
 					setFont(false, 7)
@@ -948,6 +985,9 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 		})
 	})
 
+	if wrapErr != nil {
+		return nil, fmt.Errorf("render pdf: %w", wrapErr)
+	}
 	if err := stampPageNumbers(pdf, margin, contentW, pageH-34); err != nil {
 		return nil, err
 	}
