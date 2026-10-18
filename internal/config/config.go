@@ -60,7 +60,7 @@ type Config struct {
 }
 
 // RateLimits are the request limits the API enforces per API key, per
-// signed-in account, or per client address before sign-in. Each must be a
+// tenant for dashboard sessions, or per client address before sign-in. Each must be a
 // whole number of 1 or more; anything else stops start-up. A bad value used
 // to fall back to the default without a word, so the install ran on a limit
 // nobody chose.
