@@ -31,6 +31,11 @@ type fakeRefunder struct {
 	foundID     string
 	foundStatus domain.RefundStatus
 	findErr     error
+
+	// duringCreate runs inside CreateRefund, while the request is "at
+	// Stripe". A test passes a context's cancel func to end the caller's
+	// context in the middle of the call.
+	duringCreate func()
 }
 
 type fakeRefundCall struct {
@@ -45,13 +50,22 @@ type fakeFindCall struct {
 	creditNoteID    string
 }
 
-func (f *fakeRefunder) CreateRefund(_ context.Context, paymentIntentID string, amountCents int64, idempotencyKey, creditNoteID string) (string, domain.RefundStatus, error) {
+func (f *fakeRefunder) CreateRefund(ctx context.Context, paymentIntentID string, amountCents int64, idempotencyKey, creditNoteID string) (string, domain.RefundStatus, error) {
 	f.calls = append(f.calls, fakeRefundCall{
 		paymentIntentID: paymentIntentID,
 		amountCents:     amountCents,
 		idempotencyKey:  idempotencyKey,
 		creditNoteID:    creditNoteID,
 	})
+	if f.duringCreate != nil {
+		f.duringCreate()
+		// stripe-go gives up when the caller's context ends, with no answer
+		// from Stripe. The Stripe refunder reads that as "result unknown",
+		// as it reads any error that is not Stripe's own.
+		if err := ctx.Err(); err != nil {
+			return "", "", &outcomeErr{msg: "stripe refund: Post \"https://api.stripe.com/v1/refunds\": " + err.Error(), unknown: true}
+		}
+	}
 	if f.failWith != nil {
 		return "", "", f.failWith
 	}

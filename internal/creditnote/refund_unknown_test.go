@@ -32,9 +32,9 @@ func (e *outcomeErr) RequestNotRun() bool  { return e.notRun }
 var (
 	errRefundNoAnswer = &outcomeErr{msg: "stripe refund: An unknown error occurred", unknown: true}
 	errRefundRefused  = &outcomeErr{msg: "stripe refund: Charge ch_1 has already been refunded.", unknown: false}
-	// Stripe refused before running the request (a rate limit), so it saved
-	// no result for the key.
-	errRefundNotRun = &outcomeErr{msg: "stripe refund: not run: Request rate limit exceeded.", notRun: true}
+	// Stripe refused before running the request (an invalid API key), so it
+	// saved no result for the key.
+	errRefundNotRun = &outcomeErr{msg: "stripe refund: not run: Invalid API Key provided: sk_test_****FAKE", notRun: true}
 )
 
 func TestIssue_RefundResultUnknownOrFailed(t *testing.T) {
@@ -262,12 +262,13 @@ func TestRetryRefund_ResendRecordsTheRefundsCurrentStatus(t *testing.T) {
 	}
 }
 
-// On a resend, an error Stripe raised before running it (a rate limit) is
-// about that resend only: Stripe saved no result for the key, so the earlier
-// request's result is still unknown. The note stays unknown with the same key,
-// the caller is told the result is unknown (never "not refunded"), and the
-// next retry resends the same request again. On a first request the same
-// error is a refusal: nothing ran, so nothing was refunded.
+// On a resend, an error Stripe raised before running it (an invalid API key,
+// a key without refund permission) is about that resend only: Stripe saved no
+// result for the key, so the earlier request's result is still unknown. The
+// note stays unknown with the same key, the caller is told the result is
+// unknown (never "not refunded"), and the next retry resends the same request
+// again. On a first request the same error is a refusal: nothing ran, so
+// nothing was refunded.
 func TestRetryRefund_ResendStripeDidNotRunStaysUnknown(t *testing.T) {
 	t.Parallel()
 	svc, store, _, refunder := setupRefundSvc(t)
@@ -322,4 +323,148 @@ func safeMessage(err error) string {
 		return sm.OperatorSafeMessage()
 	}
 	return ""
+}
+
+// A refund asked for through the API runs on the request's context, which
+// chi's middleware.Timeout ends after 30 seconds (internal/api/router.go).
+// The Stripe client also allows 30 seconds, but its clock starts later, so
+// when Stripe hangs, the request context ends first, during the Stripe call.
+// The write that records the unclear result must still land. A database write
+// on an ended context is refused, which used to leave a retried note at
+// "failed" (the #965 label) and an issued one at "none".
+func TestRefund_RequestEndsDuringTheStripeCall(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Retry refund on a failed note records unknown and keeps the key", func(t *testing.T) {
+		t.Parallel()
+		svc, store, _, refunder := setupRefundSvc(t)
+		cn, err := store.Create(context.Background(), "t1", domain.CreditNote{
+			TenantID: "t1", InvoiceID: "inv_paid", CustomerID: "cus_1",
+			CreditNoteNumber: "CN-RETRY-DEADLINE", Status: domain.CreditNoteIssued,
+			Reason: "retry", SubtotalCents: 5000, TotalCents: 5000,
+			RefundAmountCents: 5000, Currency: "USD", RefundStatus: domain.RefundFailed,
+		})
+		if err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		refunder.duringCreate = cancel
+
+		_, err = svc.RetryRefund(ctx, "t1", cn.ID)
+		var oe interface{ OutcomeUnknown() bool }
+		if !errors.As(err, &oe) || !oe.OutcomeUnknown() {
+			t.Fatalf("RetryRefund error = %v, want one that says the result is unknown", err)
+		}
+		got := store.notes[cn.ID]
+		if got.RefundStatus != refundUnknown {
+			t.Fatalf("refund_status = %q, want unknown: Stripe may have made the refund", got.RefundStatus)
+		}
+		if len(refunder.calls) != 1 || got.RefundUnknownKey != refunder.calls[0].idempotencyKey {
+			t.Fatalf("stored key = %q, want the key of the request sent (%+v)", got.RefundUnknownKey, refunder.calls)
+		}
+	})
+
+	t.Run("Issue records unknown with its key and returns the issued note", func(t *testing.T) {
+		t.Parallel()
+		svc, store, _, refunder := setupRefundSvc(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		refunder.duringCreate = cancel
+
+		// The API answers with this note, so the caller sees "unknown"
+		// rather than an error after the note was issued.
+		cn, err := svc.CreateRefund(ctx, "t1", RefundInput{InvoiceID: "inv_paid", Reason: "fraudulent"})
+		if err != nil {
+			t.Fatalf("CreateRefund: %v (want the issued note with refund_status unknown)", err)
+		}
+		if cn.Status != domain.CreditNoteIssued || cn.RefundStatus != refundUnknown {
+			t.Fatalf("returned note = (%q, %q), want (issued, unknown)", cn.Status, cn.RefundStatus)
+		}
+		got := store.notes[cn.ID]
+		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "velox_cn_"+cn.ID {
+			t.Fatalf("stored refund leg = (%q, key %q), want (unknown, velox_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		}
+	})
+}
+
+// seedIssuedNoneRefund is an issued note whose refund leg has no recorded
+// outcome: Issue sent velox_cn_<id> to Stripe (or was about to), then crashed
+// or lost its write before recording the answer.
+func seedIssuedNoneRefund(t *testing.T, store *memStore) domain.CreditNote {
+	t.Helper()
+	cn, err := store.Create(context.Background(), "t1", domain.CreditNote{
+		TenantID: "t1", InvoiceID: "inv_paid", CustomerID: "cus_1",
+		CreditNoteNumber: "CN-NONE", Status: domain.CreditNoteIssued,
+		Reason: "fraudulent", SubtotalCents: 5000, TotalCents: 5000,
+		RefundAmountCents: 5000, Currency: "USD", RefundStatus: domain.RefundNone,
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	return cn
+}
+
+// From "none", Issue's request may still be running at Stripe, or may yet be
+// made by Stripe's incident recovery, and its outcome was never recorded. So
+// Retry refund resends that same request, velox_cn_<id>, as it does from
+// "unknown", and reads the refund's current status after it. A new key could
+// start a second refund (https://docs.stripe.com/error-low-level#content-errors).
+func TestRetryRefund_NoneResendsTheIssueRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the resend reuses the issue key and records the current status", func(t *testing.T) {
+		t.Parallel()
+		svc, store, _, refunder := setupRefundSvc(t)
+		cn := seedIssuedNoneRefund(t, store)
+		// Stripe's saved answer to Issue's request says succeeded; the refund
+		// has failed since.
+		refunder.returnStatus = domain.RefundSucceeded
+		refunder.getStatusOf = map[string]domain.RefundStatus{"re_fake_1": domain.RefundFailed}
+
+		out, err := svc.RetryRefund(context.Background(), "t1", cn.ID)
+		if err != nil {
+			t.Fatalf("RetryRefund: %v", err)
+		}
+		if len(refunder.findCalls) != 1 {
+			t.Fatalf("Stripe lookups before the resend = %d, want 1", len(refunder.findCalls))
+		}
+		if len(refunder.calls) != 1 || refunder.calls[0].idempotencyKey != "velox_cn_"+cn.ID {
+			t.Fatalf("requests = %+v, want one with Issue's key velox_cn_%s", refunder.calls, cn.ID)
+		}
+		if out.StripeRefundID != "re_fake_1" || out.RefundStatus != domain.RefundFailed {
+			t.Fatalf("refund leg = (%q, %q), want (re_fake_1, failed): the saved answer is stale", out.StripeRefundID, out.RefundStatus)
+		}
+	})
+
+	t.Run("a resend with no clear answer is unknown with the issue key", func(t *testing.T) {
+		t.Parallel()
+		svc, store, _, refunder := setupRefundSvc(t)
+		cn := seedIssuedNoneRefund(t, store)
+		refunder.failWith = errRefundNoAnswer
+
+		if _, err := svc.RetryRefund(context.Background(), "t1", cn.ID); err == nil {
+			t.Fatal("RetryRefund returned no error for an unclear answer")
+		}
+		got := store.notes[cn.ID]
+		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "velox_cn_"+cn.ID {
+			t.Fatalf("refund leg = (%q, key %q), want (unknown, velox_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		}
+	})
+
+	t.Run("a resend Stripe never ran is unknown, not failed", func(t *testing.T) {
+		t.Parallel()
+		svc, store, _, refunder := setupRefundSvc(t)
+		cn := seedIssuedNoneRefund(t, store)
+		refunder.failWith = errRefundNotRun
+
+		_, err := svc.RetryRefund(context.Background(), "t1", cn.ID)
+		if strings.Contains(safeMessage(err), "not refunded") {
+			t.Fatalf("operator message = %q: Issue's request may have made the refund", safeMessage(err))
+		}
+		got := store.notes[cn.ID]
+		if got.RefundStatus != refundUnknown || got.RefundUnknownKey != "velox_cn_"+cn.ID {
+			t.Fatalf("refund leg = (%q, key %q), want (unknown, velox_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		}
+	})
 }

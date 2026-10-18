@@ -40,10 +40,22 @@ type keyRecordingRefunder struct {
 	err      error
 	refundID string
 	keys     []string
+	// during runs inside CreateRefund, while the request is "at Stripe". A
+	// test passes a context's cancel func to end the caller's context in the
+	// middle of the call, as chi's request timeout does.
+	during func()
 }
 
-func (r *keyRecordingRefunder) CreateRefund(_ context.Context, _ string, _ int64, key, _ string) (string, domain.RefundStatus, error) {
+func (r *keyRecordingRefunder) CreateRefund(ctx context.Context, _ string, _ int64, key, _ string) (string, domain.RefundStatus, error) {
 	r.keys = append(r.keys, key)
+	if r.during != nil {
+		r.during()
+		// stripe-go gives up with no answer from Stripe; the Stripe
+		// refunder reads that as "result unknown".
+		if ctx.Err() != nil {
+			return "", "", outcomeRefundErr{unknown: true}
+		}
+	}
 	if r.err != nil {
 		return "", "", r.err
 	}
@@ -213,6 +225,97 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		}
 		if err := store.UpdateRefundStatusAudited(ctx, tenantID, cn.ID, creditnote.RefundStatusWrite{Status: domain.RefundFailed, ExpectedPriorRefundID: "re_unk_race", UnknownKey: key}, nil); err == nil {
 			t.Fatal("store accepted a request key with status failed")
+		}
+	})
+
+	// seedCardRefund is an issued note with a card refund on a paid invoice
+	// with a PaymentIntent, its refund leg at status (and refundID, if any).
+	seedCardRefund := func(t *testing.T, suffix string, status domain.RefundStatus, refundID string) domain.CreditNote {
+		t.Helper()
+		cust, inv := seedInvoiceForCN(t, db, tenantID, suffix, domain.InvoicePaid, domain.PaymentSucceeded, "pi_"+suffix)
+		cn, err := store.Create(ctx, tenantID, domain.CreditNote{
+			InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-" + suffix,
+			Status: domain.CreditNoteIssued, Reason: "fraudulent",
+			SubtotalCents: 5000, TotalCents: 5000, RefundAmountCents: 5000,
+			Currency: "USD", RefundStatus: domain.RefundNone,
+		})
+		if err != nil {
+			t.Fatalf("seed credit note: %v", err)
+		}
+		if status != domain.RefundNone {
+			if err := store.UpdateRefundStatus(ctx, tenantID, cn.ID, status, refundID); err != nil {
+				t.Fatalf("stamp refund leg: %v", err)
+			}
+		}
+		return cn
+	}
+
+	// A refund asked for through the API runs on the request's context, which
+	// chi's middleware.Timeout ends after 30 seconds. When Stripe hangs, that
+	// context ends during the Stripe call, and Postgres refuses a transaction
+	// begun on it. The write that records the unclear result must still land.
+	t.Run("a request that ends during the Stripe call still stores unknown at issue", func(t *testing.T) {
+		_, inv := seedInvoiceForCN(t, db, tenantID, "unk-deadline-issue", domain.InvoicePaid, domain.PaymentSucceeded, "pi_unk_deadline_issue")
+		refunder := &keyRecordingRefunder{}
+		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetNumberGenerator(&seqNumbers{prefix: "UNKDLISSUE"})
+		reqCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		refunder.during = cancel
+
+		cn, err := svc.CreateRefund(reqCtx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+		if err != nil {
+			t.Fatalf("CreateRefund: %v (want the issued note with refund_status unknown)", err)
+		}
+		got, err := store.Get(ctx, tenantID, cn.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.RefundStatus != refundStatusUnknown || got.RefundUnknownKey != "velox_cn_"+cn.ID {
+			t.Fatalf("stored refund leg = (%q, key %q), want (unknown, velox_cn_%s)", got.RefundStatus, got.RefundUnknownKey, cn.ID)
+		}
+	})
+
+	t.Run("a request that ends during the Stripe call still stores unknown on retry", func(t *testing.T) {
+		cn := seedCardRefund(t, "unk-deadline-retry", domain.RefundFailed, "")
+		refunder := &keyRecordingRefunder{}
+		svc := creditnote.NewService(store, invStore, refunder)
+		reqCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		refunder.during = cancel
+
+		if _, err := svc.RetryRefund(reqCtx, tenantID, cn.ID); err == nil {
+			t.Fatal("RetryRefund returned no error for an unclear answer")
+		}
+		got, err := store.Get(ctx, tenantID, cn.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.RefundStatus != refundStatusUnknown {
+			t.Fatalf("stored refund_status = %q, want unknown: Stripe may have made the refund", got.RefundStatus)
+		}
+		if len(refunder.keys) != 1 || got.RefundUnknownKey != refunder.keys[0] {
+			t.Fatalf("stored key = %q, want the key of the request sent %v", got.RefundUnknownKey, refunder.keys)
+		}
+	})
+
+	// From "none", Issue's request (velox_cn_<id>) may have reached Stripe and
+	// its outcome was never recorded, so Retry resends it rather than starting
+	// a new request under a new key.
+	t.Run("Retry from none resends the issue request", func(t *testing.T) {
+		cn := seedCardRefund(t, "unk-none-resend", domain.RefundNone, "")
+		refunder := &keyRecordingRefunder{refundID: "re_unk_none_resend"}
+		svc := creditnote.NewService(store, invStore, refunder)
+
+		out, err := svc.RetryRefund(ctx, tenantID, cn.ID)
+		if err != nil {
+			t.Fatalf("RetryRefund: %v", err)
+		}
+		if want := "velox_cn_" + cn.ID; len(refunder.keys) != 1 || refunder.keys[0] != want {
+			t.Fatalf("request keys = %v, want [%s]", refunder.keys, want)
+		}
+		if out.RefundStatus != domain.RefundSucceeded || out.StripeRefundID != "re_unk_none_resend" {
+			t.Fatalf("refund leg = (%q, %q), want (succeeded, re_unk_none_resend)", out.RefundStatus, out.StripeRefundID)
 		}
 	})
 

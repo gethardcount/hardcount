@@ -25,6 +25,10 @@ const (
 	stripeRefundKeyInUse = `{"error":{"code":"idempotency_key_in_use","message":"The idempotency key provided is currently being used in another request.","type":"invalid_request_error"}}`
 	// Stripe's answer to a revoked or mistyped secret key.
 	stripeBadKey = `{"error":{"message":"Invalid API Key provided: sk_test_****FAKE","type":"invalid_request_error"}}`
+	// Stripe's answer to a restricted key (rk_, which Velox accepts) that
+	// lacks refund permission: 403, "The API key doesn't have permissions to
+	// perform the request" (https://docs.stripe.com/api/errors).
+	stripeKeyNoPermission = `{"error":{"message":"The provided key 'rk_test_****FAKE' does not have the required permissions for this endpoint on account 'acct_FAKE'.","type":"invalid_request_error"}}`
 )
 
 // refundOutcome is how the credit-note service reads a refund error. It is
@@ -43,6 +47,26 @@ func (n *noAnswer) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("read tcp 10.0.0.1:443: i/o timeout")
 }
 
+// lostThenCanned loses the first request on the wire, then answers every
+// later one with a fixed response. stripe-go resends a request lost on the
+// wire, under the same idempotency key, and stops at any answer from Stripe
+// but a 429 lock_timeout (stripe-go v82 stripe.go shouldRetry, error.go
+// canRetry). So the error Velox reads can be the answer to a second attempt
+// while the first one ran.
+type lostThenCanned struct {
+	status int
+	body   string
+	calls  int
+}
+
+func (l *lostThenCanned) RoundTrip(r *http.Request) (*http.Response, error) {
+	l.calls++
+	if l.calls == 1 {
+		return nil, errors.New("read tcp 10.0.0.1:443: connection reset by peer")
+	}
+	return (&cannedStripe{status: l.status, body: l.body}).RoundTrip(r)
+}
+
 // TestCreateRefund_SaysWhetherTheRefundMayExist pins #965. CreateRefund used
 // to flatten every Stripe error into a string, so the credit note recorded a
 // timeout or a Stripe 5xx as "refund failed", although Stripe may have made
@@ -53,11 +77,12 @@ func (n *noAnswer) RoundTrip(*http.Request) (*http.Response, error) {
 // error stripe-go builds from the response, not one written by hand.
 func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 	cases := []struct {
-		name    string
-		stripe  func(t *testing.T)
-		unknown bool
-		notRun  bool   // Stripe ran nothing, so it saved no result for the key
-		code    string // the 502 code the API answers with
+		name      string
+		stripe    func(t *testing.T)
+		wantCalls int // requests stripe-go sends; 0 skips the check
+		unknown   bool
+		notRun    bool   // Stripe ran nothing, so it saved no result for the key
+		code      string // the 502 code the API answers with
 	}{
 		{
 			name:    "Stripe 500: the refund may exist",
@@ -93,20 +118,54 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 		{
 			// Stripe sends 429 before it runs a request, and saves no result
 			// for it (https://docs.stripe.com/error-low-level#content-errors).
-			// stripe429 is a real test-mode reply; its type is
-			// rate_limit_error, which the charge classifier alone reads as
-			// unclear.
-			name:    "rate limit: Stripe refused before running the request",
+			// But stripe-go may have sent the request before, and lost it on
+			// the wire (next case), and Velox cannot tell. stripe429 is a
+			// real test-mode reply.
+			name:    "rate limit: an earlier attempt may have run",
 			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusTooManyRequests, stripe429) },
+			unknown: true,
+			code:    "payment_outcome_unknown",
+		},
+		{
+			// The first attempt reached Stripe or not; the second got a 429.
+			// Recording "failed" here would free the next retry to use a new
+			// key while Stripe may be making the first refund.
+			name: "connection lost, then a rate limit: the first attempt may have run",
+			stripe: func(t *testing.T) {
+				withTransport(t, &lostThenCanned{status: http.StatusTooManyRequests, body: stripe429})
+			},
+			wantCalls: 2,
+			unknown:   true,
+			code:      "payment_outcome_unknown",
+		},
+		{
+			// An invalid API key is refused before execution, with no saved
+			// result (same page).
+			name:    "invalid API key: Stripe refused before running the request",
+			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusUnauthorized, stripeBadKey) },
 			unknown: false,
 			notRun:  true,
 			code:    "provider_error",
 		},
 		{
-			// An invalid API key is also refused before execution, with no
-			// saved result (same page).
-			name:    "invalid API key: Stripe refused before running the request",
-			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusUnauthorized, stripeBadKey) },
+			// Every attempt of one call carries the same API key, so if the
+			// last was refused for the key, any earlier one that reached
+			// Stripe was refused the same way, before it ran.
+			name: "connection lost, then an invalid API key: no attempt ran",
+			stripe: func(t *testing.T) {
+				withTransport(t, &lostThenCanned{status: http.StatusUnauthorized, body: stripeBadKey})
+			},
+			wantCalls: 2,
+			unknown:   false,
+			notRun:    true,
+			code:      "provider_error",
+		},
+		{
+			// A key without refund permission is also refused before the
+			// request runs. On a resend, this answer says nothing about the
+			// earlier request: the tenant may have changed keys since.
+			name:    "key without refund permission: Stripe refused before running the request",
+			stripe:  func(t *testing.T) { withCannedStripe(t, http.StatusForbidden, stripeKeyNoPermission) },
 			unknown: false,
 			notRun:  true,
 			code:    "provider_error",
@@ -115,12 +174,16 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.stripe(t)
+			sent := countRequests(t)
 			r := NewStripeRefunder(NewStripeClients(fixedCreds{}))
 			ctx := auth.WithTenantID(context.Background(), "t1")
 
 			_, _, err := r.CreateRefund(ctx, "pi_x", 500, "velox_cn_x", "cn_x")
 			if err == nil {
 				t.Fatal("CreateRefund returned no error")
+			}
+			if tc.wantCalls != 0 && *sent != tc.wantCalls {
+				t.Fatalf("requests sent = %d, want %d", *sent, tc.wantCalls)
 			}
 			var oe refundOutcome
 			if !errors.As(err, &oe) {
@@ -147,3 +210,29 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 		})
 	}
 }
+
+// withTransport answers every Stripe request through rt for this test.
+func withTransport(t *testing.T, rt http.RoundTripper) {
+	t.Helper()
+	old := stripeHTTPClient.Transport
+	stripeHTTPClient.Transport = rt
+	t.Cleanup(func() { stripeHTTPClient.Transport = old })
+}
+
+// countRequests counts the requests that reach the transport set for this
+// test.
+func countRequests(t *testing.T) *int {
+	t.Helper()
+	n := new(int)
+	next := stripeHTTPClient.Transport
+	stripeHTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		*n++
+		return next.RoundTrip(r)
+	})
+	t.Cleanup(func() { stripeHTTPClient.Transport = next })
+	return n
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

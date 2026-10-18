@@ -156,7 +156,11 @@ func (m *memStore) ListPendingClawbackDraftsForClock(_ context.Context, _, _ str
 	return m.ListPendingClawbackDrafts(context.Background(), 0, false)
 }
 
-func (m *memStore) Get(_ context.Context, tenantID, id string) (domain.CreditNote, error) {
+func (m *memStore) Get(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {
+	// The real store's query is refused once ctx has ended (database/sql).
+	if err := ctx.Err(); err != nil {
+		return domain.CreditNote{}, err
+	}
 	cn, ok := m.notes[id]
 	if !ok || cn.TenantID != tenantID {
 		return domain.CreditNote{}, errs.ErrNotFound
@@ -232,8 +236,12 @@ func (m *memStore) UpdateRefundStatus(ctx context.Context, tenantID, id string, 
 // the ProviderRead bypass — not just its happy path. The fake-fidelity rule:
 // a service test passing against a laxer fake would assert nothing about the
 // paths that matter (retry_guard_integration_test.go pins the real SQL).
-func (m *memStore) UpdateRefundStatusAudited(_ context.Context, tenantID, id string, w RefundStatusWrite, emit func(tx *sql.Tx, updated domain.CreditNote, prior domain.RefundStatus, changed bool) error) error {
+func (m *memStore) UpdateRefundStatusAudited(ctx context.Context, tenantID, id string, w RefundStatusWrite, emit func(tx *sql.Tx, updated domain.CreditNote, prior domain.RefundStatus, changed bool) error) error {
 	if err := w.validate(); err != nil {
+		return err
+	}
+	// The real store's BeginTx is refused once ctx has ended (database/sql).
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	cn, ok := m.notes[id]
