@@ -1,6 +1,6 @@
 # ADR-104: One activity lane — the entity's calendar
 
-**Status:** Accepted (amended 2026-07-29)
+**Status:** Accepted (amended 2026-07-29, 2026-10-19)
 **Date:** 2026-07-29
 **Supersedes:** the invoice page's two-lane timeline (the "Real-time
 activity" card and its classification rules; #649's constant-identity
@@ -12,7 +12,7 @@ facts), ADR-103 (one payment owner).
 
 ## Summary
 
-The invoice page shows one timeline and drops its separate "Real-time activity" card. Every row is placed on the entity's own calendar, which for an entity pinned to a test clock is that clock's simulated time. A row that also happened in the real world shows the real moment underneath as a `Recorded` line, only in test mode. Emails store their cause's simulated instant (`sim_effective_at` and `test_clock_id` in `email_outbox`, migration 0163) at enqueue. So handlers must bind the clock before enqueuing, and `internal/arch/email_enqueue_binding_test.go` enforces this. An email without that stamp is never backfilled and shows at its real send time. Amended 2026-07-29: every row created by an insert (emails, charge attempts, credit notes, dunning events) shows both dates when they differ. Lifecycle rows such as created, finalized and void get their real time from the invoice's audit entries. Rows at the same simulated instant follow their real order only when every row in that group has a recorded time. Otherwise they follow a fixed cause-before-effect order, so an email always comes after the money event it announces.
+The invoice page shows one timeline and drops its separate "Real-time activity" card. Every row is placed on the entity's own calendar, which for an entity pinned to a test clock is that clock's simulated time. A row that also happened in the real world shows the real moment underneath as a `Recorded` line, only in test mode. Emails store their cause's simulated instant (`sim_effective_at` and `test_clock_id` in `email_outbox`, migration 0163) at enqueue. So handlers must bind the clock before enqueuing, and `internal/arch/email_enqueue_binding_test.go` enforces this. An email without that stamp is never backfilled and shows at its real send time. Amended 2026-07-29: every row created by an insert (emails, charge attempts, credit notes, dunning events) shows both dates when they differ. Lifecycle rows such as created, finalized and void get their real time from the invoice's audit entries. Rows at the same simulated instant follow their real order only when every row in that group has a recorded time. Otherwise they follow a fixed cause-before-effect order, so an email always comes after the money event it announces. Amended 2026-10-19 by [ADR-128](128-activity-line-standard.md): the customer's Sent-emails card also follows the entity's calendar, with the real send time as its Recorded part. Webhook deliveries stay on real time. Until that change ships, the card shows the real send time.
 
 ## Context
 
@@ -141,6 +141,9 @@ picks the calendar.
 | Sent-emails card, webhook deliveries | did it actually go out / arrive? | real |
 | Banner | am I in a simulation, and where is it parked? | stated once per page (ADR-099) |
 
+> Amended 2026-10-19: the Sent-emails card moves to the entity's calendar.
+> See [Amendment 2026-10-19](#amendment-2026-10-19-the-sent-emails-card-follows-the-entitys-calendar).
+
 What an operator must NEVER need to know to read a screen: who wrote a
 row (engine / operator / webhook — provenance never changes
 interpretation); which table a row came from; the words "wall-clock" or
@@ -231,3 +234,33 @@ Invariants, each mechanized or asserted in MANUAL_TEST:
 - **Backfill anchors for legacy emails:** the enqueue-time binding is
   the fact; a read-time reconstruction is a heuristic (banned class),
   and ADR-103 already set the precedent for accepting the gap instead.
+
+## Amendment 2026-10-19: the Sent-emails card follows the entity's calendar
+
+**Change.** The surface table above put the customer's Sent-emails card on the
+real calendar, next to webhook deliveries. [ADR-128](128-activity-line-standard.md)
+moves the card to the entity's calendar. The owner approved it on 2026-10-18
+as decision 6 of the activity line standard.
+
+**Why.** The customer page carries the test-clock banner, which says the
+page's dates follow the test clock. The card showed unlabeled real send times
+under it, so the banner was false for that card. Each email already stores
+its cause's simulated instant (`sim_effective_at`, migration 0163), so the
+card needs no new fact.
+
+**The surface table, as amended:**
+
+| Surface | Question | Calendar |
+|---|---|---|
+| Timelines (invoice / subscription / customer) and the Sent-emails card | what happened, in order? | the entity's, with the real moment as the Recorded part |
+| Audit log | who did what, really when? | real, always (ADR-030) |
+| Webhook deliveries | did it actually arrive? | real |
+| Banner | am I in a simulation, and where is it parked? | stated once per page (ADR-099) |
+
+The Sent-emails card reads newest first, under day headers on the customer's
+calendar, because it is a log of sends across many invoices. Its "Last 30
+days" window counts on the same calendar. An email without the stamp (written
+before migration 0163) keeps its real send time, with no Recorded part.
+
+**Status.** Decided, not yet built. The customer-page PR of the ADR-128 series
+makes the change; until it ships, the card shows the real send time.

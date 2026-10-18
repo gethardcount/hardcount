@@ -1,11 +1,11 @@
 # ADR-102: Charge attempts as first-class facts
 
 Date: 2026-07-28
-Status: Accepted (partly superseded by [ADR-103](103-single-payment-source.md) on 2026-07-28 and [ADR-104](104-one-activity-lane-entity-calendar.md) on 2026-07-29: the rendering rules)
+Status: Accepted (partly superseded by [ADR-103](103-single-payment-source.md) on 2026-07-28 and [ADR-104](104-one-activity-lane-entity-calendar.md) on 2026-07-29: the rendering rules; amended by [ADR-128](128-activity-line-standard.md) on 2026-10-19: hosted-page attempts)
 
 ## Summary
 
-Each charge attempt is one row in `invoice_charge_attempts`, created when Velox creates the PaymentIntent and updated by PaymentIntent id as Stripe reports the outcome. The row records what triggered the attempt (`auto_charge` or `dunning_retry`) and its test-clock time, and a `succeeded` outcome is final. Before this, a failed charge reached the invoice timeline only through a Stripe webhook row or a dunning (payment retry) row, so a simulated invoice with dunning off could hide it. [ADR-103](103-single-payment-source.md) moved the outcome write into the settle transaction and made these rows the only source of payment rows on the timeline. Status: active, partly superseded by ADR-103 and by [ADR-104](104-one-activity-lane-entity-calendar.md), which removed the separate real-time timeline card.
+Each charge attempt is one row in `invoice_charge_attempts`, created when Velox creates the PaymentIntent and updated by PaymentIntent id as Stripe reports the outcome. The row records what triggered the attempt (`auto_charge` or `dunning_retry`) and its test-clock time, and a `succeeded` outcome is final. Before this, a failed charge reached the invoice timeline only through a Stripe webhook row or a dunning (payment retry) row, so a simulated invoice with dunning off could hide it. [ADR-103](103-single-payment-source.md) moved the outcome write into the settle transaction and made these rows the only source of payment rows on the timeline. Status: active, partly superseded by ADR-103 and by [ADR-104](104-one-activity-lane-entity-calendar.md), which removed the separate real-time timeline card. [ADR-128](128-activity-line-standard.md) reverses one rule below: an attempt made on the hosted payment page is to be dated on the invoice's clock, not on real time. Until that change ships, it is still dated on real time.
 
 ## Context
 
@@ -48,6 +48,11 @@ Writers (all best-effort — see Consequences):
    Velox didn't mint inline (hosted checkout) this insert IS the
    record, `trigger_source='external'`, deliberately wall-clock — an
    interactive act is a wall fact.
+
+> Reversed 2026-10-19 by [ADR-128](128-activity-line-standard.md). A customer
+> paying is an act on the invoice, like an operator voiding it. So the settle
+> path is to stamp the attempt from the invoice's clock. Not yet built: until
+> the dates PR of the ADR-128 series ships, this paragraph describes the code.
 
 Upsert semantics (enforced in SQL): `succeeded` is terminal; every
 other outcome may advance — including `failed → succeeded` (a 3DS PI

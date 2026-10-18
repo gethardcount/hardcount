@@ -2132,15 +2132,14 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	// SAME facts a place in the chronology ("Invoice paid" then silence
 	// after a refund read as nothing-happened). Issued notes only —
 	// drafts aren't activity yet, voided notes vanish from the story the
-	// same way Stripe's do. Each row carries the CN's OWN is_simulated:
-	// operator-HTTP CNs stamp WALL-CLOCK issued_at (the HTTP path doesn't
-	// bind the customer clock) → is_simulated=false → real-time lane;
-	// engine clawbacks (downgrade/cancel proration) issue under the
-	// clock-pinned sub's bound time → is_simulated=true → billing
-	// (Activity) lane, sorted with the other simulated rows. Pre-fix all
-	// CNs were tagged with the INVOICE's flag and routed to the real-time
-	// lane, so an engine CN showed a simulated timestamp in the wall-clock
-	// lane (migration 0117 added the per-CN flag).
+	// same way Stripe's do. There is one lane (ADR-104): every CN row sorts
+	// by its issued_at on the invoice's calendar. Operator CNs and engine
+	// clawbacks both issue under the invoice's clock, because
+	// creditnote.Service binds the source invoice's pin at every operator
+	// entry point (bindForInvoice) and the engine paths run under the
+	// clock-pinned subscription's bound time. Each row carries the CN's OWN
+	// is_simulated (migration 0117); it gates the Recorded subline that
+	// shows the real insert time (below).
 	if h.creditNotes != nil {
 		if cns, err := h.creditNotes.List(r.Context(), tenantID, inv.ID); err != nil {
 			degrade("credit_notes", err)

@@ -166,6 +166,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md) | 2026-10-17 | Superseded by ADR-125 | Platform & ops | Run migrations with plain golang-migrate and a 5-second lock limit per file; never built |
 | [125](125-goose-migrations-from-one-v081-baseline.md) | 2026-10-18 | Accepted | Platform & ops | From v0.9.0, run migrations with goose from one baseline; v0.8 databases need no change |
 | [126](126-a-card-refused-for-good-is-not-retried.md) | 2026-10-18 | Accepted | Dunning | After a hard decline, dunning charges that card no more for that invoice until another card is the default |
+| [128](128-activity-line-standard.md) | 2026-10-19 | Accepted | Test clocks & simulated time | Every activity line has one wording, names who acted and follows one clock rule; the backend builds the words |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.
@@ -189,9 +190,10 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 Work an ADR deliberately scoped out, as **thin pointers** — the authoritative
 rationale and revisit trigger live in each ADR's *Consequences/Deferred* section;
 this table only makes the open items discoverable in one place. Remove a row when
-its follow-up ships. (These share one shape: a post-commit side-effect / external
-call not yet in-tx or idempotent. None is a regression; each is guarded today and
-gated on a named trigger — see `feedback_pre_launch_scoping`.)
+its follow-up ships. (The first four share one shape: a post-commit side-effect /
+external call not yet in-tx or idempotent. None is a regression; each is guarded today and
+gated on a named trigger — see `feedback_pre_launch_scoping`. The rest are activity
+lines that ADR-128 left out.)
 
 | Follow-up | ADR | Code site | Revisit trigger |
 |---|---|---|---|
@@ -199,6 +201,9 @@ gated on a named trigger — see `feedback_pre_launch_scoping`.)
 | **`amount_paid` edge — Part C: record from captured** — `MarkPaid` records `amount_paid = amount_due` at settle. Under Velox's PaymentIntent-only **full-capture** model this equals the captured amount, so it is **not reachable today** (Velox exposes no partial/manual-capture flow). If partial capture is ever added, record from the PI's `amount_received` (the processor's captured amount) instead. | [059](059-guard-invoice-mutations-while-payment-in-flight.md) §Consequences | `internal/invoice/postgres.go` · `MarkPaid` | partial-capture support |
 | **Per-customer balance_low threshold** — `credit.balance_low` fires only on the single tenant-level threshold; consumers cannot implement per-customer low alerts from it (falsified 2026-07-06 — the design doc's consumer-side mitigation was impossible). Workaround: smallest-customer tenant threshold + always-per-customer `balance_depleted` + polling `GET /v1/credits/grants/{id}`. | [078](078-prepaid-commits-phase-1.md) §D8 (amended) | `internal/credit/postgres.go` · `emitBalanceCrossings` | first DP with heterogeneous commit sizes asking for per-customer low alerts |
 | **`DispatchTx` seam — atomic lifecycle-event emission (remaining perimeter)** — the **subscription lifecycle subset SHIPPED 2026-07-05**: `subscription.created` / `.activated` / `.canceled` / `.trial_ended` are enqueued IN their transition txs at the store level (`subscription.PostgresStore.SetOutboxEnqueuer`, one emit site per transition covering the operator API + engine schedule paths + trial sweeps; the ~10 scattered post-commit dispatch sites were deleted). The settlement money events (`invoice.paid`, `payment.succeeded`) were already in-tx. `dunning.started` joined them 2026-10-08 (ADR-116: `dunning.Store.StartRun` writes run + timeline event + webhook in one tx). **Remaining**: the ~12 other notification events (item/pending-change/collection/dunning/invoice.finalized/voided etc.) still dispatch post-commit — a dropped enqueue leaves no row anywhere and the loss is silent (there is no consumer-reconciliation mechanism). Per-service `dispatchEvent` ERROR-logs failures. | dual-write audit (no ADR) + 2026-07-05 reassessment | `internal/subscription/postgres.go` · `enqueueLifecycle` (shipped) / `internal/domain/webhook_outbound.go` · `EventDispatcher` (rest) | first DP integration that consumes a non-subscription lifecycle event |
+| **A customer-level activity timeline** — customer events (profile, cards, setup links, credit grants) show only in the audit log. | [128](128-activity-line-standard.md) §Consequences | — | an operator asks "what happened to this customer" and the audit log filter is not enough |
+| **An activity line when the final dunning action fails** — the run retries it every 24 hours while the invoice timeline stays quiet; the Dunning badge says "Final action failed". | [128](128-activity-line-standard.md) §Consequences | `internal/dunning/service.go` | an operator misses a stuck final action, or asks why an invoice shows no change |
+| **An activity line when a subscription's billing run fails** — the page banner shows the current failure, but past failures have no line. | [128](128-activity-line-standard.md) §Consequences | `internal/subscription/handler.go` · `describeSubscriptionAction` | an operator needs the history of the failures, not just the current state |
 
 ### Resolved follow-ups
 
