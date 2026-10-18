@@ -21,3 +21,13 @@ export function authFormError(err: unknown): string {
   }
   return errorSentence(err)
 }
+
+// What the sign-in page says on a 429. The sign-in throttle refuses an
+// attempt with code login_throttled and a message that names the wait in
+// whole minutes ("Too many sign-in attempts. Try again in 3 minutes."), so
+// that sentence is shown as it is. Any other 429 comes from the per-address
+// rate limit, which resets within a minute.
+export function signInRateLimitMessage(err: { code?: string; message: string }): string {
+  if (err.code === 'login_throttled' && err.message.trim()) return err.message.trim()
+  return 'Too many attempts. Please wait a moment and try again.'
+}

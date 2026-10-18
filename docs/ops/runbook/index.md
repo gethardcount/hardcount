@@ -53,6 +53,7 @@ row-level-security role you see only one tenant's rows, or none.
 | A tenant sees another tenant's data | [Data leak between tenants suspected](rls-leak-suspected.md) |
 | LiteLLM spend 503s, or Velox spend short of LiteLLM's | [LiteLLM spend gap after an outage](litellm-spend-gap.md) |
 | A replica will not boot and names Redis | [A replica will not start](replica-will-not-start.md) |
+| Someone cannot sign in: "Too many sign-in attempts", or `velox_auth_login_total{outcome="throttled"}` rising | [Sign-in says "Too many sign-in attempts"](sign-in-throttled.md) |
 | `velox migrate` or the start-up stops with `migration … failed`, `schema_migrations`, `goose_db_version` or `another Velox process is migrating` | [A database upgrade stopped](migration-failed-midway.md) |
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade waited for a table lock](migration-lock-timeout.md) |
 | `velox_parked_invoices` above zero | [Parked invoices](parked-invoices.md) |

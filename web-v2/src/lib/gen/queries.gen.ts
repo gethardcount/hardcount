@@ -10965,6 +10965,11 @@ export const getPostV1AuthLoginUrl = () => {
  * Subsequent dashboard requests authenticate via the cookie; sessions
  * are bound to `users.id` and are independent of API key lifecycle.
  * See ADR-011.
+ *
+ * A successful sign-in also sets `velox_device` (HttpOnly,
+ * `Path=/v1/auth`, 180 days). It marks the browser as one that signed
+ * in to this email, so the sign-in throttle counts its attempts on
+ * their own. It never replaces the password.
  * @summary Sign in with email and password; mint an httpOnly session cookie
  */
 export const postV1AuthLogin = async (postV1AuthLoginBody: PostV1AuthLoginBody, options?: RequestInit): Promise<PostV1AuthLogin200> => {

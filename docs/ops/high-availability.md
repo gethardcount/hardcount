@@ -36,7 +36,7 @@ One feature still assumes a single copy. The dashboard's live webhook event stre
 
 2. Set `TRUST_PROXY` on every copy to the address range (CIDR) of the load balancer. Separate several ranges with commas.
 
-   Without it, every request seems to come from the load balancer. The per-address limits on the public payment pages (60 a minute) and on sign-in, `/v1/auth` (100 a minute), then become one shared limit for every customer and every operator of the install. Set `TRUST_PROXY=none` only when the copies take client connections directly, with no proxy in front.
+   Without it, every request seems to come from the load balancer. The per-address limits on the public payment pages (60 a minute) and on sign-in, `/v1/auth` (100 a minute), then become one shared limit for every customer and every operator of the install. The sign-in throttle also counts every try as if it came from one address, so 5 wrong passwords for an email, from anyone, make every new browser wait to sign in with it. Set `TRUST_PROXY=none` only when the copies take client connections directly, with no proxy in front.
 
    **You see:** the copy starts. In `production`, a copy with `TRUST_PROXY` unset refuses to start with `TRUST_PROXY is required in production`.
 

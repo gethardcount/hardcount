@@ -348,6 +348,7 @@ Anyone who can open your address and knows a team member's password can sign in.
 - **Passwords are stored only as bcrypt hashes,** which are slow to crack.
 - **About 30,000 common leaked passwords are refused** when a password is set or reset.
 - **Sign-in is rate-limited:** one address can try only so many times a minute.
+- **Repeated wrong passwords slow down,** from one address or spread over many, instead of locking the account. A browser that signed in before is not slowed by other people's guesses ([how it works](self-host.md#repeated-wrong-passwords)).
 - **The sign-in cookie travels only over HTTPS** outside `localhost`, because `.env` sets `APP_ENV=production` ([step 3](#3-add-https-with-caddy)).
 
 Velox has no two-factor sign-in yet, so a stolen password is enough to sign in. If your team wants a second factor, you can put sign-in behind your own SSO or VPN. This is optional: Velox runs in production without it.
