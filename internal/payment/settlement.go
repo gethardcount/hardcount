@@ -287,6 +287,31 @@ type PaymentFailure struct {
 	// the charge_attempt_seq it charged with (see
 	// domain.PaymentFailureReport).
 	ChargedAtSeq *int64
+	// DeclineCode is Stripe's decline_code and PaymentMethodID the card it
+	// declined, when the source knows them: the charge call from its own
+	// error, the webhook and the reconciler from the PaymentIntent's
+	// last_payment_error. They land on the attempt row with the failure
+	// (domain.PaymentFailureReport), where a dunning retry reads them.
+	DeclineCode     string
+	PaymentMethodID string
+}
+
+// refusedCardCustomerMessage is the reason the customer's payment-failed
+// email gives when the bank refused the card for good (domain.IsHardDecline).
+// It does not say why: Stripe asks that lost, stolen and fraud declines be
+// shown to the customer as a plain decline
+// (https://docs.stripe.com/declines/codes). It says what to do, since
+// Velox will not charge that card again for this invoice.
+const refusedCardCustomerMessage = "Your bank declined this card, and we won't try it again. Please pay with a different card."
+
+// customerFailureReason is the reason the payment-failed email shows the
+// customer: Stripe's own message, except for a card the bank refused for
+// good, where "try again later" would be the wrong advice.
+func customerFailureReason(f PaymentFailure) string {
+	if domain.IsHardDecline(f.DeclineCode) {
+		return refusedCardCustomerMessage
+	}
+	return f.Message
 }
 
 // failureEmailSuppressed reports whether a failure of a PaymentIntent with
@@ -359,6 +384,8 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	report := domain.PaymentFailureReport{
 		PaymentIntentID: f.PaymentIntentID,
 		Message:         f.Message,
+		DeclineCode:     f.DeclineCode,
+		PaymentMethodID: f.PaymentMethodID,
 		ChargedAtSeq:    f.ChargedAtSeq,
 		External:        f.Purpose == PurposeHostedInvoicePay,
 	}
@@ -366,7 +393,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// on the first notice by the store — the same shape as the paid twin.
 	var failedTx func(tx *sql.Tx, fresh domain.Invoice) error
 	if !report.External && !failureEmailSuppressed(f.Purpose) {
-		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, f.Message)
+		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, customerFailureReason(f))
 	}
 	fresh, res, err := s.invoices.MarkPaymentFailedReportingTransition(ctx, tenantID, inv.ID, report, failedTx)
 	if err != nil {

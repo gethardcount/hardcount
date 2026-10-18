@@ -465,6 +465,16 @@ type AttentionContext struct {
 	// finalized, unpaid invoices only.
 	PaymentPageOpen bool
 
+	// RefusedCardDeclineCode is set when the bank refused the customer's
+	// current default card for good on this invoice: Stripe's decline code
+	// (one IsHardDecline accepts), recorded on one of the invoice's charge
+	// attempts with that card. Dunning retries skip that card, so the
+	// payment-failure notice says the customer needs a different card and
+	// does not offer Retry. Empty once another card is the default — the next
+	// retry charges that card, and the ordinary decline notice comes back.
+	// The invoice service reads it for failed invoices only.
+	RefusedCardDeclineCode string
+
 	// LastFailedChargeAt is the simulated instant of the invoice's latest
 	// failed charge, for a clock-pinned invoice only (nil otherwise). The
 	// payment-failure banner dates "since" from it: attentionSince's issue
@@ -962,6 +972,9 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	if atc.LastFailedChargeAt != nil {
 		since = *atc.LastFailedChargeAt
 	}
+	if atc.RefusedCardDeclineCode != "" {
+		return classifyRefusedCard(inv, atc.RefusedCardDeclineCode, since)
+	}
 	// Update Payment Method is the primary action: the card on file
 	// is broken, retrying with the same card will decline again.
 	// Retry Payment is offered as secondary for transient declines
@@ -982,6 +995,31 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionUpdatePaymentMethod, Label: "Update payment method"},
 			{Code: AttentionActionRetryPayment, Label: "Retry payment"},
+		},
+		ProviderResponse: inv.LastPaymentError,
+		Since:            &since,
+	}
+}
+
+// classifyRefusedCard is the payment-failure notice when the bank refused the
+// customer's default card for good (#966): lost, stolen, revoked and the rest
+// of IsHardDecline. Dunning retries skip that card until another card is the
+// default, so the notice asks for a different card and drops Retry payment —
+// a manual retry would charge the card the bank just refused, and the card
+// networks charge merchants for retrying these declines.
+func classifyRefusedCard(inv Invoice, declineCode string, since time.Time) *Attention {
+	return &Attention{
+		Severity: AttentionSeverityCritical,
+		Reason:   AttentionReasonPaymentFailed,
+		Code:     "payment.card_refused",
+		Message:  "The customer's bank refused this card for good, so automatic retries won't charge it; the customer needs a different card.",
+		Detail: "Stripe's decline code is " + declineCode + ", which Stripe and the card networks treat as final. " +
+			"Dunning keeps its schedule and counts each retry, but charges only once a different card is the customer's default. " +
+			"A card the customer adds beside this one does not become the default by itself, so make it the default on the customer's page. " +
+			"The customer can also pay on the hosted invoice page.",
+		DocURL: docURL("payment-failed"),
+		Actions: []AttentionActionItem{
+			{Code: AttentionActionUpdatePaymentMethod, Label: "Update payment method"},
 		},
 		ProviderResponse: inv.LastPaymentError,
 		Since:            &since,

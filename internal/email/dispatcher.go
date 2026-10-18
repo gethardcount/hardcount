@@ -38,7 +38,7 @@ type DispatcherConfig struct {
 type EmailDeliverer interface {
 	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string) error
 	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
-	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error
+	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
 	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents int64, currency string, pdfBytes []byte) error
@@ -227,7 +227,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 			msg.AmountCents, msg.Currency, msg.PublicToken)
 	case TypeDunningWarning:
 		return d.sender.SendDunningWarning(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
-			msg.AttemptNumber, msg.MaxAttempts, msg.NextRetryDate, msg.FailureReason, msg.PublicToken)
+			msg.AttemptNumber, msg.MaxAttempts, msg.NextRetryDate, msg.FailureReason, msg.PublicToken, msg.CardNeedsReplacing)
 	case TypeDunningEscalation:
 		return d.sender.SendDunningEscalation(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.EscalationOutcome, msg.PublicToken)

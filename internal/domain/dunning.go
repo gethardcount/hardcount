@@ -145,6 +145,13 @@ const (
 	DunningCauseNoPaymentMethod DunningStartCause = "no_payment_method"
 )
 
+// DunningRetryReasonCardRefused is the reason on a retry_attempted event for
+// a scheduled retry that charged nothing: the bank had refused the
+// customer's default card for good on this invoice (ErrCardNeedsReplacing,
+// #966). The attempt counts, and the timeline shows it as not charged, the
+// way it shows a retry with no card (DunningCauseNoPaymentMethod).
+const DunningRetryReasonCardRefused = "card_refused"
+
 // Valid reports whether the cause is a known enum value — StartDunning
 // refuses anything else (no-silent-fallbacks: an unlabeled run would
 // re-introduce the hardcoded-reason lie this type exists to end).

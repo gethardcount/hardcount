@@ -1903,6 +1903,10 @@ func describeDunningEvent(eventType, reason string, attemptCount int) (desc, sta
 			// — claimed here it would assert a send this function
 			// can't see.
 			return desc, "scheduled", "No payment method"
+		case domain.DunningRetryReasonCardRefused:
+			// Nothing was charged either: the bank had refused the default
+			// card for good on this invoice, and the retry skipped it (#966).
+			return desc, "scheduled", "Not charged: the bank refused this card, so a different card is needed"
 		}
 		return desc, "processing", ""
 	case "resolved":

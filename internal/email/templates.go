@@ -218,6 +218,35 @@ func renderDunningWarningHTML(customerName, invoiceNumber string, attemptNumber,
 	return subject, b.String(), ctaURL, ctaLabel
 }
 
+// renderCardRefusedWarningHTML is the dunning warning for a card the bank
+// refused for good (#966): lost, stolen, revoked and the rest of
+// domain.IsHardDecline. Dunning will not charge that card again for this
+// invoice, so unlike renderDunningWarningHTML it promises no retry date and
+// shows no attempt count. It does not say why the bank refused: Stripe asks
+// that lost, stolen and fraud declines reach the customer as a plain decline
+// (https://docs.stripe.com/declines/codes).
+func renderCardRefusedWarningHTML(customerName, invoiceNumber, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
+	subject = "Action required — use a different card for invoice " + invoiceNumber
+	var b strings.Builder
+	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Please use a different card</h1>`)
+	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
+	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">` + escape(cardRefusedSentence(invoiceNumber)) + `</p>`)
+	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(cardRefusedAsk) + `</p>`)
+	if hostedURL != "" {
+		ctaURL = hostedURL
+		ctaLabel = "Pay invoice"
+	}
+	return subject, b.String(), ctaURL, ctaLabel
+}
+
+// cardRefusedSentence and cardRefusedAsk are the card-refused warning's copy,
+// shared by its HTML and plain-text parts so the two cannot drift.
+func cardRefusedSentence(invoiceNumber string) string {
+	return "Your bank declined the card on file for invoice " + invoiceNumber + ", so we won't charge that card again."
+}
+
+const cardRefusedAsk = "Please pay the invoice with a different card."
+
 func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
 	subject = "Action required for invoice " + invoiceNumber
 	var b strings.Builder
