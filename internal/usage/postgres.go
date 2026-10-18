@@ -440,9 +440,9 @@ func (s *PostgresStore) AggregateForBillingPeriodByAgg(ctx context.Context, tena
 
 	// One query per DISTINCT aggregation function (at most four) rather
 	// than one per meter. A subscription spanning M meters cost M round
-	// trips per billing period — and billOnePeriod calls this up to four
-	// times (base, pre-cap re-derive, per-interval), so the fan-out was
-	// multiplicative in M.
+	// trips per call — and a period close calls this once per distinct
+	// usage window (the whole period, and each mid-period segment), so the
+	// fan-out was multiplicative in M.
 	byAgg := make(map[string][]string, 4)
 	for meterID, agg := range meters {
 		byAgg[agg] = append(byAgg[agg], meterID)

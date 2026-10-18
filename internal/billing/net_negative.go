@@ -3,7 +3,6 @@ package billing
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"sort"
 	"time"
 
@@ -27,7 +26,7 @@ import (
 // cancel final invoice, spend-threshold invoice, preview, live balance,
 // customer usage view): the bucket counts as 0 for that window and the rest
 // of the invoice is built. A block-mode usage cap totals what the invoice
-// bills, so it counts the bucket as 0 too (capUsageTotals).
+// bills, so it counts the bucket as 0 too (usageCapFor).
 //
 // It is never silent. The preview and the usage view show a warning. Each
 // invoice decision that leaves such a bucket out logs a WARN and writes one
@@ -74,60 +73,6 @@ func (n netNegativeUsage) add(meterID, meterKey string, qty decimal.Decimal, fro
 		m.to = to
 	}
 	n[meterID] = m
-}
-
-// billableUsageTotal is the usage cap's total: the sum of the meters'
-// quantities, with a meter below zero counted as 0, as it bills. That is what
-// the cap saw when the store dropped such totals; counting one at its value
-// would lower the total and scale the other meters above the cap. The
-// quantities come from capUsageTotals.
-func billableUsageTotal(totals map[string]decimal.Decimal) decimal.Decimal {
-	sum := decimal.Zero
-	for _, q := range totals {
-		if q.IsPositive() {
-			sum = sum.Add(q)
-		}
-	}
-	return sum
-}
-
-// capUsageTotals returns totals, the meter totals over [from, to), as a
-// block usage cap counts them: each meter at what the invoice bills for it
-// before the cap. A meter priced by pricing rules bills its rule buckets,
-// not its total, so its entry is the sum of its buckets above zero. Its
-// total nets a bucket below zero in, while the invoice bills that bucket 0:
-// buckets of +150 and -50 have a total of +100, and a cap of 80 taken from
-// that total billed 120. Every other meter keeps its total.
-func (e *Engine) capUsageTotals(ctx context.Context, sub domain.Subscription, meterAggs map[string]string, totals map[string]decimal.Decimal, from, to time.Time) (map[string]decimal.Decimal, error) {
-	out := make(map[string]decimal.Decimal, len(totals))
-	for id, q := range totals {
-		out[id] = q
-	}
-	for meterID, agg := range meterAggs {
-		rules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, sub.TenantID, meterID)
-		if err != nil {
-			return nil, fmt.Errorf("list pricing rules for meter %s: %w", meterID, err)
-		}
-		if len(rules) == 0 {
-			continue
-		}
-		aggs, err := e.usage.AggregateByPricingRules(ctx, sub.TenantID, sub.CustomerID, meterID, mapMeterAggregation(agg), from, to)
-		if err != nil {
-			return nil, fmt.Errorf("aggregate by pricing rules for meter %s: %w", meterID, err)
-		}
-		billed := decimal.Zero
-		for _, a := range aggs {
-			if a.Quantity.IsPositive() {
-				billed = billed.Add(a.Quantity)
-			}
-		}
-		if billed.IsZero() {
-			delete(out, meterID)
-		} else {
-			out[meterID] = billed
-		}
-	}
-	return out, nil
 }
 
 // noteNetNegativeTx writes the decision's subscription.net_negative_usage row

@@ -2694,31 +2694,8 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// and of the plans hydrated above. Segment-aware usage needs every meter
 	// that was active at ANY point during the period: a meter that existed
 	// on plan_A (now swapped out or removed) bills its [seg.start, seg.end)
-	// window. Usage is customer+meter scoped, so a meter on two plans
-	// aggregates once.
-	meterAggs := make(map[string]string)
-	for _, pl := range plans {
-		for _, meterID := range pl.MeterIDs {
-			if _, ok := meterAggs[meterID]; ok {
-				continue
-			}
-			// An unreadable meter fails the close (retried per ADR-119):
-			// defaulting to "sum" billed a max/last meter as its total.
-			m, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err != nil {
-				return nil, 0, nil, fmt.Errorf("get meter %s aggregation: %w", meterID, err)
-			}
-			meterAggs[meterID] = m.Aggregation
-		}
-	}
-	// Each meter's usage over the whole period, by its own aggregation.
-	usageTotals, err := e.usage.AggregateForBillingPeriodByAgg(ctx, sub.TenantID, sub.CustomerID, meterAggs, periodStart, periodEnd)
-	if err != nil {
-		return nil, 0, nil, fmt.Errorf("aggregate usage: %w", err)
-	}
-	// The block usage cap, worked out once over every meter above. Every
-	// usage quantity below is scaled by it (usage_cap.go).
-	usageCap, err := e.usageCapFor(ctx, sub, meterAggs, usageTotals, periodStart, periodEnd)
+	// window.
+	meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -2745,17 +2722,20 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// credit read so the two cannot drift).
 	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, thresholdBilledThrough)
 
-	// Cache per-interval aggregation so a meter active across N
-	// non-overlapping intervals incurs at most N queries (and 1 query
-	// when N == 1 and the interval equals the full period — we use
-	// the precomputed usageTotals in that case).
-	intervalAggCache := map[string]map[string]decimal.Decimal{}
-	intervalKey := func(iv usageInterval) string {
-		return iv.start.UTC().Format(time.RFC3339Nano) + "|" + iv.end.UTC().Format(time.RFC3339Nano)
+	// Usage is read once per window (one read covers every meter for a
+	// window; a pricing-rule meter reads its buckets per window). The block
+	// usage cap counts each meter over the windows it bills, before the
+	// threshold clamp, and every usage quantity below is scaled by it
+	// (usage_cap.go).
+	reads := newWindowUsage(e, sub, meterAggs)
+	capWindows := meterIntervals
+	if thresholdBilledThrough != nil {
+		capWindows = meterIntervalsFull
 	}
-	// Separate cache for the multi-dim (pricing-rules) path — keyed by
-	// meter + interval since AggregateByPricingRules is per-meter.
-	ruleAggCache := map[string][]domain.RuleAggregation{}
+	usageCap, err := e.usageCapFor(ctx, sub, capWindows, reads)
+	if err != nil {
+		return nil, 0, nil, err
+	}
 
 	// Union of meters with billable windows. When a watermark exists, a
 	// meter whose clamped intervals vanished entirely (all usage inside the
@@ -2820,20 +2800,12 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 			iv := w.iv
 			ivStart := iv.start
 			ivEnd := iv.end
-			fullPeriod := iv.start.Equal(periodStart) && iv.end.Equal(periodEnd)
 
 			// ---- Multi-dim path: one billable bucket per claimed rule. ----
 			if len(pricingRules) > 0 {
-				defaultMode := mapMeterAggregation(meter.Aggregation)
-				cacheK := meterID + "|" + intervalKey(iv)
-				aggs, cached := ruleAggCache[cacheK]
-				if !cached {
-					a, err := e.usage.AggregateByPricingRules(ctx, sub.TenantID, sub.CustomerID, meterID, defaultMode, iv.start, iv.end)
-					if err != nil {
-						return nil, 0, nil, fmt.Errorf("aggregate by pricing rules for meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
-					}
-					aggs = a
-					ruleAggCache[cacheK] = a
+				aggs, err := reads.ruleBuckets(ctx, meterID, iv)
+				if err != nil {
+					return nil, 0, nil, err
 				}
 				for _, agg := range aggs {
 					// The cap's one factor. A bucket below zero bills 0, so
@@ -2922,21 +2894,9 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 			if wm.deferredBucket(mapMeterAggregation(meter.Aggregation), meterID, meter.RatingRuleVersionID) != w.nonAdditiveOnly {
 				continue
 			}
-			var quantity decimal.Decimal
-			if fullPeriod {
-				quantity = usageTotals[meterID]
-			} else {
-				key := intervalKey(iv)
-				totals, cached := intervalAggCache[key]
-				if !cached {
-					t, err := e.usage.AggregateForBillingPeriodByAgg(ctx, sub.TenantID, sub.CustomerID, meterAggs, iv.start, iv.end)
-					if err != nil {
-						return nil, 0, nil, fmt.Errorf("aggregate usage for segment [%v, %v): %w", iv.start, iv.end, err)
-					}
-					totals = t
-					intervalAggCache[key] = t
-				}
-				quantity = totals[meterID]
+			quantity, err := reads.meterTotal(ctx, meterID, iv)
+			if err != nil {
+				return nil, 0, nil, err
 			}
 			// The cap's one factor, for a full-period and a sub-period
 			// quantity alike; not for a quantity below zero (it bills 0).
@@ -3959,35 +3919,9 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	// boundaries differ. Iterates the full `plans` map (current items'
 	// plans + hydrated change-log plans) so segment-aware billing
 	// picks up meters that existed on now-removed plans.
-	meterAggs := make(map[string]string)
-	for _, pl := range plans {
-		for _, meterID := range pl.MeterIDs {
-			if _, ok := meterAggs[meterID]; ok {
-				continue
-			}
-			m, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err != nil { // never default to "sum": a max/last meter would bill its total
-				return nil, 0, fmt.Errorf("get meter %s aggregation on cancel: %w", meterID, err)
-			}
-			meterAggs[meterID] = m.Aggregation
-		}
-	}
-	usageTotals := make(map[string]decimal.Decimal)
-	if len(meterAggs) > 0 {
-		totals, err := e.usage.AggregateForBillingPeriodByAgg(ctx, sub.TenantID, sub.CustomerID, meterAggs, periodStart, canceledAt)
-		if err != nil {
-			return nil, 0, fmt.Errorf("aggregate usage on cancel: %w", err)
-		}
-		usageTotals = totals
-	}
-
-	// The block usage cap, worked out as the period close works it out
-	// (usage_cap.go): the partial window [periodStart, canceledAt] is the
-	// entire billable extent of the final cycle, so the per-cycle cap
-	// applies to it whole. Every usage quantity below is scaled by it.
-	usageCap, err := e.usageCapFor(ctx, sub, meterAggs, usageTotals, periodStart, canceledAt)
+	meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
 	if err != nil {
-		return nil, 0, fmt.Errorf("on cancel: %w", err)
+		return nil, 0, fmt.Errorf("cancel: %w", err)
 	}
 
 	// Segment-aware usage billing over the partial period
@@ -4043,9 +3977,19 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		}
 	}
 
-	intervalAggCache := map[string]map[string]decimal.Decimal{}
-	intervalKey := func(iv usageInterval) string {
-		return iv.start.UTC().Format(time.RFC3339Nano) + "|" + iv.end.UTC().Format(time.RFC3339Nano)
+	// The block usage cap, worked out as the period close works it out
+	// (usage_cap.go): the partial window [periodStart, canceledAt] is the
+	// entire billable extent of the final cycle, so the per-cycle cap
+	// applies to it whole, each meter over the windows it bills. The cap
+	// and the lines read usage through reads, once per window.
+	reads := newWindowUsage(e, sub, meterAggs)
+	capWindows := meterIntervals
+	if wm.exists() {
+		capWindows = meterIntervalsFull
+	}
+	usageCap, err := e.usageCapFor(ctx, sub, capWindows, reads)
+	if err != nil {
+		return nil, 0, fmt.Errorf("cancel: %w", err)
 	}
 
 	// Union of meters with billable windows (a meter fully clamped away can
@@ -4102,14 +4046,13 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 			for _, r := range pricingRules {
 				rulesByID[r.ID] = r
 			}
-			defaultMode := mapMeterAggregation(meter.Aggregation)
 			for _, mw := range windows {
 				iv := mw.iv
 				ivStart := iv.start
 				ivEnd := iv.end
-				aggs, err := e.usage.AggregateByPricingRules(ctx, sub.TenantID, sub.CustomerID, meterID, defaultMode, iv.start, iv.end)
+				aggs, err := reads.ruleBuckets(ctx, meterID, iv)
 				if err != nil {
-					return nil, 0, fmt.Errorf("aggregate by pricing rules for meter %s on cancel [%v, %v): %w", meterID, iv.start, iv.end, err)
+					return nil, 0, fmt.Errorf("cancel: %w", err)
 				}
 				for _, agg := range aggs {
 					// The cap's one factor, as in billOnePeriod's multi-dim
@@ -4190,22 +4133,9 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 			if wm.deferredBucket(mapMeterAggregation(meter.Aggregation), meterID, meter.RatingRuleVersionID) != mw.nonAdditiveOnly {
 				continue
 			}
-			var quantity decimal.Decimal
-			fullPeriod := iv.start.Equal(periodStart) && iv.end.Equal(canceledAt)
-			if fullPeriod {
-				quantity = usageTotals[meterID]
-			} else {
-				key := intervalKey(iv)
-				totals, cached := intervalAggCache[key]
-				if !cached {
-					t, err := e.usage.AggregateForBillingPeriodByAgg(ctx, sub.TenantID, sub.CustomerID, meterAggs, iv.start, iv.end)
-					if err != nil {
-						return nil, 0, fmt.Errorf("aggregate usage on cancel for segment [%v, %v): %w", iv.start, iv.end, err)
-					}
-					totals = t
-					intervalAggCache[key] = t
-				}
-				quantity = totals[meterID]
+			quantity, err := reads.meterTotal(ctx, meterID, iv)
+			if err != nil {
+				return nil, 0, fmt.Errorf("cancel: %w", err)
 			}
 			// The cap's one factor, for the whole window and a segment
 			// alike; not for a quantity below zero, which bills 0.
