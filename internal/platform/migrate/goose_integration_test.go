@@ -148,16 +148,18 @@ func TestUpRefusesV08States(t *testing.T) {
 // T4. A new database: the baseline, then a file with unqualified names, in
 // the same Up. Mutation: drop gen-baseline's R4 (search_path made
 // transaction-local); the baseline's empty search_path then leaks into
-// 00181, which has no schema to create its table in.
+// the widgets file, which has no schema to create its table in.
 func TestUpBaselineThenFileInOneUp(t *testing.T) {
 	dsn, db := scratchDB(t, "velox_migrate_t4")
-	if err := up(context.Background(), dsn, files(map[string]string{"00181_widgets.sql": widgetsFile})); err != nil {
+	widgets, version := pastShipped(t, "widgets.sql")
+	fsys := files(map[string]string{widgets: widgetsFile})
+	if err := up(context.Background(), dsn, fsys); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
 	if !tableExists(t, db, "public.widgets") || !tableExists(t, db, "public.tenants") {
-		t.Fatal("want public.tenants (baseline) and public.widgets (00181)")
+		t.Fatalf("want public.tenants (baseline) and public.widgets (%s)", widgets)
 	}
-	for _, v := range []int64{180, 181} {
+	for _, v := range []int64{180, version} {
 		if n := gooseRows(t, db, v); n != 1 {
 			t.Fatalf("version %d: %d rows, want 1", v, n)
 		}
@@ -169,14 +171,25 @@ func TestUpBaselineThenFileInOneUp(t *testing.T) {
 		t.Fatalf("leader_leases: want 5 rows with tokens from install time, got %d rows, fresh=%v (%v)", leases, fresh, err)
 	}
 	// A second run finds nothing to do.
-	if err := up(context.Background(), dsn, files(map[string]string{"00181_widgets.sql": widgetsFile})); err != nil {
+	if err := up(context.Background(), dsn, fsys); err != nil {
 		t.Fatalf("second Up: %v", err)
 	}
-	// This binary ships 180 alone, so to the boot check the scratch
-	// database is ahead (it has 181): a WARN, not an error.
+	// The widgets version is past every file this binary ships, so to the
+	// boot check the scratch database is ahead: a WARN, not an error.
 	if err := CheckSchemaReady(db); err != nil {
 		t.Fatalf("CheckSchemaReady: %v", err)
 	}
+}
+
+// pastShipped names a test migration file one version past the highest
+// migration this binary ships. A scratch database that has it reads as
+// ahead to the boot check, so these tests keep passing as sql/ grows. With
+// a fixed 00181, the second shipped file after the baseline made the
+// scratch database read as behind ("1 migration to apply").
+func pastShipped(t *testing.T, name string) (file string, version int64) {
+	t.Helper()
+	_, latest := shippedSet(t)
+	return fmt.Sprintf("%05d_%s", latest+1, name), latest + 1
 }
 
 // A new database where the admin user owns a schema named after itself,
@@ -188,7 +201,8 @@ func TestUpBaselineThenFileInOneUp(t *testing.T) {
 func TestUpCreatesInPublicWhateverTheSearchPath(t *testing.T) {
 	dsn, db := scratchDB(t, "velox_migrate_search_path")
 	mustExec(t, db, `CREATE SCHEMA AUTHORIZATION CURRENT_USER`)
-	fsys := files(map[string]string{"00181_widgets.sql": widgetsFile})
+	widgets, _ := pastShipped(t, "widgets.sql")
+	fsys := files(map[string]string{widgets: widgetsFile})
 	if err := up(context.Background(), dsn, fsys); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
@@ -198,7 +212,7 @@ func TestUpCreatesInPublicWhateverTheSearchPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if schemas.String != "public,public" {
-		t.Fatalf("tenants (baseline) and widgets (00181) are in %q, want both in public", schemas.String)
+		t.Fatalf("tenants (baseline) and widgets (%s) are in %q, want both in public", widgets, schemas.String)
 	}
 	// A second run, then the boot check on a pool with the user's own
 	// search_path: no M3 refusal, because Velox's tables are in public.
