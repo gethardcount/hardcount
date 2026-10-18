@@ -19,9 +19,10 @@ import (
 
 // The sign-in throttle (ADR-094, amended 2026-10-18), driven over the real
 // router and a real Postgres. Repeated wrong passwords slow down, per
-// (address × email) and per email across every address; nothing ever locks
-// the account; a refusal looks the same for an email with no account; and
-// the count lives in Postgres, so two copies of the server share it.
+// (address × email) and per email across every address; a browser that
+// signed in before is not slowed by other people's guesses; a refusal looks
+// the same for an email with no account; and the count lives in Postgres,
+// so two copies of the server share it.
 //
 // Numbers the tests rely on:
 //   - one address and one email: attempts 1 to 5 reach the password check,
@@ -251,8 +252,8 @@ func TestE2E_LoginThrottle_NoAccountLooksTheSame(t *testing.T) {
 }
 
 // TestE2E_LoginThrottle_SuccessResetsTheCount: a right password clears the
-// count. Negative control: four wrong passwords then the right one signs in,
-// so the throttle refuses nothing below its threshold.
+// counts it was held by. Negative control: four wrong passwords then the
+// right one signs in, so the throttle refuses nothing below its threshold.
 func TestE2E_LoginThrottle_SuccessResetsTheCount(t *testing.T) {
 	_, ts := throttleServer(t)
 	const ip = "198.51.100.40"
@@ -262,6 +263,30 @@ func TestE2E_LoginThrottle_SuccessResetsTheCount(t *testing.T) {
 	// Counted from zero again: five more wrong passwords reach the check.
 	wrongFrom(t, ts, ip, throttleOwner, 5, "after the sign-in")
 	trySignIn(t, ts, ip, throttleOwner, throttleWrong, nil).wantThrottled(t, "6th wrong password after the sign-in")
+}
+
+// TestE2E_LoginThrottle_NewBrowserSignInClearsTheEmailCount: a sign-in from
+// a browser with no velox_device cookie was counted under the email, so it
+// clears the email's count. Without that, a script with no cookie jar, or a
+// person in a private window, would pile up waits with every sign-in.
+func TestE2E_LoginThrottle_NewBrowserSignInClearsTheEmailCount(t *testing.T) {
+	_, ts := throttleServer(t)
+
+	// Nine wrong passwords from nine addresses: one short of the email's wait.
+	for i := 1; i <= 9; i++ {
+		ip := fmt.Sprintf("192.0.2.%d", i)
+		trySignIn(t, ts, ip, throttleOwner, throttleWrong, nil).wantWrongPassword(t, "wrong password from "+ip)
+	}
+	// The 10th attempt is the right password from a new browser. Counted, it
+	// starts the email's 1-minute wait; signed in, it clears the count.
+	trySignIn(t, ts, "203.0.113.40", throttleOwner, throttlePassword, nil).want(t, http.StatusOK, "right password from a new browser")
+	trySignIn(t, ts, "192.0.2.10", throttleOwner, throttleWrong, nil).wantWrongPassword(t, "wrong password after the sign-in")
+
+	// Eleven sign-ins in a row from cookie-less clients never wait.
+	for i := 1; i <= 11; i++ {
+		trySignIn(t, ts, fmt.Sprintf("203.0.113.%d", 40+i), throttleOwner, throttlePassword, nil).
+			want(t, http.StatusOK, fmt.Sprintf("cookie-less sign-in %d", i))
+	}
 }
 
 // TestE2E_LoginThrottle_CapsOneEmailAcrossAddresses: guesses spread over many
@@ -281,10 +306,19 @@ func TestE2E_LoginThrottle_CapsOneEmailAcrossAddresses(t *testing.T) {
 
 	// A browser that never signed in to this email waits, at any address.
 	trySignIn(t, ts, "203.0.113.51", throttleOwner, throttlePassword, nil).wantThrottled(t, "right password from a new browser")
-	// The owner's browser is never held out, even from a new address.
+	// A velox_device cookie the server never set is a new browser. Held out,
+	// it shows the known-browser check reads the stored row, not just the
+	// cookie's shape. (A cookie set for another email: user package,
+	// TestLoginThrottle_BrowserIsKnownPerEmail.)
+	trySignIn(t, ts, "203.0.113.53", throttleOwner, throttlePassword,
+		&http.Cookie{Name: "velox_device", Value: strings.Repeat("7c", 32)}).
+		wantThrottled(t, "right password with a made-up velox_device cookie")
+
+	// The owner's browser is not slowed, even from a new address.
 	trySignIn(t, ts, "203.0.113.52", throttleOwner, throttlePassword, home.browser).want(t, http.StatusOK, "owner's browser from a new address")
-	// That sign-in cleared the email's count.
-	trySignIn(t, ts, "192.0.2.99", throttleOwner, throttleWrong, nil).wantWrongPassword(t, "wrong password after the owner signed in")
+	// That sign-in leaves the email's wait running. Ending it early would
+	// tell a guesser the email has an account, and give them new guesses.
+	trySignIn(t, ts, "192.0.2.99", throttleOwner, throttleWrong, nil).wantThrottled(t, "wrong password after the owner signed in")
 }
 
 // TestE2E_LoginThrottle_TwoServersShareTheCount: two copies of the server on
@@ -330,8 +364,9 @@ func TestE2E_LoginThrottle_CountFadesAfterADay(t *testing.T) {
 }
 
 // TestE2E_LoginThrottle_PasswordResetLetsTheOwnerBackIn: when guesses from
-// many addresses hold out a new browser, a completed password reset clears
-// the count and marks the browser that completed it, so the owner signs in.
+// many addresses hold out a new browser, a completed password reset marks
+// the browser that completed it, so the owner signs in from it at once. The
+// reset leaves the email's wait running for every other new browser.
 func TestE2E_LoginThrottle_PasswordResetLetsTheOwnerBackIn(t *testing.T) {
 	t.Setenv("DASHBOARD_BASE_URL", "http://dash.throttle-e2e.test")
 	db, ts := throttleServer(t)
@@ -351,17 +386,16 @@ func TestE2E_LoginThrottle_PasswordResetLetsTheOwnerBackIn(t *testing.T) {
 		t.Fatal("a completed reset set no velox_device cookie")
 	}
 
-	// The reset cleared the count: a new browser elsewhere signs in.
-	trySignIn(t, ts, "203.0.113.81", throttleOwner, newPassword, nil).want(t, http.StatusOK, "new password from another browser")
-
-	// And the laptop is now a known browser: new guesses do not hold it out.
-	tripAccount(t, ts, throttleOwner, "198.51.100")
+	// The laptop is now a known browser: the wait does not hold it out.
 	trySignIn(t, ts, laptop, throttleOwner, newPassword, reset.browser).want(t, http.StatusOK, "owner's laptop after the reset")
+	// Any other new browser still waits: a reset does not end the wait early.
+	trySignIn(t, ts, "203.0.113.81", throttleOwner, newPassword, nil).wantThrottled(t, "new password from another new browser")
 }
 
 // TestE2E_LoginThrottle_InviteAcceptMarksTheBrowser: a new member who
-// accepts an invite proved their inbox and set a password, the same proof as
-// a sign-in. Their browser becomes known and the email's count is cleared.
+// accepts an invite proved their inbox and set a password. The browser that
+// accepted becomes known, so guesses made at the email before do not hold it
+// out. The email's wait keeps running for other new browsers.
 func TestE2E_LoginThrottle_InviteAcceptMarksTheBrowser(t *testing.T) {
 	t.Setenv("DASHBOARD_BASE_URL", "http://dash.throttle-e2e.test")
 	// Invites are refused with no SMTP. No dispatcher runs here.
@@ -384,11 +418,8 @@ func TestE2E_LoginThrottle_InviteAcceptMarksTheBrowser(t *testing.T) {
 	if accept.session == nil || accept.browser == nil {
 		t.Fatalf("accept set session %v, velox_device %v; want both", accept.session != nil, accept.browser != nil)
 	}
-	// Accepting cleared the count.
-	trySignIn(t, ts, "203.0.113.91", member, memberPassword, nil).want(t, http.StatusOK, "member from another browser")
-
-	// The browser that accepted stays known through new guesses.
-	tripAccount(t, ts, member, "198.51.100")
-	trySignIn(t, ts, "203.0.113.92", member, memberPassword, nil).wantThrottled(t, "member from a new browser")
+	// The browser that accepted is known: the wait does not hold it out.
 	trySignIn(t, ts, desk, member, memberPassword, accept.browser).want(t, http.StatusOK, "member at the desk that accepted")
+	// Another new browser still waits: accepting does not end the wait early.
+	trySignIn(t, ts, "203.0.113.91", member, memberPassword, nil).wantThrottled(t, "member from another new browser")
 }

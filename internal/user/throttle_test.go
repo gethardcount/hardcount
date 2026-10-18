@@ -10,6 +10,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -219,5 +220,30 @@ func TestLogin_ThrottleFailsClosed(t *testing.T) {
 	// Control: the same handler without the throttle signs in.
 	if code := itSignIn(itHandler(store, nil), "198.51.100.4", "op@acme.com", "a-good-password-123"); code != http.StatusOK {
 		t.Fatalf("control without the throttle: status %d, want 200", code)
+	}
+}
+
+// TestLogin_RefusedSignInIsNotAServerError: the right password for a user
+// with no tenant, such as a removed member, gets a 409. The sign-in metric
+// counts it as refused. The error outcome is kept for server failures: the
+// monitoring page says everyone is refused while it rises.
+func TestLogin_RefusedSignInIsNotAServerError(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("a-good-password-123"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := domain.User{ID: "usr_gone", Email: "gone@acme.com", PasswordHash: string(hash)}
+	store := &fakeUserStore{loginUser: &u} // no tenants
+
+	errorsBefore := promtest.ToFloat64(loginAttempts.WithLabelValues("error"))
+	refusedBefore := promtest.ToFloat64(loginAttempts.WithLabelValues("refused"))
+	if code := itSignIn(itHandler(store, nil), "198.51.100.5", "gone@acme.com", "a-good-password-123"); code != http.StatusConflict {
+		t.Fatalf("right password, no tenant: status %d, want 409", code)
+	}
+	if d := promtest.ToFloat64(loginAttempts.WithLabelValues("error")) - errorsBefore; d != 0 {
+		t.Errorf("outcome error rose by %v, want 0", d)
+	}
+	if d := promtest.ToFloat64(loginAttempts.WithLabelValues("refused")) - refusedBefore; d != 1 {
+		t.Errorf("outcome refused rose by %v, want 1", d)
 	}
 }
