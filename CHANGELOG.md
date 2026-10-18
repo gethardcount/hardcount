@@ -33,7 +33,7 @@ original text.
 
 ### Changed
 
-- **New page: what Velox does when a card payment goes wrong (2026-10-18).** It covers declines, unclear charge results, crashes mid-charge, repeated or late Stripe webhooks and refunds: what Velox does, what you see and what you do. It ends with four known gaps. See [When card payments go wrong](docs/payments.md).
+- **New page: card payment failure handling (2026-10-18).** How Velox handles declines, ambiguous charge results, crashes mid-charge, duplicate or late Stripe webhooks and refunds, and the four gaps still open ([docs/payments.md](docs/payments.md)).
 - **Browser tests now set up pricing, recipes, price overrides and dunning policies through the dashboard (2026-10-18).** Contributors: `web-v2/e2e/account-setup.spec.ts` has four journeys, each checked against the API, and the smoke test now opens the six public pages signed out, including links with no or a dead code.
 - **Browser tests now change subscriptions through the dashboard (2026-10-18).** Contributors: `web-v2/e2e/subscriptions.spec.ts` has four journeys: change plan now (proration invoice) and at renewal, cancel at period end, undo and cancel now, quantity and item changes against the upcoming invoice, and trial and collection controls. Each checks the page against the API.
 - **A misspelled key in a bundled recipe now fails CI and stops Velox at startup (2026-10-18).** For contributors: before, a key such as `base_bill_timming` was skipped without a word, so the plan quietly billed in arrears. The three bundled recipes load unchanged.
