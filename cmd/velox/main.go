@@ -183,7 +183,8 @@ func serve() {
 	// traffic — including hosted-invoice pay pages — while /health/ready
 	// stays ok). config.validateFatal already rejects an UNSET REDIS_URL
 	// in production; this catches invalid/unreachable. Other environments
-	// warn and run fail-open.
+	// warn and run fail-open, except /v1/auth, whose limiter counts in the
+	// process.
 	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
 	rdb, err := mw.OpenRedis(pingCtx, cfg.RedisURL)
 	cancelPing()
@@ -192,7 +193,7 @@ func serve() {
 		os.Exit(1)
 	}
 	if err != nil {
-		slog.Warn("redis unavailable — rate limiting fails open in this environment", "env", cfg.Env, "error", err)
+		slog.Warn("redis unavailable — rate limiting fails open in this environment, except /v1/auth, which counts in this process", "env", cfg.Env, "error", err)
 	} else if rdb != nil {
 		slog.Info("redis connected for rate limiting")
 	}

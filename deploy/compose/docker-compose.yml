@@ -41,10 +41,11 @@ services:
   redis:
     # Rate limiting backend. APP_ENV=production fail-closes the general
     # and hosted-invoice limiters, so the stack ships Redis in-stack —
-    # without it /v1/bootstrap and most API surfaces would 429. /v1/auth
-    # and usage ingest ride deliberately fail-OPEN limiters (a Redis blip
-    # must not lock out login or drop billable events — see
-    # internal/api/router.go). Used for rate limiting only.
+    # without it /v1/bootstrap and most API surfaces would 429. Usage
+    # ingest rides a deliberately fail-OPEN limiter (a Redis blip must not
+    # drop billable events), and /v1/auth counts in the velox-api process
+    # while Redis is down (a blip must not lock out login or lift its
+    # limit) — see internal/api/router.go. Used for rate limiting only.
     image: redis:7-alpine
     restart: unless-stopped
     healthcheck:

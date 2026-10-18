@@ -1320,11 +1320,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// main.go covers "unreachable/invalid"), because the general and
 	// hosted-invoice limiters fail CLOSED without it and a replica would
 	// otherwise boot green and answer 429 to its share of traffic. rdb is
-	// nil only outside production, where every limiter fails open. The
-	// split below describes the RUNTIME direction for a Redis outage
-	// after boot: general + hosted-invoice fail CLOSED in production (DDoS
-	// posture), ingest and /v1/auth always fail open (revenue events and
-	// operator login must survive a Redis blip).
+	// nil only outside production, where every limiter but /v1/auth's fails
+	// open. The split below describes the RUNTIME direction for a Redis
+	// outage after boot: general + hosted-invoice fail CLOSED in production
+	// (DDoS posture), ingest always fails open (revenue events must survive
+	// a Redis blip), and /v1/auth counts in this process (operator login
+	// must survive a Redis blip, and so must its throttle).
 	prod := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
 	// Login brute-force protection: v1 ships NO automatic per-account throttle.
 	// The old users.locked_until auto-lockout (fragmenting across Redis↔in-memory
@@ -1354,8 +1355,15 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// docs/records/ha-readiness-2026-07-06.md) found the prior wiring mounted the
 	// fail-closed general limiter on /v1/auth, contradicting this
 	// stated design — a prod Redis outage killed dashboard login.
+	//
+	// Not fail-open either: that left password guessing unlimited for as
+	// long as Redis was down. Without Redis (unset, or a call fails) it
+	// counts in this process with the same limit (ADR-095 amendment
+	// 2026-10-18). That count is per replica, so N replicas allow one
+	// address up to N times the limit until Redis is back.
 	authLimiter := mw.NewRateLimiter(rdb, "general",
 		envInt("VELOX_RATE_LIMIT_GENERAL_PER_MIN", 100), time.Minute)
+	authLimiter.SetLocalFallback()
 
 	// Dedicated, much larger bucket for the ingest surface (/v1/usage-events*
 	// + the LiteLLM adapter). The general 100/min bucket was sized for

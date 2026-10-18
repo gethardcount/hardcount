@@ -78,7 +78,7 @@ You now have:
 | Service | Where | Notes |
 |---|---|---|
 | Postgres | `:5432` | Password `velox`. Data is kept in a Docker volume. |
-| Redis | `:6379` | Used for rate limiting. Optional outside production. |
+| Redis | `:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
 | Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Velox sends, so nothing leaves your machine. |
 | The API | `:8080` | Started by `make dev`. Not a container. |
 
@@ -182,7 +182,7 @@ Velox reads its settings from environment variables. The tables below list the m
 | `DATABASE_URL` | Postgres connection URL for the admin user |
 | `APP_DATABASE_URL` | Postgres connection URL for the limited user. Required in `staging` and `production`. |
 | `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data. 64 hex characters. Required in `production`. |
-| `REDIS_URL` | Redis, for rate limiting. Required in `production`. |
+| `REDIS_URL` | Redis, for rate limiting. Required in `production`. If Redis goes down later, sign-in stays rate-limited, but each copy counts on its own. |
 | `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward. Use `none` if there is no proxy. Required in `production`. Velox refuses to start if an entry is not an IP address or CIDR. |
 
 Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit. The audit log and dashboard sign-in records would also show the load balancer's address.

@@ -26,7 +26,8 @@ type Config struct {
 	// limiters fail CLOSED without it (every covered request 429) and a
 	// replica would boot green and serve 1/N of traffic that way, so
 	// production refuses to start without a reachable Redis (validateFatal +
-	// cmd/velox/main.go). Optional elsewhere: limiters fail open.
+	// cmd/velox/main.go). Optional elsewhere: limiters fail open, except
+	// /v1/auth's, which counts in the process.
 	RedisURL string
 	// TrustProxy is the TRUST_PROXY CIDR list the router honours forwarded
 	// client addresses from. Required in production: behind a balancer with

@@ -10,7 +10,7 @@ One VM with Docker Compose is also a supported production setup, for a small tea
 
 - Two or more `velox-api` copies behind a load balancer.
 - A managed Postgres with automatic failover and point-in-time restore.
-- A managed Redis. Velox uses it only for rate limiting.
+- A managed Redis. Velox uses it only for rate limiting, and all copies share its counts. If Redis goes down after start-up, see [Redis going down after boot](runbook/replica-will-not-start.md#redis-going-down-after-boot).
 - A connection pooler, if you want one. PgBouncer in transaction mode works, and CI runs the test suite through it. RDS Proxy is expected to behave the same way but has not been tested ([details](postgres-requirements.md)). Run database upgrades (migrations) over a direct connection.
 
 The settings for each copy are in [Self-host](../self-host.md#settings). Every copy uses the same settings and the same database.
