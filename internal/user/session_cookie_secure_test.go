@@ -32,11 +32,9 @@ func TestLogin_SessionCookieSecurePerEnvironment(t *testing.T) {
 		appEnv string
 		secure bool
 	}{
-		{"", false}, // unset means local
 		{"local", false},
 		{"staging", true},
 		{"production", true},
-		{" Production ", true},
 	}
 	pages := []struct {
 		name, origin, referer string
@@ -53,11 +51,10 @@ func TestLogin_SessionCookieSecurePerEnvironment(t *testing.T) {
 	for _, e := range envs {
 		for _, p := range pages {
 			t.Run("APP_ENV="+e.appEnv+"/"+p.name, func(t *testing.T) {
-				t.Setenv("APP_ENV", e.appEnv)
 				u := domain.User{ID: "usr_1", Email: "op@acme.com", PasswordHash: string(hash)}
 				store := &fakeUserStore{loginUser: &u, tenants: []domain.UserTenant{{UserID: "usr_1", TenantID: "ten_acme"}}}
 				h := NewHandler(NewService(store, clock.Real()), session.NewService(&recordingSessionStore{}),
-					session.DefaultCookieConfig(), stubEmailSender{}, "", false)
+					session.DefaultCookieConfig(e.appEnv), stubEmailSender{}, "", false)
 
 				body, _ := json.Marshal(loginReq{Email: "op@acme.com", Password: "a-good-password-123"})
 				req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body)))

@@ -45,7 +45,7 @@ func TestLogin_SessionIPIsTheTrustedClientIP(t *testing.T) {
 			store := &fakeUserStore{loginUser: &u, tenants: []domain.UserTenant{{UserID: "usr_1", TenantID: "ten_acme"}}}
 			sessions := &recordingSessionStore{}
 			h := NewHandler(NewService(store, clock.Real()), session.NewService(sessions),
-				session.DefaultCookieConfig(), stubEmailSender{}, "", false)
+				session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
 			rec := &recordingAuditRecorder{}
 			h.SetAuditLogger(rec)
 			// The router mounts TrustedRealIP globally, ahead of /v1/auth.

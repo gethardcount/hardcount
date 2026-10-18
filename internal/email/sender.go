@@ -113,8 +113,9 @@ type RecipientSuppressionChecker interface {
 // NewSender creates an email sender from environment variables. When
 // SMTP_HOST is unset every send returns ErrSMTPNotConfigured —
 // `make dev` should run MailHog (docs/ops/email-setup.md) so the
-// dev path exercises the same error contract as production.
-func NewSender() *Sender {
+// dev path exercises the same error contract as production. appEnv is
+// config.Config.Env.
+func NewSender(appEnv string) *Sender {
 	tlsMode := strings.ToLower(strings.TrimSpace(os.Getenv("SMTP_TLS")))
 	switch tlsMode {
 	case "starttls", "implicit", "none":
@@ -127,7 +128,7 @@ func NewSender() *Sender {
 		slog.Warn("SMTP_TLS unrecognized, defaulting to starttls", "got", tlsMode)
 		tlsMode = "starttls"
 	}
-	prodEnv := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+	prodEnv := appEnv == "production"
 	// One line of boot-time truth about the transport mode: strict
 	// STARTTLS is the default, and a stale env pointing at a no-TLS
 	// sandbox will now fail loudly at send — this log is how the

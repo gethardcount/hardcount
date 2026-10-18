@@ -203,13 +203,15 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 | Variable | Default | What it does |
 |---|---|---|
 | `APP_ENV` | `local` | `local`, `staging` or `production`. In `staging` and `production` the sign-in cookie is always marked `Secure`, so the dashboard needs HTTPS, and the start-up checks on this page apply. An address setting such as `DASHBOARD_BASE_URL` that starts with `http://` then logs a warning at start-up. `local` is for your own machine over plain HTTP; the quickstart uses it. A value that starts with `prod` but is not exactly `production`, such as `prod`, stops start-up. Any other unrecognised value starts with a warning and is treated as not production. |
-| `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. With `false`, run `velox migrate` before starting a new release. |
+| `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. With `false`, run `velox migrate` before starting a new release. A value other than `true` or `false` (or `yes`, `no`, `1`, `0`) stops start-up. |
 | `MIGRATION_LOCK_TIMEOUT` | `5s` | How long a database upgrade waits for a table lock before it stops. A duration such as `30s`, or `0` for no limit. Any other value stops the upgrade. |
 | `DASHBOARD_BASE_URL` | unset | The dashboard's address, used in password-reset links. If unset, no password-reset emails are sent. For local development use `http://localhost:5173`. |
 | `CUSTOMER_PORTAL_URL` | unset | The dashboard's address, with no path. Stripe returns a customer here after they save a card. If unset, Stripe sends them to `http://localhost:5173`, which exists only in local development; the card is still saved. |
 | `SMTP_HOST`, `SMTP_PORT` | unset | Your email server. If unset, Velox sends no email. The local `.env.example` points these at Mailpit; the Compose stack leaves them unset. See [email setup](ops/email-setup.md). |
 | `VELOX_BOOTSTRAP_TOKEN` | unset | Allows the `POST /v1/bootstrap` call that creates the first tenant. At least 16 characters outside `local`. |
 | `METRICS_TOKEN` | unset | The bearer token a scraper must send to read `/metrics`. If unset, `/metrics` answers 401 in `production` and is open elsewhere. |
+| `VELOX_RATE_LIMIT_GENERAL_PER_MIN` | `100` | Requests a minute for each API key, signed-in account, or client address before sign-in. Sign-in attempts from one address use the same limit. A whole number of 1 or more; any other value stops start-up. |
+| `VELOX_RATE_LIMIT_INGEST_PER_SEC` | `1000` | Usage events and LiteLLM callbacks a second for each API key. A whole number of 1 or more; any other value stops start-up. |
 | `INVOICE_GRACE_PERIOD` | `1h` | How long Velox waits after a billing period ends before it builds the invoice, so usage that arrives late but belongs to the period is billed. See below. A duration from `0` to `72h`, such as `30m` or `24h`. Any other value stops start-up. `0` builds the invoice as soon as the period ends. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Your OpenTelemetry collector's OTLP/HTTP address, such as `http://otel-collector:4318`. If unset, Velox sends no traces. |
 | `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | all traces | Which traces to keep, using the standard OpenTelemetry values. To keep 1 in 10, set `parentbased_traceidratio` and `0.1`. |

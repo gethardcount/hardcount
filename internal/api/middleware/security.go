@@ -10,13 +10,12 @@ import (
 
 // SecurityHeaders adds standard security headers to all responses.
 // These are defense-in-depth measures that enterprise security audits expect.
-func SecurityHeaders() func(http.Handler) http.Handler {
-	env := strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV")))
-
+// appEnv is config.Config.Env.
+func SecurityHeaders(appEnv string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// HSTS: tell browsers to always use HTTPS (skip in local dev)
-			if env != "local" {
+			if appEnv != "local" {
 				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
 
@@ -43,10 +42,11 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 // data and costs database queries, and an address allowlist in front of it
 // stops holding once a load balancer makes every caller a private address.
 // It refuses the scrape rather than the boot, so an install that does not
-// scrape metrics keeps billing through the upgrade.
-func MetricsAuth(next http.Handler) http.Handler {
+// scrape metrics keeps billing through the upgrade. appEnv is
+// config.Config.Env.
+func MetricsAuth(appEnv string, next http.Handler) http.Handler {
 	token := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
-	prod := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+	prod := appEnv == "production"
 	if token == "" && prod {
 		slog.Warn("METRICS_TOKEN not set — /metrics answers 401 in production. Set METRICS_TOKEN and have Prometheus send it as a bearer token")
 	}

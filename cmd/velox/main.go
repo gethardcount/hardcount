@@ -198,7 +198,10 @@ func serve() {
 		slog.Info("redis connected for rate limiting")
 	}
 
-	server := api.NewServer(db, nil, rdb, api.WithInvoiceGrace(cfg.InvoiceGracePeriod))
+	server := api.NewServer(db, nil, rdb,
+		api.WithInvoiceGrace(cfg.InvoiceGracePeriod),
+		api.WithAppEnv(cfg.Env),
+		api.WithRateLimits(cfg.RateLimits))
 
 	billingInterval := 1 * time.Hour
 	if cfg.Env == "local" {
