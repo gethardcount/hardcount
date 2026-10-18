@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -254,5 +255,27 @@ func TestDescribeSubscriptionAction_BillingRetried(t *testing.T) {
 		map[string]any{"action": "billing_retried", "attempts_before": float64(1)}, nil)
 	if detail != "After 1 failed attempt" {
 		t.Fatalf("singular: got %q", detail)
+	}
+}
+
+// TestDescribeSubscriptionAction_NetNegativeUsage: the row an invoice decision
+// writes when a meter's usage was below zero after corrections (#1193) names
+// each meter and its amount, says what to do, and is a warning. The metadata
+// arrives as JSON, so the meter list is []any.
+func TestDescribeSubscriptionAction_NetNegativeUsage(t *testing.T) {
+	desc, detail, _, status := describeSubscriptionAction("subscription.net_negative_usage", map[string]any{
+		"billing_reason": "subscription_cycle",
+		"meters": []any{
+			map[string]any{"meter_id": "mtr_1", "meter_key": "api_calls", "quantity": "-50"},
+			map[string]any{"meter_id": "mtr_2", "meter_key": "tokens", "quantity": "-12.5"},
+		},
+	}, nil)
+	if desc != "Usage below zero billed as zero" || status != "warning" {
+		t.Fatalf("got %q / %q, want the net-negative title as a warning", desc, status)
+	}
+	for _, want := range []string{"api_calls -50", "tokens -12.5", "credit note"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail %q: missing %q", detail, want)
+		}
 	}
 }
