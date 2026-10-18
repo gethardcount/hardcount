@@ -196,6 +196,51 @@ func TestHandleDispute_Outcomes(t *testing.T) {
 	}
 }
 
+// TestHandleDispute_YoungDisputeOnAnUnknownPaymentIsRedelivered: a dispute
+// can reach Velox before Velox has recorded the payment it disputes (a
+// hosted-page payment whose settle has not committed, an off-session charge
+// whose attempt row is written after Stripe answers; Stripe's test dispute
+// cards open the dispute right after the charge). A dispute created within
+// the race window that no invoice holds yet fails the delivery, so Stripe
+// sends it again, and writes no dedup row. An older one is acknowledged as
+// not Velox's, as before.
+func TestHandleDispute_YoungDisputeOnAnUnknownPaymentIsRedelivered(t *testing.T) {
+	cases := []struct {
+		name       string
+		age        time.Duration
+		wantErr    bool
+		wantIngest bool
+	}{
+		{"created a minute ago", time.Minute, true, false},
+		{"created an hour ago", time.Hour, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			webhooks := newMockWebhookStore()
+			s := NewStripe(&mockStripeClient{}, newMockInvoiceUpdater(), webhooks, nil)
+			rec := &fakeDisputeRecorder{err: errs.ErrNotFound}
+			s.SetDisputeRecorder(rec)
+			obj := disputeObject("needs_response", "pi_not_recorded_yet")
+			obj["created"] = time.Now().Add(-tc.age).Unix()
+			err := s.HandleWebhook(context.Background(), "t1", domain.StripeWebhookEvent{
+				StripeEventID: "evt_dsp_race_" + strings.ReplaceAll(tc.name, " ", "_"),
+				EventType:     "charge.dispute.created",
+				OccurredAt:    time.Now().UTC(),
+				Payload:       map[string]any{"raw": disputeRaw(t, obj)},
+			})
+			if (err != nil) != tc.wantErr {
+				t.Errorf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if len(rec.snaps) != 1 {
+				t.Errorf("recorder calls %d, want 1", len(rec.snaps))
+			}
+			if got := webhooks.ingestCalls == 1; got != tc.wantIngest {
+				t.Errorf("dedup row written = %v, want %v", got, tc.wantIngest)
+			}
+		})
+	}
+}
+
 // TestHandleDispute_RedeliveryAfterIngestSkips: once the dedup row is
 // written, the same event id does not reach the store again.
 func TestHandleDispute_RedeliveryAfterIngestSkips(t *testing.T) {
