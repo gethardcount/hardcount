@@ -29,7 +29,7 @@ That gives you a working [tenant](glossary.md): one business account with its ow
 
 To run it for real customers, follow [Production on one VM](production-one-vm.md). It adds HTTPS, the web address settings, email, Stripe, nightly backups with a restore test, a go-live checklist and upgrade steps.
 
-**Signing in before you add TLS.** The stack serves plain HTTP on port 80. Until you put TLS in front, sign in to the dashboard at `http://localhost/` on the server, or through an SSH tunnel. Sign-in does not work at `http://<server-ip>/`. The [compose guide](../deploy/compose/README.md#tls) covers both.
+**Signing in before you add TLS.** The stack serves plain HTTP on port 80, and in production mode the sign-in cookie is always `Secure`. Until you put TLS in front, sign in at `http://localhost/` on the server, or through an SSH tunnel, in Chrome or Firefox. Safari does not keep a `Secure` cookie over plain HTTP, even at localhost, and no browser keeps it at `http://<server-ip>/`. The [compose guide](../deploy/compose/README.md#5-sign-in-to-the-dashboard) covers both. The quickstart (`./quickstart.sh`) runs in local mode, so it works in every browser.
 
 **What to expect from one VM:**
 
@@ -197,7 +197,7 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `APP_ENV` | `local` | `local`, `staging` or `production`. Outside `local`, cookies are marked secure and the start-up checks on this page apply. A value that starts with `prod` but is not exactly `production`, such as `prod`, stops start-up. Any other unrecognised value starts with a warning and is treated as not production. |
+| `APP_ENV` | `local` | `local`, `staging` or `production`. In `staging` and `production` the sign-in cookie is always marked `Secure`, so the dashboard needs HTTPS, and the start-up checks on this page apply. An address setting such as `DASHBOARD_BASE_URL` that starts with `http://` then logs a warning at start-up. `local` is for your own machine over plain HTTP; the quickstart uses it. A value that starts with `prod` but is not exactly `production`, such as `prod`, stops start-up. Any other unrecognised value starts with a warning and is treated as not production. |
 | `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. With `false`, run `velox migrate` before starting a new release. |
 | `MIGRATION_LOCK_TIMEOUT` | `5s` | How long a database upgrade waits for a table lock before it stops. A duration such as `30s`, or `0` for no limit. Any other value stops the upgrade. |
 | `DASHBOARD_BASE_URL` | unset | The dashboard's address, used in password-reset links. If unset, no password-reset emails are sent. For local development use `http://localhost:5173`. |

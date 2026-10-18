@@ -14,8 +14,10 @@
 # Go, Node and jq are not needed. To build from this checkout instead, run
 # `./quickstart.sh --build`.
 #
-# This is for trying Velox on your own machine. For a server, follow README.md
-# in this directory: it explains each setting this script fills in for you.
+# This is for trying Velox on your own machine. It runs with APP_ENV=local, so
+# the dashboard works over plain HTTP at http://localhost in every browser.
+# For a server, follow README.md in this directory: it explains each setting
+# this script fills in for you, and runs in production mode.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -55,6 +57,10 @@ write_env() {
     # with another Velox stack on this machine (a development checkout, or an
     # install made by hand from this directory).
     echo "COMPOSE_PROJECT_NAME=velox-quickstart"
+    # Local mode, because this install is served over plain HTTP. Production
+    # mode always marks the sign-in cookie Secure, and Safari does not keep a
+    # Secure cookie at http://localhost, so sign-in would fail there.
+    echo "APP_ENV=local"
     echo "NGINX_HTTP_PORT=${PORT_DEFAULT}"
     # Where Stripe returns a customer after they save a card.
     echo "CUSTOMER_PORTAL_URL=http://localhost:${PORT_DEFAULT}"

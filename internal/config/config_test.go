@@ -79,6 +79,9 @@ func TestValidate_ProductionWarnsMissingRedis(t *testing.T) {
 
 func TestValidate_ValidConfig(t *testing.T) {
 	t.Setenv("VELOX_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	for _, name := range publicAddressSettings {
+		t.Setenv(name, "https://billing.example.com")
+	}
 
 	cfg := Config{
 		Port:       "8080",
@@ -419,6 +422,58 @@ func TestLoad_RejectsNearMissOfProduction(t *testing.T) {
 		if _, err := Load(); err != nil {
 			t.Errorf("APP_ENV=%q must boot, got: %v", env, err)
 		}
+	}
+}
+
+// In staging and production the sign-in cookie is always Secure, and browsers
+// keep a Secure cookie only over HTTPS. An address setting that starts with
+// http:// says Velox is served without TLS there, so start-up names it. Local
+// is plain HTTP by design and stays quiet.
+func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
+	base := Config{
+		Port:       "8080",
+		RedisURL:   "redis://localhost:6379",
+		TrustProxy: "none",
+		DB:         DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
+	}
+	settings := []string{
+		"DASHBOARD_BASE_URL", "CUSTOMER_PORTAL_URL", "HOSTED_INVOICE_BASE_URL",
+		"PAYMENT_UPDATE_URL", "PAYMENT_UPDATE_RETURN_URL", "VELOX_API_BASE_URL",
+	}
+	for _, name := range settings {
+		t.Run(name, func(t *testing.T) {
+			for _, other := range settings {
+				t.Setenv(other, "")
+			}
+			for _, c := range []struct {
+				env, value string
+				warn       bool
+			}{
+				{"production", "http://billing.example.com", true},
+				{"production", " HTTP://billing.example.com/pay ", true},
+				{"production", "http://localhost:8080", true},
+				{"staging", "http://staging.example.com", true},
+				{"production", "https://billing.example.com", false},
+				{"production", "", false},
+				{"local", "http://localhost:5173", false},
+			} {
+				t.Setenv(name, c.value)
+				cfg := base
+				cfg.Env = c.env
+				var got []string
+				for _, w := range cfg.Validate() {
+					if strings.HasPrefix(w, name+" is an http:// address") {
+						got = append(got, w)
+					}
+				}
+				if c.warn && (len(got) != 1 || !strings.Contains(got[0], "https://")) {
+					t.Errorf("APP_ENV=%s %s=%q: want one warning that asks for an https:// address, got %q", c.env, name, c.value, got)
+				}
+				if !c.warn && len(got) != 0 {
+					t.Errorf("APP_ENV=%s %s=%q: want no warning, got %q", c.env, name, c.value, got)
+				}
+			}
+		})
 	}
 }
 

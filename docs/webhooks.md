@@ -36,12 +36,13 @@ export VELOX_KEY=vlx_secret_test_…   # your test key
 2. **Pick the address Velox will call.** It depends on how you run Velox.
 
    - **From source** (`make dev`): use `http://localhost:9099/ok`.
-   - **In Docker** (the [quick start](quick-start.md) or a server): this
-     setup refuses `localhost` and private network addresses, so Velox
-     cannot reach the receiver directly. In a second terminal, start a
-     tunnel, which gives your computer a public `https://` address. For
-     example: `cloudflared tunnel --url http://localhost:9099`. Use the
-     `https://` address it prints, plus `/ok`.
+   - **In Docker** (the [quick start](quick-start.md) or a server): inside
+     its container, `localhost` is the container itself, and Velox refuses
+     private network addresses, so it cannot reach the receiver directly.
+     In a second terminal, start a tunnel, which gives your computer a
+     public `https://` address. For example:
+     `cloudflared tunnel --url http://localhost:9099`. Use the `https://`
+     address it prints, plus `/ok`.
 
    ```bash
    export HOOK_URL=http://localhost:9099/ok   # or https://<tunnel address>/ok

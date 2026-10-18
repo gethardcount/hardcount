@@ -27,6 +27,7 @@ original text.
 - **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, Velox refuses to start and says why.
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
 - **A password on the built-in leaked-password list is refused when it is set ([#1222](https://github.com/getvelox/velox/pull/1222)).** Passwords already in use keep working. If a script bootstraps or resets with a fixed password, check that it still works; a refused password gets a 422.
+- **In staging and production, sign in over HTTPS (PRLINK).** The sign-in cookie is now always `Secure`. Over plain HTTP only Chrome and Firefox at `http://localhost` keep it; Safari does not. A quickstart `deploy/compose/.env` written before this has no `APP_ENV`, so it runs in production mode: add `APP_ENV=local` to it, or run `./quickstart.sh destroy` and start again.
 
 ### Added
 
@@ -51,6 +52,10 @@ original text.
 
 - **Adding an item to a subscription now refuses an archived plan (2026-10-18).** Creating a subscription and changing an item's plan already refused one; `POST /v1/subscriptions/{id}/items` did not, so new business could land on a retired plan. It now answers 409 `invalid_state` with the same message as create. Items already on an archived plan keep billing. ([#1218](https://github.com/getvelox/velox/pull/1218), fixes #1194)
 - **Writing off an invoice with "Also pause collection" ticked now shows the paused subscription (2026-10-18).** The pause happened, but the invoice page still said "The subscription is still billing." and the subscription page still offered Pause collection, until it was reloaded about 30 seconds later. Both pages now refresh the subscription. ([#1208](https://github.com/getvelox/velox/pull/1208))
+
+### Security
+
+- **The sign-in cookie is always `Secure` in staging and production (2026-10-18).** It dropped `Secure` when the browser was on plain http at localhost, for Safari on the quickstart. The quickstart now runs with `APP_ENV=local` instead. An `http://` address setting, such as `DASHBOARD_BASE_URL`, logs a start-up warning ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md) Phase 0(b), PRLINK).
 
 ## [0.8.2] - 2026-10-18
 

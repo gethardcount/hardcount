@@ -276,7 +276,7 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(ctx, "accept-invite: session issue failed — user must log in manually",
 				"user_id", res.UserID, "error", err)
 		} else {
-			h.cookie.SetCookie(w, r, rawID, sess.ExpiresAt)
+			h.cookie.SetCookie(w, rawID, sess.ExpiresAt)
 			out["session_minted"] = true
 			out["livemode"] = sess.Livemode
 			out["expires_at"] = sess.ExpiresAt.Format(rfc3339)

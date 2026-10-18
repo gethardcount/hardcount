@@ -180,6 +180,18 @@ func (c Config) validateFatal() error {
 	return nil
 }
 
+// publicAddressSettings are the settings that hold Velox's own public
+// addresses: the dashboard, the customer pages and the API. internal/api
+// and internal/email read them; Validate only checks their scheme.
+var publicAddressSettings = []string{
+	"DASHBOARD_BASE_URL",
+	"CUSTOMER_PORTAL_URL",
+	"HOSTED_INVOICE_BASE_URL",
+	"PAYMENT_UPDATE_URL",
+	"PAYMENT_UPDATE_RETURN_URL",
+	"VELOX_API_BASE_URL",
+}
+
 // Validate checks the config for common misconfigurations.
 func (c Config) Validate() []string {
 	var warnings []string
@@ -208,6 +220,20 @@ func (c Config) Validate() []string {
 	case "local", "staging", "production":
 	default:
 		warnings = append(warnings, fmt.Sprintf("APP_ENV=%q is not a recognized environment (expected: local, staging, production)", c.Env))
+	}
+
+	// Staging and production always mark the sign-in cookie Secure
+	// (session.DefaultCookieConfig), so they are meant to be served over
+	// HTTPS (ADR-095 Phase 0(b)). An address setting that starts with
+	// http:// says one is not. Velox cannot see the browser's scheme at
+	// start-up; these settings are what it can see.
+	if c.Env == "production" || c.Env == "staging" {
+		for _, name := range publicAddressSettings {
+			u, err := neturl.Parse(strings.TrimSpace(os.Getenv(name)))
+			if err == nil && strings.EqualFold(u.Scheme, "http") {
+				warnings = append(warnings, fmt.Sprintf("%s is an http:// address, so Velox is served without TLS there. In %s the sign-in cookie is always Secure, and the pages at this address and the links to them are not encrypted. Serve Velox over HTTPS and set %s to its https:// address (docs/production-one-vm.md#3-add-https-with-caddy)", name, c.Env, name))
+			}
+		}
 	}
 
 	if port, err := strconv.Atoi(c.Port); err != nil || port < 1 || port > 65535 {

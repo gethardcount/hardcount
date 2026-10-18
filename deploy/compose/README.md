@@ -2,7 +2,7 @@
 
 This guide takes you from a fresh VM to a working Velox with a dashboard login and API keys.
 
-Just trying Velox on your own machine? Run `./quickstart.sh` in this directory instead. It does steps 1 to 4 for you, on port 8080, with the published images. This guide explains each of those steps, for a server you will keep.
+Just trying Velox on your own machine? Run `./quickstart.sh` in this directory instead. It does steps 1 to 4 for you, on port 8080, with the published images. It runs in local mode (`APP_ENV=local`), so sign-in works at `http://localhost` in every browser. This guide explains each of those steps, for a server you will keep, and runs in production mode.
 
 Going to production? [Production on one VM](../../docs/production-one-vm.md) does the same install with a pinned release, then adds HTTPS, email, Stripe, nightly backups and a go-live checklist.
 
@@ -102,16 +102,16 @@ Calling it a second time returns `409 already_bootstrapped`.
 
 ## 5. Sign in to the dashboard
 
-Open `http://localhost/` on the VM and sign in with the owner login.
+In production mode the sign-in cookie is always marked `Secure`. Browsers keep a `Secure` cookie on HTTPS. At `http://localhost`, Chrome and Firefox keep it too; Safari does not. At any other plain-HTTP address, no browser keeps it.
 
-**From your laptop, use an SSH tunnel:**
+Until you add [TLS](#tls), sign in at `http://localhost` in Chrome or Firefox. Open `http://localhost/` on the VM, or use an SSH tunnel from your laptop:
 
 ```bash
 ssh -L 8080:localhost:80 you@server
 # then open http://localhost:8080/
 ```
 
-**Sign-in does not work at `http://<server-ip>/`.** Browsers keep the sign-in cookie only on HTTPS or on localhost, and the sign-in page tells you so. Once you add [TLS](#tls), sign in at your HTTPS address.
+**Sign-in does not work at `http://<server-ip>/`,** in any browser, and the sign-in page tells you so. Once you add TLS, sign in at your HTTPS address.
 
 ## 6. Make a first API call
 
@@ -154,7 +154,7 @@ This stack serves plain HTTP. Before real use, put TLS in front of it. Two commo
 
 [Production on one VM](../../docs/production-one-vm.md#3-add-https-with-caddy) has a copy-paste example with Caddy, a web server that gets and renews the certificate by itself.
 
-Keep `APP_ENV=production`, the default. It marks cookies as secure and turns on HSTS.
+Keep `APP_ENV=production`, the default. It always marks the sign-in cookie `Secure` and turns on HSTS. If an address setting such as `DASHBOARD_BASE_URL` starts with `http://`, Velox logs a warning at start-up that names it.
 
 ## Backups
 
@@ -196,6 +196,9 @@ Set `NGINX_HTTP_PORT=8080`, or any free port, in `.env` and start the stack agai
 
 **Sign-in says it does not work at this address.**
 You opened the dashboard over plain HTTP at an address other than localhost. See [step 5](#5-sign-in-to-the-dashboard).
+
+**In Safari, sign-in at `http://localhost` says the browser did not keep you signed in.**
+Safari does not keep the `Secure` sign-in cookie over plain HTTP, even at localhost. Use Chrome or Firefox until you add [TLS](#tls). To try Velox on your own Mac, use `./quickstart.sh`, which runs in local mode.
 
 ## Next
 

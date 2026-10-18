@@ -135,7 +135,7 @@ Caddy is a web server that gets a free HTTPS certificate from Let's Encrypt and 
 
    **You see:** the dashboard, in test mode. Nothing in test mode charges real money.
 
-`APP_ENV=production` is already set in `.env`. It marks the sign-in cookie as HTTPS-only, which is why sign-in works only at your `https://` address or on `localhost`.
+`APP_ENV=production` is already set in `.env`. It always marks the sign-in cookie `Secure`, so browsers keep it only on HTTPS and at `http://localhost`. Sign in at your `https://` address. Through an SSH tunnel to `http://localhost:8080`, sign-in works in Chrome and Firefox but not in Safari, which does not keep a `Secure` cookie over plain HTTP, even at localhost.
 
 Velox reads each visitor's real address from the headers Caddy and nginx forward. Caddy's requests reach Velox through Docker's private network, which the Compose stack's default `TRUST_PROXY` already trusts, so leave that setting as it is.
 
@@ -189,6 +189,7 @@ docker compose logs velox-api | grep '"level":"WARN"'
 | `METRICS_TOKEN not set` | `/metrics` answers 401 to everyone. | Only if you collect metrics with Prometheus. See [What to watch](self-host.md#what-to-watch). |
 | `VELOX_API_BASE_URL NOT SET` | The link you copy to share a customer's cost dashboard (a page of their usage and charges) is a path, not a full address. | Only if you share cost dashboards. Set it in `.env` to your HTTPS address. |
 | `RUN_MIGRATIONS_ON_BOOT=true in production` | Velox updates its database as it starts. | No. On one VM this is how upgrades apply. The warning is for setups with several copies of Velox. |
+| `DASHBOARD_BASE_URL is an http:// address`, or the same for another address setting | That setting starts with `http://`, so Velox is served without HTTPS there. Sign-in needs HTTPS, and links to that address are not encrypted. | Yes. Change it to your `https://` address, as in [step 4](#4-set-the-web-addresses). |
 
 To set `VELOX_EMAIL_BIDX_KEY`, add a random key and restart. Set it before you add customers: Velox indexes a customer's email only when the customer is created or edited.
 
