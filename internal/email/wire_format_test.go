@@ -67,8 +67,11 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 			return s.SendPaymentReceipt(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 123456, "eur", "tok_abc")
 		}, []string{cust}},
 		{"dunning-warning", func() error {
-			return s.SendDunningWarning(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 1, 4, "2026-10-20", "insufficient_funds", "tok_abc")
+			return s.SendDunningWarning(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 1, 4, "2026-10-20", "insufficient_funds", "tok_abc", false)
 		}, []string{cust, "insufficient_funds"}},
+		{"dunning-warning-card-refused", func() error {
+			return s.SendDunningWarning(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 1, 4, "2026-10-20", "", "tok_abc", true)
+		}, []string{cust, "different card"}},
 		{"dunning-escalation", func() error {
 			return s.SendDunningEscalation(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", domain.DunningEscalationOutcome{}, "tok_abc")
 		}, []string{cust}},
