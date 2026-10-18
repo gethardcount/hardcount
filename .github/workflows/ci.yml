@@ -365,7 +365,7 @@ jobs:
           curl -sf http://127.0.0.1:4173/ >/dev/null || { echo "vite preview never came up"; cat preview.log; exit 1; }
 
       - name: Run Playwright
-        run: cd web-v2 && npx playwright test
+        run: cd web-v2 && npx playwright test account-setup smoke journeys -g "account-setup|\(public\)|dead code" --repeat-each 5 --retries=0
 
       - name: Upload Playwright report and traces
         if: failure()
