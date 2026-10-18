@@ -696,18 +696,23 @@ type recordingEmailNotifier struct {
 	warnings     int
 	escalations  int
 	paymentFails int
+	// What the latest warning said (#966): its decline reason, and whether
+	// it was the "use a different card" variant.
+	lastWarnReason      string
+	lastWarnCardRefused bool
 }
 
 func (r *recordingEmailNotifier) SendPaymentFailed(context.Context, string, string, []string, string, string, string, string) error {
 	r.paymentFails++
 	return nil
 }
-func (r *recordingEmailNotifier) SendDunningWarning(context.Context, string, string, []string, string, string, int, int, string, string, string) error {
+func (r *recordingEmailNotifier) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, failureReason, _ string, cardNeedsReplacing bool) error {
 	r.warnings++
+	r.lastWarnReason, r.lastWarnCardRefused = failureReason, cardNeedsReplacing
 	return nil
 }
-func (r *recordingEmailNotifier) SendDunningWarningTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error {
-	return r.SendDunningWarning(ctx, tenantID, to, cc, customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, publicToken)
+func (r *recordingEmailNotifier) SendDunningWarningTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
+	return r.SendDunningWarning(ctx, tenantID, to, cc, customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, publicToken, cardNeedsReplacing)
 }
 
 func (r *recordingEmailNotifier) SendDunningEscalation(context.Context, string, string, []string, string, string, domain.DunningEscalationOutcome, string) error {
