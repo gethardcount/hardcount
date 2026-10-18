@@ -1,7 +1,7 @@
 # ADR-082: Email recipient semantics — additional_emails + CC coverage matrix
 
 Date: 2026-07-06
-Status: Accepted (amended 2026-07-19 by [ADR-098](098-postmark-delivery-webhook-ingestion.md))
+Status: Accepted. Amended 2026-07-19 by [ADR-098](098-postmark-delivery-webhook-ingestion.md). Amended 2026-10-18: [addresses must be bare](#amendment-2026-10-18-every-address-must-be-one-bare-address).
 Design basis: docs/design/cc-emails.md (two-lens divergent panel +
 adversarial judge; plumbing claims verified against the code before
 acceptance).
@@ -11,7 +11,7 @@ hours-slice.
 
 ## Summary
 
-A customer can hold up to 10 extra email addresses (`additional_emails`, encrypted like the main address), so billing emails reach more than one contact. They go in a visible `Cc:` on one message, for six email types: invoice, payment receipt, payment failed, both dunning emails and credit note, now sent with `POST /v1/credit-notes/{id}/send`. The two payment-setup emails, password reset and member invite are never copied, because each carries a personal link; their send functions take no CC list. A bounce on a copied address never marks the main address as bounced, and a suppressed main address blocks the whole send. Status: active, amended 2026-07-19: [ADR-098](098-postmark-delivery-webhook-ingestion.md) adds Postmark delivery, bounce and spam-complaint reports.
+A customer can hold up to 10 extra email addresses (`additional_emails`, encrypted like the main address), so billing emails reach more than one contact. They go in a visible `Cc:` on one message, for six email types: invoice, payment receipt, payment failed, both dunning emails and credit note, now sent with `POST /v1/credit-notes/{id}/send`. The two payment-setup emails, password reset and member invite are never copied, because each carries a personal link; their send functions take no CC list. A bounce on a copied address never marks the main address as bounced, and a suppressed main address blocks the whole send. Status: active, amended 2026-07-19: [ADR-098](098-postmark-delivery-webhook-ingestion.md) adds Postmark delivery, bounce and spam-complaint reports. Amended 2026-10-18: every address, main or copied, must be one bare address such as `ap@example.com`. A display name, quotes or angle brackets are refused with 422 instead of being stripped, and the sender checks each address again before it sends.
 
 ## Context
 
@@ -112,3 +112,16 @@ per-cause customer.email_bounced/email_complained outbound events;
 outbound email-*sent* lifecycle events remain cut; hosted CN page;
 auto-email at finalize (separate register item); BCC / Reply-To /
 operator self-copy.
+
+## Amendment 2026-10-18: every address must be one bare address
+
+Decision 1 said: trim, validate, then keep the bare address that `ParseAddress` returns, so `Bob <bob@x.com>` was stored as `bob@x.com`. That step is replaced. An address is now refused with 422 unless, trimmed, it is exactly the address `net/mail` parses from it. So a display name, angle brackets, a comment, a quoted local part or a second address are refused, not stripped.
+
+Why. `ParseAddress` returns a quoted local part unquoted, so the stored address was not the one typed, and the SMTP envelope could name a recipient the `Cc:` header did not show. Refusing keeps the typed, stored, shown and sent address the same.
+
+What changes:
+
+- **One check for every address.** `domain.ValidateEmail` returns the parsed address, and callers store and send to it. It covers the customer's email and CC list, and the `email` and CC list of both send endpoints (decision 6). Before, that `email` was only checked for being present. It also covers team invites, the company email in settings and the bootstrap owner email. The customer service's copy of the check is deleted.
+- **Stored addresses are not rewritten.** The sender checks To and every Cc again before it connects. If one fails, the send fails as a permanent error: the outbox row is marked `failed` at once, no bounce is recorded, and the operator fixes the address and sends again. A failing Cc fails the whole send, like a Cc with a control character did before; it is not dropped.
+
+The dashboard forms already refused these values, so only API callers see the new 422.

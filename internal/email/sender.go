@@ -210,6 +210,29 @@ func (s *Sender) SetSuppressionChecker(c RecipientSuppressionChecker) { s.suppre
 // "delivered" if they care; most callers swallow it.
 var ErrRecipientSuppressed = errors.New("email: recipient suppressed (bounced or complained)")
 
+// ErrInvalidRecipient marks a send whose To or Cc address is not one bare
+// address (domain.ValidateEmail). Every entry point has refused such an
+// address since 2026-10-18, but addresses stored before are not rewritten,
+// so the sender checks again: the send fails before any SMTP traffic,
+// IsPermanentSendError moves the outbox row to failed at once, and no
+// bounce is recorded. The operator fixes the address and sends again.
+var ErrInvalidRecipient = errors.New("email: recipient is not a single valid email address")
+
+// checkRecipients applies domain.ValidateEmail to the To address and each
+// Cc address. The error names no address: it is stored as the outbox row's
+// last_error, which erasure does not scrub.
+func checkRecipients(to string, cc []string) error {
+	if _, err := domain.ValidateEmail("to", to); err != nil {
+		return fmt.Errorf("%w (the To address)", ErrInvalidRecipient)
+	}
+	for _, a := range cc {
+		if _, err := domain.ValidateEmail("cc", a); err != nil {
+			return fmt.Errorf("%w (a Cc address)", ErrInvalidRecipient)
+		}
+	}
+	return nil
+}
+
 func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) error {
 	if s.suppression == nil || tenantID == "" || to == "" {
 		return nil
@@ -788,6 +811,9 @@ func (s *Sender) sendRich(ctx context.Context, msg richMessage) error {
 	if !s.IsConfigured() {
 		return ErrSMTPNotConfigured
 	}
+	if err := checkRecipients(msg.To, msg.Cc); err != nil {
+		return err
+	}
 	if err := s.checkSuppression(ctx, msg.TenantID, msg.To); err != nil {
 		// Primary suppressed = the whole send is blocked, never
 		// downgraded to a CC-only delivery — the CC list is an audience,
@@ -967,6 +993,9 @@ func (s *Sender) deliver(ctx context.Context, tenantID, to string, cc []string, 
 func (s *Sender) sendPlain(ctx context.Context, tenantID, to, fromName, subject, body string) error {
 	if !s.IsConfigured() {
 		return ErrSMTPNotConfigured
+	}
+	if err := checkRecipients(to, nil); err != nil {
+		return err
 	}
 	if err := s.checkSuppression(ctx, tenantID, to); err != nil {
 		return err

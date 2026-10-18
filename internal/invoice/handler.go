@@ -890,6 +890,12 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		respond.BadRequest(w, r, "email is required")
 		return
 	}
+	// The To address gets the same check as a customer's stored email.
+	to, err := domain.ValidateEmail("email", body.Email)
+	if err != nil {
+		respond.FromError(w, r, err, "invoice_email")
+		return
+	}
 
 	inv, items, err := h.svc.GetWithLineItems(r.Context(), tenantID, id)
 	if errors.Is(err, errs.ErrNotFound) {
@@ -920,7 +926,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// 2026-07-29 walk caught after the anchor shipped.
 	ctx := h.svc.bindForInvoice(r.Context(), tenantID, inv.ID)
 
-	cc, err := resolveSendCC(ctx, h.customers, tenantID, inv.CustomerID, body.Email, body.AdditionalEmails)
+	cc, err := resolveSendCC(ctx, h.customers, tenantID, inv.CustomerID, to, body.AdditionalEmails)
 	if err != nil {
 		respond.FromError(w, r, err, "invoice_email")
 		return
@@ -941,7 +947,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// AmountDueCents, not Total: the email template labels this figure
 	// "Amount due", and credits/partial payments make the two differ —
 	// telling a customer they owe the pre-credit total is wrong.
-	if err := h.emailSender.SendInvoice(ctx, tenantID, body.Email, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken); err != nil {
+	if err := h.emailSender.SendInvoice(ctx, tenantID, to, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken); err != nil {
 		// Sanitize at the boundary — SMTP errors / outbox-store errors
 		// would otherwise leak to the operator toast. ADR-026.
 		respond.FromError(w, r, err, "invoice_email")

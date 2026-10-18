@@ -103,8 +103,11 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	if ownerEmail == "" {
 		ownerEmail = "admin@velox.local"
 	}
-	if !strings.Contains(ownerEmail, "@") {
-		return BootstrapResult{}, errs.Invalid("owner_email", "must be an email address")
+	// The owner signs in with this address and password-reset emails go
+	// to it, so it gets the same check as every other address.
+	ownerEmail, err := domain.ValidateEmail("owner_email", ownerEmail)
+	if err != nil {
+		return BootstrapResult{}, err
 	}
 
 	ownerPassword := opts.OwnerPassword

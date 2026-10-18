@@ -44,6 +44,12 @@ different things by row status:
 - On a **failed** row: no replica knew the type for the whole ramp. The
   code that writes this email type shipped without its dispatcher case.
 
+A `last_error` that begins `email: recipient is not a single valid email
+address` is not a provider problem. The row holds an address stored before
+Velox refused names, quotes and angle brackets, so it failed at once with
+no retry. Retrying the row sends the same address and fails again. Fix the
+customer's email or CC list (or the member's email) and send again.
+
 ## Fix
 
 1. Diagnose the SMTP provider from `last_error`.

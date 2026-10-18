@@ -120,7 +120,7 @@ func IsPermanentSendError(err error) bool {
 	if errors.Is(err, ErrUnknownEmailType) {
 		return false
 	}
-	if errors.Is(err, ErrRecipientSuppressed) || errors.Is(err, ErrPayloadDecode) {
+	if errors.Is(err, ErrRecipientSuppressed) || errors.Is(err, ErrInvalidRecipient) || errors.Is(err, ErrPayloadDecode) {
 		return true
 	}
 	permanent, _ := isPermanentSMTPBounce(err)

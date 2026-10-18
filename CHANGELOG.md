@@ -29,6 +29,8 @@ original text.
 - **A password on the built-in leaked-password list is refused when it is set ([#1222](https://github.com/getvelox/velox/pull/1222)).** Passwords already in use keep working. If a script bootstraps or resets with a fixed password, check that it still works; a refused password gets a 422.
 - **In staging and production, sign in over HTTPS ([#1226](https://github.com/getvelox/velox/pull/1226)).** The sign-in cookie is now always `Secure`. Over plain HTTP only Chrome and Firefox at `http://localhost` keep it; Safari does not. A quickstart `deploy/compose/.env` written before this has no `APP_ENV`, so it runs in production mode: add `APP_ENV=local` to it, or run `./quickstart.sh destroy` and start again.
 - **Without Redis, sign-in is now rate-limited ([#1255](https://github.com/getvelox/velox/pull/1255)).** Outside production with no Redis, `/v1/auth` now answers 429 after `VELOX_RATE_LIMIT_GENERAL_PER_MIN` requests a minute (default 100) from one address; before, it allowed every request. A test script that signs in more often from one address needs that setting raised.
+- **API callers: an email address must be one bare address, such as `bob@example.com` ([#PRNUM](https://github.com/getvelox/velox/pull/PRNUM)).** A name, quotes, angle brackets or a second address get a 422, as does a domain with no dot. Team invites and `make bootstrap` now apply the dot rule too, so `tenant-b@local` is refused. The dashboard forms already refused these.
+- **A stored address that fails this check is kept, and email to it now fails at once.** For a customer, **Sent emails** shows `failed` with `email: recipient is not a single valid email address`; fix the address and send again. A dev owner such as `tenant-b@local` gets no password-reset email. A failing company email blocks saving Settings until fixed.
 
 ### Added
 
@@ -59,6 +61,7 @@ original text.
 
 ### Security
 
+- **Every email address Velox accepts or sends to gets the same check (2026-10-18).** Customer emails and CC lists, the `email` of an invoice or credit-note send (before, only checked for being present), team invites, the company email and the bootstrap owner email must be one bare address. The sender checks To and Cc again before sending ([ADR-082](docs/adr/082-email-recipient-semantics.md#amendment-2026-10-18-every-address-must-be-one-bare-address), [#PRNUM](https://github.com/getvelox/velox/pull/PRNUM)).
 - **Sign-in stays rate-limited while Redis is down (2026-10-18).** The per-address limit on `/v1/auth` used to allow every request when a Redis call failed, so an outage made password guessing unlimited. Each copy now counts in memory with the same limit until Redis answers again ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md#amendment-2026-10-18-the-sign-in-limiter-without-redis), [#1255](https://github.com/getvelox/velox/pull/1255)).
 - **The sign-in cookie is always `Secure` in staging and production (2026-10-18).** It dropped `Secure` when the browser was on plain http at localhost, for Safari on the quickstart. The quickstart now runs with `APP_ENV=local` instead. An `http://` address setting, such as `DASHBOARD_BASE_URL`, logs a start-up warning ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md) Phase 0(b), [#1226](https://github.com/getvelox/velox/pull/1226)).
 

@@ -246,6 +246,8 @@ Send one invoice email and follow it.
 
 If the email stays `pending`, Velox is retrying it. The server log shows the provider's error; fix the cause it names. Velox retries for about 72 hours, then marks the email failed.
 
+If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. Velox refuses these when they are entered, since 2026-10-18, but an address stored before is kept as it was. Velox does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
+
 ## Bounces and spam complaints
 
 A bounce is an email that could not be delivered. Velox stops emailing an address that bounced or that marked Velox's email as spam.

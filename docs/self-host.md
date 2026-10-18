@@ -96,7 +96,7 @@ dashboard users and API keys. To add another one, run the bootstrap tool
 again with a different owner email:
 
 ```bash
-make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@local \
+make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@velox.local \
   VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \
   VELOX_BOOTSTRAP_TENANT='Tenant B'
 ```
@@ -191,7 +191,7 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 
 | Variable | What it is |
 |---|---|
-| `VELOX_BOOTSTRAP_EMAIL` | The dashboard owner's email. Default `admin@velox.local`. |
+| `VELOX_BOOTSTRAP_EMAIL` | The dashboard owner's email: one address with a dot in the domain, such as `you@example.com`. Default `admin@velox.local`. |
 | `VELOX_BOOTSTRAP_PASSWORD` | The owner's password. If unset, one is generated and printed once. |
 | `VELOX_BOOTSTRAP_TENANT` | The tenant's name. Default `Demo Tenant`. |
 

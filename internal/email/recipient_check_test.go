@@ -14,8 +14,7 @@ import (
 // recorded against the customer.
 //
 // The first case is the stored form of a quoted CC accepted before: net/mail
-// returned it unquoted, so RCPT TO:<x@evil.example> notify=never@example.com>
-// delivered a copy to x@evil.example.
+// returned it unquoted, and the RCPT command then named x@evil.example.
 func TestSend_RefusesNonBareRecipient(t *testing.T) {
 	cases := []struct {
 		name string

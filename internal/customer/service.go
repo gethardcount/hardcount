@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/mail"
 	"regexp"
 	"strings"
 
@@ -309,9 +308,11 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		return domain.Customer{}, err
 	}
 	if input.Email != "" {
-		if err := validateEmail("email", input.Email); err != nil {
+		addr, err := domain.ValidateEmail("email", input.Email)
+		if err != nil {
 			return domain.Customer{}, err
 		}
+		input.Email = addr
 	}
 	// Test-clock attach: validate the clock exists (mode gating happens at
 	// the route layer — test_clock_id only reaches us when the caller is on a
@@ -459,10 +460,11 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 		existing.DisplayName = name
 	}
 	if email := strings.TrimSpace(input.Email); email != "" {
-		if err := validateEmail("email", email); err != nil {
+		addr, err := domain.ValidateEmail("email", email)
+		if err != nil {
 			return domain.Customer{}, err
 		}
-		existing.Email = email
+		existing.Email = addr
 	}
 	if status := domain.CustomerStatus(input.Status); status != "" {
 		// Archive = 409-BLOCK while any subscription still bills, never
@@ -789,28 +791,6 @@ func (s *Service) GetBillingProfile(ctx context.Context, tenantID, customerID st
 // handlers) enforce identical rules from one source.
 func normalizeAdditionalEmails(list []string, primaryEmail string) ([]string, error) {
 	return domain.NormalizeAdditionalEmails(list, primaryEmail)
-}
-
-// validateEmail accepts only well-formed RFC 5322 addresses via the
-// Go stdlib parser, plus a hard requirement that the domain contains
-// at least one dot. ParseAddress alone allows local-only addresses
-// like `foo@bar` (no TLD) — fine in RFC terms, useless for actual
-// SMTP delivery, so we still gate on the dot. Tier-1 syntax check;
-// tier-6 (bounce-driven suppression) catches what survives.
-func validateEmail(field, email string) error {
-	addr, err := mail.ParseAddress(email)
-	if err != nil {
-		return errs.Invalid(field, "invalid email")
-	}
-	at := strings.LastIndex(addr.Address, "@")
-	if at < 0 {
-		return errs.Invalid(field, "invalid email")
-	}
-	domainPart := addr.Address[at+1:]
-	if !strings.Contains(domainPart, ".") || strings.HasSuffix(domainPart, ".") {
-		return errs.Invalid(field, "invalid email: domain must contain a dot")
-	}
-	return nil
 }
 
 // archiveBlockedMessage is the refusal to archive a customer whose
