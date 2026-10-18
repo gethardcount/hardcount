@@ -28,6 +28,20 @@ Nothing needs repair.
 Index builds (`CREATE INDEX CONCURRENTLY`) have no time limit, because
 they do not block reads or writes while they wait.
 
+## Before anything else
+
+With Docker Compose, stop the API:
+
+```bash
+docker compose stop velox-api
+```
+
+The API exits when the upgrade stops, and Compose starts it again by
+itself, again and again. With `RUN_MIGRATIONS_ON_BOOT=true`, each start
+runs the migration again, and each try makes queries on that table wait for
+up to 5 seconds. Stopping the API pauses the tries while you look. It adds
+no downtime: the API does not serve while the upgrade fails.
+
 ## Check
 
 Find what holds the lock. In `psql` as the database owner, list the open
@@ -47,7 +61,9 @@ a transaction (`state` is `idle in transaction`), or a backup tool.
 
 ## Fix
 
-Pick one, then run the upgrade again (`velox migrate`, or start Velox).
+Pick one, then run the upgrade again: `velox migrate`, or start Velox.
+With Docker Compose, start the API you stopped:
+`docker compose start velox-api`.
 
 - **Wait.** Run the upgrade again when the long transaction has finished
   or traffic is lower.
@@ -59,9 +75,9 @@ Pick one, then run the upgrade again (`velox migrate`, or start Velox).
 
 - **Wait longer for the lock.** Set `MIGRATION_LOCK_TIMEOUT` for this one
   run, for example `MIGRATION_LOCK_TIMEOUT=30s velox migrate`. With
-  Docker Compose: `docker compose run --rm -e MIGRATION_LOCK_TIMEOUT=30s velox-api migrate`.
-  While the migration waits, queries on that table wait too. `0` means no
-  limit.
+  Docker Compose: `docker compose run --rm -e MIGRATION_LOCK_TIMEOUT=30s velox-api migrate`,
+  then `docker compose start velox-api`. While the migration waits,
+  queries on that table wait too. `0` means no limit.
 
 If the upgrade instead says `another Velox process is migrating this
 database`, it waited 30 minutes for another process's migration, not for

@@ -385,13 +385,13 @@ Check each line before the first real customer.
 Velox is down while the new version starts. Database changes (migrations) run by themselves as it starts.
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every release between yours and the new one.
-2. Take a backup.
+2. Take a backup. It is the only way back to the old release if the upgrade goes wrong, because `velox migrate rollback` runs only with `APP_ENV=local`.
 
    ```bash
    sudo velox-backup
    ```
 
-   **You see:** `Verified:  yes`.
+   **You see:** `Verified:  yes`, and a `File:` line such as `/var/backups/velox/velox_20261018_101500.dump`. Write that file name down: it is the backup to restore if you go back. The name holds the backup's time in UTC, here 10:15:00 on 18 October 2026.
 
 3. Get the new release's files and point `.env` at its images. This example moves to `v0.9.0`.
 
@@ -413,7 +413,7 @@ Velox is down while the new version starts. Database changes (migrations) run by
    docker compose run --rm velox-api migrate status
    ```
 
-   **You see:** a few `Container … Running` lines, then the plan. From v0.8.x to v0.9.0 it says `state:        ready to move: the next "velox migrate" records 180 in goose_db_version and changes no table`. For a later release it lists the migrations to apply. If it says `refused`, stop here and follow the message.
+   **You see:** a few `Container … Running` lines, then the plan. From v0.8.x to v0.9.0 it says `state:        ready to move: the next "velox migrate" records 180 in goose_db_version and changes no table`. For a later release it lists the migrations to apply. If it says `refused`, stop here and follow the message. Write down the number on the `database:` line: [Going back](#going-back) compares with it.
 
 5. Start the new images.
 
@@ -424,18 +424,70 @@ Velox is down while the new version starts. Database changes (migrations) run by
 
    **You see:** `velox v0.9.0`, and `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again.
 
-If the upgrade stops with an error, nothing needs repair: a failed migration is undone. Follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md) to find the cause, then start the API again.
+If the upgrade stops with an error, the API exits, and Compose starts it again by itself, again and again. Each start runs the failed migration again. A slow one loads the database every time, and one that waits for a table lock makes queries on that table wait up to 5 seconds every time. Stop the API while you look. This adds no downtime: the API does not serve while the upgrade fails.
 
-If it says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query. Start the API again, or see [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md).
+```bash
+docker compose stop velox-api
+```
+
+A failed migration is undone, so nothing needs repair. Find the cause in [A database upgrade stopped](ops/runbook/migration-failed-midway.md). If the error says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query: see [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md). Fix the cause, then start the API again.
+
+```bash
+docker compose start velox-api
+```
+
+**You see:** `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again. If you cannot fix the cause now, go back to the old release.
 
 ### Going back
 
-Never roll the database back with `velox migrate rollback`: it runs only with `APP_ENV=local`, because it loses data the newer release wrote. To go back to the old release:
+Never roll the database back with `velox migrate rollback`: it runs only with `APP_ENV=local`, because it loses data the newer release wrote. Stop the API, then see which way back applies.
 
-- **Restore the backup from step 2 into an empty database**, then start the old release. See [Restore a backup](ops/backup-considerations.md#4-restore-a-backup).
+```bash
+docker compose stop velox-api
+docker compose run --rm velox-api migrate status
+```
+
+- **The upgrade stopped with an error, and `database:` shows the number you wrote down in step 4.** No migration applied, and the new release never served. Start the old release as it is: run step 3 with the old version, then `docker compose up -d`. Nothing is lost.
 - **From v0.9.0 to v0.8.x only, when v0.9.0 applied no migration after 180,** you can also start the old images as they are: v0.8.x reads its own record, still at 180, and changes nothing. `velox migrate status` (with v0.9.0) shows `database:     180` when this applies.
+- **Otherwise, restore the backup from step 2** into an empty database, then start the old release. See [Restore a backup](ops/backup-considerations.md#4-restore-a-backup). Read [What a restore loses](#what-a-restore-loses) first.
 
 Do not run v0.8.x's `migrate rollback` or `migrate force` on a database v0.9.0 took over. If one runs, v0.9.0 refuses to start until the records agree again; see [Two migration records](ops/runbook/migration-failed-midway.md#two-migration-records).
+
+#### What a restore loses
+
+A restore takes the database back to the moment of the step-2 backup. Everything written after it is lost, under the old release and the new one:
+
+- usage events your app sent,
+- invoices, payments and credit notes,
+- customers, subscriptions and every other change made in the dashboard or through the API. Your app may still hold the IDs of ones that no longer exist.
+
+Velox also forgets what it did in that time, so it can do it again. A billing period it invoiced after the backup is invoiced again, maybe under an invoice number already sent, and the customer's card can be charged a second time. Emails and webhooks can go out twice. The shorter the time from step 2 to the restore, the less of this happens.
+
+Before you restore:
+
+1. Back up the database as it is now. This second dump holds what the restore removes, so you can look it up later.
+
+   ```bash
+   sudo velox-backup
+   ```
+
+   **You see:** `Verified:  yes`. This dump is now `latest.dump`, so restore the step-2 file by its name, not `latest.dump`.
+
+2. List the invoices the restore removes. Restore `latest.dump` into a test database with [Test a restore](#test-a-restore), step 1. Then list the invoices made since the step-2 backup, using the time in the step-2 file name:
+
+   ```bash
+   docker compose exec -T postgres psql -U velox -d velox_restore_test -c \
+     "SELECT id, invoice_number, customer_id, total_amount_cents, payment_status
+      FROM invoices WHERE created_at >= '2026-10-18 10:15:00+00' ORDER BY created_at"
+   ```
+
+   **You see:** one row for each invoice made since the backup, or `(0 rows)`. Keep the test database until you have checked them.
+
+After the restore:
+
+- Run the [checks after a restore](ops/backup-considerations.md#checks-after-a-restore).
+- Look up each invoice from the list in the Stripe dashboard. If its customer paid it and is charged again for the same period after the restore, refund the extra charge in Stripe.
+- Have your app send again the usage events it sent since the backup, with the same idempotency keys. Velox drops an event whose key the restored database already holds, so nothing is counted twice. Velox keeps each event's own `timestamp`, not the time it arrived, so it cannot list the lost events for you. Send them soon: an event that arrives after its billing period's invoice is built is stored but not billed ([Late usage](api-surface.md#late-usage)).
 
 ## Related
 

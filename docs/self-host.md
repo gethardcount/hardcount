@@ -163,7 +163,7 @@ A migration is a versioned script that changes the database schema. Velox applie
 ## Upgrading
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every version between yours and the new one.
-2. Take a backup. See [backups](ops/backup-considerations.md).
+2. Take a backup. See [backups](ops/backup-considerations.md). It is the only way back if the upgrade goes wrong, because `velox migrate rollback` runs only with `APP_ENV=local`. A restore loses everything written after the backup: see [What a restore loses](production-one-vm.md#what-a-restore-loses).
 3. See the plan: run the new version's `velox migrate status`.
 
    **You see:** `state:` with the migrations it will apply, and `running now:  no`. A `refused` state names its next step; follow it before you go on.
@@ -172,7 +172,9 @@ A migration is a versioned script that changes the database schema. Velox applie
 
    **You see:** `/health/ready` answers 200 again.
 
-On one VM there is one copy, so Velox is down while the new version starts. For the Compose commands, see [Day-to-day commands](../deploy/compose/README.md#day-to-day-commands). With two or more copies, see [Upgrades](ops/high-availability.md#upgrades).
+If the upgrade stops with an error, Velox exits, and a failed migration is undone. With Docker Compose, stop the API first with `docker compose stop velox-api`. Compose starts it again by itself, and with `RUN_MIGRATIONS_ON_BOOT=true` each start runs the failed migration again. Fix the cause, then `docker compose start velox-api`. See [A database upgrade stopped](ops/runbook/migration-failed-midway.md).
+
+On one VM there is one copy, so Velox is down while the new version starts. For the Compose commands, see [Upgrade to a new release](production-one-vm.md#upgrade-to-a-new-release). With two or more copies, see [Upgrades](ops/high-availability.md#upgrades).
 
 ## Settings
 
