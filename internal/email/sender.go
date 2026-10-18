@@ -444,11 +444,18 @@ func (s *Sender) SendPaymentReceipt(ctx context.Context, tenantID, to string, cc
 // willExhaustThisAttempt in internal/dunning/service.go).
 // CTA is a "Pay invoice" button on the hosted invoice page (Stripe
 // Checkout there handles both PM update and pay).
-func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error {
+func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 
+	// A card the bank refused for good (#966) gets its own copy: no retry
+	// date is promised, because dunning will not charge that card again.
 	subject, contentHTML, ctaURL, ctaLabel := renderDunningWarningHTML(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
+	textBody := dunningWarningTextBody(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
+	if cardNeedsReplacing {
+		subject, contentHTML, ctaURL, ctaLabel = renderCardRefusedWarningHTML(customerName, invoiceNumber, hostedURL)
+		textBody = cardRefusedWarningTextBody(customerName, invoiceNumber, hostedURL)
+	}
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
 		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
@@ -457,7 +464,6 @@ func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc
 	if err != nil {
 		return fmt.Errorf("render dunning warning html: %w", err)
 	}
-	textBody := dunningWarningTextBody(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID: tenantID, To: to, Cc: cc, Subject: subject,
@@ -697,6 +703,18 @@ func dunningWarningTextBody(customerName, invoiceNumber string, attemptNumber, m
 		fmt.Fprintf(&b, "Reason: %s\n", failureReason)
 	}
 	fmt.Fprintf(&b, "\nWe'll try again on %s.\n\n", nextRetryDate)
+	if hostedURL != "" {
+		fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
+	}
+	return b.String()
+}
+
+// cardRefusedWarningTextBody is the plain-text part of the "use a different
+// card" warning (renderCardRefusedWarningHTML).
+func cardRefusedWarningTextBody(customerName, invoiceNumber, hostedURL string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
+	fmt.Fprintf(&b, "%s\n%s\n\n", cardRefusedSentence(invoiceNumber), cardRefusedAsk)
 	if hostedURL != "" {
 		fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
 	}

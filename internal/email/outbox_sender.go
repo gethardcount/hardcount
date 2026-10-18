@@ -84,6 +84,11 @@ type outboxMessage struct {
 	// the customer can act (insufficient_funds → top up; lost_card →
 	// swap card).
 	FailureReason string `json:"failure_reason,omitempty"`
+	// CardNeedsReplacing selects the dunning warning's "use a different card"
+	// copy: the bank refused the card for good, so no retry is promised
+	// (#966). Rows enqueued by an older binary decode to false, the ordinary
+	// warning they were written for.
+	CardNeedsReplacing bool `json:"card_needs_replacing,omitempty"`
 	// EscalationOutcome is what dunning's exhaustion actually did to this
 	// invoice (ADR-112) — it replaced the single `action` verb, which could
 	// not describe a policy that both cancels and writes off. Rows enqueued
@@ -267,33 +272,35 @@ func (s *OutboxSender) SendPaymentReceipt(ctx context.Context, tenantID, to stri
 }
 
 // SendDunningWarning enqueues a dunning-warning email. Satisfies dunning.EmailNotifier.
-func (s *OutboxSender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error {
+func (s *OutboxSender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
 	return s.enqueue(ctx, tenantID, TypeDunningWarning, outboxMessage{
-		To:            to,
-		Cc:            cc,
-		CustomerName:  customerName,
-		InvoiceNumber: invoiceNumber,
-		AttemptNumber: attemptNumber,
-		MaxAttempts:   maxAttempts,
-		NextRetryDate: nextRetryDate,
-		FailureReason: failureReason,
-		PublicToken:   publicToken,
+		To:                 to,
+		Cc:                 cc,
+		CustomerName:       customerName,
+		InvoiceNumber:      invoiceNumber,
+		AttemptNumber:      attemptNumber,
+		MaxAttempts:        maxAttempts,
+		NextRetryDate:      nextRetryDate,
+		FailureReason:      failureReason,
+		PublicToken:        publicToken,
+		CardNeedsReplacing: cardNeedsReplacing,
 	})
 }
 
 // SendDunningWarningTx is SendDunningWarning on the caller's transaction —
 // the dunning reschedule and its warning email commit together (ADR-040).
-func (s *OutboxSender) SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error {
+func (s *OutboxSender) SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
 	return s.enqueueTx(ctx, tx, tenantID, TypeDunningWarning, outboxMessage{
-		To:            to,
-		Cc:            cc,
-		CustomerName:  customerName,
-		InvoiceNumber: invoiceNumber,
-		AttemptNumber: attemptNumber,
-		MaxAttempts:   maxAttempts,
-		NextRetryDate: nextRetryDate,
-		FailureReason: failureReason,
-		PublicToken:   publicToken,
+		To:                 to,
+		Cc:                 cc,
+		CustomerName:       customerName,
+		InvoiceNumber:      invoiceNumber,
+		AttemptNumber:      attemptNumber,
+		MaxAttempts:        maxAttempts,
+		NextRetryDate:      nextRetryDate,
+		FailureReason:      failureReason,
+		PublicToken:        publicToken,
+		CardNeedsReplacing: cardNeedsReplacing,
 	})
 }
 

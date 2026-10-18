@@ -377,14 +377,29 @@ func (c *LiveStripeClient) GetPaymentIntent(ctx context.Context, paymentIntentID
 	if err != nil {
 		return PaymentIntentResult{}, classifyStripeError(err)
 	}
-	return PaymentIntentResult{
+	return paymentIntentResult(pi), nil
+}
+
+// paymentIntentResult maps a retrieved PaymentIntent to what the reconciler
+// reads: status, purpose, captured amount, the charge's anchor and, for a
+// declined attempt, the bank's decline code and the card it declined
+// (last_payment_error, #966).
+func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
+	res := PaymentIntentResult{
 		ID:                  pi.ID,
 		Status:              string(pi.Status),
 		ClientSecret:        pi.ClientSecret,
 		Purpose:             pi.Metadata["velox_purpose"],
 		AmountReceivedCents: pi.AmountReceived,
 		AnchorAt:            anchorFromPIMetadata(pi.Metadata),
-	}, nil
+	}
+	if lpe := pi.LastPaymentError; lpe != nil {
+		res.DeclineCode = string(lpe.DeclineCode)
+		if lpe.PaymentMethod != nil {
+			res.PaymentMethodID = lpe.PaymentMethod.ID
+		}
+	}
+	return res
 }
 
 // anchorFromPIMetadata reads the contracted simulated instant off a retrieved

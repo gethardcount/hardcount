@@ -43,6 +43,13 @@ type InvoiceChargeAttempt struct {
 	Trigger               ChargeAttemptTrigger
 	Outcome               ChargeAttemptOutcome
 	ProviderReason        string
+	// DeclineCode is Stripe's decline_code for a declined attempt (empty
+	// otherwise, and on rows written before migration 181).
+	DeclineCode string
+	// StripePaymentMethodID is the card the attempt charged. With
+	// DeclineCode it tells a dunning retry whether the card it is about to
+	// charge was refused for good on this invoice (IsHardDecline).
+	StripePaymentMethodID string
 	AmountCents           int64
 	OccurredAt            time.Time  // wall-clock
 	SimEffectiveAt        *time.Time // billing-axis instant under a test clock; nil = wall-clock fact
@@ -62,6 +69,14 @@ type InvoiceChargeAttempt struct {
 type PaymentFailureReport struct {
 	PaymentIntentID string
 	Message         string
+	// DeclineCode and PaymentMethodID are what Stripe said about the decline:
+	// the bank's reason and the card it refused. Each report that knows them
+	// writes them on the attempt row, in the same transaction as the failure,
+	// so a hard decline (IsHardDecline) is on record the moment the invoice
+	// reads failed. Empty when the source did not say; an empty value never
+	// erases one already recorded.
+	DeclineCode     string
+	PaymentMethodID string
 	// ChargedAtSeq is set only by the charge call reporting its own attempt:
 	// the charge_attempt_seq it charged with. It is that attempt's identity
 	// before the invoice has seen its PaymentIntent, so the report is

@@ -933,6 +933,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Live hosted payment page for the attention banner: Velox holds its own
 	// charges while one is open (ADR-068), so the banner must not offer Retry.
 	invoiceSvc.SetPaymentPageReader(invoiceStore)
+	// A card the bank refused for good (#966) turns the decline notice into
+	// "needs a different card", by the same rule the dunning retry skips it.
+	invoiceSvc.SetCardRefusalReader(invoiceStore)
 	invoiceSvc.SetCreditApplier(creditSvc)
 	// Tenant net-terms fallback: a manual invoice created without an explicit
 	// net_payment_term_days inherits the tenant's configured default (then 30),

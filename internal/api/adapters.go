@@ -393,6 +393,29 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 		return domain.ErrNoPaymentMethodOnRetry
 	}
 
+	// A card the bank refused for good on this invoice (lost, stolen and the
+	// rest of domain.IsHardDecline, #966) is not charged again: the retry
+	// cannot succeed, and the card networks charge merchants for trying.
+	// Stripe Billing does the same — its schedule and attempt count carry on,
+	// but a retry charges only once it sees a new payment method. So this
+	// attempt counts and charges nothing until a different card is the
+	// customer's default; then the next scheduled retry charges that card.
+	// Provably pre-Stripe, so the lease is released. A read error is not "no
+	// refusal": skip this tick uncounted, as for the payment-setup read.
+	refusedCode, err := a.invoiceStore.HardDeclineOnCard(ctx, tenantID, invoiceID, ps.StripePaymentMethodID)
+	if err != nil {
+		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		slog.WarnContext(ctx, "dunning retry: refused-card read failed; skipping this attempt",
+			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
+		return dunning.ErrTransientSkip
+	}
+	if refusedCode != "" {
+		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		slog.InfoContext(ctx, "dunning retry: not charging a card the bank refused for good; waiting for a different default card",
+			"invoice_id", invoiceID, "customer_id", customerID, "decline_code", refusedCode)
+		return domain.ErrCardNeedsReplacing
+	}
+
 	// 15s bound on the Stripe leg. Scheduler ticks run tens of retries
 	// back-to-back; without this, one tenant with a network-partitioned
 	// Stripe call could hold the goroutine for the full request deadline
@@ -415,9 +438,16 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 		// retry's timeline row can be matched to its exact
 		// payment_intent.payment_failed webhook twin. Transient skips
 		// pass through untouched — no attempt row is written for them.
+		// A hard decline is flagged so the customer's warning asks for a
+		// different card (#966); the next retry's HardDeclineOnCard read is
+		// what stops the card being charged again.
 		var pe *payment.PaymentError
 		if !errors.Is(cerr, dunning.ErrTransientSkip) && errors.As(err, &pe) && pe.PaymentIntentID != "" {
-			return &dunning.RetryError{PaymentIntentID: pe.PaymentIntentID, Err: cerr}
+			return &dunning.RetryError{
+				PaymentIntentID:    pe.PaymentIntentID,
+				Err:                cerr,
+				CardNeedsReplacing: domain.IsHardDecline(pe.DeclineCode),
+			}
 		}
 		return cerr
 	}

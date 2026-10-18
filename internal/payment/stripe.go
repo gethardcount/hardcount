@@ -237,6 +237,13 @@ type PaymentIntentResult struct {
 	// paid_at differed by however far the clock had moved, purely on whether
 	// the webhook landed. Zero for wall-clock charges, which carry no anchor.
 	AnchorAt time.Time
+	// DeclineCode and PaymentMethodID are the PaymentIntent's
+	// last_payment_error decline_code and payment_method.id, populated by
+	// GetPaymentIntent. The reconciler passes them on when it records a
+	// failure, as the webhook does, so a hard decline it is the first to
+	// learn of still stops dunning from charging that card (#966).
+	DeclineCode     string
+	PaymentMethodID string
 }
 
 // InvoiceUpdater updates invoice payment status.
@@ -696,7 +703,8 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		if pe.Unknown {
 			attemptOutcome = domain.ChargeAttemptUnknown
 		}
-		recordChargeAttempt(ctx, s.invoices, tenantID, inv, pe.PaymentIntentID, purpose, attemptOutcome, pe.Message)
+		recordChargeAttempt(ctx, s.invoices, tenantID, inv, pe.PaymentIntentID, purpose, attemptOutcome, pe.Message,
+			chargedCard{paymentMethodID: stripePaymentMethodID, declineCode: pe.DeclineCode})
 
 		if !pe.Unknown && pe.PaymentIntentID != "" {
 			// A decline that names its PaymentIntent is reported through the
@@ -724,6 +732,12 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				Message:         pe.Message,
 				Purpose:         purpose,
 				ChargedAtSeq:    &seq,
+				// The card is the one this call charged; the code is the
+				// bank's, from Stripe's error. A hard decline lands on the
+				// attempt row with the failure, so the next dunning retry
+				// skips this card (#966).
+				DeclineCode:     pe.DeclineCode,
+				PaymentMethodID: stripePaymentMethodID,
 			})
 			switch {
 			case serr != nil:
@@ -779,7 +793,8 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// ADR-102: insert the attempt at PI-create time so trigger_source
 	// and the sim anchor are recorded by the writer that knows them;
 	// the settle paths only flip the outcome.
-	recordChargeAttempt(ctx, s.invoices, tenantID, inv, result.ID, purpose, domain.ChargeAttemptPending, "")
+	recordChargeAttempt(ctx, s.invoices, tenantID, inv, result.ID, purpose, domain.ChargeAttemptPending, "",
+		chargedCard{paymentMethodID: stripePaymentMethodID})
 
 	// Honor the synchronous confirmation outcome (ADR-049 Phase 3,
 	// discover-then-settle). With Confirm:true + OffSession:true, Stripe
@@ -1102,7 +1117,14 @@ func persistChargeOutcomeWithRetry(ctx context.Context, invoices InvoiceUpdater,
 // timeline's precedence chain (dunning row → attempt row → webhook row)
 // falls back to the webhook row when this write is lost, so failure
 // degrades display, never money.
-func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, piID, purpose string, outcome domain.ChargeAttemptOutcome, reason string) {
+// chargedCard is what the charge call knows about the card on an attempt: the
+// card it charged and, for a decline, the bank's decline code (#966).
+type chargedCard struct {
+	paymentMethodID string
+	declineCode     string
+}
+
+func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, piID, purpose string, outcome domain.ChargeAttemptOutcome, reason string, card chargedCard) {
 	trigger := domain.ChargeTriggerAutoCharge
 	if purpose == piPurposeDunningRetry {
 		trigger = domain.ChargeTriggerDunningRetry
@@ -1118,6 +1140,8 @@ func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID 
 		Trigger:               trigger,
 		Outcome:               outcome,
 		ProviderReason:        reason,
+		DeclineCode:           card.declineCode,
+		StripePaymentMethodID: card.paymentMethodID,
 		AmountCents:           inv.AmountDueCents,
 		OccurredAt:            time.Now().UTC(),
 		SimEffectiveAt:        simAt,
@@ -1480,11 +1504,64 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	if err != nil {
 		return fmt.Errorf("decode payment_intent.payment_failed metadata: %w", err)
 	}
+	declineCode, declinedCard := declineFromEventPayload(event.Payload)
 	return s.SettleFailed(ctx, tenantID, inv, PaymentFailure{
 		PaymentIntentID: event.PaymentIntentID,
 		Message:         event.FailureMessage,
 		Purpose:         md["velox_purpose"],
+		DeclineCode:     declineCode,
+		PaymentMethodID: declinedCard,
 	}, SourceWebhook)
+}
+
+// declineFromEventPayload reads the bank's decline code and the declined card
+// from data.object.last_payment_error of a payment_intent.payment_failed body
+// (decline_code, payment_method.id — Stripe's PaymentIntent object). They
+// matter only to a later dunning retry (#966), so anything unreadable yields
+// empty values rather than an error: a decline the webhook could not label
+// is retried on schedule, as every decline was before, and the settlement
+// itself must not wait on it. payment_method is an object in the PaymentIntent
+// API; a bare id string is accepted too.
+func declineFromEventPayload(payload map[string]any) (declineCode, paymentMethodID string) {
+	rawStr, ok := payload["raw"].(string)
+	if !ok {
+		return "", ""
+	}
+	var parsed struct {
+		Data struct {
+			Object struct {
+				LastPaymentError *struct {
+					DeclineCode   string          `json:"decline_code"`
+					PaymentMethod json.RawMessage `json:"payment_method"`
+				} `json:"last_payment_error"`
+			} `json:"object"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(rawStr), &parsed); err != nil || parsed.Data.Object.LastPaymentError == nil {
+		return "", ""
+	}
+	lpe := parsed.Data.Object.LastPaymentError
+	return lpe.DeclineCode, stripeObjectID(lpe.PaymentMethod)
+}
+
+// stripeObjectID returns the id of a Stripe field that is either an expanded
+// object ({"id": "pm_…", …}) or a bare id string, and "" for null or anything
+// else.
+func stripeObjectID(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var id string
+	if json.Unmarshal(raw, &id) == nil {
+		return id
+	}
+	var obj struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.ID
+	}
+	return ""
 }
 
 // piMetadata parses data.object.metadata out of the event body in

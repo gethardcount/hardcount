@@ -177,6 +177,7 @@ type Service struct {
 	subPauseReader SubscriptionPauseReader
 	commitGrants   CommitGrantReader
 	paymentPages   PaymentPageReader
+	cardRefusals   CardRefusalReader
 	creditApplier  CreditApplier
 	settings       TenantSettingsReader
 	audit          AuditLogger
@@ -427,6 +428,21 @@ type PaymentPageReader interface {
 // Retry, which a live page would refuse with a clear 422.
 func (s *Service) SetPaymentPageReader(r PaymentPageReader) {
 	s.paymentPages = r
+}
+
+// CardRefusalReader reports, for a page of invoices, which ones the bank
+// refused the customer's current default card on for good (#966): invoice id
+// → Stripe's decline code. Satisfied by *PostgresStore (HardDeclinesOnDefaultCards),
+// the same rule the dunning retry skips the card on.
+type CardRefusalReader interface {
+	HardDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error)
+}
+
+// SetCardRefusalReader wires the refused-card lookup for the attention
+// banner. Optional: when nil a refused card reads as an ordinary decline,
+// whose banner still offers Update payment method first.
+func (s *Service) SetCardRefusalReader(r CardRefusalReader) {
+	s.cardRefusals = r
 }
 
 // collectionPaused reports whether the invoice's subscription has
@@ -865,11 +881,12 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 // pays for a read exactly when it did before.
 type attentionFacts struct {
 	stripeConnected bool
-	paymentReady    map[string]bool // customer id → ready payment method
-	hasEmail        map[string]bool // customer id → email on file
-	escalated       map[string]bool // invoice id → dunning run escalated
-	paused          map[string]bool // subscription id → pause_collection in force
-	pageLive        map[string]bool // invoice id → hosted payment page live
+	paymentReady    map[string]bool   // customer id → ready payment method
+	hasEmail        map[string]bool   // customer id → email on file
+	escalated       map[string]bool   // invoice id → dunning run escalated
+	paused          map[string]bool   // subscription id → pause_collection in force
+	pageLive        map[string]bool   // invoice id → hosted payment page live
+	refusedCard     map[string]string // invoice id → hard decline code on the default card
 }
 
 // attachAttentionAll decorates every invoice with its Attention, reading the
@@ -1019,6 +1036,27 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 			}
 		}
 	}
+
+	// A refused card (#966) changes only the payment-failure notice, so only
+	// failed, finalized invoices join the read. A read error leaves it empty:
+	// the notice then shows the ordinary decline, which still leads with
+	// Update payment method.
+	if s.cardRefusals != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentFailed {
+				return inv.ID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			refused, err := s.cardRefusals.HardDeclinesOnDefaultCards(ctx, tenantID, ids)
+			if err != nil {
+				slog.Warn("invoice: attention could not read refused cards", "error", err,
+					"tenant_id", tenantID, "invoices", len(ids))
+			}
+			f.refusedCard = refused
+		}
+	}
 	return f
 }
 
@@ -1058,6 +1096,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 		atc.CollectionPaused = f.paused[inv.SubscriptionID]
 	}
 	atc.PaymentPageOpen = f.pageLive[inv.ID]
+	atc.RefusedCardDeclineCode = f.refusedCard[inv.ID]
 	// A clock-pinned invoice's failure banner dates "since" from its latest
 	// failed charge's simulated instant. Simulated failed invoices only, so a
 	// live list page never pays this read.

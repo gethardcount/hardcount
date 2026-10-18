@@ -26,6 +26,7 @@ original text.
 - **`velox migrate force` is removed, and `velox migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade ([Going back](docs/production-one-vm.md#going-back)).
 - **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, Velox refuses to start and says why.
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
+- **Migration 181 adds two columns to `invoice_charge_attempts` ([#1225](https://github.com/getvelox/velox/pull/1225)).** It is instant (a constant default, no table rewrite), and copies of the previous release ignore the columns, so they keep serving while it runs.
 - **A password on the built-in leaked-password list is refused when it is set ([#1222](https://github.com/getvelox/velox/pull/1222)).** Passwords already in use keep working. If a script bootstraps or resets with a fixed password, check that it still works; a refused password gets a 422.
 
 ### Added
@@ -48,6 +49,7 @@ original text.
 
 ### Fixed
 
+- **Dunning no longer charges a card the bank refused for good (2026-10-18).** After a lost, stolen or similar decline, retries keep their schedule but charge only once another card is the customer's default. The customer is asked for a different card, and the invoice says so. Make the new card the default. ([#1225](https://github.com/getvelox/velox/pull/1225), fixes #966)
 - **Adding an item to a subscription now refuses an archived plan (2026-10-18).** Creating a subscription and changing an item's plan already refused one; `POST /v1/subscriptions/{id}/items` did not, so new business could land on a retired plan. It now answers 409 `invalid_state` with the same message as create. Items already on an archived plan keep billing. ([#1218](https://github.com/getvelox/velox/pull/1218), fixes #1194)
 - **Writing off an invoice with "Also pause collection" ticked now shows the paused subscription (2026-10-18).** The pause happened, but the invoice page still said "The subscription is still billing." and the subscription page still offered Pause collection, until it was reloaded about 30 seconds later. Both pages now refresh the subscription. ([#1208](https://github.com/getvelox/velox/pull/1208))
 
