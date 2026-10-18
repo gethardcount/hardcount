@@ -471,10 +471,19 @@ export default function InvoiceDetailPage() {
     },
     onSuccess: (pause) => {
       invalidateAll()
+      const subId = invoice?.subscription_id
+      // The pause changed the subscription. This page's written-off notice
+      // and the subscription page both read ['subscription', id]; without
+      // this they kept showing it as still billing.
+      if (pause === 'paused' && subId) {
+        queryClient.invalidateQueries({ queryKey: ['subscription', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscription-preview', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscription-activity-timeline', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
+      }
       setShowMarkUncollectibleConfirm(false)
       setPauseSubOnWriteOff(false)
       const outcome = writeOffOutcome(invoice?.invoice_number ?? '', pause)
-      const subId = invoice?.subscription_id
       showOutcome(outcome, outcome.openSubscription && subId
         ? { label: 'Open subscription', onClick: () => navigate(`/subscriptions/${subId}`) }
         : undefined)
