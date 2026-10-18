@@ -575,3 +575,72 @@ func TestPreview_AfterThresholdFire_TiersContinueUnlessTheCapBinds(t *testing.T)
 		})
 	}
 }
+
+// An upgrade mid-period between two plans that carry the same meters bills
+// each meter once over the whole period, so the cap counts it once. For a max
+// meter the peaks of the two halves (80 and 100) add up to more than the
+// period's peak (100): counting the halves apart scaled the invoice too far,
+// 53.571428571428 units each at a cap of 150 instead of 75.
+func TestRunCycle_UsageCap_SameMeterAcrossAPlanSwapCountsOnce(t *testing.T) {
+	capUnits := int64(150)
+	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	mar15 := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	subs := &mockSubs{
+		subs: map[string]domain.Subscription{"sub_1": {
+			ID: "sub_1", TenantID: "t1", CustomerID: "cus_1",
+			Items:  []domain.SubscriptionItem{{ID: "it_1", PlanID: "pln_pro", Quantity: 1}},
+			Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
+			CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd,
+			NextBillingAt: &periodEnd,
+			UsageCapUnits: &capUnits, OverageAction: "block",
+		}},
+		cycleUpdated: make(map[string]bool),
+		// it_1 moved from Starter to Pro on Mar 15.
+		intervals: []domain.ItemInterval{
+			{SubscriptionItemID: "it_1", PlanID: "pln_starter", Quantity: 1, EndsAt: &mar15},
+			{SubscriptionItemID: "it_1", PlanID: "pln_pro", Quantity: 1, StartsAt: mar15},
+		},
+	}
+	pricing := &mockPricing{
+		plans: map[string]domain.Plan{
+			"pln_starter": {ID: "pln_starter", Name: "Starter", Currency: "USD", BillingInterval: domain.BillingMonthly,
+				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_a", "mtr_b"}},
+			"pln_pro": {ID: "pln_pro", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
+				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_a", "mtr_b"}},
+		},
+		meters: map[string]domain.Meter{},
+		rules:  map[string]domain.RatingRuleVersion{},
+	}
+	usage := &mockUsage{}
+	capMeters(pricing, usage) // 100 units of each meter over the whole period
+	maxMeter := pricing.meters["mtr_a"]
+	maxMeter.Aggregation = "max"
+	pricing.meters["mtr_a"] = maxMeter
+	usage.perInterval = map[string]int64{
+		mockIntervalKey("mtr_a", periodStart, mar15): 80,
+		mockIntervalKey("mtr_a", mar15, periodEnd):   100,
+		mockIntervalKey("mtr_b", periodStart, mar15): 40,
+		mockIntervalKey("mtr_b", mar15, periodEnd):   60,
+	}
+	invoices := &mockInvoices{}
+	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
+
+	if n, errs := engine.RunCycle(context.Background(), 50, nil); n != 1 || len(errs) != 0 {
+		t.Fatalf("RunCycle = %d, %v; want 1 invoice", n, errs)
+	}
+	wantCapped(t, invoices.lineItems, capUnits, map[string]string{"mtr_a": "75", "mtr_b": "75"})
+	lines := map[string]int{}
+	for _, li := range invoices.lineItems {
+		if li.LineType != domain.LineTypeUsage {
+			continue
+		}
+		lines[li.MeterID]++
+		if li.BillingPeriodStart == nil || !li.BillingPeriodStart.Equal(periodStart) || li.BillingPeriodEnd == nil || !li.BillingPeriodEnd.Equal(periodEnd) {
+			t.Errorf("%s line covers [%v, %v), want the whole period", li.MeterID, li.BillingPeriodStart, li.BillingPeriodEnd)
+		}
+	}
+	if lines["mtr_a"] != 1 || lines["mtr_b"] != 1 {
+		t.Errorf("usage lines per meter = %v, want one each", lines)
+	}
+}
