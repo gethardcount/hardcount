@@ -635,10 +635,12 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		result, err = s.client.CreatePaymentIntent(ctx, params)
 	}
 	if errors.Is(err, ErrPaymentTransient) {
-		// Nothing reached Stripe (the credentials could not be read): same as
-		// the breaker short-circuit above — no state write, the next tick
-		// retries. Classified below it would be an UNKNOWN outcome, parking
-		// the invoice for a reconciler that has no PaymentIntent to find.
+		// This request charged nothing (the credentials could not be read, or
+		// Stripe answered 429): same as the breaker short-circuit above — no
+		// state write, the hold stays, the next tick retries. Classified below
+		// it would be an UNKNOWN outcome, parking the invoice for a reconciler
+		// that has no PaymentIntent to find. A 429 after stripe-go resent the
+		// request can hide a first request still running (ErrPaymentTransient).
 		return domain.Invoice{}, ErrPaymentTransient
 	}
 	if err != nil {
@@ -979,7 +981,12 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 			slog.ErrorContext(ctx, "CRITICAL: a charge attempt could not be identified at the provider — this invoice is parked; Velox will keep searching the provider and adopts the attempt if it can be found, but if it cannot be found this will not resolve on its own. If it is still parked tomorrow: find the attempt in the Stripe dashboard (search by customer and amount); if no charge succeeded, mark the invoice uncollectible to close it out",
 				"invoice_id", inv.ID, "tenant_id", tenantID,
 				"customer_id", inv.CustomerID, "invoice_number", inv.InvoiceNumber,
-				"amount_due_cents", inv.AmountDueCents, "error", pe.Message)
+				"amount_due_cents", inv.AmountDueCents,
+				// After any 409 an attempt under this key reached Stripe (the
+				// fact isIdempotencyConflict names the key for), so the park
+				// line names it too.
+				"idempotency_key", idempotencyKey,
+				"error", pe.Message)
 		}
 	} else {
 		// LOAD-BEARING, especially on the Unknown path: this is the SOLE

@@ -5,15 +5,18 @@ payment failures, and the gaps still open.
 
 ## Rules
 
-- **An ambiguous result is `unknown`, not failed.** A timeout, a Stripe 5xx
-  or any Stripe 409 leaves the payment `unknown`. Stripe sends a 409 when an
-  idempotency key is reused, so an earlier request with that key may have
-  charged the card. No path charges that
-  invoice again (auto-charge, dunning, **Collect payment**, hosted page) until
-  a Stripe webhook or the reconciler resolves it. If neither can, because
-  Stripe never received the request, the invoice stays parked until an
-  operator marks it uncollectible
-  ([ADR-107](adr/107-unknown-is-terminal-until-a-human.md)).
+- **An ambiguous result is `unknown`, not failed.** A Stripe 5xx, any Stripe
+  409, or a Stripe request that times out while Velox is still waiting leaves
+  the payment `unknown`. Stripe sends a 409 when an idempotency key is reused,
+  so an earlier request with that key may have charged the card. No path
+  charges that invoice again (auto-charge, dunning, **Collect payment**,
+  hosted page) until a Stripe webhook or the reconciler resolves it. If
+  neither can, the invoice stays parked until an operator marks it
+  uncollectible ([ADR-107](adr/107-unknown-is-terminal-until-a-human.md)).
+  That happens when Stripe never received the request, or when it declined
+  the charge and the decline's webhook did not reach Velox. When Velox stops
+  waiting first, the payment is not marked `unknown`: see #976 under
+  [Not handled yet](#not-handled-yet).
 - **One charge per invoice at a time.** Auto-charge, dunning retries and
   **Collect payment** share one 5-minute claim on the invoice. An open hosted
   Checkout page blocks them, and a running or `unknown` charge blocks the page
@@ -34,7 +37,9 @@ payment failures, and the gaps still open.
   ([ADR-108](adr/108-parked-invoices-search-and-adopt.md)). Results go
   through the same settlement code as webhooks. Still webhook-only: refund
   status after a pending refund, and parked invoices on accounts where Stripe
-  Search is not offered.
+  Search is not offered. A declined charge on a parked invoice is
+  webhook-only too: the search adopts only a payment that succeeded or is
+  still running.
 - **Anomalies are flagged, never refunded automatically**: a second
   successful payment, an amount or currency that differs from the invoice,
   money on a voided invoice.
@@ -46,7 +51,7 @@ payment failures, and the gaps still open.
 | Card declined on a Velox charge | Payment `failed`, customer emailed (if SMTP is set), `payment.failed` sent, dunning starts (new accounts' default policy: day 3, 7, 14). A decline on the hosted page leaves the invoice as it was. | Nothing, or ask for a new card. |
 | Card refused for good: lost, stolen, pick up card, revoked authorization and the rest of Stripe's hard decline codes | As above, but retries no longer charge that card for this invoice. They keep their schedule and count, and charge only once another card is the customer's default. A card the customer saves after the refusal becomes the default by itself, and the next retry charges it. The customer is asked for a different card; the reason is not named. The invoice says "needs a different card". | Ask for a new card (**Update payment method**), or let the customer pay on the hosted page. A card saved before the refusal needs **Set as default** on the customer's page ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)). |
 | Stripe 5xx that names a PaymentIntent | `unknown` ("Confirming payment"); the reconciler reads the PaymentIntent after 1 minute, or a webhook settles it. | Nothing. If it lasts hours: [runbook](ops/runbook/payment-status-unknown.md). |
-| Timeout, or an error with no PaymentIntent ID | Invoice *parked* ("Payment status unknown"); searched in Stripe hourly from 1 hour after parking. A found success marks it paid; no result never marks it failed. If Stripe never received the request, nothing resolves it. Stripe Search is not offered to every account (for example, India); there only a webhook can. | Check Stripe; **Mark uncollectible** if nothing was taken: [runbook](ops/runbook/parked-invoices.md). |
+| A Stripe request that times out while Velox waits, or an error with no PaymentIntent ID (any 409 included) | Invoice *parked* ("Payment status unknown"); searched in Stripe hourly from 1 hour after parking. A found success marks it paid; a decline is recorded only by its webhook; no result never marks it failed. If Stripe never received the request, nothing resolves it. Stripe Search is not offered to every account (for example, India); there only a webhook can. | Check Stripe; **Mark uncollectible** if nothing was taken: [runbook](ops/runbook/parked-invoices.md). |
 | Crash after finalize, before the charge | Finalize and the charge queue are one write; the next run charges it. | Nothing. |
 | Crash after Stripe charged, before Velox saved | Webhook marks it paid; without one, re-sending the attempt reuses the key. See #976 below. | Nothing. |
 | Concurrent charges (auto, dunning, manual, second replica) | One wins the claim; a refused **Collect payment** says a payment is in progress. | Nothing. |
@@ -62,12 +67,20 @@ payment failures, and the gaps still open.
 - **Refund timeout shows `failed`** though Stripe may have paid it. **Retry
   refund** is safe; a manual refund in the Stripe dashboard can pay twice
   ([#965](https://github.com/getvelox/velox/issues/965)).
-- **Rare double charge after a crash** between Stripe charging and Velox
-  saving, if the webhook is also late or lost. The retry then gets a new
-  idempotency key when the default card changed, the charge kind differs (for
-  example a dunning retry) or Stripe has dropped the key. The second payment
-  is flagged as `payment.duplicate_charge` when the first one's webhook
-  arrives; if it never arrives, nothing flags it
+- **Rare double charge when Velox does not save Stripe's answer**, if the
+  webhook is also late or lost. Three things leave the invoice chargeable
+  while Stripe may still take the money:
+  - a crash between Stripe charging and Velox saving;
+  - Velox stops waiting for Stripe: a dunning retry's 15-second limit,
+    auto-charge's 30-second limit, or a closed **Collect payment** request;
+  - Stripe answers 429 (rate limit) to a request that Velox resent after a
+    dropped connection, while the first request still runs.
+
+  After the 5-minute claim ends, the next charge gets a new idempotency key
+  when the default card changed, the charge kind differs (for example a
+  dunning retry) or Stripe has dropped the key. The second payment is flagged
+  as `payment.duplicate_charge` when the first one's webhook arrives; if it
+  never arrives, nothing flags it
   ([#976](https://github.com/getvelox/velox/issues/976)).
 - **Collect payment still charges a card refused for good.** The invoice
   notice no longer offers a retry, but the invoice page's **Collect
