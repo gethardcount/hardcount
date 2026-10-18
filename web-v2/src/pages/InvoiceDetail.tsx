@@ -2109,6 +2109,12 @@ function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCreated }:
   const canSubmit =
     reasonOk && amountOk && allocationMatches && !refundOverCap && !amountOverCreditable && !submitting
 
+  // One Idempotency-Key per dialog open, sent with every submit from it. A
+  // retry after a lost answer (a timeout while Stripe is slow) then gets the
+  // first request's credit note back instead of making a second one. The
+  // dialog unmounts on close, so the next open makes a new key.
+  const [idemKey] = useState(() => crypto.randomUUID())
+
   // Single-flight: the per-invoice lock only enforces the over-credit CAP, not
   // dedup — a double-fire that still fits under the remaining creditable amount
   // issues a SECOND credit note (a real second card refund / balance credit).
@@ -2130,7 +2136,7 @@ function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCreated }:
           : {}),
         auto_issue: true,
         lines: [{ description: reason.trim(), quantity: 1, unit_amount_cents: amountCents }],
-      })
+      }, idemKey)
       onCreated()
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to create credit note')

@@ -78,7 +78,7 @@ func (m *invoicesMock) SetAutoChargePendingTx(_ context.Context, _ *sql.Tx, _, i
 	return nil
 }
 
-func (m *invoicesMock) CreateInvoiceWithLineItems(_ context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
+func (m *invoicesMock) createInvoice(tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	if m.createInvoiceErr != nil {
 		return domain.Invoice{}, m.createInvoiceErr
 	}
@@ -87,6 +87,22 @@ func (m *invoicesMock) CreateInvoiceWithLineItems(_ context.Context, tenantID st
 	m.createdInvoices = append(m.createdInvoices, inv)
 	m.createdLineItems = append(m.createdLineItems, items)
 	return inv, nil
+}
+
+// CreateInvoiceWithLineItemsAudited runs emit as the store does, after the
+// insert; an emit error discards the invoice, as the store's rollback would.
+// The fake has no transaction, so emit gets a nil tx.
+func (m *invoicesMock) CreateInvoiceWithLineItemsAudited(_ context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
+	out, err := m.createInvoice(tenantID, inv, items)
+	if err != nil || emit == nil {
+		return out, err
+	}
+	if err := emit(nil, out); err != nil {
+		m.createdInvoices = m.createdInvoices[:len(m.createdInvoices)-1]
+		m.createdLineItems = m.createdLineItems[:len(m.createdLineItems)-1]
+		return domain.Invoice{}, err
+	}
+	return out, nil
 }
 
 func (m *invoicesMock) GetByProrationSource(_ context.Context, _, _, _ string, _ domain.ItemChangeType, _ time.Time) (domain.Invoice, error) {
@@ -129,8 +145,8 @@ func (m *invoicesMock) FindFundingInvoicesForPeriod(_ context.Context, _, _ stri
 // non-Tx counterparts for tx-aware callers. Fakes ignore the tx; the
 // tests exercise business logic, not transactional atomicity (a
 // dedicated integration test covers that path against a real DB).
-func (m *invoicesMock) CreateInvoiceWithLineItemsTx(ctx context.Context, _ *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return m.CreateInvoiceWithLineItems(ctx, tenantID, inv, items)
+func (m *invoicesMock) CreateInvoiceWithLineItemsTx(_ context.Context, _ *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
+	return m.createInvoice(tenantID, inv, items)
 }
 
 func (m *invoicesMock) NextInvoiceNumberTx(ctx context.Context, _ *sql.Tx, tenantID string) (string, error) {
