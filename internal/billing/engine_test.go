@@ -4204,6 +4204,59 @@ func TestRunCycle_SegmentAware_UsageMetersDifferPerSegment(t *testing.T) {
 	}
 }
 
+// TestRunCycle_ItemRemovedAfterPeriodEnd_BillsItsUsage: an item removed
+// after its period ended, before the close ran (a late close or a catch-up),
+// has an interval that covers the whole period. Its meter is billed from the
+// whole-period usage read, which used to cover only the current items' plans,
+// so a meter with its own rating rule billed 0 (#1192). A meter priced by
+// pricing rules reads each window itself and already billed.
+func TestRunCycle_ItemRemovedAfterPeriodEnd_BillsItsUsage(t *testing.T) {
+	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	removedAt := periodEnd.Add(time.Hour)
+	subs := &mockSubs{
+		subs: map[string]domain.Subscription{"sub_1": {
+			ID: "sub_1", TenantID: "t1", CustomerID: "cus_1",
+			Items:  []domain.SubscriptionItem{{ID: "it_cur", PlanID: "pln_cur", Quantity: 1}},
+			Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
+			CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd,
+			NextBillingAt: &periodEnd,
+		}},
+		cycleUpdated: make(map[string]bool),
+		intervals: []domain.ItemInterval{
+			{SubscriptionItemID: "it_cur", PlanID: "pln_cur", Quantity: 1},
+			{SubscriptionItemID: "it_old", PlanID: "pln_old", Quantity: 1, EndsAt: &removedAt},
+		},
+	}
+	pricing := &mockPricing{
+		plans: map[string]domain.Plan{
+			"pln_cur": {ID: "pln_cur", Name: "Current", Currency: "USD", BillingInterval: domain.BillingMonthly,
+				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_x"}},
+			"pln_old": {ID: "pln_old", Name: "Removed", Currency: "USD", BillingInterval: domain.BillingMonthly,
+				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_y"}},
+		},
+		meters: map[string]domain.Meter{
+			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_x"},
+			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_y"},
+		},
+		rules: map[string]domain.RatingRuleVersion{
+			"rrv_x": {ID: "rrv_x", RuleKey: "x_key", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5)},
+			"rrv_y": {ID: "rrv_y", RuleKey: "y_key", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(10)},
+		},
+	}
+	usage := &mockUsage{totals: map[string]int64{"mtr_x": 100, "mtr_y": 50}}
+	invoices := &mockInvoices{}
+	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
+
+	if n, errs := engine.RunCycle(context.Background(), 50, nil); n != 1 || len(errs) != 0 {
+		t.Fatalf("RunCycle = %d, %v; want 1 invoice", n, errs)
+	}
+	// X: 100 x 5c = 500c; Y: 50 x 10c = 500c.
+	if got := invoices.invoices[0].SubtotalCents; got != 1000 {
+		t.Errorf("subtotal = %d, want 1000 (the removed item's 50 units of Y bill 500)", got)
+	}
+}
+
 // TestRunCycle_SegmentAware_NoChanges_FullPeriodLine verifies the no-
 // regress path: a sub with NO mid-period changes still emits a single
 // full-period base line at the current plan/qty (segments collapse).
