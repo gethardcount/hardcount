@@ -2,7 +2,7 @@
 
 Velox keeps all its data in one Postgres database. This page is a checklist for the engineer or DBA (database administrator) who prepares that database, often a managed one such as AWS RDS. Running Postgres itself (replication, failover, sizing the server) stays with you or your provider.
 
-The Compose stack in [`deploy/compose`](../../deploy/compose/README.md) already covers the version, the extensions and the two users. Use this page when you bring your own Postgres, and for the timeouts on any install.
+The Compose stack in [`deploy/compose`](../../deploy/compose/README.md) already covers the version, the extensions and the two users. On a new data volume it also sets the required timeout. Use this page when you bring your own Postgres, and for the [timeouts](#timeouts-on-the-limited-user) on an older Compose volume.
 
 ## Checklist
 
@@ -83,8 +83,22 @@ ALTER ROLE velox_app SET statement_timeout = '30s';
 
 **You see:** `ALTER ROLE` twice. They apply to new connections, so restart Velox afterwards.
 
-- **`idle_in_transaction_session_timeout` is required.** Closing a billing period locks the subscription's row until the invoice is saved. If a Velox process freezes in the middle (a paused VM, for example), that lock blocks every other change to the subscription. This timeout ends such a frozen session. Nothing in Velox sets it.
+- **`idle_in_transaction_session_timeout` is required.** Closing a billing period locks the subscription's row until the invoice is saved. If a Velox process freezes in the middle (a paused VM, for example), that lock blocks every other change to the subscription. This timeout ends such a frozen session. The Compose stack sets it when it creates a new data volume. Velox itself neither sets it nor checks it at start-up.
 - **`statement_timeout` is optional.** Velox sets no time limit on most queries. `DB_QUERY_TIMEOUT_MS` (default 5 seconds) covers only a few. Set this if you want a hard limit on every query.
+
+To check, connect as `velox_app` and run `SHOW idle_in_transaction_session_timeout;`. On the Compose stack, from `deploy/compose`:
+
+```bash
+docker compose exec postgres psql -U velox_app -d velox -tAc "SHOW idle_in_transaction_session_timeout"
+```
+
+**You see:** `30s`. A Compose volume created before the stack set it shows `0`. Postgres runs its setup script only on an empty volume, so set it yourself, then restart Velox:
+
+```bash
+docker compose exec postgres psql -U velox -d velox \
+  -c "ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s'"
+docker compose restart velox-api
+```
 
 ## Connection poolers
 

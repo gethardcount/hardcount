@@ -75,10 +75,11 @@ The dump travels through standard output, so the container needs no mounted fold
 
 **Restore into an empty database when you can.** The script leaves alone what the backup does not hold. Restored over a newer database, that includes its migration record and any table a newer migration created. A backup from v0.8.x must go into an empty database: over a database that v0.9.0 or newer has upgraded, Velox refuses to start (see [Two migration records](runbook/migration-failed-midway.md#two-migration-records)). A backup from before v0.8.0 goes into an empty database, then through v0.8.1's `velox migrate`, then the new release's.
 
-1. On a new Postgres server, create the limited user first. Users belong to the server, not to the database, so a dump cannot carry them. Without it the restore fails, and the script stops before it starts.
+1. On a new Postgres server, create the limited user first. Users and their settings belong to the server, not to the database, so a dump cannot carry them. Without the user the restore fails, and the script stops before it starts. The second line sets the timeout that [Postgres requirements](postgres-requirements.md#timeouts-on-the-limited-user) calls required.
 
    ```sql
    CREATE ROLE velox_app LOGIN PASSWORD '<your-password>';
+   ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
    ```
 
 2. Run the restore against the target database.

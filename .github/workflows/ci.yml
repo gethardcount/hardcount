@@ -263,6 +263,7 @@ jobs:
           GRANT ALL ON SCHEMA public TO velox_app;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+          ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
           CREATE EXTENSION IF NOT EXISTS pgcrypto;
           EOSQL
 
@@ -348,6 +349,7 @@ jobs:
           GRANT ALL ON SCHEMA public TO velox_app;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+          ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
           CREATE EXTENSION IF NOT EXISTS pgcrypto;
           EOSQL
 

@@ -134,7 +134,10 @@ GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
 GRANT ALL ON SCHEMA public TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
 ```
+
+The last line is required. If a Velox process freezes in the middle of a transaction, the subscription it was billing stays locked until something ends that session, and this timeout does. The Compose stack sets it only on a new data volume. To check an older one, see [Timeouts on the limited user](ops/postgres-requirements.md#timeouts-on-the-limited-user).
 
 With `APP_ENV` set to `staging` or `production`, Velox refuses to start when `APP_DATABASE_URL`:
 

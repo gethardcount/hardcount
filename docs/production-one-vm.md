@@ -370,6 +370,7 @@ Check each line before the first real customer.
 
 - [ ] `docker compose exec velox-api /usr/local/bin/velox version` shows a release, not `dev`.
 - [ ] `https://billing.example.com/health/ready` answers `"status":"ok"`.
+- [ ] `docker compose exec postgres psql -U velox_app -d velox -tAc "SHOW idle_in_transaction_session_timeout"` shows `30s`. If it shows `0`, set it as [Postgres requirements](ops/postgres-requirements.md#timeouts-on-the-limited-user) says.
 - [ ] You can sign in at `https://billing.example.com`.
 - [ ] A password-reset email arrived, and its link opens your `https://` address.
 - [ ] **Settings → Payments** reads **Connected** in test mode, and a test charge worked ([Stripe end-to-end test](dev/stripe-end-to-end-test.md)).
