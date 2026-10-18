@@ -16,8 +16,11 @@ import (
 // corrections, so a usage bucket can total below zero over a billing window
 // when the corrections are larger than the usage in that window. A negative
 // quantity has no price (ComputeAmountCents refuses it). Before #1193 the
-// period close and the cancel's final invoice failed on it, so the whole
-// invoice, base fee included, was not made and the close was retried.
+// period close and the cancel's final invoice failed on a pricing-rule
+// bucket below zero, so the whole invoice, base fee included, was not made
+// and the close was retried. A single-rule meter below zero was billed 0
+// with no word, because the usage store dropped meter totals at or below
+// zero; it now returns them so the rule below can apply.
 //
 // The rule now, the same in every path that prices usage (period close,
 // cancel final invoice, spend-threshold invoice, preview, live balance,
@@ -58,9 +61,9 @@ func (n netNegativeUsage) add(meterID, meterKey string, qty decimal.Decimal) {
 }
 
 // billableUsageTotal is the usage cap's total: the sum of the meters'
-// quantities, with a meter below zero counted as 0, as it bills. Counting it
-// at its value lowered the total, so the cap scaled the other meters above
-// the cap.
+// quantities, with a meter below zero counted as 0, as it bills. That is what
+// the cap saw when the store dropped such totals; counting one at its value
+// would lower the total and scale the other meters above the cap.
 func billableUsageTotal(totals map[string]decimal.Decimal) decimal.Decimal {
 	sum := decimal.Zero
 	for _, q := range totals {

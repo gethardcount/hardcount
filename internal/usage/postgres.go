@@ -513,10 +513,12 @@ func (s *PostgresStore) AggregateForBillingPeriodByAgg(ctx context.Context, tena
 				if err := rows.Scan(&meterID, &val); err != nil {
 					return err
 				}
-				// Only a positive aggregate is a billable line. A meter
-				// with no events in the period produces no row at all,
-				// which lands in the same place: absent from the map.
-				if val.IsPositive() {
+				// A zero aggregate is absent from the map, the same as a
+				// meter with no events in the period (no row at all).
+				// A total below zero (corrections larger than the usage)
+				// is returned as it is: the billing engine bills it 0
+				// and records it (#1193). Dropping it here hid it.
+				if !val.IsZero() {
 					result[meterID] = val
 				}
 			}
