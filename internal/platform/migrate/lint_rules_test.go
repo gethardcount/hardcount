@@ -1,9 +1,13 @@
 package migrate
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Fixtures for lint_test.go. Each rule has at least one directory that
@@ -159,6 +163,22 @@ func TestLintMigrationDir(t *testing.T) {
 		{"VALIDATE in the same file as its ADD", map[string]string{"00181_chk.sql": normalFile(
 			"ALTER TABLE invoices ADD CONSTRAINT chk CHECK (number <> '') NOT VALID;\nALTER TABLE invoices VALIDATE CONSTRAINT chk;",
 			"ALTER TABLE invoices DROP CONSTRAINT chk;")}, "validate in the next file"},
+
+		// Added columns (#1231). TestAddColumnRules has the other forms.
+		{"a NOT NULL column with a constant default", map[string]string{"00181_x.sql": normalFile(
+			"ALTER TABLE invoices ADD COLUMN paid BOOLEAN NOT NULL DEFAULT false;", "ALTER TABLE invoices DROP COLUMN paid;")}, noFinding},
+		{"a generated value set as the default after the column is added", map[string]string{"00181_x.sql": normalFile(
+			"ALTER TABLE invoices ADD COLUMN ref UUID;\nALTER TABLE invoices ALTER COLUMN ref SET DEFAULT gen_random_uuid();",
+			"ALTER TABLE invoices DROP COLUMN ref;")}, noFinding},
+		{"a NOT NULL column with no default on a table the file creates", map[string]string{"00181_x.sql": normalFile(
+			"CREATE TABLE widgets (id TEXT);\nALTER TABLE widgets ADD COLUMN name TEXT NOT NULL;", "DROP TABLE widgets;")}, noFinding},
+		{"a NOT NULL column with no default", map[string]string{"00181_x.sql": normalFile(
+			"ALTER TABLE invoices ADD COLUMN memo TEXT NOT NULL;", "ALTER TABLE invoices DROP COLUMN memo;")}, "NOT NULL with no DEFAULT"},
+		{"a NOT NULL column with no default and the opt-out line", map[string]string{"00181_x.sql": normalFile(
+			"-- velox:blocking-ddl-ok: invoices is small on every install\nALTER TABLE invoices ADD COLUMN memo TEXT NOT NULL;",
+			"ALTER TABLE invoices DROP COLUMN memo;")}, "NOT NULL with no DEFAULT"},
+		{"a volatile default", map[string]string{"00181_x.sql": normalFile(
+			"ALTER TABLE invoices ADD COLUMN ref UUID DEFAULT gen_random_uuid();", "ALTER TABLE invoices DROP COLUMN ref;")}, "to fill every existing row"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,6 +292,121 @@ CREATE INDEX idx_invoices_provider_sync_inflight
 	}
 	if len(got) != 1 || !strings.Contains(got[0], "CREATE INDEX on invoices") {
 		t.Fatalf("0167: want one CREATE INDEX finding on invoices, got %q", got)
+	}
+}
+
+// addColumnCases are ALTER TABLE statements on a live invoices table, and
+// what each does to a table that has rows: refuses the new column
+// (required), or rewrites the table (rewrite). TestAddColumnRules checks
+// that the lint says so, and TestAddColumnRulesMatchPostgres checks the
+// same answers against Postgres.
+var addColumnCases = []struct {
+	name              string
+	sql               string
+	required, rewrite bool
+}{
+	{"nullable", "ALTER TABLE invoices ADD COLUMN c TEXT;", false, false},
+	{"NOT NULL with a constant default", "ALTER TABLE invoices ADD COLUMN c TEXT NOT NULL DEFAULT '';", false, false},
+	{"the default before NOT NULL", "ALTER TABLE invoices ADD COLUMN c INT DEFAULT 0 NOT NULL;", false, false},
+	{"#966's two columns", "ALTER TABLE invoices\n    ADD COLUMN decline_code TEXT NOT NULL DEFAULT '',\n    ADD COLUMN stripe_payment_method_id TEXT NOT NULL DEFAULT '';", false, false},
+	{"NOT NULL with no default", "ALTER TABLE invoices ADD COLUMN c TEXT NOT NULL;", true, false},
+	{"without the COLUMN keyword", "alter table invoices add c text not null;", true, false},
+	{"IF NOT EXISTS", "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS c TEXT NOT NULL;", true, false},
+	{"quoted, schema-qualified", `ALTER TABLE public."invoices" ADD COLUMN "Memo" TEXT NOT NULL;`, true, false},
+	{"the second of two columns", "ALTER TABLE invoices ADD COLUMN a TEXT NOT NULL DEFAULT 'x, y',\n  ADD COLUMN b NUMERIC(10,2) NOT NULL;", true, false},
+	{"DEFAULT NULL", "ALTER TABLE invoices ADD COLUMN c TEXT NOT NULL DEFAULT NULL;", true, false},
+	{"NOT NULL inside a literal", "ALTER TABLE invoices ADD COLUMN c TEXT DEFAULT 'NOT NULL';", false, false},
+	{"NOT NULL inside parentheses", "ALTER TABLE invoices ADD COLUMN c BOOLEAN DEFAULT (NULL IS NOT NULL);", false, false},
+	{"now()", "ALTER TABLE invoices ADD COLUMN c TIMESTAMPTZ NOT NULL DEFAULT now();", false, false},
+	{"pg_catalog.now()", "ALTER TABLE invoices ADD COLUMN c TIMESTAMPTZ NOT NULL DEFAULT pg_catalog.now();", false, false},
+	{"CURRENT_TIMESTAMP", "ALTER TABLE invoices ADD COLUMN c TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;", false, false},
+	{"now() plus an interval", "ALTER TABLE invoices ADD COLUMN c TIMESTAMPTZ NOT NULL DEFAULT (now() + '30 days'::interval);", false, false},
+	{"a cast with a type modifier", "ALTER TABLE invoices ADD COLUMN c NUMERIC(10,2) NOT NULL DEFAULT '0'::numeric(10,2);", false, false},
+	{"CAST to character varying(n)", "ALTER TABLE invoices ADD COLUMN c VARCHAR(10) NOT NULL DEFAULT CAST('x' AS character varying(10));", false, false},
+	{"encode() of a constant", "ALTER TABLE invoices ADD COLUMN c TEXT NOT NULL DEFAULT encode('abc'::bytea, 'hex');", false, false},
+	{"a function in a CHECK, not in the default", "ALTER TABLE invoices ADD COLUMN c TEXT NOT NULL DEFAULT '' CHECK (char_length(c) <= 64);", false, false},
+	{"a function name inside a literal", "ALTER TABLE invoices ADD COLUMN c TEXT DEFAULT 'random()';", false, false},
+	{"gen_random_uuid()", "ALTER TABLE invoices ADD COLUMN c UUID DEFAULT gen_random_uuid();", false, true},
+	{"the baseline's ID default", "ALTER TABLE invoices ADD COLUMN c TEXT NOT NULL DEFAULT ('vlx_x_'::text || encode(public.gen_random_bytes(12), 'hex'::text));", false, true},
+	{"clock_timestamp()", "ALTER TABLE invoices ADD COLUMN c TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp();", false, true},
+	{"random() inside another call", "ALTER TABLE invoices ADD COLUMN c DOUBLE PRECISION DEFAULT floor(random() * 10);", false, true},
+	{"nextval()", "ALTER TABLE invoices ADD COLUMN c BIGINT DEFAULT nextval('invoice_seq');", false, true},
+	{"a function the check does not know", "ALTER TABLE invoices ADD COLUMN c TEXT DEFAULT velox_new_id();", false, true},
+	{"BIGSERIAL", "ALTER TABLE invoices ADD COLUMN c BIGSERIAL;", false, true},
+	{"an identity column", "ALTER TABLE invoices ADD COLUMN c BIGINT GENERATED ALWAYS AS IDENTITY;", false, true},
+	{"an identity column BY DEFAULT", "ALTER TABLE invoices ADD COLUMN c BIGINT NOT NULL GENERATED BY DEFAULT AS IDENTITY;", false, true},
+	{"a stored generated column", "ALTER TABLE invoices ADD COLUMN c BIGINT GENERATED ALWAYS AS (amount_due * 2) STORED;", false, true},
+	{"SET DEFAULT on an existing column", "ALTER TABLE invoices ALTER COLUMN number SET DEFAULT gen_random_uuid()::text;", false, false},
+	{"a constraint is not a column", "ALTER TABLE invoices ADD CONSTRAINT chk CHECK (number IS NOT NULL) NOT VALID;", false, false},
+	{"on a table the file creates", "CREATE TABLE widgets (id TEXT);\nALTER TABLE widgets ADD COLUMN ref UUID NOT NULL DEFAULT gen_random_uuid(),\n  ADD COLUMN name TEXT NOT NULL;", false, false},
+}
+
+// addColumnVerdict runs the lint on one Up section and reads its findings.
+func addColumnVerdict(t *testing.T, up string) (required, rewrite bool) {
+	t.Helper()
+	for _, f := range lintMigrationFile([]byte(normalFile(up, "SELECT 1;")), false, indexSet{}) {
+		r, w := strings.Contains(f, "NOT NULL with no DEFAULT"), strings.Contains(f, "to fill every existing row")
+		if !r && !w {
+			t.Errorf("unexpected finding: %s", f)
+		}
+		required, rewrite = required || r, rewrite || w
+	}
+	return required, rewrite
+}
+
+func TestAddColumnRules(t *testing.T) {
+	for _, tc := range addColumnCases {
+		t.Run(tc.name, func(t *testing.T) {
+			required, rewrite := addColumnVerdict(t, tc.sql)
+			if required != tc.required || rewrite != tc.rewrite {
+				t.Fatalf("lint: required=%v rewrite=%v, want required=%v rewrite=%v", required, rewrite, tc.required, tc.rewrite)
+			}
+		})
+	}
+}
+
+// TestAddColumnRulesMatchPostgres runs each case on a table with a row and
+// checks the lint's answers against what Postgres does: a refused column
+// fails with not_null_violation, and a rewrite gives the table a new file.
+func TestAddColumnRulesMatchPostgres(t *testing.T) {
+	_, db := scratchDB(t, "velox_migrate_add_column")
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE EXTENSION pgcrypto;
+		CREATE SEQUENCE invoice_seq;
+		CREATE FUNCTION velox_new_id() RETURNS text LANGUAGE sql AS $$ SELECT md5(random()::text) $$;
+		CREATE TABLE invoices (id TEXT PRIMARY KEY, number TEXT, amount_due BIGINT NOT NULL DEFAULT 0);
+		INSERT INTO invoices (id, number) VALUES ('inv_1', 'INV-1');`); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range addColumnCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			var before, after int64
+			if err := tx.QueryRowContext(ctx, `SELECT pg_relation_filenode('invoices')`).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			_, err = tx.ExecContext(ctx, tc.sql)
+			var pgErr *pgconn.PgError
+			required := errors.As(err, &pgErr) && pgErr.Code == "23502"
+			if err != nil && !required {
+				t.Fatalf("postgres: %v", err)
+			}
+			rewrite := false
+			if err == nil {
+				if err := tx.QueryRowContext(ctx, `SELECT pg_relation_filenode('invoices')`).Scan(&after); err != nil {
+					t.Fatal(err)
+				}
+				rewrite = after != before
+			}
+			if required != tc.required || rewrite != tc.rewrite {
+				t.Fatalf("postgres: required=%v rewrite=%v, want required=%v rewrite=%v", required, rewrite, tc.required, tc.rewrite)
+			}
+		})
 	}
 }
 
