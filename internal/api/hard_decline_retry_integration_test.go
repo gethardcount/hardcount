@@ -144,6 +144,25 @@ func (r *hardDeclineRig) attentionCode(invID string) string {
 	return inv.Attention.Code
 }
 
+// assertOnlyDefault checks that the customer has exactly one active default
+// card, and that it is wantPM.
+func (r *hardDeclineRig) assertOnlyDefault(custID, wantPM string) {
+	r.t.Helper()
+	pms, err := r.pmSvc.List(r.ctx, r.tenantID, custID)
+	if err != nil {
+		r.t.Fatalf("list cards: %v", err)
+	}
+	var defaults []string
+	for _, pm := range pms {
+		if pm.IsDefault && pm.DetachedAt == nil {
+			defaults = append(defaults, pm.StripePaymentMethodID)
+		}
+	}
+	if len(defaults) != 1 || defaults[0] != wantPM {
+		r.t.Fatalf("default cards = %v, want exactly [%s]", defaults, wantPM)
+	}
+}
+
 func (r *hardDeclineRig) invoice(id string) domain.Invoice {
 	r.t.Helper()
 	inv, err := r.invoices.Get(r.ctx, r.tenantID, id)
@@ -155,11 +174,14 @@ func (r *hardDeclineRig) invoice(id string) domain.Invoice {
 
 // #966, real Postgres and production wiring: the cycle charge's card is
 // reported lost. The decline lands on the attempt row with the card; every
-// dunning retry then charges nothing while that card is the default — a card
-// the customer adds beside it does not change the default (ADR-021) — and
-// once the new card is made the default, the next retry charges it and the
-// invoice is paid. The operator's notice follows the same rule.
-func TestHardDecline_RetrySkipsTheRefusedCardUntilAnotherIsDefault_RealStore(t *testing.T) {
+// dunning retry then charges nothing while that card is the default. The
+// customer then saves a new card through the update link: because the bank
+// refused the default for good, the new card replaces it as the default
+// (ADR-126; review of #1225 — before, it was added beside the refused card,
+// every later retry skipped, and the run exhausted although the customer had
+// done what they were asked). The notice returns to an ordinary decline and
+// the next retry charges the new card.
+func TestHardDecline_RetrySkipsTheRefusedCardUntilANewCardArrives_RealStore(t *testing.T) {
 	r := newHardDeclineRig(t, "Hard Decline Retry")
 	custID := r.customerWithCard("lost", "pm_lost")
 	inv := r.finalizedInvoice(custID, "INV-HD-1")
@@ -203,26 +225,15 @@ func TestHardDecline_RetrySkipsTheRefusedCardUntilAnotherIsDefault_RealStore(t *
 		t.Fatalf("Stripe charges %v, want only the first — the refused card must not be charged again", r.charges.charged)
 	}
 
-	// The customer saves a new card through the update link. It is added
-	// beside the refused default, which stays the default, so retries still
-	// skip — and the notice still asks for a different card.
+	// The customer saves a new card through the update link. The bank
+	// refused the default for good, so the new card becomes the default
+	// with no operator step: the notice returns to an ordinary decline
+	// (Retry is useful again), and the next retry charges the new card.
 	fresh := r.addCard(custID, "pm_new")
-	if fresh.IsDefault {
-		t.Fatal("the second card became the default on attach; this test assumes ADR-021's rule")
+	if !fresh.IsDefault {
+		t.Fatal("the new card was added beside the refused default; it must replace it as the default")
 	}
-	if err := retry(); !errors.Is(err, domain.ErrCardNeedsReplacing) {
-		t.Fatalf("retry with the new card not yet default: %v, want ErrCardNeedsReplacing", err)
-	}
-	if code := r.attentionCode(inv.ID); code != "payment.card_refused" {
-		t.Errorf("attention with the refused card still the default: %q, want payment.card_refused", code)
-	}
-
-	// The new card becomes the default: the notice returns to an ordinary
-	// decline (Retry is useful again), and the next retry charges the new
-	// card.
-	if _, err := r.pmSvc.SetDefault(r.ctx, r.tenantID, custID, fresh.ID); err != nil {
-		t.Fatalf("set default: %v", err)
-	}
+	r.assertOnlyDefault(custID, "pm_new")
 	if code := r.attentionCode(inv.ID); code != "payment.declined" {
 		t.Errorf("attention after the card was replaced: %q, want payment.declined", code)
 	}
@@ -252,6 +263,12 @@ func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.
 	if code := r.attentionCode(inv.ID); code != "payment.declined" {
 		t.Errorf("attention %q, want payment.declined", code)
 	}
+	// A card added after an ordinary decline is added beside the default, as
+	// before (ADR-021): only a default the bank refused for good is replaced.
+	if other := r.addCard(custID, "pm_other"); other.IsDefault {
+		t.Error("a card added after an ordinary decline became the default; ADR-021 keeps it beside")
+	}
+	r.assertOnlyDefault(custID, "pm_nsf")
 	err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID)
 	var re *dunning.RetryError
 	if !errors.As(err, &re) || re.PaymentIntentID != "pi_nsf_2" || re.CardNeedsReplacing {
@@ -294,11 +311,11 @@ func TestHardDecline_WebhookReportStopsTheRetry_RealStore(t *testing.T) {
 		t.Errorf("Stripe charges %v, want none", r.charges.charged)
 	}
 
-	// A second card made the default, which the bank also refuses (picked
-	// up): that retry is a counted decline flagged for the new-card warning.
-	second := r.addCard(custID, "pm_second")
-	if _, err := r.pmSvc.SetDefault(r.ctx, r.tenantID, custID, second.ID); err != nil {
-		t.Fatalf("set default: %v", err)
+	// A second card arrives and replaces the refused default by itself. The
+	// bank refuses it too (picked up): that retry is a counted decline flagged
+	// for the new-card warning.
+	if second := r.addCard(custID, "pm_second"); !second.IsDefault {
+		t.Fatal("the second card did not replace the refused default")
 	}
 	r.charges.answers = []scriptedCharge{{err: stripeDeclined("pi_pickup_1", "pickup_card", "Your card was declined.")}}
 	err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID)
@@ -311,5 +328,40 @@ func TestHardDecline_WebhookReportStopsTheRetry_RealStore(t *testing.T) {
 	}
 	if len(r.charges.charged) != 1 {
 		t.Errorf("Stripe charges %v, want one (the second card, once)", r.charges.charged)
+	}
+}
+
+// A card saved before the refusal, beside a working default, is attached again
+// after the bank refuses the default for good (Stripe redelivers its
+// setup_intent.succeeded, or the customer saves it again). The attach takes
+// the store's update path, not its insert, and must still make it the default
+// and leave the customer exactly one default — never none.
+func TestHardDecline_CardAlreadySavedBesideReplacesTheRefusedDefault_RealStore(t *testing.T) {
+	r := newHardDeclineRig(t, "Hard Decline Re-attach")
+	custID := r.customerWithCard("revoked", "pm_revoked")
+	if spare := r.addCard(custID, "pm_spare"); spare.IsDefault {
+		t.Fatal("a second card beside a working default became the default")
+	}
+	inv := r.finalizedInvoice(custID, "INV-HD-4")
+	r.charges.answers = []scriptedCharge{
+		{err: stripeDeclined("pi_revoked_1", "revocation_of_authorization", "Your card was declined.")},
+		{pi: "pi_spare_paid"},
+	}
+	if _, err := r.charger.ChargeInvoice(r.ctx, r.tenantID, inv, "cus_stripe_revoked", "pm_revoked"); err == nil {
+		t.Fatal("the revoked-card charge returned no error")
+	}
+	// The refusal alone does not move the default: the card beside it was
+	// saved before, and nothing about it changed.
+	r.assertOnlyDefault(custID, "pm_revoked")
+
+	if again := r.addCard(custID, "pm_spare"); !again.IsDefault {
+		t.Fatal("re-attaching the spare card did not replace the refused default")
+	}
+	r.assertOnlyDefault(custID, "pm_spare")
+	if err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID); err != nil {
+		t.Fatalf("retry on the spare card: %v", err)
+	}
+	if len(r.charges.charged) != 2 || r.charges.charged[1] != "pm_spare" {
+		t.Errorf("Stripe charges %v, want the spare card charged second", r.charges.charged)
 	}
 }

@@ -57,3 +57,23 @@ func TestDunningWarning_OrdinaryDeclineStillPromisesTheRetry(t *testing.T) {
 		}
 	}
 }
+
+// Review of #1225: the payment-failed email's plain-text part labelled the
+// hosted invoice link "Update payment method:", while the HTML button on the
+// same link says "Pay invoice". The link opens the page that takes payment,
+// and after a hard decline paying there with a different card is what the
+// customer is asked to do, so both parts name it the same way.
+func TestPaymentFailedText_LabelsTheHostedLinkAsPay(t *testing.T) {
+	const hosted = "https://pay.example.com/i/tok"
+	_, _, ctaURL, ctaLabel := renderPaymentFailedHTML("Ada", "INV-0042", "Your card was declined.", hosted)
+	text := paymentFailedTextBody("Ada", "INV-0042", "Your card was declined.", hosted)
+	if ctaURL != hosted || ctaLabel != "Pay invoice" {
+		t.Fatalf("HTML CTA %q %q, want Pay invoice on the hosted page", ctaLabel, ctaURL)
+	}
+	if !strings.Contains(text, ctaLabel+": "+hosted) {
+		t.Errorf("text part does not label the hosted link %q:\n%s", ctaLabel, text)
+	}
+	if strings.Contains(text, "Update payment method") {
+		t.Errorf("text part calls the pay link an update link:\n%s", text)
+	}
+}

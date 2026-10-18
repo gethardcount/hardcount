@@ -8,12 +8,16 @@ import (
 
 // The named set (#966). Each code here is one Stripe Billing will not retry
 // (docs.stripe.com/billing/revenue-recovery/smart-retries, "Hard decline
-// codes"); authentication_required is the one deliberately left out.
+// codes"). Two of Stripe's codes are left out: authentication_required, which
+// needs the customer to authenticate rather than a new card, and
+// highest_risk_level, which is Stripe Radar's block reason (a charge's
+// outcome.reason, never a bank's decline code: docs.stripe.com/declines,
+// "Blocked payments"), so a decline code can never carry it.
 func TestIsHardDecline(t *testing.T) {
 	hard := []string{
 		"lost_card", "stolen_card", "pickup_card",
 		"incorrect_number", "revocation_of_authorization", "revocation_of_all_authorizations",
-		"highest_risk_level", "transaction_not_allowed",
+		"transaction_not_allowed",
 	}
 	for _, code := range hard {
 		if !IsHardDecline(code) {
@@ -28,7 +32,7 @@ func TestIsHardDecline(t *testing.T) {
 		"insufficient_funds", "do_not_honor", "generic_decline", "card_declined",
 		"try_again_later", "processing_error", "issuer_not_available", "card_velocity_exceeded",
 		"expired_card", "incorrect_cvc", "fraudulent", "merchant_blacklist", "restricted_card",
-		"stop_payment_order", "authentication_required", "", "LOST_CARD", "some_future_code",
+		"stop_payment_order", "authentication_required", "highest_risk_level", "", "LOST_CARD", "some_future_code",
 	}
 	for _, code := range retried {
 		if IsHardDecline(code) {
