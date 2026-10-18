@@ -264,7 +264,7 @@ has to come from the throttle, so the shipped design adds a per-email count.
 It also adds the device-cookie pattern OWASP recommends for this problem, so
 the per-email count does not slow a browser that signed in before.
 
-**What ships** (`internal/user/throttle.go`, migration 181):
+**What ships** (`internal/user/throttle.go`, migration 182):
 
 | Subject | Counts | A wait starts at |
 |---|---|---|
