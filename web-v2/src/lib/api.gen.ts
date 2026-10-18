@@ -4196,6 +4196,11 @@ export interface paths {
          *     Subsequent dashboard requests authenticate via the cookie; sessions
          *     are bound to `users.id` and are independent of API key lifecycle.
          *     See ADR-011.
+         *
+         *     A successful sign-in also sets `velox_device` (HttpOnly,
+         *     `Path=/v1/auth`, 180 days). It marks the browser as one that signed
+         *     in to this email, so the sign-in throttle counts its attempts on
+         *     their own. It never replaces the password.
          */
         post: {
             parameters: {
@@ -4240,11 +4245,34 @@ export interface paths {
                     };
                 };
                 /**
-                 * @description Rate limited — the shared per-IP request limit on `/v1/auth`
-                 *     was exceeded. There is no per-account lockout or login
-                 *     throttle in v1 (ADR-094).
+                 * @description Too many attempts. Two limits answer 429, and neither locks
+                 *     the account:
+                 *
+                 *     - Code `login_throttled`: the sign-in throttle. Repeated wrong
+                 *       passwords for one email, from one address or from many,
+                 *       start a wait of 1 to 15 minutes. The message names the wait
+                 *       in minutes and `Retry-After` gives it in seconds. The answer
+                 *       is the same for an email with no account. A browser that
+                 *       signed in to the email before is counted on its own.
+                 *     - Code `rate_limited`: the shared per-address request limit on
+                 *       `/v1/auth`.
                  */
                 429: {
+                    headers: {
+                        /** @description Seconds until an attempt is counted again. */
+                        "Retry-After"?: number;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description Code `authentication_unavailable`: the sign-in throttle could not
+                 *     read the database, so the attempt was refused before the password
+                 *     check. Try again shortly.
+                 */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };

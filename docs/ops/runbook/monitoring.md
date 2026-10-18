@@ -63,6 +63,8 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_audit_write_errors_total{outcome="row_lost"}` | rate > 0/s | **Audit evidence permanently lost.** Treat as a compliance incident. See [Audit write errors](audit-write-errors.md) |
 | `velox_audit_write_errors_total{outcome="mutation_refused"}` | rate > 0/s | **Nothing is missing.** An availability problem, not an evidence problem. See [Audit write errors](audit-write-errors.md) |
 | `velox_audit_uncovered_mutation_total{route}` | any increase | A route changed data and wrote no audit row. Should be **flat zero**. See [Mutation without an audit row](mutation-without-audit-row.md) |
+| `velox_auth_login_total{outcome="throttled"}` | rate > 0 for 15m | Someone keeps guessing dashboard passwords, or `TRUST_PROXY` is wrong. See [Sign-in throttled](sign-in-throttled.md) |
+| `velox_auth_login_total{outcome="error"}` | any increase | Sign-in failed on the server side, usually the database. Everyone is refused while it lasts |
 | `increase(velox_usage_unpriced_quantity_total{mode="live"}[1d])` by `meter_id` | > 0 | An invoice was built without usage that matched no price. That usage is not billed unless you bill it. See [Usage with no price](usage-with-no-price.md) |
 
 Notes on three rows:

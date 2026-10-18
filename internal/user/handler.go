@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -50,7 +53,13 @@ type Handler struct {
 	dashboardBaseURL string      // canonical dashboard origin for reset links; never from request headers. empty => reset emails disabled
 	smtpConfigured   bool        // SMTP wired at boot (email.Sender.IsConfigured); drives the email_delivery hint
 	auditLogger      AuditRecorder
+	throttle         *LoginThrottle // nil only in unit tests that build a bare handler
 }
+
+// SetLoginThrottle wires the sign-in throttle (throttle.go). Production always
+// wires it in internal/api; the e2e tests there prove it. A handler without
+// one checks every password, as before the throttle.
+func (h *Handler) SetLoginThrottle(t *LoginThrottle) { h.throttle = t }
 
 // AuditRecorder is the narrow audit surface the auth handler needs — kept here
 // (not an import of *audit.Logger) so internal/user stays decoupled. Production
@@ -181,10 +190,34 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The address TrustedRealIP resolved. The failed-login log, the session
-	// row and the audit row all record this one value; none of them reads a
-	// forwarding header the client could have written.
+	// The address TrustedRealIP resolved. The failed-login log, the throttle,
+	// the session row and the audit row all use this one value; none of them
+	// reads a forwarding header the client could have written.
 	ip := audit.ExtractClientIP(r)
+
+	// The sign-in throttle counts this attempt before the password check, so
+	// a refused attempt costs no account lookup and no bcrypt. It is keyed on
+	// the typed email, so an email with no account is refused the same way.
+	var account string
+	if h.throttle != nil {
+		verdict, err := h.throttle.Reserve(r, req.Email)
+		if err != nil {
+			// Fail closed: sign-in needs the database anyway.
+			slog.ErrorContext(r.Context(), "auth: sign-in throttle failed; sign-in refused", "ip", ip, "error", err)
+			recordLogin("error")
+			respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "authentication_unavailable",
+				"Sign-in is unavailable right now. Try again in a minute.")
+			return
+		}
+		account = verdict.Account
+		if !verdict.Allowed {
+			slog.WarnContext(r.Context(), "auth: sign-in throttled",
+				"account", verdict.Account, "ip", ip, "retry_after_s", retryAfterSeconds(verdict.RetryAfter))
+			recordLogin("throttled")
+			writeLoginThrottled(w, r, verdict.RetryAfter)
+			return
+		}
+	}
 
 	u, tenants, err := h.users.Authenticate(r.Context(), req.Email, req.Password)
 	if err != nil {
@@ -193,14 +226,28 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 			// stuffing). They can't go to the per-tenant audit_log — there's no
 			// resolved tenant pre-auth, and recording email-existence there would
 			// be an enumeration oracle — so they land in the structured security
-			// log (the right home for pre-auth events).
+			// log (the right home for pre-auth events). The line names the
+			// email's throttle subject and, when the email has an account, its
+			// user id: never the typed email, which would sit in the log sink
+			// with no way to erase it.
 			slog.WarnContext(r.Context(), "auth: failed login attempt",
-				"email", req.Email, "ip", ip, "reason", "bad_credentials")
+				"account", account, "user_id", wrongPasswordUserID(err), "ip", ip, "reason", "bad_credentials")
+			recordLogin("bad_credentials")
 			respond.Unauthorized(w, r, "invalid email or password")
 			return
 		}
+		recordLogin("error")
 		respond.FromError(w, r, err, "user")
 		return
+	}
+
+	if h.throttle != nil {
+		// The right password clears this email's count and marks this
+		// browser. A failure here does not undo the sign-in; the counts
+		// fade within a day.
+		if err := h.throttle.SignedIn(w, r, req.Email); err != nil {
+			slog.ErrorContext(r.Context(), "auth: sign-in throttle not cleared after a sign-in", "user_id", u.ID, "error", err)
+		}
 	}
 
 	// V1: each user belongs to exactly one tenant. The Authenticate
@@ -216,10 +263,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Error("session: issue failed", "err", err, "user_id", u.ID)
+		recordLogin("error")
 		respond.InternalError(w, r)
 		return
 	}
 
+	recordLogin("ok")
 	h.cookie.SetCookie(w, rawID, sess.ExpiresAt)
 	// No email in the label: resource_id IS the user id, and the reader resolves the
 	// address from the (erasable) users row. audit_log is append-only — an email
@@ -519,6 +568,17 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 			"user_id", u.ID, "err", revokeErr)
 	}
 
+	// The reset link proved the inbox, the same proof a sign-in gives. It
+	// clears the email's sign-in count and marks this browser, so an owner
+	// held out by guesses from many addresses can always get back in: reset
+	// from this browser, then sign in from it. Logged, not surfaced: the
+	// password is already changed.
+	if h.throttle != nil {
+		if err := h.throttle.SignedIn(w, r, u.Email); err != nil {
+			slog.ErrorContext(r.Context(), "auth: sign-in throttle not cleared after a password reset", "user_id", u.ID, "error", err)
+		}
+	}
+
 	// Audit the completed reset — a password change + all-session revocation is
 	// a high-value account-takeover signal. Actor is the account owner (they
 	// held the token); tenant resolved separately since domain.User carries none.
@@ -530,6 +590,30 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]string{
 		"message": "password updated — sign in with your new password",
 	})
+}
+
+// writeLoginThrottled answers an attempt the sign-in throttle refused: 429,
+// Retry-After in seconds, and the wait in whole minutes. Real and unknown
+// emails get the same answer.
+func writeLoginThrottled(w http.ResponseWriter, r *http.Request, wait time.Duration) {
+	secs := retryAfterSeconds(wait)
+	minutes := (secs + 59) / 60
+	unit := "minutes"
+	if minutes == 1 {
+		unit = "minute"
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	respond.Error(w, r, http.StatusTooManyRequests, "rate_limit_error", "login_throttled",
+		fmt.Sprintf("Too many sign-in attempts. Try again in %d %s.", minutes, unit))
+}
+
+// retryAfterSeconds rounds a wait up to whole seconds, at least 1.
+func retryAfterSeconds(wait time.Duration) int {
+	secs := int((wait + time.Second - 1) / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	return secs
 }
 
 // buildResetLink constructs the operator-facing URL for the reset

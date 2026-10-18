@@ -21,9 +21,9 @@ import (
 // Service is the auth-side surface for user accounts. ADR-011.
 //
 // The recipe is intentionally boring: bcrypt cost 12 for hashing,
-// crypto/rand for tokens, sha256 for token storage. v1 has NO automatic login
-// brute-force throttle — the interim one was removed; ADR-094 records the
-// deferred design. All of this is well-trodden Go stdlib + x/crypto territory.
+// crypto/rand for tokens, sha256 for token storage. The sign-in throttle
+// (throttle.go, ADR-094) runs in the handler before Authenticate. All of this
+// is well-trodden Go stdlib + x/crypto territory.
 type Service struct {
 	store Store
 	clock clock.Clock
@@ -119,6 +119,24 @@ func VerifyPassword(hash, plaintext string) error {
 // emails by timing the response. Handler maps to 401.
 var ErrBadCredentials = errs.New("bad_credentials", "invalid email or password")
 
+// wrongPasswordError is ErrBadCredentials for an email that has an account.
+// It carries the user id only for the failed-login log line, which must not
+// hold the typed email. The response stays the same generic 401.
+type wrongPasswordError struct{ userID string }
+
+func (e *wrongPasswordError) Error() string { return ErrBadCredentials.Error() }
+func (e *wrongPasswordError) Unwrap() error { return ErrBadCredentials }
+
+// wrongPasswordUserID returns the account's user id when err is a wrong
+// password for an existing account, and "" otherwise.
+func wrongPasswordUserID(err error) string {
+	var wp *wrongPasswordError
+	if errors.As(err, &wp) {
+		return wp.userID
+	}
+	return ""
+}
+
 // CreateUser inserts a new user with hashed password and binds them
 // to the given tenant with the supplied role. Used by the bootstrap
 // CLI; not exposed via the HTTP API in v1 (no public signup).
@@ -156,9 +174,10 @@ func (s *Service) GetByID(ctx context.Context, id string) (domain.User, error) {
 // dummy bcrypt), so response timing can't be used to enumerate registered emails.
 // On success: stamps last_login_at.
 //
-// There is no account-lock check: v1 has no automatic login throttle or lockout
-// (deferred as one unit — ADR-094). An account under active attack is handled by
-// password reset / session revocation, not by refusing login.
+// There is no account-lock check, and there never is: the sign-in throttle
+// (throttle.go) slows guesses before this runs and never locks an account
+// (ADR-094). An account under active attack is handled by password reset /
+// session revocation, not by refusing login.
 func (s *Service) Authenticate(ctx context.Context, email, plaintext string) (domain.User, []domain.UserTenant, error) {
 	u, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
@@ -175,6 +194,9 @@ func (s *Service) Authenticate(ctx context.Context, email, plaintext string) (do
 	}
 
 	if err := VerifyPassword(u.PasswordHash, plaintext); err != nil {
+		if errors.Is(err, ErrBadCredentials) {
+			return domain.User{}, nil, &wrongPasswordError{userID: u.ID}
+		}
 		return domain.User{}, nil, err
 	}
 

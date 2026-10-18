@@ -3,7 +3,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { returnPath } from '@/lib/returnPath'
 import { SESSION_ENDED_MESSAGE } from '@/lib/errorCopy'
-import { authFormError } from '@/lib/authFormError'
+import { authFormError, signInRateLimitMessage } from '@/lib/authFormError'
 import { Callout } from '@/components/Callout'
 import { useAuth } from '@/contexts/AuthContext'
 import { ApiError } from '@/lib/api'
@@ -51,11 +51,10 @@ export default function LoginPage() {
         if (err.status === 401) {
           setError('Invalid email or password')
         } else if (err.status === 429) {
-          // 429 comes only from the per-IP rate limiter (a ~1-minute window),
-          // never from account lockout — that is deliberately masked as 401 for
-          // anti-enumeration (user/handler.go). So this copy must NOT promise a
-          // 15-minute lockout wait; it describes the rate limit, with no number.
-          setError('Too many attempts. Please wait a moment and try again.')
+          // Two limits answer 429: the sign-in throttle, whose message names
+          // the wait in minutes, and the per-address rate limit. Neither locks
+          // the account.
+          setError(signInRateLimitMessage(err))
         } else if (err.status === 403) {
           setError(signInRefusedMessage(window.isSecureContext, err.message))
         } else {

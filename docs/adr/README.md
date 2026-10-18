@@ -133,7 +133,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [091](091-org-timezone-change-seam-absorb.md) | 2026-07-14 | Accepted | Timezones | Changing the org timezone never bills a full fee for the short period it creates |
 | [092](092-split-billing-timezone-from-display.md) | 2026-07-14 | Proposed | Timezones | Split the billing timezone from the display timezone; deferred until a partner needs it |
 | [093](093-csrf-origin-verification.md) | 2026-07-16 | Accepted | Auth & security | State-changing cookie requests must come from the same site, checked by origin headers |
-| [094](094-login-brute-force-throttle.md) | 2026-07-17 | Accepted (amended) | Auth & security | v1 has no login lockout; a throttle, MFA and breached-password check are designed, deferred |
+| [094](094-login-brute-force-throttle.md) | 2026-07-17 | Accepted (amended) | Auth & security | No login lockout; repeated wrong passwords wait 1 to 15 minutes, per address and email and per email, and a browser that signed in before is never held out (shipped 2026-10-18) |
 | [095](095-login-security-roadmap-and-mfa.md) | 2026-07-17 | Accepted (amended) | Auth & security | TOTP MFA is designed, not built, and waits for a user or security-review ask; the offline breached-password check and the always-Secure production cookie shipped 2026-10-18 |
 | [096](096-unpriced-meter-plan-attach-guard.md) | 2026-07-18 | Accepted (amended) | Pricing & usage | Plans attach only priced meters; a billing meter's last price cannot be removed |
 | [097](097-mid-period-scheduled-cancel-fires-as-immediate-cancel.md) | 2026-07-18 | Accepted (amended) | Subscriptions | A scheduled cancel that falls mid-period fires as an immediate cancel at that time |

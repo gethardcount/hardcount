@@ -219,6 +219,7 @@ func serve() {
 	// exactly that in theory until the 2026-08-11 module audit.)
 	scheduler.SetTokenCleaner(server.TokenSvc)
 	scheduler.SetIdempotencyCleaner(mw.NewIdempotencyCleaner(db))
+	scheduler.SetLoginThrottleCleaner(server.LoginThrottle)
 	scheduler.SetTaxRetrier(server.InvoiceSvc)
 	// Re-issue clawback credit-note drafts whose post-commit Issue() failed
 	// (created atomically with a subscription downgrade/removal). ADR-056

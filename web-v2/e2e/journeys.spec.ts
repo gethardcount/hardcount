@@ -87,6 +87,27 @@ test.describe('signed out', () => {
     await expect(page.getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/login')
   })
 
+  test('repeated wrong passwords: the sign-in page says how long to wait', async ({ page }) => {
+    // An email with no account, so no other test's sign-in is slowed. The
+    // answers are the same as for a real one.
+    const signInAnswer = () => page.waitForResponse(r => new URL(r.url()).pathname === '/v1/auth/login')
+    await page.goto('/login')
+    await page.getByLabel('Email').fill(`nobody-${uniq()}@e2e.test`)
+    await page.getByLabel('Password', { exact: true }).fill('not-the-password-12')
+    const signIn = page.getByRole('button', { name: 'Sign in' })
+    for (let i = 1; i <= 5; i++) {
+      const answered = signInAnswer()
+      await signIn.click()
+      expect((await answered).status(), `wrong password ${i}`).toBe(401)
+      await expect(page.getByText('Invalid email or password')).toBeVisible()
+    }
+    const sixth = signInAnswer()
+    await signIn.click()
+    expect((await sixth).status()).toBe(429)
+    await expect(page.getByText('Too many sign-in attempts. Try again in 1 minute.')).toBeVisible()
+    await expect(page.getByText('Invalid email or password')).toHaveCount(0)
+  })
+
   test('sign-in follows dark mode; the hosted invoice stays light', async ({ page }) => {
     const { invoice } = JSON.parse(fs.readFileSync(seedFile, 'utf8')) as Seed
     await page.addInitScript(() => localStorage.setItem('velox-theme', 'dark'))

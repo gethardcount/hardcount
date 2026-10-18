@@ -115,6 +115,9 @@ type Server struct {
 	SubscriptionSvc     *subscription.Service
 	TokenSvc            *payment.TokenService
 	PaymentReconciler   *payment.Reconciler
+	// LoginThrottle is the sign-in throttle; main.go wires its Cleanup into
+	// the leader's cleanup steps.
+	LoginThrottle *user.LoginThrottle
 
 	// TestClockSvc lets main.go wire the async catchup queue + worker
 	// (per ADR-015 — Stripe-style async test-clock advance) and run
@@ -1252,6 +1255,18 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// distinct from authH (the API-key handler) wired above.
 	dashboardAuthH.SetAuditLogger(auditLogger)
 
+	// The sign-in throttle (ADR-094, amended 2026-10-18): Postgres-only, so it
+	// works without Redis and every replica shares one count. Its HMAC key is
+	// derived from VELOX_ENCRYPTION_KEY, which production requires and config
+	// validates; with no key (local development) it uses a fixed one.
+	throttleKey, err := user.ThrottleKey(strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY")))
+	if err != nil {
+		slog.Error("invalid VELOX_ENCRYPTION_KEY: the sign-in throttle uses the local development key", "error", err)
+		throttleKey, _ = user.ThrottleKey("")
+	}
+	loginThrottle := user.NewLoginThrottle(db, throttleKey, session.DefaultCookieConfig(o.appEnv))
+	dashboardAuthH.SetLoginThrottle(loginThrottle)
+
 	// Team membership: invite / accept / remove (minimal — no RBAC; every
 	// member gets the full owner permission set until roles land). Invite
 	// emails ride the transactional outbox like every other email; accept
@@ -1269,6 +1284,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	membersSvc.SetEmailConfigured(emailSender.IsConfigured())
 	membersH := dashmembers.NewHandler(membersSvc, sessionSvc, session.DefaultCookieConfig(o.appEnv))
 	membersH.SetAuditLogger(auditLogger)
+	// An accepted invite counts as a sign-in for the throttle.
+	membersH.SetSignInRecorder(loginThrottle)
 
 	// Settings → Email: read-only SMTP status, the link env vars and a test
 	// send to the signed-in member.
@@ -1329,6 +1346,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		SubscriptionSvc:     subSvc,
 		TokenSvc:            tokenSvc,
 		PaymentReconciler:   paymentReconciler,
+		LoginThrottle:       loginThrottle,
 		TestClockSvc:        testClockSvc,
 	}
 
@@ -1345,30 +1363,26 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// a Redis blip), and /v1/auth counts in this process (operator login
 	// must survive a Redis blip, and so must its throttle).
 	prod := o.appEnv == "production"
-	// Login brute-force protection: v1 ships NO automatic per-account throttle.
-	// The old users.locked_until auto-lockout (fragmenting across Redis↔in-memory
-	// and weaponizable — any known operator email → a 15-min lockout on demand)
-	// was removed, and the interim Postgres throttle that briefly replaced it was
-	// removed too, to keep v1 lean until the full control lands. The per-IP
-	// /v1/auth limiter below is the brute-force floor; the full design (a
-	// non-weaponizable throttle + MFA + login-time breached-password check) is
-	// documented in ADR-094 and deferred as one unit.
+	// Login brute-force protection has two layers. The per-IP /v1/auth limiter
+	// below is the outer one. The sign-in throttle (user.LoginThrottle, wired
+	// above) is the inner one: per (address × email) and per email, in
+	// Postgres, never a lockout (ADR-094). The old users.locked_until
+	// auto-lockout (fragmenting across Redis↔in-memory and weaponizable — any
+	// known operator email → a 15-min lockout on demand) stays removed.
 	rateLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
 	// In production, refuse requests when Redis is unreachable rather than
 	// silently disabling rate limiting (DDoS vector). The general/IP limiter
 	// deliberately stays fail-open in non-prod: per the industry split (OWASP
 	// ASVS + practitioner consensus) generic API rate limiting should fail
-	// open on a store blip. v1 has no dedicated per-account login throttle
-	// (deferred — ADR-094); the per-IP /v1/auth limiter below is the floor.
+	// open on a store blip. The sign-in throttle does not depend on Redis.
 	if prod {
 		rateLimiter.SetFailClosed(true)
 	}
 	// /v1/auth gets its OWN limiter instance — same Redis namespace and
 	// limits as the general one (shared buckets), but NEVER fail-closed:
 	// locking operators out of login during a Redis blip re-introduces
-	// the DoS the #21 design avoids. This per-IP limiter is the only
-	// brute-force floor on auth in v1 — a per-(IP×account) login throttle
-	// is deferred (ADR-094). The HA-readiness audit (docs/dev/
+	// the DoS the #21 design avoids. Login keeps a brute-force floor even
+	// then: the sign-in throttle lives in Postgres. The HA-readiness audit (docs/dev/
 	// docs/records/ha-readiness-2026-07-06.md) found the prior wiring mounted the
 	// fail-closed general limiter on /v1/auth, contradicting this
 	// stated design — a prod Redis outage killed dashboard login.

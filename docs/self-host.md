@@ -188,7 +188,9 @@ Velox reads its settings from environment variables. The tables below list the m
 | `REDIS_URL` | Redis, for rate limiting. Required in `production`. If Redis goes down later, sign-in stays rate-limited, but each copy counts on its own. |
 | `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward. Use `none` if there is no proxy. Required in `production`. Velox refuses to start if an entry is not an IP address or CIDR. |
 
-Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit. The audit log and dashboard sign-in records would also show the load balancer's address.
+Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit. The audit log and dashboard sign-in records would also show the load balancer's address. And the sign-in throttle would treat everyone as one address: 5 wrong passwords for an email, from anyone, would make every new browser wait to sign in with it.
+
+To check it, sign in, switch the dashboard to test mode and open the audit log. The newest `login` entry shows the address Velox saw. It should be yours, not the load balancer's.
 
 **Read once, when creating the first tenant** (by `make bootstrap`, not by the server)
 
@@ -225,6 +227,20 @@ Raise it if your usage pipeline can deliver an event more than an hour late. Usa
 
 These close a period at once, with no grace: an immediate cancel, `POST /v1/subscriptions/{id}/retry-billing`, any other change to a subscription whose period has ended, and advancing a test clock. `POST /v1/billing/run` waits for the grace, like the hourly run.
 
+## Repeated wrong passwords
+
+Velox slows down anyone who guesses passwords at the dashboard sign-in. It never locks an account. It needs no setup and no Redis: the count is kept in Postgres, so every copy of the server shares it.
+
+- **One address and one email:** the first 5 wrong passwords are checked as usual. After that, each try waits 1 minute, then 2, 4 and 8, then 15 minutes.
+- **One email from many addresses:** the same waits start after 10 tries in total. This stops guesses spread over many addresses.
+- **A browser that signed in before is never held out.** A sign-in leaves a `velox_device` cookie in the browser. Its tries count only against that browser, so other people's guesses do not slow it.
+- **The right password clears the email's count,** and the count for the address it came from. A completed password reset and an accepted invite do the same.
+- **The answer is the same whether or not the email has an account,** so a wait tells no one which emails exist.
+
+During a wait the sign-in page says "Too many sign-in attempts. Try again in N minutes." A count with no try for 24 hours starts over. The count uses the client address, so set `TRUST_PROXY` correctly (see [Settings](#settings)).
+
+If a team member is held out on a new browser, they can sign in from a browser they used before, or reset their password from the new one. To clear every count, see [Sign-in says "Too many sign-in attempts"](ops/runbook/sign-in-throttled.md).
+
 ## How much load it takes
 
 On AWS, one database took **1,000 usage events per second** on a
@@ -252,6 +268,7 @@ The metrics worth an alert:
 | `velox_audit_write_errors_total` | Audit log entries that failed to save |
 | `velox_audit_uncovered_mutation_total` | Changes made with no audit log entry. Should stay at zero. |
 | `velox_stripe_breaker_state` | Whether Velox has paused calls to Stripe after repeated failures. 0 is normal, 2 is paused. |
+| `velox_auth_login_total` | Dashboard sign-ins by `outcome`. A rising `throttled` or `bad_credentials` count means someone is guessing passwords. |
 
 What to do when one fires: the [operations runbook](ops/runbook/index.md).
 
