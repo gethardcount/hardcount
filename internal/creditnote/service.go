@@ -316,7 +316,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// that invoice's own time domain rather than wall-clock.
 	ctx = s.bindForInvoice(ctx, tenantID, input.InvoiceID)
 	// In-flight payment gate. An OPERATOR credit note must not reduce an
-	// invoice's amount_due while its payment is in flight (processing/unknown):
+	// invoice's amount_due while its payment is in flight (processing/unknown,
+	// or a charge record: a charge sent to Stripe whose result is not saved
+	// yet, ADR-127 — Invoice.PaymentInFlight answers both):
 	// at settle, MarkPaid records amount_paid off the now-lower amount_due
 	// (invoice/postgres.go KNOWN EDGE), under-sizing the refund cap. So block it
 	// — the operator settles or cancels the payment first. Consistent with
@@ -1759,7 +1761,8 @@ func (s *Service) holdIssue(ctx context.Context, tenantID string, cn domain.Cred
 	}
 
 	// Defer-until-settle gate (ADR-059). The source's charge is still in flight
-	// (processing/unknown) — its captured amount is unknown. Issuing now would
+	// (processing/unknown, or a charge record, ADR-127) — its captured amount
+	// is unknown. Issuing now would
 	// either reduce amount_due before MarkPaid records the captured amount
 	// (under-record / undersized refund cap) or relieve a charge that may yet
 	// succeed. Leave the draft status='draft' + issue_pending so the reconciler

@@ -164,6 +164,14 @@ var (
 		[]string{"mode", "class"},
 	)
 
+	interruptedChargeResolutions = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_interrupted_charge_resolutions_total",
+			Help: "Charges interrupted between Stripe and their saved result (or given an unclear answer), resolved by the reconciler's check with Stripe (ADR-127), by result: succeeded, declined, processing, canceled (an orphaned PaymentIntent on an invoice that moved on), not_found (Stripe never got the request; charged normally) and parked (Stripe unreadable for 24 hours).",
+		},
+		[]string{"result"},
+	)
+
 	scheduledCleanupRows = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_scheduled_cleanup_rows_total",
@@ -305,6 +313,13 @@ func RecordStripeBreakerState(state string) {
 // differently from "nothing is parked".
 func RecordParkedSearchError(mode, class string) {
 	parkedSearchErrors.WithLabelValues(mode, class).Inc()
+}
+
+// RecordInterruptedChargeResolution counts one interrupted charge the
+// reconciler's check ended (ADR-127). A parked one also raises the parked
+// gauge and its CRITICAL; the rest need no one.
+func RecordInterruptedChargeResolution(result string) {
+	interruptedChargeResolutions.WithLabelValues(result).Inc()
 }
 
 // Metrics returns middleware that records HTTP request metrics.

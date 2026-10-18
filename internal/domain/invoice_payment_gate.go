@@ -57,7 +57,7 @@ type PaymentBlock struct {
 // every surface derives from, so the next change to what a payment state means
 // cannot leave seven stale copies behind.
 //
-// Three cases:
+// Four cases:
 //
 //   - NOT in flight — nothing here blocks; the caller's own status rules
 //     (paid/voided/draft) still apply and are deliberately NOT folded in, since
@@ -68,46 +68,14 @@ type PaymentBlock struct {
 //     to use it.
 //   - IN FLIGHT with a known PaymentIntent — genuinely resolving, so waiting is
 //     the correct advice.
-//
-// EXTENDING THIS IF ADR-106's LEDGER IS EVER RESUMED. That design adds a
-// charge_intents row whose state answers the same question more precisely, and
-// this function is where it plugs in — not into the seven call sites:
-//
-//	intent open        → an attempt is in flight and recovery is actively
-//	                     retrying it, so this is the WAIT case, even though the
-//	                     invoice has no PaymentIntent id yet. Today that shape
-//	                     reads as parked; the ledger is exactly what lets it be
-//	                     told apart.
-//	intent needs_review → recovery gave up, so it is the PARKED case: refuse
-//	                     everything but mark-uncollectible and say so.
-//
-// That is one branch here, and every surface — five service guards, two HTTP
-// handlers, the attention banner, the dashboard menu — inherits it. The reason
-// to say this out loud is that two adversarial review rounds found the ledger's
-// needs_review state had NO operator exit and no honest copy, and the cause was
-// structural: expressing a give-up state used to mean writing eight strings and
-// wiring a menu, so it got written zero times. Extend the function; do not
-// re-scatter the rule.
-//
-// The gate needs ONE more fact, and where that fact enters is the real decision.
-// Two ways in, and they are not equally priced:
-//
-//   - ON THE READ MODEL (preferred): the invoice store LEFT JOINs the unresolved
-//     charge_intents row and populates one more field, exactly as the invoice
-//     already carries stripe_payment_intent_id, payment_status and
-//     charge_attempt_seq. This signature does not change, the seven callers do
-//     not change, and no domain boundary is crossed. Costs one join on the
-//     invoice read path, hitting at most one row (the partial unique index on
-//     unresolved intents already exists).
-//   - VIA THE SIGNATURE: pass the intent state as a parameter. The edit here is
-//     trivial, but every caller holds only an Invoice, so each must LOAD the
-//     intent — and internal/invoice reaching into internal/payment is the
-//     cross-domain coupling internal/arch/boundaries_test.go fails the build
-//     over. It threads a new dependency through five services and two handlers
-//     to answer a question they already believe they can answer.
-//
-// Neither is pre-built here. Speculative parameters for a parked design are how
-// the ledger reached 1,900 lines in the first place.
+//   - CHARGE RECORDED (ADR-127) — a charge was sent to Stripe and its result is
+//     not saved. The payment status is still pending or failed, so this case
+//     is the charge record (Invoice.ChargeStartedAt) on the read model, which
+//     is where ADR-106's parked ledger planned to plug in: one more field on
+//     the invoice row, read by the seven callers through this function and
+//     PaymentInFlight. Everything is refused, the write-off included: unlike
+//     a parked invoice, this charge is being confirmed, and the reconciler
+//     asks Stripe about it within about an hour. The refusal says so.
 func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 	if !inv.PaymentInFlight() {
 		return PaymentBlock{}
@@ -129,12 +97,26 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 		}
 	}
 
+	// Charge recorded: the same in-flight answer, with the wait it carries.
+	if inv.ChargeStartedAt != nil && inv.PaymentStatus != PaymentProcessing && inv.PaymentStatus != PaymentUnknown {
+		return PaymentBlock{
+			Blocked: true,
+			Code:    "payment_in_flight",
+			Message: chargeRecordedMessage,
+		}
+	}
+
 	return PaymentBlock{
 		Blocked: true,
 		Code:    "payment_in_flight",
 		Message: inFlightMessage(action),
 	}
 }
+
+// chargeRecordedMessage is the refusal while a charge record exists (ADR-127).
+// It answers both halves for every action alike: why (Stripe is confirming a
+// charge), and what to do (try again later, and how much later).
+const chargeRecordedMessage = "A charge on this invoice is being confirmed with Stripe. Try again later. An interrupted charge is confirmed within about an hour."
 
 // PaymentBlocksActionHeld is PaymentBlocksAction plus the charge hold, for the
 // three actions that settle what is owed: void, write-off and offline payment
@@ -164,9 +146,11 @@ func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, chargeHeld bool)
 		return PaymentBlock{
 			Blocked: true,
 			Code:    "payment_in_flight",
-			// The hold can outlive a charge that was never sent (a breaker-open
-			// or credentials failure returns without releasing it), so the
-			// advice is a short wait, never "check Stripe".
+			// The hold alone, with no charge record, is a charge between its
+			// claim and its Stripe call (or one whose charger died there): no
+			// request was sent, so the advice is a short wait, never "check
+			// Stripe". A charge that reached its call holds a record, which
+			// PaymentBlocksAction answers above.
 			Message: "a charge on this invoice is in progress — try again in a few minutes",
 		}
 	}

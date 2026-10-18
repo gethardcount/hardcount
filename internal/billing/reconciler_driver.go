@@ -13,8 +13,16 @@ import (
 // never abort the batch, and the same item may be handed back next tick.
 //
 // ELIGIBILITY RULE — audited across all seven sweeps 2026-07-30. The predicate
-// must survive the very crash it recovers from, which permits two shapes and
-// forbids a third:
+// must survive the very crash it recovers from, which permits three shapes and
+// forbids a fourth:
+//
+//  0. RECORD BEFORE THE EFFECT — a marker written in a commit of its own BEFORE
+//     an external call that cannot be undone, and cleared only once the call's
+//     result is saved. It exists whenever the effect may have happened, so no
+//     crash point can hide one. The charge record (ADR-127,
+//     invoices.charge_started_*) is this shape: payment_unknown's first sweep,
+//     the interrupted-charge check, lists records 10 minutes old and asks
+//     Stripe what each charge did.
 //
 //  1. STRUCTURAL — the missing effect IS the predicate; no marker exists.
 //     tax_commit (has tax_calculation_id, no tax_transaction_id),
@@ -44,10 +52,10 @@ import (
 // carry a 24h freshness window (anti-churn, #310) that bounds DETECTION only —
 // cn_tax_reversal promotes a marker-less orphan onto its unbounded marker
 // branch on the first failed re-drive (2026-08-30), so an orphan is never aged
-// out of recovery, only out of the cheap scan; and payment_unknown
-// keys on a payment_status the CHARGE path must have stamped — a crash before
-// that stamp is recovered by the auto-charge retry's stable Stripe idempotency
-// key instead, not by this sweep.
+// out of recovery, only out of the cheap scan; and payment_unknown's
+// status sweeps key on a payment_status the CHARGE path must have stamped — a
+// crash or a timeout before that stamp leaves the charge record (shape 0),
+// which the interrupted-charge check in the same reconciler resolves.
 //
 // This is the seam the future obligation-queue drainer (ADR-062) plugs into:
 // when the four re-drive sweeps migrate onto the generalised webhook_outbox, the
@@ -82,7 +90,9 @@ var recordReconcilerSweep = mw.RecordReconcilerSweep
 // ORDER IS LOAD-BEARING: the tax reconcilers must run before auto-charge so a
 // freshly-finalised invoice's finalize-time auto-charge doesn't slip a tick, and
 // payment_unknown runs first so a stuck-unknown charge that actually succeeded is
-// marked paid before the retry path considers re-charging. An order-asserting
+// marked paid before the retry path considers re-charging, and an interrupted
+// charge Stripe never got is released in time for the same tick's auto-charge
+// sweep (ADR-127). An order-asserting
 // test guards this. Only wired (non-nil) reconcilers are included.
 func (s *Scheduler) reconcilers() []Reconciler {
 	var rs []Reconciler

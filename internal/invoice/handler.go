@@ -1033,11 +1033,13 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		respond.Validation(w, r, "invoice is already paid")
 		return
 	}
-	if inv.PaymentStatus == domain.PaymentUnknown {
+	if inv.PaymentStatus == domain.PaymentUnknown || inv.ChargeStartedAt != nil {
 		// A possibly-succeeded payment is the reconciler's to resolve —
 		// blind re-charging an ambiguous outcome is how double charges
-		// happen. The claim below also excludes 'unknown'; this gate
-		// exists to say WHY instead of a generic conflict.
+		// happen. The claim below also excludes 'unknown' and a charge
+		// record (ADR-127: a charge sent to Stripe whose result is not saved
+		// yet); this gate exists to say WHY instead of a generic conflict,
+		// and for the record, how long the wait is.
 		//
 		// Carries the gate's CODE, not just its message. respond.Validation
 		// flattens everything to 422/validation_error, so a walk of all four

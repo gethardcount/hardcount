@@ -448,22 +448,22 @@ func TestListInterruptedCharges(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Charge Record List")
 	store := invoice.NewPostgresStore(db)
 
-	seedRecord := func(c context.Context, num, age, synced string) domain.Invoice {
+	seedRecord := func(c context.Context, num string, age, synced time.Duration) domain.Invoice {
 		t.Helper()
 		inv := seedClaimableInvoice(t, db, c, tenantID, num)
 		recordCharge(t, db, store, c, tenantID, inv.ID)
-		execBypass(t, db, `UPDATE invoices SET charge_started_at = now() - $2::interval WHERE id = $1`, inv.ID, age)
-		if synced != "" {
-			execBypass(t, db, `UPDATE invoices SET provider_synced_at = now() - $2::interval WHERE id = $1`, inv.ID, synced)
+		execBypass(t, db, `UPDATE invoices SET charge_started_at = now() - make_interval(secs => $2) WHERE id = $1`, inv.ID, age.Seconds())
+		if synced > 0 {
+			execBypass(t, db, `UPDATE invoices SET provider_synced_at = now() - make_interval(secs => $2) WHERE id = $1`, inv.ID, synced.Seconds())
 		}
 		return inv
 	}
-	young := seedRecord(ctx, "INV-LIST-YOUNG", "1 minute", "")
-	due := seedRecord(ctx, "INV-LIST-DUE", "11 minutes", "")
-	old := seedRecord(ctx, "INV-LIST-OLD", "25 hours", "")
-	checkedRecently := seedRecord(ctx, "INV-LIST-RECENT", "2 hours", "1 minute")
-	checkedLongAgo := seedRecord(ctx, "INV-LIST-LONGAGO", "2 hours", "11 minutes")
-	live := seedRecord(liveCtx, "INV-LIST-LIVE", "2 hours", "")
+	young := seedRecord(ctx, "INV-LIST-YOUNG", time.Minute, 0)
+	due := seedRecord(ctx, "INV-LIST-DUE", 11*time.Minute, 0)
+	old := seedRecord(ctx, "INV-LIST-OLD", 25*time.Hour, 0)
+	checkedRecently := seedRecord(ctx, "INV-LIST-RECENT", 2*time.Hour, time.Minute)
+	checkedLongAgo := seedRecord(ctx, "INV-LIST-LONGAGO", 2*time.Hour, 11*time.Minute)
+	live := seedRecord(liveCtx, "INV-LIST-LIVE", 2*time.Hour, 0)
 
 	got, err := store.ListInterruptedCharges(ctx, 10*time.Minute, 24*time.Hour, 50)
 	if err != nil {

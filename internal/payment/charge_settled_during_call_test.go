@@ -159,12 +159,32 @@ func TestChargeInvoice_UnnamedTimeout_ParkAnnouncedOnlyWhenParked(t *testing.T) 
 		}
 	})
 
-	t.Run("control, nothing recorded during the call: parked and announced", func(t *testing.T) {
+	// Since the charge record (ADR-127) an unnamed timeout parks nothing: the
+	// record stays and the interrupted-charge check asks Stripe. The one
+	// unnamed answer that still parks is the "same key, different
+	// parameters" 409, so that is the control.
+	t.Run("control, an unnamed timeout with nothing recorded during the call: not parked, record kept", func(t *testing.T) {
 		logs := captureLogs(t)
 		invoices := newMockInvoiceUpdater()
 		snapshot := pendingSnapshot()
 		invoices.invoices["inv_1"] = snapshot
 		stripe := NewStripe(&mockStripeClient{shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
+		_, _ = stripe.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+		if strings.Contains(logs.String(), parked) {
+			t.Fatalf("park announced for an unnamed timeout, which now keeps its charge record:\n%s", logs)
+		}
+		if !invoices.recordHeld("inv_1") {
+			t.Fatal("charge record cleared on an unnamed timeout")
+		}
+	})
+
+	t.Run("control, same key with different parameters, nothing recorded during the call: parked and announced", func(t *testing.T) {
+		logs := captureLogs(t)
+		invoices := newMockInvoiceUpdater()
+		snapshot := pendingSnapshot()
+		invoices.invoices["inv_1"] = snapshot
+		conflict := &PaymentError{Message: "Keys for idempotent requests can only be used with the same parameters", Unknown: true, IdempotencyConflict: true}
+		stripe := NewStripe(&mockStripeClient{shouldFail: true, failErr: conflict}, invoices, newMockWebhookStore(), nil, nil)
 		_, _ = stripe.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
 		if !strings.Contains(logs.String(), parked) {
 			t.Fatalf("park not announced for an invoice that did park:\n%s", logs)

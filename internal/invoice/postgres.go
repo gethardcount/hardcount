@@ -210,7 +210,7 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	COALESCE(payment_anomaly_kind,''), COALESCE(payment_anomaly_payment_intent_id,''), COALESCE(payment_anomaly_captured_cents,0),
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
 	COALESCE(provider_payment_status,''), provider_synced_at,
-	bill_to_snapshot, supplier_snapshot`
+	bill_to_snapshot, supplier_snapshot, charge_started_at`
 
 // qualifiedInvCols returns invCols with every column reference prefixed
 // by the given table alias. Used by ADR-029's per-clock queries that
@@ -2219,6 +2219,12 @@ func collectionQueuedAtFinalize(status domain.InvoiceStatus, paymentStatus domai
 // (domain.HostedCheckoutLiveSQL says when a page counts as live).
 var noLiveHostedPageSQL = "NOT " + domain.HostedCheckoutLiveSQL("invoices.id")
 
+// chargeNotHeldSQL keeps every Velox charge off an invoice another charge
+// holds: a live charge hold, or a charge record (ADR-127) a crash or a
+// timeout left. The three charge claims share it, so a fourth cannot forget
+// the record.
+const chargeNotHeldSQL = domain.ChargeNotHeldSQL
+
 // lockInvoiceForChargeClaim takes the invoice row lock before a charge
 // claim's UPDATE. Without it the UPDATE could miss a hosted session created
 // concurrently: the hosted claim (payment.CheckoutSessionStore.ClaimOpen)
@@ -2284,7 +2290,7 @@ func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string
 		  AND auto_charge_pending = TRUE
 		  AND payment_status = 'pending'
 		  AND status = 'finalized'
-		  AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now())
+		  AND `+chargeNotHeldSQL+`
 		  AND `+noLiveHostedPageSQL+`
 	`, id)
 	if err != nil {
@@ -2408,7 +2414,7 @@ func (s *PostgresStore) ClaimChargeForManualCollect(ctx context.Context, tenantI
 		  AND payment_status IN ('pending', 'failed')
 		  AND status = 'finalized'
 		  AND amount_due_cents > 0
-		  AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now())
+		  AND `+chargeNotHeldSQL+`
 		  AND `+noLiveHostedPageSQL+`
 	`, id)
 	if err != nil {
@@ -2449,7 +2455,7 @@ func (s *PostgresStore) claimChargeLease(ctx context.Context, tenantID, id strin
 		  AND payment_status IN ('pending', 'failed')
 		  AND status = 'finalized'
 		  AND amount_due_cents > 0
-		  AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now())
+		  AND `+chargeNotHeldSQL+`
 		  AND `+noLiveHostedPageSQL+`
 	`, id)
 	if err != nil {
@@ -3486,6 +3492,11 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.ProviderPaymentStatus, &inv.ProviderSyncedAt,
 		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &inv.BillToSnapshot, Open: s.openBillTo},
 		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &inv.SupplierSnapshot},
+		// The charge record (ADR-127): every read of an invoice carries it,
+		// so every "may a payment be open?" check (Invoice.PaymentInFlight)
+		// sees it, the locked rows of void, write-off and offline payment
+		// included.
+		&inv.ChargeStartedAt,
 	}
 }
 

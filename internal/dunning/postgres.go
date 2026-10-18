@@ -918,10 +918,15 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 			-- A live hosted Checkout page blocks the claim the same way (one
 			-- payer at a time, domain.HostedCheckoutLiveSQL), so it is part of
 			-- the same exclusion.
+			--
+			-- A charge record (ADR-127: a charge sent to Stripe whose result is
+			-- not saved yet) refuses the claim the same way, so it is part of
+			-- the same exclusion (domain.PaymentInFlightSQL, the SQL twin of
+			-- Invoice.PaymentInFlight).
 			AND NOT EXISTS (
 			  SELECT 1 FROM invoices i
 			  WHERE i.id = r.invoice_id
-			    AND (i.payment_status IN ('processing', 'unknown')
+			    AND (`+domain.PaymentInFlightSQL("i")+`
 			      OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
 			    AND i.status NOT IN ('voided', 'uncollectible')
 			)
@@ -991,7 +996,7 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 			-- in-flight sim invoice can consume the whole catchup budget and stall
 			-- every other run on the clock.
 			AND NOT (
-			  (i.payment_status IN ('processing', 'unknown')
+			  (`+domain.PaymentInFlightSQL("i")+`
 			    OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
 			  AND i.status NOT IN ('voided', 'uncollectible')
 			)

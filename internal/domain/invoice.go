@@ -81,7 +81,8 @@ const (
 // uncollectible an invoice with open payments").
 //
 // Code outside this file asks Invoice.PaymentInFlight instead, which answers
-// for the whole invoice row; internal/arch pins that.
+// for the whole invoice row (the charge record joins there, ADR-127);
+// internal/arch pins that.
 func (s InvoicePaymentStatus) IsInFlight() bool {
 	return s == PaymentProcessing || s == PaymentUnknown
 }
@@ -100,8 +101,29 @@ func (s InvoicePaymentStatus) IsInFlight() bool {
 // go through while Stripe may be taking the money. PaymentInFlightSQL is the
 // same rule for a SQL predicate.
 func (i Invoice) PaymentInFlight() bool {
-	return i.PaymentStatus.IsInFlight()
+	return i.ChargeStartedAt != nil || i.PaymentStatus.IsInFlight()
 }
+
+// PaymentInFlightSQL is PaymentInFlight as a SQL predicate on the invoices row
+// aliased alias, for the scans that must skip an invoice whose payment may be
+// open: dunning's due-run pickers and the deferred credit-note scans. Keep the
+// two in step: a scan that asked only the payment status would pick, every
+// tick, an invoice whose charge record refuses it.
+func PaymentInFlightSQL(alias string) string {
+	return "(" + alias + ".payment_status IN ('processing', 'unknown') OR " + alias + ".charge_started_at IS NOT NULL)"
+}
+
+// ChargeNotHeldSQL is the predicate the three Velox charge claims (auto-charge,
+// dunning retry, Collect payment) add on the invoices row: no charge holds it,
+// neither a live charge hold nor a charge record (ADR-127). The hold lapses
+// after five minutes; the record stays until the charge's result is saved or
+// the reconciler has asked Stripe, so a crash or a timeout cannot reopen the
+// invoice to a second charge.
+const ChargeNotHeldSQL = `(auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now()) AND charge_started_at IS NULL`
+
+// ChargeHeldSQL is ChargeNotHeldSQL's opposite, for the hosted page's claim:
+// a Velox charge holds the invoice, so the customer cannot pay it there.
+const ChargeHeldSQL = `(COALESCE(auto_charge_claimed_until > now(), false) OR charge_started_at IS NOT NULL)`
 
 // OutOfBandPaymentIntentPrefix marks the synthetic PaymentIntent id that
 // RecordOfflinePayment stamps ("out_of_band:<RFC3339>") so an operator-recorded

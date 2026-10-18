@@ -993,10 +993,11 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 				// the lease looks again: a payment that succeeded resolves the
 				// run as recovered, and one that failed reaches the final
 				// actions through exhaust-on-entry. While the payment is
-				// processing or unknown the due-run pickers skip the run, so the
-				// wait costs no ticks. A parked invoice waits for an operator,
-				// whose write-off closes the run as not collectible without the
-				// subscription action.
+				// processing or unknown, or a charge record is on the invoice (a
+				// crash or a timeout on the final retry leaves one, ADR-127), the
+				// due-run pickers skip the run, so the wait costs no ticks. A
+				// parked invoice waits for an operator, whose write-off closes
+				// the run as not collectible without the subscription action.
 				slog.Info("dunning final action held: a payment on this invoice may still go through; a later dunning tick checks again",
 					"run_id", run.ID, "invoice_id", run.InvoiceID,
 					"payment_status", loaded.PaymentStatus,

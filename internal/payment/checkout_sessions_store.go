@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -84,8 +85,7 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	var amountDue int64
 	var charging bool
 	err = tx.QueryRowContext(ctx, `
-		SELECT status, payment_status, amount_due_cents,
-		       COALESCE(auto_charge_claimed_until > now(), false)
+		SELECT status, payment_status, amount_due_cents, `+domain.ChargeHeldSQL+`
 		FROM invoices WHERE id = $1 FOR SHARE
 	`, invoiceID).Scan(&status, &paymentStatus, &amountDue, &charging)
 	if err != nil {
@@ -101,11 +101,14 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	if paymentStatus == "processing" || paymentStatus == "unknown" {
 		return CheckoutClaim{}, false, ErrChargeInFlight
 	}
-	// A held charge lease is a Velox charge on its way to Stripe: its
-	// payment_status is still pending/failed until the call returns. The
-	// charge claims lock this row FOR UPDATE before taking the lease, so this
-	// FOR SHARE read either waits for that claim and sees its lease, or wins
-	// and the claim sees the session this transaction inserts.
+	// A held charge lease, or a charge record (ADR-127), is a Velox charge on
+	// its way to Stripe: its payment_status is still pending/failed until its
+	// result is saved. The record outlives the lease: after a crash or a
+	// timeout it stays until the reconciler has asked Stripe, so the page
+	// stays closed until then too. The charge claims lock this row FOR UPDATE
+	// before taking the lease, so this FOR SHARE read either waits for that
+	// claim and sees its lease, or wins and the claim sees the session this
+	// transaction inserts.
 	if charging {
 		return CheckoutClaim{}, false, ErrChargeInFlight
 	}

@@ -5333,15 +5333,16 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			// OWNERSHIP HANDOFF: dunning's retry schedule drives every later
 			// attempt, so the sweep is never a second retry owner (ADR-116).
 			//
-			// Cleared even if the charger could not record 'failed' (it logs
-			// CRITICAL then). Keeping the invoice queued would re-charge it
-			// under the same idempotency key with rebuilt parameters (amount
-			// after credits, a swapped card, the test-clock anchor), which
-			// Stripe rejects as an idempotency conflict, and that parks the
-			// invoice as unknown for good. The inline dunning run, which
-			// retries under its own key, and the payment_failed webhook own it:
-			// the charge call wrote its attempt row before reporting, so the
-			// webhook records the decline as the invoice's newest attempt.
+			// Cleared even if the charger could not record 'failed'. Then its
+			// charge record stays on the invoice (ADR-127), so no charge path
+			// takes it, and the payment_failed webhook or the reconciler's
+			// interrupted-charge check records the decline through
+			// SettleFailed, which starts dunning: the charge call wrote its
+			// attempt row before reporting, so either records the decline as
+			// the invoice's newest attempt. Keeping the invoice queued would
+			// re-charge it under the same idempotency key with rebuilt
+			// parameters (amount after credits, a swapped card, the test-clock
+			// anchor), which Stripe rejects as an idempotency conflict.
 			var pe *payment.PaymentError
 			if errors.As(err, &pe) && !pe.Unknown {
 				if err := e.invoices.SetAutoChargePending(ctx, inv.TenantID, inv.ID, false); err != nil {
@@ -5361,9 +5362,10 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 				errs = append(errs, fmt.Errorf("charge invoice %s refused: %w", inv.ID, err))
 				continue
 			}
-			// Transient (breaker open / pre-Stripe timeout): skip
-			// this tick without bumping dunning. The next catchup
-			// will retry.
+			// Transient (breaker open, credentials unreadable, the charge
+			// record refused, or a 429): skip this tick without bumping
+			// dunning. The next sweep retries; after a 429 the charge
+			// record stays until the reconciler has asked Stripe.
 			if errors.Is(err, payment.ErrPaymentTransient) {
 				slog.Info("auto-charge skipped; transient breaker/timeout",
 					"invoice_id", inv.ID)

@@ -256,7 +256,9 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 // ListPendingTaxCommit; each row carries its TenantID so the service re-issues
 // under the right tenant.
 //
-// "Ready" = the source invoice's payment is NOT in flight (processing/unknown).
+// "Ready" = the source invoice's payment is NOT in flight (processing/unknown,
+// or a charge record: a charge sent to Stripe whose result is not saved yet,
+// ADR-127; domain.PaymentInFlightSQL).
 // This is the defer-until-settle gate (ADR-059): an automated clawback against a
 // source whose charge is still settling is created as a draft but NOT issued —
 // issuing it now would reduce amount_due before MarkPaid records the captured
@@ -313,7 +315,7 @@ func (s *PostgresStore) ListPendingClawbackDrafts(ctx context.Context, batch int
 		    SELECT 1 FROM invoices i
 		    WHERE i.id = credit_notes.invoice_id
 		      AND i.tenant_id = credit_notes.tenant_id
-		      AND i.payment_status IN ('processing', 'unknown')
+		      AND `+domain.PaymentInFlightSQL("i")+`
 		      AND i.status NOT IN ('voided', 'uncollectible')
 		  )
 		ORDER BY updated_at ASC
@@ -364,7 +366,7 @@ func (s *PostgresStore) ListPendingClawbackDraftsForClock(ctx context.Context, t
 		    SELECT 1 FROM invoices i
 		    WHERE i.id = credit_notes.invoice_id
 		      AND i.tenant_id = credit_notes.tenant_id
-		      AND i.payment_status IN ('processing', 'unknown')
+		      AND `+domain.PaymentInFlightSQL("i")+`
 		      AND i.status NOT IN ('voided', 'uncollectible')
 		  )
 		ORDER BY updated_at ASC

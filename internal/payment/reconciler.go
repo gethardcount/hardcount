@@ -185,6 +185,11 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 
 // Run reconciles unresolved payments against Stripe:
+//   - charge records older than 10 minutes (ADR-127, reconciler_interrupted.go):
+//     charges interrupted between Stripe and the saved result, or given an
+//     unclear answer. First, so a charge Stripe never got is released before
+//     the same tick's auto-charge sweep runs, and a payment Stripe took is
+//     recorded before anything considers charging again,
 //   - 'unknown' (ambiguous charge outcomes) past the short cool-off,
 //   - stale 'processing' (the dropped-webhook backstop, ADR-049 Phase 2) past
 //     the longer processing cool-off,
@@ -200,13 +205,15 @@ func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 	// velox_parked_invoices) — not stamped here, where only the billing
 	// leader would set it.
 
+	n0, e0 := r.sweepInterruptedCharges(ctx, limit)
 	n1, e1 := r.sweep(ctx, "unknown", r.invoices.ListUnknownPayments, r.olderThan, limit)
 	n2, e2 := r.sweep(ctx, "processing", r.invoices.ListProcessingPayments, r.olderThanProcessing, limit)
 	n3, e3 := r.sweepParked(ctx, limit)
 	n4, e4 := r.sweepHostedSessions(ctx, limit)
-	errs := append(e1, e2...)
+	errs := append(e0, e1...)
+	errs = append(errs, e2...)
 	errs = append(errs, e3...)
-	return n1 + n2 + n3 + n4, append(errs, e4...)
+	return n0 + n1 + n2 + n3 + n4, append(errs, e4...)
 }
 
 // parkedSearchAge is how long an invoice must have been parked before the

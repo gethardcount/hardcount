@@ -139,7 +139,15 @@ func isRateLimited(err error) bool {
 // ambiguous outcomes because it carries a stronger fact: an attempt under this
 // exact key definitely reached Stripe. Callers use it to name the key in an
 // operator-facing ERROR, since the dashboard is searchable by it.
+//
+// It reads the PaymentError flag classifyStripeError sets: the charge path
+// gets a *PaymentError, which does not wrap the *stripe.Error it came from,
+// so checking the stripe error type alone never matched there.
 func isIdempotencyConflict(err error) bool {
+	var pe *PaymentError
+	if errors.As(err, &pe) {
+		return pe.IdempotencyConflict
+	}
 	var stripeErr *stripe.Error
 	return errors.As(err, &stripeErr) && stripeErr.Type == stripe.ErrorTypeIdempotency
 }
@@ -181,6 +189,7 @@ func classifyStripeError(err error) *PaymentError {
 	if stripeErr.PaymentIntent != nil {
 		pe.PaymentIntentID = stripeErr.PaymentIntent.ID
 	}
+	pe.IdempotencyConflict = stripeErr.Type == stripe.ErrorTypeIdempotency
 
 	// A 409 is never a definite failure, whatever its type (#976). Stripe
 	// answers 409 while another request with the same idempotency key is still
@@ -272,7 +281,7 @@ func NewLiveStripeClient(clients *StripeClients) *LiveStripeClient {
 func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
 	sc, err := c.clients.ResolveCtx(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: stripe credential lookup: %v", ErrPaymentTransient, err)
+		return nil, fmt.Errorf("%w: %w: stripe credential lookup: %v", ErrPaymentTransient, ErrNotSent, err)
 	}
 	if sc == nil {
 		return nil, ErrStripeNotConfigured
@@ -320,10 +329,12 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 	if err != nil {
 		if isRateLimited(err) {
 			// Stripe refused this request before processing it, so this
-			// request charged nothing (an earlier one that stripe-go resent
-			// may still be running; see isRateLimited). Treat it like the
-			// breaker short-circuit: no state write, the hold stays, and the
-			// next tick tries again. Classified as an error it would park the
+			// request charged nothing, but an earlier one that stripe-go
+			// resent may still be running (see isRateLimited). So it is
+			// ErrPaymentTransient without ErrNotSent: no state write and a
+			// skipped dunning attempt, as for the breaker, but the charge
+			// keeps its charge record and the interrupted-charge check asks
+			// Stripe (ADR-127). Classified as an error it would park the
 			// invoice at 'unknown' (an unrecognised type) for a person to
 			// resolve.
 			return PaymentIntentResult{}, fmt.Errorf("%w: stripe rate limit: %v", ErrPaymentTransient, errs.Scrub(err.Error()))
@@ -456,12 +467,15 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 		ID:                  pi.ID,
 		Status:              string(pi.Status),
 		ClientSecret:        pi.ClientSecret,
+		CreatedAt:           pi.Created,
 		Purpose:             pi.Metadata["velox_purpose"],
+		AttemptKey:          pi.Metadata["velox_attempt_key"],
 		AmountReceivedCents: pi.AmountReceived,
 		AnchorAt:            anchorFromPIMetadata(pi.Metadata),
 	}
 	if lpe := pi.LastPaymentError; lpe != nil {
 		res.DeclineCode = declineCodeOf(string(lpe.Type), string(lpe.Code), string(lpe.DeclineCode))
+		res.FailureMessage = errs.Scrub(lpe.Msg)
 		if lpe.PaymentMethod != nil {
 			res.PaymentMethodID = lpe.PaymentMethod.ID
 		}
@@ -564,10 +578,47 @@ func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, 
 	return out, nil
 }
 
-// ListPaymentIntentsForCustomer implements the interrupted-charge check's read
-// (ADR-127). Scaffolding: the body lands with the fix.
+// ListPaymentIntentsForCustomer is the interrupted-charge check's read
+// (ADR-127): every PaymentIntent of the Stripe customer created at or after
+// createdGTE, with each one's velox_attempt_key, status and outcome details.
+//
+// Why List and not Search (verified against Stripe's docs, 2026-10-18): List
+// is consistent — "Don't use search for read-after-write flows… use the
+// various list APIs… These APIs aren't subject to the availability delays" —
+// and it is offered in every country, while Search "isn't available to
+// businesses in India". The check treats "no match" as "Stripe never got the
+// request", which only a consistent read can support.
+//
+// The customer is retrieved first and must exist and not be deleted: an
+// empty list proves nothing about a customer this account cannot see (one in
+// another Stripe account, or gone), so that is a failed read, not an answer.
+// An error on any page fails the whole read too; a partial list is never
+// returned. Errors pass through classifyStripeError like every call here.
 func (c *LiveStripeClient) ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
-	return nil, nil
+	sc, err := c.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cust, err := sc.V1Customers.Retrieve(ctx, stripeCustomerID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve Stripe customer %s: %w", stripeCustomerID, classifyStripeError(err))
+	}
+	if cust.Deleted {
+		return nil, &PaymentError{Message: fmt.Sprintf("Stripe customer %s is deleted", stripeCustomerID)}
+	}
+	params := &stripe.PaymentIntentListParams{
+		Customer:     stripe.String(stripeCustomerID),
+		CreatedRange: &stripe.RangeQueryParams{GreaterThanOrEqual: createdGTE.Unix()},
+	}
+	params.Limit = stripe.Int64(100)
+	var out []PaymentIntentResult
+	for pi, err := range sc.V1PaymentIntents.List(ctx, params) {
+		if err != nil {
+			return nil, fmt.Errorf("list PaymentIntents of Stripe customer %s: %w", stripeCustomerID, classifyStripeError(err))
+		}
+		out = append(out, paymentIntentResult(pi))
+	}
+	return out, nil
 }
 
 // GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted

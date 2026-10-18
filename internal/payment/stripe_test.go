@@ -573,7 +573,7 @@ func TestChargeInvoice_StripeFailure(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = domain.Invoice{
 		ID: "inv_1", TenantID: "t1", Status: domain.InvoiceFinalized,
-		AmountDueCents: 5000, Currency: "USD",
+		PaymentStatus: domain.PaymentPending, AmountDueCents: 5000, Currency: "USD",
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
@@ -634,6 +634,7 @@ func TestChargeInvoice_DefiniteFailure_InlineStartsDunning(t *testing.T) {
 	invoices.invoices["inv_1"] = domain.Invoice{
 		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
 		Status:             domain.InvoiceFinalized,
+		PaymentStatus:      domain.PaymentPending,
 		AmountDueCents:     5000,
 		Currency:           "USD",
 		IssuedAt:           &cycleEnd,
@@ -679,6 +680,7 @@ func TestChargeInvoice_UnknownOutcome_NoInlineDunning(t *testing.T) {
 	invoices.invoices["inv_1"] = domain.Invoice{
 		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
 		Status:         domain.InvoiceFinalized,
+		PaymentStatus:  domain.PaymentPending,
 		AmountDueCents: 5000,
 		Currency:       "USD",
 	}
@@ -708,7 +710,7 @@ func TestChargeInvoice_UnknownOutcome(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = domain.Invoice{
 		ID: "inv_1", TenantID: "t1", Status: domain.InvoiceFinalized,
-		AmountDueCents: 5000, Currency: "USD",
+		PaymentStatus: domain.PaymentPending, AmountDueCents: 5000, Currency: "USD",
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
@@ -730,13 +732,16 @@ func TestChargeInvoice_UnknownOutcome(t *testing.T) {
 }
 
 func TestChargeInvoice_PlainErrorTreatedAsUnknown(t *testing.T) {
-	// Any error that isn't a typed *PaymentError must fail safe to Unknown —
-	// we cannot prove the request never reached Stripe.
+	// Any error that isn't a typed *PaymentError must fail safe: we cannot
+	// prove the request never reached Stripe. Safe is "unclear", never a
+	// decline: nothing is written, and the charge record stays, so no charge
+	// path takes the invoice until the interrupted-charge check has asked
+	// Stripe (ADR-127). (Before the record, safe was parking at 'unknown'.)
 	client := &mockStripeClient{shouldFail: true, failErr: fmt.Errorf("context deadline exceeded")}
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = domain.Invoice{
 		ID: "inv_1", TenantID: "t1", Status: domain.InvoiceFinalized,
-		AmountDueCents: 5000, Currency: "USD",
+		PaymentStatus: domain.PaymentPending, AmountDueCents: 5000, Currency: "USD",
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
@@ -744,8 +749,14 @@ func TestChargeInvoice_PlainErrorTreatedAsUnknown(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if got := invoices.invoices["inv_1"].PaymentStatus; got != domain.PaymentUnknown {
-		t.Errorf("payment_status: got %q, want unknown (untyped errors must fail safe)", got)
+	if !IsUnknownPaymentFailure(err) {
+		t.Errorf("err = %v classified as definite, want an unclear outcome (untyped errors must fail safe)", err)
+	}
+	if got := invoices.invoices["inv_1"].PaymentStatus; got != domain.PaymentPending {
+		t.Errorf("payment_status: got %q, want pending unchanged (no decline, no park)", got)
+	}
+	if !invoices.recordHeld("inv_1") {
+		t.Error("charge record cleared on an untyped error: the charge may have reached Stripe")
 	}
 }
 
