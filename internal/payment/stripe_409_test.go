@@ -44,6 +44,11 @@ const stripe409KeyInUse = `{"error":{"code":"idempotency_key_in_use","doc_url":"
 // rule cannot hang on the code either.
 const stripe409NoCode = `{"error":{"message":"The request conflicts with another request.","type":"invalid_request_error"}}`
 
+// stripe409CardError is a 409 of type card_error, the other type the
+// classifier reads as a definite failure. It pins "whatever its type". It
+// carries no decline code: Stripe sends card declines as 402.
+const stripe409CardError = `{"error":{"code":"card_declined","message":"Your card was declined.","type":"card_error"}}`
+
 // stripe409ParamsDiffer is the "same key, different parameters" answer
 // (type idempotency_error). It was already an unclear outcome and keeps its
 // behavior: the invoice parks (ADR-107).
@@ -60,6 +65,7 @@ func TestCreatePaymentIntent_A409IsNeverADefiniteFailure(t *testing.T) {
 	}{
 		{"key in use", stripe409KeyInUse},
 		{"invalid_request_error with no code", stripe409NoCode},
+		{"card_error", stripe409CardError},
 		{"same key, different parameters", stripe409ParamsDiffer},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

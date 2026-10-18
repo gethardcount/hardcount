@@ -5,8 +5,10 @@ payment failures, and the gaps still open.
 
 ## Rules
 
-- **An ambiguous result is `unknown`, not failed.** A timeout, Stripe 5xx or
-  idempotency conflict leaves the payment `unknown`. No path charges that
+- **An ambiguous result is `unknown`, not failed.** A timeout, a Stripe 5xx
+  or any Stripe 409 leaves the payment `unknown`. Stripe sends a 409 when an
+  idempotency key is reused, so an earlier request with that key may have
+  charged the card. No path charges that
   invoice again (auto-charge, dunning, **Collect payment**, hosted page) until
   a Stripe webhook or the reconciler resolves it. If neither can, because
   Stripe never received the request, the invoice stays parked until an

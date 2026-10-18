@@ -157,10 +157,25 @@ func classifyStripeError(err error) *PaymentError {
 		pe.PaymentIntentID = stripeErr.PaymentIntent.ID
 	}
 
+	// A 409 is never a definite failure, whatever its type (#976). Stripe
+	// answers 409 while another request with the same idempotency key is still
+	// running, and stripe-go retries a network error under the same key. So a
+	// dropped connection on a request Stripe is still running comes back as
+	// 409 "key in use", and the first request can still charge the card.
+	// Read by its type (invalid_request_error), it marked the invoice failed
+	// and started dunning, whose next retry sends a new key: a second charge.
+	// The other 409, "same key, different parameters" (idempotency_error),
+	// was already unclear and is handled as before.
+	if stripeErr.HTTPStatusCode == http.StatusConflict {
+		pe.Unknown = true
+		return pe
+	}
+
 	switch stripeErr.Type {
 	case stripe.ErrorTypeCard,
 		stripe.ErrorTypeInvalidRequest:
-		// Stripe explicitly rejected the request; no charge occurred.
+		// Stripe explicitly rejected the request; no charge occurred. (A 409
+		// of these types returned above.)
 		pe.Unknown = false
 	case stripe.ErrorTypeIdempotency:
 		// AMBIGUOUS, not a rejection — and it used to be grouped with the two
