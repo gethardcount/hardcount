@@ -293,4 +293,4 @@ Per `feedback_pre_launch_scoping`:
 
 A longer common list would add little: most of a top-1000 list is shorter than 12 characters. The real fix is the embedded breached-password set in [ADR-095](095-login-security-roadmap-and-mfa.md), still an open item before the first deployment. Found by the build-vs-library audit of 2026-10-17.
 
-Later the same day the embedded breached-password list in [ADR-095](095-login-security-roadmap-and-mfa.md#amendment-2026-10-18-the-breached-password-list-shipped) replaced the stub (#PRNUM).
+Later the same day the embedded breached-password list in [ADR-095](095-login-security-roadmap-and-mfa.md#amendment-2026-10-18-the-breached-password-list-shipped) replaced the stub (#1222).

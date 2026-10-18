@@ -106,7 +106,7 @@ Fixed in #1203. `session.ClientIP` is deleted. Login and invite accept now store
 
 ## Amendment 2026-10-18: the breached-password list shipped
 
-Phase 0(a) is done (#PRNUM). `ValidatePassword` no longer uses the 10-entry `commonPasswords` stub. It checks an embedded list, `internal/user/breachedpw/passwords.txt`, whenever a password is set: bootstrap (the CLI and `POST /v1/bootstrap`), reset confirm and invite accept. Login does not check it, as decided above. The refusal text is unchanged: "is one of the most common passwords. Pick a different one".
+Phase 0(a) is done (#1222). `ValidatePassword` no longer uses the 10-entry `commonPasswords` stub. It checks an embedded list, `internal/user/breachedpw/passwords.txt`, whenever a password is set: bootstrap (the CLI and `POST /v1/bootstrap`), reset confirm and invite accept. Login does not check it, as decided above. The refusal text is unchanged: "is one of the most common passwords. Pick a different one".
 
 Where it differs from the design above, and why:
 
