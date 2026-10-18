@@ -9,7 +9,9 @@
 
 **Open-source billing for AI and usage-based products, on your own servers.**
 
-Velox counts what each customer uses, such as tokens, prices it, makes the invoice and its PDF, and charges the card through Stripe. Your billing data stays in your own database.
+Velox counts what each customer uses, such as tokens, minutes or API calls, prices it, makes the invoice and its PDF, and charges the card through Stripe. Your billing data stays in your own database.
+
+Built for the gaps small teams hit: no Stripe Billing fee, nothing held back behind a paid licence, and light enough to run yourself. [Why Velox →](#why-velox)
 
 ---
 
@@ -121,7 +123,7 @@ Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Ev
 - **You charge by usage,** most of all an AI product that prices per token, by model and token type.
 - **You want billing on your own servers.** Usage and invoice records stay in your own Postgres. Stripe sees each charge, and the invoice lines too if you use Stripe Tax.
 - **You are a small or mid-size team.** One engineer can run it, on one server or several.
-- **Your volume is up to about a million usage events a day,** roughly 400,000 AI requests. In a 20-minute test, a €6.49-a-month server (2 CPUs, 4 GB) handled that rate with no errors. Velox keeps every raw event, so plan about 15 to 20 GB of database disk per month at that volume. [How we measured](docs/scale.md)
+- **Your volume is up to about a million usage events a day,** roughly 400,000 AI requests, however many tokens each one uses. In a 20-minute test, a €6.49-a-month server (2 CPUs, 4 GB) handled that rate with no errors. Velox keeps every raw event, so plan about 15 to 20 GB of database disk per month at that volume. [How we measured](docs/scale.md)
 
 **Not a fit if you need:**
 
