@@ -31,6 +31,8 @@ To run it for real customers, follow [Production on one VM](production-one-vm.md
 
 **Signing in before you add TLS.** The stack serves plain HTTP on port 80, and in production mode the sign-in cookie is always `Secure`. Until you put TLS in front, sign in at `http://localhost/` on the server, or through an SSH tunnel, in Chrome or Firefox. Safari does not keep a `Secure` cookie over plain HTTP, even at localhost, and no browser keeps it at `http://<server-ip>/`. The [compose guide](../deploy/compose/README.md#5-sign-in-to-the-dashboard) covers both. The quickstart (`./quickstart.sh`) runs in local mode, so it works in every browser.
 
+**Who can sign in.** Velox has no two-factor sign-in yet. What protects sign-in, and how to put it behind your own SSO or VPN: [Who can sign in to the dashboard](production-one-vm.md#who-can-sign-in-to-the-dashboard).
+
 **What to expect from one VM:**
 
 - There is one copy of the API. While it restarts, Velox is down.

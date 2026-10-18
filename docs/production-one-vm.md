@@ -341,6 +341,29 @@ A backup counts only once you have restored it. This test restores the newest du
 
 Repeat this test every few months, and after every upgrade. More on what to back up, and on point-in-time restore: [Backups](ops/backup-considerations.md).
 
+## Who can sign in to the dashboard
+
+Anyone who can open your address and knows a team member's password can sign in. Velox protects sign-in with no setup:
+
+- **Passwords are stored only as bcrypt hashes,** which are slow to crack.
+- **About 30,000 common leaked passwords are refused** when a password is set or reset.
+- **Sign-in is rate-limited:** one address can try only so many times a minute.
+- **The sign-in cookie travels only over HTTPS** outside `localhost`, because `.env` sets `APP_ENV=production` ([step 3](#3-add-https-with-caddy)).
+
+Velox has no two-factor sign-in yet, so a stolen password is enough to sign in. If your team wants a second factor, you can put sign-in behind your own SSO or VPN. This is optional: Velox runs in production without it.
+
+To do it, let only your team reach `/v1/auth/`. Every sign-in, password reset and invite acceptance goes through that path, and the dashboard shows no data until someone signs in. If your SSO tool needs a page to send people through, add the sign-in page, `/login`.
+
+Keep these paths reachable from the internet. The dashboard shares its address with them:
+
+| Path | Who uses it |
+|---|---|
+| `/v1/webhooks/` | Stripe, to tell Velox about payments. Postmark too, if you send email through it. |
+| `/invoice/…`, `/update-payment`, `/payment-method-added` | Your customers: the invoice page, the page to add a card, and the page Stripe sends them back to |
+| `/v1/public/` | The customer pages above, and shared cost dashboards |
+| `/assets/`, `/favicon.svg` | The page files. The customer pages and the dashboard load the same ones. |
+| The rest of `/v1/` | Your app, which sends an API key with each call |
+
 ## You are live when
 
 Check each line before the first real customer.
