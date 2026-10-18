@@ -70,7 +70,7 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	}
 	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry,
 		pricingSvc, dunning.NewService(dunning.NewPostgresStore(db), nil, nil),
-		webhook.NewService(webhook.NewPostgresStore(db), nil))
+		webhook.NewService(webhook.NewPostgresStore(db), nil, "local"))
 	if _, err := recipeSvc.Instantiate(ctx, tenantID, "anthropic_style", nil, recipe.InstantiateOptions{}); err != nil {
 		t.Fatalf("instantiate anthropic_style: %v", err)
 	}

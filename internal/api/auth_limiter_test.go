@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/sagarsuperuser/velox/internal/config"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
@@ -18,7 +19,8 @@ import (
 // password guessing unlimited. It now counts in the process instead.
 func TestAuthLimiter_KeepsLimitingWithoutRedis(t *testing.T) {
 	const perMin = 5
-	t.Setenv("VELOX_RATE_LIMIT_GENERAL_PER_MIN", "5")
+	limits := config.DefaultRateLimits()
+	limits.GeneralPerMinute = perMin
 
 	// Nothing listens on port 1, and retries are off, so every Redis call
 	// fails at once, as during an outage after boot.
@@ -37,7 +39,7 @@ func TestAuthLimiter_KeepsLimitingWithoutRedis(t *testing.T) {
 		{"redis not configured", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := NewServer(&postgres.DB{}, nil, tc.rdb)
+			srv := NewServer(&postgres.DB{}, nil, tc.rdb, WithRateLimits(limits))
 
 			// An invalid body reaches the login handler, which answers 400
 			// without touching the database, so 400 means "not limited".

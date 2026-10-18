@@ -43,7 +43,7 @@ func newRecipeFixture(t *testing.T) *recipeIntegrationFixture {
 	// dunning needs no retrier for UpsertPolicyTx — passing nil is safe;
 	// the recipes flow never invokes RetryPayment.
 	dunningSvc := dunning.NewService(dunning.NewPostgresStore(db), nil, nil)
-	webhookSvc := webhook.NewService(webhook.NewPostgresStore(db), nil)
+	webhookSvc := webhook.NewService(webhook.NewPostgresStore(db), nil, "local")
 	store := NewPostgresStore(db)
 	svc := NewService(db, store, registry, pricingSvc, dunningSvc, webhookSvc)
 	return &recipeIntegrationFixture{

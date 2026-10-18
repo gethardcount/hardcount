@@ -52,8 +52,30 @@ type Config struct {
 	// 1h, 0 to 72h; 0 closes a period as soon as it is due.
 	InvoiceGracePeriod time.Duration
 
+	// RateLimits are the VELOX_RATE_LIMIT_* request limits (internal/api).
+	RateLimits RateLimits
+
 	// Bootstrap
 	BootstrapToken string
+}
+
+// RateLimits are the request limits the API enforces per API key, per
+// tenant for dashboard sessions, or per client address before sign-in. Each must be a
+// whole number of 1 or more; anything else stops start-up. A bad value used
+// to fall back to the default without a word, so the install ran on a limit
+// nobody chose.
+type RateLimits struct {
+	// GeneralPerMinute is VELOX_RATE_LIMIT_GENERAL_PER_MIN, default 100: the
+	// general API bucket, and the per-address limit on /v1/auth.
+	GeneralPerMinute int
+	// IngestPerSecond is VELOX_RATE_LIMIT_INGEST_PER_SEC, default 1000: usage
+	// events and LiteLLM callbacks.
+	IngestPerSecond int
+}
+
+// DefaultRateLimits are the limits when no VELOX_RATE_LIMIT_* is set.
+func DefaultRateLimits() RateLimits {
+	return RateLimits{GeneralPerMinute: 100, IngestPerSecond: 1000}
 }
 
 type DBConfig struct {
@@ -74,7 +96,8 @@ type DBConfig struct {
 
 // AppEnv is APP_ENV, trimmed and lower-cased, and "local" when unset. Load
 // and the `velox migrate rollback` check read it through this one function,
-// so both see the same environment.
+// so both see the same environment. Nothing else reads APP_ENV: the server
+// hands Config.Env to the code that depends on it.
 func AppEnv() string {
 	return strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "local")))
 }
@@ -93,13 +116,23 @@ func Load() (Config, error) {
 	}
 	db.AppURL = strings.TrimSpace(os.Getenv("APP_DATABASE_URL"))
 
+	migrateOnBoot, err := boolEnv("RUN_MIGRATIONS_ON_BOOT", false)
+	if err != nil {
+		return Config{}, err
+	}
+	rateLimits, err := loadRateLimits()
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Port:           envOr("PORT", "8080"),
 		Env:            env,
-		Migrate:        boolEnv("RUN_MIGRATIONS_ON_BOOT", false),
+		Migrate:        migrateOnBoot,
 		DB:             db,
 		RedisURL:       strings.TrimSpace(os.Getenv("REDIS_URL")),
 		TrustProxy:     strings.TrimSpace(os.Getenv("TRUST_PROXY")),
+		RateLimits:     rateLimits,
 		BootstrapToken: strings.TrimSpace(os.Getenv("VELOX_BOOTSTRAP_TOKEN")),
 	}
 	drain, err := loadShutdownDrainDelay(env)
@@ -133,8 +166,8 @@ func Load() (Config, error) {
 func (c Config) validateFatal() error {
 	encKey := strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY"))
 
-	// The production checks below, and every other APP_ENV reader in the
-	// binary, test for exactly "production". A near-miss such as "prod" or
+	// The production checks below, and everything the server hands Config.Env
+	// to, test for exactly "production". A near-miss such as "prod" or
 	// "production-eu" would pass them all and run with those checks off, so
 	// it is refused. Any other unrecognised name keeps its Validate warning.
 	if c.Env != "production" && strings.HasPrefix(c.Env, "prod") {
@@ -409,16 +442,44 @@ func ParseTrustProxy(spec string) ([]*net.IPNet, error) {
 	return nets, nil
 }
 
-func boolEnv(key string, fallback bool) bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	switch v {
+// boolEnv reads a true/false setting: unset → fallback. Any value other than
+// true, false, yes, no, 1 or 0 is a configuration error, not the fallback:
+// RUN_MIGRATIONS_ON_BOOT=ture would otherwise start without the upgrades.
+func boolEnv(key string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	switch strings.ToLower(raw) {
+	case "":
+		return fallback, nil
 	case "1", "true", "yes":
-		return true
+		return true, nil
 	case "0", "false", "no":
-		return false
+		return false, nil
 	default:
-		return fallback
+		return false, fmt.Errorf("%s=%q must be true or false", key, raw)
 	}
+}
+
+// loadRateLimits reads VELOX_RATE_LIMIT_*: unset → DefaultRateLimits; a
+// value that is not a whole number of 1 or more stops start-up.
+func loadRateLimits() (RateLimits, error) {
+	def := DefaultRateLimits()
+	general, err := rateLimitEnv("VELOX_RATE_LIMIT_GENERAL_PER_MIN", def.GeneralPerMinute)
+	if err != nil {
+		return RateLimits{}, err
+	}
+	ingest, err := rateLimitEnv("VELOX_RATE_LIMIT_INGEST_PER_SEC", def.IngestPerSecond)
+	if err != nil {
+		return RateLimits{}, err
+	}
+	return RateLimits{GeneralPerMinute: general, IngestPerSecond: ingest}, nil
+}
+
+func rateLimitEnv(key string, fallback int) (int, error) {
+	n, err := intEnv(key, fallback)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s=%q must be a whole number of 1 or more; unset it for the default, %d", key, strings.TrimSpace(os.Getenv(key)), fallback)
+	}
+	return n, nil
 }
 
 // DefaultInvoiceGracePeriod and MaxInvoiceGracePeriod bound

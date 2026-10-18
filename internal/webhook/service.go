@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -113,8 +112,10 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-func NewService(store Store, client HTTPClient) *Service {
-	allowLoopback := !strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+// NewService builds the outbound webhook service. appEnv is
+// config.Config.Env; in production the loopback exception is off.
+func NewService(store Store, client HTTPClient, appEnv string) *Service {
+	allowLoopback := appEnv != "production"
 	if client == nil {
 		client = &http.Client{
 			Timeout:   10 * time.Second,
@@ -269,7 +270,7 @@ func (s *Service) publishFrameForEventID(ctx context.Context, tenantID, eventID,
 
 // NewTestService creates a service with synchronous delivery (no goroutines).
 func NewTestService(store Store, client HTTPClient) *Service {
-	svc := NewService(store, client)
+	svc := NewService(store, client, "local")
 	svc.syncDeliver = true
 	return svc
 }

@@ -17,8 +17,8 @@ type CookieConfig struct {
 	Path     string
 }
 
-// DefaultCookieConfig reads APP_ENV and returns a sensible default.
-// Tests override fields directly.
+// DefaultCookieConfig returns the cookie attributes for appEnv, which is
+// config.Config.Env. Tests override fields directly.
 //
 // Secure is on in staging and production, for every request, so a
 // browser sends the session cookie only over HTTPS, or to localhost
@@ -26,9 +26,8 @@ type CookieConfig struct {
 // http://localhost; Safari does not. Plain HTTP is for local, where
 // Secure is off: make dev, and the Compose quickstart, which sets
 // APP_ENV=local so Safari can sign in at http://localhost.
-func DefaultCookieConfig() CookieConfig {
-	env := strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV")))
-	secure := env == "production" || env == "staging"
+func DefaultCookieConfig(appEnv string) CookieConfig {
+	secure := appEnv == "production" || appEnv == "staging"
 	return CookieConfig{
 		Domain:   strings.TrimSpace(os.Getenv("VELOX_COOKIE_DOMAIN")),
 		Secure:   secure,

@@ -481,7 +481,7 @@ func TestEndpointSuccessRate(t *testing.T) {
 }
 
 func TestCreateEndpoint(t *testing.T) {
-	svc := NewService(newMemStore(), nil)
+	svc := NewService(newMemStore(), nil, "local")
 	ctx := context.Background()
 
 	t.Run("valid localhost", func(t *testing.T) {
@@ -815,7 +815,7 @@ func TestDelivery_FailedHTTP(t *testing.T) {
 // ~2.5h instead of the ~26.5h the 24h tail implies.
 func TestRetryLadder_AllBackoffsReachable(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, &mockHTTPClient{statusCode: 500}) // unused; we drive scheduleRetryOrFail directly
+	svc := NewService(store, &mockHTTPClient{statusCode: 500}, "local") // unused; we drive scheduleRetryOrFail directly
 
 	// Seed a fresh delivery (AttemptCount=0, as CreateDelivery makes it).
 	d := domain.WebhookDelivery{
@@ -929,7 +929,7 @@ func TestReplay(t *testing.T) {
 func TestReplay_PinsLivemodeOnDelivery(t *testing.T) {
 	store := newMemStore()
 	store.deliverySignal = make(chan bool, 4)
-	svc := NewService(store, &mockHTTPClient{statusCode: 200}) // async delivery
+	svc := NewService(store, &mockHTTPClient{statusCode: 200}, "local") // async delivery
 
 	// Endpoint + original event in TEST mode.
 	testCtx := postgres.WithLivemode(context.Background(), false)
@@ -1743,7 +1743,7 @@ func TestValidateWebhookURL_JudgesAddressesLikeTheDialer(t *testing.T) {
 // addresses through both write paths and checks the reason the caller sees.
 // A public IPv6 address is the negative control.
 func TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses(t *testing.T) {
-	svc := NewService(newMemStore(), nil)
+	svc := NewService(newMemStore(), nil, "local")
 	ctx := context.Background()
 
 	existing, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: "https://[2606:4700:4700::1111]/hook"})
@@ -1787,7 +1787,7 @@ func TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses(t *testing.T) {
 // was accepted and matchesEvent silently never fired (Velox's own recipes
 // shipped two phantom names: invoice.payment_failed, subscription.updated).
 func TestCreateEndpoint_RejectsUnknownEventNames(t *testing.T) {
-	svc := NewService(newMemStore(), nil)
+	svc := NewService(newMemStore(), nil, "local")
 	ctx := context.Background()
 
 	for _, bad := range []string{"invoice.payment_failed", "subscription.updated", "totally.made_up"} {
@@ -1823,7 +1823,7 @@ func TestCreateEndpoint_RejectsUnknownEventNames(t *testing.T) {
 // receiver redeploy, and recipe-created endpoints (inactive + placeholder
 // URL) were permanently dead.
 func TestUpdateEndpoint(t *testing.T) {
-	svc := NewService(newMemStore(), nil)
+	svc := NewService(newMemStore(), nil, "local")
 	ctx := context.Background()
 
 	created, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{

@@ -291,7 +291,7 @@ func TestLoad_AppEnvIsCaseNormalised(t *testing.T) {
 // AppEnv is the one normalisation Load and `velox migrate rollback` share:
 // the rollback check must call " Local " local, and an unset APP_ENV local.
 func TestAppEnv(t *testing.T) {
-	for raw, want := range map[string]string{"": "local", " Local ": "local", "staging": "staging", "PRODUCTION": "production"} {
+	for raw, want := range map[string]string{"": "local", " Local ": "local", "staging": "staging", " Staging ": "staging", "PRODUCTION": "production", " Production ": "production"} {
 		t.Setenv("APP_ENV", raw)
 		if got := AppEnv(); got != want {
 			t.Errorf("APP_ENV=%q: got %q, want %q", raw, got, want)
@@ -556,5 +556,76 @@ func TestLoad_RejectsUnparseableInt(t *testing.T) {
 	}
 	if cfg.DB.MaxOpenConns != 40 {
 		t.Errorf("max_open_conns: got %d, want 40", cfg.DB.MaxOpenConns)
+	}
+}
+
+// VELOX_RATE_LIMIT_* used to be read by the router, which fell back to the
+// default without a word on a value it could not parse, or on 0. Load now
+// owns them, and a bad value stops start-up naming the setting.
+func TestLoad_RateLimits(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_ENV", "local")
+	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("TRUST_PROXY", "")
+	const general, ingest = "VELOX_RATE_LIMIT_GENERAL_PER_MIN", "VELOX_RATE_LIMIT_INGEST_PER_SEC"
+
+	t.Setenv(general, "")
+	t.Setenv(ingest, "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unset: %v", err)
+	}
+	if want := (RateLimits{GeneralPerMinute: 100, IngestPerSecond: 1000}); cfg.RateLimits != want || DefaultRateLimits() != want {
+		t.Fatalf("unset: got %+v, defaults %+v, want %+v", cfg.RateLimits, DefaultRateLimits(), want)
+	}
+
+	t.Setenv(general, " 250 ")
+	t.Setenv(ingest, "5000")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if want := (RateLimits{GeneralPerMinute: 250, IngestPerSecond: 5000}); cfg.RateLimits != want {
+		t.Fatalf("set: got %+v, want %+v", cfg.RateLimits, want)
+	}
+
+	for _, key := range []string{general, ingest} {
+		for _, bad := range []string{"abc", "0", "-5", "1.5", "100/min"} {
+			t.Run(key+"="+bad, func(t *testing.T) {
+				t.Setenv(general, "")
+				t.Setenv(ingest, "")
+				t.Setenv(key, bad)
+				_, err := Load()
+				if err == nil || !strings.Contains(err.Error(), key+"=") {
+					t.Fatalf("Load with %s=%q must fail naming it, got: %v", key, bad, err)
+				}
+			})
+		}
+	}
+}
+
+// RUN_MIGRATIONS_ON_BOOT=ture used to start without the upgrades. A value
+// that is not true or false now stops start-up.
+func TestLoad_RunMigrationsOnBootMustParse(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_ENV", "local")
+	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("TRUST_PROXY", "")
+
+	for raw, want := range map[string]bool{"": false, "true": true, " TRUE ": true, "yes": true, "1": true, "false": false, "no": false, "0": false} {
+		t.Setenv("RUN_MIGRATIONS_ON_BOOT", raw)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("RUN_MIGRATIONS_ON_BOOT=%q: %v", raw, err)
+		}
+		if cfg.Migrate != want {
+			t.Errorf("RUN_MIGRATIONS_ON_BOOT=%q: got %v, want %v", raw, cfg.Migrate, want)
+		}
+	}
+	for _, bad := range []string{"ture", "on", "2"} {
+		t.Setenv("RUN_MIGRATIONS_ON_BOOT", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RUN_MIGRATIONS_ON_BOOT=") {
+			t.Errorf("RUN_MIGRATIONS_ON_BOOT=%q must fail naming it, got: %v", bad, err)
+		}
 	}
 }

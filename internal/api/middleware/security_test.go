@@ -21,13 +21,11 @@ func TestMetricsAuth(t *testing.T) {
 		wantCode int
 	}{
 		{"local without a token is open", "local", "", "", http.StatusOK},
-		{"unset APP_ENV without a token is open", "", "", "", http.StatusOK},
 		{"staging without a token is open", "staging", "", "", http.StatusOK},
 
 		{"production without a token refuses an anonymous scrape", "production", "", "", http.StatusUnauthorized},
 		{"production without a token refuses an empty bearer", "production", "", "Bearer ", http.StatusUnauthorized},
 		{"production without a token refuses any bearer", "production", "", "Bearer " + token, http.StatusUnauthorized},
-		{"production is matched case-insensitively", " Production ", "", "", http.StatusUnauthorized},
 		{"production with a blank token is still closed", "production", "   ", "", http.StatusUnauthorized},
 
 		{"token set: no header", "local", token, "", http.StatusUnauthorized},
@@ -42,11 +40,10 @@ func TestMetricsAuth(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("APP_ENV", tc.env)
 			t.Setenv("METRICS_TOKEN", tc.token)
 
 			served := false
-			h := MetricsAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			h := MetricsAuth(tc.env, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				served = true
 				w.WriteHeader(http.StatusOK)
 			}))
@@ -68,5 +65,22 @@ func TestMetricsAuth(t *testing.T) {
 				t.Fatalf("a 401 must carry WWW-Authenticate: Bearer, got %q", rec.Header().Get("WWW-Authenticate"))
 			}
 		})
+	}
+}
+
+// TestSecurityHeaders_HSTSOutsideLocal: HSTS is sent everywhere but local,
+// which is served over plain HTTP. appEnv arrives normalised by
+// config.AppEnv, so an unset APP_ENV reaches here as "local".
+func TestSecurityHeaders_HSTSOutsideLocal(t *testing.T) {
+	for env, want := range map[string]bool{"local": false, "staging": true, "production": true, "qa": true} {
+		rec := httptest.NewRecorder()
+		SecurityHeaders(env)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).
+			ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		if got := rec.Header().Get("Strict-Transport-Security") != ""; got != want {
+			t.Errorf("appEnv=%q: HSTS sent = %v, want %v", env, got, want)
+		}
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("appEnv=%q: X-Content-Type-Options missing", env)
+		}
 	}
 }

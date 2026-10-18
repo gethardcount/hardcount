@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +21,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/billing"
+	"github.com/sagarsuperuser/velox/internal/config"
 	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/customer"
@@ -125,12 +125,27 @@ type Server struct {
 }
 
 // ServerOption sets a boot-time value NewServer threads into the services it
-// builds. cmd/velox passes the ones read from config; tests pass what they
-// exercise and get the zero value otherwise.
+// builds. cmd/velox passes the ones config.Load read; tests pass what they
+// exercise and otherwise run as an install with none of them set.
 type ServerOption func(*serverOptions)
 
 type serverOptions struct {
 	invoiceGrace time.Duration
+	appEnv       string
+	rateLimits   config.RateLimits
+}
+
+// WithAppEnv sets the environment, config.Config.Env: APP_ENV as config.Load
+// normalised it, so every consumer below compares the same string. Without
+// it NewServer runs as "local", as an unset APP_ENV does.
+func WithAppEnv(env string) ServerOption {
+	return func(o *serverOptions) { o.appEnv = env }
+}
+
+// WithRateLimits sets the VELOX_RATE_LIMIT_* limits config.Load parsed.
+// Without it NewServer uses config.DefaultRateLimits.
+func WithRateLimits(rl config.RateLimits) ServerOption {
+	return func(o *serverOptions) { o.rateLimits = rl }
 }
 
 // WithInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). One value feeds the
@@ -144,7 +159,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if clk == nil {
 		clk = clock.Real()
 	}
-	var o serverOptions
+	o := serverOptions{appEnv: "local", rateLimits: config.DefaultRateLimits()}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -297,7 +312,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if sharedEnc != nil {
 		webhookOutStore.SetEncryptor(sharedEnc)
 	}
-	webhookOutSvc := webhook.NewService(webhookOutStore, nil)
+	webhookOutSvc := webhook.NewService(webhookOutStore, nil, o.appEnv)
 	webhookOutH := webhook.NewHandler(webhookOutSvc)
 
 	// Transactional outbox for outbound events (RES-1). Producers persist an
@@ -580,7 +595,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The legacy direct-SMTP-from-producer path (VELOX_EMAIL_OUTBOX_ENABLED
 	// =false) was cut 2026-05-30 per ADR-040 — same shape as the webhook
 	// outbox cut above.
-	emailSender := email.NewSender()
+	emailSender := email.NewSender(o.appEnv)
 	// Wire tenant settings so customer-facing emails pull per-tenant
 	// branding (logo, brand color, company name, support URL). Cold-start
 	// tenants without settings gracefully fall back to Velox defaults.
@@ -1226,7 +1241,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		slog.Warn("DASHBOARD_BASE_URL NOT SET — password-reset emails will NOT be sent (the reset link origin is never derived from request headers, to prevent host-header poisoning / token theft). Set this to your canonical dashboard URL (e.g. http://localhost:5173 in dev) to enable password-reset emails.")
 	}
 	dashboardAuthH := user.NewHandler(
-		userSvc, sessionSvc, session.DefaultCookieConfig(),
+		userSvc, sessionSvc, session.DefaultCookieConfig(o.appEnv),
 		&passwordResetEmailAdapter{sender: passwordResetEmail},
 		dashboardBaseURL,
 		emailSender.IsConfigured(),
@@ -1252,7 +1267,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		dashboardBaseURL,
 	)
 	membersSvc.SetEmailConfigured(emailSender.IsConfigured())
-	membersH := dashmembers.NewHandler(membersSvc, sessionSvc, session.DefaultCookieConfig())
+	membersH := dashmembers.NewHandler(membersSvc, sessionSvc, session.DefaultCookieConfig(o.appEnv))
 	membersH.SetAuditLogger(auditLogger)
 
 	// Settings → Email: read-only SMTP status, the link env vars and a test
@@ -1329,7 +1344,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// (DDoS posture), ingest always fails open (revenue events must survive
 	// a Redis blip), and /v1/auth counts in this process (operator login
 	// must survive a Redis blip, and so must its throttle).
-	prod := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+	prod := o.appEnv == "production"
 	// Login brute-force protection: v1 ships NO automatic per-account throttle.
 	// The old users.locked_until auto-lockout (fragmenting across Redis↔in-memory
 	// and weaponizable — any known operator email → a 15-min lockout on demand)
@@ -1338,8 +1353,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// /v1/auth limiter below is the brute-force floor; the full design (a
 	// non-weaponizable throttle + MFA + login-time breached-password check) is
 	// documented in ADR-094 and deferred as one unit.
-	rateLimiter := mw.NewRateLimiter(rdb, "general",
-		envInt("VELOX_RATE_LIMIT_GENERAL_PER_MIN", 100), time.Minute)
+	rateLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
 	// In production, refuse requests when Redis is unreachable rather than
 	// silently disabling rate limiting (DDoS vector). The general/IP limiter
 	// deliberately stays fail-open in non-prod: per the industry split (OWASP
@@ -1364,8 +1378,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// counts in this process with the same limit (ADR-095 amendment
 	// 2026-10-18). That count is per replica, so N replicas allow one
 	// address up to N times the limit until Redis is back.
-	authLimiter := mw.NewRateLimiter(rdb, "general",
-		envInt("VELOX_RATE_LIMIT_GENERAL_PER_MIN", 100), time.Minute)
+	authLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
 	authLimiter.SetLocalFallback()
 
 	// Dedicated, much larger bucket for the ingest surface (/v1/usage-events*
@@ -1385,8 +1398,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// authenticated (secret key required), and failing closed would turn a
 	// Redis blip into dropped revenue data — for ingest, lost-events risk
 	// outranks the DoS argument that closes the general bucket.
-	ingestLimiter := mw.NewRateLimiter(rdb, "ingest",
-		envInt("VELOX_RATE_LIMIT_INGEST_PER_SEC", 1000), time.Second)
+	ingestLimiter := mw.NewRateLimiter(rdb, "ingest", o.rateLimits.IngestPerSecond, time.Second)
 
 	// Tighter bucket for the public hosted-invoice surface. Industry
 	// practice (Stripe, Paddle) is to rate-limit payment pages more
@@ -1461,7 +1473,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		})
 	})
 
-	r.Use(mw.SecurityHeaders())
+	r.Use(mw.SecurityHeaders(o.appEnv))
 
 	// Audit-coverage detector (ADR-090). A PURE OBSERVER: it reports any
 	// mutating 2xx that produced no audit row and is not declared exempt in the
@@ -1487,7 +1499,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Public
 	r.Get("/health", handleHealth)
 	r.Get("/health/ready", handleDeepHealth(db))
-	r.Handle("/metrics", mw.MetricsAuth(mw.MetricsHandler()))
+	r.Handle("/metrics", mw.MetricsAuth(o.appEnv, mw.MetricsHandler()))
 
 	// Bootstrap — one-time setup (no auth, only works when no tenants
 	// exist). The deps wire the peer user package into
@@ -1981,22 +1993,6 @@ func loggablePath(r *http.Request) string {
 		}
 	}
 	return path
-}
-
-// envInt reads an integer env override, falling back on empty/malformed
-// values. Used for the rate-limit knobs — a bad value silently reverting
-// to the default is acceptable here (the default is safe; a boot failure
-// over a limiter tweak is not).
-func envInt(key string, fallback int) int {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		return fallback
-	}
-	return n
 }
 
 // isIngestPath scopes the dedicated ingest rate-limit bucket: the
