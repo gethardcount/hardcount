@@ -825,6 +825,78 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 		}
 	})
 
+	// A charge of the unused prebill was sent to Stripe and its result is not
+	// saved yet (the charge record, ADR-127). Voiding could leave a payment
+	// Stripe takes on a voided invoice, so the prebill takes the credit-note
+	// path, and the note waits for the record to clear. The cancel itself is
+	// not refused.
+	t.Run("no consumption, a charge record on the invoice: relieved by a deferred credit note, not voided", func(t *testing.T) {
+		sub, invID := freshUnpaidSub("cus_recorded")
+		setRecord := func(on bool) {
+			t.Helper()
+			tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer postgres.Rollback(tx)
+			q := `UPDATE invoices SET charge_started_at = NULL, charge_started_seq = NULL, charge_started_key = NULL,
+				charge_started_stripe_customer = NULL WHERE id = $1`
+			if on {
+				q = `UPDATE invoices SET charge_started_at = now(), charge_started_seq = charge_attempt_seq,
+					charge_started_key = 'velox_inv_recorded_0_pm_card', charge_started_stripe_customer = 'cus_stripe' WHERE id = $1`
+			}
+			if _, err := tx.ExecContext(ctx, q, invID); err != nil {
+				t.Fatalf("charge record: %v", err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		setRecord(true)
+		cancelAt := periodStart.Add(time.Hour) // whole period unused
+		sub.Status = domain.SubscriptionCanceled
+		sub.CanceledAt = &cancelAt
+
+		cancelRelief(t, ctx, db, tenantID, newEngine(), sub)
+
+		got, err := invoiceStore.Get(ctx, tenantID, invID)
+		if err != nil {
+			t.Fatalf("reload invoice: %v", err)
+		}
+		if got.Status == domain.InvoiceVoided {
+			t.Fatal("voided while a charge of it may be taking the money")
+		}
+		if got.AmountDueCents != 4900 {
+			t.Errorf("amount_due %d, want 4900: the relief waits until the charge is confirmed", got.AmountDueCents)
+		}
+		drafts := func() int {
+			t.Helper()
+			tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer postgres.Rollback(tx)
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM credit_notes WHERE invoice_id = $1 AND status = 'draft' AND issue_pending`, invID).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		if n := drafts(); n != 1 {
+			t.Fatalf("deferred relief drafts = %d, want 1", n)
+		}
+
+		// The check clears the record (Stripe never got the charge): the
+		// ADR-059 reconciler issues the note on its next run.
+		setRecord(false)
+		if issued, errs := creditNoteSvc.RetryPendingClawbackIssue(ctx, 100); len(errs) != 0 || issued != 1 {
+			t.Fatalf("issue the deferred relief: issued=%d errs=%v", issued, errs)
+		}
+		if got, _ := invoiceStore.Get(ctx, tenantID, invID); got.AmountDueCents != 0 {
+			t.Errorf("amount_due after the relief issued: %d, want 0 (nothing consumed)", got.AmountDueCents)
+		}
+	})
+
 	// Customer credits were applied to the unpaid invoice BEFORE the cancel.
 	// The relief is still the unused half: it clears what is due and the rest
 	// of it hands applied credits back. Sized against the amount due alone

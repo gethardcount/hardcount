@@ -596,3 +596,33 @@ func TestViewInvoice_CarriesTaxExemptReason(t *testing.T) {
 		t.Errorf("tax_exempt_reason = %q, want the operator reason carried through to the hosted page", resp.Invoice.TaxExemptReason)
 	}
 }
+
+// A charge sent to Stripe whose result is not saved (the charge record,
+// ADR-127): the payment status is still pending, and only the record says a
+// payment may be on its way. The Pay button hides, or the customer could pay
+// a second time on the hosted page.
+func TestViewInvoice_ChargeRecorded_PayDisabled(t *testing.T) {
+	fi := newFakeInvoices()
+	fc := newFakeCustomers()
+	fs := newFakeSettings()
+	inv := seedFinalized(t, fi, fc, fs, "vlx_pinv_recorded")
+	started := time.Now().UTC().Add(-20 * time.Minute)
+	inv.ChargeStartedAt = &started
+	fi.byToken["vlx_pinv_recorded"] = inv
+
+	h := newTestHandler(fi, fc, fs, &fakeCheckout{})
+	r := mountRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/vlx_pinv_recorded", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+	var resp hostedInvoicePayload
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.PayEnabled {
+		t.Error("pay_enabled must be false while a charge of this invoice may be taking the money")
+	}
+}

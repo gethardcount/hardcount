@@ -97,6 +97,10 @@ var paymentShapes = []paymentShape{
 	{name: "processing", inFlight: true, apply: stamp(domain.PaymentProcessing, "pi_racing", "")},
 	{name: "unknown with a PaymentIntent", inFlight: true, apply: stamp(domain.PaymentUnknown, "pi_racing", "stripe: 500")},
 	{name: "parked", inFlight: true, apply: stamp(domain.PaymentUnknown, "", "stripe: request timed out")},
+	// A charge sent to Stripe whose result is not saved (ADR-127): the
+	// payment status is still failed, and only the charge record says a
+	// payment may be on its way.
+	{name: "charge record", inFlight: true, apply: chargeRecord},
 	// The control: the payment definitely failed, so the final action fires.
 	{name: "failed (control)", inFlight: false, apply: func(*testing.T, context.Context, *exhaustFixture) {}},
 }

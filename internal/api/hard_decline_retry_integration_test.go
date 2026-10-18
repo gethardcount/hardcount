@@ -47,6 +47,9 @@ func (s *scriptedCharges) GetPaymentIntent(_ context.Context, id string) (paymen
 func (s *scriptedCharges) SearchPaymentIntentsByInvoiceID(context.Context, string) ([]payment.PaymentIntentResult, error) {
 	return nil, nil
 }
+func (s *scriptedCharges) ListPaymentIntentsForCustomer(context.Context, string, time.Time) ([]payment.PaymentIntentResult, error) {
+	return nil, nil
+}
 
 // stripeDeclined is the PaymentError classifyStripeError makes of Stripe's
 // 402 card_error for this decline code (the payment package's
@@ -132,6 +135,17 @@ func (r *hardDeclineRig) finalizedInvoice(custID, num string) domain.Invoice {
 	return inv
 }
 
+// cycleCharge is the auto-charge sweep's charge: it takes the charge hold
+// (ClaimAutoCharge), then charges. The charge records itself on the invoice
+// only while it holds it (ADR-127).
+func (r *hardDeclineRig) cycleCharge(inv domain.Invoice, stripeCustomerID, pm string) (domain.Invoice, error) {
+	r.t.Helper()
+	if ok, err := r.invoices.ClaimAutoCharge(r.ctx, r.tenantID, inv.ID); err != nil || !ok {
+		r.t.Fatalf("claim the charge hold: ok=%v err=%v", ok, err)
+	}
+	return r.charger.ChargeInvoice(r.ctx, r.tenantID, inv, stripeCustomerID, pm)
+}
+
 func (r *hardDeclineRig) attentionCode(invID string) string {
 	r.t.Helper()
 	inv, err := r.invSvc.Get(r.ctx, r.tenantID, invID)
@@ -191,7 +205,7 @@ func TestHardDecline_RetrySkipsTheRefusedCardUntilANewCardArrives_RealStore(t *t
 	}
 
 	// The cycle charge: Stripe refuses the card as lost.
-	if _, err := r.charger.ChargeInvoice(r.ctx, r.tenantID, inv, "cus_stripe_lost", "pm_lost"); err == nil {
+	if _, err := r.cycleCharge(inv, "cus_stripe_lost", "pm_lost"); err == nil {
 		t.Fatal("the lost-card charge returned no error")
 	}
 	if got := r.invoice(inv.ID); got.PaymentStatus != domain.PaymentFailed || got.StripePaymentIntentID != "pi_lost_1" {
@@ -259,7 +273,7 @@ func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.
 		{err: stripeDeclined("pi_nsf_2", "insufficient_funds", "Your card has insufficient funds.")},
 	}
 
-	_, _ = r.charger.ChargeInvoice(r.ctx, r.tenantID, inv, "cus_stripe_nsf", "pm_nsf")
+	_, _ = r.cycleCharge(inv, "cus_stripe_nsf", "pm_nsf")
 	if code := r.attentionCode(inv.ID); code != "payment.declined" {
 		t.Errorf("attention %q, want payment.declined", code)
 	}
@@ -347,7 +361,7 @@ func TestHardDecline_CardAlreadySavedBesideReplacesTheRefusedDefault_RealStore(t
 		{err: stripeDeclined("pi_revoked_1", "revocation_of_authorization", "Your card was declined.")},
 		{pi: "pi_spare_paid"},
 	}
-	if _, err := r.charger.ChargeInvoice(r.ctx, r.tenantID, inv, "cus_stripe_revoked", "pm_revoked"); err == nil {
+	if _, err := r.cycleCharge(inv, "cus_stripe_revoked", "pm_revoked"); err == nil {
 		t.Fatal("the revoked-card charge returned no error")
 	}
 	// The refusal alone does not move the default: the card beside it was

@@ -150,6 +150,33 @@ func (m *mockReconcileStore) Get(_ context.Context, _, id string) (domain.Invoic
 	return *inv, nil
 }
 
+// The interrupted-charge check's store methods (ADR-127). These sweep tests
+// hold no charge records: the check is proven on real Postgres
+// (interrupted_charge_integration_test.go), so here it lists nothing.
+func (m *mockReconcileStore) ListInterruptedCharges(context.Context, time.Duration, time.Duration, int) ([]domain.InterruptedCharge, error) {
+	return nil, nil
+}
+
+func (m *mockReconcileStore) ReleaseInterruptedCharge(context.Context, string, string, int64, time.Time) (bool, bool, error) {
+	return false, false, errors.New("mockReconcileStore: no charge records")
+}
+
+func (m *mockReconcileStore) ParkInterruptedCharge(context.Context, string, string, int64, time.Time, string) (bool, bool, error) {
+	return false, false, errors.New("mockReconcileStore: no charge records")
+}
+
+func (m *mockReconcileStore) EndChargeAttempt(context.Context, string, string, int64) (bool, error) {
+	return false, errors.New("mockReconcileStore: no charge records")
+}
+
+func (m *mockReconcileStore) StampChargeOutcome(context.Context, string, string, int64, domain.InvoicePaymentStatus, string, string) (domain.Invoice, bool, error) {
+	return domain.Invoice{}, false, errors.New("mockReconcileStore: no charge records")
+}
+
+func (m *mockReconcileStore) RecordChargeAttempt(context.Context, string, domain.InvoiceChargeAttempt) error {
+	return nil
+}
+
 func TestReconciler_SucceededResolvesUnknown(t *testing.T) {
 	store := newMockReconcileStore(domain.Invoice{
 		ID: "inv_1", TenantID: "t1", PaymentStatus: domain.PaymentUnknown,

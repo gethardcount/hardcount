@@ -33,11 +33,31 @@ type mockStripeClient struct {
 	searchResults map[string][]PaymentIntentResult
 	searchErr     error
 	searchCalls   []string
+	// listResults / listErr answer ListPaymentIntentsForCustomer (the
+	// interrupted-charge check's read, ADR-127); listCalls records the
+	// Stripe customer of every read.
+	listResults []PaymentIntentResult
+	listErr     error
+	listCalls   []string
+	// onCreate, when set, runs at the start of every CreatePaymentIntent:
+	// the moment Stripe receives the request.
+	onCreate func(params PaymentIntentParams)
+}
+
+func (m *mockStripeClient) ListPaymentIntentsForCustomer(_ context.Context, stripeCustomerID string, _ time.Time) ([]PaymentIntentResult, error) {
+	m.listCalls = append(m.listCalls, stripeCustomerID)
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	return m.listResults, nil
 }
 
 func (m *mockStripeClient) CreatePaymentIntent(_ context.Context, params PaymentIntentParams) (PaymentIntentResult, error) {
 	m.createCalls++
 	m.lastParams = params
+	if m.onCreate != nil {
+		m.onCreate(params)
+	}
 	if m.shouldFail {
 		if m.failErr != nil {
 			return PaymentIntentResult{}, m.failErr
@@ -104,6 +124,31 @@ type mockInvoiceUpdater struct {
 	// report, in call order — what each source told the store (#966: the
 	// decline code and the declined card ride on it).
 	failureReports []domain.PaymentFailureReport
+	// records mirrors the charge record (ADR-127): invoice id → the record on
+	// the row. BeginChargeAttempt applies the store's CAS (no record yet, the
+	// seq unchanged, finalized, pending or failed; holdLapsed[id] stands for a
+	// charge hold that is no longer live). beginErr makes the write fail.
+	// recordBegins / recordEnds count the writes that succeeded.
+	records      map[string]mockChargeRecord
+	holdLapsed   map[string]bool
+	beginErr     error
+	recordBegins int
+	recordEnds   int
+	// duringCall, when set, runs once, at the charge's first attempt-row
+	// write: the moment the charge call has Stripe's answer and has not yet
+	// written its outcome. A fixture uses it for an outcome another path
+	// records while the charge is in flight (after the charge recorded
+	// itself, before it saves its result).
+	duringCall func(m *mockInvoiceUpdater)
+	// markFailedErr, when set, makes MarkPaymentFailedReportingTransition
+	// fail: a decline whose save fails.
+	markFailedErr error
+}
+
+type mockChargeRecord struct {
+	seq              int64
+	key              string
+	stripeCustomerID string
 }
 
 func newMockInvoiceUpdater() *mockInvoiceUpdater {
@@ -111,7 +156,49 @@ func newMockInvoiceUpdater() *mockInvoiceUpdater {
 		invoices:    make(map[string]domain.Invoice),
 		byPI:        make(map[string]string),
 		failNotedPI: make(map[string]string),
+		records:     make(map[string]mockChargeRecord),
+		holdLapsed:  make(map[string]bool),
 	}
+}
+
+// BeginChargeAttempt mirrors the store's CAS (internal/invoice
+// postgres_charge_record.go; proven on real Postgres there).
+func (m *mockInvoiceUpdater) BeginChargeAttempt(_ context.Context, _, id string, seq int64, key, stripeCustomerID string) (bool, error) {
+	if m.beginErr != nil {
+		return false, m.beginErr
+	}
+	inv, ok := m.invoices[id]
+	if !ok || m.holdLapsed[id] || inv.ChargeStartedAt != nil || inv.ChargeAttemptSeq != seq ||
+		inv.Status != domain.InvoiceFinalized ||
+		(inv.PaymentStatus != domain.PaymentPending && inv.PaymentStatus != domain.PaymentFailed) {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	inv.ChargeStartedAt = &now
+	m.invoices[id] = inv
+	m.records[id] = mockChargeRecord{seq: seq, key: key, stripeCustomerID: stripeCustomerID}
+	m.recordBegins++
+	return true, nil
+}
+
+func (m *mockInvoiceUpdater) EndChargeAttempt(_ context.Context, _, id string, seq int64) (bool, error) {
+	rec, ok := m.records[id]
+	if !ok || rec.seq != seq {
+		return false, nil
+	}
+	delete(m.records, id)
+	if inv, ok := m.invoices[id]; ok {
+		inv.ChargeStartedAt = nil
+		m.invoices[id] = inv
+	}
+	m.recordEnds++
+	return true, nil
+}
+
+// recordHeld reports whether invoice id still carries a charge record.
+func (m *mockInvoiceUpdater) recordHeld(id string) bool {
+	_, ok := m.records[id]
+	return ok
 }
 
 // StampChargeOutcome models the real store's attempt-seq CAS (P13), so a
@@ -159,6 +246,10 @@ func (m *mockInvoiceUpdater) GetByStripePaymentIntentID(_ context.Context, _, pi
 }
 
 func (m *mockInvoiceUpdater) RecordChargeAttempt(_ context.Context, _ string, a domain.InvoiceChargeAttempt) error {
+	if during := m.duringCall; during != nil {
+		m.duringCall = nil
+		during(m)
+	}
 	m.chargeAttempts = append(m.chargeAttempts, a)
 	m.noteAttemptTrigger(a.StripePaymentIntentID, a.Trigger)
 	return nil
@@ -267,6 +358,9 @@ func (m *mockInvoiceUpdater) MarkPaidCardSettlementTransition(ctx context.Contex
 
 func (m *mockInvoiceUpdater) MarkPaymentFailedReportingTransition(_ context.Context, _, id string, report domain.PaymentFailureReport, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, domain.PaymentFailureResult, error) {
 	m.failureReports = append(m.failureReports, report)
+	if m.markFailedErr != nil {
+		return domain.Invoice{}, domain.PaymentFailureResult{}, m.markFailedErr
+	}
 	piID := report.PaymentIntentID
 	if piID == "" {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, fmt.Errorf("mark payment failed: a failure report needs a PaymentIntent id")

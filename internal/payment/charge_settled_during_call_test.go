@@ -12,19 +12,24 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// paidMidCharge seeds a store whose row was paid offline while the charge was
-// in flight — which bumped charge_attempt_seq — and returns it with the
-// pre-call snapshot the charge started from (seq 0). The mock store models the
-// real attempt-seq CAS; the SQL is proven in
-// internal/invoice/charge_outcome_guard_integration_test.go.
+// paidMidCharge seeds a store whose row is paid offline while the charge is in
+// flight — which bumps charge_attempt_seq — and returns it with the pre-call
+// snapshot the charge starts from (seq 0). The payment lands once the charge
+// has recorded itself and Stripe has answered (duringCall), as it would in
+// production. The mock store models the real attempt-seq CAS; the SQL is
+// proven in internal/invoice/charge_outcome_guard_integration_test.go.
 func paidMidCharge() (*mockInvoiceUpdater, domain.Invoice) {
 	base := newMockInvoiceUpdater()
+	base.invoices["inv_1"] = pendingSnapshot()
 	paidAt := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
-	base.invoices["inv_1"] = domain.Invoice{
-		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
-		Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
-		StripePaymentIntentID: "out_of_band:2026-10-10T09:00:00Z", PaidAt: &paidAt,
-		Currency: "USD", ChargeAttemptSeq: 1,
+	base.duringCall = func(m *mockInvoiceUpdater) {
+		m.invoices["inv_1"] = domain.Invoice{
+			ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
+			Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
+			StripePaymentIntentID: "out_of_band:2026-10-10T09:00:00Z", PaidAt: &paidAt,
+			Currency: "USD", ChargeAttemptSeq: 1,
+			ChargeStartedAt: m.invoices["inv_1"].ChargeStartedAt,
+		}
 	}
 	return base, pendingSnapshot()
 }
@@ -34,14 +39,18 @@ func paidMidCharge() (*mockInvoiceUpdater, domain.Invoice) {
 // store sets failure_notified_pi in the same write, so the fixture does too.
 func declinedMidCharge() (*mockInvoiceUpdater, domain.Invoice) {
 	base := newMockInvoiceUpdater()
-	row := pendingSnapshot()
-	row.PaymentStatus = domain.PaymentFailed
-	row.StripePaymentIntentID = "pi_X"
-	row.ChargeAttemptSeq = 1
-	base.invoices["inv_1"] = row
-	base.byPI["pi_X"] = "inv_1"
-	base.failNotedPI["inv_1"] = "pi_X"
-	base.failedEventEnqueues = 1
+	base.invoices["inv_1"] = pendingSnapshot()
+	base.duringCall = func(m *mockInvoiceUpdater) {
+		row := pendingSnapshot()
+		row.PaymentStatus = domain.PaymentFailed
+		row.StripePaymentIntentID = "pi_X"
+		row.ChargeAttemptSeq = 1
+		row.ChargeStartedAt = m.invoices["inv_1"].ChargeStartedAt
+		m.invoices["inv_1"] = row
+		m.byPI["pi_X"] = "inv_1"
+		m.failNotedPI["inv_1"] = "pi_X"
+		m.failedEventEnqueues = 1
+	}
 	return base, pendingSnapshot()
 }
 

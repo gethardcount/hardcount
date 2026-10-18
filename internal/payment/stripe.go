@@ -189,6 +189,14 @@ type StripeClient interface {
 	// consistency means an EMPTY result proves nothing and callers must
 	// never write a money outcome from absence.
 	SearchPaymentIntentsByInvoiceID(ctx context.Context, invoiceID string) ([]PaymentIntentResult, error)
+	// ListPaymentIntentsForCustomer is the interrupted-charge check's read
+	// (ADR-127): it retrieves the Stripe customer, which must exist and not
+	// be deleted, then lists every page of that customer's PaymentIntents
+	// created at or after createdGTE. List is a consistent read, unlike
+	// Search. Any error, on the customer or on any page, is a failed read:
+	// the caller must never take a partial or empty answer from an error as
+	// "no such charge".
+	ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error)
 }
 
 type PaymentIntentParams struct {
@@ -245,6 +253,16 @@ type PaymentIntentResult struct {
 	// learn of still stops dunning from charging that card (#966).
 	DeclineCode     string
 	PaymentMethodID string
+	// AttemptKey is the PaymentIntent's velox_attempt_key metadata: the exact
+	// idempotency key the charge sent (ADR-127). The interrupted-charge check
+	// matches a charge record to its PaymentIntent by it. Populated by the
+	// list read; empty on a PaymentIntent Velox did not create, or created
+	// before the key went into the metadata.
+	AttemptKey string
+	// FailureMessage is last_payment_error.message, scrubbed: what the
+	// interrupted-charge check reports as the reason when it records a
+	// decline. Populated by the list read.
+	FailureMessage string
 }
 
 // InvoiceUpdater updates invoice payment status.
@@ -295,6 +313,19 @@ type InvoiceUpdater interface {
 	// starving every later same-advance retry in test-clock catchup
 	// ("dunning catchup loop made no progress").
 	ReleaseAutoChargeClaim(ctx context.Context, tenantID, id string) error
+	// BeginChargeAttempt writes the charge record (ADR-127) in a commit of
+	// its own, just before the Stripe call: the start time, the
+	// charge_attempt_seq the key was built from, the exact key and the Stripe
+	// customer. It is a CAS that also re-checks, right before the call that
+	// cannot be undone, that this charger still holds the invoice (a live
+	// charge hold), that the seq is unchanged and that the invoice is still
+	// finalized and pending or failed. false or an error means Stripe must
+	// not be called.
+	BeginChargeAttempt(ctx context.Context, tenantID, id string, seq int64, key, stripeCustomerID string) (bool, error)
+	// EndChargeAttempt clears the charge record of attempt seq: once the
+	// attempt's result is saved on the invoice, or when nothing was sent.
+	// false = no record of that attempt was there.
+	EndChargeAttempt(ctx context.Context, tenantID, id string, seq int64) (bool, error)
 }
 
 // WebhookStore persists and queries Stripe webhook events.
@@ -532,12 +563,20 @@ func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID stri
 // The purpose suffix keeps the finalize-time charge and a dunning retry
 // distinct even at the same seq: they attach different PI metadata, and Stripe
 // answers "same key, different parameters" with a 409.
-func ChargeIdempotencyKey(invoiceID string, chargeAttemptSeq int64, purpose string) string {
+//
+// The card (stripePaymentMethodID) ends the key, so a charge to another card
+// is another attempt. This function builds the WHOLE key Stripe receives: the
+// card suffix used to be appended later, inside LiveStripeClient, so the key
+// Stripe saw was built in two places. The charge record (ADR-127) stores this
+// exact value and the PaymentIntent carries it as velox_attempt_key, so the
+// interrupted-charge check matches the two with one string comparison. The
+// value is unchanged by that move (TestChargeIdempotencyKey_Value).
+func ChargeIdempotencyKey(invoiceID string, chargeAttemptSeq int64, purpose, stripePaymentMethodID string) string {
 	key := fmt.Sprintf("velox_inv_%s_%d", invoiceID, chargeAttemptSeq)
 	if purpose != "" {
 		key += "_" + purpose
 	}
-	return key
+	return key + "_" + stripePaymentMethodID
 }
 
 func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, stripeCustomerID, stripePaymentMethodID, purpose string) (domain.Invoice, error) {
@@ -618,7 +657,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// parameters" with a 409. Surfaced 2026-05-19 from a clock-pinned dunning
 	// workflow. The seq seed does not retire this: it narrows when two calls
 	// share a key, it does not eliminate it.
-	idempotencyKey := ChargeIdempotencyKey(inv.ID, inv.ChargeAttemptSeq, purpose)
+	idempotencyKey := ChargeIdempotencyKey(inv.ID, inv.ChargeAttemptSeq, purpose, stripePaymentMethodID)
 	params := PaymentIntentParams{
 		AmountCents:     inv.AmountDueCents,
 		Currency:        inv.Currency,

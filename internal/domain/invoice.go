@@ -92,10 +92,13 @@ func (s InvoicePaymentStatus) IsInFlight() bool {
 // offline payment, credit notes, Collect, invoice emails, the hosted Pay
 // button, proration's credit path and dunning's final action.
 //
-// Today the answer is the payment status alone (IsInFlight). It lives on the
-// invoice rather than on the status so that a fact stored elsewhere on the
-// invoice row can join it here, once, instead of at each caller (#976 adds a
-// record of a charge sent to Stripe whose result is not saved yet).
+// Two facts answer it. The payment status (IsInFlight: processing or
+// unknown), and the charge record (ChargeStartedAt, ADR-127): a charge sent to
+// Stripe whose result is not saved yet. During that charge, and after a crash
+// or a timeout until the reconciler has asked Stripe, the payment status is
+// still pending or failed, so the status alone would let every action above
+// go through while Stripe may be taking the money. PaymentInFlightSQL is the
+// same rule for a SQL predicate.
 func (i Invoice) PaymentInFlight() bool {
 	return i.PaymentStatus.IsInFlight()
 }
@@ -350,6 +353,13 @@ type Invoice struct {
 	// after a RECORDED decline gets a fresh one. Internal: never serialised —
 	// it is a payment-protocol detail, not invoice data an operator reads.
 	ChargeAttemptSeq int64 `json:"-"`
+	// ChargeStartedAt is set while a charge Velox sent to Stripe has no saved
+	// result (ADR-127, the charge record). The charge writes it, in a commit of
+	// its own, just before it calls Stripe, and clears it once the result is on
+	// the invoice or nothing was sent. A crash or a timeout leaves it set, and
+	// the reconciler asks Stripe about it from 10 minutes on. While it is set,
+	// PaymentInFlight is true. Internal, like ChargeAttemptSeq.
+	ChargeStartedAt *time.Time `json:"-"`
 
 	// ProviderPaymentStatus is Stripe's verbatim PaymentIntent status at the
 	// last reconciler poll, and ProviderSyncedAt is when we looked (migration

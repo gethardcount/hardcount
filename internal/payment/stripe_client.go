@@ -40,6 +40,14 @@ type PaymentError struct {
 	DeclineCode     string // why the card was refused (insufficient_funds, lost_card, …): see declineCodeOf
 	PaymentIntentID string // set when Stripe returned a PI object alongside the error
 	Unknown         bool
+	// IdempotencyConflict is Stripe's "same key, different parameters"
+	// answer (error type idempotency_error). It is unclear like any 409, and
+	// it carries one more fact: an attempt under this key reached Stripe.
+	// The charge path parks the invoice on it (ADR-107) instead of leaving it
+	// to the interrupted-charge check, which matches by velox_attempt_key and
+	// so cannot find a PaymentIntent created before that metadata existed
+	// (ADR-127).
+	IdempotencyConflict bool
 }
 
 func (e *PaymentError) Error() string { return e.Message }
@@ -104,6 +112,14 @@ func humanizeDeclineCode(code string) string {
 // the same initiator resends the same key; another charge kind or a changed
 // card sends a new one.
 var ErrPaymentTransient = errors.New("payment attempt skipped; upstream breaker open, timeout before Stripe, or Stripe rate limit")
+
+// ErrNotSent marks an ErrPaymentTransient whose request never left Velox:
+// the tenant's Stripe credentials could not be read, so no HTTP request was
+// made. The charge path clears its charge record on it (ADR-127), as it does
+// when the circuit breaker is open. A 429 is ErrPaymentTransient WITHOUT
+// ErrNotSent: Stripe refused that request, but an earlier one stripe-go sent
+// under the same key may still be running, so the record stays.
+var ErrNotSent = errors.New("the request was not sent to Stripe")
 
 // isRateLimited reports whether Stripe refused the request with HTTP 429. A
 // real test-mode reply (2026-10-14) is status 429, type "rate_limit_error",
@@ -295,7 +311,8 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		Confirm:       stripe.Bool(true),
 		OffSession:    stripe.Bool(true),
 		Params: stripe.Params{
-			IdempotencyKey: stripe.String(fmt.Sprintf("%s_%s", params.IdempotencyKey, params.PaymentMethodID)),
+			// The whole key, card included: ChargeIdempotencyKey builds it.
+			IdempotencyKey: stripe.String(params.IdempotencyKey),
 			Metadata:       metadata,
 		},
 		Description: stripe.String(params.Description),
@@ -545,6 +562,12 @@ func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, 
 		})
 	}
 	return out, nil
+}
+
+// ListPaymentIntentsForCustomer implements the interrupted-charge check's read
+// (ADR-127). Scaffolding: the body lands with the fix.
+func (c *LiveStripeClient) ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
+	return nil, nil
 }
 
 // GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted

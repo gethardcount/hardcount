@@ -50,6 +50,28 @@ type ReconcileInvoiceStore interface {
 	AdoptPaymentIntentIfParked(ctx context.Context, tenantID, id, paymentIntentID string) (bool, error)
 	MarkPaymentFailedReportingTransition(ctx context.Context, tenantID, id string, report domain.PaymentFailureReport, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, domain.PaymentFailureResult, error)
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
+
+	// The interrupted-charge check (ADR-127, reconciler_interrupted.go).
+
+	// ListInterruptedCharges returns this mode's charge records older than
+	// minAge whose last failed check is older than minAge too, never-checked
+	// first. Ages are measured on the database clock; PastGiveUp marks a
+	// record older than giveUpAge.
+	ListInterruptedCharges(ctx context.Context, minAge, giveUpAge time.Duration, limit int) ([]domain.InterruptedCharge, error)
+	// ReleaseInterruptedCharge clears a record Stripe has no PaymentIntent
+	// for, and moves charge_attempt_seq if it still equals the record's seq,
+	// so the next charge sends a fresh key. A CAS on (seq, startedAt):
+	// released=false means the record changed since it was listed.
+	ReleaseInterruptedCharge(ctx context.Context, tenantID, id string, seq int64, startedAt time.Time) (released, seqMoved bool, err error)
+	// ParkInterruptedCharge gives up on a record Stripe could not be asked
+	// about for the give-up age: if the invoice is still finalized, pending or
+	// failed, at the record's seq, it parks it (ADR-107) and clears the record
+	// in one statement (parked). Otherwise it only clears the record
+	// (cleared). Both false: the record changed since it was listed.
+	ParkInterruptedCharge(ctx context.Context, tenantID, id string, seq int64, startedAt time.Time, message string) (parked, cleared bool, err error)
+	EndChargeAttempt(ctx context.Context, tenantID, id string, seq int64) (bool, error)
+	StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, paymentStatus domain.InvoicePaymentStatus, stripePaymentIntentID, lastPaymentError string) (domain.Invoice, bool, error)
+	RecordChargeAttempt(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt) error
 }
 
 // Settler is the shared payment-settlement primitive (ADR-049): it owns the

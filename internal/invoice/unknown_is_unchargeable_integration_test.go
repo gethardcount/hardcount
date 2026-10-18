@@ -93,6 +93,28 @@ func TestUnknownPaymentIsUnchargeableByEveryClaimPath(t *testing.T) {
 					"guarantee needs replacing, not the assertion.", c.name, c.what)
 			}
 		})
+
+		// The other way into the park (ADR-127): a charge record Stripe could
+		// not be asked about for 24 hours. The park clears the record in the
+		// same statement, so from then on only the 'unknown' predicate keeps
+		// the claim off the invoice.
+		t.Run(c.name+"/parked by the interrupted-charge check", func(t *testing.T) {
+			inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-UNK-24H-"+c.name)
+			rec := recordCharge(t, db, store, ctx, tenantID, inv.ID)
+			if parked, _, err := store.ParkInterruptedCharge(ctx, tenantID, inv.ID, rec.seq, rec.startedAt, "Stripe could not be read for 24 hours"); err != nil || !parked {
+				t.Fatalf("park: parked=%v err=%v", parked, err)
+			}
+			if readChargeRecord(t, db, inv.ID).set {
+				t.Fatal("setup: the park should clear the record")
+			}
+			ok, err := c.claim(inv)
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if ok {
+				t.Fatalf("%s (%s) claimed an invoice the interrupted-charge check parked: Stripe may hold a payment for it", c.name, c.what)
+			}
+		})
 	}
 }
 

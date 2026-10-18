@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -461,6 +462,16 @@ func (m *mockInvoiceUpdaterHandler) RecordChargeAttempt(_ context.Context, _ str
 
 func (m *mockInvoiceUpdaterHandler) ReleaseAutoChargeClaim(_ context.Context, _, _ string) error {
 	return nil
+}
+
+// The webhook tests never charge, so the charge record (ADR-127) is refused:
+// a test that started charging through this fake would fail closed, loudly.
+func (m *mockInvoiceUpdaterHandler) BeginChargeAttempt(context.Context, string, string, int64, string, string) (bool, error) {
+	return false, errors.New("mockInvoiceUpdaterHandler: these tests do not charge")
+}
+
+func (m *mockInvoiceUpdaterHandler) EndChargeAttempt(context.Context, string, string, int64) (bool, error) {
+	return false, nil
 }
 
 func newMockInvoiceUpdaterH() *mockInvoiceUpdaterHandler {

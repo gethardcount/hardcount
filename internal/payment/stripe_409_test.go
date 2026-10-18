@@ -156,9 +156,14 @@ func withScriptedStripe(t *testing.T, steps ...scriptedStep) *scriptedStripe {
 // connection drops, stripe-go retries it under the same key, and Stripe
 // answers the retry with 409 "key in use" because the first request is still
 // running. The charge must not count as a decline: no failed status, no
-// dunning, no released hold, no new key. Until the interrupted-charge check
-// ships, the invoice parks for the provider search (ADR-107/108), as any
-// unclear answer with no PaymentIntent id does.
+// dunning, no released hold, no new key. Since the charge record (ADR-127) it
+// does not park either: the charge wrote its record before calling Stripe,
+// the record stays, and the invoice is otherwise as it was. The reconciler's
+// interrupted-charge check asks Stripe about it from 10 minutes on
+// (interrupted_charge_integration_test.go finds the first request's
+// PaymentIntent there). Only the "same key, different parameters" 409 still
+// parks: a PaymentIntent from before velox_attempt_key existed cannot be
+// matched by the check.
 func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 	connReset := errors.New("read tcp 10.0.0.2:51234->34.200.27.109:443: read: connection reset by peer")
 	for _, tc := range []struct {
@@ -166,6 +171,7 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 		purpose  string
 		steps    []scriptedStep
 		requests int
+		parks    bool
 	}{
 		{
 			name:     "auto-charge or Collect payment: network error, then 409 key in use",
@@ -188,10 +194,11 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			requests: 2,
 		},
 		{
-			// Control: unchanged behavior for the one 409 that keeps it.
+			// Control: the one 409 that still parks.
 			name:     "409 same key, different parameters",
 			steps:    []scriptedStep{{status: http.StatusConflict, body: stripe409ParamsDiffer}},
 			requests: 1,
+			parks:    true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -212,7 +219,7 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			}
 
 			// stripe-go itself sent the retry, under the same key.
-			wantKey := ChargeIdempotencyKey("inv_1", snapshot.ChargeAttemptSeq, tc.purpose) + "_pm_on_file"
+			wantKey := ChargeIdempotencyKey("inv_1", snapshot.ChargeAttemptSeq, tc.purpose, "pm_on_file")
 			if len(stub.keys) != tc.requests {
 				t.Fatalf("requests to Stripe = %d (keys %q), want %d", len(stub.keys), stub.keys, tc.requests)
 			}
@@ -245,21 +252,48 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			if len(invoices.failureReports) != 0 {
 				t.Errorf("failure reports = %d, want 0", len(invoices.failureReports))
 			}
-			got := invoices.invoices["inv_1"]
-			if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "" {
-				t.Errorf("invoice payment_status %q, PaymentIntent %q; want unknown with no PaymentIntent (parked, ADR-107), never failed",
-					got.PaymentStatus, got.StripePaymentIntentID)
-			}
 			if len(invoices.chargeAttempts) != 1 || invoices.chargeAttempts[0].Outcome != domain.ChargeAttemptUnknown || invoices.chargeAttempts[0].DeclineCode != "" {
 				t.Errorf("charge attempts = %+v, want one unknown attempt with no decline code", invoices.chargeAttempts)
 			}
+			if invoices.recordBegins != 1 {
+				t.Errorf("charge records written = %d, want 1: the record goes on the invoice before the Stripe call", invoices.recordBegins)
+			}
 
+			got := invoices.invoices["inv_1"]
+			if !tc.parks {
+				// Unclear with nothing to name: the record stays, and nothing
+				// else is written.
+				if !invoices.recordHeld("inv_1") {
+					t.Error("charge record cleared: an unclear answer keeps it, so no path charges again until Stripe is asked")
+				}
+				if got.PaymentStatus != snapshot.PaymentStatus || got.StripePaymentIntentID != "" || got.ChargeAttemptSeq != snapshot.ChargeAttemptSeq {
+					t.Errorf("invoice payment_status %q, PaymentIntent %q, seq %d; want it unchanged (%q, none, %d): no stamp and no park",
+						got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, snapshot.PaymentStatus, snapshot.ChargeAttemptSeq)
+				}
+				if line := parkAnnouncement(logs.String()); line != "" {
+					t.Errorf("an unclear answer announced a park; it keeps the record instead:\n%s", line)
+				}
+				return
+			}
+
+			// Same key, different parameters: parked (ADR-107), and the park
+			// is the attempt's saved result, so the record is cleared.
+			if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "" {
+				t.Errorf("invoice payment_status %q, PaymentIntent %q; want unknown with no PaymentIntent (parked, ADR-107)",
+					got.PaymentStatus, got.StripePaymentIntentID)
+			}
+			if invoices.recordHeld("inv_1") {
+				t.Error("charge record kept after the park committed: the park is this attempt's saved result")
+			}
 			// The park's ERROR names the key: a 409 proves an attempt under it
 			// reached Stripe, and the operator looks the attempt up by it.
 			if line := parkAnnouncement(logs.String()); line == "" {
 				t.Errorf("park not announced at ERROR:\n%s", logs)
-			} else if field := "idempotency_key=" + ChargeIdempotencyKey("inv_1", snapshot.ChargeAttemptSeq, tc.purpose); !slices.Contains(strings.Fields(line), field) {
+			} else if field := "idempotency_key=" + wantKey; !slices.Contains(strings.Fields(line), field) {
 				t.Errorf("park announcement does not carry %s:\n%s", field, line)
+			}
+			if !strings.Contains(logs.String(), "idempotency conflict with no PaymentIntent id") {
+				t.Errorf("the idempotency-conflict CRITICAL did not fire:\n%s", logs)
 			}
 		})
 	}

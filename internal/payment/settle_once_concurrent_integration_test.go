@@ -58,12 +58,23 @@ type settleRaceStripe struct {
 	createRes payment.PaymentIntentResult
 	createErr error
 	gets      map[string]int
+	// created, when set, is closed by the first create of a round: Stripe
+	// has the request from then on, so its webhook can exist.
+	created chan struct{}
 }
 
 func (f *settleRaceStripe) CreatePaymentIntent(context.Context, payment.PaymentIntentParams) (payment.PaymentIntentResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.created != nil {
+		close(f.created)
+		f.created = nil
+	}
 	return f.createRes, f.createErr
+}
+
+func (f *settleRaceStripe) ListPaymentIntentsForCustomer(context.Context, string, time.Time) ([]payment.PaymentIntentResult, error) {
+	return nil, nil
 }
 
 func (f *settleRaceStripe) CancelPaymentIntent(context.Context, string) error { return nil }
@@ -198,6 +209,16 @@ func succeededEvent(evtID, piID, invoiceID string) domain.StripeWebhookEvent {
 	}
 }
 
+// claimHold takes the charge hold the way the auto-charge sweep does before it
+// charges (ClaimAutoCharge).
+func claimHold(t *testing.T, r *settleRaceRig, tenantID, invoiceID string) {
+	t.Helper()
+	ok, err := r.invStore.ClaimAutoCharge(r.ctx, tenantID, invoiceID)
+	if err != nil || !ok {
+		t.Fatalf("claim the charge hold: ok=%v err=%v", ok, err)
+	}
+}
+
 // race releases every racer at once and returns their errors.
 func race(racers []func() error) []error {
 	start := make(chan struct{})
@@ -303,12 +324,25 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			tenantID, inv := r.seed(t, fmt.Sprintf("settle-inline-%d", round))
 			piID := fmt.Sprintf("pi_inline_race_%d", round)
 			evtID := "evt_" + piID
+			// Every charge initiator takes the charge hold first; the charge
+			// records itself only while it holds the invoice (ADR-127).
+			claimHold(t, r, tenantID, inv.ID)
+			created := make(chan struct{})
 			r.client.mu.Lock()
 			r.client.createRes, r.client.createErr = payment.PaymentIntentResult{ID: piID, Status: "succeeded"}, nil
+			r.client.created = created
 			r.client.mu.Unlock()
 			r.counting.reached.Store(0)
 
+			// A PaymentIntent's webhook exists only once Stripe has the
+			// request, so the webhooks race the charge from its create on:
+			// between Stripe's answer and the charge's own settle.
 			webhookRacer := func() error {
+				select {
+				case <-created:
+				case <-time.After(30 * time.Second):
+					return errors.New("the charge never reached Stripe")
+				}
 				return r.stripe.HandleWebhook(r.ctx, tenantID, succeededEvent(evtID, piID, inv.ID))
 			}
 			errs := race([]func() error{
@@ -347,6 +381,7 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			r.client.createRes = payment.PaymentIntentResult{}
 			r.client.createErr = &payment.PaymentError{Message: "stripe: timeout", PaymentIntentID: piID, Unknown: true}
 			r.client.mu.Unlock()
+			claimHold(t, r, tenantID, inv.ID)
 			if _, err := r.stripe.ChargeInvoice(r.ctx, tenantID, inv, "cus_stripe_race", "pm_race_4242"); err == nil {
 				t.Fatalf("round %d: ambiguous charge returned no error", round)
 			}
