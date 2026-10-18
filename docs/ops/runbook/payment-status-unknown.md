@@ -50,4 +50,7 @@ The query above no longer returns the invoice, and the invoice no longer
 shows `payment_unconfirmed`.
 
 Related: an attempt that cannot be identified at Stripe at all becomes a
-[parked invoice](parked-invoices.md).
+[parked invoice](parked-invoices.md). A charge interrupted before its result
+was saved, with no PaymentIntent named, is not `unknown`: it keeps a charge
+record until the reconciler has asked Stripe
+([Interrupted charges](interrupted-charges.md)).

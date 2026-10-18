@@ -1,6 +1,6 @@
 # ADR-105: The charge idempotency key is seeded by an attempt counter, not `updated_at`
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-19)
 **Date:** 2026-07-30
 **Supersedes:** the `velox_inv_<id>_<UpdatedAt>` key shape, and the
 money-path playbook's gate #2 wording that blessed it.
@@ -9,7 +9,7 @@ money-path playbook's gate #2 wording that blessed it.
 
 ## Summary
 
-Each Stripe charge sends the idempotency key `velox_inv_<invoice_id>_<charge_attempt_seq>`, with a `_dunning_retry` suffix on dunning retries. Every write that records a PaymentIntent id on the invoice bumps the counter `charge_attempt_seq`, and no other write does. The old seed, `updated_at`, also moved on unrelated writes such as a tax commit, so a retry after a lost response could create a second PaymentIntent and charge twice. A Stripe idempotency conflict now counts as an unknown outcome, not a decline, because it proves an earlier attempt reached Stripe. Status: active; the case it left open, an unclear result with no PaymentIntent id, is now handled by [ADR-107](107-unknown-is-terminal-until-a-human.md) and [ADR-108](108-parked-invoices-search-and-adopt.md).
+Each Stripe charge sends the idempotency key `velox_inv_<invoice_id>_<charge_attempt_seq>`, with a `_dunning_retry` suffix on dunning retries. Every write that records a PaymentIntent id on the invoice bumps the counter `charge_attempt_seq`, and so does the release of an interrupted charge Stripe never got (amendment 2026-10-19); no other write does. The old seed, `updated_at`, also moved on unrelated writes such as a tax commit, so a retry after a lost response could create a second PaymentIntent and charge twice. A Stripe idempotency conflict now counts as an unknown outcome, not a decline, because it proves an earlier attempt reached Stripe. Status: active; the case it left open, an unclear result with no PaymentIntent id, is now handled by [ADR-107](107-unknown-is-terminal-until-a-human.md) and [ADR-108](108-parked-invoices-search-and-adopt.md).
 
 ## Context
 
@@ -169,3 +169,20 @@ column.
 metadata is already stamped) and it would close the residual above, but
 it adds a Stripe client method and a network round-trip on a rare path.
 Deferred with the ADR-062 work rather than bolted on here.
+
+## Amendment 2026-10-19 — the counter also moves on a release
+
+[ADR-127](127-record-each-charge-before-calling-stripe.md) records each charge
+on the invoice before Velox calls Stripe. When the reconciler finds that
+Stripe has no PaymentIntent for an interrupted charge's key, it releases the
+invoice, and `ReleaseInterruptedCharge` moves `charge_attempt_seq` if it still
+equals the charge's seq. That is a recorded outcome ("no payment was
+created"), so the rule above holds: the key moves when an attempt outcome is
+recorded. It is the one write that moves the counter without stamping a
+PaymentIntent id, and `TestChargeAttemptSeqBumpedByEveryPIStamp` now admits
+exactly that statement (and scans every file of the store, not one). Moving
+the key there also avoids a 500 that Stripe may have saved under the old key.
+
+The key itself is unchanged. `ChargeIdempotencyKey` now builds all of it, the
+card suffix included, which `LiveStripeClient` used to append; every charge
+also sends it as the PaymentIntent's `velox_attempt_key` metadata.

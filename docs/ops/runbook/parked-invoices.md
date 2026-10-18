@@ -11,6 +11,16 @@ closing it. Back to the [runbook index](index.md).
 
 ## Why
 
+- An invoice parks in two ways
+  ([ADR-127](../../adr/127-record-each-charge-before-calling-stripe.md)):
+  - Stripe answered a charge with 409 "same key, different parameters". Only
+    a charge in flight during an upgrade gets this answer.
+  - The reconciler could not read Stripe about an interrupted charge for 24
+    hours. The CRITICAL's `error` says "Stripe could not be read about this
+    charge".
+
+  Other unclear answers do not park: see
+  [Interrupted charges](interrupted-charges.md).
 - A parked invoice cannot be charged, on purpose. No sweep, no dunning
   retry and no operator "Collect payment" will touch it. That is what makes
   a double charge impossible.
@@ -35,8 +45,9 @@ Find the attempt in Stripe by customer, amount and approximate time.
    is failing, then send the event again from the Stripe dashboard. If the
    invoice stays parked, Velox had already received that event. Mark the
    invoice uncollectible and ask the customer to pay another way: the
-   write-off stops dunning
-   ([#976](https://github.com/getvelox/velox/issues/976) removes this case).
+   write-off stops dunning. This case came from an unclear charge answer
+   that parked; since ADR-127 such an answer keeps a charge record instead,
+   and the reconciler records the decline.
 3. If nothing was charged, mark the invoice uncollectible. This is the only
    action the invoice page offers. It also releases the invoice's deferred
    clawback draft and closes its dunning run.

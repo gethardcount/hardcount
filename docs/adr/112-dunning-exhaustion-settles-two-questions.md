@@ -1,6 +1,6 @@
 # ADR-112: Dunning exhaustion settles two questions, not one
 
-**Status:** Accepted (2026-08-05; amended 2026-10-08 and 2026-10-19)
+**Status:** Accepted (2026-08-05; amended 2026-10-08 and twice on 2026-10-19)
 **Amends:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns —
 `final_action` and its 2026-05-16 four-value enum)
 **Relates to:** [ADR-110](110-written-off-invoices-close-self-service-payment.md)
@@ -20,9 +20,11 @@ platform should not make unasked, and the policy form now says the invoice
 stays open. Automatic void is refused, and every entry point rejects the old
 `final_action` key by name. The policy every new account starts with changes
 nothing ([ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md)).
-Neither action fires while the invoice's payment is `processing` or `unknown`:
-the run waits and is checked again. A charge call still waiting on Stripe
-counts too once the #976 charge record ships ([amendment 2026-10-19](#amendment-2026-10-19--no-final-action-while-a-payment-may-be-in-flight)).
+Neither action fires while a payment on the invoice may still take money:
+its payment is `processing` or `unknown`, or a charge sent to Stripe has no
+saved result yet (the charge record, [ADR-127](127-record-each-charge-before-calling-stripe.md)).
+The run waits and is checked again
+([amendments of 2026-10-19](#amendment-2026-10-19--no-final-action-while-a-payment-may-be-in-flight)).
 
 ## Context
 
@@ -340,7 +342,8 @@ never reaches the final actions. #976 handles that path in its own design.
 
 **Not covered yet.**
 
-- **A charge call still waiting on Stripe**, until the #976 record ships.
+- **A charge call still waiting on Stripe**, until the #976 record ships
+  (it has: see the second amendment of 2026-10-19 below).
   During the call the payment status is still `pending` or `failed`. Only the
   5-minute charge hold says a charge is running, and `PaymentInFlight()` does
   not read the hold. So an exhaust-on-entry that lands during an operator's
@@ -359,3 +362,22 @@ ended the hold. So the dunning API shows the run resolved too early, and on
 the invoice timeline the escalation can sit before that failure. Trigger: a
 walk or a tenant who reports the order.
 
+## Amendment 2026-10-19 (2) — the charge record holds the final action too
+
+[ADR-127](127-record-each-charge-before-calling-stripe.md) records each charge
+on the invoice before Velox calls Stripe, and `Invoice.PaymentInFlight()` is
+true while that record exists. So the check above now also holds the final
+actions for a charge still waiting on Stripe, and for one a crash or a
+timeout interrupted. That closes the first item under "Not covered yet". An
+exhaust-on-entry during a **Collect payment** now waits. So does one after a
+crash on the final retry, until the reconciler has asked Stripe about the
+charge. A payment Stripe took closes the run as recovered; a
+decline gets the final actions on a later tick; a charge Stripe never got is
+released and the run continues.
+
+The due-run pickers skip a run whose open invoice carries a record, as they
+skip one that is `processing` or `unknown` (`domain.PaymentInFlightSQL`), so a
+held run costs no ticks. Pinned by the "charge record" shape in
+`internal/dunning/exhaust_inflight_integration_test.go` (both ways in) and by
+`internal/dunning/exhaust_charge_record_integration_test.go` (the crash on
+the final retry, through the check, to "recovered").

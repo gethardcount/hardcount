@@ -40,6 +40,10 @@ clean.
 - [ ] 3-D Secure: Pay with `4000 0027 6000 3184`, fail the challenge → the invoice stays unpaid; pass it → paid.
 - [ ] Refund: a credit note with "Refund to card" → `refund_status=succeeded`, and the refund shows in the Stripe dashboard.
 - [ ] Key in use: start two `stripe payment_intents create -d amount=2000 -d currency=usd -d payment_method=pm_card_visa -d "payment_method_types[]=card" -d confirm=true -i <key>` at once with one new key. Repeat with a fresh key until one answers HTTP 409 with code `idempotency_key_in_use` (identical replies are a replay) → write its error `type` in the comment on `stripe409KeyInUse` in `internal/payment/stripe_409_test.go`. Velox treats every 409 as unclear, whatever the type ([#976](https://github.com/getvelox/velox/issues/976)).
+- [ ] List is read-after-write: create a PaymentIntent for a customer, then within a second `stripe payment_intents list --customer <cus> -d "created[gte]=<unix>"` → it is listed. The interrupted-charge check relies on this ([ADR-127](../adr/127-record-each-charge-before-calling-stripe.md)).
+- [ ] A customer the account cannot see: `stripe customers retrieve` and `stripe payment_intents list --customer` for a deleted customer, and for a customer id from another Stripe account → note what each returns. The check reads anything but an existing, not-deleted customer as a failed read.
+- [ ] Repeat the two checks above, and the key-in-use check, on an India test account if you have one (Stripe Search is not offered there; List must be).
+- [ ] Interrupted charge: charge an invoice with `4242`, and SIGKILL the process during the call. To catch it there, add a debug delay or hold Stripe's answer in a TCP proxy. After a restart → the invoice refuses Collect with "being confirmed with Stripe". Move its `charge_started_at` back 11 minutes and wait for the next reconciler run → paid, with exactly one PaymentIntent in the Stripe dashboard.
 - [ ] Stripe Tax: with a US state registration in the Stripe test account, tax provider "Stripe Tax", customer with a full US address → the invoice has a tax line that matches Stripe's calculation.
 
 ## Money walk across a renewal

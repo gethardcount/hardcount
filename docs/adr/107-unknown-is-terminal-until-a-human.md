@@ -1,6 +1,6 @@
 # ADR-107: An unnameable charge attempt parks the invoice; it is never settled failed
 
-**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18)
+**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18, 2026-10-19)
 **Date:** 2026-07-31
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) as the answer to this
 problem. ADR-106's charge-intent ledger is **parked, not deleted** — see
@@ -10,14 +10,16 @@ in #678 and unaffected by this decision), ADR-049 (payment reconciler).
 
 ## Summary
 
-When a Stripe charge ends with an unclear result and no PaymentIntent id, Velox no longer marks the invoice `failed`. That used to make the invoice claimable again under a new idempotency key (`charge_attempt_seq`), so a retry could charge the customer twice. Now the invoice is parked at `payment_status='unknown'`, which no charge path accepts, and `TestUnknownPaymentIsUnchargeableByEveryClaimPath` fails the build if one ever does. That exclusion is the whole safeguard: the write that records `unknown` also bumps `charge_attempt_seq`, so the original attempt cannot be replayed (amendment of 2026-08-01). The parked state is logged as CRITICAL once, the reconciler sweep skips parked rows, and the invoice resolves when a webhook names the PaymentIntent or when Stripe search finds it (ADR-108). An empty search result writes nothing. The only manual exit is `MarkUncollectible`, which leaves `unknown` in place, so a charge that later succeeds still marks the invoice paid. Credit-note refunds follow the same rule since 2026-10-18: an unclear refund result is `unknown`, and **Retry refund** resends the same request under the same key (see the last amendment).
+When a Stripe charge ends with an unclear result and no PaymentIntent id, Velox no longer marks the invoice `failed`. Since 2026-10-19 most such results do not park either: the charge's record on the invoice stays, and the reconciler checks the charge with Stripe ([ADR-127](127-record-each-charge-before-calling-stripe.md)). The park described here remains for a 409 "same key, different parameters" and for a charge Stripe could not be asked about for 24 hours. That used to make the invoice claimable again under a new idempotency key (`charge_attempt_seq`), so a retry could charge the customer twice. Now the invoice is parked at `payment_status='unknown'`, which no charge path accepts, and `TestUnknownPaymentIsUnchargeableByEveryClaimPath` fails the build if one ever does. That exclusion is the whole safeguard: the write that records `unknown` also bumps `charge_attempt_seq`, so the original attempt cannot be replayed (amendment of 2026-08-01). The parked state is logged as CRITICAL once, the reconciler sweep skips parked rows, and the invoice resolves when a webhook names the PaymentIntent or when Stripe search finds it (ADR-108). An empty search result writes nothing. The only manual exit is `MarkUncollectible`, which leaves `unknown` in place, so a charge that later succeeds still marks the invoice paid. Credit-note refunds follow the same rule since 2026-10-18: an unclear refund result is `unknown`, and **Retry refund** resends the same request under the same key (see the last amendment).
 
 ## Context
 
 A Stripe charge can create a PaymentIntent that Velox never learns the name of:
 the process dies between the call and the outcome write (a **timeout** does this
 with no crash at all), or the call returns an ambiguous error carrying no
-PaymentIntent id.
+PaymentIntent id. (Correction, 2026-10-19: a crash, and a timeout whose outcome
+write failed on the expired context, never parked anything. They left the
+invoice chargeable, which was #976; see the last amendment.)
 
 `payment.reconcileOne`'s empty-PI branch then settled the invoice **failed**,
 under the comment *"a safe retry generates a new PI"*. That comment described
@@ -408,3 +410,27 @@ to reconcile, not resend
 ([Stripe](https://docs.stripe.com/error-low-level#post-requests)). Velox
 does not stop a resend at that age yet. **Trigger:** the first unknown
 refund older than 24 hours in production.
+
+## Amendment 2026-10-19 — an unclear charge result keeps its charge record instead of parking
+
+[ADR-127](127-record-each-charge-before-calling-stripe.md) records each charge
+on the invoice before Velox calls Stripe. The reconciler checks an
+interrupted or unclear one: it lists the customer's PaymentIntents and
+matches the exact idempotency key. Two things change here:
+
+- **An unclear answer with no PaymentIntent id no longer parks.** A timeout,
+  a cancelled request, a network error, a 5xx, a 409 "key in use" or a 429
+  writes nothing. The record stays, no charge path takes the invoice, and the
+  check records what Stripe did. Before, the same Stripe answer was parked or
+  left chargeable depending on which timer fired.
+- **The park stays for two cases.** A 409 "same key, different parameters"
+  still parks at once: it comes only from an attempt in flight across the
+  upgrade that added `velox_attempt_key`, whose PaymentIntent the check
+  cannot match. And the check parks an invoice whose Stripe could not be read
+  for 24 hours (`ParkInterruptedCharge`, the park and the clearing of the
+  record in one statement, with this ADR's CRITICAL).
+
+Everything else about a parked invoice is unchanged: no claim admits it
+(`TestUnknownPaymentIsUnchargeableByEveryClaimPath` now covers both ways in),
+ADR-108's search can adopt its PaymentIntent, and the write-off is its one
+exit.

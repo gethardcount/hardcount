@@ -90,6 +90,11 @@ Notes on three rows:
 - `velox_tax_outcome_total{outcome, reason}`: tax outcomes that were not a
   plain success (deferrals), by reason
 - `velox_scheduled_cleanup_rows_total`: periodic cleanup activity
+- `velox_interrupted_charge_resolutions_total{result}`: charges interrupted
+  between Stripe and their saved result, by what the reconciler's check found
+  (`succeeded`, `declined`, `processing`, `canceled`, `not_found`, `parked`).
+  A `parked` one also raises `velox_parked_invoices`. See
+  [Interrupted charges](interrupted-charges.md)
 
 ## Logs to search when paged
 

@@ -144,9 +144,9 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [102](102-invoice-charge-attempts.md) | 2026-07-28 | Accepted (partly superseded, amended) | Payments | Record each charge attempt as a row, updated by PaymentIntent id as Stripe reports |
 | [103](103-single-payment-source.md) | 2026-07-28 | Accepted | Payments | The invoice timeline shows payments only from charge-attempt rows, not from the webhook table |
 | [104](104-one-activity-lane-entity-calendar.md) | 2026-07-29 | Accepted (amended) | Test clocks & simulated time | One invoice timeline ordered by the entity's own clock; the real time shows beneath |
-| [105](105-charge-idempotency-key-seed.md) | 2026-07-30 | Accepted | Payments | Seed the Stripe idempotency key from a per-invoice attempt counter, not `updated_at` |
-| [106](106-charge-intent-ledger.md) | 2026-07-30 | Parked | Payments | Record each charge before calling Stripe, so an unnamed charge can be replayed safely |
-| [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted (amended) | Payments | An unclear charge parks the invoice; a webhook, Stripe search or a human resolves it |
+| [105](105-charge-idempotency-key-seed.md) | 2026-07-30 | Accepted (amended) | Payments | Seed the Stripe idempotency key from a per-invoice attempt counter, not `updated_at` |
+| [106](106-charge-intent-ledger.md) | 2026-07-30 | Superseded by 127 | Payments | Record each charge before calling Stripe, so an unnamed charge can be replayed safely |
+| [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted (amended) | Payments | A charge that cannot be identified at Stripe parks the invoice; a webhook, Stripe search or a human resolves it |
 | [108](108-parked-invoices-search-and-adopt.md) | 2026-08-02 | Accepted | Payments | Resolve unknown charges by searching Stripe, and act only on a payment actually found |
 | [109](109-issued-document-snapshot.md) | 2026-08-05 | Accepted (amended) | Invoices | Issued documents print bill-to and supplier details from a copy taken at issue |
 | [110](110-written-off-invoices-close-self-service-payment.md) | 2026-08-05 | Accepted (partly superseded) | Invoices | Customers cannot pay a written-off invoice online; its public pages point to support |
@@ -166,6 +166,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md) | 2026-10-17 | Superseded by ADR-125 | Platform & ops | Run migrations with plain golang-migrate and a 5-second lock limit per file; never built |
 | [125](125-goose-migrations-from-one-v081-baseline.md) | 2026-10-18 | Accepted | Platform & ops | From v0.9.0, run migrations with goose from one baseline; v0.8 databases need no change |
 | [126](126-a-card-refused-for-good-is-not-retried.md) | 2026-10-18 | Accepted | Dunning | After a hard decline, dunning charges that card no more for that invoice until another card is the default |
+| [127](127-record-each-charge-before-calling-stripe.md) | 2026-10-19 | Accepted | Payments | Record each charge on its invoice before calling Stripe; check an interrupted one with Stripe's list API before charging again |
 | [128](128-activity-line-standard.md) | 2026-10-19 | Accepted | Test clocks & simulated time | Every activity line has one wording, names who acted and follows one clock rule; the backend builds the words |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified

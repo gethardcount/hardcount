@@ -49,6 +49,7 @@ row-level-security role you see only one tenant's rows, or none.
 | `webhook_outbox` growing, or one customer's webhook endpoint failing | [Webhook outbox backed up or one endpoint failing](webhook-outbox-backed-up.md) |
 | `velox_stripe_breaker_state == 2`, or dunning retries skipped | [Stripe circuit breaker open](stripe-circuit-breaker-open.md) |
 | Invoices stuck with an unconfirmed payment for hours | [Payments stuck as unknown](payment-status-unknown.md) |
+| "A charge on this invoice is being confirmed with Stripe", or a WARN naming "the charge record stays" or "the interrupted-charge check" | [Interrupted charges](interrupted-charges.md) |
 | A test clock stuck on the Advancing badge | [Test-clock advance hung](test-clock-advance-hung.md) |
 | A tenant sees another tenant's data | [Data leak between tenants suspected](rls-leak-suspected.md) |
 | LiteLLM spend 503s, or Velox spend short of LiteLLM's | [LiteLLM spend gap after an outage](litellm-spend-gap.md) |
