@@ -409,7 +409,7 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
 		return dunning.ErrTransientSkip
 	}
-	if refusedCode != "" && refusedCode == "MUTATION i1: gate off" {
+	if refusedCode != "" {
 		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
 		slog.InfoContext(ctx, "dunning retry: not charging a card the bank refused for good; waiting for a different default card",
 			"invoice_id", invoiceID, "customer_id", customerID, "decline_code", refusedCode)
