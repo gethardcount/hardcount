@@ -127,7 +127,7 @@ Found by the build-vs-library audit of 2026-10-17.
 
 ## Amendment 2026-10-18: the session cookie is always Secure in production
 
-Phase 0(b) is done. In `staging` and `production` the session cookie is `Secure` on every response that sets it (sign-in and invite accept) or clears it (logout), whatever page the browser is on. In `local` it never is. An unrecognised `APP_ENV`, such as `dev`, still gets no `Secure`, and a near miss of `production`, such as `prod`, still stops start-up.
+Phase 0(b) is done (#1226). In `staging` and `production` the session cookie is `Secure` on every response that sets it (sign-in and invite accept) or clears it (logout), whatever page the browser is on. In `local` it never is. An unrecognised `APP_ENV`, such as `dev`, still gets no `Secure`, and a near miss of `production`, such as `prod`, still stops start-up.
 
 What changed. Since #1045 (2026-10-14) the cookie dropped `Secure` when the browser's `Origin` or `Referer` was plain http at a loopback address. The Compose quickstart ran in production mode at `http://localhost`, and Safari does not keep a `Secure` cookie over plain HTTP, even at localhost. That exception is removed. The quickstart now writes `APP_ENV=local` into its `.env`, so Safari still signs in there.
 
