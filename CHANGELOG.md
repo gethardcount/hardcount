@@ -20,6 +20,7 @@ original text.
 
 ### Changed
 
+- **`make test` no longer reads `.env` (2026-10-18).** For contributors: only `make run`, `dev`, `migrate`, `migrate-status` and `bootstrap` load it, so tests see the same settings as CI. `make test-unit` runs packages in parallel (about 30 s, was 60 s). The unused `test-integration` and `test-verbose` targets are gone. ([#1207](https://github.com/getvelox/velox/pull/1207))
 - **ADRs 001–061 all open with a short Summary (2026-10-18).** Forty-six records gained one, giving the current rule and status, including what later ADRs changed. The records below each Summary are unchanged. Fourteen status lines now name their dated amendment or partial supersession. See the [ADR index](docs/adr/README.md).
 - **Go tests now walk five untested backend flows over HTTP on a real database (2026-10-18).** Contributors: `internal/api` has new journeys for API keys (create, use, revoke, rotate), offline payments and signed Stripe webhooks, the update-payment link, dunning-policy delete, and whoami, the mode switch and the reset-link check. ([#1204](https://github.com/getvelox/velox/pull/1204))
 - **Decision recorded: migrations move to goose in v0.9.0 (2026-10-18).** Nothing changes yet. v0.9.0 takes over a v0.8.0 or v0.8.1 database without changing a table; older ones upgrade to v0.8.1 first. A failed migration leaves nothing to repair, so `velox migrate force` goes. [ADR-125](docs/adr/125-goose-migrations-from-one-v081-baseline.md) supersedes ADR-124; ADR-073's deadlock correction stands.

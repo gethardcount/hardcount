@@ -1,4 +1,12 @@
-.PHONY: build run test lint migrate dev clean cli gen gen-go gen-ts
+.PHONY: build run test lint migrate dev clean gen gen-go gen-ts
+
+# .env (cp .env.example .env) configures the targets that start Velox or
+# its tools: run, dev, migrate, migrate-status and bootstrap. Only those
+# load it, so the test targets see the same environment CI does.
+ifneq ($(filter run dev migrate migrate-status bootstrap,$(MAKECMDGOALS)),)
+-include .env
+export
+endif
 
 # Build the velox binary
 build:
@@ -8,11 +16,7 @@ build:
 run: build
 	./bin/velox
 
-# Run server locally — loads .env if present
-# Setup: cp .env.example .env && edit .env
--include .env
-export
-
+# Run the server from source
 dev:
 	go run ./cmd/velox
 
@@ -22,8 +26,7 @@ dev:
 # test database; running packages in parallel races each package's
 # SetupTestDB truncate against another package's in-flight queries
 # and produces flaky e2e failures (visible specifically on
-# internal/api e2e tests). test-unit also uses -p 1 for env-var
-# isolation; same reasoning applies broader.
+# internal/api e2e tests).
 #
 # VELOX_LIVEMODE_STRICT=true escalates "TxTenant opened without ctx
 # livemode" warnings to panics — every test that opens a tenant-
@@ -34,13 +37,9 @@ dev:
 test:
 	VELOX_LIVEMODE_STRICT=true go test -p 1 ./... -count=1
 
-# Run tests with short flag (unit only, sequential to avoid env var leaks)
+# Run the unit tests only (-short skips the ones that need Postgres)
 test-unit:
-	VELOX_LIVEMODE_STRICT=true go test -p 1 ./... -short -count=1
-
-# Run tests verbose (for debugging)
-test-verbose:
-	VELOX_LIVEMODE_STRICT=true go test ./... -v -short -count=1
+	VELOX_LIVEMODE_STRICT=true go test ./... -short -count=1
 
 # Run linter. Velox code rules live in .golangci.yml (forbidigo: wall-clock
 # time in clock-pinned packages, single-invoice period lookups) and in Go tests
@@ -75,10 +74,6 @@ bootstrap:
 # Run demo script (requires: make up, make bootstrap, make dev)
 demo:
 	@echo "Run: ./scripts/demo.sh <YOUR_SECRET_KEY>"
-
-# Integration tests (requires running postgres)
-test-integration:
-	go test -p 1 ./... -v -count=1 -short=false
 
 # Code generation from the OpenAPI spec at api/openapi.yaml — see
 # docs/dev/openapi-workflow.md. CI runs `make gen` followed by
