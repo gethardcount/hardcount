@@ -105,6 +105,13 @@ func TestUpErrorMapping(t *testing.T) {
 	if err := upError(partial(180, goose.TypeGo, "", sql.ErrConnDone), fsys, st, nil); !errors.As(err, &fe) || fe.Name != baselineName {
 		t.Fatalf("migration 180 failure: got %v", err)
 	}
+	// A lock timeout while migration 180 takes a v0.8 database over: the
+	// database is at v0.8's 180, not "no migration applied".
+	v08 := state{v08: v08Record{exists: true, rows: 1, version: 180}}
+	if err := upError(partial(180, goose.TypeGo, "", lockErr), fsys, v08, nil); !errors.As(err, &lte) || lte.Previous != 180 ||
+		!strings.Contains(err.Error(), "is still at version 180") {
+		t.Fatalf("lock timeout during the v0.8 takeover: want Previous 180, got %v", err)
+	}
 	lw := &LockWaitError{Waited: time.Minute}
 	if err := upError(fmt.Errorf("failed to initialize: %w", lw), fsys, st, nil); err != lw {
 		t.Fatalf("lock wait: got %v", err)
@@ -116,8 +123,18 @@ func TestIsNoTxFile(t *testing.T) {
 		"a.sql": {Data: []byte("-- +goose NO TRANSACTION\n-- +goose Up\nSELECT 1;\n")},
 		"b.sql": {Data: []byte("-- +goose Up\nSELECT 1; -- +goose NO TRANSACTION is only text here\n")},
 		"c.sql": {Data: []byte("-- +goose no transaction\r\n-- +goose Up\nSELECT 1;\n")},
+		// goose v3.27.0 (internal/sqlparser) reads each of these as NO
+		// TRANSACTION too: it drops every "--" and the first "+goose" from
+		// the line and compares the rest without case.
+		"d.sql": {Data: []byte("--+goose NO TRANSACTION\n-- +goose Up\nSELECT 1;\n")},
+		"e.sql": {Data: []byte("-- +goose\tNO TRANSACTION\n-- +goose Up\nSELECT 1;\n")},
+		"f.sql": {Data: []byte("-- +goose Up\nSELECT 1;\n-- +goose Down\n----  +goose   No Transaction\nSELECT 1;\n")},
+		// goose refuses a file whose annotation line is indented, so it never
+		// runs it without a transaction.
+		"g.sql": {Data: []byte(" -- +goose NO TRANSACTION\n-- +goose Up\nSELECT 1;\n")},
 	}
-	for name, want := range map[string]bool{"a.sql": true, "b.sql": false, "c.sql": true, "missing.sql": false} {
+	for name, want := range map[string]bool{"a.sql": true, "b.sql": false, "c.sql": true, "d.sql": true, "e.sql": true,
+		"f.sql": true, "g.sql": false, "missing.sql": false} {
 		if got := isNoTxFile(fsys, name); got != want {
 			t.Errorf("%s: got %v, want %v", name, got, want)
 		}

@@ -144,6 +144,13 @@ An INVALID index is one Postgres keeps but never uses.
      `lock_timeout` on that connection. Closing the pool matters, because
      a failed index file leaves `lock_timeout = 0` on its session (E4,
      phase 3).
+   - The session goose migrates on has `search_path = public`. The
+     baseline names every object `public.x`, so a later file's
+     `CREATE TABLE x` must land in `public` too, not in a schema the admin
+     user's own `search_path` lists first. The state check reads before
+     that, with the operator's `search_path`, so it still finds a v0.8
+     install outside `public`. The three extensions must be in `public`
+     too.
 6. **Rules for new files**, checked by `-short` lints:
    - A normal file runs in one goose transaction. It has no transaction
      control and uses only `SET LOCAL`. A multi-line `$$` body goes
@@ -202,7 +209,8 @@ An INVALID index is one Postgres keeps but never uses.
     2. The cut-over: code, baseline, tests, the `migrations` job and the
        operator docs. No golang-migrate file may merge before it.
     3. The lints, a `make migration` scaffold and `docs/dev/migrations.md`.
-       It merges before the first `00181` file.
+       It merges before the first `00181` file: until then a `-short`
+       test fails on any file in `sql/`, and PR 3 deletes that test.
     4. Release v0.9.0, after an upgrade drill from v0.8.1 and a cold
        install.
 

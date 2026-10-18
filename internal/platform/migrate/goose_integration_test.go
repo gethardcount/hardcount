@@ -179,6 +179,37 @@ func TestUpBaselineThenFileInOneUp(t *testing.T) {
 	}
 }
 
+// A new database where the admin user owns a schema named after itself,
+// so its default search_path ("$user", public) puts new objects there. The
+// baseline names every object public.x; a later file's unqualified CREATE
+// TABLE must land in public too, where velox_app looks. Mutation: drop
+// migrationSession's SET search_path; widgets then lands in the user's
+// own schema.
+func TestUpCreatesInPublicWhateverTheSearchPath(t *testing.T) {
+	dsn, db := scratchDB(t, "velox_migrate_search_path")
+	mustExec(t, db, `CREATE SCHEMA AUTHORIZATION CURRENT_USER`)
+	fsys := files(map[string]string{"00181_widgets.sql": widgetsFile})
+	if err := up(context.Background(), dsn, fsys); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	var schemas sql.NullString
+	if err := db.QueryRow(`SELECT string_agg(n.nspname, ',' ORDER BY n.nspname) FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname IN ('widgets', 'tenants')`).Scan(&schemas); err != nil {
+		t.Fatal(err)
+	}
+	if schemas.String != "public,public" {
+		t.Fatalf("tenants (baseline) and widgets (00181) are in %q, want both in public", schemas.String)
+	}
+	// A second run, then the boot check on a pool with the user's own
+	// search_path: no M3 refusal, because Velox's tables are in public.
+	if err := up(context.Background(), dsn, fsys); err != nil {
+		t.Fatalf("second Up: %v", err)
+	}
+	if err := CheckSchemaReady(db); err != nil {
+		t.Fatalf("CheckSchemaReady: %v", err)
+	}
+}
+
 // T5. Copies start together on a new database, and two copies meet an
 // index build that waits for an old snapshot. Mutation: a blocking
 // pg_advisory_lock locker; the waiting copy's lock statement holds a
@@ -446,7 +477,7 @@ func TestUpIndexBuildFailure(t *testing.T) {
 }
 
 // T10. Another session holds goose's lock for the whole wait. Mutation:
-// drop the lockWait wrapper; goose's bare "failed to acquire lock" comes
+// drop the migrationSession wrapper; goose's bare "failed to acquire lock" comes
 // back instead.
 func TestUpLockWait(t *testing.T) {
 	dsn, db := scratchDB(t, "velox_migrate_t10")
