@@ -3798,8 +3798,10 @@ export interface paths {
          *
          *     Leave out `amount_cents`, or send 0, to refund everything not yet
          *     refunded. The response is the credit note. Check its
-         *     `refund_status`: if Stripe failed, it is `failed` and can be retried
-         *     with `POST /v1/credit-notes/{id}/retry-refund`.
+         *     `refund_status`: if Stripe refused the refund, it is `failed`. If
+         *     Stripe gave no clear answer, it is `unknown`: the customer may
+         *     already be refunded, so don't refund again in the Stripe Dashboard.
+         *     Retry either with `POST /v1/credit-notes/{id}/retry-refund`.
          *
          *     Only invoices paid by card through Stripe can be refunded here. For
          *     an invoice paid outside Stripe, create a credit note with
@@ -3969,8 +3971,10 @@ export interface paths {
          *       part is added to the customer's credit balance.
          *
          *     Check the returned `status` and `refund_status`:
-         *     - A failed Stripe refund still returns 200, with `refund_status`
-         *       `failed`. Retry it with `POST /v1/credit-notes/{id}/retry-refund`.
+         *     - A refund Stripe refused still returns 200, with `refund_status`
+         *       `failed`. A refund with no clear answer from Stripe returns 200
+         *       with `unknown`: the customer may already be refunded. Retry either
+         *       with `POST /v1/credit-notes/{id}/retry-refund`.
          *     - If the invoice's charge is still running, or the invoice is still
          *       a draft, nothing changes and the note stays `draft`. Velox issues
          *       it later.
@@ -3996,10 +4000,13 @@ export interface paths {
         /**
          * Retry a failed credit-note refund
          * @description Sends the refund part of an `issued` credit note to Stripe again,
-         *     when its `refund_status` is `failed`, `pending` or `none`. Before
-         *     creating a refund, Velox asks Stripe for one already made for this
-         *     note and records it if found, so a retry does not refund the
-         *     customer twice.
+         *     when its `refund_status` is `failed`, `unknown`, `pending` or
+         *     `none`. Before creating a refund, Velox asks Stripe for one already
+         *     made for this note and records it if found. For `unknown` and
+         *     `none`, Velox then resends the earlier request whose result it
+         *     never recorded, with the same idempotency key. While Stripe keeps
+         *     that key (at least 24 hours), Stripe returns the earlier request's
+         *     result instead of making a second refund.
          */
         post: operations["retryCreditNoteRefund"];
         delete?: never;
@@ -8357,8 +8364,9 @@ export interface components {
             /** @description Dunning runs (automatic payment retries) still in progress. */
             dunning_active: number;
             /**
-             * @description Issued credit notes whose refund failed, has been pending for
-             *     more than 72 hours, or has not started an hour after issue.
+             * @description Issued credit notes whose refund failed, has an unknown result,
+             *     has been pending for more than 72 hours, or has not started an
+             *     hour after issue.
              */
             refunds_needing_attention: number;
             /**
@@ -8473,8 +8481,17 @@ export interface components {
             issued_at?: string;
             /** Format: date-time */
             voided_at?: string;
-            /** @enum {string} */
-            refund_status: "none" | "pending" | "succeeded" | "failed";
+            /**
+             * @description The refund part's state at Stripe. `unknown`: Stripe gave no
+             *     clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
+             *     a 429), so the customer may already be refunded. Don't refund it
+             *     again in the Stripe Dashboard. Retry it with
+             *     `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+             *     refund at Stripe first and then resends the same request with
+             *     the same idempotency key.
+             * @enum {string}
+             */
+            refund_status: "none" | "pending" | "succeeded" | "failed" | "unknown";
             stripe_refund_id?: string;
             bill_to_snapshot?: components["schemas"]["DocumentBillTo"];
             supplier_snapshot?: components["schemas"]["DocumentSupplier"];
@@ -11045,10 +11062,11 @@ export interface operations {
                 status?: "draft" | "issued" | "voided";
                 /**
                  * @description `needs_attention` returns issued, non-test-clock notes whose
-                 *     refund failed, has been pending more than 72 hours, or has a
-                 *     refund amount still at `none` after 1 hour.
+                 *     refund failed or has an unknown result, has been pending more
+                 *     than 72 hours, or has a refund amount still at `none` after 1
+                 *     hour.
                  */
-                refund_status?: "none" | "pending" | "succeeded" | "failed" | "needs_attention";
+                refund_status?: "none" | "pending" | "succeeded" | "failed" | "unknown" | "needs_attention";
                 /** @description One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default). */
                 sort?: string;
                 dir?: "asc" | "desc";
@@ -13869,9 +13887,10 @@ export interface operations {
                 };
             };
             /**
-             * @description Stripe refused the refund again (code `provider_error`). The
-             *     note keeps `refund_status` `failed`; retry later. A Stripe error
-             *     without a safe message returns 500 instead.
+             * @description Stripe refused the refund (code `provider_error`): the note's
+             *     `refund_status` is `failed`. Or Stripe gave no clear answer (code
+             *     `payment_outcome_unknown`): it is `unknown`, and the customer may
+             *     already be refunded. Retry later in both cases.
              */
             502: {
                 headers: {

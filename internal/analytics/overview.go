@@ -204,8 +204,9 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		{"usage_events", &resp.UsageEvents,
 			`SELECT COUNT(*) FROM usage_events WHERE tenant_id = $1 AND timestamp >= $2 AND timestamp < $3` + notSimViaCustomer,
 			[]any{tenantID, period.Start, period.End}},
-		// Issued credit notes whose Stripe refund leg is failed/pending — i.e.
-		// a customer is owed money that hasn't been pushed back yet. The refund
+		// Issued credit notes whose Stripe refund leg is failed, unknown or
+		// stuck pending — i.e. a customer may be owed money that hasn't been
+		// pushed back yet. The refund
 		// is operator-retried (no auto-sweep), so surfacing the count is what
 		// turns "an operator will notice" into "an operator is told". Real
 		// refunds only (test-clock sims aren't an operator obligation).

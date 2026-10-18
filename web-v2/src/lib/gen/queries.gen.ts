@@ -10097,8 +10097,10 @@ export const getRefundInvoiceUrl = (id: string,) => {
  *
  * Leave out `amount_cents`, or send 0, to refund everything not yet
  * refunded. The response is the credit note. Check its
- * `refund_status`: if Stripe failed, it is `failed` and can be retried
- * with `POST /v1/credit-notes/{id}/retry-refund`.
+ * `refund_status`: if Stripe refused the refund, it is `failed`. If
+ * Stripe gave no clear answer, it is `unknown`: the customer may
+ * already be refunded, so don't refund again in the Stripe Dashboard.
+ * Retry either with `POST /v1/credit-notes/{id}/retry-refund`.
  *
  * Only invoices paid by card through Stripe can be refunded here. For
  * an invoice paid outside Stripe, create a credit note with
@@ -10471,8 +10473,10 @@ export const getIssueCreditNoteUrl = (id: string,) => {
  *   part is added to the customer's credit balance.
  *
  * Check the returned `status` and `refund_status`:
- * - A failed Stripe refund still returns 200, with `refund_status`
- *   `failed`. Retry it with `POST /v1/credit-notes/{id}/retry-refund`.
+ * - A refund Stripe refused still returns 200, with `refund_status`
+ *   `failed`. A refund with no clear answer from Stripe returns 200
+ *   with `unknown`: the customer may already be refunded. Retry either
+ *   with `POST /v1/credit-notes/{id}/retry-refund`.
  * - If the invoice's charge is still running, or the invoice is still
  *   a draft, nothing changes and the note stays `draft`. Velox issues
  *   it later.
@@ -10550,10 +10554,13 @@ export const getRetryCreditNoteRefundUrl = (id: string,) => {
 
 /**
  * Sends the refund part of an `issued` credit note to Stripe again,
- * when its `refund_status` is `failed`, `pending` or `none`. Before
- * creating a refund, Velox asks Stripe for one already made for this
- * note and records it if found, so a retry does not refund the
- * customer twice.
+ * when its `refund_status` is `failed`, `unknown`, `pending` or
+ * `none`. Before creating a refund, Velox asks Stripe for one already
+ * made for this note and records it if found. For `unknown` and
+ * `none`, Velox then resends the earlier request whose result it
+ * never recorded, with the same idempotency key. While Stripe keeps
+ * that key (at least 24 hours), Stripe returns the earlier request's
+ * result instead of making a second refund.
  * @summary Retry a failed credit-note refund
  */
 export const retryCreditNoteRefund = async (id: string, options?: RequestInit): Promise<CreditNote> => {

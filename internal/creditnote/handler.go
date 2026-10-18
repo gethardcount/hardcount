@@ -243,10 +243,10 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
 }
 
 // retryRefund re-attempts the Stripe refund leg of an issued CN whose
-// refund_status is failed or pending. Operator-triggered via dashboard
-// when the CN was issued during a Stripe outage / before Stripe was
-// connected. Uses the same idempotency key as Issue() so retries
-// converge cleanly.
+// refund_status is failed, unknown, pending or none. Operator-triggered via
+// dashboard when the CN was issued during a Stripe outage / before Stripe was
+// connected. Svc.RetryRefund looks for the refund at Stripe before any
+// create, so retries converge (see its contract).
 func (h *Handler) retryRefund(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")

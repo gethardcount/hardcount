@@ -2188,6 +2188,14 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 						if !full {
 							desc = "Credit note issued — card refund pending"
 						}
+					case domain.RefundUnknown:
+						// Stripe gave no clear answer (#965). "Not processed"
+						// would say nothing moved, which invites a second
+						// refund by hand; the customer may already be refunded.
+						desc = "Refund result unknown"
+						if !full {
+							desc = "Credit note issued — card refund result unknown"
+						}
 					default:
 						desc = "Refund not processed"
 						if !full {
@@ -2213,8 +2221,9 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 					case domain.RefundFailed:
 						cnStatus = "failed"
 					default:
-						// pending, and none-with-allocation ("not
-						// processed"): money has not moved — never green.
+						// pending, unknown, and none-with-allocation ("not
+						// processed"): money has not been seen to move —
+						// never green.
 						cnStatus = "pending"
 					}
 				}
