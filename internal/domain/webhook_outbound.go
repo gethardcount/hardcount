@@ -44,6 +44,12 @@ type WebhookEvent struct {
 	// deliveries endpoint stitches the original and its clones into one
 	// unified attempt timeline.
 	ReplayOfEventID *string `json:"replay_of_event_id,omitempty"`
+	// ReplayOfCreatedAt is the created_at of the ReplayOfEventID event. A
+	// replay goes to receivers under that event's id and this time, so a
+	// receiver that skips seen ids skips it. Loaded only by GetEvent and
+	// CreateReplayEvent, the two reads that feed a delivery attempt. Not
+	// part of the API.
+	ReplayOfCreatedAt time.Time `json:"-"`
 }
 
 type DeliveryStatus string

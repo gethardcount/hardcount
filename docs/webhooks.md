@@ -126,8 +126,9 @@ Every message is an HTTP `POST` to your URL with
 }
 ```
 
-- `id` is the event's ID. It stays the same on every retry and replay, so
-  use it to skip repeats (rule 1).
+- `id` is the event's ID and `created_at` is when the event happened. Both
+  stay the same on every retry and replay, so use `id` to skip repeats
+  (rule 1).
 - `data` holds the event's details. The [catalog](#event-catalog) says what
   each event carries.
 
@@ -244,6 +245,9 @@ status within 10 seconds. Anything else is retried on this schedule:
 
 That is six attempts over about 26.5 hours. After the last one, the
 delivery is marked failed.
+
+Velox does not follow redirects, so a `3xx` answer is retried like any
+other failure: register the URL that answers with the `2xx` itself.
 
 **If your endpoint was down for longer:** failed deliveries stay visible in
 the dashboard, with each endpoint's success rate and each event's delivery

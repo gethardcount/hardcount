@@ -208,14 +208,18 @@ func (m *memStore) GetEvent(_ context.Context, tenantID, id string) (domain.Webh
 func (m *memStore) CreateReplayEvent(ctx context.Context, tenantID, originalEventID string) (domain.WebhookEvent, error) {
 	for _, e := range m.events {
 		if e.ID == originalEventID && e.TenantID == tenantID {
-			rootID := originalEventID
+			// Mirrors the real store: the root's created_at rides with
+			// the root id, read from the original or, for a replay of a
+			// replay, carried on it.
+			rootID, rootCreatedAt := originalEventID, e.CreatedAt
 			if e.ReplayOfEventID != nil && *e.ReplayOfEventID != "" {
-				rootID = *e.ReplayOfEventID
+				rootID, rootCreatedAt = *e.ReplayOfEventID, e.ReplayOfCreatedAt
 			}
 			clone := domain.WebhookEvent{
-				EventType:       e.EventType,
-				Payload:         e.Payload,
-				ReplayOfEventID: &rootID,
+				EventType:         e.EventType,
+				Payload:           e.Payload,
+				ReplayOfEventID:   &rootID,
+				ReplayOfCreatedAt: rootCreatedAt,
 			}
 			created, err := m.CreateEvent(ctx, tenantID, clone)
 			if err != nil {
