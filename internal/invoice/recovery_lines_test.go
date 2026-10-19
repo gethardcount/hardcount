@@ -149,8 +149,9 @@ func TestRecoveryRunLines_TheRunsEndAndItsRecoveringRetryShow(t *testing.T) {
 		runs: []domain.InvoiceDunningRun{recovered},
 		events: []domain.InvoiceDunningEvent{
 			{ID: "evt_start", RunID: recovered.ID, EventType: domain.DunningEventStarted, Reason: string(domain.DunningCausePaymentFailed), CreatedAt: t0},
-			{ID: "evt_retry", RunID: recovered.ID, EventType: domain.DunningEventRetryAttempted, AttemptCount: 1, Reason: "succeeded", CreatedAt: t1,
-				Metadata: map[string]any{"payment_intent_id": "pi_ok"}},
+			// As dunning.Service writes it on the success path: no
+			// metadata, since RetryPayment returns only an error.
+			{ID: "evt_retry", RunID: recovered.ID, EventType: domain.DunningEventRetryAttempted, AttemptCount: 1, Reason: "succeeded", CreatedAt: t1},
 			{ID: "evt_end", RunID: recovered.ID, EventType: domain.DunningEventResolved, CreatedAt: t1},
 		},
 		attempts: []domain.InvoiceChargeAttempt{{
@@ -159,7 +160,7 @@ func TestRecoveryRunLines_TheRunsEndAndItsRecoveringRetryShow(t *testing.T) {
 		}},
 	})
 	for id, want := range map[string]string{
-		"evt_retry": "Payment retry 1 succeeded · $49.00 · Automatic · success",
+		"evt_retry": "Payment retry 1 succeeded · Automatic · success",
 		"evt_end":   "Payment recovery ended · Invoice paid · Automatic · success",
 	} {
 		l := dunning[id]
