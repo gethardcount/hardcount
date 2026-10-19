@@ -984,9 +984,12 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Snapshot the pre-add subscription for proration. Factor is computed
-	// from the period boundaries which don't change when an item is added
-	// mid-cycle, so a pre-add read is equivalent to a post-add read here.
+	// Read the subscription to decide whether the add prorates. On the
+	// atomic path this read only routes the request: the add is priced from
+	// the subscription AddItemTx reads under the subscription row lock, so an
+	// add that waited on a period close or a plan swap is priced on the
+	// period it lands in (#1270). Only the legacy path with no database
+	// wired prices from this read.
 	var subBefore domain.Subscription
 	var prorationRemainingDays, prorationTotalDays int64
 	if h.plans != nil && h.invoices != nil {
@@ -997,32 +1000,14 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 			respond.FromError(w, r, serr, "subscription")
 			return
 		}
-		{
-			subBefore = sub
-			if sub.Status == domain.SubscriptionActive {
-				prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
-				// Day-grade clamp (ADR-012 amendment 2026-07-26): an item
-				// added ON the period-start calendar day (tenant TZ) owes
-				// the whole period — the add day counts whole, matching
-				// the cycle-close segment clamp in billing.itemBaseSegments.
-				// Without this a post-noon day-1 add pays 30/31 in_advance
-				// while its in_arrears twin bills the full period at close.
-				// Adds only: plan/quantity/remove changes stay instant-
-				// precise per ADR-012's Consequences, so their handlers
-				// don't clamp.
-				if prorationRemainingDays > 0 && sub.CurrentBillingPeriodStart != nil {
-					loc, err := h.tenantLoc(ctx, tenantID)
-					if err != nil {
-						slog.ErrorContext(ctx, "add item refused: tenant timezone unreadable for proration",
-							"subscription_id", id, "error", err)
-						respond.InternalError(w, r)
-						return
-					}
-					if domain.SameCalendarDayIn(clock.Now(ctx), *sub.CurrentBillingPeriodStart, loc) {
-						prorationRemainingDays = prorationTotalDays
-					}
-				}
-			}
+		subBefore = sub
+		var derr error
+		prorationRemainingDays, prorationTotalDays, derr = h.addProrationDays(ctx, tenantID, sub, clock.Now(ctx))
+		if derr != nil {
+			slog.ErrorContext(ctx, "add item refused: tenant timezone unreadable for proration",
+				"subscription_id", id, "error", derr)
+			respond.InternalError(w, r)
+			return
 		}
 	}
 
@@ -1042,7 +1027,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 	var addErr error
 	var addProration *ProrationDetail
 	if atomic {
-		item, addProration, addErr = h.atomicAddItemWithProration(ctx, tenantID, id, input, subBefore, prorationRemainingDays, prorationTotalDays)
+		item, addProration, addErr = h.atomicAddItemWithProration(ctx, tenantID, id, input)
 	} else {
 		item, addErr = h.svc.AddItem(ctx, tenantID, id, input)
 	}
@@ -1650,12 +1635,15 @@ type itemProrationSpec struct {
 // Returns the new item on success; on any error, the entire operation
 // is rolled back and the caller sees a failure (no half-committed
 // state for them to reconcile).
+//
+// The add is priced from result.pricedFrom.sub: the subscription AddItemTx
+// read under the subscription row lock (#1270), never from addItem's read
+// before the tx, whose period a plan swap or a period close that committed
+// in between has replaced.
 func (h *Handler) atomicAddItemWithProration(
 	ctx context.Context,
 	tenantID, subID string,
 	input AddItemInput,
-	subBefore domain.Subscription,
-	remainingDays, totalDays int64,
 ) (domain.SubscriptionItem, *ProrationDetail, error) {
 	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1663,9 +1651,14 @@ func (h *Handler) atomicAddItemWithProration(
 	}
 	defer postgres.Rollback(tx)
 
-	item, err := h.svc.AddItemTx(ctx, tx, tenantID, subID, input)
+	result, err := h.svc.AddItemTx(ctx, tx, tenantID, subID, input)
 	if err != nil {
 		return domain.SubscriptionItem{}, nil, err
+	}
+	item, locked := result.Item, result.pricedFrom.sub
+	remainingDays, totalDays, err := h.addProrationDays(ctx, tenantID, locked, result.EffectiveAt)
+	if err != nil {
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("proration days in atomic addItem tx: %w", err)
 	}
 
 	changeAt := item.CreatedAt
@@ -1683,7 +1676,7 @@ func (h *Handler) atomicAddItemWithProration(
 		newPlanID:     item.PlanID,
 		newQuantity:   item.Quantity,
 	}
-	detail, err := h.handleItemProration(ctx, tenantID, subBefore, spec, tx)
+	detail, err := h.handleItemProration(ctx, tenantID, locked, spec, tx)
 	if err != nil {
 		// A deliberate ADR-050 block (charge against an unpaid source) is an
 		// operator-facing 409, not an internal failure — pass it through
@@ -1727,6 +1720,34 @@ func (h *Handler) atomicAddItemWithProration(
 	// Return the proration detail so addItem's audit row can show the
 	// charge the add produced (see atomicUpdateItemWithProration).
 	return item, detail, nil
+}
+
+// addProrationDays is the share of sub's current period an item added at
+// `at` pays for in advance: the days left and the period's days, or zero
+// when sub is not active or the days left round to zero.
+//
+// Day-grade clamp (ADR-012 amendment 2026-07-26): an item added ON the
+// period-start calendar day (tenant TZ) owes the whole period — the add day
+// counts whole, matching the cycle-close segment clamp in
+// billing.itemBaseSegments. Without this a post-noon day-1 add pays 30/31
+// in_advance while its in_arrears twin bills the full period at close. Adds
+// only: plan/quantity/remove changes stay instant-precise per ADR-012's
+// Consequences, so their handlers don't clamp.
+func (h *Handler) addProrationDays(ctx context.Context, tenantID string, sub domain.Subscription, at time.Time) (remainingDays, totalDays int64, err error) {
+	if sub.Status != domain.SubscriptionActive {
+		return 0, 0, nil
+	}
+	remainingDays, totalDays = remainingPeriodRatio(sub, at)
+	if remainingDays > 0 && sub.CurrentBillingPeriodStart != nil {
+		loc, err := h.tenantLoc(ctx, tenantID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if domain.SameCalendarDayIn(at, *sub.CurrentBillingPeriodStart, loc) {
+			remainingDays = totalDays
+		}
+	}
+	return remainingDays, totalDays, nil
 }
 
 // atomicUpdateItemWithProration mirrors atomicAddItemWithProration for

@@ -78,7 +78,8 @@ func TestAddItem_RejectsArchivedPlan(t *testing.T) {
 			return svc.AddItem(ctx, "t1", subID, AddItemInput{PlanID: planID, Quantity: 1})
 		},
 		"AddItemTx": func(svc *Service, subID, planID string) (domain.SubscriptionItem, error) {
-			return svc.AddItemTx(ctx, nil, "t1", subID, AddItemInput{PlanID: planID, Quantity: 1})
+			res, err := svc.AddItemTx(ctx, nil, "t1", subID, AddItemInput{PlanID: planID, Quantity: 1})
+			return res.Item, err
 		},
 	}
 	for name, add := range paths {

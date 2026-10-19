@@ -841,7 +841,11 @@ func TestItemChange_ChecksRunUnderTheLock(t *testing.T) {
 				break
 			}
 			n++
-			t.Run(tc.name+", "+w.name, func(t *testing.T) {
+			name := tc.name + ", " + w.name
+			if tc.anyTime {
+				name = tc.name
+			}
+			t.Run(name, func(t *testing.T) {
 				r := newItemRaceRig(t, db, fmt.Sprintf("Item Checks %d", n), 1, tc.withKeeper)
 				rrs := r.whileHeld(t, w.at, nil, tc.reqs(r)...)
 

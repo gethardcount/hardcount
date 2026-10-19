@@ -1966,18 +1966,36 @@ func (s *PostgresStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID
 		return domain.SubscriptionItem{}, err
 	}
 	defer postgres.Rollback(tx)
+	stored, err := s.setItemPendingPlanInTx(ctx, tx, itemID, pendingPlanID, effectiveAt)
+	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	return stored, nil
+}
+
+// SetItemPendingPlanTx is SetItemPendingPlan on the caller's tx: the
+// service schedules a change from the state it read under the subscription
+// row lock (#1270).
+func (s *PostgresStore) SetItemPendingPlanTx(ctx context.Context, tx *sql.Tx, _ string, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
+	return s.setItemPendingPlanInTx(ctx, tx, itemID, pendingPlanID, effectiveAt)
+}
+
+func (s *PostgresStore) setItemPendingPlanInTx(ctx context.Context, tx *sql.Tx, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
 	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
-
 	now := clock.Now(ctx)
 	var stored domain.SubscriptionItem
-	err = tx.QueryRowContext(ctx, `
+	// deleted_at IS NULL: as in updateItemQuantityInTx.
+	err := tx.QueryRowContext(ctx, `
 		UPDATE subscription_items
 		SET pending_plan_id = $1,
 		    pending_plan_effective_at = $2,
 		    updated_at = $3
-		WHERE id = $4
+		WHERE id = $4 AND deleted_at IS NULL
 		RETURNING `+itemCols,
 		pendingPlanID, effectiveAt, now, itemID,
 	).Scan(scanItemDest(&stored)...)
@@ -1985,9 +2003,6 @@ func (s *PostgresStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID
 		return domain.SubscriptionItem{}, errs.ErrNotFound
 	}
 	if err != nil {
-		return domain.SubscriptionItem{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	return stored, nil

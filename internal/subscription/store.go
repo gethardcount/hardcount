@@ -325,6 +325,12 @@ type Store interface {
 	// the row is gone.
 	LockForItemChangeTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string) (domain.Subscription, error)
 
+	// WithTenantTx runs fn in one tenant-scoped transaction: commit when fn
+	// returns nil, rollback otherwise. An item change that prorates nothing
+	// runs its *Tx path here, so it takes the lock and runs its checks under
+	// it like one that does.
+	WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error
+
 	// ListItems returns all items for a subscription ordered by created_at.
 	ListItems(ctx context.Context, tenantID, subscriptionID string) ([]domain.SubscriptionItem, error)
 
@@ -361,6 +367,8 @@ type Store interface {
 
 	// SetItemPendingPlan schedules a plan change on an item.
 	SetItemPendingPlan(ctx context.Context, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error)
+	// SetItemPendingPlanTx is SetItemPendingPlan on the caller's tx.
+	SetItemPendingPlanTx(ctx context.Context, tx *sql.Tx, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error)
 
 	// ClearItemPendingPlan removes any scheduled plan change on an item.
 	// Idempotent — a second call on an item with no pending change returns
