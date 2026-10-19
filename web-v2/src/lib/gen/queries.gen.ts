@@ -13501,9 +13501,10 @@ export const getPostV1TestClocksIdAdvanceUrl = (id: string,) => {
  * it with `POST /v1/test-clocks/{id}/retry-advance` (deletion is
  * not required). ADR-018. Catchup bills every skipped period
  * before it runs payment retries and dunning, so when a dunning
- * policy cancels or pauses a subscription, advance to the day after
- * the invoice's last retry first, then to the next billing date
- * (one longer advance bills a period a real clock would not; #1276).
+ * policy cancels or pauses a subscription, advance to the time of
+ * the invoice's last retry first, then to the next billing date.
+ * The cancel or pause is dated at the advance target, and one
+ * longer advance bills a period a real clock would not (#1276).
  * @summary Advance the clock to a new frozen_time
  */
 export const postV1TestClocksIdAdvance = async (id: string,

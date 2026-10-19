@@ -232,7 +232,7 @@ deliverable, not punt them to follow-up work.
   (post-ADR-028 single call) and verifies the sub catches up past the
   target frozen_time.
 
-## Amendment 2026-05-04 — per-advance window cap (Stripe parity)
+## Amendment 2026-05-04 — per-advance window cap ("Stripe parity" corrected 2026-10-20)
 
 A single `Advance` call may shift `frozen_time` by **at most 1 year**.
 Larger ranges are chunked into successive operator clicks. Enforced in
@@ -240,7 +240,8 @@ Larger ranges are chunked into successive operator clicks. Enforced in
 Advance dialog gates the submit button on the same window so the
 operator sees the constraint before round-tripping.
 
-**Why a cap (Stripe parity):**
+**Why a cap (Stripe parity):** (corrected 2026-10-20: not Stripe
+parity; see the correction below)
 - Predictable per-click resource use — a single advance can't trigger a
   multi-decade catchup that overruns the 10-min worker timeout and
   leaves the clock in `internal_failure` for the operator to clean up.
@@ -255,9 +256,12 @@ operator sees the constraint before round-tripping.
   advance to be useful — a sub-monthly cap would force an annual sub
   through 12 advances just to hit one renewal.
 - Stripe's documented test-clock cap is also "≤ 1 year per advance".
+  (Corrected 2026-10-20: Stripe never says this; see the correction
+  below.)
 
 **Failure mode is a typed error**:
-`errs.Invalid("frozen_time", "advance cannot exceed 1 year per call — chunk longer ranges into successive advances (Stripe parity)")`.
+`errs.Invalid("frozen_time", "advance cannot exceed 1 year per call — chunk longer ranges into successive advances (Stripe parity)")`
+(since 2026-10-20 without "(Stripe parity)").
 The dialog renders the same guidance inline and points at the maximum
 allowed target so the operator can fix the picker without guessing.
 

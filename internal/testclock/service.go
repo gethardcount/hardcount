@@ -370,8 +370,9 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 	}
 	// Advance window cap (ADR-028 amendment): a single Advance call
 	// shifts frozen_time by ≤ 1 year. This is Velox's own cap; Stripe
-	// allows two intervals of the shortest subscription period (two
-	// years on a clock with no subscriptions). Larger ranges are
+	// allows two intervals of the shortest subscription period, or, on a
+	// clock with no subscriptions, up to two years from the clock's
+	// initial frozen time. Larger ranges are
 	// chunked into successive advances by the operator. Reasons:
 	//   - Predictable per-click resource use (operator can't trigger
 	//     a multi-decade catchup that exceeds the 10-min worker
@@ -700,7 +701,10 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 		// retired grant is never drawn again (ADR-071). Run first, it took a
 		// grant that was still live at an earlier retry's instant, and that
 		// retry charged the card in full. Run last, no draw can take an
-		// expired grant either: the same filter refuses it.
+		// expired grant either: the same filter refuses it. A draw that
+		// tests expiry at an earlier instant than its own breaks this; the
+		// control case of TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore
+		// then fails.
 		if s.creditExpirer != nil && needFrozen {
 			creditCount, creditErrs := s.creditExpirer.ExpireCreditsForClock(ctx, job.TenantID, job.ClockID, frozen)
 			sum.CreditsExpired = creditCount
