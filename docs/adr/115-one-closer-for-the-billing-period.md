@@ -6,7 +6,7 @@
 
 ## Summary
 
-Every invoice that bills a subscription's billing period, and every write that moves that period, commits in one transaction whose first statement is a compare-and-swap `UPDATE` (`subscription.ClosePeriodTx`, or `FireScheduledCancellationTx` when a scheduled cancellation fires at the close). That `UPDATE` locks the row and checks that `status`, `current_billing_period_start` and `next_billing_at` still match what the writer read; a writer that lost the race writes nothing and gets `ErrWatermarkMoved`. A threshold invoice that does not reset the period runs the same `UPDATE` with unchanged values, only to take the lock and check. The cycle close also re-reads the threshold watermark inside its transaction and rolls back if a threshold invoice billed part of the window since it built its lines. Before this, two such writers could plan from the same period and both commit, billing usage twice. A plan swap may now return 409 `subscription_period_moved`, and operators should set `idle_in_transaction_session_timeout = '30s'` on `velox_app`.
+Every invoice that bills a subscription's billing period, and every write that moves that period, commits in one transaction whose first statement is a compare-and-swap `UPDATE` (`subscription.ClosePeriodTx`, or `FireScheduledCancellationTx` when a scheduled cancellation fires at the close). That `UPDATE` locks the row and checks that `status`, `current_billing_period_start` and `next_billing_at` still match what the writer read; a writer that lost the race writes nothing and gets `ErrWatermarkMoved`. A threshold invoice that does not reset the period runs the same `UPDATE` with unchanged values, only to take the lock and check. The cycle close also re-reads the threshold watermark inside its transaction and rolls back if a threshold invoice billed part of the window since it built its lines. Before this, two such writers could plan from the same period and both commit, billing usage twice. A plan swap may now return 409 `subscription_period_moved`, and operators should set `idle_in_transaction_session_timeout = '30s'` on `velox_app`. Since 2026-10-18 every write to a subscription's items also locks the subscription row first, and an item change is priced from the state read under that lock ([amendment](#amendment-2026-10-18-item-writers-lock-the-subscription-row-first)).
 
 ## Context
 
@@ -180,3 +180,95 @@ loser observed `ErrWatermarkMoved`, never the index),
 `TestBillSubscription_PeriodMoved_RetriesOnce` (mocks), the doctor's seeded
 double / residual / deferred-bucket rows. All run under the PgBouncer
 transaction-mode job.
+
+## Amendment 2026-10-18: item writers lock the subscription row first
+
+Issue #1270. A quantity or plan change on an item was priced from values
+read before its transaction, and nothing locked the item or checked it at
+the write. Two changes to one item that overlapped were both priced from
+the state they started from, so the customer was charged or credited for
+the same seats twice. The tax call inside the transaction made the window
+seconds wide; a retry was enough.
+
+Decision:
+
+1. **Every write to `subscription_items` locks the subscription row first**,
+   `FOR NO KEY UPDATE`, the mode of this ADR's period CAS: add, quantity,
+   immediate plan change, scheduled change set and cleared, the billing
+   run's scheduled-plan apply, and remove (`lockSubscriptionRow`). Every
+   writer of a subscription's state now locks in one order: subscription
+   row, item rows, `billing_intervals`, invoices. Before this, the
+   scheduled-plan apply wrote the item first and then asked for the row,
+   and could deadlock with a plan swap, which holds the row from its CAS.
+2. **Every other item change takes that lock as the first statement of its
+   transaction and checks and prices from the state read under it**
+   (`LockForItemChangeTx`), not from the handler's read: an add, a quantity
+   change, a same-interval or scheduled plan change, and a removal. A
+   change the handler does not prorate (the last hours of a period, a
+   scheduled change, a trialing subscription) runs the same code in a
+   transaction of its own. A change that committed first is seen:
+   - a quantity change is priced from the quantity and plan the item holds
+     now, and a request that now changes nothing gets 422;
+   - a plan change whose checks (bill timing, interval, currency) ran on
+     another plan gets 409 `item_changed`;
+   - the checks that read the subscription's other items run under the
+     lock: the meter check of an add or a plan change (two items may not
+     bill one meter), the add's interval and currency checks, and the
+     last-item check of a removal;
+   - an add is priced from the period it finds under the lock, so an add
+     that waited on a plan swap or a period close is priced on the period
+     it lands in;
+   - the period is checked again under the lock (`unbilled_period`), and
+     the change is stamped after the lock.
+3. **The cross-interval swap keeps its CAS as the first statement**, then
+   reads the items again under the lock it took. Its refund and its
+   new-period invoice are priced from the items it read before the
+   transaction, and an item change does not move the period. If the items
+   differ, it answers 409 `item_changed`.
+
+Rejected: a compare-and-swap on the item's old values in each `UPDATE`
+(answer 409 when they changed). It refuses the second of two seat changes
+that can both apply, and it leaves the period and the other items unproven.
+
+Consequences: changes to one subscription's items, and the period closers,
+now run one at a time per subscription. A change holds the row while its
+proration calls the tax provider, as it held the share lock before, so the
+`idle_in_transaction_session_timeout` prerequisite above still bounds a
+frozen holder.
+
+Not covered:
+
+- The meter check also reads the customer's other subscriptions. Nothing
+  serializes two subscriptions of one customer, so an add on one and an add
+  on another, at the same moment, onto plans that bill one meter, can both
+  pass. That needs a lock per customer.
+- A spend-threshold invoice is priced from the items its scan read, and its
+  CAS proves only the period. It does not price item changes inside its
+  window in any case: `previewWithWindow` is the flat estimate, which bills
+  the whole window at the items it is given. A change that commits during
+  the fire only changes which items those are, by the scan's own latency.
+
+Tests, on real Postgres, each failing in CI before the fix:
+
+- `TestItemChange_OverlappingChanges_BillOnceFromTheLatestState`: six
+  pairs, with the net billed equal to one change from the start to the
+  final state. They are both orders of two quantity changes, the same
+  upgrade twice, the same decrease twice, an upgrade then a quantity
+  change, and an increase then a removal.
+- `TestItemChange_SwapAfterAQuantityChange_Refused`.
+- `TestItemWriters_SubscriptionRowFirst_NoDeadlock`.
+
+Added in review (2026-10-19), each failing in CI before its fix where the
+gap existed; the requests are sent while the test holds the row, so all of
+them read before any writes:
+
+- `TestItemChange_ChecksRunUnderTheLock`: two adds, two plan changes and two
+  scheduled plan changes onto plans that bill one meter, and two removals
+  of the two items; one succeeds and the other gets 409, mid-period and in
+  the last hours of the period.
+- `TestItemChange_PeriodEndedUnderTheLock_Refused`: a quantity change, a
+  removal and an add that wait while the period ends get 409
+  `unbilled_period`.
+- `TestAddItem_WaitingOnAPeriodMove_PricedFromTheNewPeriod`.
+- In the six-pair table, a plan change that finds the item on another plan
+  gets 409 `item_changed`.

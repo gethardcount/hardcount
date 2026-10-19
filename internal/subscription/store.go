@@ -310,6 +310,26 @@ type Store interface {
 	ExtendTrial(ctx context.Context, tenantID, id string, newTrialEnd, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error)
 
 	// ---- Subscription items ----
+	//
+	// Every write to subscription_items locks the subscription row first
+	// (#1270), so item writers wait for each other and for the period
+	// closers, and all of them lock in one order: subscription row, item
+	// rows, billing_intervals, invoices.
+
+	// LockForItemChangeTx locks the subscription row on the caller's tx and
+	// returns the subscription with its live items, read after the lock
+	// (#1270). Because every item write takes the same lock first, a change
+	// that committed before the lock was granted is in what this returns,
+	// and a change that starts later waits for the caller's tx to end. Item
+	// changes price their proration from what this returns. ErrNotFound when
+	// the row is gone.
+	LockForItemChangeTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string) (domain.Subscription, error)
+
+	// WithTenantTx runs fn in one tenant-scoped transaction: commit when fn
+	// returns nil, rollback otherwise. An item change that prorates nothing
+	// runs its *Tx path here, so it takes the lock and runs its checks under
+	// it like one that does.
+	WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error
 
 	// ListItems returns all items for a subscription ordered by created_at.
 	ListItems(ctx context.Context, tenantID, subscriptionID string) ([]domain.SubscriptionItem, error)
@@ -347,6 +367,8 @@ type Store interface {
 
 	// SetItemPendingPlan schedules a plan change on an item.
 	SetItemPendingPlan(ctx context.Context, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error)
+	// SetItemPendingPlanTx is SetItemPendingPlan on the caller's tx.
+	SetItemPendingPlanTx(ctx context.Context, tx *sql.Tx, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error)
 
 	// ClearItemPendingPlan removes any scheduled plan change on an item.
 	// Idempotent — a second call on an item with no pending change returns

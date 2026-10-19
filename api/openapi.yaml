@@ -8649,6 +8649,11 @@ paths:
         is still unpaid. `proration` in the response describes the result.
         A plan billed in arrears is settled at the end of the period.
 
+        Changes to one subscription's items run one at a time, and each is
+        settled from the item as the change before it left it. A request
+        that repeats a change that already finished finds nothing to change
+        and gets 422.
+
         Sends `subscription.item.updated`, or
         `subscription.pending_change.scheduled` for a scheduled plan
         change.
@@ -8711,8 +8716,11 @@ paths:
             an unpaid invoice for the current period; settle or void it
             first. Code `subscription_period_moved`: the billing period
             changed while the request ran; read the subscription again and
-            retry. Code `unbilled_period`: a billing period ended and could
-            not be invoiced; retry billing first.
+            retry. Code `item_changed`: a plan change found the
+            subscription's items changed by another request that finished
+            first; read the subscription again and retry. Code
+            `unbilled_period`: a billing period ended and could not be
+            invoiced; retry billing first.
           content:
             application/json:
               schema:

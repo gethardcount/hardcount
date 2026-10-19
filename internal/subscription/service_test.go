@@ -589,6 +589,18 @@ func (m *memStore) ListItems(ctx context.Context, tenantID, subscriptionID strin
 	return m.hydrateItems(subscriptionID), nil
 }
 
+// LockForItemChangeTx: the in-memory store has no locks or transactions, so
+// it returns the subscription as Get does. The lock is proven against real
+// Postgres in item_change_race_integration_test.go.
+func (m *memStore) LockForItemChangeTx(ctx context.Context, _ *sql.Tx, tenantID, subscriptionID string) (domain.Subscription, error) {
+	return m.Get(ctx, tenantID, subscriptionID)
+}
+
+// WithTenantTx: no transactions in memory; the *Tx methods ignore the tx.
+func (m *memStore) WithTenantTx(_ context.Context, _ string, fn func(tx *sql.Tx) error) error {
+	return fn(nil)
+}
+
 func (m *memStore) GetItem(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {
 	it, ok := m.items[itemID]
 	if !ok || it.TenantID != tenantID {
@@ -680,6 +692,10 @@ func (m *memStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID, pen
 	it.UpdatedAt = clock.Now(ctx)
 	m.items[itemID] = it
 	return it, nil
+}
+
+func (m *memStore) SetItemPendingPlanTx(ctx context.Context, _ *sql.Tx, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
+	return m.SetItemPendingPlan(ctx, tenantID, itemID, pendingPlanID, effectiveAt)
 }
 
 func (m *memStore) ClearItemPendingPlan(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {
