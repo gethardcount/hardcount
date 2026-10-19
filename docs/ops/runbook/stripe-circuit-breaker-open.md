@@ -17,9 +17,12 @@ another reason. Back to the [runbook index](index.md).
 
 ## Why
 
-- The Stripe API has been failing repeatedly (5xx, timeouts, network
-  errors), and the breaker tripped to protect the retry budget. The breaker
-  is shared by every tenant.
+- Stripe calls got no clear answer 5 times in a row (a 5xx, a timeout or a
+  dropped connection), and the breaker tripped to protect the retry budget.
+  Declines and other definite errors do not count, and neither does a
+  rejected API key.
+- The breaker is one per Velox process, shared by every tenant. One
+  tenant's calls can open it for all of them on that replica.
 - Stripe is rate limiting, or a tenant's Stripe credentials could not be
   read. These skip retries without tripping the breaker.
 - A database error during the retry, such as a dropped connection. Postgres
@@ -37,8 +40,9 @@ Stripe; a connection or `SQLSTATE` error points to the database.
 2. If only one tenant's retries are skipped, check its Stripe credentials
    in `Settings → Stripe`, and rotate them if needed.
 3. For database errors, restore the database connection first.
-4. The breaker resets on its own after a cool-off. Skipped retries run on
-   the next dunning pass. Normally no manual action is needed.
+4. The breaker closes on its own: after a 30-second cool-off it lets one
+   call through, and a success closes it. Skipped retries run on the next
+   dunning pass. Normally no manual action is needed.
 
 ## Verify
 

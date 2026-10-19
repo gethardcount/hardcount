@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"time"
 
+	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -440,18 +441,28 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	// row.Attempts is the CLAIM-persisted count (the single increment
 	// site) — DLQ once the budget is spent, or immediately for errors
 	// that can never succeed.
-	if row.Attempts >= MaxOutboxAttempts || IsPermanentSendError(hErr) {
-		s.markCAS(markCtx, row.ID, `
+	permanent := IsPermanentSendError(hErr)
+	if row.Attempts >= MaxOutboxAttempts || permanent {
+		// Counted and logged only when this mark moved the row: a mark
+		// that matched nothing moved nothing (markCAS logs the drop).
+		if !s.markCAS(markCtx, row.ID, `
 			UPDATE email_outbox
 			SET status = 'failed', last_error = `+"$2"+`
 			WHERE id = $1 AND status = 'pending'
-		`, errMsg)
+		`, errMsg) {
+			return
+		}
+		cause := mw.DeadLetterMaxAttempts
+		if permanent {
+			cause = mw.DeadLetterPermanent
+		}
+		mw.RecordEmailOutboxDeadLettered(cause, row.Livemode)
 		slog.Error("email outbox: row moved to DLQ",
 			"outbox_id", row.ID,
 			"tenant_id", row.TenantID,
 			"email_type", row.EmailType,
 			"attempts", row.Attempts,
-			"permanent", IsPermanentSendError(hErr),
+			"permanent", permanent,
 			"error", errMsg,
 		)
 		return
@@ -465,34 +476,37 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	`, nextAt, errMsg)
 }
 
-// markCAS executes a per-row mark in its own short tx. The WHERE
-// status='pending' guard means a stale mark (lease expired, another
-// worker already resolved the row) matches zero rows and is dropped —
-// logged, never silently absorbed into a terminal-state regression.
-func (s *OutboxStore) markCAS(ctx context.Context, rowID, query string, args ...any) {
+// markCAS executes a per-row mark in its own short tx and reports whether
+// it applied (one row moved, committed). The WHERE status='pending' guard
+// means a stale mark (lease expired, another worker already resolved the
+// row) matches zero rows and is dropped — logged, never silently absorbed
+// into a terminal-state regression.
+func (s *OutboxStore) markCAS(ctx context.Context, rowID, query string, args ...any) bool {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		slog.Error("email outbox: begin mark tx", "outbox_id", rowID, "error", err)
-		return
+		return false
 	}
 	defer postgres.Rollback(tx)
 	res, err := tx.ExecContext(ctx, query, append([]any{rowID}, args...)...)
 	if err != nil {
 		slog.Error("email outbox: mark failed", "outbox_id", rowID, "error", err)
-		return
+		return false
 	}
 	n, raErr := res.RowsAffected()
 	if raErr != nil {
 		slog.Error("email outbox: mark rows-affected", "outbox_id", rowID, "error", raErr)
-		return
+		return false
 	}
 	if n == 0 {
 		slog.Warn("email outbox: stale mark dropped (row no longer pending)", "outbox_id", rowID)
-		return
+		return false
 	}
 	if err := tx.Commit(); err != nil {
 		slog.Error("email outbox: commit mark", "outbox_id", rowID, "error", err)
+		return false
 	}
+	return true
 }
 
 // GetByID fetches one outbox row by id under a BYPASS-RLS read: the

@@ -201,7 +201,59 @@ var (
 		},
 		[]string{"meter_id", "mode"},
 	)
+
+	// The outbox dead-letter counters count a row once, when the mark that
+	// moved it to 'failed' applied. Every series starts at 0 (init below):
+	// a series born at 1 has no earlier sample, so increase() would miss the
+	// first dead letter.
+	emailOutboxDeadLettered = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_email_outbox_dead_lettered_total",
+			Help: "Emails given up on (email_outbox status='failed'), by cause and mode. permanent = the send can never succeed: the address bounced, is suppressed or is not a valid address, or the row cannot be read; max_attempts = 15 tries over about 72 hours failed, often a relay that refuses the sender or credentials. The email is not sent unless an operator requeues it.",
+		},
+		[]string{"cause", "mode"},
+	)
+	webhookOutboxDeadLettered = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_webhook_outbox_dead_lettered_total",
+			Help: "Webhook outbox rows given up on (webhook_outbox status='failed') after 15 tries over about 72 hours, by mode: the event and its deliveries were never written, so no endpoint gets it. Endpoint failures are velox_webhook_deliveries_total{status=\"failed\"}.",
+		},
+		[]string{"cause", "mode"},
+	)
 )
+
+// Dead-letter causes.
+const (
+	DeadLetterPermanent   = "permanent"
+	DeadLetterMaxAttempts = "max_attempts"
+)
+
+func init() {
+	for _, mode := range []string{"live", "test"} {
+		emailOutboxDeadLettered.WithLabelValues(DeadLetterPermanent, mode)
+		emailOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, mode)
+		webhookOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, mode)
+	}
+}
+
+func modeLabel(live bool) string {
+	if live {
+		return "live"
+	}
+	return "test"
+}
+
+// RecordEmailOutboxDeadLettered counts one email moved to 'failed'. Call it
+// only when the mark applied.
+func RecordEmailOutboxDeadLettered(cause string, live bool) {
+	emailOutboxDeadLettered.WithLabelValues(cause, modeLabel(live)).Inc()
+}
+
+// RecordWebhookOutboxDeadLettered counts one webhook outbox row moved to
+// 'failed' after its last attempt. Call it only when the mark applied.
+func RecordWebhookOutboxDeadLettered(live bool) {
+	webhookOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, modeLabel(live)).Inc()
+}
 
 // RecordUsageUnpriced adds the quantity of one meter's usage that an invoice
 // was built without because no price matched it. live is the mode the
@@ -210,11 +262,7 @@ func RecordUsageUnpriced(meterID string, live bool, quantity float64) {
 	if quantity <= 0 {
 		return
 	}
-	mode := "test"
-	if live {
-		mode = "live"
-	}
-	usageUnpricedQuantity.WithLabelValues(meterID, mode).Add(quantity)
+	usageUnpricedQuantity.WithLabelValues(meterID, modeLabel(live)).Add(quantity)
 }
 
 // RecordLeaderLeaseLost counts a lost lease (leader.LostFunc adapter).
@@ -707,6 +755,42 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	gauge("velox_webhook_outbox_pending",
 		"Outbound webhook events waiting for the outbox dispatcher (status='pending'). -1 = metric query failed.",
 		`SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'`)
+	// Outbox stall and relay signals, by mode (page on live). A pending count
+	// never pages a small install, and one oldest-pending age would page for
+	// three days over one email on the backoff ramp, so the email stall is
+	// measured from when a row came due. The livemode literal is explicit
+	// because the scrape's bypass transaction sets no app.livemode.
+	for _, m := range []struct {
+		label string
+		live  bool
+	}{{"live", true}, {"test", false}} {
+		for _, g := range []struct{ name, help, query string }{
+			{"velox_email_outbox_oldest_due_age_seconds",
+				"Seconds the longest-waiting due email has been due (next_attempt_at passed) without a dispatcher taking it; 0 when none is due. Emails waiting out a retry are not due. Grows when the email_outbox role is stalled, or when more emails come due than it sends (about 20-30 a minute on one replica). -1 = metric query failed.",
+				`SELECT COALESCE(EXTRACT(EPOCH FROM now() - MIN(next_attempt_at)), 0) FROM email_outbox
+					WHERE status = 'pending' AND next_attempt_at <= now() AND livemode = %t`},
+			{"velox_email_outbox_failing_emails",
+				"Emails still pending after 3 or more tries and queued more than 30 minutes ago: their sends keep failing and they are retrying. Usually the SMTP relay refuses the sender or the credentials, or SMTP_HOST is unset. Left alone they are dead-lettered after about 72 hours. -1 = metric query failed.",
+				`SELECT COUNT(*) FROM email_outbox
+					WHERE status = 'pending' AND attempts >= 3 AND created_at < now() - interval '30 minutes' AND livemode = %t`},
+			// Its rows are marked dispatched in the transaction that writes the
+			// event and its deliveries, before any POST, so a failing endpoint
+			// never keeps a row pending here.
+			{"velox_webhook_outbox_oldest_pending_age_seconds",
+				"Seconds since the oldest pending webhook outbox row was queued; 0 when none is pending. A row stays pending until its event and deliveries are written, so this grows when the webhook_outbox role is stalled or those writes keep failing. A failing endpoint does not show here. -1 = metric query failed.",
+				`SELECT COALESCE(EXTRACT(EPOCH FROM now() - MIN(created_at)), 0) FROM webhook_outbox
+					WHERE status = 'pending' AND livemode = %t`},
+		} {
+			q := fmt.Sprintf(g.query, m.live)
+			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: g.name, Help: g.help, ConstLabels: prometheus.Labels{"mode": m.label}}, func() float64 {
+				n, err := count(q)
+				if err != nil {
+					return -1
+				}
+				return n
+			})
+		}
+	}
 	gauge("velox_dunning_active_runs",
 		"Dunning runs currently active. -1 = metric query failed.",
 		`SELECT COUNT(*) FROM invoice_dunning_runs WHERE state = 'active'`)

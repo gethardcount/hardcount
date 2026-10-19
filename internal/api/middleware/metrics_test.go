@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -81,6 +82,40 @@ func TestMethodLabel(t *testing.T) {
 	for _, m := range []string{"BREW", "get", "", "PROPFIND"} {
 		if got := methodLabel(m); got != "other" {
 			t.Errorf("methodLabel(%q) = %s, want other", m, got)
+		}
+	}
+}
+
+// TestOutboxDeadLetterSeries_ExistAtZero: every dead-letter series an alert
+// reads is exported at 0 from boot. A counter series born at 1 on the first
+// dead letter has no earlier sample, so increase() reads it as 0 and the
+// alert misses the first lost email. Prometheus: "export a default value such
+// as 0 for any time series you know may exist".
+func TestOutboxDeadLetterSeries_ExistAtZero(t *testing.T) {
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	have := map[string]bool{}
+	for _, f := range families {
+		for _, m := range f.GetMetric() {
+			key := f.GetName()
+			for _, l := range m.GetLabel() {
+				key += "," + l.GetName() + "=" + l.GetValue()
+			}
+			have[key] = true
+		}
+	}
+	for _, want := range []string{
+		"velox_email_outbox_dead_lettered_total,cause=permanent,mode=live",
+		"velox_email_outbox_dead_lettered_total,cause=permanent,mode=test",
+		"velox_email_outbox_dead_lettered_total,cause=max_attempts,mode=live",
+		"velox_email_outbox_dead_lettered_total,cause=max_attempts,mode=test",
+		"velox_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=live",
+		"velox_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=test",
+	} {
+		if !have[want] {
+			t.Errorf("series %s is not exported before the first dead letter", want)
 		}
 	}
 }
