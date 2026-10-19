@@ -71,12 +71,13 @@ in [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
 - **A tick is wedged**: it keeps renewing its lease (its heartbeat is
   alive) while its work is stuck.
 - **No replica is polling** for the role.
-- **It is not a crash loop from a panic.** A tick that panics is
-  recovered and the poll loop keeps running, so the `/health/ready`
-  scheduler check stays `ok`. A panicking tick shows up instead as
-  `velox_leader_lease_lost_total{reason="panicked"}` and a growing
-  `velox_leader_last_tick_age_seconds{role="billing"}`, with the stack in
-  the `scheduler panic recovered` ERROR log.
+- **It is not a crash loop from a panic.** A step that panics is
+  recovered, the rest of the tick runs, and the poll loop keeps running,
+  so the `/health/ready` scheduler check stays `ok`. A panicking tick
+  shows up instead as `velox_leader_lease_lost_total{reason="panicked"}`
+  and a growing `velox_leader_last_tick_age_seconds{role}`. The stack is
+  in the `step panicked; running the rest` ERROR log (see
+  [Fix](#fix)).
 
 A long tick is not a stuck one. A billing tick bills every subscription
 that is due before it ends, so on a busy billing day it can run for hours.
@@ -101,7 +102,7 @@ The next tick starts one interval after it ends.
    | `expires_in_s` | Seconds until the lease lapses if the holder stops renewing |
    | `last_tick_holder`, `last_tick_age_s` | Which replica last finished a tick, and how long ago. **This is the cluster-wide fact** |
    | `paused_*` | An operator paused the role (see below) |
-   | `not_before`, `not_before_in_s` | The role is held back for at most 60 s, after a tick ended without completing and released its own lease (its work panicked, or its heartbeat timed out before anyone took over). Such a tick never counts as completed, so `last_tick_*` is not changed by it |
+   | `not_before`, `not_before_in_s` | The role is held back after a tick ended without completing and released its own lease. It waits one full interval when its work panicked, and at most 60 s when its heartbeat timed out before anyone took over. Such a tick never counts as completed, so `last_tick_*` is not changed by it |
 
 2. **Read the answer.**
    - Paused: see [Pause a role](#pause-a-role-on-purpose).
@@ -147,13 +148,28 @@ The next tick starts one interval after it ends.
 
 ## Fix
 
-1. **A panic.** Search the application logs for `scheduler panic recovered`.
-   A panic in the tick repeats on whichever replica leads next, so a
-   restart does not fix it: find the input in the stack, and fix or remove
-   it. A panic while billing one subscription is also logged as
-   `bill subscription panicked` with the subscription id. It repeats only
-   when that subscription's wait ends (see
-   [Billing failing](billing-failing.md)).
+1. **A panic.** Search the application logs for
+   `step panicked; running the rest`. That line has the stack and names
+   the `step`, or the row it panicked on (`subscription_id`, `invoice_id`
+   or `run_id`). The `scheduler panic recovered` line after it shows only
+   where the panic was raised again at the end of the tick.
+   - The rest of the tick ran. The panicking step or row runs again one
+     interval later on whichever replica leads, so a restart does not fix
+     it: find the input in the stack, and fix or remove it.
+   - **A dunning panic: pause dunning until the fix ships**, with
+     `SELECT leader_pause('dunning', 'your-name', 'panic on run <run_id>');`.
+     The run is put back as it was, so no attempt is spent, but each rerun
+     retries its charge.
+   - A panic while billing one subscription is also logged as
+     `bill subscription panicked` with the subscription id. It repeats only
+     when that subscription's wait ends (see
+     [Billing failing](billing-failing.md)).
+   - Once the fix is out, the role still waits until `not_before`. To run
+     it at its next poll instead, clear it (`leader_unpause` does not):
+
+     ```sql
+     UPDATE leader_leases SET not_before = NULL WHERE role = 'billing';
+     ```
 2. **A wedged holder.** Find the holder in `holder_id` and restart that
    replica.
 3. **A long query.** Cancel it with `SELECT pg_cancel_backend(<pid>)` if
@@ -195,7 +211,8 @@ A pause survives restarts, because it is a row, not a process. So
 **unpause is part of the change**, and `velox_leader_paused` is the
 reminder.
 
-Do not edit `leader_leases` by hand beyond these two functions.
+Do not edit `leader_leases` by hand beyond these two functions, and
+clearing `not_before` after a panic is fixed (see [Fix](#fix)).
 
 - Deleting a row is harmless. The next poll's acquire recreates it with a
   fresh token, seeded from the clock so it lands above any token ever
@@ -227,29 +244,31 @@ flat.
 | `heartbeat_timeout` | The holder could not renew in time and cancelled its own tick |
 | `takeover` | A renew found another holder |
 | `released` | A renew found the row already released |
-| `panicked` | The tick's work panicked and ran nothing past the panic. See below |
+| `panicked` | A step of the tick, or one row in it, panicked. The rest of the tick ran. See below |
 
 For `heartbeat_timeout`, `takeover` and `released`, correctness held (the
 fence token and the row compare-and-swap). Find out why the leader lost
 its lease: a frozen process, a database stall, or a connection pooler
 problem.
 
-After `panicked`, or a `heartbeat_timeout` that nobody took over, the role
-(not just this replica) waits `min(interval, 60 s)` before any replica
-leads it again. After a `takeover` the new holder is already running it.
-After `paused`, nobody leads until it is unpaused.
+After `panicked`, the role (not just this replica) waits one full interval
+before any replica leads it again. After a `heartbeat_timeout` that nobody
+took over, it waits `min(interval, 60 s)`. After a `takeover` the new
+holder is already running it. After `paused`, nobody leads until it is
+unpaused.
 
-**A panic repeats.** The stack is in the `scheduler panic recovered` ERROR
-log, and the same panic comes back every `min(interval, 60 s)` until the
-bad input or code is fixed. Restarting does not help.
+**A panic repeats.** The stack is in the `step panicked; running the rest`
+ERROR log. The rest of the tick runs, and the step or row that panicked
+runs again once per interval until the bad input or code is fixed.
+Restarting does not help. For a dunning panic, pause the `dunning` role
+until the fix ships ([Fix](#fix)).
 
 **A panic while billing one subscription is the exception.**
 
 - It is saved as a billing failure on that subscription, and later ticks
   skip the subscription until its wait ends.
-- Each attempt that panics again ends that one tick early. The tick that
-  follows about 60 s later skips the subscription and does the rest of the
-  work. So the page fires once per attempt, not every 60 s.
+- The tick bills every other due subscription, then ends as panicked. So
+  the page fires once per attempt, not once per tick.
 - That is at most eight times over 3 days 17 hours, spaced on the wait
   ladder (15m, 1h, 4h, 12h, 24h three times). Then the subscription parks
   and the panic stops. On the hourly production tick the first three

@@ -58,9 +58,11 @@ const (
 	// MaxPoll caps how often a follower polls for a role: a dead leader's
 	// role runs elsewhere within LeaseTTL + MaxPoll.
 	MaxPoll = 5 * time.Second
-	// interruptedCooldown is how soon an interrupted tick (lease lost,
-	// SIGTERM, heartbeat timeout) is due again — bounded so a slow database
-	// cannot turn an hourly tick into a partial tick every few seconds.
+	// interruptedCooldown caps how soon a tick whose lease was lost (taken
+	// over, or its heartbeat timed out) is due again — bounded so a slow
+	// database cannot turn an hourly tick into a partial tick every few
+	// seconds. A SIGTERM leaves the cadence alone; a panicked tick waits one
+	// full interval (sqlRelease).
 	interruptedCooldown = 60 * time.Second
 )
 

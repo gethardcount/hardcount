@@ -93,7 +93,10 @@ func Run(ctx context.Context, role leader.Role, interval time.Duration, gate lea
 // a normal return, record a completed tick, and keep the stall gauge fresh
 // while a panicking tick ran nothing every interval. Logs the recovered
 // value + a stack at ERROR (the frames are still on the stack inside a
-// deferred call); the caller's next poll fires normally.
+// deferred call); the caller's next poll fires normally. A WorkFunc that
+// runs its steps under Panics re-raises the first panic itself, so this
+// stack ends at Repanic; the panic's own stack is on the Guard's
+// "step panicked; running the rest" line.
 func leadOneTick(ctx context.Context, role leader.Role, interval time.Duration, gate leader.Gate, workFn WorkFunc) (led bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {

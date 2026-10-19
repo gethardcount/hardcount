@@ -289,12 +289,15 @@ func (e *Engine) reportBillFailure(ctx context.Context, seen domain.Subscription
 // second period's due instant, and the row and the invoice count survive both
 // an error return and a panic. Until the first read the row is the page's.
 //
-// A panic is recorded as a counted failure and then re-raised. The tick still
-// dies and the scheduler still reports it; the next tick skips this
-// subscription, so one bad subscription no longer replays the same panic at
-// the head of every tick. Whether to record is a property of the subscription
-// (its test clock), not of the caller: for a clock-pinned subscription
-// nothing is written and the panic reaches the catch-up's own recover.
+// A panic is recorded as a counted failure and then re-raised. The billing
+// run (drainDue) catches it, bills the rest of the due subscriptions, and
+// raises it again at the end, so the scheduler still reports it; the next tick
+// skips this subscription until its wait ends, so one bad subscription no
+// longer replays the same panic at the head of every tick. Whether to record
+// is a property of the subscription (its test clock), not of the caller: for
+// a clock-pinned subscription nothing is written and the panic reaches the
+// catch-up's own recover once the run has billed the clock's other
+// subscriptions.
 //
 // grace is the invoice grace the caller's run honours (see billSubscription).
 func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, grace time.Duration, logArgs ...any) (n int, err error) {

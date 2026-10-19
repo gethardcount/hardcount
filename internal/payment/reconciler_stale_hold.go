@@ -11,6 +11,7 @@ import (
 	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // StaleChargeHoldStore is what the stale-hold sweep needs from the invoice
@@ -99,7 +100,14 @@ const (
 // re-check and send budget); the sweep waits StaleChargeHoldWait more; every
 // Velox PaymentIntent carries velox_invoice_id and the invoice's Stripe
 // customer; and that customer id is set once (customer store guard).
-func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int) (int, []error) {
+//
+// A check that panics (a nil dereference on one unusual row) counts as a
+// failed check: its row is stamped, so it rotates behind the other holds, and
+// the sweep goes on. The list puts never-checked open invoices first, so one
+// panicking row would otherwise come back first on every tick and keep every
+// stale hold behind it, and this sweep is the only way out of a stale hold.
+// panics keeps the panic for Run to raise again after its last sweep.
+func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int, panics *scheduler.Panics) (int, []error) {
 	if r.settler == nil {
 		// Unit-test construction only (production wires SetSettler): without
 		// the settler a found payment could not be recorded, so do nothing
@@ -132,7 +140,7 @@ func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int) (int,
 				return resolved, errs
 			}
 			checked = append(checked, h.Invoice.ID)
-			result, read, err := r.checkStaleHold(ctx, h)
+			result, read, err := r.checkStaleHoldGuarded(ctx, h, panics)
 			mw.RecordStaleChargeHoldResolution(result)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("invoice %s: %w", h.Invoice.ID, err))
@@ -157,6 +165,24 @@ func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int) (int,
 			return resolved, errs
 		}
 	}
+}
+
+// checkStaleHoldGuarded is checkStaleHold under panics' guard. A check that
+// panics is a failed check whose read says nothing about Stripe, and its row
+// is stamped so it rotates. The store does not stamp an 'unknown' invoice;
+// the sweeps after this one stamp it on their own checks.
+func (r *Reconciler) checkStaleHoldGuarded(ctx context.Context, h domain.StaleChargeHold, panics *scheduler.Panics) (result string, read staleHoldRead, err error) {
+	panicked := true
+	func() {
+		defer panics.Guard("step", "stale_charge_check", "invoice_id", h.Invoice.ID, "tenant_id", h.Invoice.TenantID)
+		result, read, err = r.checkStaleHold(ctx, h)
+		panicked = false
+	}()
+	if panicked {
+		r.markChecked(ctx, h.Invoice)
+		return staleHoldFailed, staleReadNone, nil
+	}
+	return result, read, err
 }
 
 // checkStaleHold asks Stripe about one stale hold and acts on the answer. It

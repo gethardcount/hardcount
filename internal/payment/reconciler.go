@@ -14,6 +14,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/payment/breaker"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // ReconcileInvoiceStore is the narrow interface the reconciler needs from
@@ -187,17 +188,25 @@ func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 // All route recovered terminals through the settler, so a backstop-recovered
 // settlement fires the full side-effects.
 // Returns the number resolved (succeeded or failed) and any per-invoice errors.
+//
+// A stale-hold check that panics counts as a failed check, and the sweeps
+// after it still run. The first such panic is raised again only after the
+// last sweep: raised at the end of the stale-hold sweep, it would stop the
+// four sweeps after it, and on every tick for an 'unknown' invoice, whose
+// check is never stamped and so comes back first.
 func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 	// The parked-invoice count (ADR-107's alerting surface) is exported by
 	// every replica from the database at scrape time (metrics.go,
 	// velox_parked_invoices) — not stamped here, where only the billing
 	// leader would set it.
 
-	n0, e0 := r.sweepStaleChargeHolds(ctx, limit)
+	var panics scheduler.Panics
+	n0, e0 := r.sweepStaleChargeHolds(ctx, limit, &panics)
 	n1, e1 := r.sweep(ctx, "unknown", r.invoices.ListUnknownPayments, r.olderThan, limit)
 	n2, e2 := r.sweep(ctx, "processing", r.invoices.ListProcessingPayments, r.olderThanProcessing, limit)
 	n3, e3 := r.sweepParked(ctx, limit)
 	n4, e4 := r.sweepHostedSessions(ctx, limit)
+	panics.Repanic()
 	errs := append(e0, e1...)
 	errs = append(errs, e2...)
 	errs = append(errs, e3...)

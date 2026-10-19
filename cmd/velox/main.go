@@ -154,6 +154,11 @@ func serve() {
 	gate := leader.New(appPool, func(role leader.Role, reason string) {
 		mw.RecordLeaderLeaseLost(string(role), reason)
 	})
+	roles := make([]string, 0, len(leader.Roles))
+	for _, r := range leader.Roles {
+		roles = append(roles, string(r))
+	}
+	mw.InitLeaderLeaseLost(roles...)
 	mw.RegisterLeaderStatus(func(ctx context.Context) ([]mw.LeaderStatusRow, error) {
 		rows, err := leader.Status(ctx, appPool)
 		if err != nil {
