@@ -1670,7 +1670,8 @@ export interface paths {
          * @description Sends the delivery's event again to this one endpoint only. Other
          *     endpoints are not contacted. Velox copies the event to a new event
          *     (`replay_of` points to the original) and queues a new delivery.
-         *     The original delivery is not changed. Sending happens in the
+         *     The message sent carries the original event's `id` and
+         *     `created_at`. The original delivery is not changed. Sending happens in the
          *     background, so `status` is always `queued`.
          *     Writes an audit row.
          */
@@ -1829,8 +1830,9 @@ export interface paths {
          * Replay an event to all matching endpoints
          * @description Copies the event to a new event and queues it for every active
          *     endpoint in the same mode that subscribes to its type. Endpoints
-         *     that already received it get it again. The original event and its
-         *     deliveries are not changed. Each call makes a new copy.
+         *     that already received it get it again, with the original event's
+         *     `id` and `created_at`. The original event and its deliveries are
+         *     not changed. Each call makes a new copy.
          *
          *     `replay_of` is always the original event, even when `id` is a
          *     replay. `status` is `queued`, or `no_matching_endpoints` when no
@@ -9526,7 +9528,7 @@ export interface components {
         };
         WebhookEventDeliveryAttempt: {
             id: string;
-            /** @description The event this delivery sent. A replay's own id when `is_replay` is true. */
+            /** @description The event this delivery belongs to. When `is_replay` is true, the replay's own id; the message it sent carries the original event's `id` (`root_event_id`). */
             event_id: string;
             endpoint_id: string;
             endpoint_url: string;
@@ -9594,7 +9596,7 @@ export interface components {
             tenant_id?: string;
             livemode: boolean;
             webhook_endpoint_id: string;
-            /** @description The event this delivery sent. A replay's own id for a replay's delivery. */
+            /** @description The event this delivery belongs to. For a replay's delivery, the replay's own id; the message it sent carries the original event's `id`. */
             webhook_event_id: string;
             /** @enum {string} */
             status: "pending" | "succeeded" | "failed";

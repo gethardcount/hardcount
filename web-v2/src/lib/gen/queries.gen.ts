@@ -4953,7 +4953,8 @@ export const getReplayWebhookDeliveryUrl = (id: string,
  * Sends the delivery's event again to this one endpoint only. Other
  * endpoints are not contacted. Velox copies the event to a new event
  * (`replay_of` points to the original) and queues a new delivery.
- * The original delivery is not changed. Sending happens in the
+ * The message sent carries the original event's `id` and
+ * `created_at`. The original delivery is not changed. Sending happens in the
  * background, so `status` is always `queued`.
  * Writes an audit row.
  * @summary Resend one delivery to its endpoint
@@ -5526,8 +5527,9 @@ export const getReplayWebhookEventUrl = (id: string,) => {
 /**
  * Copies the event to a new event and queues it for every active
  * endpoint in the same mode that subscribes to its type. Endpoints
- * that already received it get it again. The original event and its
- * deliveries are not changed. Each call makes a new copy.
+ * that already received it get it again, with the original event's
+ * `id` and `created_at`. The original event and its deliveries are
+ * not changed. Each call makes a new copy.
  *
  * `replay_of` is always the original event, even when `id` is a
  * replay. `status` is `queued`, or `no_matching_endpoints` when no

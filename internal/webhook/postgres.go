@@ -519,14 +519,20 @@ func (s *PostgresStore) CreateReplayEvent(ctx context.Context, tenantID, origina
 	// Resolve the original. Tenant scoping comes via RLS; the row will be
 	// invisible if it belongs to another tenant.
 	var (
-		eventType   string
-		payloadJSON []byte
-		origReplay  sql.NullString
+		eventType     string
+		payloadJSON   []byte
+		origReplay    sql.NullString
+		rootCreatedAt time.Time
 	)
+	// root.created_at is NULL exactly when the original has no
+	// replay_of_event_id (the FK holds it otherwise), and then the
+	// original is the root: the same rule as rootID below.
 	err = tx.QueryRowContext(ctx, `
-		SELECT event_type, payload, replay_of_event_id
-		FROM webhook_events WHERE id = $1
-	`, originalEventID).Scan(&eventType, &payloadJSON, &origReplay)
+		SELECT o.event_type, o.payload, o.replay_of_event_id, COALESCE(root.created_at, o.created_at)
+		FROM webhook_events o
+		LEFT JOIN webhook_events root ON root.id = o.replay_of_event_id
+		WHERE o.id = $1
+	`, originalEventID).Scan(&eventType, &payloadJSON, &origReplay, &rootCreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.WebhookEvent{}, errs.ErrNotFound
 	}
@@ -545,11 +551,12 @@ func (s *PostgresStore) CreateReplayEvent(ctx context.Context, tenantID, origina
 	id := postgres.NewID("vlx_whevt")
 	now := time.Now().UTC()
 	clone := domain.WebhookEvent{
-		ID:              id,
-		TenantID:        tenantID,
-		EventType:       eventType,
-		ReplayOfEventID: &rootID,
-		CreatedAt:       now,
+		ID:                id,
+		TenantID:          tenantID,
+		EventType:         eventType,
+		ReplayOfEventID:   &rootID,
+		ReplayOfCreatedAt: rootCreatedAt,
+		CreatedAt:         now,
 	}
 	_ = json.Unmarshal(payloadJSON, &clone.Payload)
 
@@ -578,10 +585,13 @@ func (s *PostgresStore) GetEvent(ctx context.Context, tenantID, id string) (doma
 	var e domain.WebhookEvent
 	var payloadJSON []byte
 	var replayOf sql.NullString
+	var rootCreatedAt sql.NullTime
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, livemode, event_type, payload, created_at, replay_of_event_id
-		FROM webhook_events WHERE id = $1
-	`, id).Scan(&e.ID, &e.TenantID, &e.Livemode, &e.EventType, &payloadJSON, &e.CreatedAt, &replayOf)
+		SELECT e.id, e.tenant_id, e.livemode, e.event_type, e.payload, e.created_at, e.replay_of_event_id, root.created_at
+		FROM webhook_events e
+		LEFT JOIN webhook_events root ON root.id = e.replay_of_event_id
+		WHERE e.id = $1
+	`, id).Scan(&e.ID, &e.TenantID, &e.Livemode, &e.EventType, &payloadJSON, &e.CreatedAt, &replayOf, &rootCreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.WebhookEvent{}, errs.ErrNotFound
 	}
@@ -592,6 +602,7 @@ func (s *PostgresStore) GetEvent(ctx context.Context, tenantID, id string) (doma
 	if replayOf.Valid {
 		s := replayOf.String
 		e.ReplayOfEventID = &s
+		e.ReplayOfCreatedAt = rootCreatedAt.Time
 	}
 	return e, nil
 }
