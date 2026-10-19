@@ -771,6 +771,7 @@ func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID,
 			Trigger:          trigger,
 			SimEffectiveAt:   r.SimEffectiveAt,
 			SendFailure:      emailSendFailure(r.Status, r.LastError),
+			SkipReason:       r.SkipReason,
 			CreditNoteNumber: cnNumber,
 		})
 	}
@@ -808,8 +809,10 @@ type paymentSetupEmailSender interface {
 
 // customerSentEmailsAdapter bridges email.OutboxStore.ListByCustomer →
 // customer.SentEmailsLister. Pure shape conversion plus payload field
-// extraction (recipient, invoice_number) so the customer package
-// doesn't import the email package.
+// extraction (recipient, invoice and credit-note numbers, trigger) and the
+// send-failure classification the invoice timeline uses, so the customer
+// package doesn't import the email package and both cards word an email
+// from the same facts.
 type customerSentEmailsAdapter struct {
 	store *email.OutboxStore
 }
@@ -823,16 +826,25 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 	for _, r := range rows {
 		to, _ := r.Payload["to"].(string)
 		invNum, _ := r.Payload["invoice_number"].(string)
+		cnNumber, _ := r.Payload["credit_note_number"].(string)
+		trigger, _ := r.Payload["trigger"].(string)
 		out = append(out, customer.SentEmailOutboxRow{
-			ID:            r.ID,
-			EmailType:     r.EmailType,
-			Recipient:     to,
-			Status:        r.Status,
-			DeliveryState: r.DeliveryState,
-			LastError:     r.LastError,
-			CreatedAt:     r.CreatedAt,
-			DispatchedAt:  r.DispatchedAt,
-			InvoiceNumber: invNum,
+			ID:               r.ID,
+			EmailType:        r.EmailType,
+			Recipient:        to,
+			Status:           r.Status,
+			DeliveryState:    r.DeliveryState,
+			LastError:        r.LastError,
+			CreatedAt:        r.CreatedAt,
+			DispatchedAt:     r.DispatchedAt,
+			InvoiceNumber:    invNum,
+			InvoiceID:        r.InvoiceID,
+			CreditNoteNumber: cnNumber,
+			CreditNoteID:     r.CreditNoteID,
+			Trigger:          trigger,
+			SendFailure:      emailSendFailure(r.Status, r.LastError),
+			SkipReason:       r.SkipReason,
+			SimEffectiveAt:   r.SimEffectiveAt,
 		})
 	}
 	return out, nil

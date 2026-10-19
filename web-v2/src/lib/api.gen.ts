@@ -7959,6 +7959,16 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             dispatched_at?: string;
+            /**
+             * @description The email in the words of the activity line standard (ADR-128),
+             *     the same as on the invoice's payment timeline: its name and
+             *     what happened to it ("Receipt email delivered"), why it was not
+             *     sent, the invoice it was about, and who it went to. Dated at the
+             *     time on the customer's test clock that caused it, with the real
+             *     send time as `recorded_at`. Present for every email type this
+             *     list returns.
+             */
+            line?: components["schemas"]["ActivityLine"];
         };
         CustomerUsage: {
             customer_id: string;
@@ -8591,7 +8601,10 @@ export interface components {
         ActivityLine: {
             /**
              * @description The row's stable key: the event's `id` on an invoice timeline
-             *     row, the audit entry's id on a subscription timeline row.
+             *     row, the audit entry's id on a subscription timeline row,
+             *     `dunning:` and the event's id on a dunning run event (the same
+             *     key the invoice timeline gives that event), and `email:` and
+             *     the email's id on a sent email (likewise).
              */
             id: string;
             /**
@@ -8862,10 +8875,26 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             recorded_at?: string;
+            /**
+             * @description The event in the words of the activity line standard (ADR-128):
+             *     the line the invoice's payment timeline shows for the same
+             *     event, without that timeline's folds. Absent when the run's
+             *     invoice could not be read (`degraded` names `invoice`).
+             */
+            line?: components["schemas"]["ActivityLine"];
         };
         DunningRunDetail: {
             run: components["schemas"]["DunningRun"];
             events: components["schemas"]["DunningRunEvent"][];
+            /**
+             * @description Sources that could not be read. `events`: the event history, so
+             *     `events` is empty. `invoice`: the run's invoice, so no event has
+             *     a `line`. The others leave the lines without what they would
+             *     add: `emails` the reminder and final-notice clauses,
+             *     `charge_attempts` the decline reason and amount, `audit` who
+             *     resolved the run.
+             */
+            degraded: ("events" | "invoice" | "emails" | "charge_attempts" | "audit")[];
         };
         DunningStats: {
             active_count: number;
@@ -15104,7 +15133,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The run and its event history. `events` is empty if the event history could not be read. */
+            /** @description The run and its event history. `events` is empty if the event history could not be read, and `degraded` then names it. */
             200: {
                 headers: {
                     [name: string]: unknown;

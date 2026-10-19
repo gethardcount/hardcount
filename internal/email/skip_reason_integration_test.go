@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"regexp"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/platform/leader"
@@ -57,5 +58,32 @@ func TestDispatcher_SkippedEmailRecordsWhy(t *testing.T) {
 				t.Errorf("row: status %q, skip_reason %q; want skipped, %q", status, reason, state)
 			}
 		})
+	}
+}
+
+// TestSkipReasons_MatchCheckConstraint keeps SkipReasons and migration
+// 00186's CHECK equal (the enum and CHECK sync rule): a reason the CHECK did
+// not list would fail the skip mark, and the row would never end.
+func TestSkipReasons_MatchCheckConstraint(t *testing.T) {
+	testutil.SetupTestDB(t)
+	admin := testutil.AdminPool(t)
+	var def string
+	if err := admin.QueryRowContext(context.Background(),
+		`SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'email_outbox_skip_reason_check'`,
+	).Scan(&def); err != nil {
+		t.Fatalf("read the CHECK: %v", err)
+	}
+	inCheck := map[string]bool{}
+	for _, m := range regexp.MustCompile(`'(\w+)'`).FindAllStringSubmatch(def, -1) {
+		inCheck[m[1]] = true
+	}
+	for _, r := range SkipReasons() {
+		if !inCheck[r] {
+			t.Errorf("skip reason %q is not in the CHECK (%s)", r, def)
+		}
+		delete(inCheck, r)
+	}
+	for r := range inCheck {
+		t.Errorf("the CHECK allows %q, which no Go constant names", r)
 	}
 }

@@ -8,9 +8,19 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { DunningRun } from './dunningRun';
+import type { DunningRunDetailDegradedItem } from './dunningRunDetailDegradedItem';
 import type { DunningRunEvent } from './dunningRunEvent';
 
 export interface DunningRunDetail {
   run: DunningRun;
   events: DunningRunEvent[];
+  /**
+     * Sources that could not be read. `events`: the event history, so
+     * `events` is empty. `invoice`: the run's invoice, so no event has
+     * a `line`. The others leave the lines without what they would
+     * add: `emails` the reminder and final-notice clauses,
+     * `charge_attempts` the decline reason and amount, `audit` who
+     * resolved the run.
+     */
+  degraded: DunningRunDetailDegradedItem[];
 }

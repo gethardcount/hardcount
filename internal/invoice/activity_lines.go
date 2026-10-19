@@ -236,72 +236,29 @@ func creditNoteLine(cn domain.CreditNote, actor *activity.Actor, refundFailure s
 	return l
 }
 
-// emailCause is the setup-link email's cause, from the trigger it was
-// enqueued with.
-func emailCause(trigger string) string {
-	switch trigger {
-	case "finalize_no_pm":
-		return "No payment method when the invoice was finalized"
-	case "auto_charge_retry_no_pm":
-		return "A charge found no payment method"
-	case "operator_resend":
-		// Who resent it is not recorded with the row yet; the actor replaces
-		// this once it is.
-		return "Resent"
+// email is the row as the shared email vocabulary reads it.
+func (evt EmailEventRow) email() activity.Email {
+	return activity.Email{
+		Type: evt.EmailType, Status: evt.Status, DeliveryState: evt.DeliveryState,
+		SendFailure: evt.SendFailure, SkipReason: evt.SkipReason, Trigger: evt.Trigger, To: evt.To,
+		CreatedAt: evt.CreatedAt, DispatchedAt: evt.DispatchedAt, SimEffectiveAt: evt.SimEffectiveAt,
 	}
-	return ""
 }
 
-// emailActor names who sent an email when the email itself proves it:
-// receipts, failed-payment notices and payment-recovery emails are only ever
-// sent by Velox, and so is a setup email whose trigger is automatic. An
-// invoice or credit-note email, or a resend, is an operator's act whose actor
-// is not recorded with the row yet.
-func emailActor(emailType, trigger string) *activity.Actor {
-	switch emailType {
-	case "payment_receipt", "payment_failed", "dunning_warning", "dunning_escalation":
-		return activity.Automatic()
-	case "payment_setup_request":
-		if trigger == "finalize_no_pm" || trigger == "auto_charge_retry_no_pm" {
-			return activity.Automatic()
-		}
-	}
-	return nil
-}
-
-// emailLine is I-9 to I-13: the email's name and its outcome word. cn is the
-// credit note a credit-note email names, as a link part, or nil.
+// emailLine is I-9 to I-13: the email's name and its outcome word, in the
+// words every surface uses (activity.EmailLine). cn is the credit note a
+// credit-note email names, as a link part, or nil.
 func emailLine(evt EmailEventRow, cn *activity.Part) (activity.Line, bool) {
-	name, ok := activity.EmailName(evt.EmailType)
-	if !ok {
-		return activity.Line{}, false
-	}
-	out := activity.Outcome(evt.Status, evt.DeliveryState, evt.SendFailure)
-	l := activity.Line{
-		Kind: "email." + evt.EmailType, Title: name + " " + out.Word, Tone: out.Tone, Problem: out.Problem,
-		Actor: emailActor(evt.EmailType, evt.Trigger),
-	}
-	if out.Reason != "" {
-		l.Detail = append(l.Detail, activity.Text(out.Reason))
-	}
-	if evt.EmailType == "payment_setup_request" {
-		if c := emailCause(evt.Trigger); c != "" {
-			l.Detail = append(l.Detail, activity.Text(c))
-		}
-	}
 	if cn != nil {
-		l.Detail = append(l.Detail, activity.Segment{*cn})
+		return activity.EmailLine(evt.email(), activity.Segment{*cn})
 	}
-	if to := strings.TrimSpace(evt.To); to != "" {
-		l.Detail = append(l.Detail, activity.Text("To "+to))
-	}
-	return l, true
+	return activity.EmailLine(evt.email())
 }
 
 // emailClauseOf is a payment-recovery email's one appearance: a clause in the
 // meta of the retry or retries-ran-out row it belongs to.
 func emailClauseOf(evt EmailEventRow) activity.Segment {
-	if c := activity.EmailClause(evt.EmailType, evt.Status, evt.DeliveryState, evt.SendFailure); c != "" {
+	if c := activity.EmailClause(evt.email()); c != "" {
 		return activity.Text(c)
 	}
 	return nil
@@ -392,6 +349,10 @@ type dunningContext struct {
 	// resolvedBy is the actor of an operator's resolve, from the run's audit
 	// row; nil when no such row exists.
 	resolvedBy *activity.Actor
+	// invoicePaid: the invoice is paid. A retry that succeeded on a paid
+	// invoice is the recovery itself; on an unpaid one it is the anomaly
+	// I-7c names.
+	invoicePaid bool
 }
 
 // dunningLine is I-14 to I-17, and I-18 for an event type with no writer.
@@ -407,9 +368,14 @@ func dunningLine(evt domain.InvoiceDunningEvent, dc dunningContext) activity.Lin
 		// After a decline, the Payment failed row above it says why.
 	case domain.DunningEventRetryAttempted:
 		switch {
+		case evt.Reason == "succeeded" && dc.invoicePaid:
+			// The invoice page folds it into "Invoice paid · After N
+			// retries"; the Dunning page, which has no invoice rows, shows
+			// it as the retry that recovered the invoice.
+			l.Kind, l.Title, l.Tone = "payment_recovery.retry_succeeded", fmt.Sprintf("Payment retry %d succeeded", evt.AttemptCount), activity.ToneSuccess
 		case evt.Reason == "succeeded":
-			// Folded into "Invoice paid" when the invoice is paid; a recovery
-			// on an invoice that is not marked paid is the anomaly I-7c names.
+			// A recovery on an invoice that is not marked paid is the
+			// anomaly I-7c names.
 			l.Kind, l.Title, l.Tone = "payment.succeeded", "Payment succeeded", activity.ToneWarning
 			l.Problem = "The invoice is not marked paid yet."
 		case isNoPMRetry(evt.Reason):
