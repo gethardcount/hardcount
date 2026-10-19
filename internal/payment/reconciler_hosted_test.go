@@ -214,3 +214,45 @@ func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
 	}
 	assertIDs(t, "touched", ledger.touched, "cks_1")
 }
+
+// panickingSessionReader panics on one session, standing in for a nil
+// dereference on one unusual row.
+type panickingSessionReader struct {
+	fakeSessionReader
+	panicOn string
+}
+
+func (p panickingSessionReader) GetCheckoutSession(ctx context.Context, id string) (CheckoutSessionResult, error) {
+	if id == p.panicOn {
+		panic("hosted sweep: nil dereference on " + id)
+	}
+	return p.fakeSessionReader.GetCheckoutSession(ctx, id)
+}
+
+// TestHostedSweep_PanickingSessionRotatesAndTheRestGoesOn: the hosted list is
+// least recently looked at first, and a session is touched only after its
+// check. A check that panicked left its session first in the list on every
+// tick, and Run ended there, so no session behind it was ever looked at. Now
+// the panicking session is touched like one whose check failed, the sessions
+// behind it are checked, and Run raises the panic again at its end.
+func TestHostedSweep_PanickingSessionRotatesAndTheRestGoesOn(t *testing.T) {
+	store := newMockReconcileStore(domain.Invoice{ID: "inv_open", TenantID: "t1", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed})
+	ledger := &fakeHostedLedger{rows: []CheckoutClaim{
+		{ID: "cks_panic", TenantID: "t1", InvoiceID: "inv_open", StripeSessionID: "cs_panic", Status: "open"},
+		{ID: "cks_exp", TenantID: "t1", InvoiceID: "inv_open", StripeSessionID: "cs_exp", Status: "open"},
+	}}
+	r := NewReconciler(&mockStripeClient{}, store, time.Second)
+	r.SetSettler(&recordingSettler{})
+	r.SetHostedSessions(ledger, panickingSessionReader{fakeSessionReader{"cs_exp": {Status: "expired"}}, "cs_panic"}, nil)
+
+	recovered := func() (p any) {
+		defer func() { p = recover() }()
+		_, _ = r.Run(context.Background(), 50)
+		return nil
+	}()
+	if recovered != "hosted sweep: nil dereference on cs_panic" {
+		t.Fatalf("recovered %v, want the session's panic raised again at the end of Run", recovered)
+	}
+	assertIDs(t, "expired", ledger.expired, "cks_exp")
+	assertIDs(t, "touched", ledger.touched, "cks_panic")
+}

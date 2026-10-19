@@ -42,7 +42,11 @@ type fakeStripe struct {
 	// account), "auth" (the key is rejected), "fail" (a page fails part-way
 	// with a 500), "unreachable" (no answer: a network error), "panic" (the
 	// check panics, standing in for a nil dereference on one row).
-	customers     map[string]string
+	customers map[string]string
+	// panicOn makes a read panic, standing in for a nil dereference on one
+	// row: GetPaymentIntent for a PaymentIntent id here, and the search for
+	// an invoice id here.
+	panicOn       map[string]bool
 	notConfigured bool
 	// hang, when set, makes every list wait as a network partition does:
 	// until the caller's context ends, or hang passes, then fail.
@@ -95,7 +99,7 @@ type fakeKey struct {
 }
 
 func newFakeStripe() *fakeStripe {
-	return &fakeStripe{keys: map[string]*fakeKey{}, customers: map[string]string{}}
+	return &fakeStripe{keys: map[string]*fakeKey{}, customers: map[string]string{}, panicOn: map[string]bool{}}
 }
 
 func (f *fakeStripe) queue(modes ...fakeMode) {
@@ -295,6 +299,13 @@ func (f *fakeStripe) onlyPI() fakePI {
 	return *f.pis[0]
 }
 
+// panicOnRead makes the read of id panic (see panicOn).
+func (f *fakeStripe) panicOnRead(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.panicOn[id] = true
+}
+
 func (f *fakeStripe) setCustomer(stripeCustomerID, mode string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -391,6 +402,9 @@ func (f *fakeStripe) CancelPaymentIntent(_ context.Context, id string) error {
 func (f *fakeStripe) GetPaymentIntent(_ context.Context, id string) (PaymentIntentResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.panicOn[id] {
+		panic("reconcile: nil dereference on " + id)
+	}
 	for _, pi := range f.pis {
 		if pi.id == id {
 			return f.result(pi), nil
@@ -403,6 +417,9 @@ func (f *fakeStripe) SearchPaymentIntentsByInvoiceID(_ context.Context, invoiceI
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.searches++
+	if f.panicOn[invoiceID] {
+		panic("parked search: nil dereference on " + invoiceID)
+	}
 	var out []PaymentIntentResult
 	for _, pi := range f.pis {
 		if pi.invoiceID == invoiceID {

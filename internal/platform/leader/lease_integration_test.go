@@ -350,6 +350,62 @@ func TestLease_PanicAfterHeartbeatTimeoutKeepsTheLostCooldown(t *testing.T) {
 	}
 }
 
+// TestLease_PanicAfterShutdownReleasesAsInterrupted: a deploy's SIGTERM
+// cancels a tick, and its work then panics (on the cancelled ctx, or because
+// a row it guarded past panicked earlier and is raised again at the end). The
+// tick is released as interrupted, as a clean shutdown is: the cadence is left
+// alone, so the role is due at once on the next replica, which may be the one
+// carrying the fix for that very panic. The panic is still reported once.
+// Released as panicked, the deploy held billing and dunning back a full hour.
+// Mutation check: let a panic win over the parent's cancel in Lead's outcome
+// → the second manager is refused.
+func TestLease_PanicAfterShutdownReleasesAsInterrupted(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	admin := testutil.AdminPool(t)
+	resetRoles(t, admin)
+	var mu sync.Mutex
+	var reasons []string
+	m := leader.New(db.Pool, func(_ leader.Role, r string) {
+		mu.Lock()
+		reasons = append(reasons, r)
+		mu.Unlock()
+	})
+
+	parent, stop := context.WithCancel(context.Background())
+	done := make(chan any, 1)
+	go func() {
+		defer func() { done <- recover() }()
+		_, _ = m.Lead(parent, leader.RoleBilling, time.Hour, func(ctx context.Context) {
+			<-ctx.Done()
+			panic("nil result from a call that failed on the cancelled ctx")
+		})
+	}()
+	for i := 0; i < 50; i++ {
+		if _, holder, _ := rowToken(t, admin, leader.RoleBilling); holder.Valid {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stop() // SIGTERM
+	if r := <-done; r == nil {
+		t.Fatal("the work's panic must still re-propagate out of Lead")
+	}
+
+	var notBefore sql.NullTime
+	if err := admin.QueryRowContext(context.Background(), `SELECT not_before FROM leader_leases WHERE role='billing'`).Scan(&notBefore); err != nil {
+		t.Fatal(err)
+	}
+	b := leader.New(db.Pool, nil)
+	if led, err := b.Lead(context.Background(), leader.RoleBilling, time.Hour, func(context.Context) {}); !led || err != nil {
+		t.Fatalf("after a shutdown the role must be due at once on another manager, though the work panicked: led=%v err=%v not_before=%v", led, err, notBefore)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reasons) != 1 || reasons[0] != "panicked" {
+		t.Fatalf("reasons = %v, want exactly [panicked]: the panic is still reported", reasons)
+	}
+}
+
 // TestLease_PauseUnpause: leader_pause evicts the holder and blocks acquire
 // cluster-wide; a mid-tick holder is cancelled within a heartbeat; unpause
 // makes the role due at once.
