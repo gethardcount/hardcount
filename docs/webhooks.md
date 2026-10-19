@@ -101,8 +101,10 @@ retries on the schedule below.
 
 ## Three rules for your receiver
 
-1. **The same event can arrive more than once.** Store each event's `id`
-   and skip one you have seen before.
+1. **The same event can arrive more than once.** Once you have handled an
+   event, store its `id`, and skip any event whose `id` you have stored.
+   Store it after handling, not on arrival: otherwise a failure in between
+   makes you skip the retry and any replay, and the event is never handled.
 2. **Events can arrive out of order.** Do not work out the current state
    from the order they arrive. Read the event's data, or fetch the
    invoice or subscription from the API.
@@ -126,8 +128,8 @@ Every message is an HTTP `POST` to your URL with
 }
 ```
 
-- `id` is the event's ID and `created_at` is when the event happened. Both
-  stay the same on every retry and replay, so use `id` to skip repeats
+- `id` is the event's ID and `created_at` is when Velox created the event.
+  Both stay the same on every retry and replay, so use `id` to skip repeats
   (rule 1).
 - `data` holds the event's details. The [catalog](#event-catalog) says what
   each event carries.

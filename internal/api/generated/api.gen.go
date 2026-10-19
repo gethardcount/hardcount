@@ -6265,7 +6265,7 @@ type WebhookDelivery struct {
 	TenantId          string                `json:"tenant_id,omitempty"`
 	WebhookEndpointId string                `json:"webhook_endpoint_id"`
 
-	// WebhookEventId The event this delivery sent. A replay's own id for a replay's delivery.
+	// WebhookEventId The event this delivery belongs to. For a replay's delivery, the replay's own id; the message it sent carries the original event's `id`.
 	WebhookEventId string `json:"webhook_event_id"`
 }
 
@@ -6384,7 +6384,7 @@ type WebhookEventDeliveryAttempt struct {
 	EndpointUrl         string    `json:"endpoint_url"`
 	Error               string    `json:"error"`
 
-	// EventId The event this delivery sent. A replay's own id when `is_replay` is true.
+	// EventId The event this delivery belongs to. When `is_replay` is true, the replay's own id; the message it sent carries the original event's `id` (`root_event_id`).
 	EventId     string    `json:"event_id"`
 	Id          string    `json:"id"`
 	IsReplay    bool      `json:"is_replay"`
