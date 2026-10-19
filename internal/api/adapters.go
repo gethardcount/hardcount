@@ -338,12 +338,24 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 	// to a state that must not be re-charged ('unknown' waits for the
 	// reconciler) — map to ErrTransientSkip so the run does NOT burn an
 	// attempt on a charge that never reached Stripe.
-	claimed, err := a.invoiceStore.ClaimChargeForDunningRetry(ctx, tenantID, invoiceID)
+	//
+	// A lost charge's hold refuses the claim too (ADR-127): the due-run scan
+	// already skips such a run, so this is the race where the hold appeared
+	// after the listing.
+	hold, err := a.invoiceStore.ClaimChargeForDunningRetry(ctx, tenantID, invoiceID)
 	if err != nil {
 		return fmt.Errorf("claim dunning retry charge: %w", err)
 	}
-	if !claimed {
+	if !hold.Held() {
 		return dunning.ErrTransientSkip
+	}
+	// Every path below that sends no charge releases the hold by its token.
+	// The store runs the release even after ctx ends.
+	release := func() {
+		if err := a.invoiceStore.ReleaseChargeHold(ctx, tenantID, invoiceID, hold); err != nil {
+			slog.WarnContext(ctx, "dunning retry: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
+				"invoice_id", invoiceID, "error", err)
+		}
 	}
 
 	// Re-apply customer credits before retrying the card — same contract as
@@ -357,19 +369,23 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 		at := clock.Now(ctx) // sim-aware: catchup binds effective-now on ctx
 		if _, err := a.credits.ApplyToInvoiceAt(ctx, tenantID, customerID, invoiceID, inv.AmountDueCents, at, inv.InvoiceNumber); err != nil {
 			// Provably pre-Stripe: release so the next due tick retries
-			// without waiting out the lease.
-			_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+			// without waiting for the stale-hold sweep.
+			release()
 			return dunning.ErrTransientSkip
 		}
 		inv, err = a.invoiceStore.Get(ctx, tenantID, invoiceID)
 		if err != nil {
+			release() // provably pre-Stripe
 			return fmt.Errorf("refresh invoice after credit apply: %w", err)
 		}
 		if inv.AmountDueCents <= 0 {
 			// Fully covered by credits — settle without a card charge. nil
 			// return = recovered, so the dunning run resolves; MarkPaid fires
-			// the transactional invoice.paid event.
-			if _, err := a.invoiceStore.MarkPaid(ctx, tenantID, invoiceID, "", at); err != nil {
+			// the transactional invoice.paid event. No charge is sent, so the
+			// hold is released either way.
+			_, err := a.invoiceStore.MarkPaid(ctx, tenantID, invoiceID, "", at)
+			release()
+			if err != nil {
 				return fmt.Errorf("mark credit-covered invoice paid: %w", err)
 			}
 			return nil
@@ -381,7 +397,7 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 		// A read error is not "no card": reporting ErrNoPaymentMethodOnRetry
 		// spent a counted dunning attempt (and could drive the invoice to its
 		// terminal action) on a database blip. Skip this tick, uncounted.
-		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		release()
 		slog.WarnContext(ctx, "dunning retry: payment setup read failed; skipping this attempt",
 			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
 		return dunning.ErrTransientSkip
@@ -390,7 +406,7 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 		// Provably pre-Stripe: release the lease before reporting.
 		// Typed sentinel so the dunning warning email renders clean
 		// customer copy instead of this internal string (P2-3).
-		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		release()
 		return domain.ErrNoPaymentMethodOnRetry
 	}
 
@@ -405,13 +421,13 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 	// refusal": skip this tick uncounted, as for the payment-setup read.
 	refusedCode, err := a.invoiceStore.HardDeclineOnCard(ctx, tenantID, invoiceID, ps.StripePaymentMethodID)
 	if err != nil {
-		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		release()
 		slog.WarnContext(ctx, "dunning retry: refused-card read failed; skipping this attempt",
 			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
 		return dunning.ErrTransientSkip
 	}
 	if refusedCode != "" {
-		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		release()
 		slog.InfoContext(ctx, "dunning retry: not charging a card the bank refused for good; waiting for a different default card",
 			"invoice_id", invoiceID, "customer_id", customerID, "decline_code", refusedCode)
 		return domain.ErrCardNeedsReplacing
@@ -432,7 +448,7 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 	// receives two emails per failed retry: "Payment failed for invoice
 	// X" plus dunning's "Action required — payment retry for invoice X
 	// (Attempt N of M)".
-	_, err = a.charger.ChargeInvoiceForDunningRetry(chargeCtx, tenantID, inv, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	_, err = a.charger.ChargeInvoiceForDunningRetry(chargeCtx, tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if cerr := classifyDunningRetryError(err); cerr != nil {
 		// Counted declines carry their PI id across the boundary (typed
 		// dunning wrapper, no payment import in dunning) so the failed

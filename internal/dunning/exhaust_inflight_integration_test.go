@@ -217,6 +217,9 @@ func newExhaustFixture(t *testing.T, db *postgres.DB, name string, acts finalAct
 	svc.SetSubscriptionCanceler(dunningMovers{svc: subSvc})
 	svc.SetSubscriptionStateReader(dunningMovers{svc: subSvc})
 	svc.SetInvoiceUncollectibleMarker(writeOff{svc: invSvc})
+	// As router.go wires it: the final action takes the invoice's charge
+	// hold (ADR-127).
+	svc.SetChargeHoldClaimer(invoices)
 
 	return &exhaustFixture{
 		db: db, ctx: ctx, clk: clk, tenantID: tenantID, subID: sub.ID, invoiceID: inv.ID, runID: runID,

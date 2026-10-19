@@ -28,7 +28,7 @@ import (
 // a credit-covered invoice must settle without one.
 type failIfChargedCharger struct{ t *testing.T }
 
-func (c failIfChargedCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c failIfChargedCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.t.Errorf("ChargeInvoice called on a credit-covered invoice (due %d)", inv.AmountDueCents)
 	return inv, nil
 }

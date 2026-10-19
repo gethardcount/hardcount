@@ -311,11 +311,13 @@ func (s *PostgresStore) GetMany(ctx context.Context, tenantID string, ids []stri
 }
 
 // SetStripeCustomerID writes (or backfills) the Stripe Customer ID
-// against this Velox customer. Idempotent via the partial unique
-// index (migration 0096) — a re-write of the same value is a no-op
-// and a write of a different value to a row that already has one
-// returns a unique-violation error so callers can read the existing
-// value rather than blow it away.
+// against this Velox customer. It is set ONCE: a re-write of the same value
+// is a no-op, and a write of a different value to a row that already has one
+// is refused with ErrStripeCustomerAlreadySet, so callers read the existing
+// value rather than blow it away. The stale-hold sweep relies on it (ADR-127):
+// it asks Stripe about a lost charge through the customer the charge went to,
+// and an empty answer means "nothing was charged" only while that customer is
+// the one on file.
 //
 // Single writer for customers.stripe_customer_id since the
 // customer_payment_setups summary table was retired (migration
@@ -325,6 +327,10 @@ func (s *PostgresStore) GetMany(ctx context.Context, tenantID string, ids []stri
 func (s *PostgresStore) SetStripeCustomerID(ctx context.Context, tenantID, customerID, stripeCustomerID string) error {
 	return s.SetStripeCustomerIDAudited(ctx, tenantID, customerID, stripeCustomerID, nil)
 }
+
+// ErrStripeCustomerAlreadySet refuses to replace a customer's Stripe customer
+// id with a different one (see SetStripeCustomerID).
+var ErrStripeCustomerAlreadySet = errs.InvalidState("this customer is already linked to a different Stripe customer").WithCode("stripe_customer_already_set")
 
 // SetStripeCustomerIDAudited runs the caller-supplied audit emission on the
 // same tx as the mapping write (ADR-090). The checkout.session.completed
@@ -341,6 +347,7 @@ func (s *PostgresStore) SetStripeCustomerIDAudited(ctx context.Context, tenantID
 		UPDATE customers
 		SET stripe_customer_id = $1, updated_at = $2
 		WHERE id = $3 AND tenant_id = $4
+		  AND (stripe_customer_id IS NULL OR stripe_customer_id = '' OR stripe_customer_id = $1)
 	`, stripeCustomerID, clock.Now(ctx), customerID, tenantID)
 	if err != nil {
 		return fmt.Errorf("set stripe_customer_id: %w", err)
@@ -362,6 +369,17 @@ func (s *PostgresStore) SetStripeCustomerIDAudited(ctx context.Context, tenantID
 		return fmt.Errorf("set stripe_customer_id: rows affected: %w", err)
 	}
 	if n == 0 {
+		// Either the customer is not there, or it already has a DIFFERENT
+		// Stripe customer id, which is never overwritten (set once).
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM customers WHERE id = $1 AND tenant_id = $2)`, customerID, tenantID,
+		).Scan(&exists); err != nil {
+			return fmt.Errorf("set stripe_customer_id: check customer: %w", err)
+		}
+		if exists {
+			return ErrStripeCustomerAlreadySet
+		}
 		return errs.ErrNotFound
 	}
 	if emit != nil {

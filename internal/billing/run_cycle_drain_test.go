@@ -245,9 +245,9 @@ type cancelingCharger struct {
 	cancel context.CancelFunc
 }
 
-func (c *cancelingCharger) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, cus, pm string) (domain.Invoice, error) {
+func (c *cancelingCharger) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, cus, pm string) (domain.Invoice, error) {
 	defer c.cancel()
-	return c.recordingCharger.ChargeInvoice(ctx, tenantID, inv, cus, pm)
+	return c.recordingCharger.ChargeInvoice(ctx, tenantID, inv, hold, cus, pm)
 }
 
 // A sweep whose ctx ends mid-page stops before claiming the next invoice:

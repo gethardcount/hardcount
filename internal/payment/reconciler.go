@@ -50,6 +50,10 @@ type ReconcileInvoiceStore interface {
 	AdoptPaymentIntentIfParked(ctx context.Context, tenantID, id, paymentIntentID string) (bool, error)
 	MarkPaymentFailedReportingTransition(ctx context.Context, tenantID, id string, report domain.PaymentFailureReport, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, domain.PaymentFailureResult, error)
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
+	// The stale-hold sweep's reads and writes (ADR-127). Required, not
+	// optional: a stale hold blocks every charge and the irreversible
+	// actions, and this sweep is the only thing that clears one.
+	StaleChargeHoldStore
 }
 
 // Settler is the shared payment-settlement primitive (ADR-049): it owns the
@@ -113,6 +117,11 @@ type Reconciler struct {
 	hostedLedger HostedSessionLedger
 	hostedReader CheckoutSessionReader
 	hostedCards  CheckoutCardRecorder
+	// staleHoldTimeout and staleHoldBudget bound the stale-hold sweep
+	// (reconciler_stale_hold.go): one check's Stripe calls, and one run.
+	// Fields, not constants, so tests can shrink them.
+	staleHoldTimeout time.Duration
+	staleHoldBudget  time.Duration
 }
 
 // NewReconciler constructs a Reconciler. If olderThan <= 0, defaults to 60s
@@ -129,6 +138,8 @@ func NewReconciler(client StripeClient, invoices ReconcileInvoiceStore, olderTha
 		olderThanProcessing: 30 * time.Minute,
 		now:                 func() time.Time { return time.Now().UTC() },
 		searchDisabled:      map[string]bool{},
+		staleHoldTimeout:    staleHoldCheckTimeout,
+		staleHoldBudget:     staleHoldSweepBudget,
 	}
 }
 
@@ -163,6 +174,10 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 
 // Run reconciles unresolved payments against Stripe:
+//   - stale charge holds (ADR-127, reconciler_stale_hold.go): a charge whose
+//     result was lost. First, so an invoice it clears is charged by the same
+//     tick's auto-charge sweep, and a payment it finds is recorded before
+//     anything else looks at the invoice;
 //   - 'unknown' (ambiguous charge outcomes) past the short cool-off,
 //   - stale 'processing' (the dropped-webhook backstop, ADR-049 Phase 2) past
 //     the longer processing cool-off,
@@ -178,13 +193,15 @@ func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 	// velox_parked_invoices) — not stamped here, where only the billing
 	// leader would set it.
 
+	n0, e0 := r.sweepStaleChargeHolds(ctx, limit)
 	n1, e1 := r.sweep(ctx, "unknown", r.invoices.ListUnknownPayments, r.olderThan, limit)
 	n2, e2 := r.sweep(ctx, "processing", r.invoices.ListProcessingPayments, r.olderThanProcessing, limit)
 	n3, e3 := r.sweepParked(ctx, limit)
 	n4, e4 := r.sweepHostedSessions(ctx, limit)
-	errs := append(e1, e2...)
+	errs := append(e0, e1...)
+	errs = append(errs, e2...)
 	errs = append(errs, e3...)
-	return n1 + n2 + n3 + n4, append(errs, e4...)
+	return n0 + n1 + n2 + n3 + n4, append(errs, e4...)
 }
 
 // parkedSearchAge is how long an invoice must have been parked before the

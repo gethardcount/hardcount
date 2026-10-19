@@ -65,7 +65,7 @@ type invoiceCharger struct {
 	got map[string][]int64
 }
 
-func (c *invoiceCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c *invoiceCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.got == nil {

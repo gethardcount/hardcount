@@ -46,7 +46,7 @@ func TestDecline_ChargeResponse_StartsDunningFromTheChargeInstant(t *testing.T) 
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
 	ctx := clock.WithSim(context.Background(), clock.Sim{At: simCharged, TestClockID: "clk_1"})
-	if _, err := s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test"); err == nil {
+	if _, err := s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err == nil {
 		t.Fatal("expected the decline")
 	}
 	if len(dunning.calls) != 1 {
@@ -67,7 +67,7 @@ func TestDecline_NoPaymentIntent_StartsDunningFromTheChargeInstant(t *testing.T)
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
 	ctx := clock.WithSim(context.Background(), clock.Sim{At: simCharged, TestClockID: "clk_1"})
-	_, _ = s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test")
+	_, _ = s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 	if len(dunning.calls) != 1 {
 		t.Fatalf("StartDunning calls = %d, want 1", len(dunning.calls))
 	}

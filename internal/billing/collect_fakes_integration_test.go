@@ -60,7 +60,7 @@ func (testPaymentSetupsNoPM) ResolveForCharge(_ context.Context, _, _ string) (s
 // integration fixtures that want charging wire their own charger.
 type testChargerSentinel struct{}
 
-func (testChargerSentinel) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (testChargerSentinel) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	return inv, errors.New("testChargerSentinel: flow reached ChargeInvoice without a real charger fake")
 }
 

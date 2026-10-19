@@ -865,23 +865,30 @@ func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domai
 	return s.store.MarkPaid(ctx, tenantID, id, "", s.clock.Now(ctx))
 }
 
-// ClaimChargeForManualCollect takes the per-invoice charge lease for the
-// operator's Collect Payment action — the same lease the auto-charge sweep
-// and dunning retry hold, so no two initiators charge one invoice
-// concurrently (2026-07-21 snapshot-race audit). false = another charge is
-// in flight (or the invoice left the chargeable state); the operator
-// retries after the lease window.
-func (s *Service) ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (bool, error) {
+// ClaimChargeForManualCollect takes the per-invoice charge hold for the
+// operator's Collect Payment action — the same hold the auto-charge sweep
+// and dunning retry take, so no two initiators charge one invoice
+// concurrently (2026-07-21 snapshot-race audit). The zero ChargeHold = the
+// claim was refused: another charge holds the invoice, a lost charge waits
+// for the stale-hold sweep (ADR-127), a hosted page is live, or the invoice
+// left the chargeable state.
+func (s *Service) ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
 	return s.store.ClaimChargeForManualCollect(ctx, tenantID, id)
 }
 
-// ReleaseChargeClaim frees the charge lease on provably-pre-Stripe skip
-// paths only (claim taken, then a gate failed BEFORE ChargeInvoice was
-// called). Never call it after a charge attempt — an ambiguous outcome
-// must wait out the lease precisely because the call may have reached
-// Stripe (see Store.ReleaseAutoChargeClaim).
-func (s *Service) ReleaseChargeClaim(ctx context.Context, tenantID, id string) error {
-	return s.store.ReleaseAutoChargeClaim(ctx, tenantID, id)
+// ReleaseChargeClaim frees the hold Collect took, on paths that never sent a
+// charge (claim taken, then a gate failed, or credits settled the invoice,
+// BEFORE ChargeInvoice was called). Never call it after a charge attempt — an
+// unclear outcome must keep the hold, because the call may have reached Stripe
+// (see Store.ReleaseChargeHold).
+func (s *Service) ReleaseChargeClaim(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error {
+	return s.store.ReleaseChargeHold(ctx, tenantID, id, hold)
+}
+
+// ChargeHoldState reads the invoice's charge hold outside any lock. It words
+// a refused claim; it is never a gate.
+func (s *Service) ChargeHoldState(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error) {
+	return s.store.ChargeHoldStateOf(ctx, tenantID, id)
 }
 
 // SetNoPMNotifiedAt stamps the send-once no-PM email marker (see Store).
@@ -1655,15 +1662,28 @@ func voidRefusal(inv domain.Invoice) error {
 // 'failed' and writes only the hold, so without this the three actions went
 // through while Stripe could be taking the money — a charge then succeeding
 // on a voided invoice, or a customer paying twice after an offline payment
-// (#975, ADR-059 amendment). The hold can outlive a charge that was never
-// sent (breaker open, credentials unreadable); that costs an operator a
-// refusal of at most five minutes, which is accepted.
+// (#975, ADR-059 amendment).
+//
+// Since ADR-127 a stale hold refuses void and offline payment too: its
+// charge's result was lost and Stripe may hold the payment. The stale-hold
+// sweep asks Stripe within about an hour, so an operator (or a cancel's
+// prebill void, R3) waits up to that long after a lost charge, and a hold left
+// by a charge that was never sent (breaker open, credentials unreadable)
+// costs the same wait. Write-off stays allowed on a stale hold (see
+// domain.PaymentBlocksActionHeld).
+//
+// The hold's own owner passes: dunning's final action takes the hold for the
+// subscription cancel, and the cancel's prebill void runs under that ctx
+// (domain.WithChargeHoldOwner).
 func (s *Service) refuseWhileChargeHeld(ctx context.Context, tx *sql.Tx, locked domain.Invoice, action domain.InvoiceAction) error {
-	held, err := s.store.ChargeHeldTx(ctx, tx, locked.ID)
+	state, hold, err := s.store.ChargeHeldTx(ctx, tx, locked.ID)
 	if err != nil {
 		return err
 	}
-	if b := domain.PaymentBlocksActionHeld(locked, action, held); b.Blocked {
+	if state == domain.ChargeHoldLive && domain.OwnsChargeHold(ctx, locked.ID, hold.Until) {
+		state = domain.ChargeHoldNone
+	}
+	if b := domain.PaymentBlocksActionHeld(locked, action, state); b.Blocked {
 		return errs.InvalidState(b.Message).WithCode(b.Code)
 	}
 	return nil
@@ -1685,6 +1705,9 @@ func (s *Service) VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID stri
 		// A fully-unused prebill is voided on its period's first day, which is
 		// when the first automatic charge fires: refuse while a charge holds
 		// it (#975), so the cancel or plan swap rolls back and is retried.
+		// A stale hold refuses too (ADR-127): the retry succeeds once the
+		// stale-hold sweep has confirmed the lost charge with Stripe, up to
+		// about an hour later (residual R3).
 		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionVoid); err != nil {
 			return err
 		}
@@ -1837,7 +1860,9 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Re-run under the row lock, with the charge hold: the check above read
 	// the invoice before the lock, and a charge can claim it in between
 	// (#975). A parked invoice still passes (the hold is not consulted on
-	// 'unknown'), so ADR-107's only exit stays open.
+	// 'unknown'), so ADR-107's only exit stays open, and so does an invoice
+	// whose hold is stale (ADR-127): writing off moves no money, and a payment
+	// the stale-hold sweep finds later still settles it.
 	updated, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceUncollectible, func(tx *sql.Tx, locked domain.Invoice) error {
 		return s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionMarkUncollectible)
 	})

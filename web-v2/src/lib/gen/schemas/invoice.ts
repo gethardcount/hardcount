@@ -165,7 +165,11 @@ export interface Invoice {
      * invoice's payment state. Absent until Velox has checked.
      */
   provider_payment_status?: string;
-  /** When Velox last checked `provider_payment_status`. */
+  /**
+     * When Velox last asked Stripe about this invoice's payment, whether
+     * or not Stripe answered: a read of `provider_payment_status`, or a
+     * check of a charge whose result was lost.
+     */
   provider_synced_at?: string;
   /**
      * Hosted-invoice-URL credential (Stripe-parity

@@ -35,7 +35,7 @@ func TestChargeDecline_NotifiesWithoutAWebhook(t *testing.T) {
 	invoices.invoices["inv_1"] = snapshot
 	s, email, dunning := newDeclineStripe(declineClient("pi_X"), invoices)
 
-	if _, err := s.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test"); err == nil {
+	if _, err := s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test"); err == nil {
 		t.Fatal("a decline must return an error to the caller")
 	}
 	got := invoices.invoices["inv_1"]
@@ -61,7 +61,7 @@ func TestChargeDecline_ThenWebhook_NotifiesOnce(t *testing.T) {
 	invoices.invoices["inv_1"] = snapshot
 	s, email, _ := newDeclineStripe(declineClient("pi_X"), invoices)
 
-	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if err := s.SettleFailed(context.Background(), "t1", invoices.invoices["inv_1"],
 		PaymentFailure{PaymentIntentID: "pi_X", Message: "Your card was declined."}, SourceWebhook); err != nil {
 		t.Fatalf("webhook SettleFailed: %v", err)
@@ -80,7 +80,7 @@ func TestChargeDecline_WebhookFirst_NotifiesOnce(t *testing.T) {
 	invoices, snapshot := declinedMidCharge()
 	s, email, _ := newDeclineStripe(declineClient("pi_X"), invoices)
 
-	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if invoices.failedEventEnqueues != 1 {
 		t.Errorf("payment.failed enqueued %d times in total, want 1 (the webhook's)", invoices.failedEventEnqueues)
 	}
@@ -104,7 +104,7 @@ func TestChargeDecline_DunningRetry_EventButNoEmail(t *testing.T) {
 	invoices.failNotedPI["inv_1"] = "pi_W"
 	s, email, _ := newDeclineStripe(declineClient("pi_X"), invoices)
 
-	_, _ = s.ChargeInvoiceForDunningRetry(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	_, _ = s.ChargeInvoiceForDunningRetry(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if invoices.failedEventEnqueues != 1 {
 		t.Errorf("payment.failed enqueued %d times, want 1", invoices.failedEventEnqueues)
 	}
@@ -126,7 +126,7 @@ func TestChargeFailure_NoPaymentIntent_StampedNotAnnounced(t *testing.T) {
 	client := &mockStripeClient{shouldFail: true, failErr: &PaymentError{Message: "stripe not configured for this mode", Unknown: false}}
 	s, email, dunning := newDeclineStripe(client, invoices)
 
-	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentFailed || got.ChargeAttemptSeq != 1 {
 		t.Fatalf("row %s/seq %d, want failed/seq 1", got.PaymentStatus, got.ChargeAttemptSeq)
 	}
@@ -149,7 +149,7 @@ func TestChargeDecline_InvoiceVoidedDuringCall_NoEmailNoDunning(t *testing.T) {
 	invoices.invoices["inv_1"] = row
 	s, email, dunning := newDeclineStripe(declineClient("pi_X"), invoices)
 
-	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if email.sends != 0 {
 		t.Errorf("decline email sent %d times for a voided invoice, want 0", email.sends)
 	}
@@ -221,7 +221,7 @@ func TestChargeDecline_AttemptRowCarriesItsTrigger(t *testing.T) {
 	invoices.invoices["inv_1"] = snapshot
 	s, _, _ := newDeclineStripe(declineClient("pi_X"), invoices)
 
-	_, _ = s.ChargeInvoiceForDunningRetry(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	_, _ = s.ChargeInvoiceForDunningRetry(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if got := invoices.attemptTrigger["pi_X"]; got != domain.ChargeTriggerDunningRetry {
 		t.Fatalf("attempt trigger %q, want %q — the attempt row was written after the report", got, domain.ChargeTriggerDunningRetry)
 	}
@@ -250,7 +250,7 @@ func TestChargeDecline_WebhookRedrivesAFailedDunningStart(t *testing.T) {
 	dunning := &failingOnceDunning{}
 	s := NewStripe(declineClient("pi_X"), invoices, newMockWebhookStore(), nil, dunning)
 
-	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	_, _ = s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if dunning.calls != 3 {
 		t.Fatalf("inline StartDunning attempts %d, want 3 (all failing)", dunning.calls)
 	}

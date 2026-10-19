@@ -1,6 +1,6 @@
 # ADR-105: The charge idempotency key is seeded by an attempt counter, not `updated_at`
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-19)
 **Date:** 2026-07-30
 **Supersedes:** the `velox_inv_<id>_<UpdatedAt>` key shape, and the
 money-path playbook's gate #2 wording that blessed it.
@@ -9,7 +9,7 @@ money-path playbook's gate #2 wording that blessed it.
 
 ## Summary
 
-Each Stripe charge sends the idempotency key `velox_inv_<invoice_id>_<charge_attempt_seq>`, with a `_dunning_retry` suffix on dunning retries. Every write that records a PaymentIntent id on the invoice bumps the counter `charge_attempt_seq`, and no other write does. The old seed, `updated_at`, also moved on unrelated writes such as a tax commit, so a retry after a lost response could create a second PaymentIntent and charge twice. A Stripe idempotency conflict now counts as an unknown outcome, not a decline, because it proves an earlier attempt reached Stripe. Status: active; the case it left open, an unclear result with no PaymentIntent id, is now handled by [ADR-107](107-unknown-is-terminal-until-a-human.md) and [ADR-108](108-parked-invoices-search-and-adopt.md).
+Each Stripe charge sends the idempotency key `velox_inv_<invoice_id>_<charge_attempt_seq>`, with a `_dunning_retry` suffix on dunning retries. Every write that records a PaymentIntent id on the invoice bumps the counter `charge_attempt_seq`. So does the stale-hold sweep's clear when Stripe has no payment for a lost charge (amendment 2026-10-19). No other write does. The old seed, `updated_at`, also moved on unrelated writes such as a tax commit, so a retry after a lost response could create a second PaymentIntent and charge twice. A Stripe idempotency conflict now counts as an unknown outcome, not a decline, because it proves an earlier attempt reached Stripe. Status: active; the case it left open, an unclear result with no PaymentIntent id, is now handled by [ADR-107](107-unknown-is-terminal-until-a-human.md) and [ADR-108](108-parked-invoices-search-and-adopt.md).
 
 ## Context
 
@@ -169,3 +169,22 @@ column.
 metadata is already stamped) and it would close the residual above, but
 it adds a Stripe client method and a network round-trip on a rare path.
 Deferred with the ADR-062 work rather than bolted on here.
+
+## Amendment 2026-10-19 — the counter also moves when Stripe has nothing
+
+[ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) leaves a
+charge's hold set when its result was lost, and a sweep asks Stripe what the
+charge did. When Stripe has no PaymentIntent for the invoice and the invoice is
+still open, `ClearStaleChargeHold` clears the hold and moves
+`charge_attempt_seq`, in one compare-and-set on the hold and the counter it
+read. "No payment was created" is that attempt's recorded outcome, so the rule
+above holds: the key moves when an attempt's outcome is recorded. Reusing the
+old key could be handed a 500 Stripe saved under it, or a 409 once credits
+changed the amount. It is the one write that moves the counter without
+stamping a PaymentIntent id; `TestChargeAttemptSeqBumpedByEveryPIStamp` admits
+exactly that statement, and now scans every file of the store, not one.
+
+The key's job also narrows. It still dedupes the same initiator resending the
+same request, but a lost result no longer relies on it. Another charge kind, a
+changed card, a pruned key or the hosted page all go around the key (#976); the
+hold is what stops them now.

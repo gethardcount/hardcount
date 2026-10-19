@@ -76,6 +76,16 @@ type InvoiceGetter interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
 }
 
+// ChargeHoldClaimer takes and releases the invoice's charge hold around
+// dunning's final action (ADR-112 amendment, ADR-127). While dunning holds it
+// no charge can start on the invoice, and the final action does not run at
+// all while any hold is set: a charge running, or one whose result was lost
+// and may have taken the money. Implemented by *invoice.PostgresStore.
+type ChargeHoldClaimer interface {
+	ClaimChargeHoldForFinalAction(ctx context.Context, tenantID, invoiceID string) (domain.ChargeHold, error)
+	ReleaseChargeHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold) error
+}
+
 // SubscriptionTerminalState reports whether a subscription can still be
 // acted on. Only Terminated is needed: `canceled` and `archived` are the
 // two states in which BOTH movers refuse.
@@ -159,6 +169,7 @@ type Service struct {
 	subState         SubscriptionStateReader
 	invoiceUncollect InvoiceUncollectibleMarker
 	invoiceGet       InvoiceGetter
+	chargeHolds      ChargeHoldClaimer
 	events           domain.EventDispatcher
 	emailNotifier    EmailNotifier
 	customerEmail    CustomerEmailFetcher
@@ -257,6 +268,13 @@ func (s *Service) SetSubscriptionCanceler(c SubscriptionCanceler) {
 // invoice half.
 func (s *Service) SetSubscriptionStateReader(r SubscriptionStateReader) {
 	s.subState = r
+}
+
+// SetChargeHoldClaimer wires the final action's charge hold (ADR-127). The
+// producer always wires it; unwired (narrow tests) the final action runs
+// without the hold, as before ADR-127.
+func (s *Service) SetChargeHoldClaimer(c ChargeHoldClaimer) {
+	s.chargeHolds = c
 }
 
 // SetInvoiceUncollectibleMarker configures the write-off terminal action.
@@ -1008,6 +1026,31 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		}
 	}
 
+	// Take the invoice's charge hold for the final action (ADR-127). Refused
+	// means a hold is set: a charge is running (an auto-charge whose card
+	// was just attached, a Collect), or one whose result was lost waits for
+	// the stale-hold sweep to ask Stripe — which may find the customer paid.
+	// Neither action fires and nothing is written, exactly like the
+	// payment-in-flight branch above: the run keeps its lease as
+	// next_action_at, the due-run pickers skip it while the hold is set, and
+	// the first tick after the hold clears looks again. Held, no charge can
+	// start until the subscription action has run.
+	var hold domain.ChargeHold
+	if invRead && s.chargeHolds != nil {
+		h, err := s.chargeHolds.ClaimChargeHoldForFinalAction(ctx, tenantID, run.InvoiceID)
+		if err != nil {
+			return fmt.Errorf("dunning exhaust: take the charge hold on invoice %s: %w", run.InvoiceID, err)
+		}
+		if !h.Held() {
+			slog.Info("dunning final action held: a charge holds this invoice (running, or its result is being confirmed with Stripe); a later dunning tick checks again",
+				"run_id", run.ID, "invoice_id", run.InvoiceID,
+				"final_subscription_action", policy.FinalSubscriptionAction,
+				"final_invoice_action", policy.FinalInvoiceAction)
+			return nil
+		}
+		hold = h
+	}
+
 	// Exhaustion fires TWO independent actions (ADR-112): one on the
 	// subscription, one on the unpaid invoice. Either can fail on its own,
 	// and a failed exhaustion is re-attempted 24h later — so each is skipped
@@ -1059,13 +1102,18 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// SUBSCRIPTION first: it is the half that stops future money movement,
 	// and it matches Stripe's causality (there the subscription setting is
 	// what marks the invoice uncollectible).
+	//
+	// The action runs as the hold's owner: a cancel can void this very
+	// invoice (a wholly unused prebill, ADR-118), and that void refuses while
+	// a hold is set unless the caller owns it.
+	subCtx := domain.WithChargeHoldOwner(ctx, run.InvoiceID, hold)
 	if !actionFailed && policy.FinalSubscriptionAction != domain.SubActionNone {
 		if !invRead {
 			slog.Warn("dunning subscription action skipped — no invoice reader wired, so no subscription to act on",
 				"run_id", run.ID, "invoice_id", run.InvoiceID)
 		} else {
 			subApplied, subFailed := s.applySubscriptionAction(
-				ctx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID)
+				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID)
 			actionFailed = actionFailed || subFailed
 			switch {
 			case !subApplied:
@@ -1074,6 +1122,17 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			case policy.FinalSubscriptionAction == domain.SubActionCancel:
 				outcome.SubscriptionCanceled = true
 			}
+		}
+	}
+
+	// Release the hold before the invoice action: the write-off refuses
+	// while a live hold is set, and re-checks the hold under its own row
+	// lock. A failed release leaves the hold to expire; the write-off is then
+	// refused and re-attempted with the rest of a failed exhaustion.
+	if hold.Held() {
+		if err := s.chargeHolds.ReleaseChargeHold(ctx, tenantID, run.InvoiceID, hold); err != nil {
+			slog.Warn("dunning exhaust: releasing the charge hold failed — the stale-hold sweep clears it",
+				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
 		}
 	}
 

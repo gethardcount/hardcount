@@ -4631,7 +4631,9 @@ type Invoice struct {
 	// invoice's payment state. Absent until Velox has checked.
 	ProviderPaymentStatus string `json:"provider_payment_status,omitempty"`
 
-	// ProviderSyncedAt When Velox last checked `provider_payment_status`.
+	// ProviderSyncedAt When Velox last asked Stripe about this invoice's payment, whether
+	// or not Stripe answered: a read of `provider_payment_status`, or a
+	// check of a charge whose result was lost.
 	ProviderSyncedAt time.Time `json:"provider_synced_at,omitempty"`
 
 	// PublicToken Hosted-invoice-URL credential (Stripe-parity

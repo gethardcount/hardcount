@@ -469,8 +469,11 @@ type PaymentReadiness interface {
 // payment-failed email) access *payment.Stripe directly and use the
 // dedicated typed method (ChargeInvoiceForDunningRetry). Keeps engine
 // package free of payment-options surface.
+//
+// hold is the charge hold the caller's claim returned (ADR-127): the charge
+// re-checks it right before sending and sends nothing without it.
 type InvoiceCharger interface {
-	ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error)
+	ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error)
 }
 
 // SubscriptionReader reads subscription and plan data for billing.
@@ -665,13 +668,16 @@ type InvoiceWriter interface {
 	// auto-charge sweep checks it so a card-less invoice is emailed exactly
 	// once, not once per tick.
 	SetNoPMNotifiedAt(ctx context.Context, tenantID, invoiceID string, at time.Time) error
-	// ClaimAutoCharge takes the per-invoice charge lease (HA hazard #1):
-	// CAS re-asserting the full eligibility predicate; false = another
-	// leader owns the invoice or its state moved on — skip, never charge.
-	ClaimAutoCharge(ctx context.Context, tenantID, id string) (bool, error)
-	// ReleaseAutoChargeClaim clears the lease on provably-pre-Stripe skip
-	// paths so the next tick/Advance retries immediately.
-	ReleaseAutoChargeClaim(ctx context.Context, tenantID, id string) error
+	// ClaimAutoCharge takes the per-invoice charge hold (HA hazard #1,
+	// ADR-127): a claim re-asserting the full eligibility predicate and
+	// refusing any set hold. The zero ChargeHold = another owner holds the
+	// invoice, a lost charge waits for the stale-hold sweep, or its state
+	// moved on — skip, never charge.
+	ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
+	// ReleaseChargeHold clears this owner's hold (compared by token) on
+	// paths that sent no charge, so the next tick/Advance retries
+	// immediately instead of waiting for the stale-hold sweep.
+	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error)
 	// ListAutoChargePendingForClock is the catchup-path counterpart to
 	// ListAutoChargePending — returns invoices whose owning subscription
@@ -5227,13 +5233,26 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 		// outcome (or a webhook settle) landing between list and claim
 		// fails the claim here — BEFORE the credit-apply/refresh path
 		// that could otherwise mint a divergent Stripe idempotency key.
-		claimed, cerr := e.invoices.ClaimAutoCharge(ctx, inv.TenantID, inv.ID)
+		//
+		// Refused also while a charge whose result was lost waits for the
+		// stale-hold sweep to ask Stripe (ADR-127): charging it now could take
+		// a second payment. The sweep runs before this one in the same tick.
+		hold, cerr := e.invoices.ClaimAutoCharge(ctx, inv.TenantID, inv.ID)
 		if cerr != nil {
 			errs = append(errs, fmt.Errorf("claim auto-charge %s: %w", inv.ID, cerr))
 			continue
 		}
-		if !claimed {
+		if !hold.Held() {
 			continue
+		}
+		// Every path below that sends no charge releases the hold (by its
+		// token): left set, it would wait for the stale-hold sweep. The store
+		// runs the release even after a shutdown ends ctx.
+		release := func() {
+			if err := e.invoices.ReleaseChargeHold(ctx, inv.TenantID, inv.ID, hold); err != nil {
+				slog.Warn("auto-charge: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
+					"invoice_id", inv.ID, "error", err)
+			}
 		}
 		// Work from the row as it is now, not the list snapshot: a rival
 		// collector may have applied credits or sent the no-payment-method
@@ -5241,7 +5260,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 		fresh, err := e.invoices.GetInvoice(ctx, inv.TenantID, inv.ID)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("reload invoice %s after claim: %w", inv.ID, err))
-			_ = e.invoices.ReleaseAutoChargeClaim(ctx, inv.TenantID, inv.ID)
+			release()
 			continue
 		}
 		inv = fresh
@@ -5256,15 +5275,16 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			if _, err := e.credits.ApplyToInvoiceAt(ctx, inv.TenantID, inv.CustomerID, inv.ID, inv.AmountDueCents, settleAt, inv.InvoiceNumber); err != nil {
 				slog.Warn("auto-charge: credit apply failed — skipping charge to avoid overcharging; will retry next tick",
 					"invoice_id", inv.ID, "error", err)
-				// Provably pre-Stripe: release the lease so the next
-				// tick/Advance retries immediately instead of waiting it out.
-				_ = e.invoices.ReleaseAutoChargeClaim(ctx, inv.TenantID, inv.ID)
+				// Provably pre-Stripe: release the hold so the next
+				// tick/Advance retries immediately.
+				release()
 				continue
 			}
 			// Refresh: credits may have reduced (or fully covered) amount_due.
 			refreshed, err := e.invoices.GetInvoice(ctx, inv.TenantID, inv.ID)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("refresh invoice %s after credit apply: %w", inv.ID, err))
+				release() // provably pre-Stripe
 				continue
 			}
 			inv = refreshed
@@ -5276,7 +5296,10 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			// The claim admitted only a finalized, pending row, and MarkPaid
 			// re-checks status and tax_status under FOR UPDATE, so a draft
 			// can't be settled here. MarkPaid also clears the flag.
-			if _, err := e.invoices.MarkPaid(ctx, inv.TenantID, inv.ID, "", settleAt); err != nil {
+			// No charge is sent either way, so the hold is released either way.
+			_, err := e.invoices.MarkPaid(ctx, inv.TenantID, inv.ID, "", settleAt)
+			release()
+			if err != nil {
 				errs = append(errs, fmt.Errorf("settle zero-due invoice %s: %w", inv.ID, err))
 				continue
 			}
@@ -5345,12 +5368,12 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			// card is attached, settles it if credits arrive, retries an email
 			// that was skipped, and starts dunning once the tenant has a
 			// policy.
-			_ = e.invoices.ReleaseAutoChargeClaim(ctx, inv.TenantID, inv.ID)
+			release()
 			continue
 		}
 
 		chargeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if _, err := e.charger.ChargeInvoice(chargeCtx, inv.TenantID, inv, stripeCusID, stripePMID); err != nil {
+		if _, err := e.charger.ChargeInvoice(chargeCtx, inv.TenantID, inv, hold, stripeCusID, stripePMID); err != nil {
 			cancel()
 			// A DEFINITE failure (declined, or refused outright by Stripe):
 			// ChargeInvoice recorded payment_status='failed' AND started
