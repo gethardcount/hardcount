@@ -301,8 +301,9 @@ jobs:
 
   # The dashboard in a real browser (Playwright, Chromium) against a real API
   # and seeded data: every page at desktop and phone width, plus a few key
-  # journeys. The server setup is a copy of golden-path's. Not a required
-  # check yet. How to run it locally: web-v2/e2e/README.md.
+  # journeys, plus screenshots of the activity cards. The server setup is a
+  # copy of golden-path's. Not a required check yet. How to run it locally:
+  # web-v2/e2e/README.md.
   e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -320,6 +321,12 @@ jobs:
           --health-interval 2s
           --health-timeout 5s
           --health-retries 15
+      # Takes the emails the API sends, so an email reads as sent instead of
+      # failing for want of a mail server. Nothing leaves the runner.
+      mailpit:
+        image: axllent/mailpit:v1.31.3
+        ports:
+          - 1025:1025
     env:
       DATABASE_URL: postgres://velox:velox@localhost:5432/velox?sslmode=disable
       VELOX_BOOTSTRAP_EMAIL: e2e@example.com
@@ -328,6 +335,10 @@ jobs:
       E2E_PASSWORD: e2e-password-not-secret
       E2E_BASE_URL: http://127.0.0.1:4173
       E2E_API_URL: http://127.0.0.1:8080
+      # Mailpit has no TLS. SMTP_TLS=none is refused only in production.
+      SMTP_HOST: localhost
+      SMTP_PORT: '1025'
+      SMTP_TLS: none
     steps:
       - uses: actions/checkout@v7
 
@@ -402,6 +413,16 @@ jobs:
 
       - name: Run Playwright
         run: cd web-v2 && npx playwright test
+
+      # The activity cards on both clocks (activity.spec.ts), on every run,
+      # so a PR's shots can be compared with main's.
+      - name: Upload activity screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: activity-shots
+          path: web-v2/activity-shots/
+          retention-days: 14
 
       - name: Upload Playwright report and traces
         if: failure()
