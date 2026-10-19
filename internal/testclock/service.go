@@ -674,15 +674,6 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 		// for the whole job, so we reuse it here rather than re-reading.
 		needFrozen := (s.creditExpirer != nil || s.dunning != nil) && !frozen.IsZero()
 
-		// Phase 4 (ADR-029): credit expiry for grants belonging to
-		// customers pinned to this clock. expires_at compared against
-		// simulated time, not wall-clock.
-		if s.creditExpirer != nil && needFrozen {
-			creditCount, creditErrs := s.creditExpirer.ExpireCreditsForClock(ctx, job.TenantID, job.ClockID, frozen)
-			sum.CreditsExpired = creditCount
-			runErrs = append(runErrs, creditErrs...)
-		}
-
 		// Phase 5 (ADR-029): dunning advance for clock-pinned invoices.
 		// Runs after the charge/credit-settle phases. A Phase 1/1.5/3
 		// credit-cover settle now resolves the invoice's dunning run in place —
@@ -695,6 +686,25 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 			dunningCount, dunningErrs := s.dunning.ProcessDueRunsForClock(ctx, job.TenantID, job.ClockID, frozen, 50)
 			sum.DunningAdvanced = dunningCount
 			runErrs = append(runErrs, dunningErrs...)
+		}
+
+		// Phase 4 (ADR-029): credit expiry for grants belonging to
+		// customers pinned to this clock. expires_at compared against
+		// simulated time, not wall-clock.
+		//
+		// It runs last, after Phase 5 (ADR-029 amendment 2026-10-20). Every
+		// credit draw judges expiry at its own instant: drainPositiveBlocks
+		// takes only blocks with expires_at after the draw, and a dunning
+		// retry draws at its scheduled instant, at or before frozen.
+		// Expiry retires every grant with expires_at before frozen, and a
+		// retired grant is never drawn again (ADR-071). Run first, it took a
+		// grant that was still live at an earlier retry's instant, and that
+		// retry charged the card in full. Run last, no draw can take an
+		// expired grant either: the same filter refuses it.
+		if s.creditExpirer != nil && needFrozen {
+			creditCount, creditErrs := s.creditExpirer.ExpireCreditsForClock(ctx, job.TenantID, job.ClockID, frozen)
+			sum.CreditsExpired = creditCount
+			runErrs = append(runErrs, creditErrs...)
 		}
 
 		// Billing ran — capture the summary (counts are exact, from the phase
