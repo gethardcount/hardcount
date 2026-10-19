@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 type fakeHostedLedger struct {
@@ -79,7 +80,7 @@ func TestHostedSweep_SettlesPaidSessionsEvenOnAPaidInvoice(t *testing.T) {
 	r.SetSettler(settler)
 	r.SetHostedSessions(ledger, reader, nil)
 
-	resolved, errs := r.sweepHostedSessions(context.Background(), 50)
+	resolved, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics))
 
 	if len(errs) != 1 || !errors.Is(errs[0], errSessionRead) {
 		t.Fatalf("errs = %v, want exactly the cs_err read failure", errs)
@@ -125,7 +126,7 @@ func TestHostedSweep_OneAlertPerCharge(t *testing.T) {
 	r.SetSettler(settler)
 	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}}, nil)
 
-	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 1 || len(errs) != 0 {
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 1 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
 	}
 	if len(settler.succeeded) != 0 {
@@ -140,7 +141,7 @@ func TestHostedSweep_UnwiredDoesNothing(t *testing.T) {
 	ledger := &fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", StripeSessionID: "cs_1"}}}
 	r := NewReconciler(&mockStripeClient{}, newMockReconcileStore(), time.Second)
 	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "expired"}}, nil)
-	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 0 || len(errs) != 0 {
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 0 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
 	}
 	if len(ledger.expired)+len(ledger.completed)+len(ledger.touched) != 0 {
@@ -196,7 +197,7 @@ func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
 
 	rec := &recordingCardRecorder{}
 	r, ledger := newSweep(rec)
-	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 1 || len(errs) != 0 {
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 1 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
 	}
 	if len(rec.calls) != 1 || rec.calls[0] != (cardCall{"t1", "cus_velox", "cus_stripe", PurposeHostedInvoicePay}) {
@@ -206,11 +207,53 @@ func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
 
 	failing := &recordingCardRecorder{err: errors.New("db down")}
 	r, ledger = newSweep(failing)
-	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 0 || len(errs) != 1 {
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 0 || len(errs) != 1 {
 		t.Fatalf("card failure: n=%d errs=%v, want unresolved with one error", n, errs)
 	}
 	if len(ledger.completed) != 0 {
 		t.Errorf("a session whose card was not recorded must not be marked completed: %v", ledger.completed)
 	}
 	assertIDs(t, "touched", ledger.touched, "cks_1")
+}
+
+// panickingSessionReader panics on one session, standing in for a nil
+// dereference on one unusual row.
+type panickingSessionReader struct {
+	fakeSessionReader
+	panicOn string
+}
+
+func (p panickingSessionReader) GetCheckoutSession(ctx context.Context, id string) (CheckoutSessionResult, error) {
+	if id == p.panicOn {
+		panic("hosted sweep: nil dereference on " + id)
+	}
+	return p.fakeSessionReader.GetCheckoutSession(ctx, id)
+}
+
+// TestHostedSweep_PanickingSessionRotatesAndTheRestGoesOn: the hosted list is
+// least recently looked at first, and a session is touched only after its
+// check. A check that panicked left its session first in the list on every
+// tick, and Run ended there, so no session behind it was ever looked at. Now
+// the panicking session is touched like one whose check failed, the sessions
+// behind it are checked, and Run raises the panic again at its end.
+func TestHostedSweep_PanickingSessionRotatesAndTheRestGoesOn(t *testing.T) {
+	store := newMockReconcileStore(domain.Invoice{ID: "inv_open", TenantID: "t1", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed})
+	ledger := &fakeHostedLedger{rows: []CheckoutClaim{
+		{ID: "cks_panic", TenantID: "t1", InvoiceID: "inv_open", StripeSessionID: "cs_panic", Status: "open"},
+		{ID: "cks_exp", TenantID: "t1", InvoiceID: "inv_open", StripeSessionID: "cs_exp", Status: "open"},
+	}}
+	r := NewReconciler(&mockStripeClient{}, store, time.Second)
+	r.SetSettler(&recordingSettler{})
+	r.SetHostedSessions(ledger, panickingSessionReader{fakeSessionReader{"cs_exp": {Status: "expired"}}, "cs_panic"}, nil)
+
+	recovered := func() (p any) {
+		defer func() { p = recover() }()
+		_, _ = r.Run(context.Background(), 50)
+		return nil
+	}()
+	if recovered != "hosted sweep: nil dereference on cs_panic" {
+		t.Fatalf("recovered %v, want the session's panic raised again at the end of Run", recovered)
+	}
+	assertIDs(t, "expired", ledger.expired, "cks_exp")
+	assertIDs(t, "touched", ledger.touched, "cks_panic")
 }

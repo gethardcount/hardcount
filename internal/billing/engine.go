@@ -26,6 +26,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 	"github.com/sagarsuperuser/velox/internal/platform/telemetry"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/tax"
@@ -1915,10 +1916,18 @@ type dueFetch func(ctx context.Context, exclude []string, limit int) ([]domain.S
 // grace is the invoice grace this run honours (ADR-120): the wall-clock runs
 // pass the engine's, the test-clock run passes 0. It goes to
 // billSubscription, whose checks must use the same instant as fetch's scan.
+//
+// A sub whose attempt panics is handled like one that failed: attemptSub has
+// saved the failure, and the sub goes into exclude and failures. The drain
+// bills the rest, and the first panic is raised again when it returns, so the
+// caller still sees it (the scheduler's tick ends as panicked; the operator's
+// run answers 500; the test-clock catch-up marks the clock failed). Without
+// this, one panicking sub stopped every sub after it in the run.
 func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, onPage func(), grace time.Duration, logArgs ...any) (int, []SubBillError) {
 	if batchSize <= 0 {
 		batchSize = 50
 	}
+	var panics scheduler.Panics
 	generated := 0
 	var failures []SubBillError
 	attempted := make(map[string]bool)
@@ -1926,14 +1935,17 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 	for {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, SubBillError{Err: fmt.Errorf("billing run ctx done: %w", err)})
+			panics.Repanic()
 			return generated, failures
 		}
 		due, err := fetch(ctx, exclude, batchSize)
 		if err != nil {
 			failures = append(failures, SubBillError{Err: fmt.Errorf("fetch due subscriptions: %w", err)})
+			panics.Repanic()
 			return generated, failures
 		}
 		if len(due) == 0 {
+			panics.Repanic()
 			return generated, failures
 		}
 		for _, sub := range due {
@@ -1941,6 +1953,7 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 			// would only fail each sub with the same ctx error.
 			if err := ctx.Err(); err != nil {
 				failures = append(failures, SubBillError{Err: fmt.Errorf("billing run ctx done: %w", err)})
+				panics.Repanic()
 				return generated, failures
 			}
 			if attempted[sub.ID] {
@@ -1952,7 +1965,13 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 				continue
 			}
 			attempted[sub.ID] = true
-			n, err := e.attemptSub(ctx, sub, grace, logArgs...)
+			// errBillPanic stays when attemptSub panics: the assignment
+			// below never happens.
+			n, err := 0, errBillPanic
+			func() {
+				defer panics.Guard(append([]any{"subscription_id", sub.ID, "tenant_id", sub.TenantID}, logArgs...)...)
+				n, err = e.attemptSub(ctx, sub, grace, logArgs...)
+			}()
 			generated += n
 			if errors.Is(err, errBillingGated) {
 				// Not attempted, so not a failure and never "still due" in
@@ -5313,6 +5332,14 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 		}
 
 		stripeCusID, stripePMID, err := e.paymentSetups.ResolveForCharge(ctx, inv.TenantID, inv.CustomerID)
+		if err != nil {
+			// A failed read (a database error, or a missing
+			// VELOX_ENCRYPTION_KEY that fails every customer decrypt) is not
+			// "no card": an error, so the sweep logs and counts it. No card
+			// resolves to ("", "", nil). Nothing was sent; the release below
+			// frees the hold and the invoice stays queued.
+			errs = append(errs, fmt.Errorf("resolve payment method for invoice %s: %w", inv.ID, err))
+		}
 		if err != nil || stripePMID == "" || stripeCusID == "" {
 			// Genuinely no PM (not a resolve error) and never emailed: send
 			// the setup-link email ONCE (ADR-087 follow-up). This closes the

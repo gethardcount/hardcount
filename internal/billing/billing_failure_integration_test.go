@@ -971,9 +971,11 @@ func TestBillingFailure_StillDueAfterACleanAttemptIsCounted(t *testing.T) {
 }
 
 // TestBillingFailure_PanicIsRecordedThenRepanics: a panic while billing one
-// subscription is saved as a counted failure and then re-raised, so the tick
-// still dies loudly. The next run skips that subscription and bills the
-// healthy one behind it, which the panic used to block on every tick.
+// subscription (a nil dereference on one unusual row) is saved as a counted
+// failure, the run bills the healthy subscription behind it, and the panic is
+// then raised again, so the tick still ends as panicked and pages. The healthy
+// subscription used to wait for the next tick, and on a billing day every
+// subscription after the panicking one waited with it.
 func TestBillingFailure_PanicIsRecordedThenRepanics(t *testing.T) {
 	env := newBillFailureEnv(t, "Billing Failure Panic")
 	a := env.dueSub(t, "sub-a-panics", env.planBad, env.periodEnd)
@@ -985,8 +987,8 @@ func TestBillingFailure_PanicIsRecordedThenRepanics(t *testing.T) {
 		env.engine.RunCycle(env.ctx, 50, nil)
 		return nil
 	}()
-	if recovered == nil {
-		t.Fatal("RunCycle swallowed the panic: the tick must still die so the scheduler reports it")
+	if recovered != "boom: secret panic value idx_secret" {
+		t.Fatalf("recovered %v, want the original panic raised again so the scheduler reports it", recovered)
 	}
 	bf := env.get(t, a.ID).BillingFailure
 	if bf == nil || bf.Attempts != 1 {
@@ -995,19 +997,17 @@ func TestBillingFailure_PanicIsRecordedThenRepanics(t *testing.T) {
 	if !strings.Contains(bf.LastError, a.ID) || strings.Contains(bf.LastError, "boom") || strings.Contains(bf.LastError, "idx_secret") {
 		t.Fatalf("last_error = %q, want the generic reference and no panic text", bf.LastError)
 	}
-	if n := env.invoiceCount(t, b.ID); n != 0 {
-		t.Fatalf("setup: the healthy subscription was billed before the panic (%d invoices)", n)
+	if n := env.invoiceCount(t, b.ID); n != 1 {
+		t.Fatalf("the healthy subscription has %d invoices after the panicking run, want 1", n)
 	}
 
+	// The next run skips the subscription that panicked until its wait ends.
 	calls := env.pricing.calls.Load()
-	if gen, errs := env.engine.RunCycle(env.ctx, 50, nil); gen != 1 || len(errs) != 0 {
-		t.Fatalf("the next run: generated=%d errors=%v, want the healthy subscription billed", gen, errs)
+	if gen, errs := env.engine.RunCycle(env.ctx, 50, nil); gen != 0 || len(errs) != 0 {
+		t.Fatalf("the next run: generated=%d errors=%v, want nothing left to bill", gen, errs)
 	}
 	if env.pricing.calls.Load() != calls {
 		t.Fatal("the next run attempted the subscription that panicked")
-	}
-	if n := env.invoiceCount(t, b.ID); n != 1 {
-		t.Fatalf("the healthy subscription has %d invoices, want 1", n)
 	}
 }
 
