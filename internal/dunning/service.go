@@ -770,7 +770,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 			slog.Warn("dunning transient-skip: failed to rewind the pre-charge attempt persist",
 				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
 		}
-		slog.Info("dunning retry skipped — upstream transient (breaker/timeout)",
+		slog.Info("dunning retry skipped — no definite answer",
 			"run_id", run.ID, "invoice_id", run.InvoiceID)
 		return nil
 	}

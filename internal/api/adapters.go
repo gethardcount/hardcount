@@ -406,15 +406,15 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	// original failure (or whose application failed at cycle close) must
 	// reduce the charge, not sit unconsumed while the card is hit for the
 	// full amount. ApplyToInvoiceAt is idempotent (drains min(due, balance)).
-	// An apply FAILURE maps to ErrTransientSkip: the retry never reaches
-	// Stripe, so it must not burn a dunning attempt.
+	// An apply failure never reaches Stripe, so RetryPayment logs it and skips
+	// it uncounted.
 	if a.credits != nil {
 		at := clock.Now(ctx) // sim-aware: catchup binds effective-now on ctx
 		if _, err := a.credits.ApplyToInvoiceAt(ctx, tenantID, customerID, invoiceID, inv.AmountDueCents, at, inv.InvoiceNumber); err != nil {
 			// Provably pre-Stripe: release so the next due tick retries
 			// without waiting for the stale-hold sweep.
 			release()
-			return dunning.ErrTransientSkip
+			return fmt.Errorf("apply credits: %w", err)
 		}
 		inv, err = a.invoiceStore.Get(ctx, tenantID, invoiceID)
 		if err != nil {
