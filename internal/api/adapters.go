@@ -313,10 +313,21 @@ func (a *refundIssuerAdapter) IssueRefund(ctx context.Context, tenantID string, 
 	})
 }
 
+// retryInvoiceStore is the part of the invoice store a dunning retry calls.
+// *invoice.PostgresStore implements it; a test wraps the real store to fail
+// one call.
+type retryInvoiceStore interface {
+	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
+	ClaimChargeForDunningRetry(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
+	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
+	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
+	HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
+}
+
 // paymentRetrierAdapter bridges Stripe + invoice/customer stores → dunning.PaymentRetrier.
 type paymentRetrierAdapter struct {
 	charger       *payment.Stripe
-	invoiceStore  *invoice.PostgresStore
+	invoiceStore  retryInvoiceStore
 	paymentSetups payment.PaymentSetupStore
 	credits       *credit.Service
 }
