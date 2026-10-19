@@ -440,7 +440,8 @@ func TestParked_StripeCustomerGone_KeptAndStamped(t *testing.T) {
 	}
 }
 
-// 8. The upgrade. A release with #1299 and not this change cleared a parked
+// 8. The upgrade, for an install that ran main between #1299 and this change
+// (no release has one without the other). That code cleared a parked
 // invoice's hold at its first check when Stripe showed nothing, and with the
 // Search sweep gone nothing would ever look at it again. The migration gives
 // each such park a hold at its parked attempt's time (or 2026-01-01 when the

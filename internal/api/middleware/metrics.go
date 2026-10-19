@@ -602,16 +602,25 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	// database on every replica's scrape. Until sweep-2026-08-30 S4 it was a
 	// per-process Set() gauge stamped only by whichever replica led the
 	// billing tick; followers exported a stale copy and the runbook's alert
-	// fired from replicas whose number had resolved. Since REC-5 the
-	// stale-hold sweep finishes every park within about 25 hours, so a park
-	// counted longer than that is one Stripe cannot be asked about.
-	parkedHelp := "Invoices whose last charge got an unclear answer from Stripe that named no payment (ADR-107), by disposition: open (finalized) or written_off (uncollectible). Velox records a payment that appears at Stripe and, with none 24 hours after the attempt, ends the park (an open invoice is charged again). Alert on open > 0 for 25 hours: Stripe cannot be asked about it (key revoked, customer deleted there). -1 = metric query failed."
+	// fired from replicas whose number had resolved.
+	//
+	// Since REC-5 the stale-hold sweep ends a park at the first hourly tick
+	// 24 hours after its charge's hold (domain.ParkedNothingWait), so the
+	// gauge counts only the parks it has not ended on schedule: a hold more
+	// than 26 hours old (one tick plus an hour for a late one), or no hold,
+	// which nothing checks. A count of every park would stay above 0 for as
+	// long as parks kept arriving, so a Stripe incident that parked invoices
+	// over a few hours would page on parks that were on schedule. This
+	// package imports no domain package; the hand copy of the 24 hours is
+	// pinned by TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay.
+	parkedHelp := "Invoices whose last charge got an unclear answer from Stripe that named no payment (ADR-107) and that Velox has not ended on schedule: still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Velox records a payment that appears at Stripe and, with none 24 hours after the hold, ends the park at the next hourly tick (an open invoice is charged again); parks inside that are not counted. Alert on open > 0: Stripe cannot be asked or read about it, or nothing is checking it. -1 = metric query failed."
 	for _, m := range []struct {
 		label string
 		live  bool
 	}{{"live", true}, {"test", false}} {
 		for _, d := range []struct{ label, status string }{{"open", "finalized"}, {"written_off", "uncollectible"}} {
-			q := fmt.Sprintf(`SELECT COUNT(*) FROM invoices WHERE status = '%s' AND payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '' AND livemode = %t`, d.status, m.live)
+			q := fmt.Sprintf(`SELECT COUNT(*) FROM invoices WHERE status = '%s' AND payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '' AND livemode = %t
+				AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now() - interval '26 hours')`, d.status, m.live)
 			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: "velox_parked_invoices", Help: parkedHelp, ConstLabels: prometheus.Labels{"mode": m.label, "disposition": d.label}}, func() float64 {
 				n, err := count(q)
 				if err != nil {

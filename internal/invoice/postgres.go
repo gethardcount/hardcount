@@ -2646,6 +2646,10 @@ func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id s
 	return tx.Commit()
 }
 
+// parkedNoPaymentReason is a parked attempt's reason once its park ends with
+// no payment at Stripe (UnparkAfterNoPayment).
+const parkedNoPaymentReason = "Stripe showed no payment for this attempt 24 hours later."
+
 // UnparkAfterNoPayment is the stale-hold sweep's write when Stripe shows no
 // payment for a parked invoice's charge domain.ParkedNothingWait after the
 // attempt (REC-5, ADR-127 amendment 2026-10-20). It puts the invoice back
@@ -2671,8 +2675,12 @@ func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id s
 // an uncollectible invoice (ADR-113), so for them this only ends the park.
 //
 // In the same transaction the parked attempt's row is recorded as failed,
-// keeping Stripe's words as its reason: Velox now knows the attempt took no
-// money, and the timeline would otherwise say "result unknown" forever.
+// with parkedNoPaymentReason as its reason: Velox now knows the attempt took
+// no money, and the timeline would otherwise say "result unknown" forever.
+// The saved answer is not kept as the reason. For a timed-out call it is Go's
+// error (`Post "https://api.stripe.com/v1/payment_intents": context deadline
+// exceeded`), and for a 500 or a 409 it is Stripe's words about the request,
+// not about the payment; the Activity card prints the reason as the problem.
 func (s *PostgresStore) UnparkAfterNoPayment(ctx context.Context, tenantID, id string, hold time.Time, attemptSeq int64) (domain.InvoicePaymentStatus, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2706,9 +2714,9 @@ func (s *PostgresStore) UnparkAfterNoPayment(ctx context.Context, tenantID, id s
 		return "", false, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE invoice_charge_attempts SET outcome = 'failed', updated_at = now()
+		UPDATE invoice_charge_attempts SET outcome = 'failed', provider_reason = $2, updated_at = now()
 		WHERE invoice_id = $1 AND outcome = 'unknown' AND stripe_payment_intent_id = ''
-	`, id); err != nil {
+	`, id, parkedNoPaymentReason); err != nil {
 		return "", false, err
 	}
 	if err := tx.Commit(); err != nil {

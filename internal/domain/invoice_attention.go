@@ -1112,7 +1112,7 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 			Message: "Stripe didn't confirm this charge and may still complete it.\n" +
 				"Velox checks Stripe every hour and records the payment if it appears.\n" +
 				"If none appears within 24 hours, the invoice is charged again as usual.",
-			Detail: "No new charge is made before then, so the customer is never charged twice. " +
+			Detail: "No new charge is made before then. " +
 				"If the customer paid another way, mark the invoice uncollectible so it is not charged again. " +
 				"To find the attempt in Stripe, search by customer and amount.",
 			DocURL: docURL("payment-unconfirmed"),

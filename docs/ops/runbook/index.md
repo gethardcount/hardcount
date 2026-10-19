@@ -58,7 +58,7 @@ row-level-security role you see only one tenant's rows, or none.
 | Someone cannot sign in: "Too many sign-in attempts", or `velox_auth_login_total{outcome="throttled"}` rising | [Sign-in says "Too many sign-in attempts"](sign-in-throttled.md) |
 | `velox migrate` or the start-up stops with `migration … failed`, `schema_migrations`, `goose_db_version` or `another Velox process is migrating` | [A database upgrade stopped](migration-failed-midway.md) |
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade waited for a table lock](migration-lock-timeout.md) |
-| `velox_parked_invoices{disposition="open"}` above zero for more than 25 hours | [Parked invoices](parked-invoices.md) |
+| `velox_parked_invoices{disposition="open"}` above zero | [Parked invoices](parked-invoices.md) |
 | "stale charge check: can't confirm an earlier charge with Stripe" in the logs, or `velox_stale_charge_hold_resolutions_total{result="cannot_ask"}` rising | [Interrupted charges](interrupted-charges.md) |
 | An invoice says "after a lost dispute", a `payment.dispute_opened` or `payment.dispute_closed` webhook, or Stripe emails about a dispute | [Card disputes](card-disputes.md) |
 | `velox_creditnote_pending_issue_drafts` growing over days | [Clawback drafts not issuing](clawback-drafts-not-issuing.md) |

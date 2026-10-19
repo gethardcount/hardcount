@@ -8,7 +8,9 @@ cannot finish. Back to the [runbook index](index.md).
 
 ## Symptom
 
-`velox_parked_invoices{disposition="open"}` above 0 for more than 25 hours.
+`velox_parked_invoices{disposition="open"}` above 0. The gauge counts only
+parks Velox has not ended on schedule: still parked 26 hours after the
+charge's hold, or with no hold. Parks inside their 24 hours are not counted.
 
 ## Why
 
@@ -23,27 +25,45 @@ cannot finish. Back to the [runbook index](index.md).
   back to `pending` (`failed` after a dunning retry) and is charged again as
   usual. Stripe can still create a payment that long after a 5xx, while it
   recovers from an incident, so Velox waits that long before charging again.
-- So a park counted for more than 25 hours is one Velox cannot ask Stripe
-  about: the Stripe connection is broken (key revoked or rejected), or the
-  customer is gone from the Stripe account. The log has an ERROR on every
-  check: `stale charge check: can't confirm an earlier charge with Stripe`.
+- So a counted park is one the check could not finish. Either Velox cannot
+  ask Stripe about it: the Stripe connection is broken (key revoked or
+  rejected), or the customer is gone from the Stripe account. The log has an
+  ERROR on every check: `stale charge check: can't confirm an earlier charge
+  with Stripe`. Or Stripe could not be read on any check for a day. Or the
+  park has no hold, so nothing checks it: a replica of an older release
+  cleared it during a rolling upgrade.
 
 ## Check
 
 1. Fix the Stripe connection if it is broken. The next tick finishes the
    park on its own.
-2. Otherwise, find the attempt in the Stripe dashboard by customer, amount
-   and approximate time.
+2. Find the attempt in the Stripe dashboard by customer, amount and
+   approximate time.
+3. Check that the invoice has a hold:
+   `SELECT auto_charge_claimed_until FROM invoices WHERE id = '<invoice id>';`
+   With none, give it one dated a day back, and the next tick finishes the
+   park:
+
+   ```sql
+   BEGIN;
+   SET LOCAL app.bypass_rls = 'on';
+   UPDATE invoices SET auto_charge_claimed_until = now() - interval '25 hours'
+   WHERE id = '<invoice id>' AND payment_status = 'unknown'
+     AND auto_charge_claimed_until IS NULL;
+   COMMIT;
+   ```
 
 ## Fix
 
-1. If the charge succeeded, record it: it settles on its own once Stripe can
-   be asked. If it cannot (the customer is deleted in Stripe), mark the
-   invoice uncollectible: the write-off keeps the invoice out of collection.
-2. If nothing was charged, or the customer paid another way, mark the
-   invoice uncollectible. It is the one action the invoice page allows on a
-   parked invoice. It also releases the invoice's deferred clawback draft
-   and closes its dunning run.
+1. If the charge succeeded and the park does not end (the customer is
+   deleted in Stripe, so Velox cannot ask), send its
+   `payment_intent.succeeded` event again from the Stripe dashboard to the
+   Velox webhook endpoint. The webhook marks the invoice paid, a written-off
+   one too.
+2. If nothing was charged and the park does not end, or the customer paid
+   another way, mark the invoice uncollectible. It is the one action the
+   invoice page allows on a parked invoice. It also releases the invoice's
+   deferred clawback draft and closes its dunning run.
 3. A write-off closes the invoice's dunning run without the policy's final
    action (cancel or pause the subscription). Check whether that action was
    due:

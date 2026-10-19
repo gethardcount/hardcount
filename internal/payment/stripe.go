@@ -526,7 +526,7 @@ func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID stri
 //
 //   - a RECORDED decline must get a FRESH key, so a retry after the customer
 //     fixes their card isn't handed the declined PI forever (no liveness sink);
-//   - a charge whose result was lost (a crash, a caller's deadline) does NOT
+//   - a charge whose result was lost (a crash, a shutdown) does NOT
 //     rely on the key to avoid a second charge. The key only dedupes the same
 //     initiator, same card and same amount within Stripe's 24 hours; another
 //     charge kind, a changed card, a pruned key or the hosted page all go
@@ -666,8 +666,9 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// ends within ChargeSendBudget, which is at most the margin the re-check
 	// required. So no request for this attempt can start after its hold ends,
 	// and the stale-hold sweep can read "Stripe has nothing" as final. The
-	// callers' own deadlines (dunning 15 s, auto-charge 30 s) are shorter and
-	// still win; Collect has none of its own.
+	// callers' own deadlines are shorter and still win: dunning 15 s,
+	// auto-charge 30 s, and Collect payment 30 s (the /v1 routes' request
+	// timeout, router.go).
 	sendCtx, cancelSend := context.WithTimeout(ctx, domain.ChargeSendBudget)
 	defer cancelSend()
 
@@ -761,18 +762,21 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				"error", pe.Message,
 			)
 		}
-		// Where an unclear outcome is saved: on the caller's context, except
-		// when the caller's own deadline is what ended the call (dunning 15 s,
-		// auto-charge 30 s). That call timed out because Stripe was slow,
-		// which is what an incident looks like, so the attempt is saved, on a
-		// context detached from the caller, as the park it is, and waits
-		// Stripe's 24 hours like any other unclear answer
-		// (domain.ParkedNothingWait). A cancelled context (a shutdown, a lost
-		// lease, a closed tab) is Velox interrupting itself: nothing is saved,
-		// the hold stays, and the stale-hold sweep decides about an hour after
-		// the claim (ADR-127; Sagar's "by cause" rule, 2026-10-19).
+		// Where an unclear outcome is saved: on a context detached from the
+		// caller, unless the caller was cancelled. Stripe's own unclear
+		// answers (a 500, a 409) and a call the caller's deadline ended
+		// (dunning 15 s, auto-charge 30 s, Collect payment 30 s: Stripe was
+		// slow, which is what an incident looks like) are saved as the park
+		// they are, and wait Stripe's 24 hours (domain.ParkedNothingWait).
+		// Detached because the deadline can also pass while the answer is
+		// being saved: a 500 that arrives just before it would otherwise be
+		// lost and charged again about 75 minutes later, while Stripe may
+		// still complete it. A cancelled context (a shutdown, a lost lease, a
+		// closed tab) is Velox interrupting itself: nothing is saved, the hold
+		// stays, and the stale-hold sweep decides about an hour after the
+		// claim (ADR-127; Sagar's "by cause" rule, 2026-10-19).
 		saveCtx := ctx
-		if pe.Unknown && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if pe.Unknown && !errors.Is(ctx.Err(), context.Canceled) {
 			var cancelSave context.CancelFunc
 			saveCtx, cancelSave = context.WithTimeout(context.WithoutCancel(ctx), chargeOutcomeSaveTimeout)
 			defer cancelSave()
@@ -975,9 +979,9 @@ func logRefusedChargeOutcome(ctx context.Context, current domain.Invoice, attemp
 	)
 }
 
-// chargeOutcomeSaveTimeout bounds saving an unclear outcome after the
-// caller's deadline ended the call (chargeInvoice): the attempt row and the
-// park, with the park's three tries.
+// chargeOutcomeSaveTimeout bounds saving an unclear outcome on the context
+// detached from the caller (chargeInvoice): the attempt row and the park,
+// with the park's three tries.
 const chargeOutcomeSaveTimeout = 10 * time.Second
 
 // piPurposeDunningRetry tags a PaymentIntent created by the dunning
@@ -1194,12 +1198,14 @@ func (s *Stripe) settleDeclineWithRetry(ctx context.Context, tenantID string, in
 // refused retry whose row holds exactly this outcome at seq+1 is that first
 // attempt, and counts as applied.
 //
-// It writes on the ctx it is handed. chargeInvoice hands it the caller's,
-// or, when the caller's own deadline ended the call, a detached one: a timed
-// out call is saved as the park it is and gets Stripe's 24 hours. When the
-// caller was cancelled (a shutdown, a lost lease) the write fails and nothing
-// is saved; the hold the claim wrote stays, and the stale-hold sweep asks
-// Stripe about that charge about an hour after the claim (ADR-127).
+// It writes on the ctx it is handed. For an unclear outcome chargeInvoice
+// hands it a context detached from the caller, unless the caller was
+// cancelled: a 500, a 409 or a timed-out call is saved as the park it is,
+// even when the caller's deadline passes during the save, and gets Stripe's
+// 24 hours. When the caller was cancelled (a shutdown, a lost lease) the
+// write fails and nothing is saved; the hold the claim wrote stays, and the
+// stale-hold sweep asks Stripe about that charge about an hour after the
+// claim (ADR-127).
 func persistChargeOutcomeWithRetry(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, status domain.InvoicePaymentStatus, piID, message string) (domain.Invoice, bool, error) {
 	delays := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond}
 	var lastErr error

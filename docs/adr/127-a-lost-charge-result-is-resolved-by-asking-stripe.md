@@ -296,8 +296,11 @@ parked attempt was never counted. Otherwise (auto-charge, Collect, or no
 attempt row) it sets `pending`. It clears `last_payment_error` (Stripe's 500
 message, which the failure banner would print as the bank's words) and the
 hold, and moves the counter, so the next charge sends a new idempotency key.
-In the same transaction the parked attempt's row becomes `failed`, keeping
-Stripe's words as its reason. Collect on a `failed` invoice comes back
+In the same transaction the parked attempt's row becomes `failed`, with the
+reason "Stripe showed no payment for this attempt 24 hours later." The
+Activity card prints the reason as the problem, so the saved answer is not
+kept. For a timed-out call it is Go's error; for a 500 or a 409 it is
+Stripe's words about the request. Collect on a `failed` invoice comes back
 `pending`; the status shown differs, who may charge does not.
 
 **Why 24 hours for "nothing".** Every park answer is one where Stripe got the
@@ -323,13 +326,16 @@ its price. A payment the list shows is acted on at the first check. The gate
 is `domain.ParkedNothingWait`, read on the database clock the hold was
 written with (`ListStaleChargeHolds`). A test-clock park waits 24 real hours.
 
-**By cause.** A caller's deadline (dunning 15 s, auto-charge 30 s) that ends
+**By cause.** The callers' deadlines are dunning 15 s, auto-charge 30 s, and
+**Collect payment** 30 s (the `/v1` routes' request timeout). One that ends
 the Stripe call is a timed-out call: Stripe was slow, which is what an
-incident looks like. `chargeInvoice` saves its attempt row and its park on a
-context detached from the caller, so it gets the 24 hours. A cancellation (a
-shutdown, a lost lease, a closed **Collect payment** tab) or a crash is Velox
-interrupting itself, so nothing is saved. Its stale hold is checked about 75
-minutes after the claim, as before.
+incident looks like. `chargeInvoice` saves every unclear answer, its attempt
+row and its park, on a context detached from the caller, unless the caller
+was cancelled. So a timed-out call gets the 24 hours. So does a 500 that
+arrives just before the deadline, when the deadline passes while it is
+saved. A cancellation (a shutdown, a lost lease, a closed **Collect
+payment** tab) or a crash is Velox interrupting itself, so nothing is saved.
+Its stale hold is checked about 75 minutes after the claim, as before.
 
 **Why the next charge does not reuse the parked attempt's key.** Stripe
 removes keys "after they're at least 24 hours old. We generate a new request
@@ -347,14 +353,18 @@ rotates instead of heading the list every tick.
 the latch for accounts without Search, and the metric
 `velox_parked_search_errors_total`.
 
-**Upgrade.** A release with this ADR but without this amendment cleared a
-park's hold at its first check when Stripe showed nothing, and left the park
-to the Search sweep. Migration `00186_hold_parked_invoices` gives each such
-park a hold at its newest parked attempt's `created_at` (written by the
-database after Stripe answered), or 2026-01-01 when that row was lost. Parks
-older than 24 hours are then finished at the first tick: a payment found is
-recorded, and an open one with none is charged again. Before upgrading, write
-off any parked invoice the customer paid another way.
+**Upgrade.** Parks made by v0.8.x keep their claim's hold, so the sweep
+finishes them at the first tick after the upgrade. A payment found is
+recorded. An open park older than 24 hours with none is charged again.
+Before upgrading, write off any parked invoice the customer paid another
+way. Migration `00186_hold_parked_invoices` is for one install only: one
+that ran `main` between this ADR (#1299, 2026-10-19) and this amendment. No
+release has #1299 without it. That code cleared a park's hold at its first
+check when Stripe showed nothing, and left the park to the Search sweep, so
+with the Search sweep gone nothing would look at it again. The migration
+gives each such park a hold at its newest parked attempt's `created_at`
+(written by the database after Stripe answered), or 2026-01-01 when that row
+was lost. Where no park lacks a hold it changes nothing.
 
 **Product copy.** The `payment.unidentifiable` notice is a Warning: "Stripe
 didn't confirm this charge and may still complete it. Velox checks Stripe
@@ -362,8 +372,14 @@ every hour and records the payment if it appears. If none appears within 24
 hours, the invoice is charged again as usual." Write-off stays as a secondary
 action, for a customer who paid another way.
 
-**Monitoring.** `velox_parked_invoices{disposition="open"}` above 0 for 25
-hours is a park Stripe cannot be asked about (R9, R17).
+**Monitoring.** `velox_parked_invoices` counts only the parks the sweep has
+not ended on schedule. Those are parks still parked 26 hours after the hold,
+or with no hold. The 26 hours are the 24, the hourly tick that ends the
+park, and an hour for a late tick. A count of every park would stay above 0 for as long as parks kept
+arriving. So during a Stripe incident an alert on it, with any `for`, would
+page on parks that were on schedule. Alert on `disposition="open"` above 0.
+Such a park is one Stripe cannot be asked about (R9, R17), one Stripe could
+not be read about for a day, or one with no hold (R13).
 
 **Residuals.**
 
@@ -381,7 +397,8 @@ hours is a park Stripe cannot be asked about (R9, R17).
   hard decline that is one more attempt on a refused card (#966).
 - **R13.** A mixed-version rolling deploy: an old replica leading the tick
   after the migration can still clear a new park's hold. That park stays
-  parked until a webhook or a write-off; the gauge shows it after 25 hours.
+  parked until a webhook or a write-off; the gauge counts it at once, since
+  it has no hold.
 - **R14.** A network error before the request left: nothing reached Stripe,
   but Velox cannot tell that from a 500, so it waits 24 hours. Follow-up B
   below shortens it. Trigger: the first partner invoice that waits a day on a
@@ -399,6 +416,13 @@ hours is a park Stripe cannot be asked about (R9, R17).
   against Stripe yet: what List returns for a deleted customer's id. If it
   returns an empty list, the park ends as "nothing" after 24 hours, and the
   charge after it fails on the deleted customer.
+- **R18.** A 429 on stripe-go's resend. stripe-go resends a request after a
+  network error, and a 429 to the resend can hide a first request Stripe is
+  still running. The charge treats a 429 as transient: it saves nothing and
+  keeps the hold. So the stale-hold sweep decides about 75 minutes after the
+  claim, without the 24 hours, though Stripe may still complete that first
+  request. Trigger to revisit: a duplicate payment traced to a 429 on a
+  charge.
 
 **Not in this amendment:** follow-up B (an unclear answer with no PaymentIntent
 id saves nothing and becomes a lost result) and follow-up C, as above.
