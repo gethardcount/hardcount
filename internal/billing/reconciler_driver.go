@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // Reconciler is one recovery sweep: it scans for stuck/failed post-commit
@@ -130,18 +131,25 @@ func (s *Scheduler) reconcilers() []Reconciler {
 // mode-scoped ctx, with one uniform log + the per-reconciler sweep metric. A
 // per-row error is logged and metered but never aborts the batch or the next
 // reconciler. This replaces six near-identical copy-pasted log blocks.
-func runReconcilers(ctx context.Context, mode string, rs []Reconciler, batch int) {
+//
+// A sweep that panics stops (its metric is not recorded), the next sweep
+// still runs, and panics keeps the panic for the caller to raise again once
+// the tick has run.
+func runReconcilers(ctx context.Context, mode string, rs []Reconciler, batch int, panics *scheduler.Panics) {
 	for _, r := range rs {
 		if r == nil {
 			continue
 		}
-		n, errs := r.Reconcile(ctx, batch)
-		if n > 0 || len(errs) > 0 {
-			slog.Info("reconciler swept", "reconciler", r.Name(), "mode", mode, "advanced", n, "errors", len(errs))
-		}
-		for _, e := range errs {
-			slog.Error("reconciler error", "reconciler", r.Name(), "mode", mode, "error", e)
-		}
-		recordReconcilerSweep(r.Name(), mode, n, len(errs))
+		func() {
+			defer panics.Guard("step", r.Name(), "mode", mode)
+			n, errs := r.Reconcile(ctx, batch)
+			if n > 0 || len(errs) > 0 {
+				slog.Info("reconciler swept", "reconciler", r.Name(), "mode", mode, "advanced", n, "errors", len(errs))
+			}
+			for _, e := range errs {
+				slog.Error("reconciler error", "reconciler", r.Name(), "mode", mode, "error", e)
+			}
+			recordReconcilerSweep(r.Name(), mode, n, len(errs))
+		}()
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // fakeSweep returns canned (advanced, errs) and records call count.
@@ -129,7 +131,7 @@ func TestRunReconcilers_OrderSkipErrorsMeterAlways(t *testing.T) {
 		mk("b", 0, []error{errors.New("boom")}), // error must not abort the rest
 		mk("c", 0, nil),                         // zero/zero must STILL be metered
 	}
-	runReconcilers(context.Background(), "live", rs, 50)
+	runReconcilers(context.Background(), "live", rs, 50, &scheduler.Panics{})
 
 	want := []string{"a", "b", "c"}
 	if !reflect.DeepEqual(runOrder, want) {

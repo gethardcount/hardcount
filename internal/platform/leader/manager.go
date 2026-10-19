@@ -81,15 +81,17 @@ RETURNING now()`
 
 	// RELEASE — after work returns. $3 is the outcome: 0 = completed (stamp
 	// last_tick_* = this holder, now — due again after one interval; clear any
-	// cooldown); 1 = interrupted by the parent ctx (clean SIGTERM: leave the
-	// cadence alone so the role is due on another replica at its next poll,
-	// R3); 2 = lease lost or heartbeat timed out, 3 = the work panicked —
-	// both NOT a completion, so
+	// cooldown); 1 = interrupted by the parent ctx (clean SIGTERM, even if the
+	// work then panicked: leave the cadence alone so the role is due on
+	// another replica at its next poll, R3); 2 = lease lost or heartbeat
+	// timed out, 3 = the work panicked — both NOT a completion, so
 	// last_tick_* is left alone (leader_status and the stall gauge report
-	// completed ticks only) and the role is held back by not_before for a
-	// bounded cooldown (min(interval, 60 s)) so a slow database cannot turn an
-	// hourly tick into a partial tick every few seconds. 0 rows is fine
-	// (already lost).
+	// completed ticks only) and the role is held back by not_before. A lost lease waits min(interval, 60 s), so a slow database
+	// cannot turn an hourly tick into a partial tick every few seconds. A
+	// panicked tick waits one full interval: its other steps and rows already
+	// ran (each step recovers and the first panic is raised again at the end),
+	// so a sooner rerun would only re-drive the rows that panic. 0 rows is
+	// fine (already lost).
 	sqlRelease = `
 UPDATE leader_leases
    SET holder_id = NULL, acquired_at = NULL, heartbeat_at = NULL, expires_at = NULL,
@@ -98,6 +100,7 @@ UPDATE leader_leases
        not_before         = CASE $3::int
                               WHEN 0 THEN NULL
                               WHEN 1 THEN not_before
+                              WHEN 3 THEN now() + make_interval(secs => $4)
                               ELSE now() + LEAST(make_interval(secs => $4), make_interval(secs => $5))
                             END
  WHERE role = $1 AND holder_token = $2 AND holder_id IS NOT NULL`
@@ -118,26 +121,31 @@ func (m *Manager) Lead(ctx context.Context, role Role, interval time.Duration, w
 	// false and the tick is released as failed, never as completed (a
 	// completed release would stamp last_tick_ended_at and hide a tick that
 	// panics every interval behind a fresh stall gauge). The panic then
-	// continues to the runner, which logs it with the stack.
+	// continues to the runner, which logs it with the stack. A cancelled
+	// tick is released by its cause even if its work then panicked (on the
+	// cancelled ctx, or a guarded panic raised again at the end): a lost
+	// lease as lost, one event, as onLost below counts it, with the lost-lease
+	// cooldown; a shutdown as interrupted, so the role is due at once on the
+	// next replica, which may carry the fix for that panic.
 	returned := false
 	defer func() {
 		hb.stop()
 		cause := context.Cause(workCtx)
 		outcome := releaseCompleted
 		switch {
-		case !returned:
-			outcome = releaseFailed
-		case cause == nil:
 		case errors.Is(cause, ErrLeaseLost):
 			outcome = releaseLost
-		default:
+		case cause != nil:
 			outcome = releaseInterrupted // parent cancelled: clean shutdown
+		case !returned:
+			outcome = releaseFailed
 		}
 		cancel(nil)
 		m.release(role, token, interval, outcome)
 		// One report per tick. A tick whose lease was already lost has been
 		// reported by the heartbeat (m.lost); a panic while that tick unwinds
 		// on its cancelled ctx is a consequence of the loss, not a second event.
+		// A panic in a tick a shutdown interrupted is still reported.
 		if !returned && !errors.Is(cause, ErrLeaseLost) && m.onLost != nil {
 			m.onLost(role, "panicked")
 		}
@@ -162,8 +170,8 @@ func (m *Manager) acquire(ctx context.Context, role Role, interval time.Duration
 }
 
 // Release outcomes (the $3 of sqlRelease). releaseFailed (the work
-// panicked) takes the same SQL branch as releaseLost — not a completion,
-// bounded cooldown — and is its own constant so the reason stays legible.
+// panicked) and releaseLost are both not a completion; a lost lease waits
+// min(interval, 60 s), a panicked tick one full interval.
 const (
 	releaseCompleted   = 0
 	releaseInterrupted = 1

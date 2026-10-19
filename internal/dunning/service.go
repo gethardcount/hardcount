@@ -11,6 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // RetryError is the adapter's decline wrapper: it carries the Stripe
@@ -582,15 +583,33 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 // processRunsBatch is the shared per-run body of ProcessDueRuns and
 // ProcessDueRunsForClock. The candidate list shape differs by trigger;
 // the per-run state-machine step is identical.
+//
+// A run whose processing panics stops, the other runs are still processed,
+// and the first panic is raised again at the end, so the tick still ends as
+// panicked; the other runs' errors are logged first. A panic in the retry
+// itself has already been rewound (processRun).
 func (s *Service) processRunsBatch(ctx context.Context, tenantID string, dueRuns []domain.InvoiceDunningRun, isCatchup bool) (int, []error) {
+	var panics scheduler.Panics
 	processed := 0
 	var runErrs []error
 	for _, run := range dueRuns {
-		if err := s.processRun(ctx, tenantID, run, isCatchup); err != nil {
-			runErrs = append(runErrs, fmt.Errorf("run %s: %w", run.ID, err))
-			continue
+		func() {
+			defer panics.Guard("step", "dunning_run", "run_id", run.ID, "invoice_id", run.InvoiceID, "tenant_id", tenantID)
+			if err := s.processRun(ctx, tenantID, run, isCatchup); err != nil {
+				runErrs = append(runErrs, fmt.Errorf("run %s: %w", run.ID, err))
+				return
+			}
+			processed++
+		}()
+	}
+	if panics.Panicked() {
+		// The panic drops runErrs, which only the caller logs and counts. Log
+		// them here, so another run's failure is not hidden while one run
+		// keeps panicking.
+		for _, err := range runErrs {
+			slog.ErrorContext(ctx, "dunning error", "tenant_id", tenantID, "error", err)
 		}
-		processed++
+		panics.Repanic()
 	}
 	return processed, runErrs
 }
@@ -744,8 +763,19 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 
 	// Actually retry the payment
 	retryErr := fmt.Errorf("payment retrier not configured")
+	// A panic in the retry (a nil dereference on one unusual row) is not a
+	// decline. It is handled as a transient skip, so the rewind below undoes
+	// the attempt recorded above, and is then raised again. Without this the
+	// run stayed due with the attempt spent: every rerun spent another (and,
+	// after a decline had released the charge hold, charged the card again),
+	// and exhaust-on-entry fired the final action within a few reruns.
+	var retryPanic scheduler.Panics
 	if s.retrier != nil {
-		retryErr = s.retrier.RetryPayment(ctx, tenantID, run.InvoiceID, run.CustomerID)
+		retryErr = ErrTransientSkip // kept when RetryPayment panics
+		func() {
+			defer retryPanic.Guard("step", "dunning_retry", "run_id", run.ID, "invoice_id", run.InvoiceID, "tenant_id", tenantID)
+			retryErr = s.retrier.RetryPayment(ctx, tenantID, run.InvoiceID, run.CustomerID)
+		}()
 	}
 
 	// Transient skip: the Stripe call never happened (circuit breaker open or
@@ -770,6 +800,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 			slog.Warn("dunning transient-skip: failed to rewind the pre-charge attempt persist",
 				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
 		}
+		retryPanic.Repanic()
 		slog.Info("dunning retry skipped — upstream transient (breaker/timeout)",
 			"run_id", run.ID, "invoice_id", run.InvoiceID)
 		return nil
