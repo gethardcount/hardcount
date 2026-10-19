@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +54,69 @@ func TestCreditNoteToZero_ResolvesEscalatedRun(t *testing.T) {
 		r.waive()
 		r.assertRecovered(run.ID)
 	})
+}
+
+// The invoice's activity names the credit note on its paid row, not the
+// retries (review of #1306). The retries all failed; the note is what left
+// nothing due. Before, the row read "Invoice paid · After 3 retries" with no
+// actor, which credits the failed retries for the waiver.
+//
+// Mutation seam: drop marked_invoice_paid from the credit_note.issued audit
+// row → the paid row names the retries again.
+func TestCreditNoteToZero_PaidRowNamesTheNote(t *testing.T) {
+	r := newZeroDueDunningRig(t, "CN Zero Due Activity")
+	r.run(r.policy.MaxRetryAttempts, time.Now().UTC().Add(-time.Minute))
+	if _, errs := r.srv.DunningSvc.ProcessDueRuns(r.ctx, r.tenantID, 20); len(errs) > 0 {
+		t.Fatalf("dunning tick: %v", errs)
+	}
+
+	ts := httptest.NewServer(r.srv)
+	defer ts.Close()
+	key := createAPIKeyWithMode(t, r.db, r.tenantID, false)
+	call := func(method, path string, req flowReq) flowResp {
+		t.Helper()
+		req.bearer = key
+		return flowDo(t, ts, method, path, req)
+	}
+	cn := call("POST", "/v1/credit-notes", flowReq{body: map[string]any{
+		"invoice_id": r.inv.ID, "reason": "Waived", "auto_issue": true,
+		"lines": []map[string]any{{"description": "Waived", "quantity": 1, "unit_amount_cents": r.inv.AmountDueCents}},
+	}}).want(t, 201, "waive the invoice").body
+	number := flowStr(cn, "credit_note_number")
+
+	events := flowList(call("GET", "/v1/invoices/"+r.inv.ID+"/payment-timeline", flowReq{}).want(t, 200, "timeline").body, "events")
+	var paid map[string]any
+	for _, l := range linesOf(t, events) {
+		if l["kind"] == "invoice.paid" {
+			paid = l
+		}
+	}
+	if paid == nil {
+		t.Fatalf("no invoice.paid row on the waived invoice's activity")
+	}
+	var text strings.Builder
+	var links []string
+	detail, _ := paid["detail"].([]any)
+	for _, s := range detail {
+		parts, _ := s.([]any)
+		for _, p := range parts {
+			pm, _ := p.(map[string]any)
+			if link, ok := pm["link"].(map[string]any); ok {
+				links = append(links, fmt.Sprint(link["label"]))
+				continue
+			}
+			text.WriteString(fmt.Sprint(pm["text"]) + " ")
+		}
+	}
+	if strings.Contains(text.String(), "retr") {
+		t.Errorf("paid row says %q: the retries failed, the credit note settled the invoice", text.String())
+	}
+	if len(links) != 1 || links[0] != number {
+		t.Errorf("paid row links %v, want the credit note %s", links, number)
+	}
+	if a, _ := paid["actor"].(map[string]any); a["kind"] != "api_key" {
+		t.Errorf("paid row actor %v, want the API key that issued the note", paid["actor"])
+	}
 }
 
 type zeroDueDunningRig struct {
