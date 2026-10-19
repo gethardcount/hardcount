@@ -10,7 +10,7 @@ over deferral) and it shipped.
 
 ## Summary
 
-`creditnote.Service.Issue()` commits the `draft` to `issued` status change and the internal money effect in one database transaction: a credit grant for a paid invoice, or an `amount_due` reduction for an unpaid one. If the effect fails, both roll back and the note stays `draft`, so a customer is never shown a credit they did not receive. The external effects (Stripe refund, tax reversal at the provider) run after commit with idempotency keys. Amended 2026-06-25: tax reversal does not use `webhook_outbox`, because its rows would reach customer endpoints. A scheduler sweep, `RetryPendingCreditNoteTaxReversal`, retries failed reversals with the same key.
+`creditnote.Service.Issue()` commits the `draft` to `issued` status change and the internal money effect in one database transaction: a credit grant for a paid invoice, or an `amount_due` reduction for an unpaid one. If the effect fails, both roll back and the note stays `draft`, so a customer is never shown a credit they did not receive. The external effects (Stripe refund, tax reversal at the provider) run after commit with idempotency keys. Amended 2026-06-25: tax reversal does not use `webhook_outbox`, because its rows would reach customer endpoints. A scheduler sweep, `RetryPendingCreditNoteTaxReversal`, retries failed reversals with the same key. Amended 2026-10-19: a note that leaves an unpaid invoice with nothing due marks it paid in the same transaction, unless a charge hold is set.
 
 ## Context
 
@@ -310,3 +310,27 @@ Not changed: the dashboard's credit-note dialog still offers amount due as the m
 - **A charge already sent to the card network.** It is marked only by the charge lease, which `Issue()` does not read. Trigger: the first payment recorded with an amount that differs from what the card was charged.
 - **What kind of credit comes back.** It is a plain grant with no expiry and no promotional kind, as a void's hand-back already is. Trigger: the first tenant with expiring or promotional credits applied to an invoice that is then credited or voided.
 
+## Amendment (2026-10-19): a note that leaves nothing due marks the invoice paid
+
+**Decision.** When a credit note on an unpaid invoice leaves nothing due, `Issue()` marks the invoice paid in its own transaction, with `invoice.paid` queued in that transaction. The one exception is a charge hold on the invoice (ADR-127): then the invoice is left open at $0. After the commit, `Issue()` closes the invoice's dunning run as `payment_recovered`, best-effort.
+
+**Why.** The real trigger: an operator waives a dunned invoice (one whose card payment failed) with a credit note for what is due. Before, the invoice stayed finalized with its payment failed and nothing due:
+
+- no charge path takes a $0 invoice, and **Collect payment** refuses one;
+- the next dunning retry closed the run as recovered, with the invoice still unpaid and no `invoice.paid`;
+- or exhaust-on-entry ran the final action anyway: it canceled or paused the subscription and wrote off a $0 invoice. A cancel cannot be undone.
+
+Stripe does the same: a credit note that "reduces the balance of an open invoice to 0" makes the invoice paid. This is the ADR-066 rule for a zero-due invoice (paid with no payment attempt), applied at the one writer that could leave one open.
+
+**How.**
+
+- One store predicate, `invoice.PostgresStore.SettleZeroDueTx`, under the caller's row lock: the invoice is finalized, its payment is pending or failed, nothing is due, tax is `ok`, and no charge hold is set. Not settling returns the row, never an error, so the note still issues. The paid flip shares `markPaidLockedTx` with `MarkPaid`, so the checkout claims close and `invoice.paid` fires exactly as on every other settle.
+- **Any hold refuses, its own owner's included.** Dunning's final action cancels the subscription under its hold, and the cancel's relief note can take a partly credit-paid invoice to $0. If the invoice turned paid in the middle of that, the write-off would fail on a paid invoice. The run would go to `action_failed` and close a day later as `payment_recovered`, and the canceled customer would get no escalation email. A stale hold refuses too: its charge may have taken the money.
+- `Issue()` passes the invoice as it was locked, before the note, to its post-commit legs. The refund leg reads the payment status, and a note that marked the invoice paid must not look like a note on a paid invoice there.
+- The dunning retry, on a $0 invoice, now calls `SettleZeroDue` (the same predicate in its own transaction) and closes the run only if the invoice is paid. Otherwise it skips the attempt, uncounted. This covers a credit balance applied by an earlier retry whose mark-paid failed.
+
+**What this changes.** An invoice a credit note takes to $0 is paid, so it can no longer be voided. Stripe behaves the same. `invoice.paid` for it carries `amount_paid_cents` 0. A second note on the invoice then takes the paid-invoice path: its amount goes to the customer's balance. The customer gets back the same amount as before, and the credits applied stay recorded as what paid the invoice.
+
+**Left as it is.** With a policy that cancels but does not write off, a dunning cancel whose relief note clears the invoice leaves it open at $0. No money is at stake. A note issued while a hold is set leaves the invoice open at $0 too; the next dunning retry or auto-charge pass marks it paid once the hold clears.
+
+**Not done.** No $0 check in dunning's exhaust path, and no sweep for open $0 invoices. After this change the exhaust path meets one only through two coincidences. One is a note issued during a final charge. The other is a failover between the credit apply and the mark-paid on the last retry, which also loses the attempt's rewind.

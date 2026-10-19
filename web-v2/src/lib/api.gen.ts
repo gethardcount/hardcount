@@ -4005,7 +4005,9 @@ export interface paths {
         /**
          * Issue a draft credit note
          * @description Moves a `draft` credit note to `issued` and applies it.
-         *     - Unpaid invoice: the invoice's amount due goes down.
+         *     - Unpaid invoice: the invoice's amount due goes down. If nothing is
+         *       left due, the invoice is marked `paid` and `invoice.paid` is sent,
+         *       unless a charge is running on it.
          *     - Paid invoice: the refund part is sent to Stripe, and the credit
          *       part is added to the customer's credit balance.
          *
