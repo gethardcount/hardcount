@@ -160,7 +160,9 @@ The 2026-10-19 amendment (§2): `TestExpireCredits_HoldsAGrantWhileAFailedCloseI
 `TestFailedClose_ThenSuccess_DrawsTheGrantLiveAtThePeriodEnd`,
 `TestSweepCollect_CycleInvoiceDrawsCreditLiveAtIssuedAt`,
 `TestTaxDeferredClose_RetryTaxLater_DrawsTheGrant`,
-`TestExpiryVsCloseCollect_NoGapInTheHandoff` (billing). Mutations
-killed: each clause of the hold, the clock query's hold, the
-`status = 'draft'` and `auto_charge_pending` arms, and the draw at
-`issued_at`.
+`TestExpiryVsCloseCollect_NoGapInTheHandoff` (billing). Each failed
+before the fix, on the commit that added them alone (#1305, CI run
+39298980811). Each test's comment names the part it pins: a clause of
+the hold, the clock query's hold, the `status = 'draft'` or
+`auto_charge_pending` arm, or the draw at `issued_at`. Those mutations
+were checked by reading the tests, not run.
