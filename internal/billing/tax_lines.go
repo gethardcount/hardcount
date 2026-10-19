@@ -120,36 +120,47 @@ func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode 
 }
 
 // stampUntaxedCommitLine marks a prepaid-commit purchase line, which
-// collapseTaxRequestLines left out of the request: no tax, the price is the
-// line total, and the reason says why.
-func stampUntaxedCommitLine(li *domain.InvoiceLineItem) {
+// collapseTaxRequestLines left out of the request: no tax, and the price is
+// the line total. reason is commitLineTaxReason's.
+func stampUntaxedCommitLine(li *domain.InvoiceLineItem, reason string) {
 	li.TaxRate = 0
 	li.TaxAmountCents = 0
 	li.TaxJurisdiction = ""
-	li.TaxabilityReason = domain.TaxReasonPrepaidCreditPurchase
+	li.TaxabilityReason = reason
 	li.TotalAmountCents = li.AmountCents
 }
 
-// taxRequestDiscount is the share of an invoice-level discount that falls on
-// the lines sent to the provider. A discount covers every line in proportion
-// to its amount, so a commit line left out of the request takes its share
-// with it; otherwise the whole discount would lower the taxable base. Without
-// commit lines it is the discount unchanged.
-func taxRequestDiscount(lineItems []domain.InvoiceLineItem, discount int64) int64 {
-	if discount <= 0 {
-		return discount
+// commitLineTaxReason is the tax_reason an untaxed commit line carries. An
+// account on the none provider collects no tax, so its invoices say nothing
+// about tax on the line: no reason, so no dashboard label and no PDF legend.
+func commitLineTaxReason(providerName string) string {
+	if providerName == "none" {
+		return ""
 	}
-	var all, taxable int64
+	return domain.TaxReasonPrepaidCreditPurchase
+}
+
+// commitInvoiceSubtotal is the subtotal to tax an invoice from. For an
+// invoice with a commit line it is the sum of the lines, not the stored
+// header. The stored lines always hold what was entered (UpdateTaxAtomic
+// writes no line amount), but a tax-inclusive draft computed before the
+// commit line was left out stored a header with that line carved to net.
+// Taxed from that header, such a draft finalized after the change would be
+// invoiced the net while its full credit is granted. Commit lines exist only
+// on manual invoices, whose lines hold what the operator entered, so their
+// sum is what to tax from. An invoice without a commit line keeps the
+// subtotal it was given.
+func commitInvoiceSubtotal(lineItems []domain.InvoiceLineItem, subtotal int64) int64 {
+	var sum int64
+	hasCommit := false
 	for _, li := range lineItems {
-		all += li.AmountCents
-		if !li.IsCommitLine() {
-			taxable += li.AmountCents
-		}
+		sum += li.AmountCents
+		hasCommit = hasCommit || li.IsCommitLine()
 	}
-	if taxable == all || all <= 0 {
-		return discount
+	if !hasCommit {
+		return subtotal
 	}
-	return money.RoundHalfToEven(discount*taxable, all)
+	return sum
 }
 
 // expandTaxResultLines maps the provider's per-request-line results back onto

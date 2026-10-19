@@ -523,9 +523,10 @@ type InvoiceLineItem struct {
 	// (e.g. "standard_rated", "reverse_charge", "not_collecting",
 	// "customer_exempt", "product_exempt", "zero_rated"), or Velox's own
 	// TaxReasonPrepaidCreditPurchase on a prepaid-commit purchase line under
-	// any provider. The dashboard renders a badge for non-trivial values, and
-	// the PDF appends a legend when a line is customer- or product-exempt or
-	// a prepaid credit purchase. Otherwise empty for non-Stripe providers.
+	// the manual or Stripe Tax provider. The dashboard renders a badge for
+	// non-trivial values, and the PDF appends a legend when a line is
+	// customer- or product-exempt or a prepaid credit purchase. Otherwise
+	// empty for non-Stripe providers.
 	TaxabilityReason    string `json:"tax_reason,omitempty"`
 	TotalAmountCents    int64  `json:"total_amount_cents"`
 	Currency            string `json:"currency"`

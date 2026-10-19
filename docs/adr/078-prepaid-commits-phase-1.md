@@ -216,14 +216,17 @@ provider on, a prepaid commit was taxed twice. The commit line was taxed on
 the purchase invoice like any other line. Later usage invoices were taxed
 again, and the credit paid their `amount_due`, which includes that tax. At
 20% tax, a customer paid $12,000 for $10,000 of credit, and each $1,000 of
-usage then drew $1,200 of it. The account reported tax on about $20,000 for
-$10,000 of service.
+usage then drew $1,200 of it, so the credit covered about $8,333 of usage.
+The account reported tax on about $18,333 (the $10,000 purchase and the
+$8,333 of usage) for $8,333 of service.
 
 **Decision: the Lago model.** Buying credit is an advance payment, not a
 sale of a service. The commit line is left out of the tax request. It
 carries tax 0 and `tax_reason = 'prepaid_credit_purchase'`, and the PDF says
-why. The usage is taxed when it is invoiced, and the credit pays that
-invoice with its tax, as before. Lago, verified 2026-10-19:
+why. Under the `none` provider the account collects no tax, so the line
+carries no reason and the invoice says nothing about it. The usage is taxed
+when it is invoiced, and the credit pays that invoice with its tax, as
+before. Lago, verified 2026-10-19:
 
 > "Taxes do not apply to credit purchases, which are considered as advance
 > payments."
@@ -249,8 +252,11 @@ retry, the tax-retry reconciler), and the engine's cycle, threshold, cancel
 and proration invoices. Commit lines exist only on manual invoices, so in
 practice the finalize and retry paths are the ones that see them.
 `ApplyTaxToLineItems` stamps the commit line untaxed. An invoice with only a
-commit line does not call the provider at all. An invoice-level discount
-lowers the taxable base only by the taxable lines' share.
+commit line does not call the provider at all. An invoice with a commit line
+is taxed from the sum of its lines, not its stored subtotal
+(`commitInvoiceSubtotal`). A tax-inclusive draft computed before this change
+stored its subtotal with the commit line carved to net, while its lines kept
+the price entered; finalized now, it is invoiced at that price.
 
 **Consequences.**
 
@@ -260,8 +266,27 @@ lowers the taxable base only by the taxable lines' share.
 - Refunding unused credit through relief (ADR-080) reverses no tax on these
   commits: relief derives its tax from the purchase invoice's own tax, which
   is 0. A commit invoiced before this change carried tax, and relief still
-  reverses its share. Voiding an unpaid commit invoice has no transaction to
-  reverse.
+  reverses its share.
+- Voiding an unpaid commit-only invoice has no tax transaction to reverse.
+  A mixed invoice under Stripe Tax still has a transaction for its other
+  lines, and voiding reverses it as before.
+- The credit pays each usage invoice with its tax, so with tax on it covers
+  less usage than its face value. At 20%, $10,000 of credit pays for about
+  $8,333 of usage and $1,667 of tax. That was already so. What changed is
+  that the purchase is no longer taxed as well.
+- On a discounted commit the usage is taxed at its list price, which is
+  more than the customer paid for the credit. At 10%, $10,000 of credit sold
+  for $9,000 pays for about $9,091 of usage, and all of it is taxed. Some
+  voucher rules tax the use of credit on the price paid for it instead. One
+  to check is the EU rule for multi-purpose vouchers (Article 73a of
+  Directive 2006/112/EC; not quoted here). Trigger: an account
+  sells discounted commits where the use of credit is taxed on the price
+  paid.
+- No discount reaches an invoice with a commit line today: nothing writes a
+  discount on a manual invoice. So the tax request's discount is not split
+  between the commit line and the taxed lines. Trigger: anything that lets a
+  manual invoice carry a discount must split it first, or the whole discount
+  lowers the taxed lines' base.
 - Issued invoices are not changed.
 
 **Tax rules for prepayments differ by country.** Some countries tax a
@@ -272,6 +297,8 @@ account should check with its tax adviser:
 - whether its country taxes prepaid credit when it is bought or when it is
   used;
 - whether that depends on what the credit can be spent on;
+- if it sells credit below face value, whether the use of the credit is
+  taxed on the price paid or on the usage (Velox taxes the usage);
 - what its invoices must say about an untaxed prepayment.
 
 Velox has no setting to tax the purchase instead. Trigger to build one: an

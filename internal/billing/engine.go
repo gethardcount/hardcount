@@ -1614,6 +1614,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		return TaxApplication{}, fmt.Errorf("settings store not wired")
 	}
 
+	subtotal = commitInvoiceSubtotal(lineItems, subtotal)
 	app := TaxApplication{
 		SubtotalCents: subtotal,
 		DiscountCents: discount,
@@ -1653,6 +1654,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		return TaxApplication{}, refuse(refusalTaxProvider, fmt.Errorf("resolve tax provider: %w", err))
 	}
 	app.TaxProvider = provider.Name()
+	commitReason := commitLineTaxReason(provider.Name())
 
 	var profile domain.CustomerBillingProfile
 	if e.profiles != nil && customerID != "" {
@@ -1712,7 +1714,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	if len(reqLines) == 0 && len(lineItems) > 0 {
 		for i := range lineItems {
 			if lineItems[i].IsCommitLine() {
-				stampUntaxedCommitLine(&lineItems[i])
+				stampUntaxedCommitLine(&lineItems[i], commitReason)
 			}
 		}
 		return app, nil
@@ -1733,7 +1735,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		CustomerStatus:       profile.TaxStatus,
 		CustomerExemptReason: profile.TaxExemptReason,
 		TaxInclusive:         ts.TaxInclusive,
-		DiscountCents:        taxRequestDiscount(lineItems, discount),
+		DiscountCents:        discount,
 		DefaultTaxCode:       ts.DefaultProductTaxCode,
 		OnFailure:            onFailure,
 		LineItems:            reqLines,
@@ -1750,7 +1752,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 			"error", err, "tenant_id", tenantID, "provider", provider.Name())
 		for i := range lineItems {
 			if lineItems[i].IsCommitLine() {
-				stampUntaxedCommitLine(&lineItems[i])
+				stampUntaxedCommitLine(&lineItems[i], commitReason)
 				continue
 			}
 			lineItems[i].TaxRate = 0
@@ -1812,7 +1814,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	var netSubtotalSum int64
 	for i := range lineItems {
 		if lineItems[i].IsCommitLine() {
-			stampUntaxedCommitLine(&lineItems[i])
+			stampUntaxedCommitLine(&lineItems[i], commitReason)
 			netSubtotalSum += lineItems[i].AmountCents
 			continue
 		}

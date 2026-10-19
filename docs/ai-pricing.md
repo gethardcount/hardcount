@@ -219,7 +219,8 @@ does. The usage the credit pays for is taxed when it is invoiced.
 
 At 10% tax, the commit above is invoiced at $9,000 with no tax. A later
 usage invoice of $1,000 carries $100 of tax, and the credit pays all $1,100
-of it.
+of it. So with tax on, the credit covers less usage than its face value:
+the $10,000 of credit pays for about $9,091 of usage and $909 of tax.
 
 - **You see:** the commit line has tax 0 and `"tax_reason":
   "prepaid_credit_purchase"`. The dashboard marks it "Prepaid credit, not
@@ -238,6 +239,9 @@ tax on, check with your tax adviser:
 - whether your country taxes prepaid credit when it is bought or when it is
   used;
 - whether that depends on what the credit can be spent on;
+- if you sell credit below face value, as in the example, whether its use
+  is taxed on the price paid. Velox taxes the usage at its price, so the
+  $9,000 commit above leads to tax on about $9,091 of usage;
 - what your invoices must say about an untaxed prepayment.
 
 Velox has no setting to tax the purchase instead. If your country requires
