@@ -87,18 +87,35 @@ type reliefCancelRig struct {
 	tenantID   string
 	customerID string
 	subID      string
+	day1ID     string
 	invStore   *invoice.PostgresStore
 	credit     *credit.Service
 	subSvc     *subscription.Service
 	charger    *invoiceCharger
 	noPM       *testNoPMNotifier
+	// wantCredited is the balance credit Cancel reports: a paid day-1
+	// invoice's share. An unpaid share's note reduces its own invoice, so it
+	// reports none.
+	wantCredited int64
+}
+
+// reliefRigOpts shapes one rig.
+type reliefRigOpts struct {
+	card       bool  // a card on file
+	usageUnits int64 // usage on 2026-06-03, at 1c a unit
+	// day1Credit, when set, is granted before the day-1 invoice, which then
+	// stays unpaid with that much applied. It needs card=false. When zero the
+	// day-1 invoice is paid.
+	day1Credit int64
 }
 
 // newReliefCancelRig seeds one tenant: the plan, an active subscription in
-// its 2026-06 period with the day-1 invoice paid, and usageUnits of usage on
-// 2026-06-03. cardOnFile picks the payment-method resolver.
-func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, cardOnFile bool, usageUnits int64) *reliefCancelRig {
+// its 2026-06 period with its day-1 invoice, and the usage on 2026-06-03.
+func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigOpts) *reliefCancelRig {
 	t.Helper()
+	if o.day1Credit > 0 && o.card {
+		t.Fatal("rig: a day-1 credit leaves the day-1 invoice unpaid, which needs card=false")
+	}
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, name)
 
@@ -139,7 +156,7 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, cardOnFile b
 	}
 
 	var payments billing.PaymentReadiness = testPaymentSetupsNoPM{}
-	if cardOnFile {
+	if o.card {
 		payments = testPaymentSetupsReady{}
 	}
 	charger := &invoiceCharger{}
@@ -174,17 +191,28 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, cardOnFile b
 	sub.CurrentBillingPeriodStart = &periodStart
 	sub.CurrentBillingPeriodEnd = &periodEnd
 
+	wantCredited := int64(reliefCents)
+	if o.day1Credit > 0 {
+		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+			CustomerID: cust.ID, AmountCents: o.day1Credit, Description: "seed balance", At: periodStart,
+		}); err != nil {
+			t.Fatalf("grant credit: %v", err)
+		}
+		wantCredited = 0
+	}
 	day1, err := e.BillOnCreate(ctx, sub)
 	if err != nil || day1.SubtotalCents != reliefBaseCents {
 		t.Fatalf("day-1 invoice: %v subtotal=%dc, want %dc", err, day1.SubtotalCents, reliefBaseCents)
 	}
-	if _, err := invStore.MarkPaid(ctx, tenantID, day1.ID, "pi_day1", periodStart); err != nil {
-		t.Fatalf("pay day-1 invoice: %v", err)
+	if o.day1Credit == 0 {
+		if _, err := invStore.MarkPaid(ctx, tenantID, day1.ID, "pi_day1", periodStart); err != nil {
+			t.Fatalf("pay day-1 invoice: %v", err)
+		}
 	}
 
 	ts := periodStart.AddDate(0, 0, 2)
 	if _, err := usage.NewService(usageStore).Ingest(ctx, tenantID, usage.IngestInput{
-		CustomerID: cust.ID, MeterID: meter.ID, Quantity: decimal.NewFromInt(usageUnits), Timestamp: &ts,
+		CustomerID: cust.ID, MeterID: meter.ID, Quantity: decimal.NewFromInt(o.usageUnits), Timestamp: &ts,
 	}); err != nil {
 		t.Fatalf("ingest usage: %v", err)
 	}
@@ -192,8 +220,9 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, cardOnFile b
 	subSvc := subscription.NewService(subStore, clock.NewFake(reliefCancelAt))
 	subSvc.SetBiller(e)
 	return &reliefCancelRig{
-		ctx: ctx, db: db, tenantID: tenantID, customerID: cust.ID, subID: sub.ID,
+		ctx: ctx, db: db, tenantID: tenantID, customerID: cust.ID, subID: sub.ID, day1ID: day1.ID,
 		invStore: invStore, credit: creditSvc, subSvc: subSvc, charger: charger, noPM: noPM,
+		wantCredited: wantCredited,
 	}
 }
 
@@ -204,8 +233,8 @@ func (r *reliefCancelRig) cancelImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	if canceled.Status != domain.SubscriptionCanceled || credited != reliefCents {
-		t.Fatalf("cancel: status=%s credited=%dc, want canceled with %dc relief", canceled.Status, credited, reliefCents)
+	if canceled.Status != domain.SubscriptionCanceled || credited != r.wantCredited {
+		t.Fatalf("cancel: status=%s credited=%dc, want canceled with %dc balance credit", canceled.Status, credited, r.wantCredited)
 	}
 }
 
@@ -251,6 +280,15 @@ func (r *reliefCancelRig) finalInvoice(t *testing.T) domain.Invoice {
 	return found[0]
 }
 
+func (r *reliefCancelRig) invoice(t *testing.T, id string) domain.Invoice {
+	t.Helper()
+	inv, err := r.invStore.Get(r.ctx, r.tenantID, id)
+	if err != nil {
+		t.Fatalf("get invoice %s: %v", id, err)
+	}
+	return inv
+}
+
 func (r *reliefCancelRig) balance(t *testing.T) int64 {
 	t.Helper()
 	bal, err := r.credit.GetBalance(r.ctx, r.tenantID, r.customerID)
@@ -290,7 +328,7 @@ func TestCancel_ReliefReducesFinalInvoice_CardOrNoCard(t *testing.T) {
 		t.Run(c.name+"/relief covers part of the final invoice", func(t *testing.T) {
 			const usageCents, wantDue = 3000, 3000 - reliefCents
 			for _, card := range []bool{true, false} {
-				r := newReliefCancelRig(t, db, fmt.Sprintf("1272 %s part card=%v", c.name, card), card, usageCents)
+				r := newReliefCancelRig(t, db, fmt.Sprintf("1272 %s part card=%v", c.name, card), reliefRigOpts{card: card, usageUnits: usageCents})
 				c.run(r, t)
 
 				final := r.finalInvoice(t)
@@ -325,7 +363,7 @@ func TestCancel_ReliefReducesFinalInvoice_CardOrNoCard(t *testing.T) {
 		t.Run(c.name+"/relief covers the whole final invoice", func(t *testing.T) {
 			const usageCents = 1000
 			for _, card := range []bool{true, false} {
-				r := newReliefCancelRig(t, db, fmt.Sprintf("1272 %s whole card=%v", c.name, card), card, usageCents)
+				r := newReliefCancelRig(t, db, fmt.Sprintf("1272 %s whole card=%v", c.name, card), reliefRigOpts{card: card, usageUnits: usageCents})
 				c.run(r, t)
 
 				final := r.finalInvoice(t)
@@ -342,6 +380,44 @@ func TestCancel_ReliefReducesFinalInvoice_CardOrNoCard(t *testing.T) {
 				if notified := r.noPMNotified(final.ID); len(notified) != 0 {
 					t.Errorf("card=%v: no-card email for the final invoice = %v, want none (nothing is owed)", card, notified)
 				}
+			}
+		})
+
+		// The day-1 invoice is unpaid: 4000c of customer credits paid part of
+		// it, leaving 900c due, and there is no card. The 2450c relief is a
+		// credit note on that invoice. It clears the 900c due and takes 1550c
+		// of the credits off the invoice, back to the balance (ADR-061). Those
+		// 1550c must reduce the final invoice. In the old order the final
+		// invoice was collected first, with an empty balance.
+		t.Run(c.name+"/unpaid day-1 invoice: the credits the relief returns reduce the final invoice", func(t *testing.T) {
+			const (
+				usageCents      = 3000
+				day1Credit      = 4000
+				day1Due         = reliefBaseCents - day1Credit // 900
+				creditsReturned = reliefCents - day1Due        // 1550
+				wantDue         = usageCents - creditsReturned // 1450
+			)
+			r := newReliefCancelRig(t, db, "1272 "+c.name+" unpaid day-1", reliefRigOpts{usageUnits: usageCents, day1Credit: day1Credit})
+			if d := r.invoice(t, r.day1ID); d.PaymentStatus == domain.PaymentSucceeded || d.CreditsAppliedCents != day1Credit || d.AmountDueCents != day1Due {
+				t.Fatalf("fixture: day-1 invoice payment=%s credits_applied=%dc amount_due=%dc, want unpaid with %dc applied and %dc due",
+					d.PaymentStatus, d.CreditsAppliedCents, d.AmountDueCents, day1Credit, day1Due)
+			}
+			c.run(r, t)
+
+			if d := r.invoice(t, r.day1ID); d.AmountDueCents != 0 || d.CreditsAppliedCents != day1Credit-creditsReturned {
+				t.Errorf("day-1 invoice after the relief: credits_applied=%dc amount_due=%dc, want %dc and 0",
+					d.CreditsAppliedCents, d.AmountDueCents, day1Credit-creditsReturned)
+			}
+			final := r.finalInvoice(t)
+			if final.CreditsAppliedCents != creditsReturned || final.AmountDueCents != wantDue {
+				t.Errorf("final invoice credits_applied=%dc amount_due=%dc, want %dc and %dc: the credits the relief returned must reduce the final invoice",
+					final.CreditsAppliedCents, final.AmountDueCents, creditsReturned, wantDue)
+			}
+			if bal := r.balance(t); bal != 0 {
+				t.Errorf("credit balance = %dc, want 0 (the returned credits were spent on the final invoice)", bal)
+			}
+			if notified := r.noPMNotified(final.ID); len(notified) != 1 || notified[0] != wantDue {
+				t.Errorf("no-card email for the final invoice = %v, want one, for %dc", notified, wantDue)
 			}
 		})
 	}
