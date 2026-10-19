@@ -983,7 +983,7 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			case loaded.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(loaded.Status), nil)
 				return rerr
-			case false && loaded.PaymentInFlight():
+			case loaded.PaymentInFlight():
 				// A payment that may still take money: neither final action
 				// fires and nothing is written. A cancel cannot be undone, and
 				// canceling a customer whose payment then succeeds is what this

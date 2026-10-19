@@ -47,6 +47,7 @@ func (s *PostgresStore) BeginChargeAttempt(ctx context.Context, tenantID, id str
 		  AND charge_attempt_seq = $2
 		  AND status = 'finalized'
 		  AND payment_status IN ('pending', 'failed')
+		  AND auto_charge_claimed_until > now()
 	`, id, seq, key, stripeCustomerID)
 	if err != nil {
 		return false, err
