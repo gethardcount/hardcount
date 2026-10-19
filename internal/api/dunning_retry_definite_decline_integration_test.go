@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +82,31 @@ func (f *faultInvoices) MarkPaid(ctx context.Context, tenantID, id, stripePaymen
 	return f.PostgresStore.MarkPaid(ctx, tenantID, id, stripePaymentIntentID, paidAt)
 }
 
+// faultLedger is the retry's credit ledger: the real store, except that the
+// next credit apply fails while failApply is set.
+type faultLedger struct {
+	*credit.PostgresStore
+	failApply bool
+}
+
+func (f *faultLedger) ApplyToInvoiceAtomic(ctx context.Context, tenantID, customerID, invoiceID, invoiceDesc string, invoiceAmountCents int64, at time.Time) (int64, error) {
+	if f.failApply {
+		f.failApply = false
+		return 0, errConnDropped
+	}
+	return f.PostgresStore.ApplyToInvoiceAtomic(ctx, tenantID, customerID, invoiceID, invoiceDesc, invoiceAmountCents, at)
+}
+
+// captureSlog sends the default logger to a buffer for the rest of the test.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
 // settleFaultInvoices is the charge path's invoice store with its first card
 // settle failing: Stripe took the money and Velox could not record it.
 type settleFaultInvoices struct {
@@ -96,12 +124,13 @@ func (s *settleFaultInvoices) MarkPaidCardSettlementTransition(ctx context.Conte
 
 type dunningRetryRig struct {
 	*hardDeclineRig
-	runs    *dunning.PostgresStore
-	ledger  *credit.PostgresStore
-	credits *credit.Service
-	faults  *faultInvoices
-	policy  domain.DunningPolicy
-	svc     *dunning.Service
+	runs         *dunning.PostgresStore
+	ledger       *credit.PostgresStore
+	ledgerFaults *faultLedger
+	credits      *credit.Service
+	faults       *faultInvoices
+	policy       domain.DunningPolicy
+	svc          *dunning.Service
 }
 
 func newDunningRetryRig(t *testing.T, name string) *dunningRetryRig {
@@ -110,7 +139,8 @@ func newDunningRetryRig(t *testing.T, name string) *dunningRetryRig {
 	r.ctx = leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleDunning)
 	d := &dunningRetryRig{hardDeclineRig: r, runs: dunning.NewPostgresStore(r.db)}
 	d.ledger = credit.NewPostgresStore(r.db)
-	d.credits = credit.NewService(d.ledger)
+	d.ledgerFaults = &faultLedger{PostgresStore: d.ledger}
+	d.credits = credit.NewService(d.ledgerFaults)
 	d.faults = &faultInvoices{PostgresStore: r.invoices}
 	policy, err := d.runs.UpsertPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
 		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
@@ -405,6 +435,37 @@ func TestDunningRetry_CreditCoveredMarkPaidError_NotCounted_HoldReleased(t *test
 	}
 	if usage := d.creditUsage(custID, inv.ID); len(usage) != 1 || usage[0].AmountCents != -5000 {
 		t.Errorf("credit usage entries %+v, want one of -5000", usage)
+	}
+}
+
+// Applying credit fails: the retry is not counted, the hold is released, and a
+// WARN names the invoice and the error. Before, this step skipped with no log
+// line, so an operator could not see why the retry did not run.
+func TestDunningRetry_CreditApplyError_NotCounted_Logged(t *testing.T) {
+	d := newDunningRetryRig(t, "Retry Credit Apply Error")
+	custID := d.customerWithCard("applyerr", "pm_applyerr")
+	inv := d.dunnedInvoice(custID, "INV-G2-APPLY")
+	before := d.dueRun(inv.ID, custID, 1)
+	d.ledgerFaults.failApply = true
+	logs := captureSlog(t)
+
+	d.tick()
+	d.assertNotCounted(before)
+	if n := len(d.charges.charged); n != 0 {
+		t.Errorf("Stripe received %d charges, want none", n)
+	}
+	if at := d.holdAt(inv.ID); at != nil {
+		t.Errorf("charge hold still set (%v) after a retry that sent no charge", *at)
+	}
+	warned := false
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(line, "level=WARN") && strings.Contains(line, inv.ID) &&
+			strings.Contains(line, "apply credits") && strings.Contains(line, "57P01") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("no WARN names invoice %s and the credit apply's error; logs:\n%s", inv.ID, logs.String())
 	}
 }
 
