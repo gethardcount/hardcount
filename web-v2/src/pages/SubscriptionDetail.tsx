@@ -1127,13 +1127,14 @@ export default function SubscriptionDetailPage() {
               {activityTimeline.map((event, i) => (
                 <div key={i} className="flex gap-4 pb-2 last:pb-0">
                   <div className="flex flex-col items-center">
+                    {/* The status is the line's tone (ADR-128): neutral grey,
+                        success green, warning amber, failure red. */}
                     <div className={cn(
                       'w-2.5 h-2.5 rounded-full mt-1.5',
-                      event.status === 'succeeded' || event.status === 'resolved' ? 'bg-emerald-500' :
-                      event.status === 'canceled' ? 'bg-destructive' :
+                      event.status === 'succeeded' ? 'bg-emerald-500' :
+                      event.status === 'failed' ? 'bg-destructive' :
                       event.status === 'warning' ? 'bg-amber-500' :
-                      event.status === 'escalated' ? 'bg-violet-500' :
-                      'bg-blue-500'
+                      'bg-muted-foreground'
                     )} />
                     {i < activityTimeline.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
                   </div>
@@ -1152,6 +1153,11 @@ export default function SubscriptionDetailPage() {
                       </div>
                       <span className="text-xs text-muted-foreground ml-4 whitespace-nowrap">{formatDateTime(event.sim_effective_at || event.timestamp)}</span>
                     </div>
+                    {/* The problem line: what went wrong on a failure row,
+                        what it means on a warning row. */}
+                    {event.error && (event.status === 'failed' || event.status === 'warning') && (
+                      <p className={cn('text-xs mt-0.5', event.status === 'failed' ? 'text-destructive' : 'text-warning-foreground')}>{event.error}</p>
+                    )}
                     {(event.detail || event.detail_timestamp) && (
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {event.detail}

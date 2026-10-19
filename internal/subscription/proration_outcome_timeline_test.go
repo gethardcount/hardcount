@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 )
 
 // TestAddProrationMeta_StampsOutcome locks the audit-metadata shape the
@@ -33,6 +34,13 @@ func TestAddProrationMeta_StampsOutcome(t *testing.T) {
 			t.Errorf("adjustment with empty InvoiceID must omit proration_invoice_id: %+v", p)
 		}
 	})
+	t.Run("adjustment names the open invoice it reduced", func(t *testing.T) {
+		p := map[string]any{}
+		addProrationMeta(p, &ProrationDetail{Type: "adjustment", AmountCents: 5444, ClawbackInvoiceID: "inv_src"}, "USD")
+		if p["adjusted_invoice_id"] != "inv_src" {
+			t.Errorf("adjustment must stamp adjusted_invoice_id: %+v", p)
+		}
+	})
 }
 
 // TestDescribeSubscriptionAction_RendersProrationOutcome proves the timeline
@@ -58,7 +66,7 @@ func TestDescribeSubscriptionAction_RendersProrationOutcome(t *testing.T) {
 				"old_plan_id": "pln_pro", "new_plan_id": "pln_starter",
 				"proration_type": "adjustment", "proration_amount_cents": float64(5444), "currency": "USD",
 			},
-			wantDesc: "Plan changed", wantContains: "Open invoice adjusted $54.44",
+			wantDesc: "Plan changed", wantContains: "Open invoice adjusted by $54.44",
 		},
 		{
 			name:   "quantity increase → proration invoice",
@@ -100,7 +108,8 @@ func TestDescribeSubscriptionAction_RendersProrationOutcome(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			desc, detail, _, _ := describeSubscriptionAction(tc.action, tc.meta, planNames)
+			l := describeSubscriptionAction(tc.action, tc.meta, lineLabels{plans: planNames})
+			desc, detail := l.Title, activity.MetaText(l)
 			if desc != tc.wantDesc {
 				t.Errorf("desc: got %q, want %q", desc, tc.wantDesc)
 			}

@@ -1,9 +1,13 @@
 package arch
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -106,6 +110,7 @@ var ownTxLogCall = regexp.MustCompile(`[\w.]+\.Log\(\s*[\w.()]+\s*,[^,]+,\s*(?:"
 func TestBackgroundAuditWriters_AreAnExplicitShrinkingSet(t *testing.T) {
 	found := map[string]int{}
 	foundRequestScoped := map[string]int{}
+	domainConsts := domainStringConsts(t)
 
 	for _, pkg := range backgroundPkgs {
 		entries, err := os.ReadDir(pkg)
@@ -126,8 +131,15 @@ func TestBackgroundAuditWriters_AreAnExplicitShrinkingSet(t *testing.T) {
 			for _, m := range ownTxLogCall.FindAllStringSubmatch(stripLineComments(string(src)), -1) {
 				action := m[1]
 				if action == "" {
-					// domain.AuditActionFinalize -> "finalize"
-					action = strings.ToLower(strings.TrimPrefix(m[2], "AuditAction"))
+					// A domain constant counts as the action it holds:
+					// domain.AuditActionFinalize -> "finalize",
+					// domain.AuditActionSubscriptionThresholdCrossed ->
+					// "subscription.threshold_crossed".
+					v, ok := domainConsts[m[2]]
+					if !ok {
+						t.Fatalf("%s: audit action domain.%s is not a string constant in internal/domain", name, m[2])
+					}
+					action = v
 				}
 				if strings.Contains(name, "handler") {
 					foundRequestScoped[filepath.Base(pkg)+"/"+action]++
@@ -191,6 +203,46 @@ signing up for a permanently lossy audit row.`, action, n, action)
 
 // stripLineComments removes // comments so a call quoted in prose (this arc has a
 // lot of prose) cannot be mistaken for a real one.
+// domainStringConsts returns name → value for every string constant in
+// internal/domain.
+func domainStringConsts(t *testing.T) map[string]string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join("..", "domain", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	fset := token.NewFileSet()
+	for _, p := range paths {
+		if strings.HasSuffix(p, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, p, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", p, err)
+		}
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				for i, n := range vs.Names {
+					if i >= len(vs.Values) {
+						continue
+					}
+					if lit, ok := vs.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						v, _ := strconv.Unquote(lit.Value)
+						out[n.Name] = v
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
 func stripLineComments(src string) string {
 	var b strings.Builder
 	for _, line := range strings.Split(src, "\n") {

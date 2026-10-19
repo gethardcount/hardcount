@@ -626,6 +626,22 @@ func (a *invoiceSubscriptionLabelAdapter) SubscriptionLabel(ctx context.Context,
 	return sub.Code, nil
 }
 
+// subscriptionInvoiceLabelAdapter bridges invoice.PostgresStore →
+// subscription.InvoiceLabeler: the number a subscription's activity rows
+// show on their link to an invoice (ADR-128 rule 8). A missing invoice is an
+// error, so its row links nothing.
+type subscriptionInvoiceLabelAdapter struct {
+	store *invoice.PostgresStore
+}
+
+func (a *subscriptionInvoiceLabelAdapter) InvoiceNumber(ctx context.Context, tenantID, invoiceID string) (string, error) {
+	inv, err := a.store.Get(ctx, tenantID, invoiceID)
+	if err != nil {
+		return "", err
+	}
+	return inv.InvoiceNumber, nil
+}
+
 // dunningTimelineAdapter bridges dunning.Store → invoice.DunningTimelineFetcher.
 type dunningTimelineAdapter struct {
 	store *dunning.PostgresStore

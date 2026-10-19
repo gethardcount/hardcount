@@ -2377,7 +2377,7 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 			// EVIDENCE: the swap happened; record it. Independent of the webhook.
 			if e.auditLogger != nil {
 				for _, was := range dueItems {
-					_ = e.auditLogger.Log(ctx, sub.TenantID, "subscription.pending_change_applied", "subscription", sub.ID, sub.Code, map[string]any{
+					_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionSubscriptionPendingChangeApplied, "subscription", sub.ID, sub.Code, map[string]any{
 						"item_id":     was.ID,
 						"old_plan_id": was.PlanID,
 						"new_plan_id": newPlanByItem[was.ID],
@@ -2586,7 +2586,7 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 			// catchup expiry scans write.
 			if e.auditLogger != nil {
 				meta := map[string]any{
-					"action":       "trial_ended",
+					"action":       domain.SubAuditTrialEnded,
 					"customer_id":  sub.CustomerID,
 					"triggered_by": "schedule",
 				}
@@ -2860,7 +2860,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 						slog.Warn("cycle: usage below zero after corrections — billed as 0",
 							"meter", meter.Key, "quantity", qty.String(),
 							"subscription_id", sub.ID)
-						belowZero.add(meterID, meter.Key, qty, ivStart, ivEnd)
+						belowZero.add(meterID, meter.Key, meter.Name, qty, ivStart, ivEnd)
 						continue
 					}
 					if ratingRuleID == "" {
@@ -2927,7 +2927,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 				slog.Warn("cycle: usage below zero after corrections — billed as 0",
 					"meter", meter.Key, "quantity", quantity.String(),
 					"subscription_id", sub.ID)
-				belowZero.add(meterID, meter.Key, quantity, ivStart, ivEnd)
+				belowZero.add(meterID, meter.Key, meter.Name, quantity, ivStart, ivEnd)
 				continue
 			}
 
@@ -4094,7 +4094,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 						slog.Warn("cancel: usage below zero after corrections — billed as 0",
 							"meter", meter.Key, "quantity", qty.String(),
 							"subscription_id", sub.ID)
-						belowZero.add(meterID, meter.Key, qty, ivStart, ivEnd)
+						belowZero.add(meterID, meter.Key, meter.Name, qty, ivStart, ivEnd)
 						continue
 					}
 					if ratingRuleID == "" {
@@ -4164,7 +4164,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 			if quantity.IsNegative() {
 				slog.Warn("cancel: usage below zero after corrections — billed as 0",
 					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
-				belowZero.add(meterID, meter.Key, quantity, iv.start, iv.end)
+				belowZero.add(meterID, meter.Key, meter.Name, quantity, iv.start, iv.end)
 				continue
 			}
 			if meter.RatingRuleVersionID == "" {
@@ -5696,7 +5696,7 @@ func (e *Engine) cancelTrialAtEndFromEngine(ctx context.Context, sub domain.Subs
 	}
 	if e.auditLogger != nil {
 		meta := map[string]any{
-			"action":       "trial_end_cancel",
+			"action":       domain.SubAuditTrialEndCancel,
 			"customer_id":  canceled.CustomerID,
 			"triggered_by": "schedule",
 		}

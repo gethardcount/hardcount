@@ -236,11 +236,11 @@ func subscriptionSummaries(lines []map[string]any, names map[string]time.Time) [
 					b.WriteString(activity.FormatMoney(activity.Money{Cents: int64(cents), Currency: cur}))
 				case pm["link"] != nil:
 					link, _ := pm["link"].(map[string]any)
-					b.WriteString(fmt.Sprint(link["label"]))
+					fmt.Fprint(&b, link["label"])
 				case pm["time"] != nil:
 					b.WriteString("<unnamed time " + fmt.Sprint(pm["time"]) + ">")
 				default:
-					b.WriteString(fmt.Sprint(pm["text"]))
+					fmt.Fprint(&b, pm["text"])
 				}
 			}
 			meta = append(meta, b.String())

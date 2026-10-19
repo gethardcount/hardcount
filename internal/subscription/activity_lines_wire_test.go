@@ -11,6 +11,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
 // TestActivityLines_SubscriptionWire asserts the subscription timeline's rows
@@ -74,6 +75,11 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 			"meters": []any{map[string]any{"meter_id": "mtr_1", "meter_key": "api_calls", "meter_name": "API calls", "quantity": "-120"}}}},
 		{"aud_canceled", domain.AuditActionCancel, "system", "", map[string]any{
 			"canceled_by": "schedule", "prorated_credit_cents": float64(1200), "currency": "USD"}},
+		{"aud_trial_end_cancel", domain.AuditActionCancel, "system", "", map[string]any{
+			"action": "trial_end_cancel", "triggered_by": "schedule"}},
+		{"aud_item_added", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
+			"action": "item_added", "plan_id": "plan_b", "quantity": float64(3), "proration_type": "invoice",
+			"proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "vlx_inv_gone"}},
 		{"aud_unknown", "subscription.some_future_action", "system", "", map[string]any{}},
 		{"aud_on_clock", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
 			"action": "cancel_cleared", "sim_effective_at": sim.Format(time.RFC3339), "test_clock_id": "clk_1"}},
@@ -90,6 +96,9 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 
 	h := NewHandler(NewService(store, nil))
 	h.SetAuditLogger(&auditRecorderMock{entries: entries, total: len(entries)})
+	// The threshold's invoice still exists; the proration invoice does not,
+	// so only the first is linked (rule 8).
+	h.SetInvoiceLabeler(invoiceLabelsFake{"vlx_inv_1": "VLX-000123"})
 	rr := httptest.NewRecorder()
 	h.activityTimeline(rr, timelineRequest(context.WithValue(context.Background(), auth.TestTenantIDKey(), tenantID), subID))
 	if rr.Code != http.StatusOK {
@@ -140,9 +149,11 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 		"aud_below_zero": {title: "Usage below zero billed as zero", status: "warning", detail: "API calls -120",
 			problem: "Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
 			actor:   "automatic/"},
-		"aud_canceled": {title: "Subscription canceled", status: "neutral", detail: "Scheduled cancellation · Prorated credit $12.00", actor: "automatic/"},
-		"aud_unknown":  {title: "Subscription changed", status: "neutral", actor: "automatic/"},
-		"aud_on_clock": {title: "Scheduled cancellation cleared", status: "neutral", actor: "person/alice@example.com"},
+		"aud_canceled":         {title: "Subscription canceled", status: "neutral", detail: "Scheduled cancellation · Prorated credit $12.00", actor: "automatic/"},
+		"aud_trial_end_cancel": {title: "Subscription canceled", status: "neutral", detail: "At trial end", actor: "automatic/"},
+		"aud_item_added":       {title: "Item added", status: "neutral", detail: "plan_b · Quantity 3 · Proration invoice $18.00", actor: "person/alice@example.com"},
+		"aud_unknown":          {title: "Subscription changed", status: "neutral", actor: "automatic/"},
+		"aud_on_clock":         {title: "Scheduled cancellation cleared", status: "neutral", actor: "person/alice@example.com"},
 	}
 	for id, w := range cases {
 		e := byID[id]
@@ -185,8 +196,13 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	}
 	// The spend threshold crossing links its invoice.
 	crossed := byID["aud_crossed"]["line"].(map[string]any)
-	if got := mustJSONString(t, crossed["detail"]); !strings.Contains(got, `{"link":{"kind":"invoice","id":"vlx_inv_1","label":"VLX-000123"}}`) {
+	if got := mustJSONString(t, crossed["detail"]); !strings.Contains(got, `{"link":{"id":"vlx_inv_1","kind":"invoice","label":"VLX-000123"}}`) {
 		t.Errorf("threshold crossing does not link its invoice: %s", got)
+	}
+
+	added := byID["aud_item_added"]["line"].(map[string]any)
+	if got := mustJSONString(t, added["detail"]); strings.Contains(got, `"link"`) {
+		t.Errorf("a proration invoice that no longer exists is linked: %s", got)
 	}
 
 	// B10: the raw Go error stays in the audit entry, never on the timeline.
@@ -220,6 +236,16 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 			t.Errorf("row %v has tone %q", l["id"], tone)
 		}
 	}
+}
+
+// invoiceLabelsFake knows the numbers of the invoices that exist.
+type invoiceLabelsFake map[string]string
+
+func (f invoiceLabelsFake) InvoiceNumber(_ context.Context, _, id string) (string, error) {
+	if n, ok := f[id]; ok {
+		return n, nil
+	}
+	return "", errs.ErrNotFound
 }
 
 func str(v any) string {

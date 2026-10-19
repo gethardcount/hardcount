@@ -51,6 +51,7 @@ func (u unpricedUsage) record(ctx context.Context, sub domain.Subscription) {
 type leftOutBucket struct {
 	MeterID   string
 	MeterKey  string
+	MeterName string
 	Mode      domain.AggregationMode
 	Quantity  decimal.Decimal
 	BelowZero bool

@@ -588,7 +588,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 		// ComputeAmountCents refuses negative quantities.)
 		if agg.Quantity.IsNegative() {
 			warnings = append(warnings, fmt.Sprintf("meter %q: net-negative usage so far (%s) after corrections — counted as 0", meter.Key, agg.Quantity.String()))
-			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, Mode: agg.AggregationMode, Quantity: agg.Quantity, BelowZero: true})
+			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, MeterName: meter.Name, Mode: agg.AggregationMode, Quantity: agg.Quantity, BelowZero: true})
 			continue
 		}
 
@@ -600,7 +600,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 			// The quantity is what the operator needs to bill it by hand
 			// (a one-off invoice), so the warning carries it (#981).
 			warnings = append(warnings, fmt.Sprintf("meter %q: %s %s matched no pricing rule and the meter has no default price — not billed", meter.Key, agg.Quantity.String(), meter.Unit))
-			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, Mode: agg.AggregationMode, Quantity: agg.Quantity})
+			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, MeterName: meter.Name, Mode: agg.AggregationMode, Quantity: agg.Quantity})
 			continue
 		}
 

@@ -1733,6 +1733,30 @@ func (e SubscriptionTimelineEventSource) Valid() bool {
 	}
 }
 
+// Defines values for SubscriptionTimelineEventStatus.
+const (
+	SubscriptionTimelineEventStatusFailed    SubscriptionTimelineEventStatus = "failed"
+	SubscriptionTimelineEventStatusNeutral   SubscriptionTimelineEventStatus = "neutral"
+	SubscriptionTimelineEventStatusSucceeded SubscriptionTimelineEventStatus = "succeeded"
+	SubscriptionTimelineEventStatusWarning   SubscriptionTimelineEventStatus = "warning"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionTimelineEventStatus enum.
+func (e SubscriptionTimelineEventStatus) Valid() bool {
+	switch e {
+	case SubscriptionTimelineEventStatusFailed:
+		return true
+	case SubscriptionTimelineEventStatusNeutral:
+		return true
+	case SubscriptionTimelineEventStatusSucceeded:
+		return true
+	case SubscriptionTimelineEventStatusWarning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TenantStatus.
 const (
 	TenantStatusActive    TenantStatus = "active"
@@ -1951,19 +1975,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
-	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
-	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	Failed    WebhookEventDeliveryAttemptStatus = "failed"
+	Pending   WebhookEventDeliveryAttemptStatus = "pending"
+	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case WebhookEventDeliveryAttemptStatusFailed:
+	case Failed:
 		return true
-	case WebhookEventDeliveryAttemptStatusPending:
+	case Pending:
 		return true
-	case WebhookEventDeliveryAttemptStatusSucceeded:
+	case Succeeded:
 		return true
 	default:
 		return false
@@ -3089,7 +3113,8 @@ type ActivityLine struct {
 	// example a money part followed by the text " refunded to card".
 	Detail [][]ActivityPart `json:"detail"`
 
-	// Id The row's stable key, the same as the event's `id`.
+	// Id The row's stable key: the event's `id` on an invoice timeline
+	// row, the audit entry's id on a subscription timeline row.
 	Id string `json:"id"`
 
 	// Kind Machine name of the event.
@@ -5846,14 +5871,19 @@ type SubscriptionTimelineEvent struct {
 	ActorName string `json:"actor_name,omitempty"`
 	ActorType string `json:"actor_type,omitempty"`
 
-	// Description One-line summary, e.g. "Subscription canceled".
+	// Description The line's title, for example "Subscription canceled".
 	Description string `json:"description"`
 
-	// Detail Optional second line with context.
+	// Detail The line's meta line as text, without the actor (see
+	// `actor_name`) and without a date at its end, which is in
+	// `detail_timestamp`. For example "Starter → Pro".
 	Detail string `json:"detail,omitempty"`
 
-	// DetailTimestamp The instant `detail` refers to, for the client to format.
+	// DetailTimestamp The date the end of `detail` refers to, for the client to format, as in "Trial now ends" followed by this date.
 	DetailTimestamp time.Time `json:"detail_timestamp,omitempty"`
+
+	// Error The line's problem.
+	Error string `json:"error,omitempty"`
 
 	// EventType The audit action, e.g. `create`, `cancel`, `subscription.item_updated`.
 	EventType string `json:"event_type"`
@@ -5861,13 +5891,21 @@ type SubscriptionTimelineEvent struct {
 	// IsSimulated True when the action affected a subscription on a test clock.
 	IsSimulated bool `json:"is_simulated,omitempty"`
 
+	// Line One activity row in the words of the activity line standard
+	// (ADR-128): a title with no values, the amount when the event moves
+	// money, asks for it or cancels money owed, a problem line on failure
+	// and warning rows, the meta line's parts and the actor, a tone, and
+	// the event's time on the entity's calendar. `recorded_at` is the
+	// real-world time, set only for an entity on a test clock.
+	Line ActivityLine `json:"line"`
+
 	// SimEffectiveAt The test clock's simulated time when the action took effect.
 	SimEffectiveAt time.Time                       `json:"sim_effective_at,omitempty"`
 	Source         SubscriptionTimelineEventSource `json:"source"`
 
-	// Status Display tone for the row: `info`, `succeeded`, `success` (scheduled plan change applied), `warning` or `canceled`.
-	Status      string `json:"status"`
-	TestClockId string `json:"test_clock_id,omitempty"`
+	// Status The line's tone in older words, read by the dashboard's dot.
+	Status      SubscriptionTimelineEventStatus `json:"status"`
+	TestClockId string                          `json:"test_clock_id,omitempty"`
 
 	// Timestamp When the action was recorded (wall-clock time).
 	Timestamp time.Time `json:"timestamp"`
@@ -5875,6 +5913,9 @@ type SubscriptionTimelineEvent struct {
 
 // SubscriptionTimelineEventSource defines model for SubscriptionTimelineEvent.Source.
 type SubscriptionTimelineEventSource string
+
+// SubscriptionTimelineEventStatus The line's tone in older words, read by the dashboard's dot.
+type SubscriptionTimelineEventStatus string
 
 // Tenant defines model for Tenant.
 type Tenant struct {

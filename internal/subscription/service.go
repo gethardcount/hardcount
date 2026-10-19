@@ -2254,7 +2254,7 @@ func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (RetryB
 			ResourceID:    sub.ID,
 			ResourceLabel: sub.Code,
 			Metadata: map[string]any{
-				"action":            "billing_retried",
+				"action":            domain.SubAuditBillingRetried,
 				"customer_id":       sub.CustomerID,
 				"attempts_before":   cleared.Attempts,
 				"was_parked":        cleared.Parked,
@@ -2486,7 +2486,7 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 			triggeredBy = "operator"
 		}
 		meta := map[string]any{
-			"action":       "collection_paused",
+			"action":       domain.SubAuditCollectionPaused,
 			"customer_id":  sub.CustomerID,
 			"behavior":     string(input.Behavior),
 			"triggered_by": triggeredBy,
@@ -2527,7 +2527,7 @@ func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (do
 	}
 	if s.audit != nil {
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":       "collection_resumed",
+			"action":       domain.SubAuditCollectionResumed,
 			"customer_id":  sub.CustomerID,
 			"triggered_by": "operator",
 		})
@@ -2645,7 +2645,7 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 		return false, err
 	}
 	meta := map[string]any{
-		"action":       "trial_end_cancel",
+		"action":       domain.SubAuditTrialEndCancel,
 		"customer_id":  canceled.CustomerID,
 		"triggered_by": "schedule",
 		"canceled_at":  canceled.CanceledAt.UTC().Format(time.RFC3339),
@@ -2766,7 +2766,7 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			// sim_effective_at) comes from the ctx binding on `bound`, which the
 			// audit writer owns. See cancelTrialAtEnd.
 			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
-				"action":       "trial_ended",
+				"action":       domain.SubAuditTrialEnded,
 				"customer_id":  activated.CustomerID,
 				"triggered_by": "schedule",
 				"trial_end_at": trialEndAt.UTC().Format(time.RFC3339),
@@ -2878,7 +2878,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		// trial_ended row — no sim metadata, this scan excludes clock-pinned subs).
 		if s.audit != nil {
 			_ = s.audit.Log(ctx, activated.TenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
-				"action":       "trial_ended",
+				"action":       domain.SubAuditTrialEnded,
 				"customer_id":  activated.CustomerID,
 				"triggered_by": "schedule",
 			})
@@ -2953,7 +2953,7 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 		}
 		if s.audit != nil {
 			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
-				"action":       "collection_resumed",
+				"action":       domain.SubAuditCollectionResumed,
 				"customer_id":  cleared.CustomerID,
 				"resumed_at":   resumeAt.UTC(),
 				"triggered_by": "schedule",
@@ -3011,7 +3011,7 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 		}
 		if s.audit != nil {
 			_ = s.audit.Log(ctx, sub.TenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
-				"action":       "collection_resumed",
+				"action":       domain.SubAuditCollectionResumed,
 				"customer_id":  cleared.CustomerID,
 				"resumed_at":   resumeAt.UTC(),
 				"triggered_by": "schedule",
