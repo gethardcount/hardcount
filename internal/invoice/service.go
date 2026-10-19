@@ -178,6 +178,7 @@ type Service struct {
 	commitGrants   CommitGrantReader
 	paymentPages   PaymentPageReader
 	cardRefusals   CardRefusalReader
+	disputes       DisputeReader
 	creditApplier  CreditApplier
 	settings       TenantSettingsReader
 	audit          AuditLogger
@@ -443,6 +444,39 @@ type CardRefusalReader interface {
 // whose banner still offers Update payment method first.
 func (s *Service) SetCardRefusalReader(r CardRefusalReader) {
 	s.cardRefusals = r
+}
+
+// DisputeReader reads the card disputes Stripe reported against invoices
+// (#979). Satisfied by *PostgresStore, which also records them from the
+// charge.dispute.* webhooks.
+type DisputeReader interface {
+	ListDisputesByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDispute, error)
+	LostDisputesByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceDispute, error)
+}
+
+// SetDisputeReader wires the dispute records behind the dispute_lost notice,
+// the timeline's dispute rows and GET /v1/invoices/{id}/disputes. Optional:
+// when nil no dispute is reported.
+func (s *Service) SetDisputeReader(r DisputeReader) {
+	s.disputes = r
+}
+
+// ListDisputes returns the invoice's card disputes, oldest first. Empty when
+// no dispute reader is wired.
+func (s *Service) ListDisputes(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDispute, error) {
+	if s.disputes == nil {
+		return []domain.InvoiceDispute{}, nil
+	}
+	return s.disputes.ListDisputesByInvoice(ctx, tenantID, invoiceID)
+}
+
+// ListInvoiceDisputes is ListDisputes for one invoice the caller names:
+// errs.ErrNotFound when the invoice does not exist in this tenant and mode.
+func (s *Service) ListInvoiceDisputes(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDispute, error) {
+	if _, err := s.store.Get(ctx, tenantID, invoiceID); err != nil {
+		return nil, err
+	}
+	return s.ListDisputes(ctx, tenantID, invoiceID)
 }
 
 // collectionPaused reports whether the invoice's subscription has
@@ -881,13 +915,14 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 // pays for a read exactly when it did before.
 type attentionFacts struct {
 	stripeConnected bool
-	paymentReady    map[string]bool   // customer id → ready payment method
-	hasEmail        map[string]bool   // customer id → email on file
-	escalated       map[string]bool   // invoice id → dunning run escalated
-	paused          map[string]bool   // subscription id → pause_collection in force
-	pageLive        map[string]bool   // invoice id → hosted payment page live
-	refusedCard     map[string]string // invoice id → hard decline code on the default card
-	retrying        map[string]bool   // invoice id → dunning run active and not paused
+	paymentReady    map[string]bool                  // customer id → ready payment method
+	hasEmail        map[string]bool                  // customer id → email on file
+	escalated       map[string]bool                  // invoice id → dunning run escalated
+	paused          map[string]bool                  // subscription id → pause_collection in force
+	pageLive        map[string]bool                  // invoice id → hosted payment page live
+	refusedCard     map[string]string                // invoice id → hard decline code on the default card
+	retrying        map[string]bool                  // invoice id → dunning run active and not paused
+	lostDispute     map[string]domain.InvoiceDispute // invoice id → newest dispute closed as lost
 }
 
 // attachAttentionAll decorates every invoice with its Attention, reading the
@@ -1068,6 +1103,28 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		}
 	}
 
+	// A lost dispute (#979) can sit on any invoice that took a payment, and a
+	// paid invoice is where it usually does, so every non-draft row joins
+	// the read: one indexed query for the page. A read error leaves the map
+	// empty and the notice off (logged); the dispute itself stays on the
+	// invoice's timeline and in its disputes list.
+	if s.disputes != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if inv.Status != domain.InvoiceDraft {
+				return inv.ID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			lost, err := s.disputes.LostDisputesByInvoices(ctx, tenantID, ids)
+			if err != nil {
+				slog.Error("invoice: attention could not read lost disputes", "error", err,
+					"tenant_id", tenantID, "invoices", len(ids))
+			}
+			f.lostDispute = lost
+		}
+	}
+
 	return f
 }
 
@@ -1109,6 +1166,9 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	atc.PaymentPageOpen = f.pageLive[inv.ID]
 	atc.RefusedCardDeclineCode = f.refusedCard[inv.ID]
 	atc.DunningRetrying = f.retrying[inv.ID]
+	if d, ok := f.lostDispute[inv.ID]; ok {
+		atc.LostDispute = &d
+	}
 	// A clock-pinned invoice's failure banner dates "since" from its latest
 	// failed charge's simulated instant. Simulated failed invoices only, so a
 	// live list page never pays this read.
@@ -1126,9 +1186,10 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// while the cash never arrived (ADR-078 D3 fast-follow). Read per row, but
 	// behind the tightest guard of any attention read — commit lines
 	// are manual-invoice-only and funded at finalize (ADR-078 D2/D3), so a
-	// draft, a subscription-cycle invoice, or a paid one can never carry a live
-	// grant and never pays for the lookup. What remains is one hit on the
-	// unique partial index idx_credit_ledger_commit_fund_dedup.
+	// draft or a subscription-cycle invoice can never carry a live grant, and
+	// a paid one has nothing to report (the cash arrived); none of them pays
+	// for the lookup, except the paid case below. What remains is one hit on
+	// the unique partial index idx_credit_ledger_commit_fund_dedup.
 	//
 	// The clock here is the RESOLVER's, deliberately unlike atc.Now a few lines
 	// above: that one ages an in-flight payment, which settles in the real
@@ -1140,9 +1201,16 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// A read error leaves both figures zero and claims no exposure. The
 	// alternative — a banner asserting a balance we could not read — is the
 	// failure worth avoiding, and the invoice's own cause banner still renders.
+	//
+	// One paid case joins the read: a lost dispute (#1287 review). The bank
+	// took the cash back while the credit stays spendable, and the
+	// dispute_lost notice must say so and point to commit relief instead of
+	// the credit note a commit invoice refuses. Only paid invoices with a lost
+	// dispute pay for it, which is almost none.
 	if s.commitGrants != nil && inv.ID != "" &&
 		inv.BillingReason == domain.BillingReasonManual &&
-		(inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible) {
+		(inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible ||
+			(inv.Status == domain.InvoicePaid && atc.LostDispute != nil)) {
 		if drawable, consumed, err := s.commitGrants.CommitGrantExposure(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx)); err == nil {
 			atc.CommitGrantDrawableCents = drawable
 			atc.CommitGrantConsumedCents = consumed

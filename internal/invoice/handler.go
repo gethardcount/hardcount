@@ -332,6 +332,7 @@ func (h *Handler) Routes() chi.Router {
 	// operator do it directly without waiting for retries.
 	r.Post("/{id}/mark-uncollectible", h.markUncollectible)
 	r.Get("/{id}/payment-timeline", h.paymentTimeline)
+	r.Get("/{id}/disputes", h.listDisputes)
 	return r
 }
 
@@ -1332,8 +1333,12 @@ const (
 	rankEscalated         = 50
 	rankLifecycleTerminal = 60 // paid / voided / uncollectible
 	rankCreditNote        = 70
-	rankDunningResolved   = 80
-	rankEmail             = 90 // external lane; rank is a formality
+	// A dispute opens after the payment it disputes, and closes after it
+	// opened.
+	rankDisputeOpened   = 74
+	rankDisputeClosed   = 76
+	rankDunningResolved = 80
+	rankEmail           = 90 // last: an email follows the event it announces (ADR-104)
 )
 
 func dunningEventRank(eventType domain.DunningEventType) int {
@@ -2127,15 +2132,14 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	// SAME facts a place in the chronology ("Invoice paid" then silence
 	// after a refund read as nothing-happened). Issued notes only —
 	// drafts aren't activity yet, voided notes vanish from the story the
-	// same way Stripe's do. Each row carries the CN's OWN is_simulated:
-	// operator-HTTP CNs stamp WALL-CLOCK issued_at (the HTTP path doesn't
-	// bind the customer clock) → is_simulated=false → real-time lane;
-	// engine clawbacks (downgrade/cancel proration) issue under the
-	// clock-pinned sub's bound time → is_simulated=true → billing
-	// (Activity) lane, sorted with the other simulated rows. Pre-fix all
-	// CNs were tagged with the INVOICE's flag and routed to the real-time
-	// lane, so an engine CN showed a simulated timestamp in the wall-clock
-	// lane (migration 0117 added the per-CN flag).
+	// same way Stripe's do. There is one timeline (ADR-104): every CN row
+	// sorts by its issued_at on the invoice's calendar. Operator CNs and
+	// engine clawbacks both issue under the invoice's clock, because
+	// creditnote.Service binds the source invoice's pin at every operator
+	// entry point (bindForInvoice) and the engine paths run under the
+	// clock-pinned subscription's bound time. A CN's is_simulated is its
+	// source invoice's (creditnote.Service copies it at create); it gates
+	// the Recorded subline that shows the real insert time (below).
 	if h.creditNotes != nil {
 		if cns, err := h.creditNotes.List(r.Context(), tenantID, inv.ID); err != nil {
 			degrade("credit_notes", err)
@@ -2480,6 +2484,15 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Card disputes (#979): an opened row at Stripe's creation time, and a
+	// closed row once Stripe closes it. Both are real-world Stripe instants,
+	// never the invoice's simulated calendar.
+	if disputes, derr := h.svc.ListDisputes(r.Context(), tenantID, inv.ID); derr != nil {
+		degrade("disputes", derr)
+	} else {
+		events = append(events, disputeTimelineEvents(disputes)...)
+	}
+
 	// Payments render from ONE owner: the charge-attempt facts
 	// (ADR-103). A dunning row that already carries the attempt's
 	// PaymentIntent absorbs it (the campaign row is the richer telling
@@ -2502,6 +2515,90 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	sortInvoiceTimeline(events)
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{"events": events, "degraded": degraded, "truncated": truncated})
+}
+
+// disputeTimelineEvents renders each dispute as the timeline rows it has
+// earned so far: "Payment disputed" when Stripe opened it, and its outcome
+// when Stripe closed it. Statuses use the timeline's words, so the dot
+// reads amber while the dispute is open or prevented, red when lost, and
+// green when won or when an inquiry closed with no chargeback.
+func disputeTimelineEvents(disputes []domain.InvoiceDispute) []timelineEvent {
+	var out []timelineEvent
+	for _, d := range disputes {
+		amt := d.AmountCents
+		opened := "Stripe dispute " + d.StripeDisputeID
+		if d.Reason != "" {
+			opened += " · reason: " + d.Reason
+		}
+		if !d.Status.Closed() && d.EvidenceDueBy != nil {
+			// Stripe's deadline is an instant, so it shows with its time and
+			// zone: a bare date in another zone could read a day late.
+			opened += " · respond in Stripe by " + d.EvidenceDueBy.UTC().Format("Jan 2, 2006 15:04 MST") //tz:ok — an instant, shown in UTC with its zone
+		}
+		out = append(out, timelineEvent{
+			ID:              "dispute:opened:" + d.ID,
+			Timestamp:       d.OpenedAt.Format(time.RFC3339),
+			sortAt:          d.OpenedAt,
+			tieRank:         rankDisputeOpened,
+			Source:          "dispute",
+			EventType:       domain.EventPaymentDisputeOpened,
+			Status:          "pending",
+			Description:     "Payment disputed",
+			Detail:          opened,
+			AmountCents:     &amt,
+			Currency:        d.Currency,
+			PaymentIntentID: d.StripePaymentIntentID,
+		})
+		if d.ClosedAt == nil {
+			continue
+		}
+		var desc, status string
+		switch d.Status {
+		case domain.DisputeWon:
+			desc, status = "Dispute won", "succeeded"
+		case domain.DisputeLost:
+			desc, status = "Dispute lost: the bank took the payment back", "failed"
+		case domain.DisputeWarningClosed:
+			desc, status = "Dispute inquiry closed without a chargeback", "succeeded"
+		default: // prevented
+			desc, status = "Dispute prevented before a chargeback", "pending"
+		}
+		out = append(out, timelineEvent{
+			ID:              "dispute:closed:" + d.ID,
+			Timestamp:       d.ClosedAt.Format(time.RFC3339),
+			sortAt:          *d.ClosedAt,
+			tieRank:         rankDisputeClosed,
+			Source:          "dispute",
+			EventType:       domain.EventPaymentDisputeClosed,
+			Status:          status,
+			Description:     desc,
+			Detail:          "Stripe dispute " + d.StripeDisputeID,
+			AmountCents:     &amt,
+			Currency:        d.Currency,
+			PaymentIntentID: d.StripePaymentIntentID,
+		})
+	}
+	return out
+}
+
+// listDisputes returns the card disputes Stripe reported against the
+// invoice's payments (#979), oldest first. An invoice without any returns an
+// empty list.
+func (h *Handler) listDisputes(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.TenantID(r.Context())
+	id := chi.URLParam(r, "id")
+
+	disputes, err := h.svc.ListInvoiceDisputes(r.Context(), tenantID, id)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "invoice")
+		return
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "list invoice disputes", "invoice_id", id, "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, map[string]any{"data": disputes})
 }
 
 func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {

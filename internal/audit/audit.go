@@ -269,19 +269,21 @@ type Entry struct {
 // NOT COVERED — stated because a filter that omits rows silently is worse than
 // no filter at all:
 //
-//   - Operator-driven CREDIT-NOTE routes (create/issue/void/retry-refund/send).
-//     creditnote.Service has no clock.Resolver at all: the same defect that
-//     makes an operator-issued CN against a simulated invoice stamp wall-clock
-//     issued_at and is_simulated=false. Stamping the audit row while the entity
-//     stays wall-clock would hide that bug inside the audit layer. Closure: fix
-//     the CN clock binding — the sim axis then follows from ctx with no change
-//     here. (Clock-DRIVEN CN paths — the catchup clawback issuer — ARE stamped.)
+//   - Two CREDIT-NOTE rows. The operator credit-note routes are otherwise
+//     covered: creditnote.Service binds the source invoice's pin
+//     (bindForInvoice) at Create, Issue, Void, RetryRefund, CreateRefund and
+//     CreateAndIssueCommitRelief, so their in-tx rows carry the sim axis. The
+//     two exceptions: (a) the "send" row, which the handler emits on the
+//     unbound r.Context() although it sends the email on the bound ctx; and
+//     (b) the refund-status row of a Stripe refund webhook (ApplyRefundWebhook),
+//     which binds nothing, like the checkout rows below. Closure: (a) emits on
+//     the ctx the send already binds; (b) closes with the checkout rows.
 //   - Operator-driven PRICE-OVERRIDE routes (create/delete a customer price
-//     override). Same root cause as the CN routes: internal/pricing has no
-//     clock.Resolver at all, so the handler emits on an unbound r.Context() and
-//     the row lands with NULL sim columns. This one is NOT a "not in the clock
-//     domain" case and must not be mistaken for one — customer_price_overrides
-//     IS torn down with the clock (ADR-086, testclock/postgres.go), so an
+//     override). internal/pricing has no clock.Resolver at all, so the handler
+//     emits on an unbound r.Context() and the row lands with NULL sim columns.
+//     This one is NOT a "not in the clock domain" case and must not be
+//     mistaken for one — customer_price_overrides IS torn down with the
+//     clock (ADR-086, testclock/postgres.go), so an
 //     operator who negotiates a price for a simulated customer mid-simulation
 //     leaves a row that is invisible to ?test_clock_id= AND, after teardown, is
 //     the only surviving evidence the override ever existed. Closure: give

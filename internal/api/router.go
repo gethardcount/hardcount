@@ -462,6 +462,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Reconcile async refund outcomes (pending→succeeded/failed) from refund
 	// webhooks onto the credit note — the create-call only sees the initial state.
 	stripeAdapter.SetRefundStatusUpdater(creditNoteSvc)
+	// Record card disputes (charge.dispute.*) against the disputed invoice,
+	// with payment.dispute_opened / .closed queued in the same tx (#979).
+	stripeAdapter.SetDisputeRecorder(invoiceStore)
 	// Resolve an active dunning run promptly when a card payment settles (the
 	// background-settle paths already resolve via the engine; this closes the
 	// card-success symmetry — #317 follow-up). dunningSvc implements ResolveByInvoice.
@@ -905,6 +908,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// invoices — pre-fix the handler hardcoded Net 30, so a Net-15 tenant's
 	// proration invoice carried a different due date than its siblings.
 	subH.SetNetTermsReader(engine)
+	// A proration invoice born finalized writes the engine's finalize audit
+	// row and sends its invoice.finalized payload (#1279). audit.MustWired
+	// below refuses to boot without it.
+	subH.SetInvoiceFinalizeRecorder(engine)
 	// Wire the db handle so addItem (and updateItem / removeItem when
 	// they migrate to the same pattern) can open an outer tx wrapping
 	// the sub-item insert + proration writes — atomic guarantee that
@@ -954,6 +961,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// A card the bank refused for good (#966) turns the decline notice into
 	// "needs a different card", by the same rule the dunning retry skips it.
 	invoiceSvc.SetCardRefusalReader(invoiceStore)
+	// Card disputes (#979): the dispute_lost notice, the timeline's dispute
+	// rows and GET /v1/invoices/{id}/disputes.
+	invoiceSvc.SetDisputeReader(invoiceStore)
 	invoiceSvc.SetCreditApplier(creditSvc)
 	// Tenant net-terms fallback: a manual invoice created without an explicit
 	// net_payment_term_days inherits the tenant's configured default (then 30),

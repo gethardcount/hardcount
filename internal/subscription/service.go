@@ -1096,6 +1096,11 @@ type ProrationDetail struct {
 	// proration invoice, never on the dedup-replay path (that invoice may
 	// already be paid). Empty for credit/adjustment paths. Internal.
 	AutoChargeInvoiceID string `json:"-"`
+	// finalizedInvoice is the proration invoice this change created already
+	// finalized, for the invoice.finalized webhook sent after commit
+	// (dispatchProrationFinalized). nil for a draft, a credit and the dedup
+	// replay.
+	finalizedInvoice *domain.Invoice
 }
 
 // ClawbackPiece is one funding invoice's slice of a multi-invoice downgrade
@@ -1728,12 +1733,48 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 //   - FinalizeOnCreateInvoice (tax commit + auto-charge) for the new in_advance
 //     day-1 invoice committed inside the swap tx, if one was created.
 func (s *Service) FinalizeCrossIntervalSwap(ctx context.Context, tenantID string, subBefore domain.Subscription, result ItemChangeResult) {
+	var inv domain.Invoice
+	if result.crossAxisNewInvoice != nil {
+		inv = *result.crossAxisNewInvoice
+	}
+	s.finishReliefThenCollect(ctx, subBefore, result.swapRelief, inv)
+}
+
+// finishReliefThenCollect runs the post-commit legs of a committed cancel or
+// cross-interval swap, in this order (ADR-118, amended 2026-10-19):
+//
+//  1. FinishRelief issues the relief's credit notes. A paid share's note puts
+//     its credit on the customer's balance.
+//  2. FinalizeOnCreateInvoice commits the tax of the invoice the change wrote,
+//     if it wrote one, and collects it. Collection applies the balance before
+//     it charges the card (ADR-088), so the relief reduces this invoice.
+//
+// In the other order a card on file was charged the whole final invoice of a
+// cancel, and the relief was left on the balance of a customer with no
+// subscription. With no card, the no-card email and no-payment dunning went
+// out for the whole amount.
+//
+// If a step fails here, the credit notes, the tax commit and the collection
+// are each picked up by their own sweep (RetryPendingClawbackIssue,
+// RetryPendingTaxCommit, the auto-charge sweep). The invoice.finalized
+// webhook is not: no sweep sends it again.
+func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscription, r domain.Relief, inv domain.Invoice) {
+	// The change has committed, so both legs run to the end even if the
+	// caller's context ends now: an API request's timeout or a client
+	// disconnect, a billing run stopping on shutdown or a lost lease, a
+	// dunning tick stopping. Collection already ignores the caller's
+	// cancellation (CollectInvoice). If the relief did not, Issue failed on
+	// its first database call, and the card was charged the whole final
+	// invoice with the credit left on the balance (#1286 review). Each Stripe
+	// call is bounded by the client's own 30s timeout, and shutdown's
+	// published budget bounds how long the process waits for this.
+	ctx = context.WithoutCancel(ctx)
 	if s.biller == nil {
 		return
 	}
-	s.biller.FinishRelief(ctx, subBefore, result.swapRelief)
-	if result.crossAxisNewInvoice != nil {
-		s.biller.FinalizeOnCreateInvoice(ctx, subBefore, *result.crossAxisNewInvoice)
+	s.biller.FinishRelief(ctx, sub, r)
+	if inv.ID != "" {
+		s.biller.FinalizeOnCreateInvoice(ctx, sub, inv)
 	}
 }
 
@@ -1940,15 +1981,9 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 
 	afterBillCommit()
 
-	// Post-commit external legs — identical to Cancel: finalize (tax commit +
-	// auto-charge) for the final invoice, then the relief's legs (each
-	// recovered by its own sweep if this fails).
-	if s.biller != nil && finalInv.ID != "" {
-		s.biller.FinalizeOnCreateInvoice(ctx, canceled, finalInv)
-	}
-	if s.biller != nil {
-		s.biller.FinishRelief(ctx, canceled, relief)
-	}
+	// Post-commit legs, as in Cancel: the relief first, so its credit reduces
+	// the final invoice, then the final invoice's tax commit and collection.
+	s.finishReliefThenCollect(ctx, canceled, relief, finalInv)
 	return nil
 }
 
@@ -2064,8 +2099,10 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	// revenue leak (there is no final-on-cancel reconciler; the prior "G3
 	// deferred reconciler" referenced here never existed). That includes a
 	// period that ended unbilled (canceled_at at/after current_period_end):
-	// the biller refuses it. The build runs BEFORE relief so the credit grant
-	// doesn't pre-apply against this invoice.
+	// the biller refuses it. The relief is written after it on the same tx.
+	// Neither write applies credits; after commit the relief is issued first
+	// and the final invoice collected second, so the relief's balance credit
+	// reduces this invoice (finishReliefThenCollect).
 	var finalInv domain.Invoice
 	afterBillCommit := func() {}
 	var relief domain.Relief
@@ -2119,10 +2156,9 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 		}
 		finalInv = inv
 		afterBillCommit = afterCommit
-		// Cancel-proration relief (ADR-057, ADR-118): written IN this tx AFTER
-		// the final invoice (so the credit isn't sized against it), for every
-		// funding invoice, paid or unpaid. Any failure rolls the whole cancel
-		// back.
+		// Cancel-proration relief (ADR-057, ADR-118): written IN this tx after
+		// the final invoice, for every funding invoice, paid or unpaid. Any
+		// failure rolls the whole cancel back.
 		r, reliefErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
 		if reliefErr != nil {
 			return fmt.Errorf("cancel proration relief: %w", reliefErr)
@@ -2136,24 +2172,18 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	}
 	afterBillCommit()
 
-	// Post-commit external finalize for the final invoice (audit + tax commit +
-	// auto-charge) — Stripe calls must never ride a DB tx; the invoice is now
-	// durable + atomic with the cancel. Recoverable by the existing reconciler /
-	// retry sweeps if a step fails.
-	if s.biller != nil && finalInv.ID != "" {
-		s.biller.FinalizeOnCreateInvoice(ctx, canceled, finalInv)
-	}
+	// Post-commit legs; Stripe calls must never ride a DB tx. The relief and
+	// the final invoice are durable and atomic with the cancel. The relief's
+	// credit notes are issued first, then the final invoice's tax is
+	// committed and it is collected, so the relief's balance credit reduces
+	// it (ADR-088; ADR-118 amendment of 2026-10-19).
+	s.finishReliefThenCollect(ctx, canceled, relief, finalInv)
 
-	// ADR-031 / ADR-057 / ADR-118: the relief for the unused part of an
-	// already-billed in_advance period is durable (written in the cancel tx
-	// above); here its external legs run. The credited amount stamps the
-	// timeline's "Prorated credit $X.XX" line.
+	// The credited amount stamps the timeline's "Prorated credit $X.XX" line.
 	var prorationCreditCents int64
 	if s.biller != nil {
-		s.biller.FinishRelief(ctx, canceled, relief)
 		prorationCreditCents = relief.CreditedCents
 	}
-
 	return canceled, prorationCreditCents, nil
 }
 

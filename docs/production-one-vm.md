@@ -242,7 +242,7 @@ Start in test mode. Connect live mode the same way when you are ready to take re
    **You see:** "Verified as" and your Stripe account name.
 
 3. Step 2, **Deliver Stripe events to Velox**, shows a webhook URL. A webhook is a message Stripe sends to Velox when something happens, for example when a card payment succeeds. Copy the URL. It looks like `https://billing.example.com/v1/webhooks/stripe/vlx_spc_…`.
-4. In Stripe, open **Developers → Webhooks** and add an endpoint. Paste the URL and pick the events that Velox lists under the URL.
+4. In Stripe, open **Developers → Webhooks** and add an endpoint. Paste the URL and pick the events that Velox lists under the URL. Also pick `charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`, so Velox records card disputes ([Card disputes](ops/runbook/card-disputes.md)).
 5. Stripe shows the endpoint's signing secret (`whsec_…`). Paste it into step 2 in Velox and click **Finish setup**.
 
    **You see:** the card's badge reads **Connected**.
@@ -386,7 +386,7 @@ Check each line before the first real customer.
 Velox is down while the new version starts. Database changes (migrations) run by themselves as it starts.
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every release between yours and the new one.
-2. Take a backup.
+2. Take a backup. If the upgrade goes wrong, it is how you go back ([Going back](#going-back)).
 
    ```bash
    sudo velox-backup
@@ -425,16 +425,60 @@ Velox is down while the new version starts. Database changes (migrations) run by
 
    **You see:** `velox v0.9.0`, and `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again.
 
-If the upgrade stops with an error, nothing needs repair: a failed migration is undone. Follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md) to find the cause, then start the API again.
+If the upgrade stops with an error, Velox does not start, and nothing needs repair: a failed migration is undone. `docker compose logs --tail 20 velox-api` shows the error. Compose keeps starting the API again, and each start tries the upgrade again, so stop it while you find the cause:
 
-If it says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query. Start the API again, or see [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md).
+```bash
+docker compose stop velox-api
+```
+
+Then follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md). If the error says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query: see [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md). When the cause is fixed, start the API again:
+
+```bash
+docker compose up -d velox-api
+```
 
 ### Going back
 
-Never roll the database back with `velox migrate rollback`: it runs only with `APP_ENV=local`, because it loses data the newer release wrote. To go back to the old release:
+Never roll the database back with `velox migrate rollback`: it runs only with `APP_ENV=local`, because it loses data the newer release wrote. To go back, restore the backup from step 2. That is why every upgrade starts with a backup: without one, a database upgrade cannot be undone.
 
-- **Restore the backup from step 2 into an empty database**, then start the old release. See [Restore a backup](ops/backup-considerations.md#4-restore-a-backup).
-- **From v0.9.0 to v0.8.x only, when v0.9.0 applied no migration after 180,** you can also start the old images as they are: v0.8.x reads its own record, still at 180, and changes nothing. `velox migrate status` (with v0.9.0) shows `database:     180` when this applies.
+**From v0.9.0 to v0.8.x only, when v0.9.0 applied no migration after 180,** you can also start the old images as they are, with no restore. v0.8.x reads its own record, still at 180, and changes nothing. `velox migrate status` (with v0.9.0) shows `database:     180` when this applies.
+
+**A restore loses everything written after the backup.** The old release kept running after step 2, and the new one ran after step 5. The restore removes what both wrote: usage events your app sent, invoices Velox built and charged, payments and refunds, and changes made in the dashboard or through the API. The longer the new release runs, the more a restore loses.
+
+To go back with a restore:
+
+1. Stop the API, so nothing more is written.
+
+   ```bash
+   docker compose stop velox-api
+   ```
+
+   **You see:** a `Container … Stopped` line.
+
+2. Find the backup from step 2. Its name holds the time it started, in UTC. Use that file, not a newer nightly backup: a backup taken after step 5 already holds the new release's changes.
+
+   ```bash
+   ls -l /var/backups/velox/
+   ```
+
+   **You see:** files such as `velox_20261019_143000.dump`, a backup started at 14:30:00 UTC on 19 October 2026.
+
+3. List the invoices created or changed since that time, and keep the list. Run this in the database shell (`docker compose exec postgres psql -U velox -d velox`), with your backup's time:
+
+   ```sql
+   SELECT id, livemode, status, payment_status, total_amount_cents, updated_at
+   FROM invoices
+   WHERE updated_at >= '2026-10-19 14:30:00+00'
+   ORDER BY updated_at;
+   ```
+
+   **You see:** one row for each invoice that the restore removes, or takes back to how it was at the backup.
+
+4. Restore the backup into an empty database, then start the old release. See [Restore a backup](ops/backup-considerations.md#4-restore-a-backup).
+5. Put back what the restore removed.
+   - **Usage events.** Have your app send again every event it sent after the backup time, with the same `idempotency_key`. Velox counts each key once, so an event the backup already holds is not counted twice. An event that is not sent again is not billed.
+   - **Payments.** The restored database does not know about a payment Stripe took after the backup. A subscription's invoice built after the backup is built again by the next billing run, and the customer's card can be charged again. Check each invoice on your list in Stripe, and refund a second charge.
+   - **Everything else.** Run the [checks after a restore](ops/backup-considerations.md#checks-after-a-restore).
 
 Do not run v0.8.x's `migrate rollback` or `migrate force` on a database v0.9.0 took over. If one runs, v0.9.0 refuses to start until the records agree again; see [Two migration records](ops/runbook/migration-failed-midway.md#two-migration-records).
 

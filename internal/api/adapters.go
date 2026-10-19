@@ -879,8 +879,8 @@ type prorationInvoiceCreatorAdapter struct {
 	numberer invoice.InvoiceNumberer
 }
 
-func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.CreateWithLineItems(ctx, tenantID, inv, items)
+func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
+	return a.CreateWithLineItemsAudited(ctx, tenantID, inv, items, emit)
 }
 
 func (a *prorationInvoiceCreatorAdapter) NextInvoiceNumber(ctx context.Context, tenantID string) (string, error) {

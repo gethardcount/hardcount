@@ -125,6 +125,7 @@ import type {
   InviteMemberBody,
   Invoice,
   InvoiceCreateRequest,
+  InvoiceDisputeList,
   InvoiceLineItem,
   InvoiceLineItemInput,
   InvoicePaymentTimeline,
@@ -10181,7 +10182,9 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
  * lifecycle steps (created, finalized, paid, voided, marked
  * uncollectible), charge attempts (source `payment`, event_type
  * `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
- * notes and customer emails.
+ * notes, customer emails, and card disputes (source `dispute`, a
+ * `payment.dispute_opened` row and, once Stripe closes the dispute, a
+ * `payment.dispute_closed` row; both at Stripe's own time).
  * A draft invoice returns an empty list.
  *
  * If one source cannot be read, the rest is still returned and the
@@ -10266,6 +10269,114 @@ export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof g
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetInvoicePaymentTimelineQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListInvoiceDisputesUrl = (id: string,) => {
+
+
+
+
+  return `/v1/invoices/${id}/disputes`
+}
+
+/**
+ * Returns the card disputes (chargebacks) Stripe reported against the
+ * invoice's payments, oldest first. An invoice without any returns an
+ * empty list. Velox records them from Stripe's `charge.dispute.*`
+ * webhook events, which must be turned on for the Stripe webhook
+ * endpoint. Velox never changes the invoice because of a dispute:
+ * respond to it in Stripe, and if it is lost, record the loss with a
+ * credit note or a write-off in your books.
+ * @summary List the card disputes on an invoice
+ */
+export const listInvoiceDisputes = async (id: string, options?: RequestInit): Promise<InvoiceDisputeList> => {
+
+  return orvalClient<InvoiceDisputeList>(getListInvoiceDisputesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListInvoiceDisputesQueryKey = (id: string,) => {
+    return [
+    `/v1/invoices/${id}/disputes`
+    ] as const;
+    }
+
+
+export const getListInvoiceDisputesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListInvoiceDisputesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInvoiceDisputes>>> = () => listInvoiceDisputes(id, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListInvoiceDisputesQueryResult = NonNullable<Awaited<ReturnType<typeof listInvoiceDisputes>>>
+export type ListInvoiceDisputesQueryError = Error
+
+
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listInvoiceDisputes>>,
+          TError,
+          Awaited<ReturnType<typeof listInvoiceDisputes>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listInvoiceDisputes>>,
+          TError,
+          Awaited<ReturnType<typeof listInvoiceDisputes>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the card disputes on an invoice
+ */
+
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListInvoiceDisputesQueryOptions(id,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

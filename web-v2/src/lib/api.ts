@@ -484,6 +484,9 @@ export const api = {
 
   // Credit Notes
   listCreditNotes: (params?: string) => apiRequest<{ data: CreditNote[] }>('GET', `/credit-notes${params ? '?' + params : ''}`),
+  // The key is required: an issued note can refund a card, and the server's
+  // per-invoice cap stops over-crediting but not a repeat. A retry sent with
+  // the same key gets the first request's answer instead of a second note.
   createCreditNote: (data: {
     invoice_id: string
     reason: string
@@ -493,7 +496,7 @@ export const api = {
     refund_type?: string
     auto_issue?: boolean
     lines: { description: string; quantity: number; unit_amount_cents: number }[]
-  }) => apiRequest<CreditNote>('POST', '/credit-notes', data),
+  }, idempotencyKey: string) => apiRequest<CreditNote>('POST', '/credit-notes', data, { idempotencyKey }),
   issueCreditNote: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/issue`),
   voidCreditNote: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/void`),
   retryCreditNoteRefund: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/retry-refund`),
