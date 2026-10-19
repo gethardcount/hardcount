@@ -144,9 +144,11 @@ Four cases are handled so that nothing is counted twice or wrongly:
   the time a plan that carries it was on the subscription, as the invoice
   bills it. Usage on the old plan's meter before the change still counts.
 - **A grant has passed its expiry date.** It is no longer counted, even if
-  the hourly run has not yet written the expiry to the ledger. During that
-  hour `balance_cents` here is lower than the balance
-  `GET /v1/credits/balance/{customer_id}` returns.
+  the hourly run has not yet written the expiry to the ledger. The run
+  waits while a close or a period invoice that ends before the expiry can
+  still draw on the grant. Until a close or an uncollected period invoice
+  that ends before the expiry is settled, `balance_cents` here is lower than
+  the balance `GET /v1/credits/balance/{customer_id}` returns.
 
 ## What the figure leaves out
 
