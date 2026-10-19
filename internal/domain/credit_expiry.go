@@ -14,9 +14,9 @@ var creditDrawAsOfIssueReasons = []InvoiceBillingReason{BillingReasonSubscriptio
 // DrawsCreditAsOfIssue reports whether an invoice with this billing reason
 // tests credit grant expiry at its issued_at, however late it is collected
 // (ADR-071 §2). A grant that was live when the period ended pays that
-// period's invoice, as in Stripe: "The invoice's period_end occurs before the
-// credit grant's expires_at time". Every other invoice tests expiry at the
-// instant it is collected.
+// period's invoice, by the expires_at condition of Stripe's eligibility list:
+// "The invoice's period_end occurs before the credit grant's expires_at
+// time". Every other invoice tests expiry at the instant it is collected.
 func DrawsCreditAsOfIssue(reason InvoiceBillingReason) bool {
 	return slices.Contains(creditDrawAsOfIssueReasons, reason)
 }

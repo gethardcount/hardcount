@@ -66,9 +66,15 @@ idempotency key, evaluated check-then-act across transactions.
    the grant passes `expires_at`. Lago reports the same failure shape
    (lago-api #4240: "On billing day there are sometimes invoices stuck in
    `generating` status."). A tax-deferred draft finalized hours later
-   (#653) gives the same late collection. Velox follows Stripe's rule: a
-   grant applies to an invoice when "the invoice's `period_end` occurs
-   before the credit grant's `expires_at` time, if set."
+   (#653) gives the same late collection. Velox follows the `expires_at`
+   condition of Stripe's eligibility list: a grant applies to an invoice
+   when "the invoice's `period_end` occurs before the credit grant's
+   `expires_at` time, if set." The same list also requires that "the
+   invoice's `period_end` is on or after the credit grant's
+   `effective_at` time." Velox does not test that one:
+   `drainPositiveBlocks` filters on `expires_at` only, so a period
+   invoice collected late also draws a grant created after its period
+   ended. This amendment does not change that.
 
    - **The hold.** Both candidate queries (`ListExpiredGrants`,
      `ListExpiredGrantsForClock`) skip a grant while
@@ -99,10 +105,32 @@ idempotency key, evaluated check-then-act across transactions.
      version): retiring a grant only once `INVOICE_GRACE_PERIOD` had
      passed after `expires_at`. That covered a close that ran inside the
      grace, but not a close on the retry ladder or a late finalize.
-   - **Not covered on purpose:** the `cancel_at` arm of the due instant
-     comes with the reused fragment, but it protects no draw today. The
-     final invoice of a scheduled cancel (`subscription_cancel`) is
-     collected at the instant it is built and tests expiry then.
+   - **A draft that nothing finalizes holds grants until someone does.**
+     While collection is paused (`keep_as_draft`, set by an operator or
+     by dunning's `pause` final action, ADR-112), every close writes a
+     draft. Resume and the tax retry leave it a draft. Arm (ii) then holds
+     every grant of that customer that expires after the draft's
+     `issued_at`, until the draft is finalized or voided: no time limit.
+     Until then the ledger balance, `credit.balance_low` and
+     `credit.balance_depleted` count the expired credit; the spendable
+     balance does not. A draft finalized later draws on it, by the
+     `expires_at` condition. Stripe's balance summary has the same split:
+     the available balance "is equal to the ledger balance less any
+     expired credits or unrecorded transactions." Holding only
+     tax-pending drafts would bound it, but would open a gap. `RetryTax`
+     commits the computed tax, then finalizes in a second write. A sweep
+     between the two, or a crash there, would retire a grant the
+     finalize still needs.
+   - **Not covered: a scheduled cancel's final invoice.** The `cancel_at`
+     arm of the due instant comes with the reused fragment. It holds a
+     grant until that invoice is built, at least the grace after
+     `cancel_at` (ADR-120). But the invoice (`subscription_cancel`) is
+     issued when it is built and tests expiry when it is collected, not
+     at `cancel_at`. So a grant that was live at `cancel_at` and expires
+     before the build is not drawn, as before this amendment. Covering it
+     means testing that invoice's draw at its `billing_period_end` (the
+     `canceled_at`) and adding it to arm (ii). That is a separate
+     decision.
 3. **`consumed_cents` is the single structural exclusion.** Migration
    0127 retro-retires every grant the pre-fix sweep expired (exact-match
    join on the legacy `'Expired grant <id>'` description, used one last
