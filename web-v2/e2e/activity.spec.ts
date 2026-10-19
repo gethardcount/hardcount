@@ -71,6 +71,26 @@ function planBilledInAdvance(): Promise<Plan> {
   })
 }
 
+// Gives the customer a dunning policy of its own: three retries, on days 3, 7
+// and 14, then collection is paused. Other specs change the workspace's
+// default policy while they run, so the default would give a different
+// story on different runs. The policy is created turned off and then turned
+// on, because a new policy created turned on takes the default from the
+// one the account was created with (ADR-123).
+async function ownRetryPolicy(customerId: string) {
+  const policy = {
+    name: `E2E Activity retries ${uniq()}`,
+    max_retry_attempts: 3,
+    grace_period_days: 3,
+    retry_schedule: ['96h', '168h'],
+    final_subscription_action: 'pause',
+    final_invoice_action: 'none',
+  }
+  const created = await api<{ id: string }>('POST', '/dunning/policies', { ...policy, enabled: false })
+  await api('PATCH', `/dunning/policies/${created.id}`, { ...policy, enabled: true })
+  await api('PATCH', `/customers/${customerId}`, { dunning_policy_id: created.id })
+}
+
 function subscribe(customerId: string, planId: string, extra: Record<string, unknown> = {}): Promise<Sub> {
   const id = uniq()
   return api<Sub>('POST', '/subscriptions', {
@@ -164,6 +184,7 @@ for (const clock of ['real', 'test'] as const) {
   test(`activity shots, ${clock} clock: an unpaid first invoice through emails, a credit note and an offline payment (invoice, Dunning run, Sent emails)`, async ({ page }) => {
     const plan = await planBilledInAdvance()
     const { customer, testClock } = await customerOn(clock)
+    await ownRetryPolicy(customer.id)
     await subscribe(customer.id, plan.id)
     // The first period is invoiced at the start. With no card on file,
     // payment recovery starts at once.
@@ -180,10 +201,13 @@ for (const clock of ['real', 'test'] as const) {
     })
     await asPerson(page, 'POST', `/credit-notes/${note.id}/send`, { email: customer.email })
     if (testClock) {
-      // Two days past the last retry: three retries with no card, then
-      // retries run out (the default policy: 3 days, then 4, then 7).
+      // Two days past the last retry (day 14), so the three retries run and
+      // then retries run out.
       await advanceTo(testClock, Date.parse(FROZEN) + 16 * DAY)
     }
+    // Before the payment: an email still queued when the invoice is paid is
+    // not sent, and whether that happens would depend on timing.
+    await waitForEmailsSent(customer.id)
     await asPerson(page, 'POST', `/invoices/${invoice.id}/record-payment`, { note: 'Wire 1042' })
     await waitForEmailsSent(customer.id)
 
