@@ -141,6 +141,10 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 	hostedLiveWrittenOff := mkDueRun("INV-HOSTED-WROFF", domain.PaymentFailed, "", domain.InvoiceUncollectible)
 	seedLiveHostedPage(t, db, ctx, tenantID, hostedLive)
 	seedLiveHostedPage(t, db, ctx, tenantID, hostedLiveWrittenOff)
+	chargeRecorded := mkDueRun("INV-CHARGE-RECORD", domain.PaymentFailed, "", domain.InvoiceFinalized)
+	chargeRecordedWrittenOff := mkDueRun("INV-CHARGE-RECORD-WROFF", domain.PaymentFailed, "", domain.InvoiceUncollectible)
+	seedChargeRecord(t, db, ctx, tenantID, chargeRecorded)
+	seedChargeRecord(t, db, ctx, tenantID, chargeRecordedWrittenOff)
 
 	due, err := dstore.ListDueRuns(ctx, tenantID, now.Add(time.Minute), 200)
 	if err != nil {
@@ -171,6 +175,33 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 	}
 	if !got[hostedLiveWrittenOff] {
 		t.Error("a written-off source with a hosted page must still be selected — the terminal branch resolves the run")
+	}
+	if got[chargeRecorded] {
+		t.Error("a run whose invoice carries a charge record must be excluded — the charge claim refuses it until the interrupted-charge check has asked Stripe (up to an hour), so selecting it spins at the head of the queue meanwhile (ADR-127, domain.PaymentInFlightSQL)")
+	}
+	if !got[chargeRecordedWrittenOff] {
+		t.Error("a written-off source with a charge record must still be selected — the terminal branch resolves the run")
+	}
+}
+
+// seedChargeRecord puts a charge record (ADR-127) on the run's invoice: a
+// charge sent to Stripe whose result is not saved yet.
+func seedChargeRecord(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, runID string) {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE invoices SET charge_started_at = now(), charge_started_seq = charge_attempt_seq,
+		       charge_started_key = 'velox_inv_' || id || '_0_pm_card', charge_started_stripe_customer = 'cus_stripe_due'
+		WHERE id = (SELECT invoice_id FROM invoice_dunning_runs WHERE id = $1)
+	`, runID); err != nil {
+		t.Fatalf("seed charge record: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }
 
@@ -254,6 +285,13 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 	seedInvRun("inv_clk_hosted", "run_clk_hosted", "failed", "", "finalized")
 	mustExec(`INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, stripe_session_id, amount_cents, currency, status, expires_at)
 		VALUES ('cks_clk_hosted', $1, 'inv_clk_hosted', false, 'cs_clk_hosted', 2500, 'USD', 'open', now() + interval '50 minutes')`, tenantID)
+	// A charge record (ADR-127) on a failed invoice: a charge sent to Stripe
+	// whose result is not saved yet. Open, and written off.
+	seedInvRun("inv_clk_record", "run_clk_record", "failed", "", "finalized")
+	seedInvRun("inv_clk_record_wroff", "run_clk_record_wroff", "failed", "", "uncollectible")
+	mustExec(`UPDATE invoices SET charge_started_at = now(), charge_started_seq = charge_attempt_seq,
+		charge_started_key = 'velox_inv_' || id || '_0_pm_card', charge_started_stripe_customer = 'cus_stripe_clk'
+		WHERE id IN ('inv_clk_record', 'inv_clk_record_wroff')`)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -284,5 +322,11 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 	}
 	if got["run_clk_hosted"] {
 		t.Error("a simulated invoice with a live hosted page must be excluded — its charge claim refuses, so a clock advance would spin it")
+	}
+	if got["run_clk_record"] {
+		t.Error("a simulated invoice with a charge record must be excluded — its charge claim refuses until the interrupted-charge check has asked Stripe, so a clock advance would spin it through the whole catchup budget")
+	}
+	if !got["run_clk_record_wroff"] {
+		t.Error("a written-off simulated invoice with a charge record must STILL be selected — the processing path's terminal branch resolves the run")
 	}
 }

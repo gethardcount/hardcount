@@ -96,6 +96,88 @@ func TestListPendingClawbackDrafts_DefersInFlightSource(t *testing.T) {
 	mustCount(1, "settled source must make even an aged draft eligible — no 24h window")
 }
 
+// TestListPendingClawbackDrafts_DefersSourceWithChargeRecord: a charge sent to
+// Stripe whose result is not saved (the charge record, ADR-127) defers the
+// draft in the scan too, while the source's payment status is still 'pending'.
+// The issue path would defer it anyway (Invoice.PaymentInFlight); the scan
+// skipping it is what keeps the reconciler from picking a draft it cannot
+// issue on every run, for up to the hour the interrupted-charge check takes.
+// Once the record clears, the draft is eligible.
+func TestListPendingClawbackDrafts_DefersSourceWithChargeRecord(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "CN Defer Charge Record")
+
+	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
+		ExternalID: "cus_defer_rec", DisplayName: "Defer Record",
+	})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	invStore := invoice.NewPostgresStore(db)
+	now := time.Now().UTC()
+	inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		CustomerID: cust.ID, InvoiceNumber: "INV-DEFER-REC", Status: domain.InvoiceFinalized,
+		PaymentStatus: domain.PaymentPending, Currency: "USD",
+		SubtotalCents: 10000, TotalAmountCents: 10000, AmountDueCents: 10000,
+		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("create invoice: %v", err)
+	}
+	cnStore := creditnote.NewPostgresStore(db)
+	if _, err := cnStore.Create(ctx, tenantID, domain.CreditNote{
+		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-DEFER-REC",
+		Status: domain.CreditNoteDraft, Reason: "subscription_cancellation",
+		SubtotalCents: 4000, TotalCents: 4000, Currency: "USD",
+		RefundStatus: domain.RefundNone, IssuePending: true,
+	}); err != nil {
+		t.Fatalf("create clawback draft: %v", err)
+	}
+
+	setRecord := func(on bool) {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer postgres.Rollback(tx)
+		q := `UPDATE invoices SET charge_started_at = NULL, charge_started_seq = NULL,
+			charge_started_key = NULL, charge_started_stripe_customer = NULL WHERE id = $1`
+		if on {
+			q = `UPDATE invoices SET charge_started_at = now(), charge_started_seq = charge_attempt_seq,
+				charge_started_key = 'velox_inv_defer_rec_0_pm_card', charge_started_stripe_customer = 'cus_stripe_defer'
+				WHERE id = $1`
+		}
+		if _, err := tx.ExecContext(ctx, q, inv.ID); err != nil {
+			t.Fatalf("charge record: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func() int {
+		t.Helper()
+		drafts, err := cnStore.ListPendingClawbackDrafts(ctx, 100, false)
+		if err != nil {
+			t.Fatalf("list pending clawback drafts: %v", err)
+		}
+		return len(drafts)
+	}
+
+	if n := count(); n != 1 {
+		t.Fatalf("control: a pending source with no record must be eligible, got %d drafts", n)
+	}
+	setRecord(true)
+	if n := count(); n != 0 {
+		t.Fatalf("source with a charge record: got %d pending drafts, want 0 — its payment may be on its way to Stripe (domain.PaymentInFlightSQL)", n)
+	}
+	setRecord(false)
+	if n := count(); n != 1 {
+		t.Fatalf("record cleared: got %d pending drafts, want 1", n)
+	}
+}
+
 // TestListPendingClawbackDrafts_ParkedSourceReleasedByWriteOff covers the one
 // source that NEVER settles, which the defer gate above was written before we
 // had.
