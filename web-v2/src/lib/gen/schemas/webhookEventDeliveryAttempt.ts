@@ -11,7 +11,7 @@ import type { WebhookEventDeliveryAttemptStatus } from './webhookEventDeliveryAt
 
 export interface WebhookEventDeliveryAttempt {
   id: string;
-  /** The event this delivery sent. A replay's own id when `is_replay` is true. */
+  /** The event this delivery belongs to. When `is_replay` is true, the replay's own id; the message it sent carries the original event's `id` (`root_event_id`). */
   event_id: string;
   endpoint_id: string;
   endpoint_url: string;
