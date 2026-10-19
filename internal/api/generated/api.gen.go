@@ -4435,8 +4435,10 @@ type Invoice struct {
 	PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
 	// ProviderPaymentStatus Stripe's PaymentIntent status the last time Velox checked it,
-	// word for word. For information only: `payment_status` is the
-	// invoice's payment state. Absent until Velox has checked.
+	// word for word, or `search_error` or `attempt_check_error` when
+	// that check could not read Stripe. For information only:
+	// `payment_status` is the invoice's payment state. Absent until
+	// Velox has checked.
 	ProviderPaymentStatus string `json:"provider_payment_status,omitempty"`
 
 	// ProviderSyncedAt When Velox last checked `provider_payment_status`.

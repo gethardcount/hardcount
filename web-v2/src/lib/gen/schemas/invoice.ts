@@ -161,8 +161,10 @@ export interface Invoice {
   no_pm_notified_at?: string;
   /**
      * Stripe's PaymentIntent status the last time Velox checked it,
-     * word for word. For information only: `payment_status` is the
-     * invoice's payment state. Absent until Velox has checked.
+     * word for word, or `search_error` or `attempt_check_error` when
+     * that check could not read Stripe. For information only:
+     * `payment_status` is the invoice's payment state. Absent until
+     * Velox has checked.
      */
   provider_payment_status?: string;
   /** When Velox last checked `provider_payment_status`. */

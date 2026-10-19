@@ -542,16 +542,21 @@ func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID stri
 // The key answers exactly one question: is this call the SAME charge attempt as
 // before, or a new one? Two requirements pull against each other:
 //
-//   - a crash between the Stripe call and the outcome write must REUSE the key,
-//     so Stripe returns the in-flight PaymentIntent rather than creating a
-//     second one (no double charge);
+//   - a resend of the same attempt must REUSE the key, so Stripe returns the
+//     PaymentIntent it already made rather than creating a second one (no
+//     double charge). stripe-go resends under the same key after a network
+//     error. A crash or a timeout no longer rests on the key alone: the charge
+//     record (ADR-127) keeps every charge path off the invoice until the
+//     reconciler has asked Stripe what the attempt did;
 //   - a RECORDED decline must get a FRESH key, so a retry after the customer
 //     fixes their card isn't handed the declined PI forever (no liveness sink).
 //
 // So the seed must move exactly when an attempt outcome was recorded.
-// charge_attempt_seq is that signal directly: it is bumped by the three writes
-// that stamp stripe_payment_intent_id and by nothing else (migration 0165,
-// CI-enforced by TestChargeAttemptSeqBumpedByEveryPIStamp).
+// charge_attempt_seq is that signal directly: every write that stamps
+// stripe_payment_intent_id bumps it, and so does the interrupted-charge check's
+// release, which records "no payment was created" (ADR-105 amendment); nothing
+// else does (migration 0165, CI-enforced by
+// TestChargeAttemptSeqBumpedByEveryPIStamp).
 //
 // It replaced inv.UpdatedAt, which was a PROXY for the same question and
 // answered a much broader one — "did anything at all touch this row?" — making
