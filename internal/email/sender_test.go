@@ -104,16 +104,24 @@ func TestRenderInvoiceHTML(t *testing.T) {
 	}
 }
 
-// smtpReply builds the error net/smtp returns for a server reply, wrapped
-// the way deliver and sendRich wrap it on the way to the classifier.
+// smtpReply builds the error net/smtp returns for a server's reply to RCPT
+// TO, wrapped the way deliver and sendRich wrap it on the way to the
+// classifier.
 func smtpReply(code int, msg string) error {
-	return fmt.Errorf("send email: %w", fmt.Errorf("smtp rcpt to: %w", &textproto.Error{Code: code, Msg: msg}))
+	return fmt.Errorf("send email: %w", fmt.Errorf("smtp rcpt to: %w", recipientReplyError{&textproto.Error{Code: code, Msg: msg}}))
+}
+
+// smtpStepReply builds the error for a reply to another SMTP step, such as
+// "smtp mail from" or "smtp data close".
+func smtpStepReply(step string, code int, msg string) error {
+	return fmt.Errorf("send email: %w", fmt.Errorf("%s: %w", step, &textproto.Error{Code: code, Msg: msg}))
 }
 
 // TestIsPermanentSMTPBounce checks the classifier behind the
-// bounce-capture hook and the outbox's dead-letter decision. Only a
-// server REPLY can be a bounce: 550-553 or a 5.1.x / 5.2.x status →
-// permanent; sender-side 5xx, 4xx and every non-reply error → not.
+// bounce-capture hook and the outbox's dead-letter decision. Only the
+// server's REPLY to RCPT TO can be a bounce: 550-553 or a 5.1.x / 5.2.x
+// status → permanent; sender-side 5xx, 4xx, a reply to any other step and
+// every non-reply error → not.
 func TestIsPermanentSMTPBounce(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -127,7 +135,7 @@ func TestIsPermanentSMTPBounce(t *testing.T) {
 		{"553 relaying", smtpReply(553, "relaying denied"), true},
 		{"552 too big", smtpReply(552, "message size exceeds limits"), true},
 		{"550 mailbox unavailable", smtpReply(550, "mailbox unavailable"), true},
-		{"unwrapped 550", &textproto.Error{Code: 550, Msg: "mailbox unavailable"}, true},
+		{"550 to a CC's RCPT TO, as the CC loop reports it", recipientReplyError{&textproto.Error{Code: 550, Msg: "mailbox unavailable"}}, true},
 		{"enhanced 5.1.1 on an ambiguous 554", smtpReply(554, "5.1.1 user unknown"), true},
 		{"enhanced 5.2.2 over quota", smtpReply(552, "5.2.2 mailbox full"), true},
 		{"multi-line 550", smtpReply(550, "5.1.1 The email account that you tried to reach does not exist.\n5.1.1 Check the address and try again."), true},
@@ -148,6 +156,11 @@ func TestIsPermanentSMTPBounce(t *testing.T) {
 		{"550 5.7.1 policy reject", smtpReply(550, "5.7.1 message rejected by policy"), false},
 		{"553 5.7.1 sender address rejected", smtpReply(553, "5.7.1 Sender address rejected: not owned by user"), false},
 		{"550 5.7.1 quoting 5.1.1 later in the text", smtpReply(550, "5.7.1 blocked by policy, see section 5.1.1 of the postmaster guide"), false},
+		// A reply to any step but RCPT TO is about the sender or the
+		// message, whatever its code.
+		{"550 after the message: SendGrid refusing an unverified sender", smtpStepReply("smtp data close", 550, "The from address does not match a verified Sender Identity. Mail cannot be sent until this error is resolved."), false},
+		{"553 5.1.8 to MAIL FROM: the sender's domain does not exist", smtpStepReply("smtp mail from", 553, "5.1.8 <billing@velox.test>... Domain of sender address billing@velox.test does not exist"), false},
+		{"a reply to another step, unwrapped", &textproto.Error{Code: 550, Msg: "mailbox unavailable"}, false},
 		// Transient replies — not bounces, whatever their text quotes
 		{"421 transient", smtpReply(421, "try again later"), false},
 		{"450 soft bounce", smtpReply(450, "mailbox busy"), false},

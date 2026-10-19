@@ -54,7 +54,7 @@ Three things keep a tick from running twice:
 - Subscriptions due for billing are not being invoiced, and the
   `velox_billing_cycles_total` rate drops to 0.
 - `velox_leader_last_tick_age_seconds{role}` is above 3× the role's
-  interval.
+  interval, or 5 minutes for the roles that run every few seconds.
 - An outbox keeps growing, or webhook retries stop.
 
 Before you treat a gap in invoices as an outage, check the tick interval
@@ -209,8 +209,8 @@ The next tick starts one interval after it ends.
 ## Verify
 
 `SELECT * FROM leader_status` shows a small `last_tick_age_s` for the role,
-and `velox_leader_last_tick_age_seconds{role}` falls back below 3× the
-role's interval.
+and `velox_leader_last_tick_age_seconds{role}` falls back below
+max(3× the role's interval, 5 minutes).
 
 After a database failover the roles carry on, because the row moved with
 the data. Expect at most one `lease_lost` per role from the ticks that were
@@ -242,7 +242,7 @@ clearing `not_before` after a panic is fixed (see [Fix](#fix)).
 
 | Metric | Alert when |
 |---|---|
-| `velox_leader_last_tick_age_seconds{role}` | > 3× the role's interval. No replica has finished a tick. A single replica's liveness gauge (`velox_scheduler_last_run_timestamp_seconds`, which followers also stamp) cannot give this signal |
+| `velox_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min). No replica has finished a tick. The 5-minute floor keeps a restart or a lease handover of the `webhook_outbox`, `email_outbox` and `webhook_delivery` roles from paging. A single replica's liveness gauge (`velox_scheduler_last_run_timestamp_seconds`, which followers also stamp) cannot give this signal |
 | `velox_leader_held{role}` | Stays 1 while `last_tick_age` grows: a tick is wedged but still renewing. See [Check](#check) step 3 for billing |
 | `velox_leader_paused{role}` | 1 outside a planned window |
 | `velox_leader_lease_lost_total{role,reason}` | Any increase, except `reason="paused"`. See [Lease-lost reasons](#lease-lost-reasons) |

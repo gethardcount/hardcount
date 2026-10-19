@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
@@ -144,14 +145,23 @@ func (s *OutboxStore) EnqueueStandalone(ctx context.Context, tenantID, eventType
 // retry (or DLQ once MaxOutboxAttempts is reached).
 type OutboxHandler func(ctx context.Context, row OutboxRow) error
 
-// ProcessBatch locks up to `limit` due pending rows across all tenants,
-// hands them to `handler`, and marks each row based on the handler's result
-// — all within a single tx. Row locks held for the tx's duration prevent
-// concurrent dispatchers from double-delivering (`FOR UPDATE SKIP LOCKED`).
+// ProcessBatch claims up to `limit` due pending rows across all tenants,
+// hands each to `handler`, and marks it from the handler's result. Same
+// claim-lease shape as the email outbox (P5):
 //
-// Returns the number of rows processed (attempted, regardless of outcome).
-// Callers should set a sensible query timeout on ctx so a stuck handler
-// can't hold locks indefinitely.
+//  1. CLAIM: one short tx bumps attempts and pushes next_attempt_at out by
+//     the claim lease. FOR UPDATE SKIP LOCKED keeps concurrent claimers
+//     disjoint, and the locks end at its commit; the lease, not a lock,
+//     keeps another dispatcher off a claimed row.
+//  2. HANDLE: each row under its own per-row budget, panic-recovered. No
+//     new row starts once the batch ctx is nearly spent; the rest wait out
+//     their lease.
+//  3. MARK: each row in its own short tx on a ctx detached from the batch
+//     deadline, a CAS on status='pending'. A success is already marked by
+//     the handler, in the tx that writes the event and its deliveries.
+//
+// Returns the number of rows attempted, whatever their outcome. The batch
+// ctx's deadline bounds how long the loop keeps starting rows.
 func (s *OutboxStore) ProcessBatch(ctx context.Context, limit int, handler OutboxHandler) (int, error) {
 	// Leader-only funnel (ADR-114): see subscription.GetDueBilling.
 	token, err := leader.Fence(ctx, leader.RoleWebhookOutbox)
@@ -280,18 +290,26 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 
 	errMsg := truncateError(hErr.Error())
 	if row.Attempts >= MaxOutboxAttempts {
-		if _, err := mtx.ExecContext(markCtx, `
+		res, err := mtx.ExecContext(markCtx, `
 			UPDATE webhook_outbox
 			SET status = 'failed', last_error = $2
 			WHERE id = $1 AND status = 'pending'
-		`, row.ID, errMsg); err != nil {
+		`, row.ID, errMsg)
+		if err != nil {
 			slog.Error("webhook outbox: DLQ mark failed", "outbox_id", row.ID, "error", err)
+			return
+		}
+		// Counted and logged only when this mark moved the row. Zero rows:
+		// another processor resolved it after this one's lease ran out.
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			slog.Warn("webhook outbox: stale DLQ mark dropped (row no longer pending)", "outbox_id", row.ID, "error", err)
 			return
 		}
 		if err := mtx.Commit(); err != nil {
 			slog.Error("webhook outbox: commit DLQ mark", "outbox_id", row.ID, "error", err)
 			return
 		}
+		mw.RecordWebhookOutboxDeadLettered(row.Livemode)
 		slog.Error("webhook outbox: row moved to DLQ after max attempts",
 			"outbox_id", row.ID,
 			"tenant_id", row.TenantID,

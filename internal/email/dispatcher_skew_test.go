@@ -37,7 +37,7 @@ func TestDispatcherUnknownType_IsRetryable(t *testing.T) {
 // decide on the sentinel before the SMTP-bounce check, so an unknown-type
 // error stays retryable even with a real bounce reply in its chain.
 func TestIsPermanentSendError_UnknownTypeBeatsBounceScan(t *testing.T) {
-	err := fmt.Errorf("%w: %w", ErrUnknownEmailType, &textproto.Error{Code: 550, Msg: "5.1.1 user unknown"})
+	err := fmt.Errorf("%w: %w", ErrUnknownEmailType, recipientReplyError{&textproto.Error{Code: 550, Msg: "5.1.1 user unknown"}})
 	if IsPermanentSendError(err) {
 		t.Fatal("ErrUnknownEmailType wrapping a bounce reply was classified permanent — the sentinel must be checked before the bounce classifier")
 	}
