@@ -199,3 +199,70 @@ func TestCommitRelief_TaxedPurchase_StillReversesItsTax(t *testing.T) {
 		t.Errorf("relief total/tax/subtotal = %d/%d/%d, want 11000/1000/10000 (the tax the purchase carried comes back)", cn.TotalCents, cn.TaxAmountCents, cn.SubtotalCents)
 	}
 }
+
+// TestCommitTax_InclusiveDraftComputedBeforeTheChange_E2E: manual tax at 18%,
+// tax-inclusive. Before this change a compute carved tax out of the commit
+// line and stored the header subtotal as the net ($100 of a $118 commit).
+// UpdateTaxAtomic writes no line amount, so the line still holds $118. If
+// finalize failed after that compute, the draft is finalized again after
+// deploy. It must invoice the $118 the line says, with no tax, for the $118
+// of credit it grants. The fixture writes the old compute's result directly,
+// since no current path carves a commit line.
+func TestCommitTax_InclusiveDraftComputedBeforeTheChange_E2E(t *testing.T) {
+	lf := newLiveFixture(t, "Commit Tax Inclusive Draft", 0)
+	ctx := lf.ctx
+	setManualTax(t, ctx, lf.settings, lf.tenantID, 18)
+	ts, err := lf.settings.Get(ctx, lf.tenantID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	ts.TaxInclusive = true
+	if _, err := lf.settings.Upsert(ctx, ts); err != nil {
+		t.Fatalf("upsert settings: %v", err)
+	}
+
+	lf.invStore.SetCommitFunder(lf.creditSvc)
+	invSvc := invoice.NewService(lf.invStore, clock.Real(), lf.settings)
+	invSvc.SetTaxRetrier(lf.engine)
+
+	draft := createCommitInvoice(t, ctx, invSvc, lf.tenantID, lf.customerID, 11800, 11800)
+	tx, err := lf.db.BeginTx(ctx, postgres.TxTenant, lf.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE invoices SET subtotal_cents = 10000, tax_amount_cents = 1800, tax_rate = 18,
+			tax_provider = 'manual', total_amount_cents = 11800, amount_due_cents = 11800
+		WHERE id = $1`, draft.ID); err != nil {
+		t.Fatalf("seed the old compute's header: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE invoice_line_items SET tax_amount_cents = 1800, tax_rate = 18, total_amount_cents = 11800
+		WHERE invoice_id = $1`, draft.ID); err != nil {
+		t.Fatalf("seed the old compute's line: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	fin, err := invSvc.Finalize(ctx, lf.tenantID, draft.ID)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if fin.SubtotalCents != 11800 || fin.DiscountCents != 0 || fin.TaxAmountCents != 0 || fin.TotalAmountCents != 11800 {
+		t.Errorf("finalized subtotal/discount/tax/total = %d/%d/%d/%d, want 11800/0/0/11800 (the commit's price, untaxed)",
+			fin.SubtotalCents, fin.DiscountCents, fin.TaxAmountCents, fin.TotalAmountCents)
+	}
+	lines, err := lf.invStore.ListLineItems(ctx, lf.tenantID, fin.ID)
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("commit lines: %v, %+v", err, lines)
+	}
+	if l := lines[0]; l.AmountCents != 11800 || l.TaxAmountCents != 0 || l.TotalAmountCents != 11800 || l.TaxabilityReason != "prepaid_credit_purchase" {
+		t.Errorf("commit line amount/tax/total/reason = %d/%d/%d/%q, want 11800/0/11800/prepaid_credit_purchase",
+			l.AmountCents, l.TaxAmountCents, l.TotalAmountCents, l.TaxabilityReason)
+	}
+	if bal := lf.balance(t); bal != 11800 {
+		t.Errorf("credit after the purchase = %d, want 11800", bal)
+	}
+}

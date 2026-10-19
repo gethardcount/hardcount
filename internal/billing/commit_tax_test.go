@@ -145,27 +145,135 @@ func TestApplyTax_CommitLine_TaxInclusive(t *testing.T) {
 	assertPrepaidLine(t, lines[0], 11800)
 }
 
-// An invoice-level discount covers every line in proportion, so only the
-// taxable lines' share of it lowers the taxable base.
-func TestApplyTax_CommitLine_DiscountSharedInProportion(t *testing.T) {
-	e, prov := newRecordingEngine(1000, false) // 10%
+// A provider outage parks a mixed commit invoice as pending. The commit line
+// is stamped untaxed on that branch too, so the stored line says why it has
+// no tax while the rest of the invoice waits.
+func TestApplyTax_CommitLine_ProviderFailure_StampedOnThePendingInvoice(t *testing.T) {
+	prov := &countingProvider{stubProvider: stubProvider{err: errors.New("stripe tax: 503")}}
+	e := &Engine{
+		settings:     &taxSettings{provider: "stripe_tax"},
+		taxProviders: stubResolver(prov),
+	}
 	lines := []domain.InvoiceLineItem{
 		commitLine(10000, 10000),
-		{Description: "Onboarding", LineType: domain.LineTypeAddOn, Quantity: 1, AmountCents: 10000},
+		{Description: "Onboarding", LineType: domain.LineTypeAddOn, Quantity: 1, AmountCents: 5000},
 	}
 
-	app, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 20000, 2000, lines)
+	app, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 15000, 0, lines)
 	if err != nil {
 		t.Fatalf("apply tax: %v", err)
 	}
-	if len(prov.reqs) != 1 || prov.reqs[0].DiscountCents != 1000 {
-		t.Fatalf("request discount = %+v, want 1000 (the onboarding line's half of 2000)", prov.reqs)
+	if prov.calls != 1 || app.TaxStatus != domain.InvoiceTaxPending {
+		t.Fatalf("provider calls/status = %d/%s, want 1/pending", prov.calls, app.TaxStatus)
 	}
-	if app.TaxAmountCents != 900 {
-		t.Errorf("invoice tax = %d, want 900 (10%% of 10000 − 1000)", app.TaxAmountCents)
+	assertPrepaidLine(t, lines[0], 10000)
+	if lines[1].TaxabilityReason != "" || lines[1].TotalAmountCents != 5000 {
+		t.Errorf("onboarding line reason/total = %q/%d, want empty/5000 (waiting for tax)", lines[1].TaxabilityReason, lines[1].TotalAmountCents)
 	}
-	if app.DiscountCents != 2000 {
-		t.Errorf("invoice discount = %d, want 2000 (unchanged on the invoice)", app.DiscountCents)
+}
+
+// An account on the none provider collects no tax, so its invoices say
+// nothing about tax on a commit line: no reason, so no dashboard label and no
+// PDF line about prepaid credit.
+func TestApplyTax_CommitLine_NoneProvider_NoReason(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines []domain.InvoiceLineItem
+	}{
+		{"commit only", []domain.InvoiceLineItem{commitLine(10000, 10000)}},
+		{"commit and fee", []domain.InvoiceLineItem{
+			commitLine(10000, 10000),
+			{Description: "Onboarding", LineType: domain.LineTypeAddOn, Quantity: 1, AmountCents: 5000},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &Engine{
+				settings:     &taxSettings{provider: "none"},
+				taxProviders: stubResolver(tax.NewNoneProvider()),
+			}
+			var subtotal int64
+			for _, li := range tc.lines {
+				subtotal += li.AmountCents
+			}
+			app, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", subtotal, 0, tc.lines)
+			if err != nil {
+				t.Fatalf("apply tax: %v", err)
+			}
+			if app.TaxStatus != domain.InvoiceTaxOK || app.TaxAmountCents != 0 {
+				t.Errorf("status/tax = %s/%d, want ok/0", app.TaxStatus, app.TaxAmountCents)
+			}
+			c := tc.lines[0]
+			if c.TaxabilityReason != "" {
+				t.Errorf("commit line tax_reason = %q, want empty under the none provider", c.TaxabilityReason)
+			}
+			if c.TaxAmountCents != 0 || c.TotalAmountCents != 10000 {
+				t.Errorf("commit line tax/total = %d/%d, want 0/10000", c.TaxAmountCents, c.TotalAmountCents)
+			}
+		})
+	}
+}
+
+// A tax-inclusive draft whose tax was computed BEFORE the commit line was
+// left out stored a header subtotal with the commit line carved (the stored
+// lines keep what was entered: UpdateTaxAtomic writes no line amount). If
+// finalize failed after that compute, the draft is finalized again after
+// deploy. It must re-price from its lines, not from that carved subtotal, or
+// the customer is invoiced the net while the full credit is granted.
+func TestComputeTax_InclusiveCommitDraftComputedBeforeTheChange(t *testing.T) {
+	grant := int64(11800)
+	commit := domain.InvoiceLineItem{
+		ID: "li_commit", InvoiceID: "inv_1", Description: "Prepaid commit", LineType: domain.LineTypeAddOn,
+		Quantity: 1, AmountCents: 11800, TaxRate: 18, TaxAmountCents: 1800, TotalAmountCents: 11800,
+		CommitGrantedCents: &grant,
+	}
+	fee := domain.InvoiceLineItem{
+		ID: "li_fee", InvoiceID: "inv_1", Description: "Onboarding", LineType: domain.LineTypeAddOn,
+		Quantity: 1, AmountCents: 11800, TaxRate: 18, TaxAmountCents: 1800, TotalAmountCents: 11800,
+	}
+	for _, tc := range []struct {
+		name                  string
+		lines                 []domain.InvoiceLineItem
+		oldSubtotal, oldTax   int64
+		wantSubtotal, wantTax int64
+		wantTotal             int64
+		wantProviderCalls     int
+	}{
+		// $118 commit at 18% inclusive: the old compute stored subtotal $100.
+		{"commit only", []domain.InvoiceLineItem{commit}, 10000, 1800, 11800, 0, 11800, 0},
+		// $118 commit + $118 fee: the old compute stored subtotal $200.
+		{"commit and fee", []domain.InvoiceLineItem{commit, fee}, 20000, 3600, 21800, 1800, 23600, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, prov := newRecordingEngine(1800, true)
+			e.invoices = &mockInvoices{
+				invoices: []domain.Invoice{{
+					ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", Currency: "USD", Status: domain.InvoiceDraft,
+					SubtotalCents: tc.oldSubtotal, TotalAmountCents: tc.oldSubtotal + tc.oldTax, AmountDueCents: tc.oldSubtotal + tc.oldTax,
+					TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxAmountCents: tc.oldTax, TaxRate: 18},
+				}},
+				lineItems: append([]domain.InvoiceLineItem(nil), tc.lines...),
+			}
+
+			inv, err := e.ComputeTaxForInvoice(context.Background(), "t1", "inv_1")
+			if err != nil {
+				t.Fatalf("compute tax: %v", err)
+			}
+			if len(prov.reqs) != tc.wantProviderCalls {
+				t.Fatalf("provider calls = %d, want %d", len(prov.reqs), tc.wantProviderCalls)
+			}
+			if inv.SubtotalCents != tc.wantSubtotal || inv.DiscountCents != 0 || inv.TaxAmountCents != tc.wantTax {
+				t.Errorf("subtotal/discount/tax = %d/%d/%d, want %d/0/%d", inv.SubtotalCents, inv.DiscountCents, inv.TaxAmountCents, tc.wantSubtotal, tc.wantTax)
+			}
+			if inv.TotalAmountCents != tc.wantTotal || inv.AmountDueCents != tc.wantTotal {
+				t.Errorf("total/due = %d/%d, want %d/%d (what the lines say the customer owes)", inv.TotalAmountCents, inv.AmountDueCents, tc.wantTotal, tc.wantTotal)
+			}
+			stored, _ := e.invoices.ListLineItems(context.Background(), "t1", "inv_1")
+			for _, li := range stored {
+				if li.ID == "li_commit" {
+					assertPrepaidLine(t, li, 11800)
+				}
+			}
+		})
 	}
 }
 
@@ -199,8 +307,8 @@ func TestRetryTax_CommitLineStaysOutOfTheRetriedRequest(t *testing.T) {
 	}
 	stored, _ := e.invoices.ListLineItems(context.Background(), "t1", "inv_1")
 	for _, li := range stored {
-		if li.ID == "li_commit" && (li.TaxAmountCents != 0 || li.TotalAmountCents != 10000) {
-			t.Errorf("stored commit line tax/total = %d/%d, want 0/10000", li.TaxAmountCents, li.TotalAmountCents)
+		if li.ID == "li_commit" {
+			assertPrepaidLine(t, li, 10000)
 		}
 	}
 }
