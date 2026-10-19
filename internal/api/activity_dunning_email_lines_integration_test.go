@@ -1,14 +1,18 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http/httptest"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/email"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/leader"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
@@ -189,6 +193,83 @@ func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 		if rs, tst := sortedJSON(normalizeLines(realLines)), sortedJSON(normalizeLines(testLines)); !reflect.DeepEqual(rs, tst) {
 			t.Errorf("%s: the two clocks tell different stories\nreal: %q\ntest: %q", c.name, rs, tst)
 		}
+	}
+}
+
+// TestActivityLines_SkippedEmailSaysWhy: an invoice is finalized with no
+// card on file, so a payment setup email is queued; email delivery is
+// stalled (an SMTP outage, G6), the operator records the customer's wire,
+// and when the dispatcher reaches the email it skips it, because the
+// invoice is paid. Found live on the FLOW E walk, 2026-07-19. Both cards
+// that show the email say why: the invoice's Activity card and the
+// customer's Sent emails card each read the recorded skip reason through
+// their own adapter, so a reason dropped by either one reads "already
+// closed" here.
+func TestActivityLines_SkippedEmailSaysWhy(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	t.Setenv("SMTP_HOST", "smtp.skipped-email.invalid")
+	t.Setenv("PAYMENT_UPDATE_URL", "https://billing.skipped-email.test/update-payment")
+	srv := NewServer(db, clock.Real(), nil)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	tenantID := testutil.CreateTestTenant(t, db, "Skipped Email Co")
+	key := createAPIKeyWithMode(t, db, tenantID, false)
+	call := func(method, path string, req flowReq) flowResp {
+		t.Helper()
+		req.bearer = key
+		return flowDo(t, ts, method, path, req)
+	}
+
+	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
+		"external_id": "skipped-email", "display_name": "Skipped Email", "email": "billing@skipped-email.test",
+	}}).want(t, 201, "create customer").body, "id")
+	invoiceID := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
+		"customer_id": customerID,
+		"line_items":  []map[string]any{{"description": "Skipped email", "quantity": 1, "unit_amount_cents": 4900}},
+	}}).want(t, 201, "create invoice").body, "id")
+	call("POST", "/v1/invoices/"+invoiceID+"/finalize", flowReq{}).want(t, 200, "finalize")
+	call("POST", "/v1/invoices/"+invoiceID+"/record-payment", flowReq{body: map[string]any{"note": "Wire 2051"}}).want(t, 200, "record payment")
+
+	setupLine := func(rows []map[string]any) string {
+		t.Helper()
+		lines := normalizeLines(linesOf(t, rows))
+		for _, l := range lines {
+			if l["kind"] == "email.payment_setup_request" {
+				return summaries([]map[string]any{l})[0]
+			}
+		}
+		return ""
+	}
+	onInvoice := func() string {
+		t.Helper()
+		return setupLine(flowList(call("GET", "/v1/invoices/"+invoiceID+"/payment-timeline", flowReq{}).want(t, 200, "invoice timeline").body, "events"))
+	}
+	if got := onInvoice(); !strings.HasPrefix(got, "Payment setup email queued") {
+		t.Fatalf("before delivery resumes, the invoice card reads %q; want the setup email queued", got)
+	}
+
+	// Delivery resumes: the dispatcher runs as cmd/velox runs it, behind
+	// the leader lease, with the invoice store as its staleness check.
+	ctx, cancel := context.WithCancel(context.Background())
+	d := email.NewDispatcher(srv.EmailOutboxStore, srv.EmailSender, email.DispatcherConfig{Interval: 50 * time.Millisecond}, leader.New(db.Pool, nil))
+	d.SetSettledChecker(srv.EmailSettledChecker)
+	stopped := make(chan struct{})
+	go func() { defer close(stopped); d.Start(ctx) }()
+	got := onInvoice()
+	for deadline := time.Now().Add(15 * time.Second); strings.HasPrefix(got, "Payment setup email queued") && time.Now().Before(deadline); got = onInvoice() {
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	<-stopped
+
+	const want = "Payment setup email not sent | The invoice was already paid"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("invoice Activity card: %q, want it to start %q", got, want)
+	}
+	sent := flowList(call("GET", "/v1/customers/"+customerID+"/sent-emails", flowReq{}).want(t, 200, "sent emails").body, "sent_emails")
+	if got := setupLine(sent); !strings.HasPrefix(got, want) {
+		t.Errorf("Sent emails card: %q, want it to start %q", got, want)
 	}
 }
 

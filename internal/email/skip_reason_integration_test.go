@@ -43,19 +43,16 @@ func TestDispatcher_SkippedEmailRecordsWhy(t *testing.T) {
 				t.Fatalf("sent %v; an email whose invoice is %s must not go out", sender.sent, state)
 			}
 
-			tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+			// Read back the way the invoice's Activity card reads it.
+			rows, err := store.ListByInvoice(ctx, tenantID, "SKIP-"+state)
 			if err != nil {
-				t.Fatalf("begin: %v", err)
+				t.Fatalf("list by invoice: %v", err)
 			}
-			defer postgres.Rollback(tx)
-			var status, reason string
-			if err := tx.QueryRow(
-				`SELECT status, COALESCE(skip_reason, '') FROM email_outbox WHERE id = $1`, id,
-			).Scan(&status, &reason); err != nil {
-				t.Fatalf("read row: %v", err)
+			if len(rows) != 1 || rows[0].ID != id {
+				t.Fatalf("list by invoice: %d rows, want the one row %s", len(rows), id)
 			}
-			if status != "skipped" || reason != state {
-				t.Errorf("row: status %q, skip_reason %q; want skipped, %q", status, reason, state)
+			if rows[0].Status != "skipped" || rows[0].SkipReason != state {
+				t.Errorf("row: status %q, skip reason %q; want skipped, %q", rows[0].Status, rows[0].SkipReason, state)
 			}
 		})
 	}
