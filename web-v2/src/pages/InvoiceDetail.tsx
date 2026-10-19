@@ -1493,8 +1493,11 @@ export default function InvoiceDetailPage() {
                 return (
                 <div key={event.id ?? `${event.source}:${event.event_type}:${event.timestamp}:${event.payment_intent_id ?? ''}`} className="flex gap-4 pb-2 last:pb-0">
                   <div className="flex flex-col items-center">
+                    {/* The status is the line's tone (ADR-128): neutral grey,
+                        success green, warning amber, failure red. */}
                     <div className={cn(
                       'w-2.5 h-2.5 rounded-full mt-1.5',
+                      event.status === 'neutral' ? 'bg-muted-foreground' :
                       event.status === 'succeeded' || event.status === 'resolved' ? 'bg-emerald-500' :
                       event.status === 'failed' || event.status === 'canceled' ? 'bg-destructive' :
                       event.status === 'processing' || event.status === 'scheduled' ? 'bg-blue-500' :
@@ -1508,20 +1511,18 @@ export default function InvoiceDetailPage() {
                       <p className="text-sm text-foreground min-w-0">{event.description}</p>
                       <span className="text-xs text-muted-foreground ml-4 whitespace-nowrap">{formatDateTime(event.timestamp)}</span>
                     </div>
-                    {event.error && (event.status === 'failed' || event.status === 'canceled') && (
-                      <p className="text-xs text-destructive mt-0.5">{event.error}</p>
+                    {/* The problem line: what went wrong on a failure row,
+                        what it means on a warning row. */}
+                    {event.error && (event.status === 'failed' || event.status === 'warning') && (
+                      <p className={cn('text-xs mt-0.5', event.status === 'failed' ? 'text-destructive' : 'text-warning-foreground')}>{event.error}</p>
                     )}
                     {event.amount_cents != null && event.amount_cents > 0 && (
                       <p className="text-xs text-muted-foreground mt-0.5">{formatCents(event.amount_cents, invoice.currency)}</p>
                     )}
-                    {/* Sub-line: payment instrument, attempt count, etc. */}
+                    {/* Meta line: the row's details and who did it, worded
+                        by the backend ("Visa •••• 4242 · After 2 retries"). */}
                     {event.detail && (
                       <p className="text-xs text-muted-foreground mt-0.5">{event.detail}</p>
-                    )}
-                    {event.event_type === 'invoice.paid' && (event.attempt_count ?? 0) > 0 && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        after {event.attempt_count} retry attempt{event.attempt_count === 1 ? '' : 's'}
-                      </p>
                     )}
                     {/* Operator contract, Invariant A: a row whose primary
                         timestamp is on the invoice's simulated calendar but

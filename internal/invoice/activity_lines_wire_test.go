@@ -338,7 +338,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 			{"failed, with the provider's reason", "Billing error", domain.RefundFailed, []domain.AuditEntry{
 				{Action: domain.AuditActionUpdate, Metadata: map[string]any{"action": "refund_status_changed", "refund_status": "failed", "provider_failure_reason": "expired_or_canceled_card"}, CreatedAt: at.Add(time.Minute)},
 				{Action: "credit_note.issued", ActorType: "system", CreatedAt: at},
-			}, "failure", "Card refund failed: expired_or_canceled_card", "CN-1 · Billing error"},
+			}, "failure", "Card refund failed: expired or canceled card", "CN-1 · Billing error"},
 			{"failed, no reason recorded", "Billing error", domain.RefundFailed, nil, "failure", "Card refund failed.", "CN-1"},
 			{"pending", "Billing error", domain.RefundPending, nil, "warning", "The card refund is waiting on the payment provider.", "CN-1"},
 			{"unknown", "Billing error", domain.RefundUnknown, nil, "warning", "The payment provider did not say whether the card refund went through.", "CN-1"},
@@ -569,7 +569,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 			}
 			occurred, _ := time.Parse(time.RFC3339, line["occurred_at"].(string))
 			ts, _ := time.Parse(time.RFC3339, e["timestamp"].(string))
-			if !occurred.Equal(ts) {
+			if !occurred.Truncate(time.Second).Equal(ts) {
 				t.Errorf("%v: line occurred_at %v, timestamp %v", e["id"], occurred, ts)
 			}
 			if _, ok := line["detail"].([]any); !ok {

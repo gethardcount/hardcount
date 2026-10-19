@@ -718,6 +718,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	invoiceH.SetAuditLogger(auditLogger)
 	// ADR-104: timeline lifecycle rows join their wall-clock audit stamps.
 	invoiceH.SetAuditStamps(&invoiceAuditStampsAdapter{logger: auditLogger})
+	// ADR-128: invoice activity rows link the invoice's subscription by name.
+	invoiceH.SetSubscriptionLabeler(&invoiceSubscriptionLabelAdapter{store: subStore})
 	subH.SetAuditLogger(auditLogger)
 	creditNoteH.SetAuditLogger(auditLogger)
 	// CN document email (ADR-082 rider) rides the transactional outbox

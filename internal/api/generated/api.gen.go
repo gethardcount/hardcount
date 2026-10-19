@@ -44,6 +44,93 @@ func (e APIKeyKeyType) Valid() bool {
 	}
 }
 
+// Defines values for ActivityActorKind.
+const (
+	ActivityActorKindApiKey    ActivityActorKind = "api_key"
+	ActivityActorKindAutomatic ActivityActorKind = "automatic"
+	ActivityActorKindCustomer  ActivityActorKind = "customer"
+	ActivityActorKindPerson    ActivityActorKind = "person"
+)
+
+// Valid indicates whether the value is a known member of the ActivityActorKind enum.
+func (e ActivityActorKind) Valid() bool {
+	switch e {
+	case ActivityActorKindApiKey:
+		return true
+	case ActivityActorKindAutomatic:
+		return true
+	case ActivityActorKindCustomer:
+		return true
+	case ActivityActorKindPerson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActivityActorVia.
+const (
+	PaymentPage ActivityActorVia = "payment_page"
+	Portal      ActivityActorVia = "portal"
+)
+
+// Valid indicates whether the value is a known member of the ActivityActorVia enum.
+func (e ActivityActorVia) Valid() bool {
+	switch e {
+	case PaymentPage:
+		return true
+	case Portal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActivityLineTone.
+const (
+	ActivityLineToneFailure ActivityLineTone = "failure"
+	ActivityLineToneNeutral ActivityLineTone = "neutral"
+	ActivityLineToneSuccess ActivityLineTone = "success"
+	ActivityLineToneWarning ActivityLineTone = "warning"
+)
+
+// Valid indicates whether the value is a known member of the ActivityLineTone enum.
+func (e ActivityLineTone) Valid() bool {
+	switch e {
+	case ActivityLineToneFailure:
+		return true
+	case ActivityLineToneNeutral:
+		return true
+	case ActivityLineToneSuccess:
+		return true
+	case ActivityLineToneWarning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActivityLinkKind.
+const (
+	ActivityLinkKindCreditNote   ActivityLinkKind = "credit_note"
+	ActivityLinkKindInvoice      ActivityLinkKind = "invoice"
+	ActivityLinkKindSubscription ActivityLinkKind = "subscription"
+)
+
+// Valid indicates whether the value is a known member of the ActivityLinkKind enum.
+func (e ActivityLinkKind) Valid() bool {
+	switch e {
+	case ActivityLinkKindCreditNote:
+		return true
+	case ActivityLinkKindInvoice:
+		return true
+	case ActivityLinkKindSubscription:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AnalyticsPeriod.
 const (
 	N12m AnalyticsPeriod = "12m"
@@ -175,19 +262,19 @@ func (e AttentionReason) Valid() bool {
 
 // Defines values for AttentionSeverity.
 const (
-	Critical AttentionSeverity = "critical"
-	Info     AttentionSeverity = "info"
-	Warning  AttentionSeverity = "warning"
+	AttentionSeverityCritical AttentionSeverity = "critical"
+	AttentionSeverityInfo     AttentionSeverity = "info"
+	AttentionSeverityWarning  AttentionSeverity = "warning"
 )
 
 // Valid indicates whether the value is a known member of the AttentionSeverity enum.
 func (e AttentionSeverity) Valid() bool {
 	switch e {
-	case Critical:
+	case AttentionSeverityCritical:
 		return true
-	case Info:
+	case AttentionSeverityInfo:
 		return true
-	case Warning:
+	case AttentionSeverityWarning:
 		return true
 	default:
 		return false
@@ -196,19 +283,19 @@ func (e AttentionSeverity) Valid() bool {
 
 // Defines values for AuditLogEntryActorType.
 const (
-	ApiKey AuditLogEntryActorType = "api_key"
-	System AuditLogEntryActorType = "system"
-	User   AuditLogEntryActorType = "user"
+	AuditLogEntryActorTypeApiKey AuditLogEntryActorType = "api_key"
+	AuditLogEntryActorTypeSystem AuditLogEntryActorType = "system"
+	AuditLogEntryActorTypeUser   AuditLogEntryActorType = "user"
 )
 
 // Valid indicates whether the value is a known member of the AuditLogEntryActorType enum.
 func (e AuditLogEntryActorType) Valid() bool {
 	switch e {
-	case ApiKey:
+	case AuditLogEntryActorTypeApiKey:
 		return true
-	case System:
+	case AuditLogEntryActorTypeSystem:
 		return true
-	case User:
+	case AuditLogEntryActorTypeUser:
 		return true
 	default:
 		return false
@@ -1046,6 +1133,30 @@ func (e InvoiceTimelineEventSource) Valid() bool {
 	}
 }
 
+// Defines values for InvoiceTimelineEventStatus.
+const (
+	InvoiceTimelineEventStatusFailed    InvoiceTimelineEventStatus = "failed"
+	InvoiceTimelineEventStatusNeutral   InvoiceTimelineEventStatus = "neutral"
+	InvoiceTimelineEventStatusSucceeded InvoiceTimelineEventStatus = "succeeded"
+	InvoiceTimelineEventStatusWarning   InvoiceTimelineEventStatus = "warning"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceTimelineEventStatus enum.
+func (e InvoiceTimelineEventStatus) Valid() bool {
+	switch e {
+	case InvoiceTimelineEventStatusFailed:
+		return true
+	case InvoiceTimelineEventStatusNeutral:
+		return true
+	case InvoiceTimelineEventStatusSucceeded:
+		return true
+	case InvoiceTimelineEventStatusWarning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ItemChangeType.
 const (
 	ItemChangeTypeAdd      ItemChangeType = "add"
@@ -1609,13 +1720,13 @@ func (e SubscriptionPauseCollectionBehavior) Valid() bool {
 
 // Defines values for SubscriptionTimelineEventSource.
 const (
-	Audit SubscriptionTimelineEventSource = "audit"
+	SubscriptionTimelineEventSourceAudit SubscriptionTimelineEventSource = "audit"
 )
 
 // Valid indicates whether the value is a known member of the SubscriptionTimelineEventSource enum.
 func (e SubscriptionTimelineEventSource) Valid() bool {
 	switch e {
-	case Audit:
+	case SubscriptionTimelineEventSourceAudit:
 		return true
 	default:
 		return false
@@ -1840,19 +1951,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	Failed    WebhookEventDeliveryAttemptStatus = "failed"
-	Pending   WebhookEventDeliveryAttemptStatus = "pending"
-	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
+	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
+	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case Failed:
+	case WebhookEventDeliveryAttemptStatusFailed:
 		return true
-	case Pending:
+	case WebhookEventDeliveryAttemptStatusPending:
 		return true
-	case Succeeded:
+	case WebhookEventDeliveryAttemptStatusSucceeded:
 		return true
 	default:
 		return false
@@ -2941,6 +3052,87 @@ type APIKeyRotation struct {
 
 	// RawKey The new key's full value. Shown only once.
 	RawKey string `json:"raw_key"`
+}
+
+// ActivityActor Who did it. `person` and `api_key` carry the name (a person's email
+// when they have no name), `customer` says where through `via`, and
+// `automatic` is anything Velox did on its own. Absent when no fact
+// written with the row names one.
+type ActivityActor struct {
+	Kind ActivityActorKind `json:"kind"`
+	Name string            `json:"name,omitempty"`
+	Via  ActivityActorVia  `json:"via,omitempty"`
+}
+
+// ActivityActorKind defines model for ActivityActor.Kind.
+type ActivityActorKind string
+
+// ActivityActorVia defines model for ActivityActor.Via.
+type ActivityActorVia string
+
+// ActivityLine One activity row in the words of the activity line standard
+// (ADR-128): a title with no values, the amount when the event moves
+// money, asks for it or cancels money owed, a problem line on failure
+// and warning rows, the meta line's parts and the actor, a tone, and
+// the event's time on the entity's calendar. `recorded_at` is the
+// real-world time, set only for an entity on a test clock.
+type ActivityLine struct {
+	// Actor Who did it. `person` and `api_key` carry the name (a person's email
+	// when they have no name), `customer` says where through `via`, and
+	// `automatic` is anything Velox did on its own. Absent when no fact
+	// written with the row names one.
+	Actor  ActivityActor `json:"actor,omitempty"`
+	Amount ActivityMoney `json:"amount,omitempty"`
+
+	// Detail The meta line before the actor. Each item is one segment, shown
+	// joined by " · "; a segment's parts read as one phrase, for
+	// example a money part followed by the text " refunded to card".
+	Detail [][]ActivityPart `json:"detail"`
+
+	// Id The row's stable key, the same as the event's `id`.
+	Id string `json:"id"`
+
+	// Kind Machine name of the event.
+	Kind       string    `json:"kind"`
+	OccurredAt time.Time `json:"occurred_at"`
+	Problem    string    `json:"problem,omitempty"`
+	RecordedAt time.Time `json:"recorded_at,omitempty"`
+	Title      string    `json:"title"`
+
+	// Tone neutral: something happened. success: money arrived, or was
+	// returned as intended. warning: needs a look, or money will not
+	// be collected. failure: an attempt failed.
+	Tone ActivityLineTone `json:"tone"`
+}
+
+// ActivityLineTone neutral: something happened. success: money arrived, or was
+// returned as intended. warning: needs a look, or money will not
+// be collected. failure: an attempt failed.
+type ActivityLineTone string
+
+// ActivityLink An object the row's own data names, which still exists.
+type ActivityLink struct {
+	Id    string           `json:"id"`
+	Kind  ActivityLinkKind `json:"kind"`
+	Label string           `json:"label"`
+}
+
+// ActivityLinkKind defines model for ActivityLink.Kind.
+type ActivityLinkKind string
+
+// ActivityMoney defines model for ActivityMoney.
+type ActivityMoney struct {
+	Cents    int64  `json:"cents"`
+	Currency string `json:"currency"`
+}
+
+// ActivityPart One piece of a meta segment. Exactly one field is set.
+type ActivityPart struct {
+	// Link An object the row's own data names, which still exists.
+	Link  ActivityLink  `json:"link,omitempty"`
+	Money ActivityMoney `json:"money,omitempty"`
+	Text  string        `json:"text,omitempty"`
+	Time  time.Time     `json:"time,omitempty"`
 }
 
 // AnalyticsMrrMovementPoint defines model for AnalyticsMrrMovementPoint.
@@ -4789,10 +4981,14 @@ type InvoiceTimelineEvent struct {
 	AmountCents  int64  `json:"amount_cents,omitempty"`
 	AttemptCount int    `json:"attempt_count,omitempty"`
 	Currency     string `json:"currency,omitempty"`
-	Description  string `json:"description"`
 
-	// Detail Extra line shown under the description, for example the card used.
-	Detail    string `json:"detail,omitempty"`
+	// Description The line's title.
+	Description string `json:"description"`
+
+	// Detail The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries".
+	Detail string `json:"detail,omitempty"`
+
+	// Error The line's problem.
 	Error     string `json:"error,omitempty"`
 	EventType string `json:"event_type"`
 
@@ -4800,20 +4996,31 @@ type InvoiceTimelineEvent struct {
 	Id string `json:"id"`
 
 	// IsSimulated True when `timestamp` is test-clock time.
-	IsSimulated     bool   `json:"is_simulated,omitempty"`
-	PaymentIntentId string `json:"payment_intent_id,omitempty"`
+	IsSimulated bool `json:"is_simulated,omitempty"`
+
+	// Line One activity row in the words of the activity line standard
+	// (ADR-128): a title with no values, the amount when the event moves
+	// money, asks for it or cancels money owed, a problem line on failure
+	// and warning rows, the meta line's parts and the actor, a tone, and
+	// the event's time on the entity's calendar. `recorded_at` is the
+	// real-world time, set only for an entity on a test clock.
+	Line            ActivityLine `json:"line"`
+	PaymentIntentId string       `json:"payment_intent_id,omitempty"`
 
 	// RecordedAt Real-world time of a row whose `timestamp` is test-clock time.
 	RecordedAt time.Time                  `json:"recorded_at,omitempty"`
 	Source     InvoiceTimelineEventSource `json:"source"`
 
-	// Status Display status, for example succeeded, failed, resolved, escalated or info.
-	Status    string    `json:"status"`
-	Timestamp time.Time `json:"timestamp"`
+	// Status The line's tone in older words, read by the dashboard's dot.
+	Status    InvoiceTimelineEventStatus `json:"status"`
+	Timestamp time.Time                  `json:"timestamp"`
 }
 
 // InvoiceTimelineEventSource defines model for InvoiceTimelineEvent.Source.
 type InvoiceTimelineEventSource string
+
+// InvoiceTimelineEventStatus The line's tone in older words, read by the dashboard's dot.
+type InvoiceTimelineEventStatus string
 
 // InvoiceWithLineItems Response shape for `GET /v1/invoices/{id}`. The handler returns the
 // invoice and its line items as separate top-level keys (rather than

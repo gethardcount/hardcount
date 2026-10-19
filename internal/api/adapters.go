@@ -23,6 +23,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/payment"
 	"github.com/sagarsuperuser/velox/internal/paymentmethods"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/crypto"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -582,27 +583,47 @@ func (a *invoiceUncollectibleAdapter) MarkUncollectible(ctx context.Context, ten
 }
 
 // invoiceAuditStampsAdapter bridges audit.Logger.Query → invoice.AuditStampFetcher
-// (ADR-104: the timeline's read-time wall-stamp enrichment for lifecycle rows).
-// Narrow on purpose: one resource's entries, capped — an invoice's audit trail
-// is dozens of rows at most, and the join only consumes the transition actions.
+// (ADR-104: the timeline's read-time wall-stamp enrichment for lifecycle rows;
+// ADR-128: who did it, for lifecycle, credit-note and resolve rows). Narrow on
+// purpose: one resource's entries, capped — an invoice's, a credit note's or a
+// payment-recovery run's audit trail is dozens of rows at most, and the join
+// only consumes the transition actions.
 type invoiceAuditStampsAdapter struct {
 	logger *audit.Logger
 }
 
-func (a *invoiceAuditStampsAdapter) ListByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.AuditEntry, error) {
+func (a *invoiceAuditStampsAdapter) ListByResource(ctx context.Context, tenantID, resourceType, resourceID string) ([]domain.AuditEntry, error) {
 	// 100 is Query's hard cap (it CLAMPS above that — asking for more
-	// would be a silent fallback). Newest-first: an invoice with >100
+	// would be a silent fallback). Newest-first: a resource with >100
 	// audit rows would lose its OLDEST entries — exactly the transition
 	// stamps the join wants — so such a row renders bare rather than
 	// wrong. Accepted: reaching 100 audit rows on one invoice means ~90
 	// operator sends/exports; revisit with an Action-filtered query if a
 	// real invoice ever gets there.
 	entries, _, err := a.logger.Query(ctx, tenantID, audit.QueryFilter{
-		ResourceType: "invoice",
-		ResourceID:   invoiceID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
 		Limit:        100,
 	})
 	return entries, err
+}
+
+// invoiceSubscriptionLabelAdapter bridges subscription.PostgresStore →
+// invoice.SubscriptionLabeler: the name an invoice's activity rows show on
+// their link to its subscription (ADR-128 rule 8).
+type invoiceSubscriptionLabelAdapter struct {
+	store *subscription.PostgresStore
+}
+
+func (a *invoiceSubscriptionLabelAdapter) SubscriptionLabel(ctx context.Context, tenantID, subscriptionID string) (string, error) {
+	sub, err := a.store.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
+		return "", err
+	}
+	if sub.DisplayName != "" {
+		return sub.DisplayName, nil
+	}
+	return sub.Code, nil
 }
 
 // dunningTimelineAdapter bridges dunning.Store → invoice.DunningTimelineFetcher.
@@ -689,21 +710,45 @@ func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID,
 		// stamp attempt_number for pairing with retry rows.
 		attempt, _ := r.Payload["attempt_number"].(float64)
 		trigger, _ := r.Payload["trigger"].(string)
+		cnNumber, _ := r.Payload["credit_note_number"].(string)
 		out = append(out, invoice.EmailEventRow{
-			ID:             r.ID,
-			EmailType:      r.EmailType,
-			Status:         r.Status,
-			DeliveryState:  r.DeliveryState,
-			CreatedAt:      r.CreatedAt,
-			DispatchedAt:   r.DispatchedAt,
-			LastError:      r.LastError,
-			To:             to,
-			AttemptNumber:  int(attempt),
-			Trigger:        trigger,
-			SimEffectiveAt: r.SimEffectiveAt,
+			ID:               r.ID,
+			EmailType:        r.EmailType,
+			Status:           r.Status,
+			DeliveryState:    r.DeliveryState,
+			CreatedAt:        r.CreatedAt,
+			DispatchedAt:     r.DispatchedAt,
+			LastError:        r.LastError,
+			To:               to,
+			AttemptNumber:    int(attempt),
+			Trigger:          trigger,
+			SimEffectiveAt:   r.SimEffectiveAt,
+			SendFailure:      emailSendFailure(r.Status, r.LastError),
+			CreditNoteNumber: cnNumber,
 		})
 	}
 	return out, nil
+}
+
+// emailSendFailure classifies a failed outbox row's stored error into a send
+// failure the activity line names in plain words (activity.SendFailure*). The
+// stored error is the dispatcher's hErr.Error(), which keeps each sentinel's
+// own message, so matching the sentinel's text is an exact key into this
+// package's own errors. Anything else has no plain-words name and stays in the
+// server's records.
+func emailSendFailure(status, lastError string) string {
+	if status != "failed" || lastError == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(lastError, email.ErrSMTPNotConfigured.Error()):
+		return activity.SendFailureSMTPNotConfigured
+	case strings.Contains(lastError, email.ErrRecipientSuppressed.Error()):
+		return activity.SendFailureRecipientSuppressed
+	case strings.Contains(lastError, email.ErrInvalidRecipient.Error()):
+		return activity.SendFailureInvalidRecipient
+	}
+	return ""
 }
 
 // paymentSetupEmailSender is the narrow interface noPaymentMethodNotifierAdapter
