@@ -398,7 +398,9 @@ func serve() {
 	// Stage 3 (≤ 30s): scheduler + dispatchers. Their ticks run on ctx
 	// (cancelled above) and abort atomically at their next DB call; this
 	// wait exists for the WithoutCancel completions — a Stripe charge
-	// bounded by the 30s client timeout, an outbox row's detached mark —
+	// bounded by the 30s client timeout, a tax retry's finalize (its
+	// CommitTax bounded by the 30s client timeout), an outbox row's
+	// detached mark —
 	// so a mid-tick run lands its result instead of leaving a claimed row
 	// for the lease to expire. Bounded so a hung worker cannot prevent exit.
 	done := make(chan struct{})

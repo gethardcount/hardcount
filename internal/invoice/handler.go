@@ -1327,7 +1327,11 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 // success or post-retry failure (a "still failing" retry is not an
 // HTTP error — the dashboard wants the new code to render). 409 when
 // the gate fails (status != draft, or tax_status not retryable). 404
-// when the invoice doesn't exist.
+// when the invoice doesn't exist. When the tax resolves but the
+// auto-finalize does not happen (the pause state could not be read, or
+// finalize failed), the tax result is kept and the call fails: 500 for a
+// database error, 409 for a state conflict. The error names the remedy;
+// no retry_tax audit row is written for that click.
 func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
