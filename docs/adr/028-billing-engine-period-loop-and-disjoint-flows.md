@@ -265,6 +265,18 @@ allowed target so the operator can fix the picker without guessing.
 year alignment) — using a fixed nanosecond duration would drift on
 leap years.
 
+**Correction (2026-10-20):** the cap is not Stripe parity. Stripe's
+test-clock guide says: "Advance time in intervals of up to two. The
+length of the interval is based on the shortest service period
+associated with the subscription … if you have a monthly subscription,
+you can only advance up to two months at a time. If you haven't set any
+subscriptions or subscription schedules, you can advance up to two years
+from the initial frozen time"
+([API and advanced usage](https://docs.stripe.com/billing/testing/test-clocks/api-advanced-usage),
+read 2026-10-20). The 1-year cap stays as Velox's own, for the three
+reasons under "Why a cap". The error no longer ends with
+"(Stripe parity)", and the code comments say Velox's own cap.
+
 ## Compatibility
 
 - API surface unchanged. Operators see identical UI semantics

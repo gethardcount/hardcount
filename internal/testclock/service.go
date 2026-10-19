@@ -368,8 +368,10 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 	if !newTime.After(current.FrozenTime) {
 		return domain.TestClock{}, errs.Invalid("frozen_time", "must be strictly after current frozen_time")
 	}
-	// Stripe-parity advance window cap (ADR-028 amendment): a single
-	// Advance call shifts frozen_time by ≤ 1 year. Larger ranges are
+	// Advance window cap (ADR-028 amendment): a single Advance call
+	// shifts frozen_time by ≤ 1 year. This is Velox's own cap; Stripe
+	// allows two intervals of the shortest subscription period (two
+	// years on a clock with no subscriptions). Larger ranges are
 	// chunked into successive advances by the operator. Reasons:
 	//   - Predictable per-click resource use (operator can't trigger
 	//     a multi-decade catchup that exceeds the 10-min worker
@@ -384,7 +386,7 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 	maxAllowed := current.FrozenTime.AddDate(1, 0, 0)
 	if newTime.After(maxAllowed) {
 		return domain.TestClock{}, errs.Invalid("frozen_time",
-			"advance cannot exceed 1 year per call — chunk longer ranges into successive advances (Stripe parity)")
+			"advance cannot exceed 1 year per call — chunk longer ranges into successive advances")
 	}
 
 	advancing, err := s.store.MarkAdvancing(ctx, tenantID, id, newTime)

@@ -232,8 +232,14 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   exists only in test mode. [More](quick-start.md)
 - **catch-up (catchup)**: The work Velox does after a test clock moves forward. It
   runs every trial end, billing period, threshold, retry, dunning step and
-  credit expiry that fell in the skipped time. The clock then returns to
-  `ready`, or to `internal_failure` if any step failed.
+  credit expiry that fell in the skipped time. It runs them by kind, not in
+  time order: trial ends and billing periods first, then payment retries
+  and dunning steps. So when a dunning policy cancels or pauses a
+  subscription, move the clock to the day after the invoice's last retry
+  first, then to the next billing date. One longer move bills a period a
+  real clock would not
+  ([#1276](https://github.com/getvelox/velox/issues/1276)). The clock then
+  returns to `ready`, or to `internal_failure` if any step failed.
   [More](adr/015-test-clock-async-catchup.md)
 - **clock-pinned**: Describes a customer on a test clock, and everything it
   owns (subscriptions, invoices, credits). Its time comes from the clock,
