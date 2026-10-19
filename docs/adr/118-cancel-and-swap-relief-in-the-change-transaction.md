@@ -1,10 +1,10 @@
 # ADR-118: Cancel and plan-swap relief is written in the change's transaction
 
 **Date:** 2026-10-12
-**Status:** Accepted. **Amended 2026-10-19:** after a cancel commits, the
-relief is issued before the final invoice is collected, so the relief
-reduces the final invoice; see the
-[amendment](#amendment-2026-10-19-the-relief-is-issued-before-the-final-invoice-is-collected).
+**Status:** Accepted (amended 2026-10-19: after a cancel commits, the relief
+is issued before the final invoice is collected, so the relief reduces the
+final invoice; see the
+[amendment](#amendment-2026-10-19-the-relief-is-issued-before-the-final-invoice-is-collected))
 
 ## Summary
 
@@ -18,6 +18,10 @@ in the same transaction as the cancel or swap. There are three kinds:
 
 If any part fails, the cancel or swap rolls back and is retried. The
 post-commit fallback paths that could lose relief silently are deleted.
+
+After the commit, the relief's credit notes are issued before the cancel's
+final invoice is collected, so the relief reduces that invoice (amended
+2026-10-19).
 
 ## Context
 
@@ -219,6 +223,13 @@ through one helper, `Service.finishReliefThenCollect` in
 `FinalizeOnCreateInvoice`. The writes inside the transaction, and their
 order, are unchanged. Neither of those writes applies credits.
 
+The helper runs both legs on a context the caller cannot cancel, as
+collection already did. The caller's context can end right after the commit:
+an API request's timeout or a client disconnect, a billing run stopping on
+shutdown or a lost lease, a dunning tick stopping. Before, the relief's
+`Issue` then failed on its first database call while collection still ran,
+so the card was charged the whole final invoice.
+
 What the relief now does to the final invoice, by share:
 
 - **Paid share.** Its credit note credits the balance, and collection
@@ -233,8 +244,8 @@ What the relief now does to the final invoice, by share:
 
 **Residual, not closed.** The relief reduces the final invoice only when
 `FinishRelief` issues the credit notes before the final invoice is
-collected. In three cases the final invoice is collected first, and the
-relief stays on the balance, as it did before this amendment:
+collected. In four cases the final invoice is collected first, without the
+relief, as it was before this amendment:
 
 - The process crashes between the commit and `FinishRelief`.
   `RetryPendingClawbackIssue` and the auto-charge sweep both recover their
@@ -243,11 +254,20 @@ relief stays on the balance, as it did before this amendment:
   the note later.
 - An auto-charge sweep tick claims the final invoice between the commit and
   the end of `FinishRelief`.
+- The credit note's invoice is unpaid and still a draft, or has a charge in
+  flight. `Issue` holds the note and returns no error (ADR-059 for a charge
+  in flight, this ADR for a draft), so nothing is logged and collection
+  runs. `RetryPendingClawbackIssue` issues the note once that invoice is
+  finalized or its charge settles. If the charge succeeded, the invoice is
+  paid by then, so the note credits the balance.
 
-In each case no money is lost: the customer pays the final invoice and keeps
-the relief as balance credit. Closing them would move the credit grant into
-the cancel's transaction, which ADR-118 keeps after commit. That waits until
-one of them is seen in production.
+In each case no money is lost. The customer pays the final invoice in full
+and gets the relief later: as balance credit, or as a lower amount due on
+the invoice the note was held for. Closing the first three would move the
+credit grant into the cancel's transaction, which ADR-118 keeps after
+commit. That waits until one of them is seen in production. The fourth is
+the hold doing its job: what the note can relieve is not known until the
+charge settles or the draft is finalized.
 
 **Tests.**
 
@@ -255,5 +275,8 @@ one of them is seen in production.
   runs on real Postgres. It covers the immediate and the scheduled cancel,
   each with a card on file and with no card. In one case the relief is
   smaller than the final invoice; in the other it is larger.
+  A third case has an unpaid day-1 invoice with customer credits applied:
+  the credits the relief returns reduce the final invoice.
 - `internal/subscription/relief_before_collect_test.go` checks the order on
-  all three callers.
+  all three callers, and that both legs still run on a live context when
+  the caller's context ends right after the commit.

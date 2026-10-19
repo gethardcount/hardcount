@@ -1752,9 +1752,23 @@ func (s *Service) FinalizeCrossIntervalSwap(ctx context.Context, tenantID string
 // In the other order a card on file was charged the whole final invoice of a
 // cancel, and the relief was left on the balance of a customer with no
 // subscription. With no card, the no-card email and no-payment dunning went
-// out for the whole amount. Each leg is durable and recovered by its own
-// sweep if it fails here.
+// out for the whole amount.
+//
+// If a step fails here, the credit notes, the tax commit and the collection
+// are each picked up by their own sweep (RetryPendingClawbackIssue,
+// RetryPendingTaxCommit, the auto-charge sweep). The invoice.finalized
+// webhook is not: no sweep sends it again.
 func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscription, r domain.Relief, inv domain.Invoice) {
+	// The change has committed, so both legs run to the end even if the
+	// caller's context ends now: an API request's timeout or a client
+	// disconnect, a billing run stopping on shutdown or a lost lease, a
+	// dunning tick stopping. Collection already ignores the caller's
+	// cancellation (CollectInvoice). If the relief did not, Issue failed on
+	// its first database call, and the card was charged the whole final
+	// invoice with the credit left on the balance (#1286 review). Each Stripe
+	// call is bounded by the client's own 30s timeout, and shutdown's
+	// published budget bounds how long the process waits for this.
+	ctx = context.WithoutCancel(ctx)
 	if s.biller == nil {
 		return
 	}

@@ -157,7 +157,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [115](115-one-closer-for-the-billing-period.md) | 2026-08-30 | Accepted | Billing | Every period write locks the subscription and rechecks its period snapshot first |
 | [116](116-collection-intent-at-finalize-one-collector.md) | 2026-10-08 | Accepted (amended) | Payments | Finalize queues the invoice in the same write; one collector charges every queued invoice |
 | [117](117-one-payment-intent-per-invoice-deferred.md) | 2026-10-11 | Proposed | Payments | One PaymentIntent per invoice considered and deferred; Velox keeps one per charge attempt |
-| [118](118-cancel-and-swap-relief-in-the-change-transaction.md) | 2026-10-12 | Accepted | Credits | Credit for unused time on cancel or plan swap is written in the same transaction |
+| [118](118-cancel-and-swap-relief-in-the-change-transaction.md) | 2026-10-12 | Accepted (amended) | Credits | Credit for unused time on cancel or plan swap is written in the same transaction |
 | [119](119-billing-failure-record-keyed-to-the-due-instant.md) | 2026-10-12 | Accepted | Billing | Billing failures are saved on the subscription; retries back off and park after eight |
 | [120](120-invoice-grace-period-for-late-usage.md) | 2026-10-14 | Accepted | Billing | Invoices are built after a grace period (default 1h); later usage is not billed automatically |
 | [121](121-customer-usage-cards-open-on-the-billing-period.md) | 2026-10-16 | Accepted | Pricing & usage | The customer page's Activity and Margin cards open on the current billing period |
