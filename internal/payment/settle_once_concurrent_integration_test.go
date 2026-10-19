@@ -323,6 +323,12 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			errs := race([]func() error{
 				func() error {
 					_, err := r.stripe.ChargeInvoice(r.ctx, tenantID, inv, hold, "cus_stripe_race", "pm_race_4242")
+					if errors.Is(err, payment.ErrPaymentTransient) {
+						// A webhook racer settled the invoice before the charge was
+						// sent, so its re-check refused to send (ADR-127): the
+						// payment is still recorded once, by the webhook.
+						return nil
+					}
 					return err
 				},
 				webhookRacer, webhookRacer, webhookRacer,
