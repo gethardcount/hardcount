@@ -414,6 +414,11 @@ jobs:
       - name: Run Playwright
         run: cd web-v2 && npx playwright test
 
+      # TEMPORARY (removed before merge): the e2e README asks for a new spec
+      # to pass five times in a row; local Docker is down, so it runs here.
+      - name: Repeat activity.spec.ts five times (temporary)
+        run: cd web-v2 && npx playwright test activity --repeat-each 5 --retries 0
+
       # The activity cards on both clocks (activity.spec.ts), on every run,
       # so a PR's shots can be compared with main's.
       - name: Upload activity screenshots
