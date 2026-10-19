@@ -3,9 +3,15 @@ package invoice
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
@@ -65,6 +71,78 @@ func TestRetryTax_FinalizeFailureIsAnError(t *testing.T) {
 	})
 }
 
+// rivalFinalizingRetrier resolves the tax, then a rival finalizes the row
+// before RetryTax's own finalize reads it: the connect fan-out and the
+// tax_retry sweep retrying the same provider_not_configured row, or an
+// operator's Finalize click.
+type rivalFinalizingRetrier struct {
+	stubTaxRetrier
+}
+
+func (f *rivalFinalizingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
+	inv, err := f.stubTaxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID)
+	if err != nil {
+		return inv, err
+	}
+	if _, err := f.store.UpdateStatus(ctx, tenantID, invoiceID, domain.InvoiceFinalized); err != nil {
+		return domain.Invoice{}, err
+	}
+	return inv, nil
+}
+
+// TestRetryTax_RivalFinalizeWonIsNotAnError: when a rival finalized the
+// invoice first, nothing is owed. RetryTax must not report it as "not
+// finalized … finalize it", and the sweep must not log an ERROR for it. The
+// draft→finalized CAS half of this race is pinned on real Postgres in
+// TestRetryTax_RivalFinalizeWinsTheCAS.
+func TestRetryTax_RivalFinalizeWonIsNotAnError(t *testing.T) {
+	mem := newMemStore()
+	mem.invoices["inv_1"] = taxPendingCycleDraft("inv_1")
+	svc := NewService(mem, nil, nil)
+	svc.SetTaxRetrier(&rivalFinalizingRetrier{stubTaxRetrier{store: mem}})
+
+	out, err := svc.RetryTax(context.Background(), "t1", "inv_1")
+	if err != nil {
+		t.Fatalf("RetryTax: %v; want nil, the invoice is finalized and nothing is owed", err)
+	}
+	if out.Status != domain.InvoiceFinalized {
+		t.Errorf("returned status = %s, want finalized (the row as it is now)", out.Status)
+	}
+}
+
+// TestRetryTaxHandler_FinalizeFailureStillAudited: a click whose tax write
+// committed and whose finalize then failed still changed the invoice's tax and
+// total, so it writes its retry_tax audit row before answering the error.
+func TestRetryTaxHandler_FinalizeFailureStillAudited(t *testing.T) {
+	mem := newMemStore()
+	draft := taxPendingCycleDraft("inv_1")
+	draft.InvoiceNumber = "INV-001"
+	mem.invoices["inv_1"] = draft
+	svc := NewService(finalizeFailingStore{mem}, nil, nil)
+	svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
+	aud := &capturingInvoiceAudit{}
+	h := &Handler{svc: svc, auditLogger: aud}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/inv_1/retry-tax", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "inv_1")
+	reqCtx := context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1")
+	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
+	rr := httptest.NewRecorder()
+	h.retryTax(rr, req.WithContext(reqCtx))
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (finalize failed on a database error). body=%s", rr.Code, rr.Body.String())
+	}
+	entry, ok := aud.firstOf(domain.AuditActionRetryTax)
+	if !ok {
+		t.Fatalf("no retry_tax audit row; got actions=%v. The click rewrote the invoice's tax and total", aud.actions())
+	}
+	if entry.label != "INV-001" || entry.meta["tax_status"] != domain.InvoiceTaxOK {
+		t.Errorf("audit label = %q, tax_status = %v; want INV-001 and ok", entry.label, entry.meta["tax_status"])
+	}
+}
+
 // cancellingRetrier resolves tax like stubTaxRetrier and cancels the caller's
 // ctx on its first call: a SIGTERM or a lost lease while row 1 is in flight.
 // Like the real engine, it fails at once on a done ctx.
@@ -122,15 +200,20 @@ func (f *cancellingReverser) ReverseTax(ctx context.Context, _ string, req tax.R
 }
 
 // TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone (RT-O1): once shutdown or a
-// lost lease cancels the tick, each tax loop stops before its next row and
-// adds no error for the stop, as processAutoCharge does. Before, every
-// remaining row was attempted and logged a "context canceled" error.
+// lost lease cancels the tick, each tax loop stops before its next row. Before,
+// every remaining row was attempted and logged a "context canceled" error. A
+// sweep adds no error for the stop, as processAutoCharge does: its next tick
+// lists the same rows. retryStuck serves the one-shot fan-outs (Stripe
+// connect, billing-profile save), which no tick repeats, so its stop is one
+// error naming the rows it left.
 func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 	cases := []struct {
 		name string
 		// run drives one loop over two rows with a fake that cancels ctx
 		// during the first; it returns the loop's result and the fake's calls.
 		run func(ctx context.Context, cancel context.CancelFunc) (processed int, errs []error, calls int)
+		// oneShot: no next tick lists the rows left, so the stop is an error.
+		oneShot bool
 	}{
 		{"processTaxRetryBatch (tax_retry sweep, clock catch-up)", func(ctx context.Context, cancel context.CancelFunc) (int, []error, int) {
 			mem := newMemStore()
@@ -143,7 +226,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			svc.SetTaxRetrier(f)
 			n, errs := svc.processTaxRetryBatch(ctx, rows)
 			return n, errs, f.calls
-		}},
+		}, false},
 		{"retryStuck (connect and billing-profile fan-outs)", func(ctx context.Context, cancel context.CancelFunc) (int, []error, int) {
 			mem := newMemStore()
 			rows := []domain.Invoice{taxPendingCycleDraft("inv_1"), taxPendingCycleDraft("inv_2")}
@@ -155,7 +238,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			svc.SetTaxRetrier(f)
 			n, errs := svc.retryStuck(ctx, "t1", rows)
 			return n, errs, f.calls
-		}},
+		}, true},
 		{"RetryPendingTaxCommit (tax_commit sweep)", func(ctx context.Context, cancel context.CancelFunc) (int, []error, int) {
 			mem := newMemStore()
 			for _, id := range []string{"inv_1", "inv_2"} {
@@ -169,7 +252,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			svc.SetTaxCommitter(f)
 			n, errs := svc.RetryPendingTaxCommit(ctx, 50)
 			return n, errs, f.calls
-		}},
+		}, false},
 		{"RetryPendingTaxReversal (tax_reversal sweep)", func(ctx context.Context, cancel context.CancelFunc) (int, []error, int) {
 			mem := newMemStore()
 			for _, id := range []string{"inv_1", "inv_2"} {
@@ -184,7 +267,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			svc.SetTaxReverser(f)
 			n, errs := svc.RetryPendingTaxReversal(ctx, 50)
 			return n, errs, f.calls
-		}},
+		}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -194,8 +277,11 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			if calls != 1 {
 				t.Errorf("rows attempted = %d, want 1: the loop must stop before the next row once ctx is done", calls)
 			}
-			if len(errs) != 0 {
-				t.Errorf("errors = %v, want none: a stop is not a failed row", errs)
+			switch {
+			case c.oneShot && (len(errs) != 1 || !strings.Contains(errs[0].Error(), "1 of 2")):
+				t.Errorf("errors = %v, want one naming the 1 of 2 rows left: no tick retries a fan-out", errs)
+			case !c.oneShot && len(errs) != 0:
+				t.Errorf("errors = %v, want none: the next tick lists the rows left", errs)
 			}
 			if processed != 1 {
 				t.Errorf("processed = %d, want 1 (row 1 completed before the cancel was seen)", processed)

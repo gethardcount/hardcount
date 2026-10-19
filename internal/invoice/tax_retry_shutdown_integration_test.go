@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
@@ -72,6 +73,63 @@ func (r *snapRig) subTaxPendingDraft(t *testing.T, num string, paused bool) stri
 	}
 	r.svc.SetSubscriptionPauseReader(subs)
 	return d.ID
+}
+
+// rivalAtCASStore runs rival once, just before RetryTax's own draft→finalized
+// write: the rival passed the same draft check and wins the CAS first.
+type rivalAtCASStore struct {
+	*PostgresStore
+	rival func()
+}
+
+func (s *rivalAtCASStore) UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
+	if status == domain.InvoiceFinalized && s.rival != nil {
+		rival := s.rival
+		s.rival = nil
+		rival()
+	}
+	return s.PostgresStore.UpdateStatus(ctx, tenantID, id, status)
+}
+
+// TestRetryTax_RivalFinalizeWinsTheCAS: the connect fan-out and the tax_retry
+// sweep both list provider_not_configured rows and can retry the same one at
+// once; an operator can click Finalize as the tax lands. Here the rival
+// finalizes between RetryTax's draft check and its own write, so the real
+// draft→finalized CAS refuses the loser. Nothing is owed then: RetryTax
+// returns the finalized invoice and no error, and the loser does not run
+// finalize's tail again (a second public token would replace the link the
+// winner made).
+func TestRetryTax_RivalFinalizeWinsTheCAS(t *testing.T) {
+	r := newSnapRig(t, "G7 Rival Finalize Corp")
+	id := r.taxPendingDraft(t, "G7-RIVAL")
+
+	var winner domain.Invoice
+	store := &rivalAtCASStore{PostgresStore: r.store, rival: func() {
+		var err error
+		if winner, err = r.svc.Finalize(r.ctx, r.tenantID, id); err != nil {
+			t.Fatalf("rival finalize: %v", err)
+		}
+	}}
+	svc := NewService(store, clock.Real(), r.settings)
+	svc.SetTaxRetrier(&resolvingTaxRetrier{db: r.db, store: r.store})
+
+	out, err := svc.RetryTax(r.ctx, r.tenantID, id)
+	if err != nil {
+		t.Fatalf("RetryTax: %v; want nil, a rival finalized the invoice and nothing is owed", err)
+	}
+	if winner.ID == "" {
+		t.Fatal("the rival never ran: the test did not reach RetryTax's finalize write")
+	}
+	got, err := r.store.Get(r.ctx, r.tenantID, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != domain.InvoiceFinalized || out.Status != domain.InvoiceFinalized {
+		t.Errorf("row status = %s, returned status = %s; want both finalized", got.Status, out.Status)
+	}
+	if got.PublicToken == "" || got.PublicToken != winner.PublicToken {
+		t.Errorf("public token = %q, want the winner's %q: the loser ran finalize's tail", got.PublicToken, winner.PublicToken)
+	}
 }
 
 func TestRetryTax_CancelAfterTaxCommit(t *testing.T) {
