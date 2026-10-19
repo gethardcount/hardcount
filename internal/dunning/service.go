@@ -35,13 +35,13 @@ type RetryError struct {
 func (e *RetryError) Error() string { return e.Err.Error() }
 func (e *RetryError) Unwrap() error { return e.Err }
 
-// ErrTransientSkip signals that the PaymentRetrier could not attempt a
-// charge this tick — the Stripe call never happened, so dunning must NOT
-// tick attempt_count or emit a failure event. Typical causes: per-tenant
-// circuit breaker open, context timeout fired before the Stripe API call.
-// The adapter that bridges payment → dunning maps payment's internal
-// sentinel to this dunning-visible one so peer domains don't import each
-// other.
+// ErrTransientSkip signals that this tick's retry got no definite answer, so
+// dunning must NOT tick attempt_count or emit a failure event; the next tick
+// retries. The PaymentRetrier returns it for everything except a definite
+// decline, no card, or a card refused for good: the circuit breaker open,
+// Stripe rate limiting or unreachable, an unconfirmed outcome, a database
+// error before or after the charge. The adapter maps payment's errors to
+// this dunning-visible sentinel so peer domains don't import each other.
 var ErrTransientSkip = errors.New("dunning retry skipped: upstream transient")
 
 // PaymentRetrier retries a payment for an invoice.
@@ -778,12 +778,12 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		}()
 	}
 
-	// Transient skip: the Stripe call never happened (circuit breaker open or
-	// timeout before the call). This is NOT a dunning attempt — rewind the attempt we
-	// recorded above (count + last_attempt_at) so the run looks as it did before this
-	// tick, don't log a failure event or reschedule, and let the next scheduler tick
-	// retry. A five-minute Stripe outage should not burn a tenant's entire retry
-	// budget.
+	// Transient skip: no definite answer (see ErrTransientSkip). This is NOT a
+	// dunning attempt — rewind the attempt we recorded above (count +
+	// last_attempt_at) so the run looks as it did before this tick, don't log a
+	// failure event or reschedule, and let the next scheduler tick retry. A
+	// five-minute Stripe outage or a dropped database connection should not
+	// burn a tenant's retry budget.
 	if errors.Is(retryErr, ErrTransientSkip) {
 		run.AttemptCount--
 		run.LastAttemptAt = prevLastAttemptAt
@@ -801,7 +801,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
 		}
 		retryPanic.Repanic()
-		slog.Info("dunning retry skipped — upstream transient (breaker/timeout)",
+		slog.Info("dunning retry skipped — no definite answer",
 			"run_id", run.ID, "invoice_id", run.InvoiceID)
 		return nil
 	}
