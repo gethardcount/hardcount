@@ -1397,16 +1397,22 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			"immediate": input.Immediate,
 		}
 		addProrationMeta(payload, result.Proration, h.planCurrency(ctx, tenantID, result.Item.PlanID))
+		// The item as the change found it under the subscription row lock
+		// (#1270): the plan and quantity it moved from. Every path sets it,
+		// a scheduled change included, which keeps the item on this plan
+		// until the boundary; oldPlanID and oldQuantity are read only for
+		// changes that prorate.
+		was := result.pricedFrom.item
 		if input.Quantity != nil {
 			payload["action"] = domain.SubAuditItemQuantityChanged
 			payload["quantity"] = *input.Quantity
 			payload["plan_id"] = result.Item.PlanID
-			if oldQuantity > 0 {
-				payload["old_quantity"] = oldQuantity
+			if was.Quantity > 0 {
+				payload["old_quantity"] = was.Quantity
 			}
 		} else {
 			payload["action"] = domain.SubAuditItemPlanChanged
-			payload["old_plan_id"] = oldPlanID
+			payload["old_plan_id"] = was.PlanID
 			payload["new_plan_id"] = input.NewPlanID
 			// A scheduled change names the boundary it lands on.
 			if !input.Immediate && result.Item.PendingPlanEffectiveAt != nil {

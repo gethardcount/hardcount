@@ -257,14 +257,19 @@ func describeItemUpdated(meta map[string]any, lb lineLabels) activity.Line {
 		}
 		// A change that has not happened yet is not "changed".
 		l.Kind, l.Title = kindPlanChangeScheduled, "Plan change scheduled"
-		when := "at renewal"
-		if arrow != "" {
+		when := "At renewal"
+		switch newPlan := metaString(meta, "new_plan_id"); {
+		case arrow != "":
 			when = arrow + " at renewal"
+		case newPlan != "":
+			// Rows written before the old plan was recorded on a scheduled
+			// change name only the new one, as "To 5" does for a quantity.
+			when = "To " + lb.plan(newPlan) + " at renewal"
 		}
 		if t, ok := metaTime(meta, "effective_at"); ok {
 			l.Detail = append(l.Detail, activity.Segment{activity.T(when + " on "), activity.At(t)})
 		} else {
-			l.Detail = append(l.Detail, activity.Text(capitalize(when)))
+			l.Detail = append(l.Detail, activity.Text(when))
 		}
 	case domain.SubAuditItemQuantityChanged:
 		// A quantity change always applies at once (UpdateItem settles it in
@@ -417,13 +422,6 @@ func failedTriesText(n int64) string {
 		return "After 1 failed try"
 	}
 	return fmt.Sprintf("After %d failed tries", n)
-}
-
-func capitalize(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // metaString reads a string from audit metadata.

@@ -419,6 +419,9 @@ func goldenActionCases(t *testing.T) []actionCase {
 			}
 			add(name+"/at renewal", parent, m(map[string]any{"item_id": "si_1", "immediate": false, "old_plan_id": "pln_pro", "new_plan_id": "pln_basic", "effective_at": at(28)}))
 			add(name+"/at renewal legacy", parent, m(map[string]any{"item_id": "si_1", "immediate": false, "old_plan_id": "pln_pro", "new_plan_id": "pln_basic"}))
+			// Before this PR a scheduled change was written with an empty
+			// old_plan_id and no effective_at.
+			add(name+"/at renewal legacy no old plan", parent, m(map[string]any{"item_id": "si_1", "immediate": false, "old_plan_id": "", "new_plan_id": "pln_basic"}))
 		case domain.SubAuditItemQuantityChanged:
 			add(name, parent, m(map[string]any{"item_id": "si_1", "plan_id": "pln_seat", "old_quantity": float64(3), "quantity": float64(5), "immediate": false}))
 			add(name+"/proration invoice", parent, with(m(map[string]any{"item_id": "si_1", "plan_id": "pln_seat", "old_quantity": float64(3), "quantity": float64(5), "immediate": true}), prorations["invoice"]))

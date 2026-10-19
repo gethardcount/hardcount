@@ -2012,6 +2012,28 @@
     ]
   },
   {
+    "case": "subscription.item_updated/item_plan_changed/at renewal legacy no old plan",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/at renewal legacy no old plan",
+      "kind": "subscription.plan_change_scheduled",
+      "title": "Plan change scheduled",
+      "detail": [
+        [
+          {
+            "text": "To Basic at renewal"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan change scheduled",
+      "meta: To Basic at renewal",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "subscription.item_updated/item_quantity_changed",
     "line": {
       "id": "subscription.item_updated/item_quantity_changed",
