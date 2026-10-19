@@ -27,25 +27,32 @@ const lockWaitTimeout = 15 * time.Second
 // default) of a statement in pg_stat_activity, so for a long statement match
 // text near its start.
 //
-// If no such backend appears within 15 seconds the test fails with "no
-// backend blocked". That usually means the code under test no longer takes
+// If no such backend appears within 15 seconds the test fails with "0 of 1
+// backends blocked". That usually means the code under test no longer takes
 // the lock the test is about, or takes a different one first.
 func WaitForLockWaiter(t *testing.T, ctx context.Context, admin *sql.DB, queryLike string) {
 	t.Helper()
+	WaitForLockWaiters(t, ctx, admin, queryLike, 1)
+}
+
+// WaitForLockWaiters is WaitForLockWaiter for a test that sends several
+// requests behind one lock: it returns once at least n backends wait.
+func WaitForLockWaiters(t *testing.T, ctx context.Context, admin *sql.DB, queryLike string, n int) {
+	t.Helper()
 	deadline := time.Now().Add(lockWaitTimeout)
 	for {
-		var n int
+		var waiting int
 		if err := admin.QueryRowContext(ctx, `
 			SELECT count(*) FROM pg_stat_activity
 			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE $1
-		`, "%"+queryLike+"%").Scan(&n); err != nil {
+		`, "%"+queryLike+"%").Scan(&waiting); err != nil {
 			t.Fatalf("WaitForLockWaiter: read pg_stat_activity: %v", err)
 		}
-		if n > 0 {
+		if waiting >= n {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no backend blocked on a lock in a statement matching %q within %s", queryLike, lockWaitTimeout)
+			t.Fatalf("%d of %d backends blocked on a lock in a statement matching %q within %s", waiting, n, queryLike, lockWaitTimeout)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

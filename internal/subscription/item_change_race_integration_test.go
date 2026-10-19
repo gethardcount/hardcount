@@ -46,7 +46,13 @@ const (
 	raceBasicCents  = 3000
 	raceProCents    = 6000
 	raceKeeperCents = 1000
+	raceMeterACents = 4000
+	raceMeterBCents = 2000
 )
+
+// raceMeter is billed by both the meter-a and the meter-b plan: one
+// subscription may have an item on one of them, never on both.
+const raceMeter = "mtr_item_race_tokens"
 
 // holdFirst blocks the first call that reaches it until release is closed.
 // Later calls pass straight through.
@@ -180,10 +186,13 @@ func (f *raceCredits) GetByProrationSource(context.Context, string, string, stri
 	return domain.CreditLedgerEntry{}, errs.ErrNotFound
 }
 
-// raceReq is one item change: a PATCH body, or a DELETE when remove is set.
+// raceReq is one item change: a PATCH body, a DELETE when remove is set, or
+// a POST of add. It changes the rig's basic item unless itemID names another.
 type raceReq struct {
 	body   UpdateItemInput
 	remove bool
+	add    *AddItemInput
+	itemID string
 }
 
 func raceQty(n int64) raceReq {
@@ -194,10 +203,21 @@ func racePlan(planID string) raceReq {
 	return raceReq{body: UpdateItemInput{NewPlanID: planID, Immediate: true}}
 }
 
+func raceAdd(planID string) raceReq {
+	return raceReq{add: &AddItemInput{PlanID: planID, Quantity: 1}}
+}
+
 var raceRemove = raceReq{remove: true}
+
+// on sends the change to another item of the subscription.
+func (q raceReq) on(itemID string) raceReq {
+	q.itemID = itemID
+	return q
+}
 
 type itemRaceRig struct {
 	ctx      context.Context
+	db       *postgres.DB
 	tenantID string
 	store    *PostgresStore
 	h        *Handler
@@ -207,6 +227,7 @@ type itemRaceRig struct {
 	plans    map[string]domain.Plan // by code
 	subID    string
 	itemID   string
+	keeperID string // "" without the keeper item
 }
 
 // newItemRaceRig seeds an active subscription on the basic plan at qty seats
@@ -230,6 +251,8 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 		{Code: "pro", Name: "Pro", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceProCents},
 		{Code: "keeper", Name: "Keeper", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceKeeperCents},
 		{Code: "basic-yearly", Name: "Basic Yearly", BillingInterval: domain.BillingYearly, BaseAmountCents: raceBasicCents * 10},
+		{Code: "meter-a", Name: "Meter A", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceMeterACents, MeterIDs: []string{raceMeter}},
+		{Code: "meter-b", Name: "Meter B", BillingInterval: domain.BillingMonthly, BaseAmountCents: raceMeterBCents, MeterIDs: []string{raceMeter}},
 	} {
 		p.Currency = "USD"
 		p.BaseBillTiming = domain.BillInAdvance
@@ -258,10 +281,13 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 	if err != nil {
 		t.Fatalf("create subscription: %v", err)
 	}
-	var itemID string
+	var itemID, keeperID string
 	for _, it := range created.Items {
-		if it.PlanID == plans["basic"].ID {
+		switch it.PlanID {
+		case plans["basic"].ID:
 			itemID = it.ID
+		case plans["keeper"].ID:
+			keeperID = it.ID
 		}
 	}
 	if itemID == "" {
@@ -288,22 +314,89 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 	h.SetProrationTaxApplier(&raceTax{gate: gate})
 
 	return &itemRaceRig{
-		ctx: ctx, tenantID: tenantID, store: store, h: h, gate: gate,
+		ctx: ctx, db: db, tenantID: tenantID, store: store, h: h, gate: gate,
 		invoices: invoices, credits: credits, plans: plans,
-		subID: created.ID, itemID: itemID,
+		subID: created.ID, itemID: itemID, keeperID: keeperID,
 	}
 }
 
 func (r *itemRaceRig) send(at time.Time, q raceReq) *httptest.ResponseRecorder {
 	ctx := clock.WithEffectiveNow(context.WithValue(r.ctx, auth.TestTenantIDKey(), r.tenantID), at)
 	rr := httptest.NewRecorder()
-	if q.remove {
-		r.h.removeItem(rr, removeItemURL(ctx, r.subID, r.itemID))
-		return rr
+	itemID := r.itemID
+	if q.itemID != "" {
+		itemID = q.itemID
 	}
-	body, _ := json.Marshal(q.body)
-	r.h.updateItem(rr, updateItemURL(ctx, r.subID, r.itemID, body))
+	switch {
+	case q.add != nil:
+		body, _ := json.Marshal(q.add)
+		r.h.addItem(rr, addItemURL(ctx, r.subID, body))
+	case q.remove:
+		r.h.removeItem(rr, removeItemURL(ctx, r.subID, itemID))
+	default:
+		body, _ := json.Marshal(q.body)
+		r.h.updateItem(rr, updateItemURL(ctx, r.subID, itemID, body))
+	}
 	return rr
+}
+
+// whileHeld sends reqs at `at` while a transaction of the test holds the
+// subscription row, as a writer in the middle of its change does. hold runs
+// on that transaction once it has the row (nil: change nothing). When every
+// request is blocked on the row, the transaction commits and the requests go
+// on. Nothing else holds here, so the gate is opened first. The responses
+// come back in the order of reqs.
+func (r *itemRaceRig) whileHeld(t *testing.T, at time.Time, hold func(ctx context.Context, tx *sql.Tx, sub domain.Subscription) error, reqs ...raceReq) []*httptest.ResponseRecorder {
+	t.Helper()
+	close(r.gate.release)
+
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			postgres.Rollback(tx) // a failed wait must not leave the row held
+		}
+	}()
+	sub, err := r.store.LockForItemChangeTx(r.ctx, tx, r.tenantID, r.subID)
+	if err != nil {
+		t.Fatalf("lock subscription: %v", err)
+	}
+	if hold != nil {
+		if err := hold(r.ctx, tx, sub); err != nil {
+			t.Fatalf("change held under the lock: %v", err)
+		}
+	}
+
+	out := make([]*httptest.ResponseRecorder, len(reqs))
+	var wg sync.WaitGroup
+	for i, q := range reqs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out[i] = r.send(at, q)
+		}()
+	}
+	testutil.WaitForLockWaiters(t, r.ctx, testutil.AdminPool(t), "subscription", len(reqs))
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit the held change: %v", err)
+	}
+	committed = true
+	wg.Wait()
+	return out
+}
+
+// liveItems is the subscription's items now.
+func (r *itemRaceRig) liveItems(t *testing.T) []domain.SubscriptionItem {
+	t.Helper()
+	sub, err := r.store.Get(r.ctx, r.tenantID, r.subID)
+	if err != nil {
+		t.Fatalf("get subscription: %v", err)
+	}
+	return sub.Items
 }
 
 // race sends first and holds it inside its transaction, sends second, waits
@@ -443,6 +536,23 @@ func TestItemChange_OverlappingChanges_BillOnceFromTheLatestState(t *testing.T) 
 				return racePlan(r.plans["pro"].ID)
 			},
 			wantSecond: http.StatusUnprocessableEntity, wantCode: "validation_error",
+			wantQty: 2, wantPlan: "pro",
+			wantNet: half(2 * (raceProCents - raceBasicCents)),
+		},
+		{
+			// The second plan change was checked (bill timing, interval,
+			// meters, currency) against the basic plan. The item is on pro
+			// when it gets the lock, so it is refused, not written unchecked
+			// and priced as a move from pro.
+			name: "two plan changes from basic: the second finds the item on another plan",
+			qty:  2,
+			first: func(r *itemRaceRig) raceReq {
+				return racePlan(r.plans["pro"].ID)
+			},
+			second: func(r *itemRaceRig) raceReq {
+				return racePlan(r.plans["keeper"].ID)
+			},
+			wantSecond: http.StatusConflict, wantCode: "item_changed",
 			wantQty: 2, wantPlan: "pro",
 			wantNet: half(2 * (raceProCents - raceBasicCents)),
 		},
@@ -622,5 +732,185 @@ func TestItemChange_SwapAfterAQuantityChange_Refused(t *testing.T) {
 	}
 	if !sub.CurrentBillingPeriodStart.Equal(proPeriodStart) || !sub.CurrentBillingPeriodEnd.Equal(proPeriodEnd) {
 		t.Fatalf("period = [%v, %v), want it unchanged [%v, %v)", sub.CurrentBillingPeriodStart, sub.CurrentBillingPeriodEnd, proPeriodStart, proPeriodEnd)
+	}
+}
+
+// proLastHours is in the last 12 hours of the June period, where the days
+// left round to 0: a change there prorates nothing and runs outside the
+// handler's proration transaction.
+var proLastHours = proPeriodEnd.Add(-6 * time.Hour)
+
+// TestItemChange_ChecksRunUnderTheLock: two changes that pass their checks
+// one at a time but not together. Each case sends both while another writer
+// holds the subscription row, so both read the state before either writes.
+// Exactly one may succeed: the other must find, under the lock, what the
+// first one wrote.
+//
+//   - Two items may not bill one meter: usage is rated per customer and
+//     meter, so the meter would be invoiced twice every period.
+//   - An active subscription keeps at least one item: billing refuses one
+//     with none, every cycle.
+//
+// Each check runs mid-period, where the change prorates in the handler's
+// transaction, and in the last hours of the period, where it prorates
+// nothing and takes the other path.
+func TestItemChange_ChecksRunUnderTheLock(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	type when struct {
+		name string
+		at   time.Time
+	}
+	whens := []when{
+		{"mid-period", proNow.Add(time.Hour)},
+		{"last hours of the period", proLastHours},
+	}
+	onMeter := func(r *itemRaceRig, items []domain.SubscriptionItem) int {
+		n := 0
+		for _, it := range items {
+			if it.PlanID == r.plans["meter-a"].ID || it.PlanID == r.plans["meter-b"].ID {
+				n++
+			}
+		}
+		return n
+	}
+
+	cases := []struct {
+		name       string
+		withKeeper bool
+		reqs       func(r *itemRaceRig) []raceReq
+		wantOK     int
+		// wantItems and wantOnMeter are the live items after both requests,
+		// and how many of them bill raceMeter.
+		wantItems, wantOnMeter int
+	}{
+		{
+			name: "two adds of plans that bill one meter",
+			reqs: func(r *itemRaceRig) []raceReq {
+				return []raceReq{raceAdd(r.plans["meter-a"].ID), raceAdd(r.plans["meter-b"].ID)}
+			},
+			wantOK:    http.StatusCreated,
+			wantItems: 2, wantOnMeter: 1,
+		},
+		{
+			name:       "two plan changes on different items onto plans that bill one meter",
+			withKeeper: true,
+			reqs: func(r *itemRaceRig) []raceReq {
+				return []raceReq{racePlan(r.plans["meter-a"].ID), racePlan(r.plans["meter-b"].ID).on(r.keeperID)}
+			},
+			wantOK:    http.StatusOK,
+			wantItems: 2, wantOnMeter: 1,
+		},
+		{
+			name:       "two removals of the two items",
+			withKeeper: true,
+			reqs: func(r *itemRaceRig) []raceReq {
+				return []raceReq{raceRemove, raceRemove.on(r.keeperID)}
+			},
+			wantOK:    http.StatusNoContent,
+			wantItems: 1, wantOnMeter: 0,
+		},
+	}
+
+	n := 0
+	for _, tc := range cases {
+		for _, w := range whens {
+			n++
+			t.Run(tc.name+", "+w.name, func(t *testing.T) {
+				r := newItemRaceRig(t, db, fmt.Sprintf("Item Checks %d", n), 1, tc.withKeeper)
+				rrs := r.whileHeld(t, w.at, nil, tc.reqs(r)...)
+
+				ok, refused := 0, 0
+				for _, rr := range rrs {
+					switch rr.Code {
+					case tc.wantOK:
+						ok++
+					case http.StatusConflict:
+						refused++
+					}
+				}
+				if ok != 1 || refused != 1 {
+					t.Errorf("responses %d %s / %d %s, want one %d and one 409",
+						rrs[0].Code, rrs[0].Body.String(), rrs[1].Code, rrs[1].Body.String(), tc.wantOK)
+				}
+				items := r.liveItems(t)
+				if len(items) != tc.wantItems || onMeter(r, items) != tc.wantOnMeter {
+					t.Errorf("live items = %+v, want %d of them, %d billing %s", items, tc.wantItems, tc.wantOnMeter, raceMeter)
+				}
+			})
+		}
+	}
+}
+
+// TestItemChange_PeriodEndedUnderTheLock_Refused: a change reads the
+// subscription, then waits on the row while another writer ends the billing
+// period (here the truncation an in-arrears interval swap writes: the period
+// ends now and is due). Under the lock the period is due and not invoiced, so
+// the change is refused with unbilled_period and writes nothing: a change
+// written into a due period is missing from, or wrongly priced on, the
+// invoice the billing run then builds from items it read before.
+func TestItemChange_PeriodEndedUnderTheLock_Refused(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	endNow := func(ctx context.Context, tx *sql.Tx, sub domain.Subscription) error {
+		return NewPostgresStore(db).ClosePeriodTx(ctx, tx, sub.TenantID, sub.ID, SnapshotOf(sub),
+			*sub.CurrentBillingPeriodStart, proNow, proNow, sub.BillingAnchorDay)
+	}
+
+	cases := []struct {
+		name       string
+		withKeeper bool
+		req        func(r *itemRaceRig) raceReq
+	}{
+		{name: "a quantity change", req: func(*itemRaceRig) raceReq { return raceQty(8) }},
+		{name: "a removal", withKeeper: true, req: func(*itemRaceRig) raceReq { return raceRemove }},
+		{name: "an add", req: func(r *itemRaceRig) raceReq { return raceAdd(r.plans["pro"].ID) }},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newItemRaceRig(t, db, fmt.Sprintf("Item Period Ended %d", i), 5, tc.withKeeper)
+			before := r.liveItems(t)
+
+			rr := r.whileHeld(t, proNow.Add(time.Hour), endNow, tc.req(r))[0]
+
+			if rr.Code != http.StatusConflict || errorCode(rr) != "unbilled_period" {
+				t.Errorf("change: %d %s, want 409 unbilled_period", rr.Code, rr.Body.String())
+			}
+			if after := r.liveItems(t); !sameItems(after, before) {
+				t.Errorf("items = %+v, want them unchanged %+v", after, before)
+			}
+			if len(r.invoices.all()) != 0 || len(r.credits.all()) != 0 {
+				t.Errorf("billed invoices %+v, credits %+v, want nothing", r.invoices.all(), r.credits.all())
+			}
+		})
+	}
+}
+
+// TestAddItem_WaitingOnAPeriodMove_PricedFromTheNewPeriod: an add reads the
+// subscription, then waits on the row while another writer moves the period
+// (here a threshold fire that resets the billing cycle to now, giving a new
+// period June 16 to July 16). The add is priced from the period it finds
+// under the lock: the whole new month on day one of it, on an invoice that
+// ends July 16. Priced from its first read, it would charge the 15 days left
+// of a June period that no longer exists.
+func TestAddItem_WaitingOnAPeriodMove_PricedFromTheNewPeriod(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	r := newItemRaceRig(t, db, "Item Add Period Move", 1, false)
+	newEnd := proNow.AddDate(0, 1, 0)
+	resetToNow := func(ctx context.Context, tx *sql.Tx, sub domain.Subscription) error {
+		return r.store.ClosePeriodTx(ctx, tx, sub.TenantID, sub.ID, SnapshotOf(sub), proNow, newEnd, newEnd, proNow.Day())
+	}
+
+	rr := r.whileHeld(t, proNow.Add(time.Hour), resetToNow, raceAdd(r.plans["pro"].ID))[0]
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("add: %d %s, want 201", rr.Code, rr.Body.String())
+	}
+	invs := r.invoices.all()
+	if len(invs) != 1 {
+		t.Fatalf("invoices = %+v, want one proration invoice", invs)
+	}
+	if invs[0].SubtotalCents != raceProCents || !invs[0].BillingPeriodEnd.Equal(newEnd) {
+		t.Errorf("proration invoice = %d cents ending %v, want %d cents (the whole new month) ending %v",
+			invs[0].SubtotalCents, invs[0].BillingPeriodEnd, int64(raceProCents), newEnd)
 	}
 }
