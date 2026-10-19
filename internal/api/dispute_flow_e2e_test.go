@@ -146,8 +146,8 @@ func TestE2E_CardDispute_RecordedNeverActedOn(t *testing.T) {
 			rows[flowStr(e, "event_type")] = flowStr(e, "description") + " / " + flowStr(e, "status")
 		}
 	}
-	if rows["payment.dispute_opened"] != "Payment disputed / pending" ||
-		rows["payment.dispute_closed"] != "Dispute lost: the bank took the payment back / failed" || len(rows) != 2 {
+	if rows["payment.dispute_opened"] != "Payment disputed / warning" ||
+		rows["payment.dispute_closed"] != "Dispute closed / failed" || len(rows) != 2 {
 		t.Errorf("timeline dispute rows = %v, want the opened row and the lost row", rows)
 	}
 	if deg, _ := timeline.body["degraded"].([]any); len(deg) != 0 {

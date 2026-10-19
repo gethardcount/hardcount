@@ -3832,6 +3832,10 @@ export interface paths {
          *     `payment.dispute_closed` row; both at Stripe's own time).
          *     A draft invoice returns an empty list.
          *
+         *     Each row carries `line`, the row in the activity line standard's
+         *     words (ADR-128). `description`, `detail`, `error`, `status` and
+         *     `amount_cents` repeat it for clients that read the older fields.
+         *
          *     If one source cannot be read, the rest is still returned and the
          *     source is named in `degraded`.
          */
@@ -8554,6 +8558,80 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * @description One activity row in the words of the activity line standard
+         *     (ADR-128): a title with no values, the amount when the event moves
+         *     money, asks for it or cancels money owed, a problem line on failure
+         *     and warning rows, the meta line's parts and the actor, a tone, and
+         *     the event's time on the entity's calendar. `recorded_at` is the
+         *     real-world time, set only for an entity on a test clock.
+         */
+        ActivityLine: {
+            /** @description The row's stable key, the same as the event's `id`. */
+            id: string;
+            /**
+             * @description Machine name of the event.
+             * @example invoice.voided
+             */
+            kind: string;
+            /** @example Payment failed */
+            title: string;
+            amount?: components["schemas"]["ActivityMoney"];
+            /** @example Card declined: insufficient funds */
+            problem?: string;
+            /**
+             * @description The meta line before the actor. Each item is one segment, shown
+             *     joined by " · "; a segment's parts read as one phrase, for
+             *     example a money part followed by the text " refunded to card".
+             */
+            detail: components["schemas"]["ActivityPart"][][];
+            actor?: components["schemas"]["ActivityActor"];
+            /**
+             * @description neutral: something happened. success: money arrived, or was
+             *     returned as intended. warning: needs a look, or money will not
+             *     be collected. failure: an attempt failed.
+             * @enum {string}
+             */
+            tone: "neutral" | "success" | "warning" | "failure";
+            /** Format: date-time */
+            occurred_at: string;
+            /** Format: date-time */
+            recorded_at?: string;
+        };
+        ActivityMoney: {
+            /** Format: int64 */
+            cents: number;
+            /** @example USD */
+            currency: string;
+        };
+        /** @description One piece of a meta segment. Exactly one field is set. */
+        ActivityPart: {
+            text?: string;
+            money?: components["schemas"]["ActivityMoney"];
+            /** Format: date-time */
+            time?: string;
+            link?: components["schemas"]["ActivityLink"];
+        };
+        /** @description An object the row's own data names, which still exists. */
+        ActivityLink: {
+            /** @enum {string} */
+            kind: "invoice" | "credit_note" | "subscription";
+            id: string;
+            label: string;
+        };
+        /**
+         * @description Who did it. `person` and `api_key` carry the name (a person's email
+         *     when they have no name), `customer` says where through `via`, and
+         *     `automatic` is anything Velox did on its own. Absent when no fact
+         *     written with the row names one.
+         */
+        ActivityActor: {
+            /** @enum {string} */
+            kind: "person" | "api_key" | "customer" | "automatic";
+            name?: string;
+            /** @enum {string} */
+            via?: "payment_page" | "portal";
+        };
         InvoiceTimelineEvent: {
             /** @description Stable key for the row. */
             id: string;
@@ -8563,11 +8641,16 @@ export interface components {
             source: "lifecycle" | "payment" | "dunning" | "email" | "credit_note" | "dispute";
             /** @example invoice.finalized */
             event_type: string;
-            /** @description Display status, for example succeeded, failed, resolved, escalated or info. */
-            status: string;
+            /**
+             * @description The line's tone in older words, read by the dashboard's dot.
+             * @enum {string}
+             */
+            status: "neutral" | "succeeded" | "warning" | "failed";
+            /** @description The line's title. */
             description: string;
-            /** @description Extra line shown under the description, for example the card used. */
+            /** @description The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries". */
             detail?: string;
+            /** @description The line's problem. */
             error?: string;
             /** Format: int64 */
             amount_cents?: number;
@@ -8581,6 +8664,7 @@ export interface components {
              * @description Real-world time of a row whose `timestamp` is test-clock time.
              */
             recorded_at?: string;
+            line: components["schemas"]["ActivityLine"];
         };
         /**
          * @description A card dispute (chargeback) Stripe reported against one of the

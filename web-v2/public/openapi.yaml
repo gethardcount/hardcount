@@ -2830,9 +2830,117 @@ components:
           type: string
           format: date-time
 
+    ActivityLine:
+      type: object
+      description: |
+        One activity row in the words of the activity line standard
+        (ADR-128): a title with no values, the amount when the event moves
+        money, asks for it or cancels money owed, a problem line on failure
+        and warning rows, the meta line's parts and the actor, a tone, and
+        the event's time on the entity's calendar. `recorded_at` is the
+        real-world time, set only for an entity on a test clock.
+      required: [id, kind, title, detail, tone, occurred_at]
+      properties:
+        id:
+          type: string
+          description: The row's stable key, the same as the event's `id`.
+        kind:
+          type: string
+          description: Machine name of the event.
+          example: invoice.voided
+        title:
+          type: string
+          example: Payment failed
+        amount:
+          $ref: "#/components/schemas/ActivityMoney"
+        problem:
+          type: string
+          example: "Card declined: insufficient funds"
+        detail:
+          type: array
+          description: |
+            The meta line before the actor. Each item is one segment, shown
+            joined by " · "; a segment's parts read as one phrase, for
+            example a money part followed by the text " refunded to card".
+          items:
+            type: array
+            items:
+              $ref: "#/components/schemas/ActivityPart"
+        actor:
+          $ref: "#/components/schemas/ActivityActor"
+        tone:
+          type: string
+          enum: [neutral, success, warning, failure]
+          description: |
+            neutral: something happened. success: money arrived, or was
+            returned as intended. warning: needs a look, or money will not
+            be collected. failure: an attempt failed.
+        occurred_at:
+          type: string
+          format: date-time
+        recorded_at:
+          type: string
+          format: date-time
+
+    ActivityMoney:
+      type: object
+      required: [cents, currency]
+      properties:
+        cents:
+          type: integer
+          format: int64
+        currency:
+          type: string
+          example: USD
+
+    ActivityPart:
+      type: object
+      description: One piece of a meta segment. Exactly one field is set.
+      properties:
+        text:
+          type: string
+        money:
+          $ref: "#/components/schemas/ActivityMoney"
+        time:
+          type: string
+          format: date-time
+        link:
+          $ref: "#/components/schemas/ActivityLink"
+
+    ActivityLink:
+      type: object
+      description: An object the row's own data names, which still exists.
+      required: [kind, id, label]
+      properties:
+        kind:
+          type: string
+          enum: [invoice, credit_note, subscription]
+        id:
+          type: string
+        label:
+          type: string
+
+    ActivityActor:
+      type: object
+      description: |
+        Who did it. `person` and `api_key` carry the name (a person's email
+        when they have no name), `customer` says where through `via`, and
+        `automatic` is anything Velox did on its own. Absent when no fact
+        written with the row names one.
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [person, api_key, customer, automatic]
+        name:
+          type: string
+        via:
+          type: string
+          enum: [payment_page, portal]
+
     InvoiceTimelineEvent:
       type: object
-      required: [id, timestamp, source, event_type, status, description]
+      required: [id, timestamp, source, event_type, status, description, line]
       properties:
         id:
           type: string
@@ -2848,14 +2956,17 @@ components:
           example: invoice.finalized
         status:
           type: string
-          description: Display status, for example succeeded, failed, resolved, escalated or info.
+          description: The line's tone in older words, read by the dashboard's dot.
+          enum: [neutral, succeeded, warning, failed]
         description:
           type: string
+          description: The line's title.
         detail:
           type: string
-          description: Extra line shown under the description, for example the card used.
+          description: The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries".
         error:
           type: string
+          description: The line's problem.
         amount_cents:
           type: integer
           format: int64
@@ -2872,6 +2983,8 @@ components:
           type: string
           format: date-time
           description: Real-world time of a row whose `timestamp` is test-clock time.
+        line:
+          $ref: "#/components/schemas/ActivityLine"
 
     InvoiceDispute:
       type: object
@@ -10137,6 +10250,10 @@ paths:
         `payment.dispute_opened` row and, once Stripe closes the dispute, a
         `payment.dispute_closed` row; both at Stripe's own time).
         A draft invoice returns an empty list.
+
+        Each row carries `line`, the row in the activity line standard's
+        words (ADR-128). `description`, `detail`, `error`, `status` and
+        `amount_cents` repeat it for clients that read the older fields.
 
         If one source cannot be read, the rest is still returned and the
         source is named in `degraded`.

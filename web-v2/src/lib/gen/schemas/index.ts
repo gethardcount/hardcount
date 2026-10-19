@@ -8,6 +8,15 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+export * from './activityActor';
+export * from './activityActorKind';
+export * from './activityActorVia';
+export * from './activityLine';
+export * from './activityLineTone';
+export * from './activityLink';
+export * from './activityLinkKind';
+export * from './activityMoney';
+export * from './activityPart';
 export * from './addSubscriptionItemBody';
 export * from './adjustCreditsBody';
 export * from './aggregateUsageEventsParams';
@@ -227,6 +236,7 @@ export * from './invoiceStatus';
 export * from './invoiceTaxStatus';
 export * from './invoiceTimelineEvent';
 export * from './invoiceTimelineEventSource';
+export * from './invoiceTimelineEventStatus';
 export * from './invoiceWithLineItems';
 export * from './itemChangeType';
 export * from './listAllMeterPricingRules200';

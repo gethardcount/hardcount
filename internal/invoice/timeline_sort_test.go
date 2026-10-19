@@ -147,12 +147,12 @@ func TestEmailRowInstant(t *testing.T) {
 	})
 }
 
-// TestLifecycleRecordedStamps pins the audit→lifecycle join (ADR-104
+// TestLifecycleAuditRows pins the audit→lifecycle join (ADR-104
 // Invariant A, corrected boundary №2 — operator nudge, same day as the
-// credit-note one). Exact keys, frozen-vocabulary discriminators for the
-// update-flavored transitions, earliest-row-wins on duplicates, unknown
-// actions ignored.
-func TestLifecycleRecordedStamps(t *testing.T) {
+// credit-note one; ADR-128 reads the same rows for the actor). Exact keys,
+// frozen-vocabulary discriminators for the update-flavored transitions,
+// earliest-row-wins on duplicates, unknown actions ignored.
+func TestLifecycleAuditRows(t *testing.T) {
 	at := func(h int) time.Time { return time.Date(2026, 7, 29, h, 0, 0, 0, time.UTC) }
 	// Query order is newest-first — build the list that way.
 	entries := []domain.AuditEntry{
@@ -165,7 +165,7 @@ func TestLifecycleRecordedStamps(t *testing.T) {
 		{Action: "finalize", CreatedAt: at(10)}, // duplicate: EARLIEST (10:00) must win
 		{Action: "create", CreatedAt: at(9)},
 	}
-	got := lifecycleRecordedStamps(entries)
+	got := lifecycleAuditRows(entries)
 	want := map[string]time.Time{
 		"invoice.created":              at(9),
 		"invoice.finalized":            at(10),
@@ -177,8 +177,8 @@ func TestLifecycleRecordedStamps(t *testing.T) {
 		t.Fatalf("stamp count = %d, want %d (got %v)", len(got), len(want), got)
 	}
 	for k, w := range want {
-		if !got[k].Equal(w) {
-			t.Errorf("%s = %s, want %s", k, got[k], w)
+		if !got[k].CreatedAt.Equal(w) {
+			t.Errorf("%s = %s, want %s", k, got[k].CreatedAt, w)
 		}
 	}
 }
