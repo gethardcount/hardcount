@@ -586,7 +586,8 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 //
 // A run whose processing panics stops, the other runs are still processed,
 // and the first panic is raised again at the end, so the tick still ends as
-// panicked. A panic in the retry itself has already been rewound (processRun).
+// panicked; the other runs' errors are logged first. A panic in the retry
+// itself has already been rewound (processRun).
 func (s *Service) processRunsBatch(ctx context.Context, tenantID string, dueRuns []domain.InvoiceDunningRun, isCatchup bool) (int, []error) {
 	var panics scheduler.Panics
 	processed := 0
@@ -601,7 +602,15 @@ func (s *Service) processRunsBatch(ctx context.Context, tenantID string, dueRuns
 			processed++
 		}()
 	}
-	panics.Repanic()
+	if panics.Panicked() {
+		// The panic drops runErrs, which only the caller logs and counts. Log
+		// them here, so another run's failure is not hidden while one run
+		// keeps panicking.
+		for _, err := range runErrs {
+			slog.ErrorContext(ctx, "dunning error", "tenant_id", tenantID, "error", err)
+		}
+		panics.Repanic()
+	}
 	return processed, runErrs
 }
 

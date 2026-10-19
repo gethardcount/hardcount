@@ -47,6 +47,11 @@ func (p *Panics) Guard(args ...any) {
 	}
 }
 
+// Panicked reports whether Guard kept a panic. The panic Repanic raises drops
+// the caller's return values, so a caller that collected errors for its own
+// caller to log logs them itself first.
+func (p *Panics) Panicked() bool { return p.first != nil }
+
 // Repanic raises the first panic Guard kept, if any.
 func (p *Panics) Repanic() {
 	if p.first != nil {

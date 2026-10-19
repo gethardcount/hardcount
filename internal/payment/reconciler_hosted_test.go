@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 type fakeHostedLedger struct {
@@ -79,7 +80,7 @@ func TestHostedSweep_SettlesPaidSessionsEvenOnAPaidInvoice(t *testing.T) {
 	r.SetSettler(settler)
 	r.SetHostedSessions(ledger, reader, nil)
 
-	resolved, errs := r.sweepHostedSessions(context.Background(), 50)
+	resolved, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics))
 
 	if len(errs) != 1 || !errors.Is(errs[0], errSessionRead) {
 		t.Fatalf("errs = %v, want exactly the cs_err read failure", errs)
@@ -125,7 +126,7 @@ func TestHostedSweep_OneAlertPerCharge(t *testing.T) {
 	r.SetSettler(settler)
 	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}}, nil)
 
-	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 1 || len(errs) != 0 {
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 1 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
 	}
 	if len(settler.succeeded) != 0 {
@@ -140,7 +141,7 @@ func TestHostedSweep_UnwiredDoesNothing(t *testing.T) {
 	ledger := &fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", StripeSessionID: "cs_1"}}}
 	r := NewReconciler(&mockStripeClient{}, newMockReconcileStore(), time.Second)
 	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "expired"}}, nil)
-	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 0 || len(errs) != 0 {
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 0 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
 	}
 	if len(ledger.expired)+len(ledger.completed)+len(ledger.touched) != 0 {
@@ -196,7 +197,7 @@ func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
 
 	rec := &recordingCardRecorder{}
 	r, ledger := newSweep(rec)
-	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 1 || len(errs) != 0 {
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 1 || len(errs) != 0 {
 		t.Fatalf("n=%d errs=%v", n, errs)
 	}
 	if len(rec.calls) != 1 || rec.calls[0] != (cardCall{"t1", "cus_velox", "cus_stripe", PurposeHostedInvoicePay}) {
@@ -206,7 +207,7 @@ func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
 
 	failing := &recordingCardRecorder{err: errors.New("db down")}
 	r, ledger = newSweep(failing)
-	if n, errs := r.sweepHostedSessions(context.Background(), 50); n != 0 || len(errs) != 1 {
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 0 || len(errs) != 1 {
 		t.Fatalf("card failure: n=%d errs=%v, want unresolved with one error", n, errs)
 	}
 	if len(ledger.completed) != 0 {

@@ -172,13 +172,8 @@ func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int, panic
 // is stamped so it rotates. The store does not stamp an 'unknown' invoice;
 // the sweeps after this one stamp it on their own checks.
 func (r *Reconciler) checkStaleHoldGuarded(ctx context.Context, h domain.StaleChargeHold, panics *scheduler.Panics) (result string, read staleHoldRead, err error) {
-	panicked := true
-	func() {
-		defer panics.Guard("step", "stale_charge_check", "invoice_id", h.Invoice.ID, "tenant_id", h.Invoice.TenantID)
-		result, read, err = r.checkStaleHold(ctx, h)
-		panicked = false
-	}()
-	if panicked {
+	if guardRow(panics, func() { result, read, err = r.checkStaleHold(ctx, h) },
+		"step", "stale_charge_check", "invoice_id", h.Invoice.ID, "tenant_id", h.Invoice.TenantID) {
 		r.markChecked(ctx, h.Invoice)
 		return staleHoldFailed, staleReadNone, nil
 	}

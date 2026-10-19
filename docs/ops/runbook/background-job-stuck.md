@@ -71,13 +71,13 @@ in [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
 - **A tick is wedged**: it keeps renewing its lease (its heartbeat is
   alive) while its work is stuck.
 - **No replica is polling** for the role.
-- **It is not a crash loop from a panic.** A step that panics is
-  recovered, the rest of the tick runs, and the poll loop keeps running,
-  so the `/health/ready` scheduler check stays `ok`. A panicking tick
-  shows up instead as `velox_leader_lease_lost_total{reason="panicked"}`
-  and a growing `velox_leader_last_tick_age_seconds{role}`. The stack is
-  in the `step panicked; running the rest` ERROR log (see
-  [Fix](#fix)).
+- **It is not a crash loop from a panic.** A panic is recovered and the
+  poll loop keeps running, so the `/health/ready` scheduler check stays
+  `ok`. In billing and dunning only the step or row that panicked stops,
+  and the rest of the tick runs. A panicking tick shows up instead as
+  `velox_leader_lease_lost_total{reason="panicked"}` and a growing
+  `velox_leader_last_tick_age_seconds{role}`. To find the stack, see
+  [Fix](#fix).
 
 A long tick is not a stuck one. A billing tick bills every subscription
 that is due before it ends, so on a busy billing day it can run for hours.
@@ -148,18 +148,36 @@ The next tick starts one interval after it ends.
 
 ## Fix
 
-1. **A panic.** Search the application logs for
-   `step panicked; running the rest`. That line has the stack and names
-   the `step`, or the row it panicked on (`subscription_id`, `invoice_id`
-   or `run_id`). The `scheduler panic recovered` line after it shows only
-   where the panic was raised again at the end of the tick.
-   - The rest of the tick ran. The panicking step or row runs again one
-     interval later on whichever replica leads, so a restart does not fix
-     it: find the input in the stack, and fix or remove it.
-   - **A dunning panic: pause dunning until the fix ships**, with
-     `SELECT leader_pause('dunning', 'your-name', 'panic on run <run_id>');`.
-     The run is put back as it was, so no attempt is spent, but each rerun
-     retries its charge.
+1. **A panic.** Find the stack:
+   - **Billing and dunning:** search for `step panicked; running the rest`.
+     One panic logs this line once for each step it passes on the way up.
+     The first line has the panic's own stack and names the `step`, or
+     the row it panicked on (`subscription_id`, `invoice_id`, `claim_id`
+     or `run_id`). The later lines, and the `scheduler panic recovered` line
+     after them, show only where the panic was raised again.
+   - **`webhook_outbox`, `email_outbox` and `webhook_delivery`:** the
+     stack is in the `scheduler panic recovered` line. These roles stop
+     the tick at the panic.
+
+   The panicking step or row runs again one interval later on whichever
+   replica leads, so a restart does not fix it: find the input in the
+   stack, and fix or remove it.
+   - **A dunning run panics: pause that run until the fix ships.** A
+     panic is not counted as an attempt, so the run never runs out of
+     attempts. If the panic comes after a charge the card declined, the
+     stale-charge sweep clears the hold within the hour. The next tick
+     then charges the card again: one real decline every hour or two,
+     with no attempt counted and no email. Take `run_id` from the first
+     `step panicked` line:
+
+     ```sql
+     UPDATE invoice_dunning_runs SET paused = true WHERE id = '<run_id>';
+     ```
+
+     Set `paused = false` once the fix is out. Pause the whole role
+     (`SELECT leader_pause('dunning', 'your-name', 'reason');`) only if
+     runs in several tenants keep panicking: it stops dunning for every
+     tenant.
    - A panic while billing one subscription is also logged as
      `bill subscription panicked` with the subscription id. It repeats only
      when that subscription's wait ends (see
@@ -244,7 +262,7 @@ flat.
 | `heartbeat_timeout` | The holder could not renew in time and cancelled its own tick |
 | `takeover` | A renew found another holder |
 | `released` | A renew found the row already released |
-| `panicked` | A step of the tick, or one row in it, panicked. The rest of the tick ran. See below |
+| `panicked` | The tick's work panicked. In billing and dunning only that step or row stopped, and the rest of the tick ran. See below |
 
 For `heartbeat_timeout`, `takeover` and `released`, correctness held (the
 fence token and the row compare-and-swap). Find out why the leader lost
@@ -257,11 +275,11 @@ took over, it waits `min(interval, 60 s)`. After a `takeover` the new
 holder is already running it. After `paused`, nobody leads until it is
 unpaused.
 
-**A panic repeats.** The stack is in the `step panicked; running the rest`
-ERROR log. The rest of the tick runs, and the step or row that panicked
-runs again once per interval until the bad input or code is fixed.
-Restarting does not help. For a dunning panic, pause the `dunning` role
-until the fix ships ([Fix](#fix)).
+**A panic repeats.** The step or row that panicked runs again once per
+interval until the bad input or code is fixed, and restarting does not
+help. A tick that a shutdown stopped is released as interrupted even if
+it then panicked, so a deploy does not add a wait. To find the stack,
+and for a dunning run that panics, see [Fix](#fix).
 
 **A panic while billing one subscription is the exception.**
 

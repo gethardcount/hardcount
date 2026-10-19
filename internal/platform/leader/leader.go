@@ -61,8 +61,8 @@ const (
 	// interruptedCooldown caps how soon a tick whose lease was lost (taken
 	// over, or its heartbeat timed out) is due again — bounded so a slow
 	// database cannot turn an hourly tick into a partial tick every few
-	// seconds. A SIGTERM leaves the cadence alone; a panicked tick waits one
-	// full interval (sqlRelease).
+	// seconds. A SIGTERM leaves the cadence alone, even if the work then
+	// panicked; a panicked tick waits one full interval (sqlRelease).
 	interruptedCooldown = 60 * time.Second
 )
 

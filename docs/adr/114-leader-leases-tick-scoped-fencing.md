@@ -339,16 +339,27 @@ What changed:
    (`step panicked; running the rest`), keeps the first, and the other steps
    run. `runBillingHalf` and `runDunningHalf` raise the first panic again at
    the end, so `Lead` still releases the tick as panicked and the lease-lost
-   counter pages. The livemode asserts stay outside the guards.
+   counter pages. The livemode asserts stay outside the guards. A panic logs
+   that line once per guard it passes on the way up; the first has its own
+   stack. `Reconciler.Run` and a dunning batch log the errors they
+   collected before they raise a panic again, since the panic drops their
+   return (the billing run's per-subscription failures are logged where
+   they happen, by `attemptSub`). The other three roles are
+   unchanged: a panic ends their tick, with the stack on `scheduler panic
+   recovered`.
 2. **The billing run bills past a panicking subscription.** `attemptSub`
    saves the failure as before; the run (`drainDue`) leaves that
    subscription out, bills the rest, and raises the panic at the end. The
    operator's run and the test-clock catch-up use the same drain.
-3. **The stale-hold sweep guards each row.** A check that panics is a
-   failed check, and its row is stamped so it rotates. `Reconciler.Run`
-   raises the panic only after its last sub-sweep. The store never stamps
-   an `unknown` invoice's check, so a re-raise at the end of the stale-hold
-   sweep would stop the four later sweeps on every tick.
+3. **Each payment-reconciler sweep guards each row.** The stale-hold,
+   unknown, processing, parked and hosted-session sweeps all list the least
+   recently checked rows first, and stamp a row only once its check is
+   done. So a row whose check panicked came back first on every tick and
+   stopped the rows behind it. A check that panics now counts as failed, and its
+   row is stamped so it rotates. `Reconciler.Run` raises the panic only
+   after its last sweep. Every charge claim refuses an `unknown` invoice,
+   so this sweep (or a webhook) is its only way out, as it is for a stale
+   hold.
 4. **A panic in a dunning retry is rewound.** It goes through the guarded
    transient-skip rewind, so the run is as it was listed. It is then raised
    again, after the batch has processed its other runs. This is the same rule as
@@ -358,10 +369,14 @@ What changed:
    already run in the panicked tick. A 60 s rerun would only re-drive the
    rows that panic: in billing, 60 times the Stripe reads, threshold scans
    and charge-queue writes an hour. An hourly rerun also gives the paged
-   operator time to pause the role. A lost lease keeps `min(interval,
-   60 s)`, and so does a lost tick whose work then panics on the cancelled
-   ctx: `Lead` checks the lost cause first, as its single `onLost` report
-   already did. Roles faster than 60 s are unchanged.
+   operator time to pause the dunning run that panics (the runbook says
+   how; pausing the role would stop dunning for every tenant). A lost
+   lease keeps `min(interval, 60 s)`, and so does a lost tick whose work
+   then panics on the cancelled ctx: `Lead` checks the lost cause first,
+   as its single `onLost` report already did. A tick a shutdown cancelled
+   is released as interrupted even if its work then panicked, so a deploy
+   (often the one with the fix) adds no wait; the panic is still reported.
+   Roles faster than 60 s are unchanged.
 6. **`velox_leader_lease_lost_total{role, reason="panicked"}` starts at 0.**
    The page row is `increase(...[1h]) > 0`, and a series first exported at 1
    has no earlier sample, so the first panicked tick after a start never
@@ -375,6 +390,9 @@ To run it at once: `UPDATE leader_leases SET not_before = NULL WHERE role =
 Pinned by `TestScheduler_StepPanic_RestOfTheTickRuns`,
 `TestBillingFailure_PanicIsRecordedThenRepanics`,
 `TestProcessDueRuns_RetryPanic_RewindsAndRunsTheRest`,
-`TestStaleHold_PanickingCheck_RestOfTheRunGoesOn` and
-`TestLease_PanickedTickIsNotACompletion` (real Postgres), and by unit tests
-for the reconcilers, the dunning tenants and the pre-created series.
+`TestStaleHold_PanickingCheck_RestOfTheRunGoesOn`,
+`TestReconcile_PanickingRow_RotatesAndTheRestGoesOn`,
+`TestLease_PanickedTickIsNotACompletion` and
+`TestLease_PanicAfterShutdownReleasesAsInterrupted` (real Postgres), and by
+unit tests for the reconcilers, the hosted sweep, the dunning tenants, the
+errors a re-raised panic would drop, and the pre-created series.
