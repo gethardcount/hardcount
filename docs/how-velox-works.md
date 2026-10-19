@@ -55,28 +55,32 @@ flowchart LR
    happens 1 to 2 hours after the period ends. Velox waits an hour so that
    usage arriving a little late is still billed, and its billing run is
    hourly. The invoice has one line for each price, plus the base fee and
-   any tax. Credit the customer holds, such as prepaid credit (a prepaid
-   commit), lowers the amount due. Then the invoice is finalized: issued,
-   and no longer a draft. Velox tells your app with
-   an `invoice.finalized` [webhook](webhooks.md).
+   any tax. Then the invoice is finalized: issued, and no longer a draft.
+   Velox tells your app with an `invoice.finalized` [webhook](webhooks.md).
 
    **You see:** the invoice under **Invoices**. Its page shows each line,
    and its **⋯** menu has the PDF.
 
-5. **Stripe charges the card.** If the customer has a saved card and your
-   Stripe account is connected, Velox asks Stripe to charge that card for
-   the amount due. Velox, not Stripe Billing, keeps the invoice, so
-   Stripe Billing's fee does not apply. With no saved card, Velox can
-   email the customer a link to add one, once email is set up.
+5. **Credit pays first, then Stripe charges the card.** Right after the
+   invoice is finalized, Velox uses any credit the customer holds, such as
+   prepaid credit (a prepaid commit), to lower the amount due. So the
+   `invoice.finalized` webhook shows the amount before credit. If credit
+   covers it all, the invoice is marked paid with no charge. Otherwise, if
+   the customer has a saved card and your Stripe account is connected,
+   Velox asks Stripe to charge that card for what is left. Velox, not
+   Stripe Billing, keeps the invoice, so Stripe Billing's fee does not
+   apply. With no saved card, Velox can email the customer a link to add
+   one, once email is set up.
 
-   **You see:** the invoice reads **Paid**, and the payment shows in your
-   Stripe dashboard.
+   **You see:** the invoice reads **Paid**, with a "Credits applied" line
+   if credit paid part of it. The payment shows in your Stripe dashboard.
 
 6. **A failed payment is tried again.** When a charge fails, Velox starts
    dunning: it retries the charge on a schedule and, once email is set up,
-   emails the customer. If every retry fails, it does what your dunning
-   policy says: pause or cancel the subscription, write off the invoice,
-   both, or neither.
+   emails the customer. Each retry first uses any credit the customer got
+   since the last try, so credit added later can pay an older invoice. If
+   every retry fails, it does what your dunning policy says: pause or
+   cancel the subscription, write off the invoice, both, or neither.
 
    **You see:** the invoice on the **Dunning** page while it is being
    retried. The schedule is under **Dunning policies**. A new account

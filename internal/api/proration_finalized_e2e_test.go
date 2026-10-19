@@ -162,9 +162,9 @@ func (r *lagRig) wantFinalizedOnce(invoiceID string, reason domain.InvoiceBillin
 	defer postgres.Rollback(tx)
 
 	var number, customerID, currency string
-	var total, due int64
-	if err := tx.QueryRowContext(ctx, `SELECT invoice_number, customer_id, currency, total_amount_cents, amount_due_cents
-		FROM invoices WHERE id = $1`, invoiceID).Scan(&number, &customerID, &currency, &total, &due); err != nil {
+	var total, due, credited int64
+	if err := tx.QueryRowContext(ctx, `SELECT invoice_number, customer_id, currency, total_amount_cents, amount_due_cents, credits_applied_cents
+		FROM invoices WHERE id = $1`, invoiceID).Scan(&number, &customerID, &currency, &total, &due, &credited); err != nil {
 		r.t.Fatalf("read invoice %s: %v", invoiceID, err)
 	}
 
@@ -179,7 +179,8 @@ func (r *lagRig) wantFinalizedOnce(invoiceID string, reason domain.InvoiceBillin
 		want := map[string]any{
 			"invoice_id": invoiceID, "invoice_number": number, "customer_id": customerID,
 			"status": "finalized", "payment_status": "pending",
-			"total_amount_cents": float64(total), "amount_due_cents": float64(due), "currency": currency,
+			"total_amount_cents": float64(total), "amount_due_cents": float64(due),
+			"credits_applied_cents": float64(credited), "currency": currency,
 		}
 		for k, v := range want {
 			if p[k] != v {
