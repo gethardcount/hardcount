@@ -208,7 +208,8 @@ A line has up to three parts:
    ran out"). Leave out a problem line that only repeats the title.
 8. **Link what the row's own data names:** an invoice, a credit note or a
    subscription whose id the row carries, and only while it still exists. A
-   deleted object stays plain text. Never link from a guess.
+   deleted object stays plain text. Never link from a guess, and never to a
+   payment-recovery run: the Dunning page cannot open on one run.
 
 ## Shapes for common docs
 

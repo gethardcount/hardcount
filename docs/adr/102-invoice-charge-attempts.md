@@ -1,7 +1,7 @@
 # ADR-102: Charge attempts as first-class facts
 
 Date: 2026-07-28
-Status: Accepted (partly superseded by [ADR-103](103-single-payment-source.md) on 2026-07-28 and [ADR-104](104-one-activity-lane-entity-calendar.md) on 2026-07-29: the rendering rules; amended by [ADR-128](128-activity-line-standard.md) on 2026-10-19: hosted-page attempts)
+Status: Accepted (partly superseded by [ADR-103](103-single-payment-source.md) on 2026-07-28 and [ADR-104](104-one-activity-lane-entity-calendar.md) on 2026-07-29: the rendering rules; amended 2026-10-19 by [ADR-128](128-activity-line-standard.md): hosted-page attempts)
 
 ## Summary
 
@@ -49,10 +49,9 @@ Writers (all best-effort — see Consequences):
    record, `trigger_source='external'`, deliberately wall-clock — an
    interactive act is a wall fact.
 
-> Reversed 2026-10-19 by [ADR-128](128-activity-line-standard.md). A customer
-> paying is an act on the invoice, like an operator voiding it. So the settle
-> path is to stamp the attempt from the invoice's clock. Not yet built: until
-> the dates PR of the ADR-128 series ships, this paragraph describes the code.
+> Reversed 2026-10-19 by [ADR-128](128-activity-line-standard.md): see
+> [Amendment 2026-10-19](#amendment-2026-10-19-hosted-page-attempts-follow-the-invoices-clock).
+> Until that change ships, this paragraph describes the code.
 
 Upsert semantics (enforced in SQL): `succeeded` is terminal; every
 other outcome may advance — including `failed → succeeded` (a 3DS PI
@@ -115,3 +114,25 @@ it also covers any future lost attempt write.
 - Future surface: `trigger_source` gives an exact per-attempt
   provenance if payment-attempt history becomes a product surface —
   without re-deriving it from PI metadata.
+
+## Amendment 2026-10-19: hosted-page attempts follow the invoice's clock
+
+**Change.** Writer 2 above inserts the attempt for a payment made on the
+hosted payment page (`trigger_source='external'`) with no test-clock time,
+"deliberately wall-clock", because "an interactive act is a wall fact".
+[ADR-128](128-activity-line-standard.md) reverses that rule. When the settle
+path writes the attempt, it stamps `sim_effective_at` from the invoice's
+clock, the same as any other act on a pinned invoice. The owner approved it
+on 2026-10-18 as decision 7 of the activity line standard.
+
+**Why.** A customer paying is an act on the invoice, like an operator voiding
+it. Operator credit notes moved off real time for the same reason one day
+after this record was written (the 2026-07-29 credit-note fix that
+[ADR-104](104-one-activity-lane-entity-calendar.md) records). Left on real
+time, a failed payment on the hosted page sorts by its real time among the
+invoice's simulated rows.
+
+**Status.** Decided, not yet built. The change touches the settle path, so it
+follows the [money-path playbook](../dev/money-path-robustness-playbook.md).
+The dates PR of the ADR-128 series makes it; until it ships, the settle path
+inserts these attempts with no test-clock time.

@@ -141,7 +141,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [099](099-simulated-time-disclosure-policy.md) | 2026-07-21 | Accepted (amended) | Test clocks & simulated time | Say "Simulated" once per scope: one page banner, or one chip per list row |
 | [100](100-currency-coherence-guard-ring.md) | 2026-07-26 | Accepted | Pricing & usage | Reject mismatched currencies at every write; the engine never converts |
 | [101](101-billing-intervals.md) | 2026-07-27 | Accepted | Subscriptions | Store each item's billable date ranges on change; billing intersects them with the period |
-| [102](102-invoice-charge-attempts.md) | 2026-07-28 | Accepted (partly superseded) | Payments | Record each charge attempt as a row, updated by PaymentIntent id as Stripe reports |
+| [102](102-invoice-charge-attempts.md) | 2026-07-28 | Accepted (partly superseded, amended) | Payments | Record each charge attempt as a row, updated by PaymentIntent id as Stripe reports |
 | [103](103-single-payment-source.md) | 2026-07-28 | Accepted | Payments | The invoice timeline shows payments only from charge-attempt rows, not from the webhook table |
 | [104](104-one-activity-lane-entity-calendar.md) | 2026-07-29 | Accepted (amended) | Test clocks & simulated time | One invoice timeline ordered by the entity's own clock; the real time shows beneath |
 | [105](105-charge-idempotency-key-seed.md) | 2026-07-30 | Accepted | Payments | Seed the Stripe idempotency key from a per-invoice attempt counter, not `updated_at` |

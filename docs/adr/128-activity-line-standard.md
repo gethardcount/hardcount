@@ -1,13 +1,10 @@
 # ADR-128: Activity line standard
 
 **Date:** 2026-10-19
-
 **Status:** Accepted
-
 **Amends:** [ADR-104](104-one-activity-lane-entity-calendar.md) for the Sent
 emails card, and [ADR-102](102-invoice-charge-attempts.md) for hosted-page
 payment attempts.
-
 **Builds on:** [ADR-030](030-simulated-time-everywhere-on-clock-pinned-entities.md)
 and ADR-104.
 
@@ -91,7 +88,9 @@ verified to make (day headers), it says so.
    be collected), failure (an attempt failed). A failure or warning row says
    what went wrong in a problem line, unless the title already says it all.
 8. **Link what the row's own data names:** an invoice, a credit note or a
-   subscription whose id the row carries, while it still exists.
+   subscription whose id the row carries, while it still exists. No link
+   goes to a payment-recovery run, because the Dunning page cannot open on
+   one run.
 
 Writers apply them from
 [Activity lines](../dev/writing-style.md#activity-lines) in the writing-style
@@ -210,9 +209,9 @@ path, so it follows the
   (October 2026) would otherwise sort before the February 2027 invoice it
   voided. The Recorded part keeps the real moment on screen.
 - **A customer paying is an act on the invoice,** like an operator voiding
-  it. ADR-104 moved operator credit notes off real time for the same reason.
-  Left on real time, a hosted-page attempt sorts among simulated rows by its
-  real time.
+  it. Operator credit notes moved off real time for the same reason, in the
+  2026-07-29 fix that ADR-104 records. Left on real time, a hosted-page
+  attempt sorts among simulated rows by its real time.
 - **The Sent-emails card sits under a banner that says the page follows the
   test clock.** Showing unlabeled real times there contradicts the banner.
   The Recorded part still answers "did it go out, and when, really".
@@ -255,8 +254,8 @@ path, so it follows the
   5. Facts: `actor_type` and `actor_id` on `email_outbox` and
      `invoice_charge_attempts` (one migration, no backfill).
   6. Facts: dates. Trial-end catch-up dated at the trial end, the finalize
-     flag for engine invoices, and the hosted-page attempt stamp. It follows
-     the money-path playbook.
+     flag for invoices born finalized, and the hosted-page attempt stamp. It
+     follows the money-path playbook.
   7. The dashboard's shared activity list, on the invoice page.
   8. The subscription, Dunning and customer pages, then the audit log words.
   9. One release later, deprecate the old time fields.
@@ -275,6 +274,17 @@ path, so it follows the
   standard was written). The standard names problem lines for failed,
   pending and never-ran refunds only. The invoice-lines PR gives `unknown`
   its own; the golden file over every refund status fails until it does.
+- **Card disputes add invoice lines the standard has not weighed** (#1287,
+  merged after the standard was written). The invoice page now shows
+  "Payment disputed" and four closing titles such as "Dispute lost: the bank
+  took the payment back". The meta shows the Stripe dispute id and Stripe's
+  reason code. The invoice-lines PR words them under the rules above.
+  Their dates are an open question. #1287 dates both rows at Stripe's real
+  time on every invoice, on purpose: its code comment calls them real-world
+  Stripe instants. On a test-clock invoice that breaks rule 6, the way
+  hosted-page attempts do today. Decide before the dates PR: date disputes
+  on the invoice's clock, like hosted-page attempts (decision 7), or name
+  them as the one known exception.
 - **Not in this standard,** each with the trigger that brings it back:
   - A customer-level activity timeline. Trigger: an operator asks "what
     happened to this customer" and the audit log filter is not enough.

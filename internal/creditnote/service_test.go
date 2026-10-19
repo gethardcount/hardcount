@@ -476,11 +476,11 @@ func (m *memInvoiceReader) ApplyCreditNoteTx(_ context.Context, _ *sql.Tx, tenan
 }
 
 // TestCreate_IsSimulated locks the per-CN time-domain flag (migration 0117):
-// it's true ONLY when the issuance runs in the invoice's bound time domain
-// (engine clawback, input.IsSimulated) AND the invoice itself is simulated.
-// Operator HTTP issuance (input.IsSimulated=false) is always wall-clock. The
-// invoice activity timeline lanes a CN by this flag, so getting it wrong shows
-// a simulated timestamp in the wall-clock "Real-time activity" lane.
+// it is true exactly when the source invoice is simulated, whether the engine
+// or an operator issues the note. The wall-clock recovery sweeps skip notes
+// that carry it, and the invoice timeline shows a CN's Recorded subline by
+// it, so a wrong flag sends the note to the wrong sweep and shows or hides
+// its Recorded line.
 func TestCreate_IsSimulated(t *testing.T) {
 	ctx := context.Background()
 	mk := func(id string, simulated bool) domain.Invoice {

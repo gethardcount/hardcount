@@ -1338,7 +1338,7 @@ const (
 	rankDisputeOpened   = 74
 	rankDisputeClosed   = 76
 	rankDunningResolved = 80
-	rankEmail           = 90 // external lane; rank is a formality
+	rankEmail           = 90 // last: an email follows the event it announces (ADR-104)
 )
 
 func dunningEventRank(eventType domain.DunningEventType) int {
@@ -2132,14 +2132,14 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	// SAME facts a place in the chronology ("Invoice paid" then silence
 	// after a refund read as nothing-happened). Issued notes only —
 	// drafts aren't activity yet, voided notes vanish from the story the
-	// same way Stripe's do. There is one lane (ADR-104): every CN row sorts
-	// by its issued_at on the invoice's calendar. Operator CNs and engine
-	// clawbacks both issue under the invoice's clock, because
+	// same way Stripe's do. There is one timeline (ADR-104): every CN row
+	// sorts by its issued_at on the invoice's calendar. Operator CNs and
+	// engine clawbacks both issue under the invoice's clock, because
 	// creditnote.Service binds the source invoice's pin at every operator
 	// entry point (bindForInvoice) and the engine paths run under the
-	// clock-pinned subscription's bound time. Each row carries the CN's OWN
-	// is_simulated (migration 0117); it gates the Recorded subline that
-	// shows the real insert time (below).
+	// clock-pinned subscription's bound time. A CN's is_simulated is its
+	// source invoice's (creditnote.Service copies it at create); it gates
+	// the Recorded subline that shows the real insert time (below).
 	if h.creditNotes != nil {
 		if cns, err := h.creditNotes.List(r.Context(), tenantID, inv.ID); err != nil {
 			degrade("credit_notes", err)
