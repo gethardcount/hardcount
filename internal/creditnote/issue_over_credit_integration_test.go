@@ -185,6 +185,11 @@ func TestIssue_NotePartlyAboveAmountDue_ReturnsOnlyTheDifference(t *testing.T) {
 
 // Voiding the invoice afterwards hands back only the credits still applied to
 // it: the ones a credit note already returned must not come back twice.
+//
+// Both notes leave nothing due, which marks the invoice paid, and a paid
+// invoice cannot be voided. An invoice the note left open at $0 is one it
+// issued against while a charge held the invoice; the hold then clears (the
+// stale-hold sweep found nothing at Stripe) and the operator voids it.
 func TestVoid_AfterCreditNoteReturnedCredits_HandsBackOnlyTheRest(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -198,8 +203,13 @@ func TestVoid_AfterCreditNoteReturnedCredits_HandsBackOnlyTheRest(t *testing.T) 
 			r := newOverCreditRig(t, "CN Void Netting")
 			draft := r.draft(t, tc.noteCents)
 			r.applyCredits(t, 6000)
+			setChargeHold(t, r.ctx, r.db, r.inv.ID, false)
 			if _, err := r.notes.Issue(r.ctx, r.tenantID, draft.ID); err != nil {
 				t.Fatalf("Issue: %v", err)
+			}
+			clearChargeHold(t, r.ctx, r.db, r.inv.ID)
+			if inv := r.invoiceNow(t); inv.Status != domain.InvoiceFinalized || inv.AmountDueCents != 0 {
+				t.Fatalf("invoice %s with %d due, want open at 0 to void", inv.Status, inv.AmountDueCents)
 			}
 			if _, err := r.invSvc.Void(r.ctx, r.tenantID, r.inv.ID); err != nil {
 				t.Fatalf("Void: %v", err)
