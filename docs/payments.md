@@ -43,6 +43,12 @@ payment failures, and the gaps still open.
 - **Anomalies are flagged, never refunded automatically**: a second
   successful payment, an amount or currency that differs from the invoice,
   money on a voided invoice.
+- **Disputes are recorded, never acted on.** A dispute (chargeback) is a
+  customer asking their bank to reverse a payment. Velox records each one
+  against the invoice the payment paid, from Stripe's `charge.dispute.*`
+  webhooks, in any order. It never changes the invoice or moves money: the
+  operator responds in Stripe, and decides what a lost dispute means
+  ([runbook](ops/runbook/card-disputes.md)).
 
 ## Cases
 
@@ -57,6 +63,7 @@ payment failures, and the gaps still open.
 | Concurrent charges (auto, dunning, manual, second replica) | One wins the claim; a refused **Collect payment** says a payment is in progress. | Nothing. |
 | Customer pays on the hosted page during a Velox charge | Mutually exclusive (see Rules). Sessions expire after 1 hour. | Nothing. |
 | Second payment, amount or currency mismatch, money on a voided invoice | "Payment needs review"; `payment.duplicate_charge`, `payment.amount_mismatch` or `payment.received_on_voided_invoice` sent. | Refund the extra, or reconcile the difference, in Stripe. |
+| Customer disputes a card payment (chargeback) | Recorded against the invoice, which stays paid. `payment.dispute_opened` sent, then `payment.dispute_closed` when Stripe closes it. A lost dispute shows a critical notice on the invoice. Needs the three `charge.dispute.*` events on the Stripe webhook endpoint. | Respond in Stripe before the deadline. If lost: a credit note with the money returned outside Velox (never a card refund), a new invoice, or a write-off in your own books ([runbook](ops/runbook/card-disputes.md)). |
 | Void, write-off or offline payment while a charge is running | Refused until the charge settles. A parked invoice can still be written off; if its charge later turns out to have succeeded, it is marked paid. | Retry after it settles. |
 | Credit note while a charge is running | Refused while the payment is `processing` or `unknown`; allowed while the charge call itself is in flight. | Wait for the charge result before issuing one. |
 | Retries used up, and the payment turns `processing` or `unknown` just before dunning's final action | No cancel, pause or write-off while that payment may still go through; dunning checks again later. A payment that succeeds closes dunning; one that fails gets the final action. A parked invoice waits for an operator. | Nothing. Writing off a parked invoice whose dunning used every retry: apply the policy's cancel or pause by hand ([runbook](ops/runbook/parked-invoices.md)). |
@@ -103,9 +110,19 @@ payment failures, and the gaps still open.
   notice no longer offers a retry, but the invoice page's **Collect
   payment** reaches Stripe with the refused card
   ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)).
-- **Disputes are not recorded**: the invoice stays paid and no webhook is
-  sent; follow disputes in Stripe
-  ([#979](https://github.com/getvelox/velox/issues/979)).
+- **The dashboard has no badge for an open dispute.** An open dispute shows
+  only as a row in the invoice's Activity list, and the lost-dispute notice
+  carries the generic title "Needs attention". The dashboard's list of Stripe
+  events to turn on does not name the three dispute events yet, so a setup
+  that follows only that list records no disputes; add them by hand
+  ([runbook](ops/runbook/card-disputes.md)). Read disputes with
+  `GET /v1/invoices/{id}/disputes`.
+- **A dispute that Stripe's dispute prevention settles (status
+  `prevented`) shows no notice.** Prevention settles a dispute by
+  refunding the payment in Stripe, and Velox does not record a refund made
+  in Stripe. The dispute is in the invoice's Activity list; record the
+  refund with a credit note
+  ([ADR-049](adr/049-payment-settlement-primitive.md), "Deferred").
 
 Related: [operations runbook](ops/runbook/index.md),
 [webhook events](webhooks.md#event-catalog),

@@ -29,7 +29,17 @@
  * reason applies; when one does, the exposure is folded into that
  * reason's `message` and its `actions` instead, so clients must
  * not treat the reason code as the presence test for exposure
- * (2026-08-04).
+ * (2026-08-04). `dispute_lost` reports a payment on the invoice that
+ * the customer disputed with their bank and that the dispute took
+ * back (the dispute closed as `lost`). Velox leaves the invoice paid
+ * and moves no money; the operator records the loss. Surfaced on paid
+ * invoices. On an invoice that bought prepaid credit, the message
+ * also says how much of the credit is still spendable and names
+ * commit relief, because an ordinary credit note is refused there.
+ * When the invoice also has `payment_anomaly`, that reason stays and
+ * its message asks the operator to check Stripe before any refund.
+ * The disputes themselves are at `GET /v1/invoices/{id}/disputes`
+ * (2026-10-19).
  */
 export type AttentionReason = typeof AttentionReason[keyof typeof AttentionReason];
 
@@ -47,4 +57,5 @@ export const AttentionReason = {
   dunning_exhausted: 'dunning_exhausted',
   collection_paused: 'collection_paused',
   commit_exposure: 'commit_exposure',
+  dispute_lost: 'dispute_lost',
 } as const;

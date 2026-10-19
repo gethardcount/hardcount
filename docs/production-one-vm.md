@@ -242,7 +242,7 @@ Start in test mode. Connect live mode the same way when you are ready to take re
    **You see:** "Verified as" and your Stripe account name.
 
 3. Step 2, **Deliver Stripe events to Velox**, shows a webhook URL. A webhook is a message Stripe sends to Velox when something happens, for example when a card payment succeeds. Copy the URL. It looks like `https://billing.example.com/v1/webhooks/stripe/vlx_spc_…`.
-4. In Stripe, open **Developers → Webhooks** and add an endpoint. Paste the URL and pick the events that Velox lists under the URL.
+4. In Stripe, open **Developers → Webhooks** and add an endpoint. Paste the URL and pick the events that Velox lists under the URL. Also pick `charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`, so Velox records card disputes ([Card disputes](ops/runbook/card-disputes.md)).
 5. Stripe shows the endpoint's signing secret (`whsec_…`). Paste it into step 2 in Velox and click **Finish setup**.
 
    **You see:** the card's badge reads **Connected**.

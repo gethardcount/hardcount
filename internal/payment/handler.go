@@ -152,13 +152,16 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Extract payment intent details from the event object
 	var obj struct {
-		ID        string `json:"id"`
-		Object    string `json:"object"`
-		Status    string `json:"status"`
-		Amount    int64  `json:"amount"`
-		Currency  string `json:"currency"`
-		Customer  string `json:"customer"`
-		LastError *struct {
+		ID     string `json:"id"`
+		Object string `json:"object"`
+		// PaymentIntent is read only from a Dispute, whose own id is not a
+		// payment's (see below).
+		PaymentIntent json.RawMessage `json:"payment_intent"`
+		Status        string          `json:"status"`
+		Amount        int64           `json:"amount"`
+		Currency      string          `json:"currency"`
+		Customer      string          `json:"customer"`
+		LastError     *struct {
 			Message string `json:"message"`
 		} `json:"last_payment_error"`
 		Metadata map[string]string `json:"metadata"`
@@ -207,11 +210,18 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	amount := obj.Amount
+	// The audit row's payment_intent_id names the payment. For a Dispute the
+	// object's own id is the dispute's (du_…), so the disputed PaymentIntent
+	// goes there instead.
+	paymentIntentID := obj.ID
+	if obj.Object == "dispute" {
+		paymentIntentID = stripeObjectID(obj.PaymentIntent)
+	}
 	event := domain.StripeWebhookEvent{
 		StripeEventID:      raw.ID,
 		EventType:          raw.Type,
 		ObjectType:         obj.Object,
-		PaymentIntentID:    obj.ID,
+		PaymentIntentID:    paymentIntentID,
 		PaymentStatus:      obj.Status,
 		AmountCents:        &amount,
 		Currency:           obj.Currency,
@@ -271,6 +281,13 @@ func endpointAuthoritativeEvent(eventType string) bool {
 		// endpoint tenant is authoritative (per-tenant secret + HMAC); the handler
 		// still matches the refund to a Velox credit note by stripe_refund_id and
 		// acks anything foreign.
+		return true
+	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
+		// A Dispute carries its own metadata, not the PaymentIntent's, so a
+		// dispute on a Velox charge arrives without velox_tenant_id (#979).
+		// The endpoint tenant is authoritative; the handler matches the
+		// dispute to a Velox invoice by the disputed PaymentIntent and acks
+		// one that no Velox invoice holds.
 		return true
 	default:
 		return false

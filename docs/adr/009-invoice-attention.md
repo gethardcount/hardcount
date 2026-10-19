@@ -84,7 +84,7 @@ payment_unconfirmed      — Stripe returned an ambiguous outcome (5xx/timeout)
 overdue                  — past due_at, still unpaid
 ```
 
-Reserved-but-not-yet-emitted (planned, code reserved): `finalization_failed`, `payment_action_required`, `payment_method_required`, `dunning_exhausted`, `dispute_lost`. Adding these later is a non-breaking extension — the enum is documented as open-for-extension in the OpenAPI spec.
+Reserved-but-not-yet-emitted (planned, code reserved): `finalization_failed`, `payment_action_required`, `payment_method_required`, `dunning_exhausted`, `dispute_lost`. Adding these later is a non-breaking extension — the enum is documented as open-for-extension in the OpenAPI spec. *(2026-10-19: `dunning_exhausted` shipped 2026-07-22, and `dispute_lost` shipped with #979: a dispute on one of the invoice's payments closed as lost. It is Critical and shows on paid invoices.)*
 
 ### Action codes — closed enum
 

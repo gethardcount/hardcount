@@ -45,7 +45,7 @@ const (
 //	payment_action_required     — 3DS / SCA pending
 //	payment_method_required     — no PM on file
 //	dunning_exhausted           — shipped 2026-07-22 (payment-surfacing audit)
-//	dispute_lost                — Lago parity
+//	dispute_lost                — shipped 2026-10-19 (#979)
 type AttentionReason string
 
 const (
@@ -171,6 +171,15 @@ const (
 	// the default pause action collection must be resumed too. Chargebee/Stripe
 	// parity: the end-of-dunning terminal is an explicit, visible state.
 	AttentionReasonDunningExhausted AttentionReason = "dunning_exhausted"
+
+	// AttentionReasonDisputeLost: the customer disputed a payment on this
+	// invoice with their bank and the dispute closed as lost, so the bank
+	// took the money back (#979). Velox leaves the invoice paid and moves no
+	// money; the operator decides what the loss means for the invoice (a
+	// credit note for money returned outside Velox, or a write-off in their
+	// own books). Critical, and surfaced on paid invoices, which is where
+	// every dispute lands. Lago parity.
+	AttentionReasonDisputeLost AttentionReason = "dispute_lost"
 )
 
 // AttentionAction names the operator's recommended next step. Closed
@@ -486,6 +495,14 @@ type AttentionContext struct {
 	// operator to get a new card rather than to wait on a retry.
 	DunningRetrying bool
 
+	// LostDispute is a dispute on one of this invoice's payments that closed
+	// as lost (#979), the newest one when there are several; nil when none
+	// did. The invoice service reads it for every non-draft invoice, from the
+	// invoice's dispute records. A read error leaves it nil: the notice is
+	// display-only, and the dispute stays visible on the invoice's timeline
+	// and in GET /v1/invoices/{id}/disputes.
+	LostDispute *InvoiceDispute
+
 	// LastFailedChargeAt is the simulated instant of the invoice's latest
 	// failed charge, for a clock-pinned invoice only (nil otherwise). The
 	// payment-failure banner dates "since" from it: attentionSince's issue
@@ -566,8 +583,21 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	// fires almost exclusively on invoices that are ALREADY paid or voided —
 	// exactly the rows the early-return hides. The operator must see it to
 	// refund it.
+	//
+	// A lost dispute on the same invoice changes what the anomaly asks for:
+	// the bank already gave one payment back, so "refund the extra charge"
+	// could return the customer's money twice (#1287 review).
 	if inv.PaymentAnomalyKind != "" {
-		return classifyPaymentAnomaly(inv)
+		att := classifyPaymentAnomaly(inv)
+		if atc.LostDispute != nil {
+			att = withLostDispute(att, *atc.LostDispute)
+		}
+		return att
+	}
+	// A lost dispute pierces it too: disputes land on paid invoices, so the
+	// early return would hide every one of them.
+	if atc.LostDispute != nil {
+		return classifyDisputeLost(inv, *atc.LostDispute, atc)
 	}
 	// A BAD-DEBT RECOVERY charge in flight pierces the early-return, for the
 	// same reason the anomaly does: the state lives only on a row the return
@@ -695,6 +725,9 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 		return att
 	}
 	// Paid: the cash arrived, which is the whole point — nothing to report.
+	// (Unless a dispute took it back: classifyDisputeLost reports the
+	// spendable credit on a paid invoice itself, with commit relief as the
+	// action, since void is refused there.)
 	// Voided: the operator already took the one recovery action there is, and
 	// the void tx retired the unspent balance. Draft: a grant is funded at
 	// finalize, so a draft cannot have one; if it somehow does, that is a
@@ -1440,6 +1473,87 @@ func classifyPaymentAnomaly(inv Invoice) *Attention {
 	if pi != "" {
 		att.Actions = []AttentionActionItem{{Code: AttentionActionReconcilePayment, Label: "Open in Stripe"}}
 	}
+	return att
+}
+
+// classifyDisputeLost reports a payment the customer's bank took back after a
+// lost dispute (#979). Velox records the loss and changes nothing else, so the
+// invoice still reads paid and its books overstate what was collected until
+// the operator acts. No action button: the decision is the operator's (a
+// credit note, or a write-off in their own books), and none of the existing
+// actions makes it. The Stripe dispute id goes in Detail, where the Stripe
+// dashboard search needs it.
+//
+// A paid invoice that bought prepaid credit is different in two ways: the
+// credit stays spendable after the bank took the money back, and an ordinary
+// credit note is refused there (ADR-078 D4). Commit relief is the one action
+// that retires the credit (ADR-080), so the notice names it, with the
+// spendable amount up front. The service reads the grant for exactly this
+// case (decorateInvoice). Relief is for paid invoices only, so the branch is
+// too; on any other status withCommitExposure already reports the credit.
+func classifyDisputeLost(inv Invoice, d InvoiceDispute, atc AttentionContext) *Attention {
+	since := inv.UpdatedAt
+	if d.ClosedAt != nil {
+		since = *d.ClosedAt
+	}
+	taken := FormatMoneyMinor(d.AmountCents, d.Currency)
+	detail := "Stripe dispute " + d.StripeDisputeID + " closed as lost"
+	if d.Reason != "" {
+		detail += "; the customer's reason was " + d.Reason
+	}
+	detail += ". Velox leaves the invoice paid and moves no money."
+	message := "The customer's bank took back " + taken +
+		" after a lost dispute, so record it with a credit note or write it off in your books."
+
+	drawable, spent := atc.CommitGrantDrawableCents, atc.CommitGrantConsumedCents
+	switch {
+	case inv.Status == InvoicePaid && drawable > 0:
+		message = "The customer's bank took back " + taken + " after a lost dispute, and the customer can still spend " +
+			FormatMoneyMinor(drawable, inv.Currency) + " of this invoice's prepaid credit." +
+			"\nRetire that credit with commit relief, recorded as money returned outside Velox."
+		detail += " The prepaid credit stays spendable until you retire it. An ordinary credit note is refused on an invoice that bought prepaid credit: " +
+			"use POST /v1/credit-notes with commit_relief {\"retire_all\": true} and the relief amount as out_of_band_amount_cents, never as a card refund, because the bank already returned the money. " +
+			"If the amount you send differs, the answer names the right one. " +
+			"Relief returns at most the price paid for the unspent credit; record any rest of the loss in your own books."
+	case inv.Status == InvoicePaid && spent > 0:
+		message = "The customer's bank took back " + taken +
+			" after a lost dispute, so bill the customer again or write it off in your books."
+		detail += " The customer already spent all the credit this invoice bought, so there is none to retire, and an ordinary credit note is refused on an invoice that bought prepaid credit."
+	default:
+		detail += " To record the loss, issue a credit note with the amount as money returned outside Velox, not as a card refund: the bank already returned it."
+	}
+	return &Attention{
+		Severity: AttentionSeverityCritical,
+		Reason:   AttentionReasonDisputeLost,
+		Code:     "payment.dispute_lost",
+		Message:  message,
+		Detail:   detail,
+		DocURL:   docURL("dispute-lost"),
+		Since:    &since,
+	}
+}
+
+// withLostDispute rewrites a payment-anomaly notice for an invoice that also
+// lost a dispute (#1287 review). The anomaly's own instruction (refund the
+// extra charge, refund the payment on a voided invoice) assumes Stripe still
+// holds the money, and after a chargeback it may not: refund the extra charge
+// of a duplicate whose original the bank took back, and the customer has both
+// payments back. Stripe refuses a refund of the charged-back payment itself
+// (error charge_disputed), so the risk is the other one. The anomaly keeps
+// its reason, code and "Open in Stripe" button; the message stops asking for
+// a refund, and Detail puts the dispute and its payment before the anomaly's
+// own facts, so the operator can see which payment the bank took back.
+func withLostDispute(att *Attention, d InvoiceDispute) *Attention {
+	if att == nil {
+		return nil
+	}
+	att.Message = "The customer's bank took back " + FormatMoneyMinor(d.AmountCents, d.Currency) +
+		" after a lost dispute, so check what Stripe still holds before you refund anything."
+	att.Detail = joinDetail(
+		"Stripe dispute "+d.StripeDisputeID+" on payment "+d.StripePaymentIntentID+
+			" closed as lost: the customer already has that money back, and Stripe refuses a refund of it. "+
+			"A refund of another payment on this invoice can return the same money twice.",
+		"Velox also flagged a payment on this invoice. "+att.Detail)
 	return att
 }
 

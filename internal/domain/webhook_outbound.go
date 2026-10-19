@@ -144,7 +144,17 @@ const (
 	// voided (or otherwise non-payable) invoice — the void's session-expire
 	// leg failed and the customer paid inside the residual. Distinct cause
 	// from duplicate_charge: the money is owed BACK, not double-collected.
-	EventPaymentReceivedOnVoidedInvoice     = "payment.received_on_voided_invoice"
+	EventPaymentReceivedOnVoidedInvoice = "payment.received_on_voided_invoice"
+	// EventPaymentDisputeOpened fires once per Stripe dispute, when Velox
+	// first records it against an invoice (charge.dispute.*, #979). Queued in
+	// the transaction that records it. Velox changes nothing else: the invoice
+	// stays paid and no money moves.
+	EventPaymentDisputeOpened = "payment.dispute_opened"
+	// EventPaymentDisputeClosed fires when a recorded dispute reaches a closed
+	// status it did not have: won, lost, warning_closed (an inquiry that never
+	// became a chargeback) or prevented. A lost dispute that Stripe later
+	// marks won fires it again. Queued in the transaction that records it.
+	EventPaymentDisputeClosed               = "payment.dispute_closed"
 	EventSubscriptionCreated                = "subscription.created"
 	EventSubscriptionActivated              = "subscription.activated"
 	EventSubscriptionCanceled               = "subscription.canceled"
@@ -220,6 +230,8 @@ var KnownWebhookEventTypes = map[string]bool{
 	EventPaymentDuplicateCharge:             true,
 	EventPaymentAmountMismatch:              true,
 	EventPaymentReceivedOnVoidedInvoice:     true,
+	EventPaymentDisputeOpened:               true,
+	EventPaymentDisputeClosed:               true,
 	EventPaymentMethodAttached:              true,
 	EventPaymentMethodUpdated:               true,
 	EventSubscriptionCreated:                true,

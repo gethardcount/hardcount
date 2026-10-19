@@ -633,6 +633,7 @@ components:
         - dunning_exhausted
         - collection_paused
         - commit_exposure
+        - dispute_lost
       description: |
         Closed, typed code naming why an invoice needs operator
         attention. Stable public-API contract — codes are never
@@ -654,7 +655,17 @@ components:
         reason applies; when one does, the exposure is folded into that
         reason's `message` and its `actions` instead, so clients must
         not treat the reason code as the presence test for exposure
-        (2026-08-04).
+        (2026-08-04). `dispute_lost` reports a payment on the invoice that
+        the customer disputed with their bank and that the dispute took
+        back (the dispute closed as `lost`). Velox leaves the invoice paid
+        and moves no money; the operator records the loss. Surfaced on paid
+        invoices. On an invoice that bought prepaid credit, the message
+        also says how much of the credit is still spendable and names
+        commit relief, because an ordinary credit note is refused there.
+        When the invoice also has `payment_anomaly`, that reason stays and
+        its message asks the operator to check Stripe before any refund.
+        The disputes themselves are at `GET /v1/invoices/{id}/disputes`
+        (2026-10-19).
 
     RecoveryWarning:
       type: object
@@ -2831,7 +2842,7 @@ components:
           format: date-time
         source:
           type: string
-          enum: [lifecycle, payment, dunning, email, credit_note]
+          enum: [lifecycle, payment, dunning, email, credit_note, dispute]
         event_type:
           type: string
           example: invoice.finalized
@@ -2862,6 +2873,163 @@ components:
           format: date-time
           description: Real-world time of a row whose `timestamp` is test-clock time.
 
+    InvoiceDispute:
+      type: object
+      description: |
+        A card dispute (chargeback) Stripe reported against one of the
+        invoice's payments, recorded from Stripe's `charge.dispute.created`,
+        `.updated` and `.closed` webhook events. It holds the dispute as the
+        newest of those events showed it, whatever order they arrived in.
+        Velox records and reports a dispute, and nothing else: the invoice
+        stays paid and no money moves.
+      required:
+        - id
+        - invoice_id
+        - stripe_dispute_id
+        - stripe_payment_intent_id
+        - status
+        - amount_cents
+        - currency
+        - opened_at
+        - livemode
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          example: vlx_dsp_6f1c0a7e9b2d4c8e1a3b5d7f
+        invoice_id:
+          type: string
+        stripe_dispute_id:
+          type: string
+          example: du_1MtJUT2eZvKYlo2CNaw2HvEv
+        stripe_charge_id:
+          type: string
+        stripe_payment_intent_id:
+          type: string
+          description: The disputed payment.
+        status:
+          type: string
+          enum:
+            - warning_needs_response
+            - warning_under_review
+            - warning_closed
+            - needs_response
+            - under_review
+            - won
+            - lost
+            - prevented
+          description: |
+            Stripe's dispute status, as Stripe sends it. The `warning_`
+            statuses are an inquiry, which comes before a chargeback or
+            instead of one. `won`, `lost`, `warning_closed` and `prevented`
+            are closed.
+        reason:
+          type: string
+          description: The reason the cardholder gave, for example `fraudulent`.
+        amount_cents:
+          type: integer
+          format: int64
+          description: The disputed amount. It can differ from the payment.
+        currency:
+          type: string
+          example: USD
+        evidence_due_by:
+          type: string
+          format: date-time
+          description: The deadline to respond in Stripe. Absent when Stripe gave none.
+        opened_at:
+          type: string
+          format: date-time
+          description: When Stripe opened the dispute.
+        closed_at:
+          type: string
+          format: date-time
+          description: When Stripe closed it. Absent while it is open.
+        livemode:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    InvoiceDisputeList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceDispute"
+
+    DisputeWebhookEventData:
+      type: object
+      description: |
+        The `data` of the outbound webhook events `payment.dispute_opened`
+        and `payment.dispute_closed` (docs/webhooks.md). Both are saved in the
+        same transaction that records the dispute, so a crash cannot drop
+        them. `payment.dispute_opened` is sent once per dispute, when Velox
+        first records it; if the first event Velox receives is already the
+        close, both are sent, and both carry the closed status and
+        `closed_at`. Their delivery order is not guaranteed.
+        `payment.dispute_closed` is sent when the dispute reaches a closed
+        status it did not have: `won`, `lost`, `warning_closed` or
+        `prevented`. A lost dispute that Stripe later marks won sends it
+        again.
+      required:
+        - invoice_id
+        - invoice_number
+        - customer_id
+        - dispute_id
+        - stripe_dispute_id
+        - payment_intent_id
+        - status
+        - amount_cents
+        - currency
+        - opened_at
+      properties:
+        invoice_id:
+          type: string
+        invoice_number:
+          type: string
+        customer_id:
+          type: string
+        dispute_id:
+          type: string
+          description: The Velox dispute record (`InvoiceDispute.id`).
+        stripe_dispute_id:
+          type: string
+        stripe_charge_id:
+          type: string
+        payment_intent_id:
+          type: string
+          description: The disputed Stripe PaymentIntent.
+        status:
+          type: string
+          description: The dispute's status when the event was saved (see `InvoiceDispute.status`).
+        reason:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        evidence_due_by:
+          type: string
+          format: date-time
+        opened_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: string
+          format: date-time
+          description: |
+            Set when the dispute is closed: always on `payment.dispute_closed`,
+            and on `payment.dispute_opened` when the first event Velox received
+            was already the close.
+
     InvoicePaymentTimeline:
       type: object
       required: [events, degraded, truncated]
@@ -2875,7 +3043,7 @@ components:
           description: Sources that could not be read, so their rows are missing.
           items:
             type: string
-            enum: [audit, credit_notes, emails, dunning, charge_attempts]
+            enum: [audit, credit_notes, emails, dunning, charge_attempts, disputes]
         truncated:
           type: boolean
           description: True when the credit-note source hit its limit of 100 rows.
@@ -4431,6 +4599,10 @@ components:
         payload:
           type: object
           additionalProperties: true
+          description: |
+            The event's data. docs/webhooks.md lists what each event carries;
+            `payment.dispute_opened` and `payment.dispute_closed` carry a
+            `DisputeWebhookEventData`.
         created_at:
           type: string
           format: date-time
@@ -9961,7 +10133,9 @@ paths:
         lifecycle steps (created, finalized, paid, voided, marked
         uncollectible), charge attempts (source `payment`, event_type
         `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
-        notes and customer emails.
+        notes, customer emails, and card disputes (source `dispute`, a
+        `payment.dispute_opened` row and, once Stripe closes the dispute, a
+        `payment.dispute_closed` row; both at Stripe's own time).
         A draft invoice returns an empty list.
 
         If one source cannot be read, the rest is still returned and the
@@ -9979,6 +10153,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvoicePaymentTimeline"
+        "404":
+          description: Invoice not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/invoices/{id}/disputes:
+    get:
+      tags: [Invoices]
+      summary: List the card disputes on an invoice
+      operationId: listInvoiceDisputes
+      description: |
+        Returns the card disputes (chargebacks) Stripe reported against the
+        invoice's payments, oldest first. An invoice without any returns an
+        empty list. Velox records them from Stripe's `charge.dispute.*`
+        webhook events, which must be turned on for the Stripe webhook
+        endpoint. Velox never changes the invoice because of a dispute:
+        respond to it in Stripe, and if it is lost, record the loss with a
+        credit note or a write-off in your books.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The invoice's disputes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceDisputeList"
         "404":
           description: Invoice not found.
           content:
