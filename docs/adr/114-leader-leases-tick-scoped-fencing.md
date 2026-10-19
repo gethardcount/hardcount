@@ -302,3 +302,13 @@ only the loss reason, once. The counter's role as the TTL-revisit trigger
 (Observability above) counts only the lost-lease reasons: `panicked` is a
 code or data defect and `paused` an operator action, so both are excluded. Pinned by `TestLease_PanickedTickIsNotACompletion` (real Postgres) and
 `TestRun_PanicUnwindsThroughTheGate`, both mutation-verified.
+
+## Amendment 2026-10-19 — one more `invoice.finalized` site, outside the leader
+
+The effect table (2026-08-30) lists the engine's `invoice.finalized` sites.
+Another site sends the same webhook: the proration invoice of a mid-period
+upgrade, seat increase or added item (#1279). An API request sends it, not a
+leader tick, through `Engine.DispatchInvoiceFinalized` once the item-change
+transaction commits. That transaction also writes the finalize audit row.
+A retried change hits `idx_invoices_proration_dedup`, returns the invoice
+the first attempt made, and sends nothing.

@@ -39,6 +39,27 @@ async function creditBalance(customerId: string): Promise<number> {
   return (await api<{ balance_cents: number }>('GET', `/credits/balance/${customerId}`)).balance_cents
 }
 
+// Lets the next "Issue credit note" request reach the server, then drops the
+// answer on its way back to the browser, as when a slow refund outlasts the
+// browser's wait. serverStatus is what the server answered.
+async function dropNextCreditNoteAnswer(page: Page) {
+  let settle!: (status: number) => void
+  const serverStatus = new Promise<number>(resolve => { settle = resolve })
+  let dropped = false
+  await page.route(url => url.pathname === '/v1/credit-notes', async route => {
+    if (dropped || route.request().method() !== 'POST') return route.fallback()
+    dropped = true
+    // route.fetch sends the request from outside the page, without the
+    // Sec-Fetch-Site header Chrome adds. The server's CSRF check would then
+    // look up the Origin in its allowed list, empty on the test server, and
+    // refuse. Send the header as Chrome does.
+    const answer = await route.fetch({ headers: { ...route.request().headers(), 'sec-fetch-site': 'same-origin' } })
+    await route.abort('failed')
+    settle(answer.status())
+  })
+  return { serverStatus }
+}
+
 // A calendar date as the dashboard and the payment page print it: "Nov 18, 2026".
 function day(iso: string, timeZone: string | undefined): string {
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: timeZone || 'UTC' })
@@ -371,4 +392,47 @@ test('the credit notes page issues a note against an invoice, and issues or void
   // Issuing the draft lowered the amount due; voiding the other changed nothing.
   expect((await getInvoice(invoice.id)).invoice.amount_due_cents)
     .toBe(invoice.amount_due_cents - issued.total_cents - toIssue.total_cents)
+})
+
+test('issuing a credit note again after its answer was lost makes one note, from the invoice page and the credit notes page', async ({ page }) => {
+  const { invoice } = await billedCustomer()
+  const issueButton = (dialog: Locator) => dialog.getByRole('button', { name: 'Issue credit note' })
+
+  // Invoice page: the first answer is lost, so the operator clicks again. The
+  // server answers with the note it already made, and makes no second one.
+  let drop = await dropNextCreditNoteAnswer(page)
+  await page.goto(`/invoices/${invoice.id}`)
+  await (await invoiceActions(page)).getByRole('menuitem', { name: 'Issue credit note' }).click()
+  const fromInvoice = page.getByRole('dialog', { name: 'Issue credit note' })
+  await fromInvoice.getByLabel('Reason').fill('E2E lost answer')
+  await fromInvoice.getByLabel(/^Amount/).fill('10.00')
+  await issueButton(fromInvoice).click()
+  expect(await drop.serverStatus, 'the first try reached the server and made the note').toBe(201)
+  await issueButton(fromInvoice).click()
+  await expect(fromInvoice).toBeHidden()
+  expect(await creditNotesFor(invoice.id)).toHaveLength(1)
+
+  // Credit notes page: the same, from its own dialog.
+  const openListDialog = async () => {
+    await page.getByRole('button', { name: 'Issue credit note' }).first().click()
+    const dialog = page.getByRole('dialog', { name: 'Issue credit note' })
+    await dialog.getByLabel('Invoice', { exact: true }).selectOption(invoice.id)
+    await dialog.getByRole('button', { name: 'Billing error', exact: true }).click()
+    await dialog.getByLabel(/^Amount/).fill('5.00')
+    return dialog
+  }
+  drop = await dropNextCreditNoteAnswer(page)
+  await page.goto('/credit-notes')
+  const fromList = await openListDialog()
+  await issueButton(fromList).click()
+  expect(await drop.serverStatus, 'the first try reached the server and made the note').toBe(201)
+  await issueButton(fromList).click()
+  await expect(fromList).toBeHidden()
+  expect(await creditNotesFor(invoice.id)).toHaveLength(2)
+
+  // Opening the dialog again starts a new action: the same values make a new note.
+  const again = await openListDialog()
+  await issueButton(again).click()
+  await expect(again).toBeHidden()
+  expect(await creditNotesFor(invoice.id)).toHaveLength(3)
 })

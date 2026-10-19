@@ -43,7 +43,11 @@ type PlanReader interface {
 // plan_changed_at) would collide between them. The store's dedup index
 // matches this tuple.
 type ProrationInvoiceCreator interface {
-	CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
+	// CreateInvoiceWithLineItemsAudited writes the invoice in its own
+	// transaction and runs emit on it before commit (nil emit = none). The
+	// non-atomic path uses it so the finalize audit row commits with the
+	// invoice, as on the atomic path.
+	CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error)
 	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
 	// FindBaseInvoiceForPeriod gates immediate in_advance proration on
@@ -77,6 +81,17 @@ type ProrationInvoiceCreator interface {
 	// SetAutoChargePendingTx is the tx-aware variant — enrolls inside the caller's
 	// tx so enrollment commits atomically with the proration item change.
 	SetAutoChargePendingTx(ctx context.Context, tx *sql.Tx, tenantID, id string, pending bool) error
+}
+
+// InvoiceFinalizeRecorder records that an invoice was born finalized: the
+// finalize audit row, on the transaction that inserts the invoice, and the
+// invoice.finalized webhook, after that transaction commits. *billing.Engine
+// satisfies it, so a proration invoice gets the row and the payload the engine
+// writes for a cycle or first invoice (#1279). Both calls skip a draft, which
+// gets them from invoice.Service.Finalize when it finalizes.
+type InvoiceFinalizeRecorder interface {
+	EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain.Invoice) error
+	DispatchInvoiceFinalized(ctx context.Context, tenantID string, inv domain.Invoice)
 }
 
 // ProrationCreditGranter grants credits for downgrade proration. Dedup key is
@@ -206,6 +221,11 @@ type Handler struct {
 	tax         ProrationTaxApplier
 	events      domain.EventDispatcher
 	auditLogger auditRecorder
+	// finalizeAudit writes the finalize audit row and sends invoice.finalized
+	// for a proration invoice born finalized. Its name holds "audit" so
+	// audit.MustWired refuses to boot without it; nil (narrow tests) writes
+	// neither.
+	finalizeAudit InvoiceFinalizeRecorder
 	// Resolver binds effective-now from the sub pin at handler entry
 	// for proration math + changeAt stamping (PR-12, ADR-030 follow-
 	// through). Without it, mid-cycle plan changes on clock-pinned
@@ -229,6 +249,10 @@ func NewHandler(svc *Service) *Handler {
 
 // SetAuditLogger configures audit logging for financial operations.
 func (h *Handler) SetAuditLogger(l auditRecorder) { h.auditLogger = l }
+
+// SetInvoiceFinalizeRecorder wires the finalize audit row and invoice.finalized
+// webhook for proration invoices (the billing engine; router.go).
+func (h *Handler) SetInvoiceFinalizeRecorder(r InvoiceFinalizeRecorder) { h.finalizeAudit = r }
 
 // SetResolver wires the clock.Resolver used to bind effective-now at
 // proration entry points so wall-clock-time computations on
@@ -1679,6 +1703,9 @@ func (h *Handler) atomicAddItemWithProration(
 	if err := tx.Commit(); err != nil {
 		return domain.SubscriptionItem{}, nil, fmt.Errorf("commit atomic addItem tx: %w", err)
 	}
+	// invoice.finalized for the charge invoice, now that it is durable (its
+	// finalize audit row committed in the tx above).
+	h.dispatchProrationFinalized(ctx, tenantID, detail)
 	// Commit proration tax AFTER the tx is durable — CommitTax is an external
 	// Stripe call and must not ride the DB tx (a rollback would orphan the
 	// committed tax transaction). No-op unless a stripe_tax calculation exists.
@@ -1795,6 +1822,9 @@ func (h *Handler) atomicUpdateItemWithProration(
 	if err := tx.Commit(); err != nil {
 		return ItemChangeResult{}, fmt.Errorf("commit atomic updateItem tx: %w", err)
 	}
+	// invoice.finalized for an upgrade or seat-increase invoice, now that it
+	// is durable (see atomicAddItemWithProration).
+	h.dispatchProrationFinalized(ctx, tenantID, detail)
 	// Commit proration tax AFTER the tx is durable (external Stripe call;
 	// must not ride the DB tx). No-op unless a stripe_tax calculation exists.
 	h.commitProrationTax(ctx, tenantID, detail)
@@ -1871,6 +1901,33 @@ func (h *Handler) atomicRemoveItemWithProration(
 	// Return the credit detail so removeItem's audit row can show the
 	// clawback amount (see atomicUpdateItemWithProration).
 	return detail, nil
+}
+
+// finalizeAuditEmit returns the emission that writes the finalize audit row
+// for a proration invoice born finalized, on the transaction that inserts it.
+// nil when no recorder is wired. A draft gets no row here: it gets one from
+// invoice.Service.Finalize when it finalizes.
+func (h *Handler) finalizeAuditEmit(ctx context.Context, tenantID, subID string) func(tx *sql.Tx, out domain.Invoice) error {
+	if h.finalizeAudit == nil {
+		return nil
+	}
+	actx := h.auditCtx(ctx, tenantID, subID)
+	return func(tx *sql.Tx, out domain.Invoice) error {
+		if out.Status != domain.InvoiceFinalized {
+			return nil
+		}
+		return h.finalizeAudit.EmitFinalizeAuditTx(actx, tx, out)
+	}
+}
+
+// dispatchProrationFinalized sends invoice.finalized for the proration invoice
+// this change created finalized. Called after the row is durable, never inside
+// a transaction. No-op for a draft, a credit or a dedup replay.
+func (h *Handler) dispatchProrationFinalized(ctx context.Context, tenantID string, detail *ProrationDetail) {
+	if h.finalizeAudit == nil || detail == nil || detail.finalizedInvoice == nil {
+		return
+	}
+	h.finalizeAudit.DispatchInvoiceFinalized(ctx, tenantID, *detail.finalizedInvoice)
 }
 
 // commitProrationTax turns the proration invoice's provider tax calculation
@@ -1961,7 +2018,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		// that matters is what the source could still be credited for
 		// (total − already credited); whether the in-flight charge ultimately
 		// succeeds is decided later, by creditnote.Issue's paid/unpaid branch.
-		if f.PaymentStatus == domain.PaymentSucceeded || f.PaymentStatus.IsInFlight() {
+		if f.PaymentStatus == domain.PaymentSucceeded || f.PaymentInFlight() {
 			credited, cerr := h.creditNotes.CreditedCents(ctx, tenantID, f.ID)
 			if cerr != nil {
 				return nil, fmt.Errorf("read creditable headroom for %s: %w", f.ID, cerr)
@@ -2299,7 +2356,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		// how the source actually resolved. All of that needs one thing from us:
 		// a DRAFT must exist. So an in-flight source falls through to the
 		// draft-creating path below instead of being settled inline.
-		if resolved.PaymentStatus.IsInFlight() {
+		if resolved.PaymentInFlight() {
 			slog.InfoContext(ctx, "item proration: source payment in flight — clawback will be drafted and issued once it settles (ADR-059)",
 				"subscription_id", sub.ID,
 				"item_id", spec.itemID,
@@ -2555,11 +2612,20 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		}
 		invoice.InvoiceNumber = invoiceNumber
 
+		// The finalize audit row commits with the invoice (ADR-090 shared
+		// fate): on the caller's tx, or inside the store's own tx on the
+		// non-atomic path. Its failure rolls the item change back.
+		emit := h.finalizeAuditEmit(ctx, tenantID, sub.ID)
 		var inv domain.Invoice
 		if tx != nil {
 			inv, err = h.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, tenantID, invoice, lineItems)
+			if err == nil && emit != nil {
+				if aerr := emit(tx, inv); aerr != nil {
+					return nil, fmt.Errorf("finalize audit for proration invoice: %w", aerr)
+				}
+			}
 		} else {
-			inv, err = h.invoices.CreateInvoiceWithLineItems(ctx, tenantID, invoice, lineItems)
+			inv, err = h.invoices.CreateInvoiceWithLineItemsAudited(ctx, tenantID, invoice, lineItems, emit)
 		}
 		if err != nil {
 			// Only the proration-dedup constraint maps to an idempotent
@@ -2628,7 +2694,17 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		// back would orphan it). Mirrors the engine's post-finalize commit.
 		detail.TaxProvider = inv.TaxProvider
 		detail.TaxCalculationID = inv.TaxCalculationID
+		// invoice.finalized goes out once the row is durable: here on the
+		// non-atomic path, after the caller's commit on the atomic one. Only
+		// this fresh creation sets it. The dedup replay above sends nothing:
+		// the attempt that created the invoice sent it, unless the process
+		// died between that commit and the send (#974, as for the engine).
+		if inv.Status == domain.InvoiceFinalized {
+			created := inv
+			detail.finalizedInvoice = &created
+		}
 		if tx == nil {
+			h.dispatchProrationFinalized(ctx, tenantID, detail)
 			h.commitProrationTax(ctx, tenantID, detail)
 			h.enrollAutoCharge(ctx, tenantID, detail)
 		}

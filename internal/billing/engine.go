@@ -199,6 +199,14 @@ func (e *Engine) emitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain
 	return e.auditLogger.LogInTx(ctx, tx, entry)
 }
 
+// EmitFinalizeAuditTx is emitFinalizeAuditTx for an invoice another domain
+// inserts already finalized on its own transaction: the subscription handler's
+// proration invoice (upgrade, seat increase, added item). It writes the same
+// row the engine writes for its own invoices, so the two cannot drift (#1279).
+func (e *Engine) EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain.Invoice) error {
+	return e.emitFinalizeAuditTx(ctx, tx, inv)
+}
+
 // finalizeAuditEmit adapts emitFinalizeAuditTx to the CreateInvoiceWithLineItemsAudited
 // callback shape, so the own-tx finalize paths audit on the create tx. The store
 // hands back the persisted invoice as `out` (with its real ID); audit that, not
@@ -218,11 +226,20 @@ func (e *Engine) finalizeAuditEmit(ctx context.Context) func(tx *sql.Tx, out dom
 // billing path (cycle / create / cancel-final / threshold) emitted NO
 // invoice.finalized at all — integrators only ever saw operator-clicked finalizes.
 func (e *Engine) dispatchInvoiceFinalized(ctx context.Context, sub domain.Subscription, inv domain.Invoice) {
+	e.DispatchInvoiceFinalized(ctx, sub.TenantID, inv)
+}
+
+// DispatchInvoiceFinalized sends invoice.finalized for an invoice born
+// finalized, after the transaction that created it committed. Exported for
+// the subscription handler's proration invoice, so it sends the payload the
+// engine sends for its own invoices (#1279). Drafts send nothing: they send
+// it from invoice.Service.Finalize when they finalize.
+func (e *Engine) DispatchInvoiceFinalized(ctx context.Context, tenantID string, inv domain.Invoice) {
 	if inv.Status != domain.InvoiceFinalized {
 		return
 	}
 	if e.events != nil {
-		e.dispatchEvent(ctx, sub.TenantID, domain.EventInvoiceFinalized, map[string]any{
+		e.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, map[string]any{
 			"invoice_id":         inv.ID,
 			"invoice_number":     inv.InvoiceNumber,
 			"customer_id":        inv.CustomerID,

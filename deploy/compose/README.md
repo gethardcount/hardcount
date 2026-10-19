@@ -136,14 +136,55 @@ VELOX_BASE=http://localhost VELOX_DASHBOARD_URL=http://localhost ./scripts/demo.
 |---|---|
 | See logs | `docker compose logs -f` |
 | Restart the API | `docker compose restart velox-api` |
-| Upgrade, built from source | `git pull`, then `docker compose up -d --build` |
-| Upgrade, published release image | See [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release) |
+| Upgrade to a new release | See [Upgrade](#upgrade) |
 | Stop, keeping data | `docker compose stop` |
 | Stop and delete all data | `docker compose down -v` |
 | See the database's version and the upgrades still to apply | `docker compose run --rm velox-api migrate status` |
 | Open a database shell | `docker compose exec postgres psql -U velox -d velox` |
 
-Read the upgrade notes in the [changelog](../../CHANGELOG.md) before upgrading.
+## Upgrade
+
+Take a backup before every upgrade. Velox cannot undo a database upgrade (a migration) in place: the way back is to restore the backup taken before it ([Going back](../../docs/production-one-vm.md#going-back)).
+
+Upgrade to a release, not to the newest code on `main`, which can hold changes that are not released yet. Read the upgrade notes in the [changelog](../../CHANGELOG.md) for every release between yours and the new one.
+
+If `.env` sets `VELOX_IMAGE`, you run the published images: follow [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release). Otherwise this stack builds Velox from your checkout. To move it to a release, for example `v0.9.0`, run these steps in `deploy/compose`:
+
+1. Take a backup. [Production on one VM, step 7](../../docs/production-one-vm.md#7-back-up-every-night) sets up this command. If your checkout is not in `/opt/velox`, change its two `/opt/velox` paths.
+
+   ```bash
+   sudo velox-backup
+   ```
+
+   **You see:** `Verified:  yes`.
+
+2. Check out the release and build it.
+
+   ```bash
+   git fetch --tags
+   git checkout v0.9.0
+   docker compose build
+   ```
+
+   **You see:** `HEAD is now at …` from git, then the two images build. That takes a few minutes.
+
+3. See what the upgrade will change. `migrate status` only reads.
+
+   ```bash
+   docker compose run --rm velox-api migrate status
+   ```
+
+   **You see:** the plan. If it says `refused`, stop here and follow the message. If it says `ahead`, the database has migrations this release does not ship, because this install ran newer code: check out a newer release and build again.
+
+4. Start the new build. It applies the database upgrades as it starts.
+
+   ```bash
+   docker compose up -d
+   ```
+
+   **You see:** after a few seconds, `curl -fsS http://localhost/health/ready` answers `"status":"ok"` again.
+
+If the upgrade stops with an error, see [If something goes wrong](#if-something-goes-wrong).
 
 ## TLS
 
@@ -161,6 +202,14 @@ Keep `APP_ENV=production`, the default. It always marks the sign-in cookie `Secu
 Once the data matters, set up backups: [`docs/ops/backup-considerations.md`](../../docs/ops/backup-considerations.md). It includes backup and restore scripts and a restore drill.
 
 ## If something goes wrong
+
+To see the settings the API container runs with, ask Docker. The image has no shell and no `env` command, so `docker compose exec velox-api env` fails.
+
+```bash
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -aq velox-api)"
+```
+
+The output holds passwords and keys, so keep it private.
 
 **The API exits with `VELOX_ENCRYPTION_KEY is required in production`.**
 Set the key in `.env` (`openssl rand -hex 32`) and run `docker compose up -d` again.
@@ -183,7 +232,7 @@ If the user does not exist at all, create it with the SQL in [Self-host, "The tw
 `APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `velox_app`.
 
 **The API exits with `migration … failed`, or names `schema_migrations` or `goose_db_version`.**
-A database upgrade stopped. A failed migration leaves nothing to repair: fix the cause the error names, then start the API again. `docker compose run --rm velox-api migrate status` shows the plan. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
+A database upgrade stopped. A failed migration leaves nothing to repair. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop velox-api`. Fix the cause the error names, then start it with `docker compose up -d velox-api`. `docker compose run --rm velox-api migrate status` shows the plan. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
 
 **`/health/ready` shows `scheduler: degraded`.**
 The API is up and still answers 200 here, but its background jobs have stopped running. Check the API logs. To see which copy last ran each job, run `SELECT * FROM leader_status;` in the database shell.

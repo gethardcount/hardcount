@@ -40,6 +40,18 @@ Find the attempt in Stripe by customer, amount and approximate time.
 3. If nothing was charged, mark the invoice uncollectible. This is the only
    action the invoice page offers. It also releases the invoice's deferred
    clawback draft and closes its dunning run.
+4. A write-off in step 2 or 3 closes the invoice's dunning run without the
+   policy's final action (cancel or pause the subscription). Check whether
+   that action was due:
+   - Find the run with `GET /v1/dunning/runs?invoice_id=<invoice id>`, then
+     the policy it runs on with `GET /v1/dunning/policies/<policy_id>`. A run
+     keeps the policy it started on, even if the customer moved to another.
+   - If the run's `attempt_count` has reached the policy's
+     `max_retry_attempts` and its `final_subscription_action` is `cancel` or
+     `pause`, apply that action by hand on the subscription page. Dunning
+     held it because a payment was in flight.
+   - With no run, or with retries left, the final action was never due. The
+     invoice was parked before dunning started or before its last retry.
 
 ## Verify
 

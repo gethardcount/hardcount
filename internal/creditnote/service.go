@@ -1714,7 +1714,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 // flight, or it is still a draft. holdIssue carries out the matching outcome.
 func issueHeld(inv domain.Invoice) bool {
 	return inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible ||
-		inv.PaymentStatus.IsInFlight() || inv.Status == domain.InvoiceDraft
+		inv.PaymentInFlight() || inv.Status == domain.InvoiceDraft
 }
 
 // holdIssue is what Issue() does instead of issuing when issueHeld(inv): void
@@ -1768,7 +1768,7 @@ func (s *Service) holdIssue(ctx context.Context, tenantID string, cn domain.Cred
 	// the single chokepoint for ALL issue triggers (engine CreateAndIssueAdjustment,
 	// the post-commit issueClawbackDrafts, and the reconciler), so the automated
 	// clawback paths defer here rather than each gating their own create site.
-	if inv.PaymentStatus.IsInFlight() {
+	if inv.PaymentInFlight() {
 		slog.InfoContext(ctx, "deferring clawback issue until source payment settles",
 			"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "payment_status", string(inv.PaymentStatus))
 		return cn, nil

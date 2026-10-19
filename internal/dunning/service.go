@@ -953,7 +953,9 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// mid-tick would otherwise cancel a paying customer's subscription here. Re-
 	// read invoice status as late as possible and, if it is now terminal, resolve
 	// the run (CAS-safe) instead of firing the terminal action. Same STATUS gate
-	// as the tick-start check. This one read also feeds both terminal actions
+	// as the tick-start check, plus one the tick-start check does not need: a
+	// payment that may still take money holds both actions (ADR-112 amendment
+	// 2026-10-19). This one read also feeds both terminal actions
 	// below, so the state they act on is the state this check just cleared.
 	// A fetch ERROR means the state is unknown: neither action fires, and the
 	// run is re-queued through the action-failed path (the old behaviour fell
@@ -981,6 +983,26 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			case loaded.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(loaded.Status), nil)
 				return rerr
+			case loaded.PaymentInFlight():
+				// A payment that may still take money: neither final action
+				// fires and nothing is written. A cancel cannot be undone, and
+				// canceling a customer whose payment then succeeds is what this
+				// prevents. The run stays active with the lease it already
+				// carries as next_action_at (the final retry and the
+				// exhaust-on-entry claim both wrote it), so a dunning tick after
+				// the lease looks again: a payment that succeeded resolves the
+				// run as recovered, and one that failed reaches the final
+				// actions through exhaust-on-entry. While the payment is
+				// processing or unknown the due-run pickers skip the run, so the
+				// wait costs no ticks. A parked invoice waits for an operator,
+				// whose write-off closes the run as not collectible without the
+				// subscription action.
+				slog.Info("dunning final action held: a payment on this invoice may still go through; a later dunning tick checks again",
+					"run_id", run.ID, "invoice_id", run.InvoiceID,
+					"payment_status", loaded.PaymentStatus,
+					"final_subscription_action", policy.FinalSubscriptionAction,
+					"final_invoice_action", policy.FinalInvoiceAction)
+				return nil
 			}
 			inv, invRead = loaded, true
 		}

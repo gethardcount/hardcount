@@ -307,6 +307,13 @@ An INVALID index is one Postgres keeps but never uses.
   say so.
 - **A v0.8.x backup restores only into an empty database.** Restored over
   an adopted database, the state check refuses and changes nothing.
+  *(2026-10-19: from migration 185 on, a table created after 180 holds a
+  foreign key into the backup's tables. So `scripts/restore.sh` stops
+  first: `pg_restore --clean` cannot drop those tables, and the
+  single-transaction restore is rolled back. Nothing changes either way;
+  the CI restore drill checks both outcomes, accepts the rollback only for
+  that cause, and also restores the backup into an empty database, which
+  must succeed.)*
 - **v0.8.x binaries can still write `schema_migrations`** after adoption,
   through `migrate rollback` or `migrate force`. The state check catches
   it on the next v0.9 start. To go back, restore the backup. When no file

@@ -267,7 +267,7 @@ caused them, so a crash cannot drop them (rule 3).
 
 | Event | Sent when |
 |---|---|
-| `invoice.finalized` | An invoice is final and ready to pay |
+| `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized |
 | `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment *(always sent)* |
 | `invoice.payment_recorded` | Someone recorded a payment made outside Velox, such as a bank transfer or cheque |
 | `invoice.marked_uncollectible` | An invoice was written off as bad debt |
@@ -279,6 +279,19 @@ caused them, so a crash cannot drop them (rule 3).
 | `payment.duplicate_charge` | A second charge succeeded on an invoice that was already paid. Refund it. |
 | `payment.amount_mismatch` | A charge settled for a different amount than the invoice owed |
 | `payment.received_on_voided_invoice` | Money arrived for a voided invoice. Refund it. |
+| `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Velox recorded it against the invoice. Sent once per dispute. Carries `stripe_dispute_id`, `status`, `reason`, `amount_cents` and `evidence_due_by`, the deadline to respond in Stripe. *(always sent)* |
+| `payment.dispute_closed` | A recorded dispute closed. `status` is `won`, `lost`, `warning_closed` (an inquiry that never became a chargeback) or `prevented`. Sent again if Stripe turns a loss into a win. *(always sent)* |
+
+A dispute changes nothing else in Velox: the invoice stays paid and no money
+moves. Respond to it in Stripe; if it is lost, decide what the invoice should
+say ([Card disputes](ops/runbook/card-disputes.md)). Both events carry
+`invoice_id`, `invoice_number`, `customer_id`, `dispute_id`,
+`payment_intent_id`, `stripe_charge_id`, `currency` and `opened_at`, and
+`closed_at` once the dispute is closed. When the first Stripe event Velox
+receives is already the close, both events are sent with the closed status,
+in either order. Velox hears of a dispute only when Stripe's
+`charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`
+events are turned on for its Stripe webhook endpoint.
 
 ### Subscriptions
 
