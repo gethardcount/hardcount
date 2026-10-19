@@ -8314,7 +8314,7 @@ export interface components {
             date: string;
             /**
              * Format: int64
-             * @description Sum of invoice totals paid in the bucket.
+             * @description What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
              */
             revenue_cents: number;
             invoice_count: number;
@@ -8367,12 +8367,12 @@ export interface components {
             arr_prev: number;
             /**
              * Format: int64
-             * @description Total of invoices paid in the window.
+             * @description What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
              */
             revenue: number;
             /**
              * Format: int64
-             * @description Total of invoices paid in the previous window.
+             * @description `revenue` for the previous window.
              */
             revenue_prev: number;
             /**

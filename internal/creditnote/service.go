@@ -1722,6 +1722,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 				"out_of_band_amount_cents": cn.OutOfBandAmountCents,
 				"amount_due_reduced_cents": dueReduced,
 				"credits_returned_cents":   creditsReturned,
+				"marked_invoice_paid":      settled, // the invoice's paid row names this note
 				"reason":                   cn.Reason,
 				"currency":                 cn.Currency,
 			},

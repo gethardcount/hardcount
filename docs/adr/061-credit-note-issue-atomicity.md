@@ -307,7 +307,7 @@ Not changed: the dashboard's credit-note dialog still offers amount due as the m
 
 ### Not decided here, with triggers
 
-- **A charge already sent to the card network.** It is marked only by the charge lease, which `Issue()` does not read. Trigger: the first payment recorded with an amount that differs from what the card was charged.
+- **A charge already sent to the card network.** It is marked only by the charge lease. `Issue()` reads the lease only to decide whether to mark the invoice paid (amendment 2026-10-19), never before it lowers the amount due. Trigger: the first payment recorded with an amount that differs from what the card was charged.
 - **What kind of credit comes back.** It is a plain grant with no expiry and no promotional kind, as a void's hand-back already is. Trigger: the first tenant with expiring or promotional credits applied to an invoice that is then credited or voided.
 
 ## Amendment (2026-10-19): a note that leaves nothing due marks the invoice paid
@@ -331,6 +331,19 @@ Stripe does the same: a credit note that "reduces the balance of an open invoice
 
 **What this changes.** An invoice a credit note takes to $0 is paid, so it can no longer be voided. Stripe behaves the same. `invoice.paid` for it carries `amount_paid_cents` 0. A second note on the invoice then takes the paid-invoice path: its amount goes to the customer's balance. The customer gets back the same amount as before, and the credits applied stay recorded as what paid the invoice.
 
-**Left as it is.** With a policy that cancels but does not write off, a dunning cancel whose relief note clears the invoice leaves it open at $0. No money is at stake. A note issued while a hold is set leaves the invoice open at $0 too; the next dunning retry or auto-charge pass marks it paid once the hold clears.
+**Readers of a paid invoice (review of #1306).** A waived invoice is paid with nothing paid for it, so three readers that took "paid" to mean money came in changed with it:
+
+- **Revenue.** The dashboard's Revenue and revenue chart summed the totals of paid invoices. A note on an unpaid invoice leaves the total as it was, so an invoice waived in full added its whole total. They now sum what paid each invoice: `amount_paid_cents + credits_applied_cents`. For an invoice paid in full with no such note the two are equal. An invoice lowered by a note and then paid now counts what was paid, which it did not before. A note on an invoice already paid changes neither figure: Revenue is before refunds.
+- **The paid row.** The `credit_note.issued` audit row records `marked_invoice_paid`. When it is set, the invoice's paid row names that note and its issuer instead of "After N retries": the retries failed, and the note settled the invoice.
+- **An item change after a full waive.** Removing an item, lowering a quantity or downgrading in the same period sends the paid invoice down the clawback path, and the waiver used all its credit headroom. That answered 500 ("no creditable funding invoice for period"). The period is already fully credited, so nothing more is owed and the change now proceeds, with an ERROR log. This is ADR-118's rule for a cancel or plan swap, applied to the item change. Before G3 the same change went through with no credit.
+
+**Left as it is.** With a policy that cancels but does not write off, a dunning cancel whose relief note clears the invoice leaves it open at $0. No money is at stake. A note issued while a charge holds the invoice leaves it open at $0 too. If that charge fails, the next dunning retry marks it paid. Auto-charge does not, since it takes only an invoice whose payment is still pending. A cancel or plan swap after a full waive logs ADR-118's ERROR ("already fully credited"); it gives no relief, as before G3.
 
 **Not done.** No $0 check in dunning's exhaust path, and no sweep for open $0 invoices. After this change the exhaust path meets one only through two coincidences. One is a note issued during a final charge. The other is a failover between the credit apply and the mark-paid on the last retry, which also loses the attempt's rewind.
+
+**Waiting on the owner: a partial waive meets the paid-invoice headroom rule.** When customer credits paid part of an invoice and a note waived the rest, the invoice is paid with headroom equal to the credits. Two paths then treat a credit larger than that headroom as they treat a card-paid invoice partly credited before:
+
+- a cancel or plan swap gives no relief at all, with an ERROR log (`allocateUnusedAcrossFunding` returns `errHeadroomExhausted` for an all-paid set). Before G3 the unpaid path returned up to the credits applied;
+- an item change is refused with a 500 (`resolveClawbackPieces`). Before G3 it went through and returned up to the credits applied.
+
+Example: credits paid 20.00 of a 100.00 invoice, the card failed on 80.00, the operator waived it, then canceled halfway. Before G3 the 20.00 of credits went back to the balance; now nothing does. Placing what fits and logging the rest would fix both, but it also changes those two paths for card-paid invoices, so it waits for a decision. Trigger: the first partial waive followed by a cancel, swap or item change in the same period.

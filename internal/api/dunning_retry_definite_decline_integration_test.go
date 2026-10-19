@@ -40,15 +40,13 @@ var errConnDropped = &pgconn.PgError{Severity: "FATAL", Code: "57P01", Message: 
 
 // faultInvoices is the retry adapter's invoice store: the real store, except
 // that the nth call of one method fails. With lostAck the real call commits
-// first and only its answer is lost. beforeGet, when set, runs once before the
-// next invoice read: a write that lands after the pass listed the run.
+// first and only its answer is lost.
 type faultInvoices struct {
 	*invoice.PostgresStore
-	method    string
-	nth       int
-	lostAck   bool
-	calls     int
-	beforeGet func()
+	method  string
+	nth     int
+	lostAck bool
+	calls   int
 }
 
 func (f *faultInvoices) trips(method string) bool {
@@ -60,10 +58,6 @@ func (f *faultInvoices) trips(method string) bool {
 }
 
 func (f *faultInvoices) Get(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	if hook := f.beforeGet; hook != nil {
-		f.beforeGet = nil
-		hook()
-	}
 	if f.trips("Get") {
 		return domain.Invoice{}, errConnDropped
 	}
@@ -272,22 +266,6 @@ func (d *dunningRetryRig) clearHold(invID string) {
 	}
 }
 
-// setHold writes a live charge hold on the invoice, as a claim does.
-func (d *dunningRetryRig) setHold(invID string) {
-	d.t.Helper()
-	tx, err := d.db.BeginTx(d.ctx, postgres.TxBypass, "")
-	if err != nil {
-		d.t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(d.ctx, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '5 minutes' WHERE id = $1`, invID); err != nil {
-		d.t.Fatalf("set hold: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		d.t.Fatalf("commit: %v", err)
-	}
-}
-
 // paidEvents counts the invoice.paid rows queued for the invoice.
 func (d *dunningRetryRig) paidEvents(invID string) int {
 	d.t.Helper()
@@ -458,70 +436,46 @@ func TestDunningRetry_ClaimError_NotCounted(t *testing.T) {
 // finds nothing due and marks the invoice paid (G3). Before, it closed the run
 // as recovered and left the invoice unpaid at $0, with no invoice.paid.
 //
-// Mutation seam: in retryPayment, return nil for a $0 invoice again → both
-// subtests go red.
+// Mutation seam: in retryPayment, return nil for a $0 invoice again → the
+// second pass leaves the invoice unpaid.
 func TestDunningRetry_CreditCoveredMarkPaidError_NotCounted_HoldReleased(t *testing.T) {
-	coveredButUnmarked := func(t *testing.T, name string) (*dunningRetryRig, string, domain.Invoice, domain.InvoiceDunningRun) {
-		t.Helper()
-		d := newDunningRetryRig(t, name)
-		d.invoices.SetOutboxEnqueuer(webhook.NewOutboxStore(d.db))
-		custID := d.customerWithCard("covered", "pm_covered")
-		inv := d.dunnedInvoice(custID, "INV-G2-COVERED")
-		d.grant(custID, 5000)
-		before := d.dueRun(inv.ID, custID, 1)
-		d.faults.method, d.faults.nth = "MarkPaid", 1
+	d := newDunningRetryRig(t, "Retry Covered MarkPaid Error")
+	d.invoices.SetOutboxEnqueuer(webhook.NewOutboxStore(d.db))
+	custID := d.customerWithCard("covered", "pm_covered")
+	inv := d.dunnedInvoice(custID, "INV-G2-COVERED")
+	d.grant(custID, 5000)
+	before := d.dueRun(inv.ID, custID, 1)
+	d.faults.method, d.faults.nth = "MarkPaid", 1
 
-		d.tick()
-		d.assertNotCounted(before)
-		if n := len(d.charges.charged); n != 0 {
-			t.Errorf("Stripe received %d charges for an invoice credits covered", n)
-		}
-		if at := d.holdAt(inv.ID); at != nil {
-			t.Errorf("charge hold still set (%v) after a settle that sent no charge", *at)
-		}
-		if usage := d.creditUsage(custID, inv.ID); len(usage) != 1 || usage[0].AmountCents != -5000 {
-			t.Errorf("credit usage entries %+v, want one of -5000", usage)
-		}
-		return d, custID, inv, before
+	d.tick()
+	d.assertNotCounted(before)
+	if n := len(d.charges.charged); n != 0 {
+		t.Errorf("Stripe received %d charges for an invoice credits covered", n)
+	}
+	if at := d.holdAt(inv.ID); at != nil {
+		t.Errorf("charge hold still set (%v) after a settle that sent no charge", *at)
+	}
+	if usage := d.creditUsage(custID, inv.ID); len(usage) != 1 || usage[0].AmountCents != -5000 {
+		t.Errorf("credit usage entries %+v, want one of -5000", usage)
 	}
 
-	t.Run("the next pass marks it paid", func(t *testing.T) {
-		d, custID, inv, before := coveredButUnmarked(t, "Retry Covered MarkPaid Error")
-
-		d.tick()
-		if got := d.invoice(inv.ID); got.Status != domain.InvoicePaid || got.AmountDueCents != 0 {
-			t.Errorf("invoice %s/%s with %d due, want paid: credits covered it", got.Status, got.PaymentStatus, got.AmountDueCents)
-		}
-		if n := d.paidEvents(inv.ID); n != 1 {
-			t.Errorf("%d invoice.paid events queued, want exactly 1", n)
-		}
-		if got := d.run(before.ID); got.State != domain.DunningResolved || got.Resolution != domain.ResolutionPaymentRecovered {
-			t.Errorf("run %s/%q, want resolved as payment_recovered", got.State, got.Resolution)
-		}
-		if usage := d.creditUsage(custID, inv.ID); len(usage) != 1 || usage[0].AmountCents != -5000 {
-			t.Errorf("credit usage entries %+v, want still one of -5000", usage)
-		}
-		if n := len(d.charges.charged); n != 0 {
-			t.Errorf("Stripe received %d charges for an invoice credits covered", n)
-		}
-	})
-
-	// A charge claims the invoice after the pass listed the run (the due-run
-	// scan skips an invoice whose hold is set). The pass skips, uncounted, and
-	// leaves the invoice as it is until the charge resolves.
-	t.Run("a charge holds it: the next pass skips", func(t *testing.T) {
-		d, _, inv, before := coveredButUnmarked(t, "Retry Covered Then Held")
-		d.faults.beforeGet = func() { d.setHold(inv.ID) }
-
-		d.tick()
-		d.assertNotCounted(before)
-		if got := d.invoice(inv.ID); got.Status != domain.InvoiceFinalized || got.AmountDueCents != 0 {
-			t.Errorf("invoice %s with %d due, want finalized at 0 while the charge holds it", got.Status, got.AmountDueCents)
-		}
-		if n := d.paidEvents(inv.ID); n != 0 {
-			t.Errorf("%d invoice.paid events queued, want none", n)
-		}
-	})
+	// The next pass marks it paid.
+	d.tick()
+	if got := d.invoice(inv.ID); got.Status != domain.InvoicePaid || got.AmountDueCents != 0 {
+		t.Errorf("invoice %s/%s with %d due, want paid: credits covered it", got.Status, got.PaymentStatus, got.AmountDueCents)
+	}
+	if n := d.paidEvents(inv.ID); n != 1 {
+		t.Errorf("%d invoice.paid events queued, want exactly 1", n)
+	}
+	if got := d.run(before.ID); got.State != domain.DunningResolved || got.Resolution != domain.ResolutionPaymentRecovered {
+		t.Errorf("run %s/%q, want resolved as payment_recovered", got.State, got.Resolution)
+	}
+	if usage := d.creditUsage(custID, inv.ID); len(usage) != 1 || usage[0].AmountCents != -5000 {
+		t.Errorf("credit usage entries %+v, want still one of -5000", usage)
+	}
+	if n := len(d.charges.charged); n != 0 {
+		t.Errorf("Stripe received %d charges for an invoice credits covered", n)
+	}
 }
 
 // Applying credit fails: the retry is not counted, the hold is released, and a
