@@ -11,7 +11,7 @@
 --   charge_started_stripe_customer the Stripe customer the charge was sent for
 -- All four are nullable with no default, so the ADD COLUMNs are instant. The
 -- CHECK keeps them all set or all NULL. It is added NOT VALID, so it holds for
--- new rows at once; 00186 checks the rows already there.
+-- new rows at once; 00187 checks the rows already there.
 ALTER TABLE invoices ADD COLUMN charge_started_at TIMESTAMPTZ;
 ALTER TABLE invoices ADD COLUMN charge_started_seq BIGINT;
 ALTER TABLE invoices ADD COLUMN charge_started_key TEXT;

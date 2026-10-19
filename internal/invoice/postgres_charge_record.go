@@ -103,7 +103,7 @@ func (s *PostgresStore) EndChargeAttempt(ctx context.Context, tenantID, id strin
 // explicit, so a test-mode record is never checked with live keys (#13). Not
 // gated on is_simulated: Stripe's truth is on the wall clock, and a charge
 // interrupted during a test-clock advance must be checked too. The partial
-// index idx_invoices_charge_started (migration 00187) holds only invoices
+// index idx_invoices_charge_started (migration 00188) holds only invoices
 // with a record.
 func (s *PostgresStore) ListInterruptedCharges(ctx context.Context, minAge, giveUpAge time.Duration, limit int) ([]domain.InterruptedCharge, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")

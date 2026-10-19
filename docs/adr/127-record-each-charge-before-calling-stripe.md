@@ -37,7 +37,7 @@ And from stripe-go v82.5.1: `shouldRetry` resends any non-Stripe error (a reset 
 
 ## Decision
 
-**Record first.** `InvoiceUpdater.BeginChargeAttempt` writes four nullable columns on `invoices` (migration 00185): `charge_started_at` (the database's `now()`), `charge_started_seq` (the `charge_attempt_seq` the key was built from), `charge_started_key` (the exact key Stripe receives) and `charge_started_stripe_customer`. It is a CAS (an `UPDATE` that applies only while the row is still in the expected state): no record yet, the same seq, finalized, `pending` or `failed`, and a live charge hold. If it fails or is refused, Stripe is not called and the hold is released. A CHECK keeps the four columns all set or all `NULL` (00185 adds it `NOT VALID`, 00186 validates it). A partial index serves the check (00187).
+**Record first.** `InvoiceUpdater.BeginChargeAttempt` writes four nullable columns on `invoices` (migration 00186): `charge_started_at` (the database's `now()`), `charge_started_seq` (the `charge_attempt_seq` the key was built from), `charge_started_key` (the exact key Stripe receives) and `charge_started_stripe_customer`. It is a CAS (an `UPDATE` that applies only while the row is still in the expected state): no record yet, the same seq, finalized, `pending` or `failed`, and a live charge hold. If it fails or is refused, Stripe is not called and the hold is released. A CHECK keeps the four columns all set or all `NULL` (00186 adds it `NOT VALID`, 00187 validates it). A partial index serves the check (00188).
 
 **Send the key as metadata.** Every charge sends `velox_attempt_key = <the exact key>`. `ChargeIdempotencyKey` builds the whole key, card included, in one place; the value is unchanged.
 
@@ -114,6 +114,6 @@ The release checklist carries these:
 
 - Design and review record: the `charge-intent-976-design-2026-10-18.md` note in the maintainers' ops repository.
 - Code: `internal/payment/stripe.go` (`chargeInvoice`), `internal/payment/reconciler_interrupted.go`, `internal/invoice/postgres_charge_record.go`, `internal/domain/invoice.go` (`PaymentInFlight`, `ChargeNotHeldSQL`).
-- Migrations 00185, 00186, 00187.
+- Migrations 00186, 00187, 00188.
 - Tests: `internal/payment/interrupted_charge_integration_test.go`, `internal/invoice/charge_record_integration_test.go`, `internal/dunning/exhaust_charge_record_integration_test.go`.
 - Operators: [Interrupted charges](../ops/runbook/interrupted-charges.md).
