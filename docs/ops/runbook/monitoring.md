@@ -38,8 +38,11 @@ alerting tier: what should page someone, and what is only informational.
 | `up{job="velox"}` | == 0 | Process down |
 | Postgres connection errors (count) | > 10/min | Database connectivity broken |
 | `time() - velox_scheduler_last_run_timestamp_seconds` | > 2× tick interval | Scheduler stalled on this replica. `/health/ready` shows it in its body but stays 200, so this alert is how you find out |
-| `velox_leader_last_tick_age_seconds{role}` | > 3× the role's interval | No replica has finished a tick of this role. **On a busy billing day this trips too**: if `velox_billing_due_subscriptions` is falling, the tick is draining; do not restart it. See [A background job is stuck](background-job-stuck.md) |
+| `velox_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min) | No replica has finished a tick of this role. The 5-minute floor is for the roles that run every few seconds: a restart or a lease handover stops them for more than 3 intervals, and that is not a stall. **On a busy billing day this trips too**: if `velox_billing_due_subscriptions` is falling, the tick is draining; do not restart it. See [A background job is stuck](background-job-stuck.md) |
 | `increase(velox_leader_lease_lost_total[1h])` | > 0 | A tick lost its lease. Split by `reason`, and exclude `paused` (an operator action). What each reason means: [Lease-lost reasons](background-job-stuck.md#lease-lost-reasons) |
+| `velox_email_outbox_failing_emails{mode="live"}` | > 0 | Emails tried 3 or more times and queued over 30 minutes ago keep failing. Usually the SMTP relay refuses the sender or the credentials, or `SMTP_HOST` is unset. Left alone they are lost after about 72 hours. See [Emails not going out](email-outbox-backed-up.md) |
+| `velox_email_outbox_oldest_due_age_seconds{mode="live"}` | > 1800 | An email has been due for 30 minutes and no replica has sent it. The email job is stopped, or more emails came due than it sends: about 20 to 30 a minute on one replica. See [Emails not going out](email-outbox-backed-up.md) |
+| `velox_webhook_outbox_oldest_pending_age_seconds{mode="live"}` | > 1800 | A webhook event queued 30 minutes ago has no deliveries yet: the webhook outbox job is stopped, or writing the event fails. A failing endpoint does not show here. See [Webhook outbox backed up](webhook-outbox-backed-up.md) |
 
 ### Warn (Slack or email, not page)
 
@@ -50,10 +53,12 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_billing_oldest_due_age_seconds{mode}` | > 2× billing interval | A subscription has been due that long, and its billing is not saved as failing. See [A subscription is due but not billed](background-job-stuck.md#a-subscription-is-due-but-not-billed) |
 | `velox_billing_failing_subscriptions{state="parked",mode="live"}` | > 0 | A subscription has not been invoiced and nothing will retry it. Eight billing attempts failed. See [Billing failing](billing-failing.md) |
 | `velox_dunning_runs_processed_total{outcome="failed"}` | rate > 0.5/s | Dunning machinery struggling |
-| `velox_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down or signature wrong |
+| `velox_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down, redirecting, or signature wrong. See [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
 | `velox_stripe_breaker_state` | == 2 (open; 0=closed, 1=half_open) | Stripe API circuit breaker tripped |
 | `velox_email_outbox_pending` | > 1000 | Email dispatcher stuck or SMTP provider issue (−1 = the metric query itself failed) |
 | `velox_webhook_outbox_pending` | > 1000 | Webhook dispatcher stuck (−1 = metric query failed) |
+| `increase(velox_email_outbox_dead_lettered_total{mode="live"}[1h])` by `cause` | > 0 | Emails given up on; they are not sent unless you send them again. `permanent`: the address bounced, is suppressed or is invalid. `max_attempts`: 15 tries over about 72 hours failed. See [Emails not going out](email-outbox-backed-up.md) |
+| `increase(velox_webhook_outbox_dead_lettered_total{mode="live"}[1h])` | > 0 | Webhook events given up on before any delivery was written, so no endpoint gets them. See [Webhook outbox backed up](webhook-outbox-backed-up.md) |
 | `velox_creditnote_pending_tax_reversals` | any row older than 24h (alert on age, not presence) | An issued credit note whose tax reversal at the provider is still owed. See the note below the table |
 | `velox_invoice_pending_tax_reversals` | any row older than 24h | A voided `stripe_tax` invoice whose committed tax transaction has no confirmed reversal. See the note below the table |
 | `velox_creditnote_pending_issue_drafts` | sustained growth over days | Clawback drafts not issuing. Alert on growth or age, not presence. See [Clawback drafts](clawback-drafts-not-issuing.md) |

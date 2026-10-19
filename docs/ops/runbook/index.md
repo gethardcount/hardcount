@@ -45,8 +45,9 @@ row-level-security role you see only one tenant's rows, or none.
 | If you see | Open |
 |---|---|
 | The `scheduler` check in `/health/ready` starts with `degraded`, no invoices are being generated, or a background job looks stuck | [A background job is stuck](background-job-stuck.md) |
-| `email_outbox` growing, or customers report missing invoice emails | [Email outbox backed up](email-outbox-backed-up.md) |
-| `webhook_outbox` growing, or one customer's webhook endpoint failing | [Webhook outbox backed up or one endpoint failing](webhook-outbox-backed-up.md) |
+| `velox_email_outbox_failing_emails` or `velox_email_outbox_oldest_due_age_seconds` firing, emails dead-lettered, or customers report missing invoice emails | [Emails not going out](email-outbox-backed-up.md) |
+| `velox_webhook_outbox_oldest_pending_age_seconds` firing, or `webhook_outbox` rows dead-lettered | [Webhook outbox backed up](webhook-outbox-backed-up.md) |
+| One customer's webhook endpoint keeps failing (`velox_webhook_deliveries_total{status="failed"}`) | [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
 | `velox_stripe_breaker_state == 2`, or dunning retries skipped | [Stripe circuit breaker open](stripe-circuit-breaker-open.md) |
 | Invoices stuck with an unconfirmed payment for hours | [Payments stuck as unknown](payment-status-unknown.md) |
 | A test clock stuck on the Advancing badge | [Test-clock advance hung](test-clock-advance-hung.md) |

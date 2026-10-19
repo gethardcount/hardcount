@@ -1,32 +1,68 @@
-# Email outbox backed up
+# Emails not going out
 
 Velox queues every email in the `email_outbox` table, and a background job
-sends them. This page is for when that queue grows. Back to the
-[runbook index](index.md).
+sends them through your SMTP relay. This page is for when emails stop going
+out: the relay keeps refusing them, the queue stalls, or emails are given
+up on. Back to the [runbook index](index.md).
 
 ## Symptom
 
-- The `email_outbox` table grows past 1000 rows in `status='pending'`
-  (`velox_email_outbox_pending` > 1000).
+- `velox_email_outbox_failing_emails{mode="live"}` is above 0. These emails
+  were tried 3 or more times and queued over 30 minutes ago, and they keep
+  failing.
+- `velox_email_outbox_oldest_due_age_seconds{mode="live"}` is above 1800.
+  An email has been due for 30 minutes and no replica has sent it.
+- `velox_email_outbox_dead_lettered_total` rises. Emails were dead-lettered:
+  set aside as `failed` and never tried again on their own.
+- `velox_email_outbox_pending` is above 1000.
 - Customers report missing invoice emails.
 
 ## Why
 
-- The SMTP provider is rate-limiting or down.
-- The provider rejected the mail (authentication, sender domain, and so on).
-- The dispatcher stopped (rare). See
-  [A background job is stuck](background-job-stuck.md).
+- **The SMTP relay refuses the mail.** The emails keep failing. The relay's
+  reply is in `last_error`. Common ones:
+  - `554 Message rejected: Email address is not verified` (AWS SES): the
+    sender is not verified with the relay. In the SES sandbox the
+    recipient must be verified too.
+  - `535`: the relay rejected the SMTP username or password, often after a
+    credential rotation.
+  - `454`: the relay's sending quota or rate is used up, as in the SES
+    sandbox.
+  - `email: SMTP not configured (SMTP_HOST unset)`: Velox has no relay.
+
+  Velox retries these for about 72 hours (15 tries), then dead-letters them
+  with `cause="max_attempts"`.
+- **The address can never get mail.** It bounced, it is suppressed after an
+  earlier bounce, or it is not a valid address. These are dead-lettered at
+  once, with `cause="permanent"`. A bounce is a reply from 550 to 553, or
+  one with a `5.1.x` or `5.2.x` status (an address or mailbox problem).
+  Every other reply is retried.
+- **The sending job is stopped or behind.** Due emails wait, and the oldest
+  due age grows. One replica sends about 20 to 30 emails a minute, so a
+  billing day that queues many invoice emails at once takes a while to
+  drain. If the age grows and no emails are sent at all, see
+  [A background job is stuck](background-job-stuck.md) for the
+  `email_outbox` role.
 
 ## Check
 
 ```sql
+-- Emails that keep failing, and the relay's reply
+SELECT livemode, email_type, attempts, created_at, last_error
+FROM email_outbox
+WHERE status = 'pending' AND attempts >= 3
+  AND created_at < now() - interval '30 minutes'
+ORDER BY created_at
+LIMIT 20;
+
+-- The queue by type and status
 SELECT email_type, status, count(*), max(attempts) AS max_attempts
 FROM email_outbox
 WHERE status IN ('pending', 'failed')
 GROUP BY email_type, status
 ORDER BY count(*) DESC;
 
--- Most recent failure messages (the 10 most common)
+-- Most common reasons for dead-lettered emails
 SELECT email_type, last_error, count(*)
 FROM email_outbox
 WHERE status = 'failed' AND last_error IS NOT NULL
@@ -52,9 +88,12 @@ customer's email or CC list (or the member's email) and send again.
 
 ## Fix
 
-1. Diagnose the SMTP provider from `last_error`.
-2. Once the provider is healthy, the dispatcher drains the queue on its
-   own. Pending rows are sent on their `next_attempt_at` schedule.
+1. Fix the cause in `last_error`. Verify the sender with the relay, correct
+   `SMTP_USERNAME` and `SMTP_PASSWORD`, raise the relay's quota, or set
+   `SMTP_HOST`. Velox reads the `SMTP_*` settings at start-up, so restart it
+   after changing them.
+2. Once the relay accepts mail, the job drains the queue on its own.
+   Pending rows are sent on their `next_attempt_at` schedule.
 3. To recover faster, set `next_attempt_at` to now for every pending row:
 
    ```sql
@@ -62,12 +101,25 @@ customer's email or CC list (or the member's email) and send again.
    WHERE status = 'pending' AND attempts < 15;
    ```
 
-4. Failed rows are dead-lettered: set aside after delivery gave up
-   (15 attempts over about 72 hours). Find the root cause. Then either fix
-   it and retry (`UPDATE ... SET status='pending', attempts=0`), or accept
-   the loss and tell the affected customers.
+4. Send dead-lettered emails again. Narrow the `created_at` window to the
+   incident:
+
+   ```sql
+   -- status = 'failed' keeps this off emails that are being sent or were sent.
+   UPDATE email_outbox
+   SET status = 'pending', attempts = 0, next_attempt_at = now()
+   WHERE status = 'failed'
+     AND created_at > now() - interval '7 days';
+   ```
+
+   - A failed row keeps its links and PDF, so it can be sent again.
+   - An address that bounced fails again at once. Fix the customer's email
+     first.
+   - A payment reminder whose invoice was paid since is skipped, not sent.
+   - To accept the loss instead, tell the affected customers.
 
 ## Verify
 
-`velox_email_outbox_pending` falls back below 1000, and the first query
-shows fewer pending rows on each run.
+`velox_email_outbox_failing_emails` falls to 0,
+`velox_email_outbox_oldest_due_age_seconds` stays near 0, and
+`velox_email_outbox_dead_lettered_total` stops rising.

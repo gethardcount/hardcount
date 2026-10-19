@@ -1,58 +1,67 @@
-# Webhook outbox backed up or one endpoint failing
+# Webhook outbox backed up
 
-Velox queues every webhook event in the `webhook_outbox` table, and
-background jobs send each one to your customers' endpoints. This page is
-for when that queue grows or one endpoint keeps failing. Back to the
+Velox queues every webhook event in the `webhook_outbox` table. A
+background job turns each row into an event plus one delivery per matching
+endpoint, in one transaction, and marks the row dispatched in that same
+transaction, before any request is sent. This page is for when that queue
+grows. An endpoint that keeps failing does not grow it: see
+[A webhook endpoint keeps failing](webhook-endpoint-failing.md). Back to the
 [runbook index](index.md).
 
 ## Symptom
 
-- `webhook_outbox` grows past 1000 rows in `status='pending'`
-  (`velox_webhook_outbox_pending` > 1000).
-- Or one customer's endpoint keeps failing
-  (`velox_webhook_deliveries_total{status="failed"}`).
-
-The outbox holds one row per event, with no endpoint column. Each attempt
-to deliver to one endpoint is a row in `webhook_deliveries`.
+- `velox_webhook_outbox_oldest_pending_age_seconds{mode="live"}` is above
+  1800. A row queued 30 minutes ago has no event yet.
+- `velox_webhook_outbox_dead_lettered_total` rises. Rows were given up on
+  after 15 tries over about 72 hours. Their events were never written, so
+  no endpoint gets them.
+- `velox_webhook_outbox_pending` is above 1000.
 
 ## Why
 
-- The customer's webhook endpoint is down or rejecting requests.
-- The HMAC signature does not match: the shared-secret signature on each
-  delivery no longer verifies. The customer rotated the secret without
-  telling Velox.
+- **The `webhook_outbox` job is stopped.** See
+  [A background job is stuck](background-job-stuck.md).
+- **Writing the event and its deliveries fails.** The database refuses the
+  write, for example on lost connections or a full disk. The error is in
+  `last_error`, and the row is retried on a backoff ramp.
 
 ## Check
 
 ```sql
--- The queue: one row per event
-SELECT event_type, status, count(*), max(attempts) AS max_attempts
+-- The queue, oldest first, with the last error
+SELECT livemode, event_type, status, attempts, created_at, last_error
 FROM webhook_outbox
 WHERE status IN ('pending', 'failed')
-GROUP BY event_type, status;
-
--- Failures by endpoint (the delivery log, not the outbox)
-SELECT webhook_endpoint_id, error_message, count(*)
-FROM webhook_deliveries
-WHERE status = 'failed' AND error_message IS NOT NULL
-GROUP BY webhook_endpoint_id, error_message
-ORDER BY count(*) DESC
+ORDER BY created_at
 LIMIT 20;
 ```
 
 ## Fix
 
-1. Contact the customer and confirm the endpoint is up.
-2. If the signature does not match:
-   1. Rotate the signing secret in the dashboard
-      (`Webhooks → Endpoint → Rotate secret`).
-   2. The customer updates their side.
-   3. Replay the failed events.
-3. Only in a SEV-1, pause deliveries by deactivating the endpoint (see
-   step 1 of [Escalation](escalation.md)). Events sent while it is inactive
-   are not delivered to it.
+1. If the job is stopped, follow
+   [A background job is stuck](background-job-stuck.md).
+2. Fix the cause in `last_error`. Pending rows then go out on their
+   `next_attempt_at` schedule.
+3. Send the failed rows again, as below.
+
+### Send failed rows again
+
+Narrow the `created_at` window to the incident:
+
+```sql
+-- status = 'failed' keeps this off rows that are being dispatched or were
+-- dispatched. A dispatched row already has its event: dispatching it again
+-- sends a second event with a new id, which receivers cannot skip.
+UPDATE webhook_outbox
+SET status = 'pending', attempts = 0, next_attempt_at = now()
+WHERE status = 'failed'
+  AND created_at > now() - interval '7 days';
+```
+
+Each row then becomes one event, sent to the endpoints that match it at
+that moment.
 
 ## Verify
 
-`velox_webhook_outbox_pending` falls back below 1000, and the second query
-shows no new failures for the endpoint.
+`velox_webhook_outbox_oldest_pending_age_seconds` falls back near 0, and
+`velox_webhook_outbox_dead_lettered_total` stops rising.

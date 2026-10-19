@@ -16,33 +16,35 @@ the [runbook index](index.md).
 
 ## Why
 
-- The Stripe API has been failing repeatedly, and the breaker tripped to
-  protect the retry budget.
-- The tenant's Stripe credentials are invalid. The breaker is per tenant.
+- Stripe calls got no clear answer 5 times in a row: a 5xx, a timeout or a
+  dropped connection. Declines and other definite errors do not count, and
+  neither does a rejected API key.
+- The breaker is one per Velox process, shared by every tenant. One
+  tenant's calls can open it for all of them on that replica.
 
 ## Check
 
+A skipped retry writes no row: the attempt is not counted, so it is not
+recorded. Find the skips in the logs:
+
+```bash
+grep "dunning retry skipped — upstream transient" log | jq '{run_id, invoice_id}'
+```
+
 ```sql
--- Recent payment retry outcomes
-SELECT outcome, count(*) FROM (
-  SELECT
-    CASE WHEN reason LIKE '%breaker%' OR reason LIKE '%transient%'
-         THEN 'transient_skip'
-         ELSE 'real_failure' END AS outcome
-  FROM invoice_dunning_events
-  WHERE event_type = 'retry_attempted' AND created_at > now() - interval '1 hour'
-) t GROUP BY outcome;
+-- Retries that reached Stripe in the last hour
+SELECT count(*) FROM invoice_dunning_events
+WHERE event_type = 'retry_attempted' AND created_at > now() - interval '1 hour';
 ```
 
 ## Fix
 
 1. Check Stripe's status page (`status.stripe.com`).
-2. If only one tenant is affected, check its Stripe credentials in
-   `Settings → Stripe`, and rotate them if needed.
-3. The breaker resets on its own after a cool-off. Normally no manual
-   action is needed.
+2. The breaker closes on its own: after a 30-second cool-off it lets one
+   call through, and a success closes it. Normally no manual action is
+   needed.
 
 ## Verify
 
-`velox_stripe_breaker_state` returns to 0 (closed), and the query above
-shows `real_failure` or successful retries instead of `transient_skip`.
+`velox_stripe_breaker_state` returns to 0 (closed), the skip lines stop,
+and due retries write `retry_attempted` rows again.

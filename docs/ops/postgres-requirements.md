@@ -136,7 +136,7 @@ For one account at about 50 requests per second, 20 connections is enough. With 
 | `usage_events` | Every usage event. Can pass 10 million rows a month. | Split by month, or move rows older than 12 months to cold storage. Velox deletes nothing. |
 | `audit_log` | Every change by a person or by Velox. Hundreds a day per account. | Often 7 years for audits such as SOC 2 |
 | `email_outbox` | One row per email sent | All. The invoice timeline, the customer's Sent emails and the Postmark webhook read them. |
-| `webhook_outbox` | One row per webhook queued | Rows with `status='dispatched'` can be deleted at any age; Velox does not delete them. Keep `failed` rows: the runbook sends them again. |
+| `webhook_outbox` | One row per webhook queued | Rows with `status='dispatched'` can be deleted at any age; Velox does not delete them. Keep `failed` rows: [the runbook](runbook/webhook-outbox-backed-up.md#send-failed-rows-again) sends them again. |
 | `webhook_events`, `webhook_deliveries` | Every webhook Velox sends, and every try | All. Replay and timelines read them. |
 | `stripe_webhook_events` | Every event Stripe sends | At least 90 days |
 | `invoice_dunning_events` | Every payment-retry step | As long as the invoice |
