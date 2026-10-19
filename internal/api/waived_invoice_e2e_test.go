@@ -52,7 +52,7 @@ func TestE2E_RemoveItemAfterWaive_NoFurtherCredit(t *testing.T) {
 		r := newLagRig(t, "in_advance", true)
 		invID := r.firstInvoiceID()
 		r.waive(invID, lagP0.Add(time.Hour))
-		inv := r.must(http.MethodGet, "/v1/invoices/"+invID, lagP0.Add(time.Hour), nil, http.StatusOK)
+		inv := flowObj(r.must(http.MethodGet, "/v1/invoices/"+invID, lagP0.Add(time.Hour), nil, http.StatusOK), "invoice")
 		if s := flowStr(inv, "status"); s != string(domain.InvoicePaid) {
 			t.Fatalf("waived invoice is %s, want paid", s)
 		}
@@ -118,7 +118,7 @@ func TestE2E_Revenue_CountsWhatPaidTheInvoice(t *testing.T) {
 	creditNote(lowered, 500)
 	call("POST", "/v1/invoices/"+lowered+"/record-payment", flowReq{body: map[string]any{"note": "Wire 2"}}).want(t, 200, "record payment")
 	for _, id := range []string{paid, waived, lowered} {
-		if s := flowStr(call("GET", "/v1/invoices/"+id, flowReq{}).want(t, 200, "get invoice").body, "status"); s != string(domain.InvoicePaid) {
+		if s := flowStr(call("GET", "/v1/invoices/"+id, flowReq{}).want(t, 200, "get invoice").body, "invoice", "status"); s != string(domain.InvoicePaid) {
 			t.Fatalf("invoice %s is %s, want paid", id, s)
 		}
 	}
@@ -157,8 +157,7 @@ func (r *lagRig) firstInvoiceID() string {
 // operator waiving it does from the dashboard.
 func (r *lagRig) waive(invID string, at time.Time) {
 	r.t.Helper()
-	inv := r.must(http.MethodGet, "/v1/invoices/"+invID, at, nil, http.StatusOK)
-	due := flowInt(inv, "amount_due_cents")
+	due := flowInt(r.must(http.MethodGet, "/v1/invoices/"+invID, at, nil, http.StatusOK), "invoice", "amount_due_cents")
 	if due <= 0 {
 		r.t.Fatalf("invoice %s has %d due, want an amount to waive", invID, due)
 	}
