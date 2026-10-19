@@ -2743,6 +2743,11 @@ export interface paths {
          *     is still unpaid. `proration` in the response describes the result.
          *     A plan billed in arrears is settled at the end of the period.
          *
+         *     Changes to one subscription's items run one at a time, and each is
+         *     settled from the item as the change before it left it. A request
+         *     that repeats a change that already finished finds nothing to change
+         *     and gets 422.
+         *
          *     Sends `subscription.item.updated`, or
          *     `subscription.pending_change.scheduled` for a scheduled plan
          *     change.
@@ -7482,7 +7487,9 @@ export interface components {
             provider_payment_status?: string;
             /**
              * Format: date-time
-             * @description When Velox last checked `provider_payment_status`.
+             * @description When Velox last asked Stripe about this invoice's payment, whether
+             *     or not Stripe answered: a read of `provider_payment_status`, or a
+             *     check of a charge whose result was lost.
              */
             provider_synced_at?: string;
             /**
@@ -7559,7 +7566,10 @@ export interface components {
              * @description Stripe-canonical structured `taxability_reason`
              *     (`standard_rated`, `reverse_charge`, `not_collecting`,
              *     `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
-             *     Empty for non-Stripe providers.
+             *     `prepaid_credit_purchase` is Velox's own value, on a prepaid
+             *     commit purchase line under the manual or Stripe Tax provider:
+             *     the line is not taxed, and the usage the credit pays for is
+             *     taxed when invoiced. Otherwise empty for non-Stripe providers.
              */
             tax_reason?: string;
             /** Format: int64 */
@@ -12891,8 +12901,11 @@ export interface operations {
              *     an unpaid invoice for the current period; settle or void it
              *     first. Code `subscription_period_moved`: the billing period
              *     changed while the request ran; read the subscription again and
-             *     retry. Code `unbilled_period`: a billing period ended and could
-             *     not be invoiced; retry billing first.
+             *     retry. Code `item_changed`: a plan change found the
+             *     subscription's items changed by another request that finished
+             *     first; read the subscription again and retry. Code
+             *     `unbilled_period`: a billing period ended and could not be
+             *     invoiced; retry billing first.
              */
             409: {
                 headers: {
@@ -13831,8 +13844,11 @@ export interface operations {
                 };
             };
             /**
-             * @description An earlier charge has an unknown outcome and must be resolved
-             *     first. Code `payment_in_flight` or `payment_unidentifiable`.
+             * @description An earlier charge must be resolved first. Code
+             *     `payment_in_flight`: a charge on the invoice is running, or its
+             *     result was lost and Velox is confirming it with Stripe (within
+             *     about an hour). Code `payment_unidentifiable`: the earlier
+             *     charge's outcome is unknown and could not be identified.
              */
             409: {
                 headers: {
@@ -13844,8 +13860,8 @@ export interface operations {
             };
             /**
              * @description Code `validation_error`. The invoice is not finalized, is already
-             *     paid, or has no amount due; another charge is already running;
-             *     payments are not configured; or the customer has no payment
+             *     paid, or has no amount due; the customer is paying on the hosted
+             *     page; payments are not configured; or the customer has no payment
              *     method set up.
              */
             422: {

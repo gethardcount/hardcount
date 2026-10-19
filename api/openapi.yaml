@@ -1106,7 +1106,10 @@ components:
         provider_synced_at:
           type: string
           format: date-time
-          description: When Velox last checked `provider_payment_status`.
+          description: |
+            When Velox last asked Stripe about this invoice's payment, whether
+            or not Stripe answered: a read of `provider_payment_status`, or a
+            check of a charge whose result was lost.
         public_token:
           type: string
           description: |
@@ -1236,7 +1239,10 @@ components:
             Stripe-canonical structured `taxability_reason`
             (`standard_rated`, `reverse_charge`, `not_collecting`,
             `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
-            Empty for non-Stripe providers.
+            `prepaid_credit_purchase` is Velox's own value, on a prepaid
+            commit purchase line under the manual or Stripe Tax provider:
+            the line is not taxed, and the usage the credit pays for is
+            taxed when invoiced. Otherwise empty for non-Stripe providers.
         total_amount_cents:
           type: integer
           format: int64
@@ -8657,6 +8663,11 @@ paths:
         is still unpaid. `proration` in the response describes the result.
         A plan billed in arrears is settled at the end of the period.
 
+        Changes to one subscription's items run one at a time, and each is
+        settled from the item as the change before it left it. A request
+        that repeats a change that already finished finds nothing to change
+        and gets 422.
+
         Sends `subscription.item.updated`, or
         `subscription.pending_change.scheduled` for a scheduled plan
         change.
@@ -8719,8 +8730,11 @@ paths:
             an unpaid invoice for the current period; settle or void it
             first. Code `subscription_period_moved`: the billing period
             changed while the request ran; read the subscription again and
-            retry. Code `unbilled_period`: a billing period ended and could
-            not be invoiced; retry billing first.
+            retry. Code `item_changed`: a plan change found the
+            subscription's items changed by another request that finished
+            first; read the subscription again and retry. Code
+            `unbilled_period`: a billing period ended and could not be
+            invoiced; retry billing first.
           content:
             application/json:
               schema:
@@ -10136,8 +10150,11 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: |
-            An earlier charge has an unknown outcome and must be resolved
-            first. Code `payment_in_flight` or `payment_unidentifiable`.
+            An earlier charge must be resolved first. Code
+            `payment_in_flight`: a charge on the invoice is running, or its
+            result was lost and Velox is confirming it with Stripe (within
+            about an hour). Code `payment_unidentifiable`: the earlier
+            charge's outcome is unknown and could not be identified.
           content:
             application/json:
               schema:
@@ -10145,8 +10162,8 @@ paths:
         "422":
           description: |
             Code `validation_error`. The invoice is not finalized, is already
-            paid, or has no amount due; another charge is already running;
-            payments are not configured; or the customer has no payment
+            paid, or has no amount due; the customer is paying on the hosted
+            page; payments are not configured; or the customer has no payment
             method set up.
           content:
             application/json:

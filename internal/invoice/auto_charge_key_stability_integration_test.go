@@ -57,18 +57,30 @@ func TestChargeKey_StableUntilAnOutcomeIsRecorded(t *testing.T) {
 		}
 	}
 
-	// The crashed-leader sequence: a leader claims, dies mid-charge, the lease
-	// ages out, the next sweep re-claims. (updated_at stability across the lease
-	// is TestClaimAutoCharge_UpdatedAtStable's job — asserted here only because
-	// it is the sequence the unrelated writes below interleave with.)
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
+	// The crashed-leader sequence: a leader claims and dies mid-charge, and
+	// its hold ages out. Since ADR-127 an expired hold refuses every claim
+	// until the stale-hold sweep has asked Stripe, and the hold never touches
+	// the counter, so the key holds still meanwhile. (updated_at stability
+	// across the hold is TestClaimAutoCharge_UpdatedAtStable's job — asserted
+	// here only because it is the sequence the unrelated writes below
+	// interleave with.)
+	first, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
+	if !first.Held() {
 		t.Fatal("first claim must succeed")
 	}
 	expireLease(t, db, inv.ID)
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
-		t.Fatal("claim after lease expiry must succeed")
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); h.Held() {
+		t.Fatal("claim after the hold expired must be refused (ADR-127)")
 	}
-	assertKeyUnchanged("re-claiming after a stalled leader")
+	assertKeyUnchanged("a stalled leader's expired hold")
+
+	// A leader that provably sent nothing releases its own hold, and the next
+	// sweep re-claims under the same key.
+	clearHoldForTest(t, db, inv.ID)
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !h.Held() {
+		t.Fatal("claim after the hold was cleared must succeed")
+	}
+	assertKeyUnchanged("re-claiming after the hold was cleared")
 
 	// Unrelated writers on the same row — the drift that used to mint a second
 	// PaymentIntent. tax_commit's stamp runs immediately before the auto-charge

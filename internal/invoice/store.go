@@ -77,8 +77,11 @@ type Store interface {
 	// MarkPaidOffline is MarkPaid for Record Offline Payment: check runs on
 	// the row under the lock and can refuse. Never for a card settlement.
 	MarkPaidOffline(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
-	// ChargeHeldTx: is the charge hold live? Caller holds the row lock on tx.
-	ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (bool, error)
+	// ChargeHeldTx: the charge hold — none, live or stale (ADR-127) — and
+	// its value. Caller holds the row lock on tx.
+	ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (domain.ChargeHoldState, domain.ChargeHold, error)
+	// ChargeHoldStateOf reads the hold outside any lock, to word a refusal.
+	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
 	ApplyCreditNote(ctx context.Context, tenantID, id string, amountCents int64) (domain.Invoice, error)
 
 	SetAutoChargePending(ctx context.Context, tenantID, id string, pending bool) error
@@ -86,14 +89,15 @@ type Store interface {
 	// email (checked by the auto-charge sweep; stamped by whichever sender
 	// delivered the email).
 	SetNoPMNotifiedAt(ctx context.Context, tenantID, invoiceID string, at time.Time) error
-	// ClaimAutoCharge / ReleaseAutoChargeClaim: the per-invoice charge
-	// lease (HA hazard #1) — exactly one sweep leader enters the charge
-	// leg per invoice per 5m window.
-	ClaimAutoCharge(ctx context.Context, tenantID, id string) (bool, error)
+	// ClaimAutoCharge / ReleaseChargeHold: the per-invoice charge hold
+	// (HA hazard #1, ADR-127) — exactly one owner enters the charge leg per
+	// invoice. A claim returns its token (the zero ChargeHold = refused);
+	// the release compares it.
+	ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
 	// ClaimChargeForManualCollect: operator-collect twin on the same
-	// lease — see postgres.go (2026-07-21 snapshot-race audit).
-	ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (bool, error)
-	ReleaseAutoChargeClaim(ctx context.Context, tenantID, id string) error
+	// hold — see postgres.go (2026-07-21 snapshot-race audit).
+	ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
+	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error)
 
 	CreateLineItem(ctx context.Context, tenantID string, item domain.InvoiceLineItem) (domain.InvoiceLineItem, error)

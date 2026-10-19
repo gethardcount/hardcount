@@ -498,6 +498,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// invoice service which is defined just above; other dunning
 	// adapters (pauser, canceler) wire earlier next to dunningSvc.
 	dunningSvc.SetInvoiceUncollectibleMarker(&invoiceUncollectibleAdapter{svc: invoiceSvc})
+	// Dunning's final action takes the invoice's charge hold (ADR-127), so no
+	// charge starts while it cancels or pauses the subscription, and it does
+	// not run while a lost charge waits for the stale-hold sweep.
+	dunningSvc.SetChargeHoldClaimer(invoiceStore)
 	// Route the dunning manual-resolve void through the invoice service (single
 	// void writer: guards + in-flight block + tax reversal + invoice.voided
 	// event) instead of the raw store. Same lazy wire as the marker above.

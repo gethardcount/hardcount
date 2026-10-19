@@ -1,12 +1,12 @@
 # ADR-106: Record the charge attempt before calling Stripe
 
-**Status:** PARKED — not implemented on `main`. Superseded as the answer to this
-problem by [ADR-107](107-unknown-is-terminal-until-a-human.md), which makes the
-double charge unreachable in ~328 lines instead of guarding it in ~1,900. This
-document is kept, and its number claimed, because the design is sound and may be
-resumed; see "Trigger to resume". The implementation lives on the unmerged
-branch `fix/charge-intent-ledger` (PR #679).
-**Date:** 2026-07-30 (parked 2026-07-31)
+**Status:** Superseded by [ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md).
+Its trigger (production cutover) fired, and the problem was solved in October
+2026 without a ledger. The charge hold every claim already writes now marks a
+charge whose result was lost, and one sweep asks Stripe about it. Never
+implemented on `main`; PR #679 (`fix/charge-intent-ledger`) is closed. Kept
+for the history and for the reasons ADR-127 chose differently.
+**Date:** 2026-07-30 (parked 2026-07-31, superseded 2026-10-19)
 **Amends:** [ADR-105](105-charge-idempotency-key-seed.md) — its deferred residual
 is closed here rather than by ADR-062's obligation queue, and its "mutable
 params in the key" rejected-alternative is corrected to describe what ships.

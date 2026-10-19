@@ -60,7 +60,7 @@ func TestChargeDecline_IncorrectNumberAsErrorCode_IsAHardDecline(t *testing.T) {
 	s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 	s.SetEmailPaymentFailed(email, staticCustomerEmail{})
 
-	_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, "cus_stripe", "pm_on_file")
+	_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
 	var pe *PaymentError
 	if !errors.As(err, &pe) || pe.Unknown || pe.PaymentIntentID != "pi_badnum" {
 		t.Fatalf("charge error = %#v, want a definite decline naming pi_badnum", err)
@@ -105,7 +105,7 @@ func TestChargeDecline_OtherErrorCodeWithoutDeclineCode_StaysOrdinary(t *testing
 	s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 	s.SetEmailPaymentFailed(email, staticCustomerEmail{})
 
-	_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, "cus_stripe", "pm_on_file")
+	_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
 	var pe *PaymentError
 	if !errors.As(err, &pe) || pe.PaymentIntentID != "pi_exp" {
 		t.Fatalf("charge error = %#v, want a decline naming pi_exp", err)

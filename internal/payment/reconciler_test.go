@@ -21,6 +21,25 @@ type mockReconcileStore struct {
 	getResult map[string]domain.Invoice
 }
 
+// The stale-hold sweep's store methods: these unit tests hold no stale
+// holds (the sweep is pinned on real Postgres, stale_hold_integration_test.go).
+func (m *mockReconcileStore) ListStaleChargeHolds(context.Context, int, []string) ([]domain.StaleChargeHold, error) {
+	return nil, nil
+}
+
+func (m *mockReconcileStore) ClearStaleChargeHold(context.Context, string, string, time.Time, int64, bool) (bool, error) {
+	return false, nil
+}
+
+func (m *mockReconcileStore) MarkStaleHoldChecked(context.Context, string, string) error { return nil }
+
+func (m *mockReconcileStore) StampChargeOutcome(_ context.Context, _, id string, _ int64, _ domain.InvoicePaymentStatus, _, _ string) (domain.Invoice, bool, error) {
+	if inv, ok := m.byID[id]; ok {
+		return *inv, false, nil
+	}
+	return domain.Invoice{}, false, errs.ErrNotFound
+}
+
 func newMockReconcileStore(unknowns ...domain.Invoice) *mockReconcileStore {
 	byID := make(map[string]*domain.Invoice, len(unknowns))
 	for i := range unknowns {

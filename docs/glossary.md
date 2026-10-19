@@ -137,7 +137,8 @@ works](how-velox-works.md). Back to the [docs index](README.md).
 - **prepaid commit**: Usage credit the customer pays for up front, sold as
   a line on a one-off invoice. When that invoice is finalized, Velox adds a
   credit block to the customer's balance. The credit can be more than the
-  price (pay $9k, get $10k). [More](ai-pricing.md)
+  price (pay $9k, get $10k). The purchase is not taxed; the usage the
+  credit pays for is. [More](ai-pricing.md#tax-on-prepaid-credit)
 - **drawdown**: Using a customer's credit balance to pay part of an invoice
   when it is billed, so less is charged. Free promotional credit is used
   before paid credit. Within each, the credit that expires soonest goes

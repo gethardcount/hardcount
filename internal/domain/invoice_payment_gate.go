@@ -138,40 +138,57 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 
 // PaymentBlocksActionHeld is PaymentBlocksAction plus the charge hold, for the
 // three actions that settle what is owed: void, write-off and offline payment
-// (#975). chargeHeld is COALESCE(auto_charge_claimed_until > now(), false) —
-// the same expression the hosted-page claim uses — read in the same
-// transaction as inv, with the invoice row locked. Called on any other copy
-// it answers a question about the past.
+// (#975, ADR-127). hold is the invoice's hold read in the same transaction as
+// inv, with the invoice row locked (ChargeHeldTx). Called on any other copy it
+// answers a question about the past.
 //
 // Why the hold counts as in flight here: every charge claim writes only the
-// hold, and payment_status stays 'pending' or 'failed' until Stripe answers
-// (up to 30 seconds), so PaymentBlocksAction alone sees nothing while Stripe
-// may be taking the money. A void that lands there leaves a successful charge
-// on a voided invoice; an offline payment makes the customer pay twice.
+// hold, and payment_status stays 'pending' or 'failed' until Stripe answers,
+// so PaymentBlocksAction alone sees nothing while Stripe may be taking the
+// money. A void that lands there leaves a successful charge on a voided
+// invoice; an offline payment makes the customer pay twice.
+//
+// A STALE hold refuses too (ADR-127): its charge may have been sent and its
+// result lost, so Stripe may hold a payment Velox has not recorded. It stays
+// set until the stale-hold sweep has asked Stripe, within about an hour.
+// Write-off is the one action a stale hold allows: it moves no money, a
+// payment the sweep finds later still settles the invoice (uncollectible →
+// paid), and it is the exit when Stripe can never answer (disconnected, the
+// customer deleted) — ADR-107's carve-out reasoning.
 //
 // Only 'pending' and 'failed' consult the hold. 'processing' and 'unknown' are
-// decided above, and an unknown outcome keeps its hold for the full five
-// minutes, so applying the hold to 'unknown' would refuse the write-off of a
-// parked invoice — its only exit (ADR-107).
+// decided above, and an unknown outcome keeps its hold, so applying the hold
+// to 'unknown' would refuse the write-off of a parked invoice — its only exit
+// (ADR-107).
 //
 // The card settlement path must never call this: the charge holding the hold
 // has to be able to record its own success.
-func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, chargeHeld bool) PaymentBlock {
+func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldState) PaymentBlock {
 	if b := PaymentBlocksAction(inv, action); b.Blocked {
 		return b
 	}
-	if chargeHeld && (inv.PaymentStatus == PaymentPending || inv.PaymentStatus == PaymentFailed) {
+	if inv.PaymentStatus != PaymentPending && inv.PaymentStatus != PaymentFailed {
+		return PaymentBlock{}
+	}
+	switch {
+	case hold == ChargeHoldLive,
+		hold == ChargeHoldStale && action != ActionMarkUncollectible:
 		return PaymentBlock{
 			Blocked: true,
 			Code:    "payment_in_flight",
-			// The hold can outlive a charge that was never sent (a breaker-open
-			// or credentials failure returns without releasing it), so the
-			// advice is a short wait, never "check Stripe".
-			Message: "a charge on this invoice is in progress — try again in a few minutes",
+			// The same words for a live and a stale hold: the operator's next
+			// step is the same (wait), and a stale hold is resolved within
+			// about an hour without them.
+			Message: ChargeHoldRefusalMessage,
 		}
 	}
 	return PaymentBlock{}
 }
+
+// ChargeHoldRefusalMessage is what an operator reads when an action is refused
+// because a charge holds the invoice — live, or stale and waiting for the
+// stale-hold sweep to confirm it with Stripe (ADR-127).
+const ChargeHoldRefusalMessage = "A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is confirmed within about an hour."
 
 // parkedMessage always ends by naming mark-uncollectible, because it is the one
 // action that works on a parked invoice and an operator who is not told that

@@ -85,7 +85,7 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	var charging bool
 	err = tx.QueryRowContext(ctx, `
 		SELECT status, payment_status, amount_due_cents,
-		       COALESCE(auto_charge_claimed_until > now(), false)
+		       auto_charge_claimed_until IS NOT NULL
 		FROM invoices WHERE id = $1 FOR SHARE
 	`, invoiceID).Scan(&status, &paymentStatus, &amountDue, &charging)
 	if err != nil {
@@ -101,10 +101,12 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	if paymentStatus == "processing" || paymentStatus == "unknown" {
 		return CheckoutClaim{}, false, ErrChargeInFlight
 	}
-	// A held charge lease is a Velox charge on its way to Stripe: its
-	// payment_status is still pending/failed until the call returns. The
-	// charge claims lock this row FOR UPDATE before taking the lease, so this
-	// FOR SHARE read either waits for that claim and sees its lease, or wins
+	// A set charge hold is a Velox charge on its way to Stripe (its
+	// payment_status is still pending/failed until the call returns), or one
+	// whose result was lost and may have charged the card: an expired hold
+	// counts too, until the stale-hold sweep has asked Stripe (ADR-127). The
+	// charge claims lock this row FOR UPDATE before taking the hold, so this
+	// FOR SHARE read either waits for that claim and sees its hold, or wins
 	// and the claim sees the session this transaction inserts.
 	if charging {
 		return CheckoutClaim{}, false, ErrChargeInFlight

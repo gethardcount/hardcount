@@ -210,7 +210,7 @@ func TestRetryPendingCharges_CardDeclineDoesNotEscalate(t *testing.T) {
 // left nil it models a decline whose outcome write failed.
 type fakeChargerDecline struct{ store *mockInvoices }
 
-func (c *fakeChargerDecline) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c *fakeChargerDecline) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.store.stampPaymentStatus(inv.ID, domain.PaymentFailed)
 	return inv, &payment.PaymentError{Message: "Card was declined.", DeclineCode: "card_declined"}
 }
@@ -333,7 +333,7 @@ func wireBaseTax(e *Engine) *Engine {
 // own charger fake — surface that as a loud error, not a silent success.
 type sentinelCharger struct{}
 
-func (sentinelCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (sentinelCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	return inv, errors.New("sentinelCharger: fixture reached ChargeInvoice without wiring a charger fake")
 }
 
@@ -900,7 +900,9 @@ type mockInvoices struct {
 	// clockQueue holds the ids ListAutoChargePendingForClock returns (the fake
 	// has no sub→clock mapping). Empty by default.
 	clockQueue map[string]bool
-	claimed    map[string]bool
+	claimed    map[string]domain.ChargeHold
+	holds      int      // tokens handed out so far
+	released   []string // invoice ids released, in order
 	invoices   []domain.Invoice
 	lineItems  []domain.InvoiceLineItem
 	// createErr, when set, is returned by CreateInvoiceWithLineItems[Tx] instead
@@ -1037,33 +1039,47 @@ func (m *mockInvoices) CreateInvoiceWithLineItemsTx(ctx context.Context, _ *sql.
 // pattern): it honors the real CAS semantics — predicate re-check +
 // exactly-one-winner — so engine tests exercising concurrent sweeps
 // prove the claim actually gates the charge leg.
-func (m *mockInvoices) ClaimAutoCharge(_ context.Context, _, id string) (bool, error) {
+// Each claim hands out its own token, and a release clears the hold only
+// with the token that took it, as the real store compares the value.
+func (m *mockInvoices) ClaimAutoCharge(_ context.Context, _, id string) (domain.ChargeHold, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.claimed == nil {
-		m.claimed = map[string]bool{}
+		m.claimed = map[string]domain.ChargeHold{}
 	}
-	if m.claimed[id] {
-		return false, nil
+	if m.claimed[id].Held() {
+		return domain.ChargeHold{}, nil
 	}
 	for _, inv := range m.invoices {
 		if inv.ID == id {
 			if !inv.AutoChargePending || inv.PaymentStatus != domain.PaymentPending ||
 				inv.Status != domain.InvoiceFinalized {
-				return false, nil
+				return domain.ChargeHold{}, nil
 			}
-			m.claimed[id] = true
-			return true, nil
+			m.holds++
+			h := domain.ChargeHold{Until: time.Date(2099, 1, 1, 0, 0, m.holds, 0, time.UTC)}
+			m.claimed[id] = h
+			return h, nil
 		}
 	}
-	return false, nil
+	return domain.ChargeHold{}, nil
 }
 
-func (m *mockInvoices) ReleaseAutoChargeClaim(_ context.Context, _, id string) error {
+func (m *mockInvoices) ReleaseChargeHold(_ context.Context, _, id string, hold domain.ChargeHold) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.claimed, id)
+	if m.claimed[id] == hold {
+		delete(m.claimed, id)
+	}
+	m.released = append(m.released, id)
 	return nil
+}
+
+// holdSet reports whether the invoice's hold is still taken.
+func (m *mockInvoices) holdSet(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.claimed[id].Held()
 }
 
 func (m *mockInvoices) SetNoPMNotifiedAt(_ context.Context, _, id string, at time.Time) error {
@@ -1261,11 +1277,11 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 		return domain.Invoice{}, errs.ErrNotFound
 	}
 	inv := m.invoices[idx]
+	// Mirrors invoice.PostgresStore.UpdateTaxAtomic: draft is the only gate
+	// (the pending/failed rule is the engine's retry policy, and the operator
+	// finalize computes over an 'ok' draft), and it writes the same columns.
 	if inv.Status != domain.InvoiceDraft {
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf("invoice must be draft (current: %s)", inv.Status))
-	}
-	if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
-		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf("tax retry requires pending/failed (current: %s)", inv.TaxStatus))
 	}
 	byID := make(map[string]domain.InvoiceLineItem, len(lineItems))
 	for _, li := range lineItems {
@@ -1279,6 +1295,9 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 			m.lineItems[i].TaxRate = updated.TaxRate
 			m.lineItems[i].TaxAmountCents = updated.TaxAmountCents
 			m.lineItems[i].TotalAmountCents = updated.TotalAmountCents
+			m.lineItems[i].TaxJurisdiction = updated.TaxJurisdiction
+			m.lineItems[i].TaxCode = updated.TaxCode
+			m.lineItems[i].TaxabilityReason = updated.TaxabilityReason
 		}
 	}
 	inv.TaxAmountCents = update.TaxAmountCents
@@ -1294,7 +1313,12 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 	inv.TaxDeferredAt = update.TaxDeferredAt
 	inv.TaxPendingReason = update.TaxPendingReason
 	inv.TaxErrorCode = update.TaxErrorCode
-	inv.TaxRetryCount++
+	if !update.InitialAttempt {
+		inv.TaxRetryCount++
+	}
+	inv.TaxNextRetryAt = update.TaxNextRetryAt
+	inv.SubtotalCents = update.SubtotalCents
+	inv.DiscountCents = update.DiscountCents
 	inv.TotalAmountCents = update.TotalAmountCents
 	due := inv.TotalAmountCents - inv.AmountPaidCents - inv.CreditsAppliedCents
 	if due < 0 {

@@ -7785,6 +7785,11 @@ export const getUpdateSubscriptionItemUrl = (id: string,
  * is still unpaid. `proration` in the response describes the result.
  * A plan billed in arrears is settled at the end of the period.
  *
+ * Changes to one subscription's items run one at a time, and each is
+ * settled from the item as the change before it left it. A request
+ * that repeats a change that already finished finds nothing to change
+ * and gets 422.
+ *
  * Sends `subscription.item.updated`, or
  * `subscription.pending_change.scheduled` for a scheduled plan
  * change.

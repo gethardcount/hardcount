@@ -526,6 +526,19 @@ func TestExemptionLegend_Both(t *testing.T) {
 	}
 }
 
+// TestExemptionLegend_PrepaidCreditPurchase: a prepaid-commit purchase line
+// is untaxed on purpose (ADR-078, issue #1271). The PDF says why, so the
+// missing tax does not read as a mistake.
+func TestExemptionLegend_PrepaidCreditPurchase(t *testing.T) {
+	got := exemptionLegend([]domain.InvoiceLineItem{
+		{TaxabilityReason: "prepaid_credit_purchase"},
+	})
+	want := "Prepaid credit is not taxed when bought; any tax is charged on the usage it pays for."
+	if got != want {
+		t.Errorf("exemptionLegend = %q, want %q", got, want)
+	}
+}
+
 // TestExemptionLegend_None covers the no-op path: trivial reasons (empty,
 // standard_rated, reverse_charge, not_collecting) must not trigger the
 // exemption legend. reverse_charge has its own dedicated legend driven by

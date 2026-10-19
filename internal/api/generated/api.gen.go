@@ -4656,7 +4656,9 @@ type Invoice struct {
 	// invoice's payment state. Absent until Velox has checked.
 	ProviderPaymentStatus string `json:"provider_payment_status,omitempty"`
 
-	// ProviderSyncedAt When Velox last checked `provider_payment_status`.
+	// ProviderSyncedAt When Velox last asked Stripe about this invoice's payment, whether
+	// or not Stripe answered: a read of `provider_payment_status`, or a
+	// check of a charge whose result was lost.
 	ProviderSyncedAt time.Time `json:"provider_synced_at,omitempty"`
 
 	// PublicToken Hosted-invoice-URL credential (Stripe-parity
@@ -4881,7 +4883,10 @@ type InvoiceLineItem struct {
 	// TaxReason Stripe-canonical structured `taxability_reason`
 	// (`standard_rated`, `reverse_charge`, `not_collecting`,
 	// `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
-	// Empty for non-Stripe providers.
+	// `prepaid_credit_purchase` is Velox's own value, on a prepaid
+	// commit purchase line under the manual or Stripe Tax provider:
+	// the line is not taxed, and the usage the credit pays for is
+	// taxed when invoiced. Otherwise empty for non-Stripe providers.
 	TaxReason string `json:"tax_reason,omitempty"`
 
 	// TenantId Owning tenant. Omitted when empty.

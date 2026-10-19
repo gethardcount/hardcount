@@ -1004,7 +1004,8 @@ export interface LineItem {
   tax_code?: string
   // tax_reason is the Stripe-canonical structured taxability_reason
   // (e.g. "standard_rated", "reverse_charge", "not_collecting",
-  // "customer_exempt"). Empty for non-Stripe providers. The dashboard
+  // "customer_exempt"), or Velox's own "prepaid_credit_purchase" on a
+  // prepaid commit purchase line. Otherwise empty for non-Stripe providers. The dashboard
   // surfaces a small badge for non-trivial values; see taxReasonLabel
   // in lib/taxReasons.ts for the rendering contract.
   tax_reason?: string

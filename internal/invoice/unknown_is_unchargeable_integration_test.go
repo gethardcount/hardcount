@@ -38,26 +38,26 @@ func TestUnknownPaymentIsUnchargeableByEveryClaimPath(t *testing.T) {
 		name string
 		// what this path is, in operator terms, so a failure explains itself
 		what  string
-		claim func(inv domain.Invoice) (bool, error)
+		claim func(inv domain.Invoice) (domain.ChargeHold, error)
 	}{
 		{
 			name: "ClaimAutoCharge",
 			what: "the background auto-charge sweep",
-			claim: func(inv domain.Invoice) (bool, error) {
+			claim: func(inv domain.Invoice) (domain.ChargeHold, error) {
 				return store.ClaimAutoCharge(ctx, tenantID, inv.ID)
 			},
 		},
 		{
 			name: "ClaimChargeForManualCollect",
 			what: "an operator pressing Collect payment",
-			claim: func(inv domain.Invoice) (bool, error) {
+			claim: func(inv domain.Invoice) (domain.ChargeHold, error) {
 				return store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID)
 			},
 		},
 		{
 			name: "ClaimChargeForDunningRetry",
 			what: "a dunning retry",
-			claim: func(inv domain.Invoice) (bool, error) {
+			claim: func(inv domain.Invoice) (domain.ChargeHold, error) {
 				return store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID)
 			},
 		},
@@ -70,11 +70,11 @@ func TestUnknownPaymentIsUnchargeableByEveryClaimPath(t *testing.T) {
 			// Control: while the invoice is claimable the path DOES claim it.
 			// Without this the test could pass against a predicate that refuses
 			// everything, which would prove nothing.
-			ok, err := c.claim(inv)
+			h, err := c.claim(inv)
 			if err != nil {
 				t.Fatalf("control claim: %v", err)
 			}
-			if !ok {
+			if !h.Held() {
 				t.Fatalf("%s refused a claimable invoice — the negative result below would be meaningless", c.name)
 			}
 			releaseClaim(t, db, inv.ID)
@@ -82,11 +82,11 @@ func TestUnknownPaymentIsUnchargeableByEveryClaimPath(t *testing.T) {
 			// Treatment: an ambiguous outcome with no PaymentIntent id.
 			stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "", "ambiguous: no payment_intent_id")
 
-			ok, err = c.claim(inv)
+			h, err = c.claim(inv)
 			if err != nil {
 				t.Fatalf("treatment claim: %v", err)
 			}
-			if ok {
+			if h.Held() {
 				t.Fatalf("%s (%s) CLAIMED an invoice at payment_status='unknown'. "+
 					"A PaymentIntent may be live at Stripe for it, so this charge would be the customer's SECOND. "+
 					"ADR-107's guarantee is that no claim path admits 'unknown' — if this path must change, the "+
