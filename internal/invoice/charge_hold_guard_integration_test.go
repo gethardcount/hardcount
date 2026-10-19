@@ -69,13 +69,14 @@ func requireChargeInProgressRefusal(t *testing.T, store *invoice.PostgresStore, 
 }
 
 // requireHoldRefusal is requireChargeInProgressRefusal for a refusal caused by
-// the charge hold, whose message must tell the operator to wait briefly.
+// the charge hold, whose message must say the charge is being confirmed with
+// Stripe and tell the operator to try again shortly (ADR-127).
 func requireHoldRefusal(t *testing.T, store *invoice.PostgresStore, ctx context.Context, tenantID, id string, got domain.Invoice, err error) {
 	t.Helper()
 	requireChargeInProgressRefusal(t, store, ctx, tenantID, id, got, err)
 	var de *errs.DomainError
-	if errors.As(err, &de) && !strings.Contains(de.Message, "try again in a few minutes") {
-		t.Fatalf("the refusal must tell the operator to try again shortly, got %q", de.Message)
+	if errors.As(err, &de) && (!strings.Contains(de.Message, "being confirmed with Stripe") || !strings.Contains(de.Message, "Try again in a few minutes")) {
+		t.Fatalf("the refusal must say the charge is being confirmed with Stripe and to try again shortly, got %q", de.Message)
 	}
 }
 
@@ -125,19 +126,26 @@ func TestChargeHold_RefusesVoidWriteOffAndOfflinePayment(t *testing.T) {
 			}
 		})
 
-		t.Run(a.name+"/expired hold: allowed", func(t *testing.T) {
-			// A crashed charger's hold lapses after five minutes; past that the
-			// operator must not be locked out.
+		t.Run(a.name+"/expired hold: refused, except write-off", func(t *testing.T) {
+			// A hold that ended with no result saved: its charge may have taken
+			// the money (ADR-127, #976). Void and offline payment wait for the
+			// stale-hold sweep to ask Stripe. Write-off is allowed: it moves no
+			// money, a payment found later still settles the invoice, and it is
+			// the exit when Stripe can never answer.
 			inv := seedClaimableInvoice(t, db, ctx, tenantID, num("EXP"))
 			claimAuto(t, store, ctx, tenantID, inv.ID)
 			expireLease(t, db, inv.ID)
 			got, err := a.run(ctx, svc, tenantID, inv.ID)
-			if err != nil {
-				t.Fatalf("hold expired, yet refused: %v", err)
+			if a.want == domain.InvoiceUncollectible {
+				if err != nil {
+					t.Fatalf("write-off on an expired hold must be allowed, got %v", err)
+				}
+				if got.Status != a.want {
+					t.Fatalf("status %s, want %s", got.Status, a.want)
+				}
+				return
 			}
-			if got.Status != a.want {
-				t.Fatalf("status %s, want %s", got.Status, a.want)
-			}
+			requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
 		})
 	}
 }
@@ -285,13 +293,20 @@ func TestChargeHold_ReliefVoidRefused(t *testing.T) {
 		requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
 	})
 
-	t.Run("expired hold: voided", func(t *testing.T) {
+	// 17. A lost charge's stale hold refuses the cancel's or plan swap's void
+	// too (residual R3): the change rolls back and is retried, and the retry
+	// voids once the stale-hold sweep has cleared the hold.
+	t.Run("expired hold: refused, then voided once the hold clears", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-RELIEF-EXP")
 		claimAuto(t, store, ctx, tenantID, inv.ID)
 		expireLease(t, db, inv.ID)
 		got, err := reliefVoid(t, inv.ID)
+		requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
+
+		clearHoldForTest(t, db, inv.ID) // what the sweep does when Stripe has nothing
+		got, err = reliefVoid(t, inv.ID)
 		if err != nil {
-			t.Fatalf("hold expired, yet refused: %v", err)
+			t.Fatalf("after the hold cleared, the retried void was refused: %v", err)
 		}
 		if got.Status != domain.InvoiceVoided {
 			t.Fatalf("status %s, want voided", got.Status)
@@ -331,5 +346,20 @@ func TestRecordOfflinePayment_CardSettledAfterReadIsRefused(t *testing.T) {
 	}
 	if cur.StripePaymentIntentID != "pi_card_won" {
 		t.Fatalf("payment intent %q, want the card's pi_card_won", cur.StripePaymentIntentID)
+	}
+}
+
+func clearHoldForTest(t *testing.T, db *postgres.DB, invoiceID string) {
+	t.Helper()
+	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.Exec(`UPDATE invoices SET auto_charge_claimed_until = NULL WHERE id = $1`, invoiceID); err != nil {
+		t.Fatalf("clear hold: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }

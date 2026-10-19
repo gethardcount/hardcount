@@ -101,13 +101,6 @@ func TestClaimAutoCharge_LeaseExpiryAndRelease(t *testing.T) {
 		t.Fatal("second claim inside the lease must fail")
 	}
 
-	// Expiry: push the lease into the past (simulating a crashed leader)
-	// — the next tick re-claims.
-	expireLease(t, db, inv.ID)
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
-		t.Fatal("claim after lease expiry must succeed (crashed leader self-heals)")
-	}
-
 	// Release: explicit clear (provably-pre-Stripe skip path) re-admits
 	// immediately, no lease wait.
 	if err := store.ReleaseAutoChargeClaim(ctx, tenantID, inv.ID); err != nil {
@@ -115,6 +108,21 @@ func TestClaimAutoCharge_LeaseExpiryAndRelease(t *testing.T) {
 	}
 	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
 		t.Fatal("claim after explicit release must succeed")
+	}
+
+	// Expiry: push the hold into the past (a crashed charger, or one whose
+	// caller's deadline ended). Its charge may have reached Stripe and its
+	// result was not saved, so the hold is NOT free (ADR-127, #976): every
+	// claim refuses it until the stale-hold sweep has asked Stripe.
+	expireLease(t, db, inv.ID)
+	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); ok {
+		t.Fatal("claim on an expired hold must be refused: its charge may have taken the money (#976)")
+	}
+	if ok, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); ok {
+		t.Fatal("dunning claim on an expired hold must be refused (#976)")
+	}
+	if ok, _ := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID); ok {
+		t.Fatal("collect claim on an expired hold must be refused (#976)")
 	}
 }
 
@@ -247,7 +255,6 @@ func TestClaimAutoCharge_UpdatedAtStable(t *testing.T) {
 	if err := store.ReleaseAutoChargeClaim(ctx, tenantID, inv.ID); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	expireLease(t, db, inv.ID)
 	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
 		t.Fatal("re-claim must succeed")
 	}

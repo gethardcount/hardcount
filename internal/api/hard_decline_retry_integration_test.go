@@ -58,6 +58,7 @@ func stripeDeclined(pi, code, message string) error {
 
 type hardDeclineRig struct {
 	t         *testing.T
+	db        *postgres.DB
 	ctx       context.Context
 	tenantID  string
 	customers *customer.PostgresStore
@@ -75,7 +76,7 @@ func newHardDeclineRig(t *testing.T, name string) *hardDeclineRig {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	t.Cleanup(cancel)
-	r := &hardDeclineRig{t: t, ctx: ctx, tenantID: testutil.CreateTestTenant(t, db, name)}
+	r := &hardDeclineRig{t: t, db: db, ctx: ctx, tenantID: testutil.CreateTestTenant(t, db, name)}
 	r.customers = customer.NewPostgresStore(db)
 	r.invoices = invoice.NewPostgresStore(db)
 	r.pmStripe = &pmCardStripe{}
