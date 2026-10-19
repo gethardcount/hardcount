@@ -40,7 +40,8 @@ type fakeStripe struct {
 	next []fakeMode
 	// customers overrides a Stripe customer's list: "missing" (not in this
 	// account), "auth" (the key is rejected), "fail" (a page fails part-way
-	// with a 500), "unreachable" (no answer: a network error).
+	// with a 500), "unreachable" (no answer: a network error), "panic" (the
+	// check panics, standing in for a nil dereference on one row).
 	customers     map[string]string
 	notConfigured bool
 	// hang, when set, makes every list wait as a network partition does:
@@ -355,6 +356,9 @@ func (f *fakeStripe) ListPaymentIntentsForCustomer(ctx context.Context, stripeCu
 	case "unreachable":
 		// Stripe never answered (a network error).
 		return nil, fakeUnreachableErr(`Get "https://api.stripe.com/v1/payment_intents": dial tcp: i/o timeout`)
+	case "panic":
+		// Not Stripe: a check that panics on one unusual row.
+		panic("stale charge check: nil dereference on " + stripeCustomerID)
 	}
 	var out []PaymentIntentResult
 	for _, pi := range f.pis {

@@ -283,8 +283,8 @@ func TestLease_HeartbeatTimeoutAbandons(t *testing.T) {
 	if holder.Valid || ended.Valid {
 		t.Fatalf("an abandoned tick must not read as a completion: last_tick_holder=%v last_tick_ended_at=%v", holder, ended)
 	}
-	if !notBefore.Valid || notBefore.Time.Before(time.Now().Add(30*time.Second)) {
-		t.Fatalf("a lost tick must hold the role back ~60 s via not_before, got %v", notBefore)
+	if !notBefore.Valid || notBefore.Time.Before(time.Now().Add(30*time.Second)) || notBefore.Time.After(time.Now().Add(61*time.Second)) {
+		t.Fatalf("a lost tick must hold the role back min(interval, 60 s) via not_before, got %v", notBefore)
 	}
 	// A fresh manager (no per-manager cooldown) is refused until not_before…
 	fresh := leader.New(db.Pool, nil)
@@ -303,6 +303,50 @@ func TestLease_HeartbeatTimeoutAbandons(t *testing.T) {
 	}
 	if !holder.Valid || notBefore.Valid {
 		t.Fatalf("a completed tick must stamp last_tick_holder and clear not_before: holder=%v not_before=%v", holder, notBefore)
+	}
+}
+
+// TestLease_PanicAfterHeartbeatTimeoutKeepsTheLostCooldown: a tick whose
+// heartbeat timed out (a database stall) and whose work then panics while it
+// unwinds on the cancelled ctx is one event, the lost lease: onLost hears only
+// heartbeat_timeout, and the role waits min(interval, 60 s), not the full
+// interval a panicked tick waits. Mutation check: let a panic win over the
+// lost cause in Lead's outcome → not_before is an hour out.
+func TestLease_PanicAfterHeartbeatTimeoutKeepsTheLostCooldown(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	admin := testutil.AdminPool(t)
+	resetRoles(t, admin)
+	var mu sync.Mutex
+	var reasons []string
+	m := leader.New(&failingRenews{DB: db.Pool}, func(_ leader.Role, r string) {
+		mu.Lock()
+		reasons = append(reasons, r)
+		mu.Unlock()
+	})
+
+	recovered := func() (r any) {
+		defer func() { r = recover() }()
+		_, _ = m.Lead(context.Background(), leader.RoleEmailOutbox, time.Hour, func(ctx context.Context) {
+			<-ctx.Done()
+			panic("nil result from a call that failed on the cancelled ctx")
+		})
+		return nil
+	}()
+	if recovered == nil {
+		t.Fatal("the work's panic must still re-propagate out of Lead")
+	}
+
+	var notBefore sql.NullTime
+	if err := admin.QueryRowContext(context.Background(), `SELECT not_before FROM leader_leases WHERE role='email_outbox'`).Scan(&notBefore); err != nil {
+		t.Fatal(err)
+	}
+	if !notBefore.Valid || notBefore.Time.Before(time.Now().Add(30*time.Second)) || notBefore.Time.After(time.Now().Add(61*time.Second)) {
+		t.Fatalf("a tick that lost its lease must wait min(interval, 60 s) even if its work then panicked, got not_before=%v", notBefore)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reasons) != 1 || reasons[0] != "heartbeat_timeout" {
+		t.Fatalf("reasons = %v, want exactly [heartbeat_timeout]", reasons)
 	}
 }
 
@@ -431,13 +475,18 @@ func TestLease_MissingRowRecreated(t *testing.T) {
 
 // TestLease_PanickedTickIsNotACompletion: a panic in work unwinds through
 // Lead, which must release the lease as a tick that did NOT complete —
-// last_tick_* untouched, a bounded not_before cooldown, the holder cleared,
-// and onLost told "panicked" — then re-propagate the panic to the caller.
-// The control is a completed tick on the same role, which stamps the cadence.
-// Before the fix the runner recovered INSIDE the work, Lead saw a normal
-// return, and a tick that panicked every interval stamped a fresh
+// last_tick_* untouched, a not_before cooldown of one full interval, the
+// holder cleared, and onLost told "panicked" — then re-propagate the panic to
+// the caller. The control is a completed tick on the same role, which stamps
+// the cadence. Before the fix the runner recovered INSIDE the work, Lead saw
+// a normal return, and a tick that panicked every interval stamped a fresh
 // last_tick_ended_at each time: billing could halt cluster-wide behind a
 // healthy-looking velox_leader_last_tick_age_seconds.
+//
+// The cooldown is the full interval, not min(interval, 60 s): the tick's
+// other steps and rows already ran (each step recovers, and the first panic
+// is raised again at the end), so a rerun a minute later would only re-drive
+// the rows that panic, in dunning a charge or a spent attempt per minute.
 func TestLease_PanickedTickIsNotACompletion(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
@@ -486,7 +535,7 @@ func TestLease_PanickedTickIsNotACompletion(t *testing.T) {
 	)
 	if err := admin.QueryRowContext(ctx, `
 		SELECT last_tick_ended_at, holder_id, not_before,
-		       COALESCE(not_before > now() AND not_before <= now() + interval '61 seconds', false)
+		       COALESCE(not_before > now() + interval '59 minutes' AND not_before <= now() + interval '61 minutes', false)
 		  FROM leader_leases WHERE role='billing'`).Scan(&after, &holder, &notBefore, &cooldownOK); err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +546,7 @@ func TestLease_PanickedTickIsNotACompletion(t *testing.T) {
 		t.Errorf("lease still held by %q after a panicked tick", holder.String)
 	}
 	if !notBefore.Valid || !cooldownOK {
-		t.Errorf("a panicked tick must set a bounded cooldown (min(interval, 60s)); not_before=%v", notBefore)
+		t.Errorf("a panicked tick must wait one full interval (1h) before it runs again; not_before=%v", notBefore)
 	}
 	mu.Lock()
 	defer mu.Unlock()
