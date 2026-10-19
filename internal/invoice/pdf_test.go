@@ -638,6 +638,9 @@ func TestCNChannelDescription_RefundStateAnnotated(t *testing.T) {
 		{"succeeded is bare", string(domain.RefundSucceeded), "$10.00 to card |", false},
 		{"failed is annotated", string(domain.RefundFailed), "$10.00 to card (refund failed)", true},
 		{"pending is annotated", string(domain.RefundPending), "$10.00 to card (refund pending)", true},
+		// The customer's document never says "unknown" (#965): the refund is
+		// either made or still to be made by Retry refund.
+		{"unknown reads as pending to the customer", string(domain.RefundUnknown), "$10.00 to card (refund pending)", true},
 		{"legacy empty status reads as pending, never settled", "", "$10.00 to card (refund pending)", true},
 	}
 	for _, tc := range cases {

@@ -80,7 +80,7 @@ The webhook + reconciler remain idempotent backstops routing through the one pri
 ## Deferred (named triggers — the triggering surface does not exist yet)
 
 - **Async payment methods** (ACH / SEPA / BACS direct debit). Trigger: first design partner who needs bank debit.
-- **Dispute / late-failure handling** (`charge.dispute.*`, post-success reversal → counter-booking, à la Recurly). Trigger: an async method or dispute webhooks enabled.
+- **Dispute / late-failure handling** (`charge.dispute.*`, post-success reversal → counter-booking, à la Recurly). Trigger: an async method or dispute webhooks enabled. *Disputes are now recorded and reported, never counter-booked: see the [2026-10-19 amendment](#amendment-2026-10-19-disputes-are-recorded-not-settled). Late failures of async methods stay deferred.*
 - **Inbound `charge.refunded` reconciliation** (an out-of-band refund done directly in the Stripe dashboard mirrored as an offsetting credit-note ledger entry). **Not a correctness gap** — a refund does not un-pay the invoice in Velox's model (`creditnote/service.go` keeps `status=paid`, same as Stripe/Recurly), so money-state stays correct; this is ledger/reporting *completeness*. While operators refund **through Velox** (the credit-note refund path, which records `stripe_refund_id` + `RefundStatus`), there is zero drift; drift only appears for dashboard-side refunds. Trigger: operators begin refunding in the Stripe dashboard, or refund reconciliation/reporting becomes a requirement. **Interim operational guidance: issue refunds via Velox (credit notes), not the Stripe dashboard.** Verified MINOR in the 2026-06-07 e2e parity audit. The handler must dedup against Velox-initiated refunds (which also fire `charge.refunded`) to avoid double-counting — design that in when built. **Build-note (ingress trap):** today `charge.refunded` is not even *captured* — the inbound handler (`internal/payment/handler.go`) skips any event whose `data.object.metadata.velox_tenant_id` is empty, and Velox stamps that metadata on the **PaymentIntent**, not the **Charge**, so a `charge.refunded` (object = Charge) hits the skip gate and is acked-and-discarded with no `stripe_webhook_events` row. So the future handler (a) must resolve the invoice via the charge's `payment_intent` field → invoice-by-PI lookup, NOT via charge metadata, and (b) needs a branch in the ingress `velox_tenant_id` gate for charge-typed events. Until then there is no captured audit trail of a dashboard refund either — which is why the "refund via Velox" guidance above is the actual safety net.
 - **Method-specific expected-settle windows** (cards: hours; ACH: ~5–8 business days). Trigger: first async method. Until then a single short card-appropriate window is correct.
 - **A standalone daily List-Events drift cron.** Velox stores the PI id per invoice, so a targeted `GetPaymentIntent` reconcile already covers the payment path; a full event-stream scan only matters once a second webhook-driven side-effect has no per-row reconcile.
@@ -111,6 +111,25 @@ Consequences:
 - Dunning start is re-driven by every report that records the failure, not only the first. The first reporter's start can fail after its stamp committed, and a test-clock invoice has no other re-drive: the dunning backfill skips simulated invoices.
 - The decline email is skipped for an invoice that is no longer `finalized` when the failure is recorded (voided or written off during the charge).
 - A parked invoice (`unknown`, no PaymentIntent) is released only by a decline the attempt history cannot place as older: the parked attempt's own decline, whose id Velox never learned. A late decline for an older attempt is superseded by the parked attempt's row. Residual, registered (velox-ops DP-readiness register): the attempt-row write is best-effort, so an older attempt whose row was lost still looks like the parked one.
+
+## Amendment 2026-10-19: disputes are recorded, not settled
+
+Card disputes (chargebacks) are recorded since #979. A dispute does not go through `SettleSucceeded` or `SettleFailed`, because it changes no settlement state: the invoice stays `paid`, `payment_status` stays `succeeded`, and no money moves.
+
+Why not reverse the payment, as a counter-booking would:
+
+- Stripe takes the disputed amount from the balance when a chargeback opens, and returns it if the dispute is won. An invoice flipped to unpaid on open would flip back on most outcomes, and start dunning against a customer who is disputing in good faith.
+- After a loss, only the operator knows what the invoice should say: the customer owes it again, it is written off, or it is settled with a credit note. Velox picks none of them.
+
+What Velox does instead:
+
+- **One record per Stripe dispute** (`invoice_disputes`, migration 00185), with one writer: `invoice.PostgresStore.RecordStripeDispute`. The `charge.dispute.created`, `.updated` and `.closed` webhooks all call it.
+- **Matched by payment, not metadata.** A Dispute has its own metadata, which is empty, so the events are admitted on the endpoint's tenant (`endpointAuthoritativeEvent`). The invoice is the one holding the disputed PaymentIntent in its charge attempts, its own payment, or its anomaly marker. A PaymentIntent no invoice holds is acknowledged as not Velox's.
+- **Any delivery order.** Each event carries the whole dispute. The row keeps the snapshot whose event was created last; within one second, the later stage of the dispute's life wins (`InvoiceDispute.SupersededBy`). A redelivery or an older event writes nothing.
+- **Reported in the same transaction.** `payment.dispute_opened` is queued when the row is created, and `payment.dispute_closed` when the dispute reaches a closed status it did not have, a late win included. The invoice row is locked first, so concurrent events serialize.
+- **Surfaced.** A lost dispute raises the `dispute_lost` attention reason, which pierces the terminal-status early return as payment anomalies do. The timeline shows an opened row and a closed row. `GET /v1/invoices/{id}/disputes` lists them.
+
+The operator answers the dispute in Stripe and decides what a loss means: [Card disputes](../ops/runbook/card-disputes.md).
 
 ## Consequences
 

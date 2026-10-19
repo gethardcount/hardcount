@@ -1108,6 +1108,11 @@ type ProrationDetail struct {
 	// proration invoice, never on the dedup-replay path (that invoice may
 	// already be paid). Empty for credit/adjustment paths. Internal.
 	AutoChargeInvoiceID string `json:"-"`
+	// finalizedInvoice is the proration invoice this change created already
+	// finalized, for the invoice.finalized webhook sent after commit
+	// (dispatchProrationFinalized). nil for a draft, a credit and the dedup
+	// replay.
+	finalizedInvoice *domain.Invoice
 }
 
 // ClawbackPiece is one funding invoice's slice of a multi-invoice downgrade

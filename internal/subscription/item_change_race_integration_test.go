@@ -103,7 +103,7 @@ func (f *raceInvoices) all() []domain.Invoice {
 	return append([]domain.Invoice(nil), f.made...)
 }
 
-func (f *raceInvoices) CreateInvoiceWithLineItems(_ context.Context, tenantID string, inv domain.Invoice, _ []domain.InvoiceLineItem) (domain.Invoice, error) {
+func (f *raceInvoices) CreateInvoiceWithLineItemsAudited(_ context.Context, tenantID string, inv domain.Invoice, _ []domain.InvoiceLineItem, _ func(*sql.Tx, domain.Invoice) error) (domain.Invoice, error) {
 	return f.record(tenantID, inv), nil
 }
 

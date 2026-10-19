@@ -17,8 +17,9 @@ customer_id?: string;
 status?: ListCreditNotesStatus;
 /**
  * `needs_attention` returns issued, non-test-clock notes whose
- * refund failed, has been pending more than 72 hours, or has a
- * refund amount still at `none` after 1 hour.
+ * refund failed or has an unknown result, has been pending more
+ * than 72 hours, or has a refund amount still at `none` after 1
+ * hour.
  */
 refund_status?: ListCreditNotesRefundStatus;
 /**

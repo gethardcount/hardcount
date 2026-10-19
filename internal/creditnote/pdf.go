@@ -703,6 +703,8 @@ func settlementLines(cn domain.CreditNote, symbol string) []string {
 				fmt.Sprintf("%s refund attempt failed.", cnFormatCents(cn.RefundAmountCents, symbol)),
 				"Our team will reach out to resolve the refund manually.")
 		default:
+			// none, and unknown (#965): the refund is either made or still to
+			// be made by Retry refund, so the customer reads "scheduled".
 			lines = append(lines, fmt.Sprintf("Refund of %s scheduled to the original payment method.", cnFormatCents(cn.RefundAmountCents, symbol)))
 		}
 	}

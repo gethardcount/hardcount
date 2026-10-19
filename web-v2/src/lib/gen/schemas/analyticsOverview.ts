@@ -74,8 +74,9 @@ export interface AnalyticsOverview {
   /** Dunning runs (automatic payment retries) still in progress. */
   dunning_active: number;
   /**
-     * Issued credit notes whose refund failed, has been pending for
-     * more than 72 hours, or has not started an hour after issue.
+     * Issued credit notes whose refund failed, has an unknown result,
+     * has been pending for more than 72 hours, or has not started an
+     * hour after issue.
      */
   refunds_needing_attention: number;
   /** Usage events with a timestamp in the window. */

@@ -163,7 +163,7 @@ A migration is a versioned script that changes the database schema. Velox applie
 ## Upgrading
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every version between yours and the new one.
-2. Take a backup. See [backups](ops/backup-considerations.md).
+2. Take a backup. If the upgrade goes wrong, it is how you go back, and a restore loses everything written after it ([Going back](production-one-vm.md#going-back)). See [backups](ops/backup-considerations.md).
 3. See the plan: run the new version's `velox migrate status`.
 
    **You see:** `state:` with the migrations it will apply, and `running now:  no`. A `refused` state names its next step; follow it before you go on.
@@ -172,7 +172,7 @@ A migration is a versioned script that changes the database schema. Velox applie
 
    **You see:** `/health/ready` answers 200 again.
 
-On one VM there is one copy, so Velox is down while the new version starts. For the Compose commands, see [Day-to-day commands](../deploy/compose/README.md#day-to-day-commands). With two or more copies, see [Upgrades](ops/high-availability.md#upgrades).
+On one VM there is one copy, so Velox is down while the new version starts. For the Compose commands, see [Upgrade to a new release](production-one-vm.md#upgrade-to-a-new-release), or [Upgrade](../deploy/compose/README.md#upgrade) for a stack built from source. With two or more copies, see [Upgrades](ops/high-availability.md#upgrades).
 
 ## Settings
 

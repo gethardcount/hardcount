@@ -125,6 +125,7 @@ import type {
   InviteMemberBody,
   Invoice,
   InvoiceCreateRequest,
+  InvoiceDisputeList,
   InvoiceLineItem,
   InvoiceLineItemInput,
   InvoicePaymentTimeline,
@@ -10102,8 +10103,10 @@ export const getRefundInvoiceUrl = (id: string,) => {
  *
  * Leave out `amount_cents`, or send 0, to refund everything not yet
  * refunded. The response is the credit note. Check its
- * `refund_status`: if Stripe failed, it is `failed` and can be retried
- * with `POST /v1/credit-notes/{id}/retry-refund`.
+ * `refund_status`: if Stripe refused the refund, it is `failed`. If
+ * Stripe gave no clear answer, it is `unknown`: the customer may
+ * already be refunded, so don't refund again in the Stripe Dashboard.
+ * Retry either with `POST /v1/credit-notes/{id}/retry-refund`.
  *
  * Only invoices paid by card through Stripe can be refunded here. For
  * an invoice paid outside Stripe, create a credit note with
@@ -10184,7 +10187,9 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
  * lifecycle steps (created, finalized, paid, voided, marked
  * uncollectible), charge attempts (source `payment`, event_type
  * `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
- * notes and customer emails.
+ * notes, customer emails, and card disputes (source `dispute`, a
+ * `payment.dispute_opened` row and, once Stripe closes the dispute, a
+ * `payment.dispute_closed` row; both at Stripe's own time).
  * A draft invoice returns an empty list.
  *
  * If one source cannot be read, the rest is still returned and the
@@ -10269,6 +10274,114 @@ export function useGetInvoicePaymentTimeline<TData = Awaited<ReturnType<typeof g
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetInvoicePaymentTimelineQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListInvoiceDisputesUrl = (id: string,) => {
+
+
+
+
+  return `/v1/invoices/${id}/disputes`
+}
+
+/**
+ * Returns the card disputes (chargebacks) Stripe reported against the
+ * invoice's payments, oldest first. An invoice without any returns an
+ * empty list. Velox records them from Stripe's `charge.dispute.*`
+ * webhook events, which must be turned on for the Stripe webhook
+ * endpoint. Velox never changes the invoice because of a dispute:
+ * respond to it in Stripe, and if it is lost, record the loss with a
+ * credit note or a write-off in your books.
+ * @summary List the card disputes on an invoice
+ */
+export const listInvoiceDisputes = async (id: string, options?: RequestInit): Promise<InvoiceDisputeList> => {
+
+  return orvalClient<InvoiceDisputeList>(getListInvoiceDisputesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListInvoiceDisputesQueryKey = (id: string,) => {
+    return [
+    `/v1/invoices/${id}/disputes`
+    ] as const;
+    }
+
+
+export const getListInvoiceDisputesQueryOptions = <TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListInvoiceDisputesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInvoiceDisputes>>> = () => listInvoiceDisputes(id, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListInvoiceDisputesQueryResult = NonNullable<Awaited<ReturnType<typeof listInvoiceDisputes>>>
+export type ListInvoiceDisputesQueryError = Error
+
+
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listInvoiceDisputes>>,
+          TError,
+          Awaited<ReturnType<typeof listInvoiceDisputes>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listInvoiceDisputes>>,
+          TError,
+          Awaited<ReturnType<typeof listInvoiceDisputes>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the card disputes on an invoice
+ */
+
+export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInvoiceDisputes>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInvoiceDisputes>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListInvoiceDisputesQueryOptions(id,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -10476,8 +10589,10 @@ export const getIssueCreditNoteUrl = (id: string,) => {
  *   part is added to the customer's credit balance.
  *
  * Check the returned `status` and `refund_status`:
- * - A failed Stripe refund still returns 200, with `refund_status`
- *   `failed`. Retry it with `POST /v1/credit-notes/{id}/retry-refund`.
+ * - A refund Stripe refused still returns 200, with `refund_status`
+ *   `failed`. A refund with no clear answer from Stripe returns 200
+ *   with `unknown`: the customer may already be refunded. Retry either
+ *   with `POST /v1/credit-notes/{id}/retry-refund`.
  * - If the invoice's charge is still running, or the invoice is still
  *   a draft, nothing changes and the note stays `draft`. Velox issues
  *   it later.
@@ -10555,10 +10670,13 @@ export const getRetryCreditNoteRefundUrl = (id: string,) => {
 
 /**
  * Sends the refund part of an `issued` credit note to Stripe again,
- * when its `refund_status` is `failed`, `pending` or `none`. Before
- * creating a refund, Velox asks Stripe for one already made for this
- * note and records it if found, so a retry does not refund the
- * customer twice.
+ * when its `refund_status` is `failed`, `unknown`, `pending` or
+ * `none`. Before creating a refund, Velox asks Stripe for one already
+ * made for this note and records it if found. For `unknown` and
+ * `none`, Velox then resends the earlier request whose result it
+ * never recorded, with the same idempotency key. While Stripe keeps
+ * that key (at least 24 hours), Stripe returns the earlier request's
+ * result instead of making a second refund.
  * @summary Retry a failed credit-note refund
  */
 export const retryCreditNoteRefund = async (id: string, options?: RequestInit): Promise<CreditNote> => {

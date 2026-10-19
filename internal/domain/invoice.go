@@ -79,8 +79,25 @@ const (
 // sale that may complete, or under-records amount_paid against a lowered
 // amount_due. Stripe enforces the same rule ("you can't void, edit, or mark
 // uncollectible an invoice with open payments").
+//
+// Code outside this file asks Invoice.PaymentInFlight instead, which answers
+// for the whole invoice row; internal/arch pins that.
 func (s InvoicePaymentStatus) IsInFlight() bool {
 	return s == PaymentProcessing || s == PaymentUnknown
+}
+
+// PaymentInFlight reports whether a payment may be open on this invoice: one
+// that may still take money, so its outcome is not known yet. Every action
+// that must refuse or wait while that is true asks here: void, write-off,
+// offline payment, credit notes, Collect, invoice emails, the hosted Pay
+// button, proration's credit path and dunning's final action.
+//
+// Today the answer is the payment status alone (IsInFlight). It lives on the
+// invoice rather than on the status so that a fact stored elsewhere on the
+// invoice row can join it here, once, instead of at each caller (#976 adds a
+// record of a charge sent to Stripe whose result is not saved yet).
+func (i Invoice) PaymentInFlight() bool {
+	return i.PaymentStatus.IsInFlight()
 }
 
 // OutOfBandPaymentIntentPrefix marks the synthetic PaymentIntent id that

@@ -17,6 +17,11 @@ export interface WebhookEvent {
   tenant_id?: string;
   livemode: boolean;
   event_type: string;
+  /**
+     * The event's data. docs/webhooks.md lists what each event carries;
+     * `payment.dispute_opened` and `payment.dispute_closed` carry a
+     * `DisputeWebhookEventData`.
+     */
   payload: WebhookEventPayload;
   created_at: string;
   /** Set on a replay. The event the replay was made from. */

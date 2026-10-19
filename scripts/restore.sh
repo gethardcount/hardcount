@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Velox Database Restore Script
 #
-# Restores a database from a pg_dump backup file.
+# Restores a database from a pg_dump backup file, in one transaction, with
+# each restored object's privileges as the backup holds them.
+#
+# A custom-format backup (what scripts/backup.sh writes) goes through
+# pg_restore into psql, so psql must be at least as recent as pg_restore. A
+# plain SQL dump restores only into a database where the restoring user has
+# no default privileges (see "The backup's privileges" below).
 #
 # Usage:
 #   DATABASE_URL="postgres://velox:velox@localhost:5432/velox?sslmode=disable" \
@@ -53,6 +59,48 @@ log() {
 die() {
   log "FATAL: $*" >&2
   exit "${2:-1}"
+}
+
+# privilege_sql reads pg_restore's SQL for a backup on stdin and writes SQL
+# that leaves each object the backup holds privileges for with exactly those
+# privileges: REVOKE ALL from each role a GRANT in the backup names, on that
+# object, then the backup's privilege statements again, in order.
+#
+# pg_restore needs this help. It creates each table, and then runs the
+# backup's GRANTs, which only add privileges. The target's default
+# privileges (ALTER DEFAULT PRIVILEGES) have already given the new table
+# theirs, and nothing takes back what the backup does not grant. Compose's
+# deploy/compose/postgres-init.sh and docs/ops/postgres-requirements.md give
+# velox_app ALL on new tables, so audit_log, where velox_app may only read
+# and add rows (migration 0150), came back with UPDATE, DELETE and TRUNCATE.
+#
+# It reads only the backup's privilege entries, each headed by a
+# "-- Name: ...; Type: ACL; ..." comment, from a --schema-only script, which
+# holds no table rows. A GRANT it cannot read stops it.
+privilege_sql() {
+  awk '
+    /^-- (Data for )?Name: / { acl = ($0 ~ /; Type: ACL; /); next }
+    !acl || /^--/ || $0 == "" { next }
+    /^GRANT / {
+      s = $0
+      sub(/;$/, "", s)
+      sub(/ WITH GRANT OPTION$/, "", s)
+      on = index(s, " ON ")
+      to = 0
+      for (i = length(s) - 3; on > 0 && i > on; i--)
+        if (substr(s, i, 4) == " TO ") { to = i; break }
+      if (to == 0) { print "cannot read this GRANT: " $0 > "/dev/stderr"; bad = 1; exit 1 }
+      # CASCADE: a grant this role made with a grant option goes too; the
+      # statements after the REVOKEs make it again.
+      revoke = "REVOKE ALL" substr(s, on, to - on) " FROM " substr(s, to + 4) " CASCADE;"
+      if (!(revoke in seen)) { seen[revoke] = 1; revokes[++nr] = revoke }
+    }
+    { stmts[++ns] = $0 }
+    END {
+      if (bad) exit 1
+      for (i = 1; i <= nr; i++) print revokes[i]
+      for (i = 1; i <= ns; i++) print stmts[i]
+    }'
 }
 
 # ---------------------------------------------------------------------------
@@ -125,6 +173,24 @@ if ! psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_roles WHERE rolname='velox_app'
   die "Target cluster has no 'velox_app' role — the archive's GRANTs will roll the restore back. Create it first (CREATE ROLE velox_app LOGIN PASSWORD '<your-password>'; see docker/init.sql for the dev shape and docs/ops/backup-considerations.md for the restore runbook), then re-run." 1
 fi
 
+# The backup's privileges: SQL the restore runs last (see privilege_sql).
+# A plain SQL dump holds its table rows in the same text, so the script does
+# not search it for privilege statements: it restores one only into a
+# database where the restoring user has no default privileges, which is
+# where the dump's GRANTs alone decide each table's privileges.
+PRIVILEGE_SQL=""
+if [ "$FILE_TYPE" = "custom" ]; then
+  log "Reading the privileges the backup holds..."
+  PRIVILEGE_SQL=$($PG_RESTORE --schema-only --no-owner -f - < "$BACKUP_FILE" | privilege_sql) \
+    || die "Could not read the privileges in the backup file." 1
+elif [ "$FILE_TYPE" = "sql" ]; then
+  HAS_DEFAULT_PRIVILEGES=$(psql "$DATABASE_URL" -X -tAc \
+    "SELECT EXISTS (SELECT 1 FROM pg_default_acl WHERE defaclrole = current_user::regrole)" 2>/dev/null || echo "unknown")
+  if [ "$HAS_DEFAULT_PRIVILEGES" != "f" ]; then
+    die "The target database gives the restoring user's new tables default privileges (ALTER DEFAULT PRIVILEGES), or the check failed, and restore.sh cannot take those back from a plain SQL dump: tables such as audit_log would come back with more access for velox_app than the backup gives. Restore a custom-format backup (scripts/backup.sh makes one), or restore this file into a database without default privileges." 1
+  fi
+fi
+
 # Test database connectivity.
 if command -v pg_isready >/dev/null 2>&1; then
   pg_isready -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -q || die "Database is not reachable at ${DB_HOST}:${DB_PORT}." 1
@@ -177,22 +243,29 @@ START_TIME=$(date +%s)
 if [ "$FILE_TYPE" = "custom" ]; then
   log "Restoring using pg_restore (custom format)..."
 
+  # One transaction, all or nothing: pg_restore writes the archive as SQL,
+  # and psql runs BEGIN, that SQL, the privilege SQL, COMMIT. pg_restore
+  # cannot run the privilege SQL itself, and a second transaction after it
+  # could leave a restored database with the wider privileges.
   # --clean drops existing objects before recreating.
   # --if-exists avoids errors when objects don't exist.
   # --no-owner skips ownership commands (the restoring user becomes owner).
-  # --single-transaction ensures atomic restore — all or nothing.
+  # COMMIT is written only after pg_restore has written the whole archive:
+  # if pg_restore stops early, psql reaches the end of its input with the
+  # transaction open, and Postgres rolls it back. ON_ERROR_STOP stops psql at
+  # the first error, which rolls back the same way.
   # Archive via STDIN (custom format supports it) so PG_RESTORE can be a
   # wrapped binary with no view of the host filesystem.
-  $PG_RESTORE \
-    --dbname="$DATABASE_URL" \
-    --clean \
-    --if-exists \
-    --no-owner \
-    --single-transaction \
-    --verbose \
-    < "$BACKUP_FILE" \
-    2>&1 | while IFS= read -r line; do log "  pg_restore: $line"; done \
-    || die "pg_restore failed — the single-transaction restore was rolled back." 2
+  {
+    echo 'BEGIN;'
+    $PG_RESTORE --clean --if-exists --no-owner --verbose -f - < "$BACKUP_FILE" \
+      2> >(while IFS= read -r line; do log "  pg_restore: $line"; done >&2) \
+      || exit 1
+    printf '%s\n' "$PRIVILEGE_SQL"
+    echo 'COMMIT;'
+  } | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -o /dev/null -f - 2>&1 \
+    | while IFS= read -r line; do log "  psql: $line"; done \
+    || die "The restore failed — the single-transaction restore was rolled back." 2
 
 elif [ "$FILE_TYPE" = "sql" ]; then
   log "Restoring using psql (SQL format)..."

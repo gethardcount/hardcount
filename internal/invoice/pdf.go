@@ -214,7 +214,9 @@ func cnChannelDescription(cn CreditNoteInfo, symbol string) string {
 		case string(domain.RefundFailed):
 			note = " (refund failed)"
 		default:
-			// pending, or empty on legacy rows: either way, not settled.
+			// pending, unknown (#965), or empty on legacy rows: not settled.
+			// A customer document says "pending" for unknown on purpose:
+			// the refund is either made or still to be made by the retry.
 			note = " (refund pending)"
 		}
 		channels = append(channels, formatCentsIn(symbol, cn.RefundAmountCents)+" to card"+note)

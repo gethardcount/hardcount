@@ -127,6 +127,7 @@ const (
 	AttentionReasonAwaitingPayment      AttentionReason = "awaiting_payment"
 	AttentionReasonCollectionPaused     AttentionReason = "collection_paused"
 	AttentionReasonCommitExposure       AttentionReason = "commit_exposure"
+	AttentionReasonDisputeLost          AttentionReason = "dispute_lost"
 	AttentionReasonDunningExhausted     AttentionReason = "dunning_exhausted"
 	AttentionReasonNoPaymentMethod      AttentionReason = "no_payment_method"
 	AttentionReasonPaymentAnomaly       AttentionReason = "payment_anomaly"
@@ -146,6 +147,8 @@ func (e AttentionReason) Valid() bool {
 	case AttentionReasonCollectionPaused:
 		return true
 	case AttentionReasonCommitExposure:
+		return true
+	case AttentionReasonDisputeLost:
 		return true
 	case AttentionReasonDunningExhausted:
 		return true
@@ -278,6 +281,7 @@ const (
 	CreditNoteRefundStatusNone      CreditNoteRefundStatus = "none"
 	CreditNoteRefundStatusPending   CreditNoteRefundStatus = "pending"
 	CreditNoteRefundStatusSucceeded CreditNoteRefundStatus = "succeeded"
+	CreditNoteRefundStatusUnknown   CreditNoteRefundStatus = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the CreditNoteRefundStatus enum.
@@ -290,6 +294,8 @@ func (e CreditNoteRefundStatus) Valid() bool {
 	case CreditNoteRefundStatusPending:
 		return true
 	case CreditNoteRefundStatusSucceeded:
+		return true
+	case CreditNoteRefundStatusUnknown:
 		return true
 	default:
 		return false
@@ -776,6 +782,42 @@ func (e InvoiceBillingReason) Valid() bool {
 	}
 }
 
+// Defines values for InvoiceDisputeStatus.
+const (
+	Lost                 InvoiceDisputeStatus = "lost"
+	NeedsResponse        InvoiceDisputeStatus = "needs_response"
+	Prevented            InvoiceDisputeStatus = "prevented"
+	UnderReview          InvoiceDisputeStatus = "under_review"
+	WarningClosed        InvoiceDisputeStatus = "warning_closed"
+	WarningNeedsResponse InvoiceDisputeStatus = "warning_needs_response"
+	WarningUnderReview   InvoiceDisputeStatus = "warning_under_review"
+	Won                  InvoiceDisputeStatus = "won"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceDisputeStatus enum.
+func (e InvoiceDisputeStatus) Valid() bool {
+	switch e {
+	case Lost:
+		return true
+	case NeedsResponse:
+		return true
+	case Prevented:
+		return true
+	case UnderReview:
+		return true
+	case WarningClosed:
+		return true
+	case WarningNeedsResponse:
+		return true
+	case WarningUnderReview:
+		return true
+	case Won:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InvoiceLineItemInputLineType.
 const (
 	InvoiceLineItemInputLineTypeAddOn    InvoiceLineItemInputLineType = "add_on"
@@ -862,6 +904,7 @@ const (
 	InvoicePaymentTimelineDegradedAudit          InvoicePaymentTimelineDegraded = "audit"
 	InvoicePaymentTimelineDegradedChargeAttempts InvoicePaymentTimelineDegraded = "charge_attempts"
 	InvoicePaymentTimelineDegradedCreditNotes    InvoicePaymentTimelineDegraded = "credit_notes"
+	InvoicePaymentTimelineDegradedDisputes       InvoicePaymentTimelineDegraded = "disputes"
 	InvoicePaymentTimelineDegradedDunning        InvoicePaymentTimelineDegraded = "dunning"
 	InvoicePaymentTimelineDegradedEmails         InvoicePaymentTimelineDegraded = "emails"
 )
@@ -874,6 +917,8 @@ func (e InvoicePaymentTimelineDegraded) Valid() bool {
 	case InvoicePaymentTimelineDegradedChargeAttempts:
 		return true
 	case InvoicePaymentTimelineDegradedCreditNotes:
+		return true
+	case InvoicePaymentTimelineDegradedDisputes:
 		return true
 	case InvoicePaymentTimelineDegradedDunning:
 		return true
@@ -974,6 +1019,7 @@ func (e InvoiceTaxStatus) Valid() bool {
 // Defines values for InvoiceTimelineEventSource.
 const (
 	InvoiceTimelineEventSourceCreditNote InvoiceTimelineEventSource = "credit_note"
+	InvoiceTimelineEventSourceDispute    InvoiceTimelineEventSource = "dispute"
 	InvoiceTimelineEventSourceDunning    InvoiceTimelineEventSource = "dunning"
 	InvoiceTimelineEventSourceEmail      InvoiceTimelineEventSource = "email"
 	InvoiceTimelineEventSourceLifecycle  InvoiceTimelineEventSource = "lifecycle"
@@ -984,6 +1030,8 @@ const (
 func (e InvoiceTimelineEventSource) Valid() bool {
 	switch e {
 	case InvoiceTimelineEventSourceCreditNote:
+		return true
+	case InvoiceTimelineEventSourceDispute:
 		return true
 	case InvoiceTimelineEventSourceDunning:
 		return true
@@ -1381,22 +1429,22 @@ func (e RecoveryWarningCode) Valid() bool {
 
 // Defines values for SentEmailDeliveryState.
 const (
-	Bounced    SentEmailDeliveryState = "bounced"
-	Complained SentEmailDeliveryState = "complained"
-	Delivered  SentEmailDeliveryState = "delivered"
-	Unknown    SentEmailDeliveryState = "unknown"
+	SentEmailDeliveryStateBounced    SentEmailDeliveryState = "bounced"
+	SentEmailDeliveryStateComplained SentEmailDeliveryState = "complained"
+	SentEmailDeliveryStateDelivered  SentEmailDeliveryState = "delivered"
+	SentEmailDeliveryStateUnknown    SentEmailDeliveryState = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the SentEmailDeliveryState enum.
 func (e SentEmailDeliveryState) Valid() bool {
 	switch e {
-	case Bounced:
+	case SentEmailDeliveryStateBounced:
 		return true
-	case Complained:
+	case SentEmailDeliveryStateComplained:
 		return true
-	case Delivered:
+	case SentEmailDeliveryStateDelivered:
 		return true
-	case Unknown:
+	case SentEmailDeliveryStateUnknown:
 		return true
 	default:
 		return false
@@ -1675,19 +1723,19 @@ func (e TenantSettingsInputTaxProvider) Valid() bool {
 
 // Defines values for TestClockStatus.
 const (
-	TestClockStatusAdvancing       TestClockStatus = "advancing"
-	TestClockStatusInternalFailure TestClockStatus = "internal_failure"
-	TestClockStatusReady           TestClockStatus = "ready"
+	Advancing       TestClockStatus = "advancing"
+	InternalFailure TestClockStatus = "internal_failure"
+	Ready           TestClockStatus = "ready"
 )
 
 // Valid indicates whether the value is a known member of the TestClockStatus enum.
 func (e TestClockStatus) Valid() bool {
 	switch e {
-	case TestClockStatusAdvancing:
+	case Advancing:
 		return true
-	case TestClockStatusInternalFailure:
+	case InternalFailure:
 		return true
-	case TestClockStatusReady:
+	case Ready:
 		return true
 	default:
 		return false
@@ -1792,19 +1840,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
-	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
-	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	Failed    WebhookEventDeliveryAttemptStatus = "failed"
+	Pending   WebhookEventDeliveryAttemptStatus = "pending"
+	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case WebhookEventDeliveryAttemptStatusFailed:
+	case Failed:
 		return true
-	case WebhookEventDeliveryAttemptStatusPending:
+	case Pending:
 		return true
-	case WebhookEventDeliveryAttemptStatusSucceeded:
+	case Succeeded:
 		return true
 	default:
 		return false
@@ -1971,6 +2019,7 @@ const (
 	ListCreditNotesParamsRefundStatusNone           ListCreditNotesParamsRefundStatus = "none"
 	ListCreditNotesParamsRefundStatusPending        ListCreditNotesParamsRefundStatus = "pending"
 	ListCreditNotesParamsRefundStatusSucceeded      ListCreditNotesParamsRefundStatus = "succeeded"
+	ListCreditNotesParamsRefundStatusUnknown        ListCreditNotesParamsRefundStatus = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the ListCreditNotesParamsRefundStatus enum.
@@ -1985,6 +2034,8 @@ func (e ListCreditNotesParamsRefundStatus) Valid() bool {
 	case ListCreditNotesParamsRefundStatusPending:
 		return true
 	case ListCreditNotesParamsRefundStatusSucceeded:
+		return true
+	case ListCreditNotesParamsRefundStatusUnknown:
 		return true
 	default:
 		return false
@@ -2590,19 +2641,19 @@ func (e GetEmailSettings200JSONResponseBodyLinksEnv) Valid() bool {
 
 // Defines values for GetEmailSettings200JSONResponseBodyTlsMode.
 const (
-	GetEmailSettings200JSONResponseBodyTlsModeImplicit GetEmailSettings200JSONResponseBodyTlsMode = "implicit"
-	GetEmailSettings200JSONResponseBodyTlsModeNone     GetEmailSettings200JSONResponseBodyTlsMode = "none"
-	GetEmailSettings200JSONResponseBodyTlsModeStarttls GetEmailSettings200JSONResponseBodyTlsMode = "starttls"
+	Implicit GetEmailSettings200JSONResponseBodyTlsMode = "implicit"
+	None     GetEmailSettings200JSONResponseBodyTlsMode = "none"
+	Starttls GetEmailSettings200JSONResponseBodyTlsMode = "starttls"
 )
 
 // Valid indicates whether the value is a known member of the GetEmailSettings200JSONResponseBodyTlsMode enum.
 func (e GetEmailSettings200JSONResponseBodyTlsMode) Valid() bool {
 	switch e {
-	case GetEmailSettings200JSONResponseBodyTlsModeImplicit:
+	case Implicit:
 		return true
-	case GetEmailSettings200JSONResponseBodyTlsModeNone:
+	case None:
 		return true
-	case GetEmailSettings200JSONResponseBodyTlsModeStarttls:
+	case Starttls:
 		return true
 	default:
 		return false
@@ -2999,8 +3050,9 @@ type AnalyticsOverview struct {
 	PaidInvoices int             `json:"paid_invoices"`
 	Period       AnalyticsPeriod `json:"period"`
 
-	// RefundsNeedingAttention Issued credit notes whose refund failed, has been pending for
-	// more than 72 hours, or has not started an hour after issue.
+	// RefundsNeedingAttention Issued credit notes whose refund failed, has an unknown result,
+	// has been pending for more than 72 hours, or has not started an
+	// hour after issue.
 	RefundsNeedingAttention int `json:"refunds_needing_attention"`
 
 	// Revenue Total of invoices paid in the window.
@@ -3134,7 +3186,17 @@ type Attention struct {
 	// reason applies; when one does, the exposure is folded into that
 	// reason's `message` and its `actions` instead, so clients must
 	// not treat the reason code as the presence test for exposure
-	// (2026-08-04).
+	// (2026-08-04). `dispute_lost` reports a payment on the invoice that
+	// the customer disputed with their bank and that the dispute took
+	// back (the dispute closed as `lost`). Velox leaves the invoice paid
+	// and moves no money; the operator records the loss. Surfaced on paid
+	// invoices. On an invoice that bought prepaid credit, the message
+	// also says how much of the credit is still spendable and names
+	// commit relief, because an ordinary credit note is refused there.
+	// When the invoice also has `payment_anomaly`, that reason stays and
+	// its message asks the operator to check Stripe before any refund.
+	// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
+	// (2026-10-19).
 	Reason AttentionReason `json:"reason"`
 
 	// Severity Urgency of an Attention surface. Operators sort/filter on this
@@ -3205,7 +3267,17 @@ type AttentionActionItem struct {
 // reason applies; when one does, the exposure is folded into that
 // reason's `message` and its `actions` instead, so clients must
 // not treat the reason code as the presence test for exposure
-// (2026-08-04).
+// (2026-08-04). `dispute_lost` reports a payment on the invoice that
+// the customer disputed with their bank and that the dispute took
+// back (the dispute closed as `lost`). Velox leaves the invoice paid
+// and moves no money; the operator records the loss. Surfaced on paid
+// invoices. On an invoice that bought prepaid credit, the message
+// also says how much of the credit is still spendable and names
+// commit relief, because an ordinary credit note is refused there.
+// When the invoice also has `payment_anomaly`, that reason stays and
+// its message asks the operator to check Stripe before any refund.
+// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
+// (2026-10-19).
 type AttentionReason string
 
 // AttentionSeverity Urgency of an Attention surface. Operators sort/filter on this
@@ -3494,12 +3566,20 @@ type CreditNote struct {
 	Reason               string                 `json:"reason"`
 
 	// RecordedAt Real-world time the row was written, when `created_at` is test-clock time.
-	RecordedAt        time.Time              `json:"recorded_at,omitempty"`
-	RefundAmountCents int64                  `json:"refund_amount_cents"`
-	RefundStatus      CreditNoteRefundStatus `json:"refund_status"`
-	Status            CreditNoteStatus       `json:"status"`
-	StripeRefundId    string                 `json:"stripe_refund_id,omitempty"`
-	SubtotalCents     int64                  `json:"subtotal_cents"`
+	RecordedAt        time.Time `json:"recorded_at,omitempty"`
+	RefundAmountCents int64     `json:"refund_amount_cents"`
+
+	// RefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
+	// clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
+	// a 429), so the customer may already be refunded. Don't refund it
+	// again in the Stripe Dashboard. Retry it with
+	// `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+	// refund at Stripe first and then resends the same request with
+	// the same idempotency key.
+	RefundStatus   CreditNoteRefundStatus `json:"refund_status"`
+	Status         CreditNoteStatus       `json:"status"`
+	StripeRefundId string                 `json:"stripe_refund_id,omitempty"`
+	SubtotalCents  int64                  `json:"subtotal_cents"`
 
 	// SupplierSnapshot What an issued invoice or credit note prints about its seller (the
 	// tenant's company), copied when the document was issued (ADR-109).
@@ -3517,7 +3597,13 @@ type CreditNote struct {
 	VoidedAt         time.Time `json:"voided_at,omitempty"`
 }
 
-// CreditNoteRefundStatus defines model for CreditNote.RefundStatus.
+// CreditNoteRefundStatus The refund part's state at Stripe. `unknown`: Stripe gave no
+// clear answer (a timeout, a network error, a Stripe 5xx, a 409 or
+// a 429), so the customer may already be refunded. Don't refund it
+// again in the Stripe Dashboard. Retry it with
+// `POST /v1/credit-notes/{id}/retry-refund`, which looks for the
+// refund at Stripe first and then resends the same request with
+// the same idempotency key.
 type CreditNoteRefundStatus string
 
 // CreditNoteStatus defines model for CreditNote.Status.
@@ -3804,6 +3890,44 @@ type CustomerUsageMeter struct {
 	// TotalQuantity Decimal string.
 	TotalQuantity string `json:"total_quantity"`
 	Unit          string `json:"unit"`
+}
+
+// DisputeWebhookEventData The `data` of the outbound webhook events `payment.dispute_opened`
+// and `payment.dispute_closed` (docs/webhooks.md). Both are saved in the
+// same transaction that records the dispute, so a crash cannot drop
+// them. `payment.dispute_opened` is sent once per dispute, when Velox
+// first records it; if the first event Velox receives is already the
+// close, both are sent, and both carry the closed status and
+// `closed_at`. Their delivery order is not guaranteed.
+// `payment.dispute_closed` is sent when the dispute reaches a closed
+// status it did not have: `won`, `lost`, `warning_closed` or
+// `prevented`. A lost dispute that Stripe later marks won sends it
+// again.
+type DisputeWebhookEventData struct {
+	AmountCents int64 `json:"amount_cents"`
+
+	// ClosedAt Set when the dispute is closed: always on `payment.dispute_closed`,
+	// and on `payment.dispute_opened` when the first event Velox received
+	// was already the close.
+	ClosedAt   time.Time `json:"closed_at,omitempty"`
+	Currency   string    `json:"currency"`
+	CustomerId string    `json:"customer_id"`
+
+	// DisputeId The Velox dispute record (`InvoiceDispute.id`).
+	DisputeId     string    `json:"dispute_id"`
+	EvidenceDueBy time.Time `json:"evidence_due_by,omitempty"`
+	InvoiceId     string    `json:"invoice_id"`
+	InvoiceNumber string    `json:"invoice_number"`
+	OpenedAt      time.Time `json:"opened_at"`
+
+	// PaymentIntentId The disputed Stripe PaymentIntent.
+	PaymentIntentId string `json:"payment_intent_id"`
+	Reason          string `json:"reason,omitempty"`
+
+	// Status The dispute's status when the event was saved (see `InvoiceDispute.status`).
+	Status          string `json:"status"`
+	StripeChargeId  string `json:"stripe_charge_id,omitempty"`
+	StripeDisputeId string `json:"stripe_dispute_id"`
 }
 
 // DocumentBillTo What an issued invoice or credit note prints about its buyer, copied
@@ -4444,6 +4568,57 @@ type InvoiceCreateRequest struct {
 
 	// SubscriptionId Optional. Leave out for a one-off invoice.
 	SubscriptionId string `json:"subscription_id,omitempty"`
+}
+
+// InvoiceDispute A card dispute (chargeback) Stripe reported against one of the
+// invoice's payments, recorded from Stripe's `charge.dispute.created`,
+// `.updated` and `.closed` webhook events. It holds the dispute as the
+// newest of those events showed it, whatever order they arrived in.
+// Velox records and reports a dispute, and nothing else: the invoice
+// stays paid and no money moves.
+type InvoiceDispute struct {
+	// AmountCents The disputed amount. It can differ from the payment.
+	AmountCents int64 `json:"amount_cents"`
+
+	// ClosedAt When Stripe closed it. Absent while it is open.
+	ClosedAt  time.Time `json:"closed_at,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	Currency  string    `json:"currency"`
+
+	// EvidenceDueBy The deadline to respond in Stripe. Absent when Stripe gave none.
+	EvidenceDueBy time.Time `json:"evidence_due_by,omitempty"`
+	Id            string    `json:"id"`
+	InvoiceId     string    `json:"invoice_id"`
+	Livemode      bool      `json:"livemode"`
+
+	// OpenedAt When Stripe opened the dispute.
+	OpenedAt time.Time `json:"opened_at"`
+
+	// Reason The reason the cardholder gave, for example `fraudulent`.
+	Reason string `json:"reason,omitempty"`
+
+	// Status Stripe's dispute status, as Stripe sends it. The `warning_`
+	// statuses are an inquiry, which comes before a chargeback or
+	// instead of one. `won`, `lost`, `warning_closed` and `prevented`
+	// are closed.
+	Status          InvoiceDisputeStatus `json:"status"`
+	StripeChargeId  string               `json:"stripe_charge_id,omitempty"`
+	StripeDisputeId string               `json:"stripe_dispute_id"`
+
+	// StripePaymentIntentId The disputed payment.
+	StripePaymentIntentId string    `json:"stripe_payment_intent_id"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+// InvoiceDisputeStatus Stripe's dispute status, as Stripe sends it. The `warning_`
+// statuses are an inquiry, which comes before a chargeback or
+// instead of one. `won`, `lost`, `warning_closed` and `prevented`
+// are closed.
+type InvoiceDisputeStatus string
+
+// InvoiceDisputeList defines model for InvoiceDisputeList.
+type InvoiceDisputeList struct {
+	Data []InvoiceDispute `json:"data"`
 }
 
 // InvoiceLineItem A single line on an invoice.
@@ -5930,11 +6105,15 @@ type WebhookEndpointStats struct {
 
 // WebhookEvent One outbound webhook event, as Velox created it.
 type WebhookEvent struct {
-	CreatedAt time.Time              `json:"created_at"`
-	EventType string                 `json:"event_type"`
-	Id        string                 `json:"id"`
-	Livemode  bool                   `json:"livemode"`
-	Payload   map[string]interface{} `json:"payload"`
+	CreatedAt time.Time `json:"created_at"`
+	EventType string    `json:"event_type"`
+	Id        string    `json:"id"`
+	Livemode  bool      `json:"livemode"`
+
+	// Payload The event's data. docs/webhooks.md lists what each event carries;
+	// `payment.dispute_opened` and `payment.dispute_closed` carry a
+	// `DisputeWebhookEventData`.
+	Payload map[string]interface{} `json:"payload"`
 
 	// ReplayOfEventId Set on a replay. The event the replay was made from.
 	ReplayOfEventId string `json:"replay_of_event_id,omitempty"`
@@ -6235,8 +6414,9 @@ type ListCreditNotesParams struct {
 	Status     ListCreditNotesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// RefundStatus `needs_attention` returns issued, non-test-clock notes whose
-	// refund failed, has been pending more than 72 hours, or has a
-	// refund amount still at `none` after 1 hour.
+	// refund failed or has an unknown result, has been pending more
+	// than 72 hours, or has a refund amount still at `none` after 1
+	// hour.
 	RefundStatus ListCreditNotesParamsRefundStatus `form:"refund_status,omitempty" json:"refund_status,omitempty"`
 
 	// Sort One of credit_note_number, total_cents (alias amount), status, issued_at, created_at (default).
@@ -8682,6 +8862,9 @@ type ServerInterface interface {
 	// Charge a finalized invoice now
 	// (POST /v1/invoices/{id}/collect)
 	CollectInvoicePayment(w http.ResponseWriter, r *http.Request, id string, params CollectInvoicePaymentParams)
+	// List the card disputes on an invoice
+	// (GET /v1/invoices/{id}/disputes)
+	ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string)
 	// Finalize draft invoice
 	// (POST /v1/invoices/{id}/finalize)
 	PostV1InvoicesIdFinalize(w http.ResponseWriter, r *http.Request, id string, params PostV1InvoicesIdFinalizeParams)
@@ -9504,6 +9687,12 @@ func (_ Unimplemented) GetInvoice(w http.ResponseWriter, r *http.Request, id str
 // Charge a finalized invoice now
 // (POST /v1/invoices/{id}/collect)
 func (_ Unimplemented) CollectInvoicePayment(w http.ResponseWriter, r *http.Request, id string, params CollectInvoicePaymentParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List the card disputes on an invoice
+// (GET /v1/invoices/{id}/disputes)
+func (_ Unimplemented) ListInvoiceDisputes(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14058,6 +14247,38 @@ func (siw *ServerInterfaceWrapper) CollectInvoicePayment(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CollectInvoicePayment(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListInvoiceDisputes operation middleware
+func (siw *ServerInterfaceWrapper) ListInvoiceDisputes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInvoiceDisputes(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19251,6 +19472,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/collect", wrapper.CollectInvoicePayment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/invoices/{id}/disputes", wrapper.ListInvoiceDisputes)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/invoices/{id}/finalize", wrapper.PostV1InvoicesIdFinalize)

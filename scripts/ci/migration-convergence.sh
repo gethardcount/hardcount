@@ -19,9 +19,14 @@
 #   citest   superuser velox; the velox_test database of docker/init.sql
 #
 # Then two more checks:
-#   restore drill  back up a v0.8.1 database, let HEAD take it over, restore
-#                  the backup over it with scripts/restore.sh: HEAD must
-#                  refuse and change nothing.
+#   restore drill  back up a v0.8.1 database. Restore the backup into an
+#                  empty database with scripts/restore.sh: it must succeed,
+#                  equal the database backed up, and HEAD must take it over.
+#                  Then let HEAD take the first database over and restore the
+#                  backup over it. Either the restore is refused because a
+#                  newer table refers to a backed-up one, and rolled back,
+#                  leaving the database exactly as HEAD left it, or it goes
+#                  through and HEAD must refuse and change nothing.
 #   Postgres 14    HEAD applies on postgres:14 and reports up to date.
 #
 # Needs Docker, psql and pg_restore on the host, and Go to build HEAD.
@@ -223,9 +228,9 @@ converge() {
 }
 
 restore_drill() {
-  say "restore drill: a v0.8.1 backup restored over a database HEAD took over"
-  local c=mig-restore port url before after out
-  CONTAINERS+=("$c")
+  say "restore drill: a v0.8.1 backup restored into an empty database, and over a database HEAD took over"
+  local c=mig-restore e=mig-restore-empty port url eurl before after out kind
+  CONTAINERS+=("$c" "$e")
   start_pg "$c" "$POSTGRES16_IMAGE" compose; port=$PG_PORT
   url=$(dsn compose "$port")
   v081_migrate "$url"
@@ -234,11 +239,68 @@ restore_drill() {
     "$ROOT/scripts/backup.sh"
   local backup
   backup=$(find "$WORK/backups" -type f -name 'velox_*.dump' | head -1) # not the latest.dump link
+  for kind in schema data; do
+    dump "$c" compose "$kind" > "$OUT/restore-source-$kind.sql"
+  done
+
+  # The documented path: the backup into an empty database. scripts/restore.sh
+  # must succeed, the restored database must equal the one backed up, and
+  # HEAD must take it over. This is the step that proves restore.sh restores
+  # anything; the over-an-upgraded-database case below can pass on a restore
+  # that is refused.
+  echo "restore into an empty database"
+  start_pg "$e" "$POSTGRES16_IMAGE" compose
+  eurl=$(dsn compose "$PG_PORT")
+  DATABASE_URL="$eurl" VELOX_RESTORE_CONFIRM=yes \
+    PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
+    "$ROOT/scripts/restore.sh" "$backup" 2>&1 | tee "$OUT/restore-empty.txt" \
+    || fail "restore drill: scripts/restore.sh failed to restore the backup into an empty database"
+  grep -q 'Restore complete' "$OUT/restore-empty.txt" \
+    || fail "restore drill: scripts/restore.sh into an empty database did not report a complete restore"
+  for kind in schema data; do
+    dump "$e" compose "$kind" > "$OUT/restore-empty-$kind.sql"
+    if ! diff -u "$OUT/restore-source-$kind.sql" "$OUT/restore-empty-$kind.sql" > "$OUT/restore-empty-$kind.diff"; then
+      head -100 "$OUT/restore-empty-$kind.diff"
+      fail "restore drill: the $kind restored into an empty database differs from the database backed up"
+    fi
+  done
+  head_velox "$eurl" migrate
+  head_velox "$eurl" migrate status | tee "$OUT/restore-empty-status.txt"
+  grep -q 'up to date, nothing to apply' "$OUT/restore-empty-status.txt" \
+    || fail "restore drill: HEAD did not take over the database restored from the v0.8.1 backup"
+  echo "restore drill: the backup restored into an empty database, and HEAD took it over"
+
+  echo "restore over the database HEAD took over"
   head_velox "$url" migrate
   before=$(versions "$c" compose)
-  DATABASE_URL="$url" VELOX_RESTORE_CONFIRM=yes \
+  dump "$c" compose schema > "$OUT/restore-before-schema.sql"
+  dump "$c" compose data > "$OUT/restore-before-data.sql"
+  if ! DATABASE_URL="$url" VELOX_RESTORE_CONFIRM=yes \
     PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
-    "$ROOT/scripts/restore.sh" "$backup" | tee "$OUT/restore.txt"
+    "$ROOT/scripts/restore.sh" "$backup" 2>&1 | tee "$OUT/restore.txt"; then
+    # pg_restore --clean drops each object the backup holds before it
+    # recreates it. Once a migration after 180 adds a table with a foreign
+    # key into one of them (invoice_disputes, migration 185), that drop
+    # fails, and the single-transaction restore is rolled back. That is the
+    # other safe outcome: nothing changed, and HEAD runs on the database it
+    # took over. Only that cause passes: any other failure fails the drill.
+    grep -q 'single-transaction restore was rolled back' "$OUT/restore.txt" \
+      || fail "restore drill: the restore failed without rolling back"
+    grep -E -q 'cannot drop .* because other objects depend on it' "$OUT/restore.txt" \
+      || fail "restore drill: the restore over the upgraded database failed, but not because a newer table refers to a backed-up one"
+    after=$(versions "$c" compose)
+    [ "$before" = "$after" ] || fail "restore drill: goose_db_version changed ($before -> $after)"
+    for kind in schema data; do
+      dump "$c" compose "$kind" > "$OUT/restore-after-$kind.sql"
+      diff -u "$OUT/restore-before-$kind.sql" "$OUT/restore-after-$kind.sql" > "$OUT/restore-$kind.diff" \
+        || fail "restore drill: the refused restore changed the $kind"
+    done
+    head_velox "$url" migrate status | tee "$OUT/restore-status.txt"
+    grep -q 'up to date, nothing to apply' "$OUT/restore-status.txt" \
+      || fail "restore drill: status after the refused restore is not up to date"
+    echo "restore drill: the restore was refused and rolled back, nothing changed"
+    return
+  fi
   if out=$(head_velox "$url" migrate 2>&1); then
     echo "$out"
     fail "restore drill: HEAD migrate accepted a v0.8.x backup restored over a database it had taken over"
