@@ -21,7 +21,10 @@ import type { ActivityPart } from './activityPart';
  * real-world time, set only for an entity on a test clock.
  */
 export interface ActivityLine {
-  /** The row's stable key, the same as the event's `id`. */
+  /**
+     * The row's stable key: the event's `id` on an invoice timeline
+     * row, the audit entry's id on a subscription timeline row.
+     */
   id: string;
   /** Machine name of the event. */
   kind: string;

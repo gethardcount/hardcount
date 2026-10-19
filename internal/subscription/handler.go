@@ -22,6 +22,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -241,6 +242,9 @@ type Handler struct {
 	// orphan-item warning in the failure path. ADR-030 atomic-proration
 	// follow-through (2026-05-29).
 	db *postgres.DB
+	// invoiceLabels names the invoices activity rows link to (ADR-128).
+	// Optional: unset, rows name no invoice by link.
+	invoiceLabels InvoiceLabeler
 }
 
 func NewHandler(svc *Service) *Handler {
@@ -643,13 +647,20 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		meta := map[string]any{
-			"action":               "cancel_scheduled",
+			"action":               domain.SubAuditCancelScheduled,
 			"customer_id":          sub.CustomerID,
 			"cancel_at_period_end": sub.CancelAtPeriodEnd,
 		}
 		if sub.CancelAt != nil {
 			meta["cancel_at"] = sub.CancelAt.UTC()
 		}
+		// When it lands, and the status it was scheduled in: at period end
+		// on a trialing subscription means at trial end (ADR-069), and the
+		// activity line says which.
+		if sub.CancelEffectiveAt != nil {
+			meta["cancel_effective_at"] = sub.CancelEffectiveAt.UTC()
+		}
+		meta["status"] = string(sub.Status)
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
 
@@ -720,7 +731,7 @@ func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      "trial_ended",
+			"action":      domain.SubAuditTrialEnded,
 			"customer_id": sub.CustomerID,
 		})
 	}
@@ -788,7 +799,7 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      "trial_extended",
+			"action":      domain.SubAuditTrialExtended,
 			"customer_id": sub.CustomerID,
 			"trial_end":   body.TrialEnd.UTC(),
 		})
@@ -858,7 +869,9 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 	// h.plans, which the service doesn't have. We hydrate the sub's items,
 	// fetch each item's plan, and reject when the set spans more than one
 	// currency. A threshold expressed in cents only makes sense against a
-	// single-currency line set.
+	// single-currency line set. The one currency rides the audit row, so the
+	// activity line can show the amount as money (ADR-128, B9).
+	var thresholdCurrency string
 	if h.plans != nil {
 		// A read error fails the request: skipping it would let a cents
 		// threshold onto a mixed-currency sub.
@@ -884,6 +897,9 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 					"billing thresholds are not supported on multi-currency subscriptions")
 				return
 			}
+			for c := range seen {
+				thresholdCurrency = c
+			}
 		}
 	}
 
@@ -895,10 +911,13 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		meta := map[string]any{
-			"action":               "billing_thresholds_set",
+			"action":               domain.SubAuditThresholdsSet,
 			"customer_id":          sub.CustomerID,
 			"amount_gte":           input.AmountGTE,
 			"item_threshold_count": len(input.ItemThresholds),
+		}
+		if thresholdCurrency != "" {
+			meta["currency"] = thresholdCurrency
 		}
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
@@ -922,7 +941,7 @@ func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request)
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      "billing_thresholds_cleared",
+			"action":      domain.SubAuditThresholdsCleared,
 			"customer_id": sub.CustomerID,
 		})
 	}
@@ -945,7 +964,7 @@ func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      "cancel_cleared",
+			"action":      domain.SubAuditCancelCleared,
 			"customer_id": sub.CustomerID,
 		})
 	}
@@ -1038,7 +1057,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		payload := map[string]any{
-			"action":   "item_added",
+			"action":   domain.SubAuditItemAdded,
 			"item_id":  item.ID,
 			"plan_id":  item.PlanID,
 			"quantity": item.Quantity,
@@ -1103,7 +1122,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 				"error", prorationErr,
 			)
 			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, id), tenantID, "subscription.proration_failed", "subscription", id, "", map[string]any{
+				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, id), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", id, "", map[string]any{
 					"item_id":                  item.ID,
 					"change_type":              string(domain.ItemChangeTypeAdd),
 					"plan_id":                  item.PlanID,
@@ -1345,7 +1364,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 				"error", prorationErr,
 			)
 			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, "subscription.proration_failed", "subscription", subID, "", map[string]any{
+				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", subID, "", map[string]any{
 					"item_id":                  result.Item.ID,
 					"change_type":              string(spec.changeType),
 					"old_plan_id":              oldPlanID,
@@ -1378,13 +1397,27 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			"immediate": input.Immediate,
 		}
 		addProrationMeta(payload, result.Proration, h.planCurrency(ctx, tenantID, result.Item.PlanID))
+		// The item as the change found it under the subscription row lock
+		// (#1270): the plan and quantity it moved from. Every path sets it,
+		// a scheduled change included, which keeps the item on this plan
+		// until the boundary; oldPlanID and oldQuantity are read only for
+		// changes that prorate.
+		was := result.pricedFrom.item
 		if input.Quantity != nil {
-			payload["action"] = "item_quantity_changed"
+			payload["action"] = domain.SubAuditItemQuantityChanged
 			payload["quantity"] = *input.Quantity
+			payload["plan_id"] = result.Item.PlanID
+			if was.Quantity > 0 {
+				payload["old_quantity"] = was.Quantity
+			}
 		} else {
-			payload["action"] = "item_plan_changed"
-			payload["old_plan_id"] = oldPlanID
+			payload["action"] = domain.SubAuditItemPlanChanged
+			payload["old_plan_id"] = was.PlanID
 			payload["new_plan_id"] = input.NewPlanID
+			// A scheduled change names the boundary it lands on.
+			if !input.Immediate && result.Item.PendingPlanEffectiveAt != nil {
+				payload["effective_at"] = result.Item.PendingPlanEffectiveAt.UTC()
+			}
 		}
 		// Sim-time context (ADR-030): re-fetch the post-change sub for its
 		// UpdatedAt (the change instant) + test_clock_id so a clock-pinned
@@ -1393,7 +1426,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		if s, err := h.svc.Get(ctx, tenantID, subID); err == nil {
 			auditSub = s
 		}
-		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, "subscription.item_updated", "subscription", subID, auditSub.Code, payload)
+		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, domain.AuditActionSubscriptionItemUpdated, "subscription", subID, auditSub.Code, payload)
 	}
 
 	// Event dispatch. Quantity changes and immediate plan changes are
@@ -1434,7 +1467,7 @@ func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionUpdate, "subscription", subID, "", map[string]any{
-			"action":  "cancel_pending_item_plan_change",
+			"action":  domain.SubAuditPendingPlanChangeCanceled,
 			"item_id": item.ID,
 		})
 	}
@@ -1525,7 +1558,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		payload := map[string]any{
-			"action":  "item_removed",
+			"action":  domain.SubAuditItemRemoved,
 			"item_id": itemID,
 			// Which plan left — captured for proration math anyway;
 			// without it the feed said "Item removed" with no noun.
@@ -1566,7 +1599,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 				"error", prorationErr,
 			)
 			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, "subscription.proration_failed", "subscription", subID, "", map[string]any{
+				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", subID, "", map[string]any{
 					"item_id":                  itemID,
 					"change_type":              string(domain.ItemChangeTypeRemove),
 					"plan_id":                  removedPlanID,
@@ -3144,6 +3177,29 @@ type timelineEvent struct {
 	// TestClockID identifies which test clock the SimEffectiveAt
 	// belongs to. Empty when SimEffectiveAt is empty.
 	TestClockID string `json:"test_clock_id,omitempty"`
+	// Error is the line's problem: what went wrong on a failure row, what it
+	// means on a warning row.
+	Error string `json:"error,omitempty"`
+	// Line is the row as the activity line standard words it (ADR-128):
+	// keyed by its audit row, with the actor from that row. Description,
+	// Detail, DetailTimestamp, Error and Status above are filled from it
+	// (fillFromLine), so a client that reads only the older fields shows the
+	// same words.
+	Line activity.Line `json:"line"`
+}
+
+// fillFromLine stamps the line's id, actor and times and copies its words
+// into the older fields: the title is the description, the meta line
+// without the actor is the detail (the card shows the actor from
+// actor_name), the problem is the error and the tone is the status.
+func (e *timelineEvent) fillFromLine(id string, actor *activity.Actor) {
+	e.Line.ID = id
+	e.Line.Actor = actor
+	e.Line = activity.Stamp(e.Line, e.sortAt, e.recordedAt, e.IsSimulated)
+	e.Description = e.Line.Title
+	e.Detail, e.DetailTimestamp = legacyDetail(e.Line)
+	e.Error = e.Line.Problem
+	e.Status = legacyStatus(e.Line.Tone)
 }
 
 // planLabel renders an operator-facing plan reference: prefer the
@@ -3175,6 +3231,11 @@ func addProrationMeta(payload map[string]any, detail *ProrationDetail, currency 
 	if detail.InvoiceID != "" {
 		payload["proration_invoice_id"] = detail.InvoiceID
 	}
+	// An adjustment reduces the open invoice the change was billed on; the
+	// activity line links it (ADR-128 rule 8).
+	if detail.Type == "adjustment" && detail.ClawbackInvoiceID != "" {
+		payload["adjusted_invoice_id"] = detail.ClawbackInvoiceID
+	}
 	if currency != "" {
 		payload["currency"] = currency
 	}
@@ -3193,283 +3254,6 @@ func (h *Handler) planCurrency(ctx context.Context, tenantID, planID string) str
 	return ""
 }
 
-// prorationPartLabel renders the proration OUTCOME segment of a timeline row
-// from the audit metadata stamped by addProrationMeta — "Proration invoice
-// $50.00" / "Credit $19.80" / "Open invoice adjusted $54.44". Empty when no
-// proration metadata is present. Shared across the plan-change, quantity-
-// change, item-add, and item-remove renderers so the wording can't drift.
-func prorationPartLabel(meta map[string]any) string {
-	// Tolerate both int64 (an in-memory map straight from addProrationMeta)
-	// and float64 (the same value after an audit-store JSON round-trip).
-	// Production reads come back float64; this keeps the helper correct if
-	// ever called on an un-round-tripped map.
-	var amt int64
-	switch v := meta["proration_amount_cents"].(type) {
-	case float64:
-		amt = int64(v)
-	case int64:
-		amt = v
-	case int:
-		amt = int64(v)
-	default:
-		return ""
-	}
-	cur, _ := meta["currency"].(string)
-	switch t, _ := meta["proration_type"].(string); t {
-	case "invoice":
-		return "Proration invoice " + formatAmountForTimeline(amt, cur)
-	case "credit":
-		return "Credit " + formatAmountForTimeline(amt, cur)
-	case "adjustment":
-		return "Open invoice adjusted " + formatAmountForTimeline(amt, cur)
-	}
-	return ""
-}
-
-// formatAmountForTimeline renders cents for the activity feed with the
-// right currency marker — the previous hardcoded "$" mislabeled every
-// non-USD tenant's amounts. Symbols for the common cases, ISO code
-// suffix otherwise.
-func formatAmountForTimeline(cents int64, currency string) string {
-	v := float64(cents) / 100
-	switch strings.ToUpper(currency) {
-	case "USD", "":
-		return fmt.Sprintf("$%.2f", v)
-	case "EUR":
-		return fmt.Sprintf("€%.2f", v)
-	case "GBP":
-		return fmt.Sprintf("£%.2f", v)
-	case "INR":
-		return fmt.Sprintf("₹%.2f", v)
-	default:
-		return fmt.Sprintf("%.2f %s", v, strings.ToUpper(currency))
-	}
-}
-
-// describeSubscriptionAction maps audit_log action + metadata to a
-// human-readable sentence + sub-line + status tag the UI colors by.
-// Unknown actions pass through with a neutral info tag rather than
-// hiding — the feed should never silently drop an event.
-//
-// Detail is the optional sub-line beneath the main description. Used
-// for human-meaningful context (dates, counts, plan names) that
-// bloats the title if inlined. Mirrors the invoice timeline shape.
-//
-// planNames is a lookup from plan_id → plan.Name used to resolve
-// raw IDs in metadata to operator-friendly labels. The caller
-// (activityTimeline) batch-fetches every plan_id referenced in the
-// audit entries before invoking this function. Missing entries fall
-// back to the raw ID (deleted plan / lookup miss).
-func describeSubscriptionAction(action string, meta map[string]any, planNames map[string]string) (desc, detail, detailTimestamp, status string) {
-	switch action {
-	case domain.AuditActionCreate:
-		return "Subscription created", "", "", "info"
-	case domain.AuditActionActivate:
-		return "Subscription activated", "", "", "succeeded"
-	case domain.AuditActionCancel:
-		by := ""
-		if v, ok := meta["canceled_by"].(string); ok && v != "" {
-			by = " by " + v
-		}
-		// Surface cancel-proration credit (in_advance unused-base
-		// refund) on the timeline. Pre-fix the credit was only
-		// visible on the customer's credit ledger; operators had to
-		// cross-reference to learn how much was refunded for this
-		// specific cancel. Industry standard — Stripe / Lago /
-		// Chargebee / Orb link the credit to the subscription event.
-		d := ""
-		if v, ok := meta["prorated_credit_cents"].(float64); ok && v > 0 {
-			cur, _ := meta["currency"].(string)
-			d = "Prorated credit issued: " + formatAmountForTimeline(int64(v), cur)
-		}
-		return "Subscription canceled" + by, d, "", "canceled"
-	case domain.AuditActionUpdate:
-		// AuditActionUpdate is a catch-all bucket; the meaningful
-		// discriminator is meta["action"]. Every operator-driven
-		// mutation that doesn't have its own audit action (cancel,
-		// activate, create) routes through here with a sub-action tag.
-		a, _ := meta["action"].(string)
-		switch a {
-		case "cancel_scheduled":
-			if v, ok := meta["cancel_at_period_end"].(bool); ok && v {
-				return "Cancellation scheduled", "At end of current period", "", "warning"
-			}
-			if t, ok := meta["cancel_at"].(string); ok && t != "" {
-				return "Cancellation scheduled", "On", t, "warning"
-			}
-			return "Cancellation scheduled", "", "", "warning"
-		case "cancel_cleared":
-			return "Scheduled cancellation cleared", "", "", "info"
-		case "collection_paused":
-			d := ""
-			ts := ""
-			if r, ok := meta["resumes_at"].(string); ok && r != "" {
-				d = "Auto-resumes"
-				ts = r
-			} else {
-				d = "Cycle keeps drafting; no charge until resumed"
-			}
-			title := "Collection paused"
-			if tb, _ := meta["triggered_by"].(string); tb == "dunning" {
-				title = "Collection paused by dunning"
-			}
-			return title, d, ts, "warning"
-		case "collection_resumed":
-			if tb, _ := meta["triggered_by"].(string); tb == "schedule" {
-				return "Collection auto-resumed", "Scheduled resume date reached", "", "succeeded"
-			}
-			return "Collection resumed", "", "", "succeeded"
-		case "trial_ended":
-			return "Trial ended early", "", "", "info"
-		case "billing_retried":
-			d := ""
-			if v, ok := meta["attempts_before"].(float64); ok && v > 0 {
-				d = fmt.Sprintf("After %d failed attempt%s", int(v), plural(int(v)))
-			}
-			return "Billing retried", d, "", "info"
-		case "trial_extended":
-			d := ""
-			ts := ""
-			if t, ok := meta["trial_end"].(string); ok && t != "" {
-				d = "New trial end:"
-				ts = t
-			}
-			return "Trial extended", d, ts, "info"
-		case "billing_thresholds_set":
-			parts := []string{}
-			if v, ok := meta["amount_gte"].(float64); ok && v > 0 {
-				parts = append(parts, fmt.Sprintf("Amount ≥ %d¢", int64(v)))
-			}
-			if v, ok := meta["item_threshold_count"].(float64); ok && v > 0 {
-				parts = append(parts, fmt.Sprintf("%d item threshold%s", int(v), plural(int(v))))
-			}
-			return "Billing thresholds set", strings.Join(parts, " · "), "", "info"
-		case "billing_thresholds_cleared":
-			return "Billing thresholds cleared", "", "", "info"
-		case "item_added":
-			parts := []string{}
-			if v, ok := meta["plan_id"].(string); ok && v != "" {
-				parts = append(parts, planLabel(v, planNames))
-			}
-			if q, ok := meta["quantity"].(float64); ok && q > 0 {
-				parts = append(parts, fmt.Sprintf("qty %d", int(q)))
-			}
-			if pp := prorationPartLabel(meta); pp != "" {
-				parts = append(parts, pp)
-			}
-			return "Item added", strings.Join(parts, " · "), "", "info"
-		case "item_removed":
-			// Plan NAME (resolved via planNames) is the operator-legible
-			// noun; the vlx_si_ item id stays out of the row.
-			parts := []string{}
-			if pid, _ := meta["plan_id"].(string); pid != "" {
-				parts = append(parts, planLabel(pid, planNames))
-			}
-			if pp := prorationPartLabel(meta); pp != "" {
-				parts = append(parts, pp)
-			}
-			return "Item removed", strings.Join(parts, " · "), "", "info"
-		case "cancel_pending_item_plan_change":
-			return "Pending plan change canceled", "", "", "info"
-		}
-		// Unknown sub-action — surface the bucket label rather than
-		// hiding the row. Better than silently dropping audit context.
-		return "Subscription updated", "", "", "info"
-	case "subscription.item_updated":
-		// Item-level plan + quantity changes go through this dedicated
-		// action (not AuditActionUpdate) so the metadata discriminator
-		// lives in meta["action"]: "item_plan_changed" or
-		// "item_quantity_changed".
-		a, _ := meta["action"].(string)
-		immediate, _ := meta["immediate"].(bool)
-		when := "At next period"
-		if immediate {
-			when = "Immediate"
-		}
-		switch a {
-		case "item_plan_changed":
-			parts := []string{}
-			oldPlan, _ := meta["old_plan_id"].(string)
-			newPlan, _ := meta["new_plan_id"].(string)
-			if oldPlan != "" && newPlan != "" {
-				parts = append(parts, planLabel(oldPlan, planNames)+" → "+planLabel(newPlan, planNames))
-			}
-			parts = append(parts, when)
-			if pp := prorationPartLabel(meta); pp != "" {
-				parts = append(parts, pp)
-			}
-			return "Plan changed", strings.Join(parts, " · "), "", "info"
-		case "item_quantity_changed":
-			parts := []string{}
-			if q, ok := meta["quantity"].(float64); ok {
-				parts = append(parts, fmt.Sprintf("To qty %d", int(q)))
-			}
-			parts = append(parts, when)
-			if pp := prorationPartLabel(meta); pp != "" {
-				parts = append(parts, pp)
-			}
-			return "Quantity changed", strings.Join(parts, " · "), "", "info"
-		}
-		return "Item updated", "", "", "info"
-	case "subscription.pending_change_applied":
-		oldPlan, _ := meta["old_plan_id"].(string)
-		newPlan, _ := meta["new_plan_id"].(string)
-		d := ""
-		if oldPlan != "" && newPlan != "" {
-			d = planLabel(oldPlan, planNames) + " → " + planLabel(newPlan, planNames)
-		}
-		return "Scheduled plan change applied", d, "", "success"
-	case "subscription.threshold_crossed":
-		d := ""
-		if num, _ := meta["invoice_number"].(string); num != "" {
-			d = "Invoice " + num + " issued early"
-			if amt, ok := meta["amount_cents"].(float64); ok {
-				cur, _ := meta["currency"].(string)
-				d += " — " + formatAmountForTimeline(int64(amt), cur)
-			}
-		}
-		return "Spending threshold crossed", d, "", "warning"
-	case "subscription.threshold_deferred":
-		// ADR-066 §4b loudness floor. Peak/last-style charges can't be split
-		// across an early invoice and the cycle close, so the fire waits.
-		return "Spending threshold reached — invoice deferred",
-			"This subscription's spend is priced on peak usage, which bills once at the end of the cycle. The invoice will be issued at cycle close.",
-			"", "info"
-	case "subscription.proration_failed":
-		d := ""
-		if e, ok := meta["error"].(string); ok && e != "" {
-			d = e
-		}
-		return "Proration failed", d, "", "warning"
-	case "subscription.net_negative_usage":
-		// #1193: an invoice decision counted usage that was below zero after
-		// corrections as 0, and built the rest of the invoice.
-		return "Usage below zero billed as zero", netNegativeUsageDetail(meta), "", "warning"
-	default:
-		return action, "", "", "info"
-	}
-}
-
-// netNegativeUsageDetail names each meter of a subscription.net_negative_usage
-// row with its amount below zero, then says what to do about it.
-func netNegativeUsageDetail(meta map[string]any) string {
-	var parts []string
-	ms, _ := meta["meters"].([]any)
-	for _, m := range ms {
-		mm, _ := m.(map[string]any)
-		key, _ := mm["meter_key"].(string)
-		qty, _ := mm["quantity"].(string)
-		if key != "" && qty != "" {
-			parts = append(parts, key+" "+qty)
-		}
-	}
-	d := "Usage corrections were larger than the usage they offset in this period. If an earlier invoice billed that usage, issue a credit note on it."
-	if len(parts) > 0 {
-		d = strings.Join(parts, " · ") + ". " + d
-	}
-	return d
-}
-
 // plural returns "s" for n != 1, else "". Tiny helper to avoid the
 // "1 thresholds" / "2 threshold" pluralization mistake.
 func plural(n int) string {
@@ -3477,6 +3261,41 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// InvoiceLabeler names an invoice a subscription activity row links to: a
+// proration invoice, the open invoice an adjustment reduced, or a spend
+// threshold's early invoice (ADR-128 rule 8). An error (the invoice no longer
+// exists, or could not be read) leaves the row's invoice as plain text.
+type InvoiceLabeler interface {
+	InvoiceNumber(ctx context.Context, tenantID, invoiceID string) (string, error)
+}
+
+// SetInvoiceLabeler wires the invoice numbers the timeline's links show.
+// Unset, rows name no invoice by link.
+func (h *Handler) SetInvoiceLabeler(l InvoiceLabeler) { h.invoiceLabels = l }
+
+// invoiceNumbers looks up the number of every invoice the entries name, once
+// each. An invoice that cannot be read is left out, so its row links nothing.
+func (h *Handler) invoiceNumbers(ctx context.Context, tenantID string, entries []domain.AuditEntry) map[string]string {
+	out := map[string]string{}
+	if h.invoiceLabels == nil {
+		return out
+	}
+	tried := map[string]bool{}
+	for _, e := range entries {
+		for _, key := range []string{"proration_invoice_id", "adjusted_invoice_id", "invoice_id"} {
+			id := metaString(e.Metadata, key)
+			if id == "" || tried[id] {
+				continue
+			}
+			tried[id] = true
+			if num, err := h.invoiceLabels.InvoiceNumber(ctx, tenantID, id); err == nil && num != "" {
+				out[id] = num
+			}
+		}
+	}
+	return out
 }
 
 func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
@@ -3567,8 +3386,9 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			labels := lineLabels{plans: planNames, invoices: h.invoiceNumbers(r.Context(), tenantID, entries)}
 			for _, e := range entries {
-				desc, detail, detailTS, status := describeSubscriptionAction(e.Action, e.Metadata, planNames)
+				line := describeSubscriptionAction(e.Action, e.Metadata, labels)
 				// Per-row sim context. metadata.sim_effective_at is
 				// mirrored by the audit writer from the ctx clock binding
 				// on writes affecting clock-pinned subs (ADR-090 §5; the
@@ -3585,23 +3405,22 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 						sortAt = t
 					}
 				}
-				events = append(events, timelineEvent{
-					Timestamp:       e.CreatedAt.UTC().Format(time.RFC3339),
-					Source:          "audit",
-					EventType:       e.Action,
-					Status:          status,
-					Description:     desc,
-					Detail:          detail,
-					DetailTimestamp: detailTS,
-					ActorType:       e.ActorType,
-					ActorName:       e.ActorName,
-					ActorID:         e.ActorID,
-					IsSimulated:     simAt != "",
-					SimEffectiveAt:  simAt,
-					TestClockID:     clockID,
-					sortAt:          sortAt,
-					recordedAt:      e.CreatedAt,
-				})
+				ev := timelineEvent{
+					Timestamp:      e.CreatedAt.UTC().Format(time.RFC3339),
+					Source:         "audit",
+					EventType:      e.Action,
+					ActorType:      e.ActorType,
+					ActorName:      e.ActorName,
+					ActorID:        e.ActorID,
+					IsSimulated:    simAt != "",
+					SimEffectiveAt: simAt,
+					TestClockID:    clockID,
+					sortAt:         sortAt,
+					recordedAt:     e.CreatedAt,
+					Line:           line,
+				}
+				ev.fillFromLine(e.ID, activity.ActorFromAudit(e.ActorType, e.ActorName))
+				events = append(events, ev)
 			}
 		} else {
 			// Audit rows are this endpoint's ONLY event source — an empty

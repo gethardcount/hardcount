@@ -45,9 +45,6 @@ import (
 // end, and a meter added or removed mid-period is priced over its own
 // segment. The row names each meter's window.
 
-// auditActionNetNegativeUsage is the audit action of that row.
-const auditActionNetNegativeUsage = "subscription.net_negative_usage"
-
 // netNegativeUsage is the usage below zero, per meter id, that one invoice
 // decision counted as 0. A builder fills it; the caller writes it on the
 // decision's transaction.
@@ -55,6 +52,7 @@ type netNegativeUsage map[string]netNegativeMeter
 
 type netNegativeMeter struct {
 	key      string
+	name     string          // the meter's name, which the activity line shows
 	qty      decimal.Decimal // below zero
 	from, to time.Time       // the window it was priced over
 }
@@ -62,9 +60,10 @@ type netNegativeMeter struct {
 // add records one bucket below zero, priced over [from, to). A meter with
 // buckets below zero in more than one window gets their sum, and the window
 // that spans them.
-func (n netNegativeUsage) add(meterID, meterKey string, qty decimal.Decimal, from, to time.Time) {
+func (n netNegativeUsage) add(meterID, meterKey, meterName string, qty decimal.Decimal, from, to time.Time) {
 	m, seen := n[meterID]
 	m.key = meterKey
+	m.name = meterName
 	m.qty = m.qty.Add(qty)
 	if !seen || from.Before(m.from) {
 		m.from = from
@@ -98,13 +97,19 @@ func (e *Engine) noteNetNegativeTx(ctx context.Context, tx *sql.Tx, sub domain.S
 	})
 	meters := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
-		meters = append(meters, map[string]any{
+		m := map[string]any{
 			"meter_id":  id,
 			"meter_key": n[id].key,
 			"quantity":  n[id].qty.String(),
 			"from":      n[id].from.UTC().Format(time.RFC3339Nano),
 			"to":        n[id].to.UTC().Format(time.RFC3339Nano),
-		})
+		}
+		if n[id].name != "" {
+			// The activity line names the meter by its name (ADR-128 rule 5:
+			// no meter keys on screen), as it was when the row was written.
+			m["meter_name"] = n[id].name
+		}
+		meters = append(meters, m)
 	}
 	meta := map[string]any{
 		"meters":         meters,
@@ -117,7 +122,7 @@ func (e *Engine) noteNetNegativeTx(ctx context.Context, tx *sql.Tx, sub domain.S
 		meta["invoice_number"] = inv.InvoiceNumber
 	}
 	return e.auditLogger.LogInTx(ctx, tx, audit.Entry{
-		Action:        auditActionNetNegativeUsage,
+		Action:        domain.AuditActionSubscriptionNetNegativeUsage,
 		ResourceType:  "subscription",
 		ResourceID:    sub.ID,
 		ResourceLabel: sub.Code,

@@ -7,7 +7,9 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ActivityLine } from './activityLine';
 import type { SubscriptionTimelineEventSource } from './subscriptionTimelineEventSource';
+import type { SubscriptionTimelineEventStatus } from './subscriptionTimelineEventStatus';
 
 export interface SubscriptionTimelineEvent {
   /** When the action was recorded (wall-clock time). */
@@ -15,14 +17,20 @@ export interface SubscriptionTimelineEvent {
   source: SubscriptionTimelineEventSource;
   /** The audit action, e.g. `create`, `cancel`, `subscription.item_updated`. */
   event_type: string;
-  /** Display tone for the row: `info`, `succeeded`, `success` (scheduled plan change applied), `warning` or `canceled`. */
-  status: string;
-  /** One-line summary, e.g. "Subscription canceled". */
+  /** The line's tone in older words, read by the dashboard's dot. */
+  status: SubscriptionTimelineEventStatus;
+  /** The line's title, for example "Subscription canceled". */
   description: string;
-  /** Optional second line with context. */
+  /**
+     * The line's meta line as text, without the actor (see
+     * `actor_name`) and without a date at its end, which is in
+     * `detail_timestamp`. For example "Starter → Pro".
+     */
   detail?: string;
-  /** The instant `detail` refers to, for the client to format. */
+  /** The date the end of `detail` refers to, for the client to format, as in "Trial now ends" followed by this date. */
   detail_timestamp?: string;
+  /** The line's problem. */
+  error?: string;
   actor_type?: string;
   actor_name?: string;
   actor_id?: string;
@@ -31,4 +39,5 @@ export interface SubscriptionTimelineEvent {
   /** The test clock's simulated time when the action took effect. */
   sim_effective_at?: string;
   test_clock_id?: string;
+  line: ActivityLine;
 }

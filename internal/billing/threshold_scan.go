@@ -443,7 +443,7 @@ func (e *Engine) noteThresholdDeferred(ctx context.Context, sub domain.Subscript
 		"amount_gte", sub.BillingThresholds.AmountGTE,
 	)
 	if e.auditLogger != nil {
-		_ = e.auditLogger.Log(ctx, sub.TenantID, "subscription.threshold_deferred", "subscription", sub.ID, sub.Code, map[string]any{
+		_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionSubscriptionThresholdDeferred, "subscription", sub.ID, sub.Code, map[string]any{
 			"amount_gte":       sub.BillingThresholds.AmountGTE,
 			"running_subtotal": eval.RunningSubtotal,
 			"reason":           "max_last_meters_bill_at_cycle_close",
@@ -866,7 +866,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	expected := subscription.SnapshotOf(sub)
 	belowZero := netNegativeUsage{}
 	for _, b := range eval.BelowZero {
-		belowZero.add(b.MeterID, b.MeterKey, b.Quantity, periodStart, now) // the window the fire priced
+		belowZero.add(b.MeterID, b.MeterKey, b.MeterName, b.Quantity, periodStart, now) // the window the fire priced
 	}
 	var inv domain.Invoice
 	err = e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
@@ -963,7 +963,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 			"amount_cents":   inv.TotalAmountCents,
 			"currency":       inv.Currency,
 		}
-		_ = e.auditLogger.Log(ctx, sub.TenantID, "subscription.threshold_crossed", "subscription", sub.ID, sub.Code, meta)
+		_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionSubscriptionThresholdCrossed, "subscription", sub.ID, sub.Code, meta)
 	}
 
 	// NOTE: the reset=true cycle re-anchor already committed atomically with

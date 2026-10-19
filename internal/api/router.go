@@ -725,6 +725,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// ADR-128: invoice activity rows link the invoice's subscription by name.
 	invoiceH.SetSubscriptionLabeler(&invoiceSubscriptionLabelAdapter{store: subStore})
 	subH.SetAuditLogger(auditLogger)
+	// ADR-128: subscription activity rows link the invoices they name.
+	subH.SetInvoiceLabeler(&subscriptionInvoiceLabelAdapter{store: invoiceStore})
 	creditNoteH.SetAuditLogger(auditLogger)
 	// CN document email (ADR-082 rider) rides the transactional outbox
 	// like every other customer email.

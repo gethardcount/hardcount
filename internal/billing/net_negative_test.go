@@ -649,8 +649,8 @@ func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing
 func TestNetNegativeUsage_AddSpansWindows(t *testing.T) {
 	d := func(day int) time.Time { return time.Date(2026, 3, day, 0, 0, 0, 0, time.UTC) }
 	n := netNegativeUsage{}
-	n.add("mtr_api", "api_calls", decimal.NewFromInt(-20), d(15), d(31))
-	n.add("mtr_api", "api_calls", decimal.NewFromInt(-30), d(1), d(10))
+	n.add("mtr_api", "api_calls", "API calls", decimal.NewFromInt(-20), d(15), d(31))
+	n.add("mtr_api", "api_calls", "API calls", decimal.NewFromInt(-30), d(1), d(10))
 	m := n["mtr_api"]
 	if !m.qty.Equal(decimal.NewFromInt(-50)) || !m.from.Equal(d(1)) || !m.to.Equal(d(31)) {
 		t.Errorf("entry = %s over [%s, %s), want -50 over [%s, %s)", m.qty, m.from, m.to, d(1), d(31))

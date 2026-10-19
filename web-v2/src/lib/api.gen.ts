@@ -8237,17 +8237,26 @@ export interface components {
             source: "audit";
             /** @description The audit action, e.g. `create`, `cancel`, `subscription.item_updated`. */
             event_type: string;
-            /** @description Display tone for the row: `info`, `succeeded`, `success` (scheduled plan change applied), `warning` or `canceled`. */
-            status: string;
-            /** @description One-line summary, e.g. "Subscription canceled". */
+            /**
+             * @description The line's tone in older words, read by the dashboard's dot.
+             * @enum {string}
+             */
+            status: "neutral" | "succeeded" | "warning" | "failed";
+            /** @description The line's title, for example "Subscription canceled". */
             description: string;
-            /** @description Optional second line with context. */
+            /**
+             * @description The line's meta line as text, without the actor (see
+             *     `actor_name`) and without a date at its end, which is in
+             *     `detail_timestamp`. For example "Starter → Pro".
+             */
             detail?: string;
             /**
              * Format: date-time
-             * @description The instant `detail` refers to, for the client to format.
+             * @description The date the end of `detail` refers to, for the client to format, as in "Trial now ends" followed by this date.
              */
             detail_timestamp?: string;
+            /** @description The line's problem. */
+            error?: string;
             actor_type?: string;
             actor_name?: string;
             actor_id?: string;
@@ -8259,6 +8268,7 @@ export interface components {
              */
             sim_effective_at?: string;
             test_clock_id?: string;
+            line: components["schemas"]["ActivityLine"];
         };
         /**
          * @default 30d
@@ -8577,7 +8587,10 @@ export interface components {
          *     real-world time, set only for an entity on a test clock.
          */
         ActivityLine: {
-            /** @description The row's stable key, the same as the event's `id`. */
+            /**
+             * @description The row's stable key: the event's `id` on an invoice timeline
+             *     row, the audit entry's id on a subscription timeline row.
+             */
             id: string;
             /**
              * @description Machine name of the event.

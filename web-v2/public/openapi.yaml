@@ -2351,7 +2351,7 @@ components:
 
     SubscriptionTimelineEvent:
       type: object
-      required: [timestamp, source, event_type, status, description]
+      required: [timestamp, source, event_type, status, description, line]
       properties:
         timestamp:
           type: string
@@ -2365,17 +2365,24 @@ components:
           description: The audit action, e.g. `create`, `cancel`, `subscription.item_updated`.
         status:
           type: string
-          description: "Display tone for the row: `info`, `succeeded`, `success` (scheduled plan change applied), `warning` or `canceled`."
+          description: The line's tone in older words, read by the dashboard's dot.
+          enum: [neutral, succeeded, warning, failed]
         description:
           type: string
-          description: One-line summary, e.g. "Subscription canceled".
+          description: The line's title, for example "Subscription canceled".
         detail:
           type: string
-          description: Optional second line with context.
+          description: |
+            The line's meta line as text, without the actor (see
+            `actor_name`) and without a date at its end, which is in
+            `detail_timestamp`. For example "Starter → Pro".
         detail_timestamp:
           type: string
           format: date-time
-          description: The instant `detail` refers to, for the client to format.
+          description: The date the end of `detail` refers to, for the client to format, as in "Trial now ends" followed by this date.
+        error:
+          type: string
+          description: The line's problem.
         actor_type:
           type: string
         actor_name:
@@ -2391,6 +2398,8 @@ components:
           description: The test clock's simulated time when the action took effect.
         test_clock_id:
           type: string
+        line:
+          $ref: "#/components/schemas/ActivityLine"
 
     AnalyticsPeriod:
       type: string
@@ -2849,7 +2858,9 @@ components:
       properties:
         id:
           type: string
-          description: The row's stable key, the same as the event's `id`.
+          description: |
+            The row's stable key: the event's `id` on an invoice timeline
+            row, the audit entry's id on a subscription timeline row.
         kind:
           type: string
           description: Machine name of the event.

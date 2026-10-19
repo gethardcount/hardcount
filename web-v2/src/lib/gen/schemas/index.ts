@@ -439,6 +439,7 @@ export * from './subscriptionPauseCollectionBehavior';
 export * from './subscriptionStatus';
 export * from './subscriptionTimelineEvent';
 export * from './subscriptionTimelineEventSource';
+export * from './subscriptionTimelineEventStatus';
 export * from './tenant';
 export * from './tenantSettings';
 export * from './tenantSettingsInput';
