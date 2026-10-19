@@ -203,6 +203,10 @@ func racePlan(planID string) raceReq {
 	return raceReq{body: UpdateItemInput{NewPlanID: planID, Immediate: true}}
 }
 
+func raceSchedule(planID string) raceReq {
+	return raceReq{body: UpdateItemInput{NewPlanID: planID}}
+}
+
 func raceAdd(planID string) raceReq {
 	return raceReq{add: &AddItemInput{PlanID: planID, Quantity: 1}}
 }
@@ -753,7 +757,9 @@ var proLastHours = proPeriodEnd.Add(-6 * time.Hour)
 //
 // Each check runs mid-period, where the change prorates in the handler's
 // transaction, and in the last hours of the period, where it prorates
-// nothing and takes the other path.
+// nothing and takes the other path. A scheduled plan change prorates nothing
+// at any time and runs once: a plan it schedules is billed from the period
+// end, so it counts as billing the meter.
 func TestItemChange_ChecksRunUnderTheLock(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 
@@ -765,10 +771,13 @@ func TestItemChange_ChecksRunUnderTheLock(t *testing.T) {
 		{"mid-period", proNow.Add(time.Hour)},
 		{"last hours of the period", proLastHours},
 	}
+	// onMeter counts the items that bill raceMeter now or from a scheduled
+	// change.
 	onMeter := func(r *itemRaceRig, items []domain.SubscriptionItem) int {
+		meterPlan := func(id string) bool { return id == r.plans["meter-a"].ID || id == r.plans["meter-b"].ID }
 		n := 0
 		for _, it := range items {
-			if it.PlanID == r.plans["meter-a"].ID || it.PlanID == r.plans["meter-b"].ID {
+			if meterPlan(it.PlanID) || meterPlan(it.PendingPlanID) {
 				n++
 			}
 		}
@@ -783,6 +792,9 @@ func TestItemChange_ChecksRunUnderTheLock(t *testing.T) {
 		// wantItems and wantOnMeter are the live items after both requests,
 		// and how many of them bill raceMeter.
 		wantItems, wantOnMeter int
+		// anyTime: the requests prorate nothing whenever they are sent, so
+		// one run covers them.
+		anyTime bool
 	}{
 		{
 			name: "two adds of plans that bill one meter",
@@ -802,6 +814,16 @@ func TestItemChange_ChecksRunUnderTheLock(t *testing.T) {
 			wantItems: 2, wantOnMeter: 1,
 		},
 		{
+			name:       "two scheduled plan changes on different items onto plans that bill one meter",
+			withKeeper: true,
+			reqs: func(r *itemRaceRig) []raceReq {
+				return []raceReq{raceSchedule(r.plans["meter-a"].ID), raceSchedule(r.plans["meter-b"].ID).on(r.keeperID)}
+			},
+			wantOK:    http.StatusOK,
+			wantItems: 2, wantOnMeter: 1,
+			anyTime: true,
+		},
+		{
 			name:       "two removals of the two items",
 			withKeeper: true,
 			reqs: func(r *itemRaceRig) []raceReq {
@@ -814,7 +836,10 @@ func TestItemChange_ChecksRunUnderTheLock(t *testing.T) {
 
 	n := 0
 	for _, tc := range cases {
-		for _, w := range whens {
+		for i, w := range whens {
+			if tc.anyTime && i > 0 {
+				break
+			}
 			n++
 			t.Run(tc.name+", "+w.name, func(t *testing.T) {
 				r := newItemRaceRig(t, db, fmt.Sprintf("Item Checks %d", n), 1, tc.withKeeper)
