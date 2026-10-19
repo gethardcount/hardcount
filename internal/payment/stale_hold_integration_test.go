@@ -1076,3 +1076,232 @@ func TestStaleHold_Concurrency(t *testing.T) {
 		}
 	})
 }
+
+// staleHolds seeds n invoices, each with its own Stripe customer and a stale
+// hold whose charge never reached Stripe, the i-th one ages[i] old (or
+// staleSweepAge when ages is short).
+func (r *shRig) staleHolds(prefix string, n int, ages ...time.Duration) []string {
+	r.t.Helper()
+	var ids []string
+	for i := 0; i < n; i++ {
+		inv := r.seed(fmt.Sprintf("%s-%02d", prefix, i))
+		if c, err := r.claim(autoCharge, inv.ID); err != nil || !c.ok() {
+			r.t.Fatalf("claim %d: %v", i, err)
+		}
+		age := staleSweepAge
+		if i < len(ages) {
+			age = ages[i]
+		}
+		r.ageHold(inv.ID, age)
+		ids = append(ids, inv.ID)
+	}
+	return ids
+}
+
+func (r *shRig) holdsLeft(ids []string) int {
+	r.t.Helper()
+	n := 0
+	for _, id := range ids {
+		if r.hold(id) != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// 17. One run drains every stale hold, page by page, each checked once: 45
+// holds at a page of 20 are all cleared by one run. The sweep used to read
+// one page per tick, so a hold waited an extra hour for every page queued
+// ahead of it, and the refusal's "within about an hour" was not a bound.
+func TestStaleHold_OneRunDrainsEveryPage(t *testing.T) {
+	r := newSHRig(t, "SH Drain")
+	ids := r.staleHolds("INV-SH-DRAIN", 45)
+	if _, errs := r.rec.Run(r.ctx, 20); len(errs) > 0 {
+		t.Fatalf("reconciler: %v", errs)
+	}
+	if left := r.holdsLeft(ids); left != 0 {
+		t.Fatalf("%d of %d stale holds left after one run at a page of 20: the rest would wait an hour a page", left, len(ids))
+	}
+	if n := r.fake.listCount(); n != len(ids) {
+		t.Errorf("Stripe lists = %d, want %d: one per hold, none checked twice", n, len(ids))
+	}
+}
+
+// 17b. A run is bounded in time. Once its budget is spent the rest wait for
+// the next tick, and the next tick reaches them: the auto-charge sweep and the
+// billing cycle run after this sweep in the same tick.
+func TestStaleHold_RunStopsAtItsBudget_RestNextTick(t *testing.T) {
+	r := newSHRig(t, "SH Budget")
+	ids := r.staleHolds("INV-SH-BUDGET", 10)
+	r.fake.beforeList = func() { time.Sleep(150 * time.Millisecond) }
+	setStaleHoldBudget(r.rec, 400*time.Millisecond)
+	r.runClean()
+	cleared := len(ids) - r.holdsLeft(ids)
+	if cleared == 0 || cleared > 4 {
+		t.Fatalf("first run cleared %d of %d holds with a 400ms budget at 150ms a check, want 1 to 4", cleared, len(ids))
+	}
+	setStaleHoldBudget(r.rec, time.Minute)
+	r.runClean()
+	if left := r.holdsLeft(ids); left != 0 {
+		t.Fatalf("%d holds left after the next run: the ones the budget cut were not reached", left)
+	}
+}
+
+// 18. Stripe cannot be reached. Each check's Stripe read is cut at its time
+// limit, and after three failed reads in a row the sweep stops for this mode
+// until the next tick: it runs first in the billing tick, and stripe-go alone
+// could take about 90 s a page (30 s a request, two resends). The holds it did
+// not reach keep their place; a read that succeeds starts the count again.
+func TestStaleHold_StripeUnreachable_ChecksBoundedAndSweepStops(t *testing.T) {
+	t.Run("a partition: three reads, each cut at its limit, then the sweep stops", func(t *testing.T) {
+		r := newSHRig(t, "SH Partition")
+		ids := r.staleHolds("INV-SH-PART", 5, 60*time.Minute, 55*time.Minute, 50*time.Minute, 45*time.Minute, 40*time.Minute)
+		r.fake.mu.Lock()
+		r.fake.hang = 3 * time.Second
+		r.fake.mu.Unlock()
+		setStaleHoldCheckTimeout(r.rec, 200*time.Millisecond)
+
+		start := time.Now()
+		_ = r.run()
+		elapsed := time.Since(start)
+
+		if n := r.fake.listCount(); n != 3 {
+			t.Errorf("Stripe lists = %d, want 3: the sweep stops after three failed reads in a row", n)
+		}
+		if elapsed > 2*time.Second {
+			t.Errorf("the run took %v: each read must be cut at its time limit", elapsed)
+		}
+		if left := r.holdsLeft(ids); left != len(ids) {
+			t.Fatalf("%d holds cleared while Stripe could not be read", len(ids)-left)
+		}
+		for i, id := range ids {
+			stamped := r.get(id).ProviderSyncedAt != nil
+			if want := i < 3; stamped != want {
+				t.Errorf("hold %d: checked-stamp %v, want %v (the holds not reached keep their place)", i, stamped, want)
+			}
+		}
+	})
+
+	t.Run("a read that succeeds starts the count again", func(t *testing.T) {
+		r := newSHRig(t, "SH Partition Reset")
+		ids := r.staleHolds("INV-SH-RESET", 7,
+			60*time.Minute, 55*time.Minute, 50*time.Minute, 45*time.Minute, 40*time.Minute, 35*time.Minute, 30*time.Minute)
+		const good = 2 // Stripe answers for this one: nothing there
+		for i, id := range ids {
+			if i != good {
+				r.fake.setCustomer(stripeCustomerOf(r.get(id)), "fail")
+			}
+		}
+		_ = r.run()
+		if n := r.fake.listCount(); n != 6 {
+			t.Errorf("Stripe lists = %d, want 6: two failures, an answer, then three failures in a row stop the sweep", n)
+		}
+		if r.hold(ids[good]) != nil {
+			t.Error("the hold Stripe answered about was not cleared")
+		}
+		if r.get(ids[6]).ProviderSyncedAt != nil {
+			t.Error("the hold after the stop was checked")
+		}
+	})
+}
+
+// 19. A processing payment the invoice does not follow keeps the hold until it
+// ends. Clearing the hold dropped the only thing still watching that payment:
+// if it later succeeded and its webhook was lost, nothing recorded the money.
+func TestStaleHold_ProcessingTheInvoiceDoesNotFollow_KeptUntilItEnds(t *testing.T) {
+	t.Run("on a written-off invoice: kept, then recorded once it succeeds", func(t *testing.T) {
+		r := newSHRig(t, "SH Processing Written Off")
+		inv := r.seed("INV-SH-PROC-WO")
+		pi := r.crashAfterCharge(inv, autoCharge, "processing")
+		r.ageHold(inv.ID, staleSweepAge)
+		if _, err := r.invSvc.MarkUncollectible(r.ctx, r.tenantID, inv.ID); err != nil {
+			t.Fatalf("write-off on a stale hold: %v", err)
+		}
+		r.runClean()
+		if r.hold(inv.ID) == nil {
+			t.Fatal("hold cleared while a payment the invoice does not follow is still processing at Stripe")
+		}
+
+		r.fake.setStatus(pi.id, "succeeded") // days later; its webhook is lost
+		r.ageHold(inv.ID, staleSweepAge)
+		r.runClean()
+		got := r.get(inv.ID)
+		if got.Status != domain.InvoicePaid || got.StripePaymentIntentID != pi.id {
+			t.Fatalf("after it succeeded: %s with PI %q, want paid with %q (uncollectible → paid)", got.Status, got.StripePaymentIntentID, pi.id)
+		}
+		if r.hold(inv.ID) != nil {
+			t.Error("hold kept after the payment was recorded")
+		}
+	})
+
+	t.Run("next to a succeeded payment: flagged as a duplicate once it succeeds", func(t *testing.T) {
+		r := newSHRig(t, "SH Processing Next To Succeeded")
+		inv := r.seed("INV-SH-PROC-DUP")
+		first := r.crashAfterCharge(inv, autoCharge, "")
+		second := r.fake.addPI(stripeCustomerOf(inv), inv.ID, "", "processing", shDue)
+		r.ageHold(inv.ID, staleSweepAge)
+		r.runClean()
+		if got := r.get(inv.ID); got.Status != domain.InvoicePaid || got.StripePaymentIntentID != first.id {
+			t.Fatalf("after the sweep: %s with PI %q, want paid with %q", got.Status, got.StripePaymentIntentID, first.id)
+		}
+		if r.hold(inv.ID) == nil {
+			t.Fatal("hold cleared while a second payment is still processing at Stripe")
+		}
+
+		r.fake.setStatus(second.id, "succeeded")
+		r.ageHold(inv.ID, staleSweepAge)
+		r.runClean()
+		if n := r.events(domain.EventPaymentDuplicateCharge, inv.ID); n != 1 {
+			t.Errorf("payment.duplicate_charge rows = %d, want 1 for %s", n, second.id)
+		}
+		if n := r.events(domain.EventPaymentSucceeded, inv.ID); n != 1 {
+			t.Errorf("payment.succeeded rows = %d, want 1", n)
+		}
+		if r.hold(inv.ID) != nil {
+			t.Error("hold kept after both payments were recorded")
+		}
+	})
+
+	t.Run("the invoice's own processing payment: cleared (control)", func(t *testing.T) {
+		r := newSHRig(t, "SH Processing Own")
+		inv := r.seed("INV-SH-PROC-OWN")
+		r.fake.queue(fakeMode{kind: fakeCreate, status: "processing"})
+		if _, err := r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1"); err != nil {
+			t.Fatalf("charge: %v", err)
+		}
+		pi := r.fake.onlyPI()
+		if got := r.get(inv.ID); got.PaymentStatus != domain.PaymentProcessing || got.StripePaymentIntentID != pi.id {
+			t.Fatalf("setup: %s with PI %q, want processing with %q", got.PaymentStatus, got.StripePaymentIntentID, pi.id)
+		}
+		r.ageHold(inv.ID, staleSweepAge)
+		r.runClean()
+		if r.hold(inv.ID) != nil {
+			t.Error("hold kept although the invoice follows its processing payment (the processing sweep and the webhook do)")
+		}
+	})
+}
+
+// 20. A parked invoice (an unclear answer that named no PaymentIntent) with a
+// stale hold whose check cannot run, here because the Stripe customer is gone,
+// is still searched by ADR-108 in the same run. The stale check stamped
+// provider_synced_at, the parked search's rotation key, on every tick, so the
+// search never saw the invoice, though Search by velox_invoice_id finds the
+// payment without the customer.
+func TestStaleHold_ParkedInvoice_FailedCheckDoesNotHideItFromTheSearch(t *testing.T) {
+	r := newSHRig(t, "SH Parked Search")
+	inv := r.seed("INV-SH-PARKED")
+	charged := r.crashAfterCharge(inv, autoCharge, "")
+	r.exec(`UPDATE invoices SET payment_status = 'unknown', updated_at = now() - interval '2 hours' WHERE id = $1`, inv.ID)
+	r.fake.setCustomer(stripeCustomerOf(inv), "missing")
+	r.ageHold(inv.ID, staleSweepAge)
+
+	_ = r.run()
+	if n := r.fake.searchCount(); n != 1 {
+		t.Errorf("parked searches = %d, want 1", n)
+	}
+	got := r.get(inv.ID)
+	if got.Status != domain.InvoicePaid || got.StripePaymentIntentID != charged.id {
+		t.Fatalf("after one run: %s/%s with PI %q, want paid with %q (found by the parked search)",
+			got.Status, got.PaymentStatus, got.StripePaymentIntentID, charged.id)
+	}
+}

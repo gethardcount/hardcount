@@ -55,6 +55,7 @@ const (
 	listCustomerMissing = `{"error":{"code":"resource_missing","message":"No such customer: 'cus_x'","param":"customer","type":"invalid_request_error"}}`
 	listBadKey          = `{"error":{"message":"Invalid API Key provided: sk_test_****","type":"invalid_request_error"}}`
 	listPage500         = `{"error":{"message":"An unknown error occurred","type":"api_error"}}`
+	listNoPermission    = `{"error":{"message":"The provided key 'rk_test_****' does not have the required permissions for this endpoint on account 'acct_x'. Having the 'rak_payment_intent_read' permission would allow this request to continue.","type":"invalid_request_error"}}`
 
 	piPage1 = `{"object":"list","url":"/v1/payment_intents","has_more":true,"data":[
 		{"id":"pi_a","object":"payment_intent","status":"succeeded","created":1760000100,"amount_received":5000,
@@ -140,6 +141,12 @@ func TestListPaymentIntentsForCustomer_AFailedReadIsAnError(t *testing.T) {
 		}, ErrStripeCustomerMissing},
 		{"API key rejected", map[string]func(*http.Request) (int, string){
 			"GET /v1/payment_intents": func(*http.Request) (int, string) { return http.StatusUnauthorized, listBadKey },
+		}, ErrStripeAuthFailed},
+		// A restricted key without PaymentIntent read access. Retried as a
+		// passing failure, it logged a WARN every tick and never raised the
+		// error that points the operator to the runbook.
+		{"API key lacks permission (403)", map[string]func(*http.Request) (int, string){
+			"GET /v1/payment_intents": func(*http.Request) (int, string) { return http.StatusForbidden, listNoPermission },
 		}, ErrStripeAuthFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

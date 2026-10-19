@@ -24,8 +24,9 @@ import (
 //   - a request can outlive the caller's context and still create its
 //     PaymentIntent;
 //   - List is consistent (every PaymentIntent created is listed at once), is
-//     per customer, can fail part-way, and can refuse for good (customer
-//     missing, key rejected, Stripe not connected);
+//     per customer, can fail part-way, can refuse for good (customer
+//     missing, key rejected, Stripe not connected), and can hang as a
+//     network partition does until the caller's context ends;
 //   - a PaymentIntent can be refunded in full.
 //
 // Every scenario counts the PaymentIntents here, not only the invoice's state.
@@ -41,9 +42,13 @@ type fakeStripe struct {
 	// account), "auth" (the key is rejected), "fail" (a page fails part-way).
 	customers     map[string]string
 	notConfigured bool
-	creates       int
-	lists         int
-	cancels       []string
+	// hang, when set, makes every list wait as a network partition does:
+	// until the caller's context ends, or hang passes, then fail.
+	hang     time.Duration
+	creates  int
+	lists    int
+	searches int
+	cancels  []string
 	// beforeList, when set, runs at the start of each list (outside the lock).
 	beforeList func()
 	// beforeCreate, when set, runs at the start of each create (outside the
@@ -238,6 +243,24 @@ func (f *fakeStripe) refund(id string) {
 	}
 }
 
+// setStatus moves a PaymentIntent on at Stripe (a processing payment
+// succeeding days later), with no webhook.
+func (f *fakeStripe) setStatus(id, status string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, pi := range f.pis {
+		if pi.id == id {
+			pi.status = status
+		}
+	}
+}
+
+func (f *fakeStripe) searchCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.searches
+}
+
 func (f *fakeStripe) countPIs() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -294,12 +317,24 @@ func (f *fakeStripe) result(pi *fakePI) PaymentIntentResult {
 // ListPaymentIntentsForCustomer answers as LiveStripeClient does: every
 // PaymentIntent of the customer created at or after createdGTE, or an error
 // for the whole read.
-func (f *fakeStripe) ListPaymentIntentsForCustomer(_ context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
+func (f *fakeStripe) ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
 	f.mu.Lock()
-	hook := f.beforeList
+	hook, hang := f.beforeList, f.hang
 	f.mu.Unlock()
 	if hook != nil {
 		hook()
+	}
+	if hang > 0 {
+		select {
+		case <-ctx.Done():
+		case <-time.After(hang):
+		}
+		f.mu.Lock()
+		f.lists++
+		f.mu.Unlock()
+		// What stripe-go returns when its request is cut off: not a Stripe
+		// error, so an unclear, retryable failure.
+		return nil, &PaymentError{Message: `Get "https://api.stripe.com/v1/payment_intents": net/http: request canceled`, Unknown: true}
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -359,6 +394,7 @@ func (f *fakeStripe) GetPaymentIntent(_ context.Context, id string) (PaymentInte
 func (f *fakeStripe) SearchPaymentIntentsByInvoiceID(_ context.Context, invoiceID string) ([]PaymentIntentResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.searches++
 	var out []PaymentIntentResult
 	for _, pi := range f.pis {
 		if pi.invoiceID == invoiceID {

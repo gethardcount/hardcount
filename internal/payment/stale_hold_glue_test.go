@@ -2,6 +2,7 @@ package payment
 
 import (
 	"context"
+	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
@@ -41,6 +42,12 @@ func (r *shRig) chargeUnder(ctx context.Context, kind chargeKind, c chargeClaim,
 func (r *shRig) release(c chargeClaim, invoiceID string) error {
 	return r.invoices.ReleaseChargeHold(r.ctx, r.tenantID, invoiceID, c.hold)
 }
+
+// setStaleHoldCheckTimeout bounds each stale-hold check's Stripe calls.
+func setStaleHoldCheckTimeout(_ *Reconciler, _ time.Duration) {}
+
+// setStaleHoldBudget bounds one run of the stale-hold sweep.
+func setStaleHoldBudget(_ *Reconciler, _ time.Duration) {}
 
 // setFakeListFields fills what the list read reports beyond the common
 // PaymentIntent fields: the invoice it is for, and whether its charge was
