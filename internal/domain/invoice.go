@@ -110,7 +110,7 @@ func (i Invoice) PaymentInFlight() bool {
 // two in step: a scan that asked only the payment status would pick, every
 // tick, an invoice whose charge record refuses it.
 func PaymentInFlightSQL(alias string) string {
-	return "(" + alias + ".payment_status IN ('processing', 'unknown'))"
+	return "(" + alias + ".payment_status IN ('processing', 'unknown') OR " + alias + ".charge_started_at IS NOT NULL)"
 }
 
 // ChargeNotHeldSQL is the predicate the three Velox charge claims (auto-charge,
@@ -123,7 +123,7 @@ const ChargeNotHeldSQL = `(auto_charge_claimed_until IS NULL OR auto_charge_clai
 
 // ChargeHeldSQL is ChargeNotHeldSQL's opposite, for the hosted page's claim:
 // a Velox charge holds the invoice, so the customer cannot pay it there.
-const ChargeHeldSQL = `(COALESCE(auto_charge_claimed_until > now(), false))`
+const ChargeHeldSQL = `(COALESCE(auto_charge_claimed_until > now(), false) OR charge_started_at IS NOT NULL)`
 
 // OutOfBandPaymentIntentPrefix marks the synthetic PaymentIntent id that
 // RecordOfflinePayment stamps ("out_of_band:<RFC3339>") so an operator-recorded

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
@@ -108,8 +107,7 @@ func (r *Reconciler) checkInterruptedCharge(ctx context.Context, row domain.Inte
 
 	results, rerr := r.listForRecord(ctx, row)
 	if rerr != nil {
-		_ = r.failedRead
-		return r.releaseNotFound(ctx, row)
+		return r.failedRead(ctx, row, rerr)
 	}
 	pi := matchAttempt(ctx, row, results)
 	if pi == nil {
@@ -155,7 +153,7 @@ func matchAttempt(ctx context.Context, row domain.InterruptedCharge, results []P
 	var best *PaymentIntentResult
 	n := 0
 	for i := range results {
-		if !strings.Contains(results[i].AttemptKey, row.InvoiceID) {
+		if results[i].AttemptKey != row.Key {
 			continue
 		}
 		n++
