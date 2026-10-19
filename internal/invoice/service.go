@@ -2271,18 +2271,24 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 // detached ctx. A SIGTERM or a lost lease cancels the tax_retry tick's ctx
 // (main.go); a finalize on that ctx failed and left the period unissued for
 // good. After a lease loss the new leader's sweep does not list this row
-// (its tax is ok), and the draft→finalized CAS makes a racing operator
-// Finalize safe. For the same reason, a failed pause read or finalize is
-// returned as an error naming the remedy, so the sweep counts it and the
-// operator sees it. A paused draft is legal and returns nil.
+// (its tax is ok). A rival that finalizes first (an operator's Finalize, or
+// a second RetryTax on the same row) wins the draft→finalized CAS; nothing
+// is owed then, so that returns nil. For the same reason, a failed pause
+// read or finalize is returned as an error naming the remedy, so the sweep
+// counts it. A paused draft is legal and returns nil.
 //
 // Still uncovered: a hard process death in the few milliseconds between the
 // tax commit and the finalize commit. That includes the connect fan-out
 // goroutine, which shutdown does not wait for, so it is covered only for its
-// own 5-minute timeout. The full fix finalizes inside UpdateTaxAtomic's tx.
+// own 5-minute timeout. It also includes a SIGTERM during the tax write's
+// COMMIT round trip: pgx commits on the BeginTx ctx, so the commit can apply
+// and still return context canceled, and RetryTax returns before the detach.
+// The full fix finalizes inside UpdateTaxAtomic's tx.
 //
-// Returns the updated invoice with its Attention re-derived so
-// the caller renders the new state immediately.
+// Returns the updated invoice with its Attention re-derived so the caller
+// renders the new state immediately. Once the tax write has committed, an
+// error comes back with the taxed draft, so the handler still audits the
+// click's tax change.
 func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
 	if s.taxRetrier == nil {
@@ -2310,7 +2316,7 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 		if perr != nil {
 			// Unknown is not "not paused": leave the draft (tax is already
 			// persisted), and return the error like a failed auto-finalize below.
-			return domain.Invoice{}, fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", perr)
+			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", perr)
 		}
 		if paused {
 			slog.Info("invoice: tax resolved but collection is paused on the subscription; leaving the invoice as a draft",
@@ -2321,11 +2327,18 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 	if shouldAutoFinalizeAfterRetry(inv) {
 		final, ferr := s.finalize(ctx, tenantID, invoiceID, false) // the calc is seconds old
 		if ferr != nil {
+			// A rival finalized it first: the connect fan-out and the
+			// tax_retry sweep can retry the same provider_not_configured
+			// row at once, or an operator clicked Finalize. Nothing is
+			// owed, so that is not a failure.
+			if cur, gerr := s.store.Get(ctx, tenantID, invoiceID); gerr == nil && cur.Status != domain.InvoiceDraft {
+				return s.attachAttention(ctx, cur), nil
+			}
 			// Tax already updated and persisted; finalize-side failure
 			// does not unwind the recompute. No sweep lists a draft whose
 			// tax is ok, so return the error: the sweep counts it, and
-			// the operator's click shows it.
-			return domain.Invoice{}, fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", ferr)
+			// the operator's click fails.
+			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", ferr)
 		}
 		// Nothing owed after finalize (a $0 invoice): settle it now so the
 		// operator who clicked Retry tax sees it paid. The auto-charge sweep
@@ -2456,9 +2469,14 @@ func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domai
 		processed int
 		errs      []error
 	)
-	for _, inv := range stuck {
-		if ctx.Err() != nil {
-			return processed, errs // see processTaxRetryBatch
+	for i, inv := range stuck {
+		// Stop before the next row, as processTaxRetryBatch does. Unlike a
+		// sweep, a fan-out runs once, and the tax_retry sweep skips a
+		// customer_data_invalid row or one past its 8 tries. So the stop
+		// (the connect fan-out's 5-minute timeout, or the request ending)
+		// is reported.
+		if err := ctx.Err(); err != nil {
+			return processed, append(errs, fmt.Errorf("stopped before %d of %d invoices: %w", len(stuck)-i, len(stuck), err))
 		}
 		if _, retryErr := s.RetryTax(ctx, tenantID, inv.ID); retryErr != nil {
 			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, retryErr))
@@ -2648,8 +2666,9 @@ func (s *Service) processTaxRetryBatch(ctx context.Context, stuck []domain.Invoi
 	for _, inv := range stuck {
 		// Shutdown or a lost lease: stop before the next row. No error here,
 		// as in processAutoCharge, so one stop is not counted as a failed
-		// row per remaining row. The same check stops retryStuck,
-		// RetryPendingTaxCommit and RetryPendingTaxReversal.
+		// row per remaining row: the next tick lists them again. The same
+		// check stops RetryPendingTaxCommit and RetryPendingTaxReversal;
+		// retryStuck, which no tick repeats, reports its stop.
 		if ctx.Err() != nil {
 			return processed, errs
 		}
