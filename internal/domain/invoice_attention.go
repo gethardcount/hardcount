@@ -244,8 +244,9 @@ const (
 	// AttentionActionMarkUncollectible opens the invoice's write-off
 	// confirmation. Offered only on a PARKED invoice (payment status unknown
 	// and no PaymentIntent to look up, ADR-107): there it is the one action
-	// the product allows, and before this code existed the notice could only
-	// name a menu item.
+	// the product allows while Stripe may still complete the charge, for a
+	// customer who paid another way. A secondary action: the dashboard never
+	// renders it as the primary button.
 	AttentionActionMarkUncollectible AttentionAction = "mark_uncollectible"
 )
 
@@ -1094,34 +1095,28 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 	// "Check provider" button was non-functional (no endpoint); an on-demand
 	// re-check is deferred until real stuck-payment pressure (ADR-049), so the
 	// dead button is removed rather than shipped greyed-out.
-	// PARKED (ADR-107) — a genuinely different situation, and the copy below
-	// asserts the opposite of it. With no PaymentIntent id there is nothing for
-	// the reconciler to re-query: it early-returns, the invoice is excluded from
-	// every charge path, and it will NEVER resolve on its own. Rendering the
-	// muted "we've got this" banner at Info severity, forever, with no actions,
-	// is the system telling an operator to wait for something that cannot
-	// happen (found by the honesty sweep, 2026-07-31).
-	if inv.StripePaymentIntentID == "" {
+	// PARKED (ADR-107): Stripe's answer was unclear and named no payment, so
+	// there is no PaymentIntent for the reconciler to re-query. Since REC-5
+	// (ADR-127 amendment 2026-10-20) the stale-hold sweep finishes it from
+	// Stripe's list of the customer's payments: a payment that appears is
+	// recorded, and with none 24 hours after the attempt the invoice goes back
+	// to being charged as usual. So the banner says that, as a Warning, in the
+	// words approved on 2026-10-19. Write-off stays as a secondary action for
+	// a customer who paid another way; the dashboard renders it as a secondary
+	// button, because waiting is the usual next step.
+	if inv.Parked() {
 		return &Attention{
-			Severity: AttentionSeverityCritical,
+			Severity: AttentionSeverityWarning,
 			Reason:   AttentionReasonPaymentUnconfirmed,
 			Code:     "payment.unidentifiable",
-			// Bounded, not absolute (ADR-108): Velox now searches the provider
-			// for the attempt, so SOME parked invoices resolve without a human
-			// — but only a found PaymentIntent may resolve one, so "if it
-			// cannot be found" keeps the old sentence's truth. The severity
-			// stays Critical: until the search finds something, this invoice
-			// still needs a human's eventual decision, and demoting it on the
-			// hope of a future find would hide exactly the rows that never get
-			// found.
-			Message: "Velox can't tell if this charge went through, so it won't charge again; check Stripe, and if nothing was taken, mark it uncollectible.",
-			Detail: "Velox keeps searching Stripe for the charge and records it here if found. If it cannot be found, this will not resolve on its own. " +
-				"No new charge is made, so the customer is never charged twice. Search Stripe by customer and amount.",
+			Message: "Stripe didn't confirm this charge and may still complete it.\n" +
+				"Velox checks Stripe every hour and records the payment if it appears.\n" +
+				"If none appears within 24 hours, the invoice is charged again as usual.",
+			Detail: "No new charge is made before then, so the customer is never charged twice. " +
+				"If the customer paid another way, mark the invoice uncollectible so it is not charged again. " +
+				"To find the attempt in Stripe, search by customer and amount.",
 			DocURL: docURL("payment-unconfirmed"),
 			Since:  &since,
-			// The way out sits in the notice, not only in the ⋯ menu: an
-			// operator told "mark it uncollectible" should not have to go
-			// looking for the control.
 			Actions: []AttentionActionItem{
 				{Code: AttentionActionMarkUncollectible, Label: "Mark uncollectible"},
 			},

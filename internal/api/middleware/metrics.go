@@ -150,20 +150,6 @@ var (
 		},
 	)
 
-	// parkedInvoices is the alerting surface for ADR-107. A parked invoice is
-	// money we may or may not have taken, that no charge path will touch and
-	// that no sweep will resolve — it needs a person. Until now "stuck and
-	// loud" was log-only, which is not loud: nothing counted them, so nothing
-	// could alert on them and an operator had no way to find them. Alert on
-	// this being non-zero, and on it growing.
-	parkedSearchErrors = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "velox_parked_search_errors_total",
-			Help: "ADR-108 parked-invoice search failures by mode and class (not_offered = provider refuses Search for this account; transient = retried after cool-off).",
-		},
-		[]string{"mode", "class"},
-	)
-
 	staleChargeHoldResolutions = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_stale_charge_hold_resolutions_total",
@@ -364,16 +350,6 @@ func RecordStripeBreakerState(state string) {
 		v = 2
 	}
 	stripeBreakerState.Set(v)
-}
-
-// RecordParkedSearchError counts ADR-108 search-and-adopt failures by class.
-// "not_offered" is the provider refusing the Search API for an account (those
-// tenants' parked invoices cannot self-resolve — the one CRITICAL log names
-// it); "transient" is rate limits / 5xx / network, which retry after the
-// cool-off. Distinct from the parked gauge so "search never works here" pages
-// differently from "nothing is parked".
-func RecordParkedSearchError(mode, class string) {
-	parkedSearchErrors.WithLabelValues(mode, class).Inc()
 }
 
 // RecordStaleChargeHoldResolution counts one stale-hold check (ADR-127).
@@ -625,9 +601,11 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	// Parked invoices (ADR-107) — a cluster fact, so it is computed from the
 	// database on every replica's scrape. Until sweep-2026-08-30 S4 it was a
 	// per-process Set() gauge stamped only by whichever replica led the
-	// billing tick; followers exported a stale copy and the runbook's
-	// "needs a human" alert fired from replicas whose number had resolved.
-	parkedHelp := "Invoices whose charge attempt could not be identified with the provider (ADR-107), by disposition. open = still awaiting an operator decision; written_off = already decided, retained only because the ADR-108 search may still name the PaymentIntent. Alert on `open` growing — summing both hides a decision that was already made. -1 = metric query failed."
+	// billing tick; followers exported a stale copy and the runbook's alert
+	// fired from replicas whose number had resolved. Since REC-5 the
+	// stale-hold sweep finishes every park within about 25 hours, so a park
+	// counted longer than that is one Stripe cannot be asked about.
+	parkedHelp := "Invoices whose last charge got an unclear answer from Stripe that named no payment (ADR-107), by disposition: open (finalized) or written_off (uncollectible). Velox records a payment that appears at Stripe and, with none 24 hours after the attempt, ends the park (an open invoice is charged again). Alert on open > 0 for 25 hours: Stripe cannot be asked about it (key revoked, customer deleted there). -1 = metric query failed."
 	for _, m := range []struct {
 		label string
 		live  bool

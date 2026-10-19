@@ -44,17 +44,15 @@ type fakeStripe struct {
 	// check panics, standing in for a nil dereference on one row).
 	customers map[string]string
 	// panicOn makes a read panic, standing in for a nil dereference on one
-	// row: GetPaymentIntent for a PaymentIntent id here, and the search for
-	// an invoice id here.
+	// row: GetPaymentIntent for a PaymentIntent id here.
 	panicOn       map[string]bool
 	notConfigured bool
 	// hang, when set, makes every list wait as a network partition does:
 	// until the caller's context ends, or hang passes, then fail.
-	hang     time.Duration
-	creates  int
-	lists    int
-	searches int
-	cancels  []string
+	hang    time.Duration
+	creates int
+	lists   int
+	cancels []string
 	// beforeList, when set, runs at the start of each list (outside the lock).
 	beforeList func()
 	// afterList, when set, runs once a list has been read and before it is
@@ -436,20 +434,4 @@ func (f *fakeStripe) GetPaymentIntent(_ context.Context, id string) (PaymentInte
 		}
 	}
 	return PaymentIntentResult{}, &PaymentError{Message: "No such payment_intent: '" + id + "'"}
-}
-
-func (f *fakeStripe) SearchPaymentIntentsByInvoiceID(_ context.Context, invoiceID string) ([]PaymentIntentResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.searches++
-	if f.panicOn[invoiceID] {
-		panic("parked search: nil dereference on " + invoiceID)
-	}
-	var out []PaymentIntentResult
-	for _, pi := range f.pis {
-		if pi.invoiceID == invoiceID {
-			out = append(out, f.result(pi))
-		}
-	}
-	return out, nil
 }

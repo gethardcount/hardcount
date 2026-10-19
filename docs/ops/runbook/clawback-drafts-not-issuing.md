@@ -23,8 +23,9 @@ drafts are waiting on parked invoices.
 
 ## Fix
 
-Only if the two gauges move together: resolve those parked invoices by
-writing them off (see [Parked invoices](parked-invoices.md)). Otherwise the
+Only if the two gauges move together: Velox finishes a parked invoice
+within about 25 hours, and its draft is released then. A park older than
+that needs the steps in [Parked invoices](parked-invoices.md). Otherwise the
 drafts are waiting on source payments still in flight, and need no action.
 
 ## Verify

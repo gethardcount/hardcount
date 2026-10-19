@@ -1,9 +1,10 @@
 # ADR-127: A lost charge result is resolved by asking Stripe before anything irreversible
 
 **Date:** 2026-10-19
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-20)
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) (the charge-intent
-ledger, parked since 2026-07-31). PR #1291 drafted a second record-based
+ledger, parked since 2026-07-31), and since the 2026-10-20 amendment
+[ADR-108](108-parked-invoices-search-and-adopt.md) (the Stripe Search sweep). PR #1291 drafted a second record-based
 design under this number; it never reached `main` and was closed for this one.
 **Amends:** [ADR-105](105-charge-idempotency-key-seed.md) (one more write moves
 the counter), [ADR-107](107-unknown-is-terminal-until-a-human.md) (a parked
@@ -128,8 +129,11 @@ directly, never through the charge breaker. It keeps the ones whose
 | nothing else, invoice open | clears and moves the counter (a fresh key for the next charge) |
 | nothing else, any other status | clears |
 | no Stripe customer on file | as "nothing": no charge can have been sent |
-| a read that may succeed later | keeps; stamps the row so it rotates (not an `unknown` invoice: see below) |
+| a read that may succeed later | keeps; stamps the row so it rotates (not an `unknown` invoice that names its PaymentIntent: see below) |
 | Stripe not connected, key rejected (401) or without permission (403), customer not in the account | keeps on an open invoice (ERROR every check; write-off is the exit); clears on a closed one |
+
+A parked invoice (an unclear answer that named no PaymentIntent) is checked
+here too, with one difference for "nothing": see the 2026-10-20 amendment.
 
 ## Why this design
 
@@ -226,10 +230,10 @@ this deploy, and works for the hosted page's PaymentIntents.
   minutes (`staleHoldRecheckAfter`), not the hour ADR-108's search waits, so a
   stamp taken during one hourly tick does not hide the row from the next. The
   stamp means "Velox last asked Stripe", whether or not Stripe answered. An
-  `unknown` invoice is never stamped by this sweep: the column is the unknown
-  sweep's rotation key and the parked search's cool-off, and those stamp it
-  themselves. Stamped here, a parked invoice whose check could not run (its
-  Stripe customer gone) was hidden from the search on every tick.
+  `unknown` invoice that names its PaymentIntent is never stamped by this
+  sweep: the column is the unknown sweep's rotation key, and that sweep stamps
+  it. A parked invoice is stamped here since the 2026-10-20 amendment (it
+  was not while the Search sweep used the column as its cool-off).
 - Not in this ADR: unclear answers with no PaymentIntent id still park when
   the caller's context is alive (follow-up B, ADR-107). A recorded off-session
   `requires_*` PaymentIntent still never ends (follow-up C).
@@ -253,3 +257,148 @@ this deploy, and works for the hosted page's PaymentIntents.
 - Stripe: [Search, data freshness](https://docs.stripe.com/search#data-freshness),
   [List PaymentIntents](https://docs.stripe.com/api/payment_intents/list),
   [Idempotent requests](https://docs.stripe.com/api/idempotent_requests).
+
+## Amendment 2026-10-20 — parked invoices are finished by this sweep; Stripe Search is gone (REC-5)
+
+Decided by Sagar on 2026-10-19: move parked invoices onto List ("do the list
+api changes everywhere then if this is the robust choice"), wait by cause
+(below), and the banner copy.
+
+**Why.** Two facts, both from Stripe or the code:
+
+- Stripe's Search page: "Don't use search for read-after-write flows… the
+  data won't be immediately available to search." And: "Propagation of new
+  or updated data could be delayed during an outage." An outage is what
+  parks an invoice, so the ADR-108 sweep searched at the worst time, and an
+  empty answer proved nothing.
+- A park whose request never reached Stripe had no exit except a write-off
+  and a new invoice made by hand.
+
+A parked invoice already keeps its claim's hold (unclear outcomes never
+release it), so this sweep already listed it. It now finishes it.
+
+**What the sweep does with a parked invoice:**
+
+| Found for this invoice | Open park (`finalized`) | Written-off park (`uncollectible`) |
+|---|---|---|
+| succeeded, not refunded in full | settles, oldest first; clears (as before) | same (`uncollectible` → paid) |
+| processing | puts the newest on the invoice (`processing`, its id, the counter moves); clears. The webhook and the processing sweep follow it | keeps the hold until it ends (as before) |
+| Velox off-session `requires_*` | cancels it at Stripe; keeps the hold (as before) | same |
+| nothing, or only failed, canceled or refunded in full, less than 24 hours after the hold | keeps the hold, stamps the row (`waiting`) | same |
+| the same, 24 hours or more after the hold | `UnparkAfterNoPayment` (`released`) | same; nothing charges a written-off invoice (ADR-113), so this only ends the park |
+| no Stripe customer on file | as "nothing" | same |
+| a read refused for good | keeps; ERROR every check; write-off is the exit (R9) | clears (as before) |
+
+`UnparkAfterNoPayment` is one compare-and-set on the hold, the counter and
+the parked shape. It sets `payment_status` back to `failed` when the parked
+attempt's row says a dunning retry made it. The run then retries at once: the
+parked attempt was never counted. Otherwise (auto-charge, Collect, or no
+attempt row) it sets `pending`. It clears `last_payment_error` (Stripe's 500
+message, which the failure banner would print as the bank's words) and the
+hold, and moves the counter, so the next charge sends a new idempotency key.
+In the same transaction the parked attempt's row becomes `failed`, keeping
+Stripe's words as its reason. Collect on a `failed` invoice comes back
+`pending`; the status shown differs, who may charge does not.
+
+**Why 24 hours for "nothing".** Every park answer is one where Stripe got the
+request or may have: a 500, a 409, a network error, a timed-out call. Stripe's
+[advanced error handling](https://docs.stripe.com/error-low-level) page,
+fetched 2026-10-19:
+
+- "Treat the outcome of a request that returns `500` as indeterminate."
+- "During incident recovery, Stripe attempts to reconcile failed operations
+  and send webhook events for any objects created during reconciliation."
+- "Limit retries of an unresolved operation to the first 24 hours after the
+  original request, using the same key and parameters. If the outcome is
+  still unknown after that window, don't retry with either the old key or a
+  new one. Retrieve the relevant object, inspect the request in the Dashboard
+  and use webhook events to reconcile the outcome. If you can't establish
+  what happened, contact Stripe support before repeating the operation."
+
+Velox retrieves: it lists the customer's payments every tick. When
+the list still shows none for the invoice 24 hours after the hold, Velox
+charges again under a new key, without contacting Stripe support. That last
+step is a deliberate departure from Stripe's text, decided by Sagar; R10 is
+its price. A payment the list shows is acted on at the first check. The gate
+is `domain.ParkedNothingWait`, read on the database clock the hold was
+written with (`ListStaleChargeHolds`). A test-clock park waits 24 real hours.
+
+**By cause.** A caller's deadline (dunning 15 s, auto-charge 30 s) that ends
+the Stripe call is a timed-out call: Stripe was slow, which is what an
+incident looks like. `chargeInvoice` saves its attempt row and its park on a
+context detached from the caller, so it gets the 24 hours. A cancellation (a
+shutdown, a lost lease, a closed **Collect payment** tab) or a crash is Velox
+interrupting itself, so nothing is saved. Its stale hold is checked about 75
+minutes after the claim, as before.
+
+**Why the next charge does not reuse the parked attempt's key.** Stripe
+removes keys "after they're at least 24 hours old. We generate a new request
+if a key is reused after the original is pruned", so the protection ends when
+the wait does. Before that, "Retries with the same key return the saved
+response, including `500` errors", so the invoice would park again. And a
+changed card, amount or charge kind is a 409.
+
+**The stamp.** `MarkStaleHoldChecked` stamps a parked invoice, so a park
+rotates instead of heading the list every tick.
+
+**Deleted.** The ADR-108 sweep and everything only it used: `sweepParked`,
+`SearchPaymentIntentsByInvoiceID` (the one call to Stripe Search),
+`ListParkedSearchable`, `AdoptPaymentIntentIfParked`, `CountParkedInvoices`,
+the latch for accounts without Search, and the metric
+`velox_parked_search_errors_total`.
+
+**Upgrade.** A release with this ADR but without this amendment cleared a
+park's hold at its first check when Stripe showed nothing, and left the park
+to the Search sweep. Migration `00186_hold_parked_invoices` gives each such
+park a hold at its newest parked attempt's `created_at` (written by the
+database after Stripe answered), or 2026-01-01 when that row was lost. Parks
+older than 24 hours are then finished at the first tick: a payment found is
+recorded, and an open one with none is charged again. Before upgrading, write
+off any parked invoice the customer paid another way.
+
+**Product copy.** The `payment.unidentifiable` notice is a Warning: "Stripe
+didn't confirm this charge and may still complete it. Velox checks Stripe
+every hour and records the payment if it appears. If none appears within 24
+hours, the invoice is charged again as usual." Write-off stays as a secondary
+action, for a customer who paid another way.
+
+**Monitoring.** `velox_parked_invoices{disposition="open"}` above 0 for 25
+hours is a park Stripe cannot be asked about (R9, R17).
+
+**Residuals.**
+
+- **R10.** Stripe creates the original payment more than 24 hours after the
+  attempt. Only its webhook records it: a later hold lists from its own hour.
+  If the invoice was charged again by then, the second payment raises
+  `payment.duplicate_charge` (ADR-068). Trigger to revisit: the first
+  duplicate traced to a Stripe incident.
+- **R11.** A park made before #1299 whose customer's Stripe id changed (it was
+  overwritten freely then): List on the current customer misses a payment on
+  the old one. It needs that payment to have succeeded and its webhook to be
+  lost too. Parks made after #1299 are not exposed.
+- **R12.** A lost decline webhook on a parked attempt: a decline counts as no
+  payment, so the charge 24 hours later declines again and records it. For a
+  hard decline that is one more attempt on a refused card (#966).
+- **R13.** A mixed-version rolling deploy: an old replica leading the tick
+  after the migration can still clear a new park's hold. That park stays
+  parked until a webhook or a write-off; the gauge shows it after 25 hours.
+- **R14.** A network error before the request left: nothing reached Stripe,
+  but Velox cannot tell that from a 500, so it waits 24 hours. Follow-up B
+  below shortens it. Trigger: the first partner invoice that waits a day on a
+  park from a network error.
+- **R15.** A cancellation while Stripe is slow (a shutdown, a closed tab
+  during an incident) is a lost result, checked about 75 minutes after the
+  claim, though Stripe may still create the payment. After a crash the cause
+  cannot be known.
+- **R16.** Two parks on one invoice, when Stripe answers 500 to creates for
+  more than a day. A late decline of the first park's payment can record the
+  second park as failed: Velox cannot tell two unnamed attempts apart. The
+  sweep then clears that hold at about 75 minutes, without the 24 hours.
+- **R17.** A customer deleted in Stripe: the list is refused, so the park
+  stays, with an ERROR every check, until someone writes it off. Not checked
+  against Stripe yet: what List returns for a deleted customer's id. If it
+  returns an empty list, the park ends as "nothing" after 24 hours, and the
+  charge after it fails on the deleted customer.
+
+**Not in this amendment:** follow-up B (an unclear answer with no PaymentIntent
+id saves nothing and becomes a lost result) and follow-up C, as above.

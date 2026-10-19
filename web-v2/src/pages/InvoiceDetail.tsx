@@ -742,10 +742,10 @@ export default function InvoiceDetailPage() {
                 </DropdownMenuItem>
               )}
               {/* Mark uncollectible is the DELIBERATE exception (ADR-107). It is
-                  the only action permitted on a parked invoice — the one whose
-                  charge could not be identified — so hiding it here would leave
-                  that invoice with no way to reach any terminal state, which is
-                  the gap the write-off exists to close. A payment that is
+                  the only action permitted on a parked invoice (Stripe's answer
+                  was unclear and named no payment) while Velox waits up to a day
+                  for Stripe: the action for a customer who paid another way, and
+                  the exit when Stripe cannot be asked. A payment that is
                   genuinely still resolving is a different matter and is still
                   excluded. */}
               {invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' &&
@@ -821,7 +821,7 @@ export default function InvoiceDetailPage() {
               {/* Refused while the payment is unresolved: voiding an invoice
                   whose charge may have succeeded would annul something that was
                   in fact paid. Mark uncollectible stays available above — it is
-                  the one exit for a parked invoice. */}
+                  the one action allowed on a parked invoice. */}
               {invoice.status !== 'voided' && invoice.status !== 'paid' &&
                 !paymentIsUnresolved(invoice.payment_status) && (
                 <>

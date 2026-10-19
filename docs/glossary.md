@@ -175,10 +175,12 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   settles it. If no PaymentIntent ID was recorded, the invoice is parked.
   [More](adr/107-unknown-is-terminal-until-a-human.md)
 - **parked invoice**: An invoice whose charge result is unknown and that has
-  no PaymentIntent ID recorded, so Velox cannot tell if the customer paid.
-  Nothing charges it. It leaves this state when a Stripe webhook or Velox's
-  Stripe search finds the charge, or when an operator writes it off.
-  [More](adr/108-parked-invoices-search-and-adopt.md)
+  no PaymentIntent ID recorded, so Velox cannot yet tell if the customer
+  paid. Nothing charges it. Velox lists the customer's payments in Stripe
+  every hour: a payment that appears is recorded, and if none has appeared
+  24 hours after the charge, the invoice is charged again as usual. An
+  operator can write it off meanwhile.
+  [More](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)
 - **parked subscription**: A subscription whose billing failed eight times
   in a row for the same period. Velox stops trying to bill it, so it stays
   due and no invoice is issued for that period. It leaves this state when an

@@ -1043,9 +1043,11 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 				// run as recovered, and one that failed reaches the final
 				// actions through exhaust-on-entry. While the payment is
 				// processing or unknown the due-run pickers skip the run, so the
-				// wait costs no ticks. A parked invoice waits for an operator,
-				// whose write-off closes the run as not collectible without the
-				// subscription action.
+				// wait costs no ticks. A parked invoice waits for the
+				// stale-hold sweep: a payment Stripe shows settles it, and with
+				// none a day after the attempt it goes back to failed or
+				// pending and this run goes on. An operator's write-off closes
+				// the run as not collectible without the subscription action.
 				slog.Info("dunning final action held: a payment on this invoice may still go through; a later dunning tick checks again",
 					"run_id", run.ID, "invoice_id", run.InvoiceID,
 					"payment_status", loaded.PaymentStatus,

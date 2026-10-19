@@ -46,9 +46,6 @@ func (s *scriptedCharges) CancelPaymentIntent(context.Context, string) error { r
 func (s *scriptedCharges) GetPaymentIntent(_ context.Context, id string) (payment.PaymentIntentResult, error) {
 	return payment.PaymentIntentResult{ID: id, Status: "requires_payment_method"}, nil
 }
-func (s *scriptedCharges) SearchPaymentIntentsByInvoiceID(context.Context, string) ([]payment.PaymentIntentResult, error) {
-	return nil, nil
-}
 func (s *scriptedCharges) ListPaymentIntentsForCustomer(context.Context, string, time.Time) ([]payment.PaymentIntentResult, error) {
 	return nil, nil
 }

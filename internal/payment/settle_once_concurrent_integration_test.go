@@ -75,10 +75,6 @@ func (f *settleRaceStripe) GetPaymentIntent(_ context.Context, piID string) (pay
 	return payment.PaymentIntentResult{ID: piID, Status: "succeeded", AmountReceivedCents: settleDue}, nil
 }
 
-func (f *settleRaceStripe) SearchPaymentIntentsByInvoiceID(context.Context, string) ([]payment.PaymentIntentResult, error) {
-	return nil, nil
-}
-
 func (f *settleRaceStripe) ListPaymentIntentsForCustomer(context.Context, string, time.Time) ([]payment.PaymentIntentResult, error) {
 	return nil, nil
 }
