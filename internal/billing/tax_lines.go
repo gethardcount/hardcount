@@ -25,17 +25,29 @@ import (
 // exactly what the create path asked it. groups[k] lists the original
 // line-item indexes behind request line k (absorber first); singleton groups
 // are the untouched fast path.
+//
+// It is also where a prepaid-commit purchase line is left out of the
+// request: buying credit is an advance payment, and the usage the credit
+// pays for is taxed on its own invoice (ADR-078 amendment 2026-10-19,
+// #1271). A commit line is in no group, so it gets no provider result; the
+// caller stamps it untaxed. It never absorbs a negative line either.
 func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode string) (reqLines []tax.RequestLine, groups [][]int, err error) {
 	negatives := []int{}
+	hasCommit := false
 	for i := range lineItems {
+		if lineItems[i].IsCommitLine() {
+			hasCommit = true
+			continue
+		}
 		if lineItems[i].AmountCents < 0 {
 			negatives = append(negatives, i)
 		}
 	}
 
-	// Fast path — no negative lines (every path except a stored ADR-048
-	// split pair): one request line per item, positionally aligned.
-	if len(negatives) == 0 {
+	// Fast path — no negative and no commit lines (every path except a
+	// stored ADR-048 split pair and a commit purchase): one request line per
+	// item, positionally aligned.
+	if len(negatives) == 0 && !hasCommit {
 		reqLines = make([]tax.RequestLine, len(lineItems))
 		groups = make([][]int, len(lineItems))
 		for i, li := range lineItems {
@@ -66,7 +78,7 @@ func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode 
 	for _, n := range negatives {
 		best := -1
 		for i := range lineItems {
-			if lineItems[i].AmountCents <= 0 || lineCode(i) != lineCode(n) {
+			if lineItems[i].AmountCents <= 0 || lineItems[i].IsCommitLine() || lineCode(i) != lineCode(n) {
 				continue
 			}
 			if best == -1 || lineItems[i].AmountCents > lineItems[best].AmountCents {
@@ -85,7 +97,7 @@ func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode 
 	}
 
 	for i, li := range lineItems {
-		if absorbed[i] {
+		if absorbed[i] || li.IsCommitLine() {
 			continue
 		}
 		group := append([]int{i}, absorberOf[i]...)
@@ -105,6 +117,50 @@ func collapseTaxRequestLines(lineItems []domain.InvoiceLineItem, defaultTaxCode 
 		groups = append(groups, group)
 	}
 	return reqLines, groups, nil
+}
+
+// stampUntaxedCommitLine marks a prepaid-commit purchase line, which
+// collapseTaxRequestLines left out of the request: no tax, and the price is
+// the line total. reason is commitLineTaxReason's.
+func stampUntaxedCommitLine(li *domain.InvoiceLineItem, reason string) {
+	li.TaxRate = 0
+	li.TaxAmountCents = 0
+	li.TaxJurisdiction = ""
+	li.TaxabilityReason = reason
+	li.TotalAmountCents = li.AmountCents
+}
+
+// commitLineTaxReason is the tax_reason an untaxed commit line carries. An
+// account on the none provider collects no tax, so its invoices say nothing
+// about tax on the line: no reason, so no dashboard label and no PDF legend.
+func commitLineTaxReason(providerName string) string {
+	if providerName == "none" {
+		return ""
+	}
+	return domain.TaxReasonPrepaidCreditPurchase
+}
+
+// commitInvoiceSubtotal is the subtotal to tax an invoice from. For an
+// invoice with a commit line it is the sum of the lines, not the stored
+// header. The stored lines always hold what was entered (UpdateTaxAtomic
+// writes no line amount), but a tax-inclusive draft computed before the
+// commit line was left out stored a header with that line carved to net.
+// Taxed from that header, such a draft finalized after the change would be
+// invoiced the net while its full credit is granted. Commit lines exist only
+// on manual invoices, whose lines hold what the operator entered, so their
+// sum is what to tax from. An invoice without a commit line keeps the
+// subtotal it was given.
+func commitInvoiceSubtotal(lineItems []domain.InvoiceLineItem, subtotal int64) int64 {
+	var sum int64
+	hasCommit := false
+	for _, li := range lineItems {
+		sum += li.AmountCents
+		hasCommit = hasCommit || li.IsCommitLine()
+	}
+	if !hasCommit {
+		return subtotal
+	}
+	return sum
 }
 
 // expandTaxResultLines maps the provider's per-request-line results back onto

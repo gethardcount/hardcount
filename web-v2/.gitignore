@@ -27,3 +27,4 @@ dist-ssr
 /e2e/.state/
 /playwright-report/
 /test-results/
+/activity-shots/

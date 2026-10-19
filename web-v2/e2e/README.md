@@ -34,6 +34,15 @@ the screen, and that the main things an operator does work end to end.
   after an offline payment, void and write-off, and the credit notes page.
   Each journey checks the dashboard and the customer's payment page against
   the API.
+- `activity.spec.ts` takes screenshots of the activity cards for people to
+  compare: the invoice and subscription Activity cards, a Dunning run and the
+  customer's Sent emails, at 1440px and 390px wide. It runs each story for a
+  customer on the real clock and for one on a test clock frozen at
+  2027-02-01 04:30 UTC. The steps that need days to pass, such as payment
+  retries and a trial running out, happen only on the test clock. Of the
+  screen it checks only that each card shows: a person reads the shots. The
+  files go to `activity-shots/`, which CI uploads as the `activity-shots`
+  artifact on every run (see [Activity screenshots](#activity-screenshots)).
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.
@@ -75,6 +84,25 @@ Useful flags: `npx playwright test smoke -g invoices` runs one page,
 `--ui` opens the test runner, and `npx playwright show-trace <trace.zip>`
 opens a trace from a CI failure (CI uploads them as the `playwright-report`
 artifact).
+
+Emails fail without a mail server. CI runs Mailpit, so its emails read as
+sent. To do the same locally, run `docker compose up -d mailpit` and start
+the API with `SMTP_HOST=localhost SMTP_PORT=1025 SMTP_TLS=none`.
+
+## Activity screenshots
+
+A change to an activity card is reviewed by comparing its screenshots with
+main's. Download both sets from the `e2e` job's runs, each into its own
+folder:
+
+```bash
+gh run download <run-id> -n activity-shots -D before   # main's latest run
+gh run download <run-id> -n activity-shots -D after    # the PR's run
+```
+
+Each file is `<surface>-<real|test>-<width>.png`. Real-clock times and the
+"Recorded" times on test-clock rows are the time of the run, so they change
+every run. The test-clock dates stay the same.
 
 ## Rules
 

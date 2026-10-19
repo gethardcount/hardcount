@@ -10192,6 +10192,10 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
  * `payment.dispute_closed` row; both at Stripe's own time).
  * A draft invoice returns an empty list.
  *
+ * Each row carries `line`, the row in the activity line standard's
+ * words (ADR-128). `description`, `detail`, `error`, `status` and
+ * `amount_cents` repeat it for clients that read the older fields.
+ *
  * If one source cannot be read, the rest is still returned and the
  * source is named in `degraded`.
  * @summary Get the invoice activity timeline

@@ -7,72 +7,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// TestDescribeDunningEvent_StartCauses locks the cause-aware start row
-// (the timeline half of the dunning-start-cause fix): a payment-failure
-// start renders as a failed row, a card-less enrollment renders as a
-// reminder-cycle row, and legacy rows with no recorded cause keep the
-// old generic copy.
-func TestDescribeDunningEvent_StartCauses(t *testing.T) {
-	cases := []struct {
-		eventType, reason, wantDesc, wantSeverity, wantDetail string
-		attempt                                               int
-	}{
-		// Uniform machine title; the cause is the subline.
-		{"dunning_started", "payment_failed", "Payment recovery started", "failed", "Card was declined — automatic retries scheduled", 0},
-		{"dunning_started", "no_payment_method", "Payment recovery started", "scheduled", "No payment method — reminders until a card is added", 0},
-		{"dunning_started", "", "Payment recovery started", "scheduled", "", 0},
-		// Card-less retry = reminder tick, never a charge failure —
-		// both the normalized enum and the legacy sentinel render it.
-		// The reminder clause is composed by the timeline builder from
-		// the actual email_outbox row, not asserted here.
-		{"retry_attempted", "no_payment_method", "Payment retry #1 attempted", "scheduled", "No payment method", 1},
-		{"retry_attempted", "no payment method for customer", "Payment retry #2 attempted", "scheduled", "No payment method", 2},
-		// A retry that skipped a card the bank refused for good charged
-		// nothing either (#966).
-		{"retry_attempted", "card_refused", "Payment retry #2 attempted", "scheduled", "Not charged: the bank refused this card, so a different card is needed", 2},
-		// A real decline keeps the processing shape (provider reason
-		// folds in from the Stripe twin); the recovering attempt is green.
-		{"retry_attempted", "card_declined", "Payment retry #3 attempted", "processing", "", 3},
-		{"retry_attempted", "succeeded", "Payment retry #3 attempted", "succeeded", "", 3},
-	}
-	for _, c := range cases {
-		desc, sev, detail := describeDunningEvent(c.eventType, c.reason, c.attempt)
-		if desc != c.wantDesc || sev != c.wantSeverity || detail != c.wantDetail {
-			t.Errorf("%s/%q: got (%q, %q, %q), want (%q, %q, %q)", c.eventType, c.reason, desc, sev, detail, c.wantDesc, c.wantSeverity, c.wantDetail)
-		}
-	}
-}
-
-// TestEmailClause locks the delivery-verdict grammar threaded into
-// dunning-row sublines: outbox status decides sent-vs-not, the
-// ADR-098 provider verdict layers over a completed handoff — same
-// grammar as describeEmailEvent, rendered as a lowercase clause.
-func TestEmailClause(t *testing.T) {
-	cases := []struct {
-		status, delivery, want string
-	}{
-		{"dispatched", "unknown", "reminder sent"},
-		{"dispatched", "delivered", "reminder sent — delivered"},
-		{"dispatched", "bounced", "reminder sent — bounced"},
-		{"dispatched", "complained", "reminder sent — recipient marked it as spam"},
-		{"failed", "unknown", "reminder failed to send"},
-		{"pending", "unknown", "reminder queued"},
-		{"skipped", "unknown", "reminder skipped — the invoice was already closed"},
-	}
-	for _, c := range cases {
-		got := emailClause("reminder", EmailEventRow{Status: c.status, DeliveryState: c.delivery})
-		if got != c.want {
-			t.Errorf("%s/%s: got %q, want %q", c.status, c.delivery, got, c.want)
-		}
-	}
-	if got := capFirst("reminder sent — bounced"); got != "Reminder sent — bounced" {
-		t.Errorf("capFirst: got %q", got)
-	}
-	if got := capFirst("Already capped"); got != "Already capped" {
-		t.Errorf("capFirst noop: got %q", got)
-	}
-}
-
 // TestRenderChargeAttempts locks the ADR-103 single-source rule: payment
 // rows come from charge attempts alone, with exactly two exact-keyed
 // suppressions — a dunning row carrying the same PaymentIntent absorbs
@@ -93,7 +27,8 @@ func TestRenderChargeAttempts(t *testing.T) {
 		return a
 	}
 	dunningRow := func(pi string) timelineEvent {
-		return timelineEvent{Source: "dunning", EventType: "retry_attempted", PaymentIntentID: pi}
+		return timelineEvent{Source: "dunning", EventType: "retry_attempted", PaymentIntentID: pi,
+			Line: dunningLine(domain.InvoiceDunningEvent{EventType: domain.DunningEventRetryAttempted, AttemptCount: 1, Reason: "payment failed: Your card was declined."}, dunningContext{})}
 	}
 	count := func(evts []timelineEvent, src string) int {
 		n := 0
@@ -106,14 +41,21 @@ func TestRenderChargeAttempts(t *testing.T) {
 	}
 
 	// Dunning owns the PI → attempt absorbed, and its provider facts
-	// land on the dunning row.
+	// land on the dunning row: the decline code in words about the
+	// cardholder, else the provider's own text, and the amount.
 	out := renderChargeAttempts([]timelineEvent{dunningRow("pi_1")},
 		[]domain.InvoiceChargeAttempt{failed("pi_1", true)}, domain.Invoice{Currency: "USD"})
 	if len(out) != 1 || count(out, "payment") != 0 {
 		t.Fatalf("dunning-owned PI: got %d rows (%d payment), want 1 dunning row only", len(out), count(out, "payment"))
 	}
-	if out[0].Error != "Your card was declined." || out[0].AmountCents == nil || *out[0].AmountCents != 440 {
-		t.Fatalf("dunning row must inherit the attempt's provider facts: %+v", out[0])
+	if out[0].Line.Problem != "Your card was declined." || out[0].Line.Amount == nil || out[0].Line.Amount.Cents != 440 {
+		t.Fatalf("dunning row must inherit the attempt's provider facts: %+v", out[0].Line)
+	}
+	coded := failed("pi_1", true)
+	coded.DeclineCode = "insufficient_funds"
+	out = renderChargeAttempts([]timelineEvent{dunningRow("pi_1")}, []domain.InvoiceChargeAttempt{coded}, domain.Invoice{Currency: "USD"})
+	if out[0].Line.Problem != "Card declined: insufficient funds" {
+		t.Fatalf("a decline code wins over the provider's text: %q", out[0].Line.Problem)
 	}
 
 	// No dunning row → the attempt renders itself, on the billing axis
@@ -146,7 +88,7 @@ func TestRenderChargeAttempts(t *testing.T) {
 		t.Fatalf("succeeded+paid must defer to the lifecycle row: %+v", out)
 	}
 	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{succ}, domain.Invoice{})
-	if count(out, "payment") != 1 || out[0].Description != "Payment collected" {
+	if count(out, "payment") != 1 || out[0].Line.Title != "Payment succeeded" {
 		t.Fatalf("succeeded+unpaid is an anomaly and must render: %+v", out)
 	}
 
