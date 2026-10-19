@@ -237,6 +237,12 @@ var ErrStripeNotConfigured = &PaymentError{Message: "stripe not configured for t
 // the stale-hold sweep logs it as a check that cannot run (ADR-127).
 var ErrStripeAuthFailed = errors.New("stripe rejected the API key")
 
+// ErrStripeUnreachable marks a read that got no answer from Stripe: a
+// network error, or the caller's time limit ended it. Unlike a 5xx or a 429,
+// which Stripe answers at once, it can take as long as the time limit allows,
+// so the stale-hold sweep stops for the tick after several in a row.
+var ErrStripeUnreachable = errors.New("stripe could not be reached")
+
 // ErrStripeCustomerMissing marks a read Stripe refused because the customer
 // does not exist in this account (resource_missing on the customer): deleted,
 // or created under other credentials. It will not succeed on retry.
@@ -596,7 +602,8 @@ func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, 
 // for the sweep: ErrStripeNotConfigured, ErrStripeAuthFailed (401, 403) and
 // ErrStripeCustomerMissing (resource_missing on the customer) will not
 // succeed on retry; anything else (5xx, 429, network, unreadable
-// credentials) may.
+// credentials) may, and a read Stripe never answered (network, time limit)
+// is also ErrStripeUnreachable.
 func (c *LiveStripeClient) ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
 	sc, err := c.client(ctx)
 	if err != nil {
@@ -620,17 +627,20 @@ func (c *LiveStripeClient) ListPaymentIntentsForCustomer(ctx context.Context, st
 
 // classifyListError types a failed PaymentIntent list for the stale-hold
 // sweep: a 401, a 403 (a restricted key without PaymentIntent read access)
-// and a missing customer will not heal on retry; everything else is
-// classifyStripeError's, which the sweep retries.
+// and a missing customer will not heal on retry; a read Stripe never answered
+// (no *stripe.Error: a network error, a time limit) is ErrStripeUnreachable;
+// everything else is classifyStripeError's. The sweep retries all but the
+// first three.
 func classifyListError(err error) error {
 	var se *stripe.Error
-	if errors.As(err, &se) {
-		switch {
-		case se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden:
-			return fmt.Errorf("%w: %s", ErrStripeAuthFailed, errs.Scrub(se.Msg))
-		case se.Code == stripe.ErrorCodeResourceMissing && (se.Param == "customer" || strings.Contains(se.Msg, "customer")):
-			return fmt.Errorf("%w: %s", ErrStripeCustomerMissing, errs.Scrub(se.Msg))
-		}
+	if !errors.As(err, &se) {
+		return fmt.Errorf("%w: %w", ErrStripeUnreachable, classifyStripeError(err))
+	}
+	switch {
+	case se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden:
+		return fmt.Errorf("%w: %s", ErrStripeAuthFailed, errs.Scrub(se.Msg))
+	case se.Code == stripe.ErrorCodeResourceMissing && (se.Param == "customer" || strings.Contains(se.Msg, "customer")):
+		return fmt.Errorf("%w: %s", ErrStripeCustomerMissing, errs.Scrub(se.Msg))
 	}
 	return classifyStripeError(err)
 }

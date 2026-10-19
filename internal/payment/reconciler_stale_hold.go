@@ -39,10 +39,11 @@ const (
 	// the list, or one cancel. stripe-go alone allows 30 s a request and
 	// resends twice, about 90 s a page while Stripe cannot be reached.
 	staleHoldCheckTimeout = 45 * time.Second
-	// staleHoldStopAfter: after this many checks in a row whose Stripe read
-	// failed in a way that may heal (network, timeout, 5xx, 429), the sweep
-	// stops for this mode until the next tick. The holds it did not reach
-	// keep their place in the queue.
+	// staleHoldStopAfter: after this many checks in a row that could not
+	// reach Stripe (a network error, or the check's time limit), the sweep
+	// stops for this mode until the next tick. Each such check can take the
+	// whole time limit; a 5xx or a 429 comes back at once and does not count.
+	// The holds it did not reach keep their place in the queue.
 	staleHoldStopAfter = 3
 	// staleHoldSweepBudget bounds one run for one mode. The sweep reads page
 	// after page, open invoices first, until no stale hold is left or the
@@ -69,9 +70,9 @@ const (
 type staleHoldRead int
 
 const (
-	staleReadNone     staleHoldRead = iota // no read was needed (no Stripe customer)
-	staleReadAnswered                      // Stripe answered: a list, or a refusal that will not heal
-	staleReadFailed                        // the read failed in a way that may heal: network, timeout, 5xx, 429
+	staleReadNone        staleHoldRead = iota // no read was needed (no Stripe customer)
+	staleReadAnswered                         // Stripe answered: a list, or an error (5xx, 429, a refusal)
+	staleReadUnreachable                      // no answer: a network error or the time limit (ErrStripeUnreachable)
 )
 
 // sweepStaleChargeHolds is the one place a stale charge hold is resolved
@@ -88,7 +89,8 @@ const (
 //
 // It drains: page after page of limit holds, open invoices first, each hold
 // checked once, until none is left, the budget is spent
-// (staleHoldSweepBudget), or staleHoldStopAfter Stripe reads failed in a row.
+// (staleHoldSweepBudget), or staleHoldStopAfter checks in a row could not
+// reach Stripe.
 // So a hold is checked on the first tick at least StaleChargeHoldWait after it
 // ends, not an hour later for every page queued ahead of it.
 //
@@ -109,10 +111,10 @@ func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int) (int,
 	}
 	start := time.Now() // wall-clock: bounds how long the sweep runs; not a billing instant
 	var (
-		checked  []string
-		errs     []error
-		resolved int
-		failed   int // Stripe reads failed in a row
+		checked   []string
+		errs      []error
+		resolved  int
+		unreached int // checks in a row that could not reach Stripe
 	)
 	for {
 		holds, err := r.invoices.ListStaleChargeHolds(ctx, limit, checked)
@@ -140,14 +142,14 @@ func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int) (int,
 				resolved++
 			}
 			switch read {
-			case staleReadFailed:
-				failed++
+			case staleReadUnreachable:
+				unreached++
 			case staleReadAnswered:
-				failed = 0
+				unreached = 0
 			}
-			if failed >= staleHoldStopAfter {
-				slog.WarnContext(ctx, "stale charge check: Stripe could not be read several times in a row; stopping until the next tick",
-					"failed_reads", failed, "checked", len(checked))
+			if unreached >= staleHoldStopAfter {
+				slog.WarnContext(ctx, "stale charge check: Stripe could not be reached several times in a row; stopping until the next tick",
+					"unreached", unreached, "checked", len(checked))
 				return resolved, errs
 			}
 		}
@@ -177,10 +179,10 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 	cancel()
 	if err != nil {
 		result, rerr := r.staleHoldReadFailed(ctx, h, err)
-		if refusedForGood(err) {
-			return result, staleReadAnswered, rerr
+		if errors.Is(err, ErrStripeUnreachable) {
+			return result, staleReadUnreachable, rerr
 		}
-		return result, staleReadFailed, rerr
+		return result, staleReadAnswered, rerr
 	}
 
 	var mine []PaymentIntentResult
@@ -239,9 +241,8 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 }
 
 // refusedForGood reports whether a failed list is a refusal that will not
-// heal on retry (Stripe not connected, the key rejected, the customer
-// missing). Stripe answered, so it does not count toward the sweep's stop
-// rule.
+// heal on retry: Stripe not connected, the key rejected, the customer
+// missing.
 func refusedForGood(err error) bool {
 	return errors.Is(err, ErrStripeNotConfigured) || errors.Is(err, ErrStripeAuthFailed) || errors.Is(err, ErrStripeCustomerMissing)
 }

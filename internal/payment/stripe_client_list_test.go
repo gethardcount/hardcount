@@ -214,3 +214,27 @@ func TestListPaymentIntentsForCustomer_NoStripeConfigured(t *testing.T) {
 		t.Fatalf("err = %v, want ErrStripeNotConfigured", err)
 	}
 }
+
+// A read Stripe never answered (a network error, a time limit) is
+// ErrStripeUnreachable, which the stale-hold sweep counts toward stopping for
+// the tick: each such read can take the whole time limit. A 500 is an answer
+// and is not.
+func TestListPaymentIntentsForCustomer_NoAnswerIsUnreachable(t *testing.T) {
+	net := &noAnswer{}
+	old := stripeHTTPClient.Transport
+	stripeHTTPClient.Transport = net
+	t.Cleanup(func() { stripeHTTPClient.Transport = old })
+	c, ctx := listClient()
+	_, err := c.ListPaymentIntentsForCustomer(ctx, "cus_x", time.Unix(1760000000, 0))
+	if !errors.Is(err, ErrStripeUnreachable) || net.calls == 0 {
+		t.Fatalf("no answer (%d requests): err = %v, want ErrStripeUnreachable", net.calls, err)
+	}
+
+	withRoutedStripe(t, map[string]func(*http.Request) (int, string){
+		"GET /v1/payment_intents": func(*http.Request) (int, string) { return http.StatusInternalServerError, listPage500 },
+	})
+	_, err = c.ListPaymentIntentsForCustomer(ctx, "cus_x", time.Unix(1760000000, 0))
+	if err == nil || errors.Is(err, ErrStripeUnreachable) {
+		t.Fatalf("a 500: err = %v, want an error that is not ErrStripeUnreachable (Stripe answered)", err)
+	}
+}

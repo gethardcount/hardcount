@@ -2,6 +2,7 @@ package payment
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -66,6 +67,12 @@ func fakeCustomerMissingErr(stripeCustomerID string) error {
 // fakeAuthFailedErr is LiveStripeClient's error for a rejected API key.
 func fakeAuthFailedErr() error {
 	return &listRefused{ErrStripeAuthFailed, "Invalid API Key provided"}
+}
+
+// fakeUnreachableErr is LiveStripeClient's error for a list Stripe never
+// answered: a network error, or the caller's time limit.
+func fakeUnreachableErr(cause string) error {
+	return fmt.Errorf("%w: %w", ErrStripeUnreachable, &PaymentError{Message: cause, Unknown: true})
 }
 
 // listRefused wraps a typed list refusal the way classifyListError does.

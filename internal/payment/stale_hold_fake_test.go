@@ -39,7 +39,8 @@ type fakeStripe struct {
 	// succeeds.
 	next []fakeMode
 	// customers overrides a Stripe customer's list: "missing" (not in this
-	// account), "auth" (the key is rejected), "fail" (a page fails part-way).
+	// account), "auth" (the key is rejected), "fail" (a page fails part-way
+	// with a 500), "unreachable" (no answer: a network error).
 	customers     map[string]string
 	notConfigured bool
 	// hang, when set, makes every list wait as a network partition does:
@@ -332,9 +333,9 @@ func (f *fakeStripe) ListPaymentIntentsForCustomer(ctx context.Context, stripeCu
 		f.mu.Lock()
 		f.lists++
 		f.mu.Unlock()
-		// What stripe-go returns when its request is cut off: not a Stripe
-		// error, so an unclear, retryable failure.
-		return nil, &PaymentError{Message: `Get "https://api.stripe.com/v1/payment_intents": net/http: request canceled`, Unknown: true}
+		// What LiveStripeClient returns when its request is cut off: no
+		// answer from Stripe.
+		return nil, fakeUnreachableErr(`Get "https://api.stripe.com/v1/payment_intents": net/http: request canceled`)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -351,6 +352,9 @@ func (f *fakeStripe) ListPaymentIntentsForCustomer(ctx context.Context, stripeCu
 		// The first page came back and a later one failed: LiveStripeClient
 		// returns the error alone, never the partial list.
 		return nil, &PaymentError{Message: "An unknown error occurred", Unknown: true}
+	case "unreachable":
+		// Stripe never answered (a network error).
+		return nil, fakeUnreachableErr(`Get "https://api.stripe.com/v1/payment_intents": dial tcp: i/o timeout`)
 	}
 	var out []PaymentIntentResult
 	for _, pi := range f.pis {

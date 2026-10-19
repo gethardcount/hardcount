@@ -19,9 +19,9 @@ This page is for when that check cannot finish. Back to the
 
 A steady `velox_stale_charge_hold_resolutions_total{result="failed"}` is
 Stripe being unreachable; the check retries and needs nothing from you
-unless it lasts. After three failed reads in a row it stops until the next
-hour and logs `stale charge check: Stripe could not be read several times in
-a row`.
+unless it lasts. When three checks in a row get no answer from Stripe, the
+check stops until the next hour and logs `stale charge check: Stripe could
+not be reached several times in a row`.
 
 ## Why
 

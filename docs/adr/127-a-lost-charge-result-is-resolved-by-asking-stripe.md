@@ -107,11 +107,12 @@ after its caller's context ends (a closed tab, a shutdown).
 billing leader). It lists invoices of any status whose hold ended at least
 10 minutes ago, open invoices (finalized, pending or failed) first, then
 rotating by `provider_synced_at`. It drains: page after page, each hold
-checked once, until none is left. It stops early when its 5-minute budget for
-the mode is spent, or after three Stripe reads in a row failed in a way that
-may heal; the rest wait for the next tick. Each check's Stripe calls are cut
-at 45 seconds (stripe-go alone allows about 90 s a page while Stripe is
-unreachable). For each hold, it lists the Stripe customer's PaymentIntents
+checked once, until none is left. It stops early when its 5-minute budget
+for the mode is spent. It also stops when three checks in a row got no
+answer from Stripe (a network error or the time limit); a 5xx or a 429 is an
+answer and comes back at once. Either way the rest wait for the next tick. Each check's
+Stripe calls are cut at 45 seconds (stripe-go alone allows about 90 s a page
+while Stripe is unreachable). For each hold, it lists the Stripe customer's PaymentIntents
 created since an hour before the hold, through List, never Search, and
 directly, never through the charge breaker. It keeps the ones whose
 `velox_invoice_id` is this invoice, then:

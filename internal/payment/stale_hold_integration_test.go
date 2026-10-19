@@ -1148,10 +1148,11 @@ func TestStaleHold_RunStopsAtItsBudget_RestNextTick(t *testing.T) {
 }
 
 // 18. Stripe cannot be reached. Each check's Stripe read is cut at its time
-// limit, and after three failed reads in a row the sweep stops for this mode
-// until the next tick: it runs first in the billing tick, and stripe-go alone
-// could take about 90 s a page (30 s a request, two resends). The holds it did
-// not reach keep their place; a read that succeeds starts the count again.
+// limit, and after three checks in a row get no answer the sweep stops for
+// this mode until the next tick: it runs first in the billing tick, and
+// stripe-go alone could take about 90 s a page (30 s a request, two resends).
+// The holds it did not reach keep their place. An answer starts the count
+// again, and a 5xx is an answer: it comes back at once.
 func TestStaleHold_StripeUnreachable_ChecksBoundedAndSweepStops(t *testing.T) {
 	t.Run("a partition: three reads, each cut at its limit, then the sweep stops", func(t *testing.T) {
 		r := newSHRig(t, "SH Partition")
@@ -1182,24 +1183,28 @@ func TestStaleHold_StripeUnreachable_ChecksBoundedAndSweepStops(t *testing.T) {
 		}
 	})
 
-	t.Run("a read that succeeds starts the count again", func(t *testing.T) {
+	t.Run("an answer starts the count again", func(t *testing.T) {
 		r := newSHRig(t, "SH Partition Reset")
-		ids := r.staleHolds("INV-SH-RESET", 7,
-			60*time.Minute, 55*time.Minute, 50*time.Minute, 45*time.Minute, 40*time.Minute, 35*time.Minute, 30*time.Minute)
-		const good = 2 // Stripe answers for this one: nothing there
+		ids := r.staleHolds("INV-SH-RESET", 8,
+			60*time.Minute, 55*time.Minute, 50*time.Minute, 45*time.Minute, 40*time.Minute, 35*time.Minute, 30*time.Minute, 25*time.Minute)
+		const good, page500 = 2, 3 // Stripe answers: nothing there; a 500
 		for i, id := range ids {
-			if i != good {
+			switch i {
+			case good:
+			case page500:
 				r.fake.setCustomer(stripeCustomerOf(r.get(id)), "fail")
+			default:
+				r.fake.setCustomer(stripeCustomerOf(r.get(id)), "unreachable")
 			}
 		}
 		_ = r.run()
-		if n := r.fake.listCount(); n != 6 {
-			t.Errorf("Stripe lists = %d, want 6: two failures, an answer, then three failures in a row stop the sweep", n)
+		if n := r.fake.listCount(); n != 7 {
+			t.Errorf("Stripe lists = %d, want 7: two without an answer, an answer, a 500, then three in a row without an answer stop the sweep", n)
 		}
 		if r.hold(ids[good]) != nil {
 			t.Error("the hold Stripe answered about was not cleared")
 		}
-		if r.get(ids[6]).ProviderSyncedAt != nil {
+		if r.get(ids[7]).ProviderSyncedAt != nil {
 			t.Error("the hold after the stop was checked")
 		}
 	})
