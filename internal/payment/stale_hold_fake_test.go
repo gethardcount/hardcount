@@ -57,6 +57,10 @@ type fakeStripe struct {
 	cancels  []string
 	// beforeList, when set, runs at the start of each list (outside the lock).
 	beforeList func()
+	// afterList, when set, runs once a list has been read and before it is
+	// returned (outside the lock): something that happens at Stripe, or a
+	// webhook that lands, between the sweep's read and its write.
+	afterList func()
 	// beforeCreate, when set, runs at the start of each create (outside the
 	// lock): a charger stalling just before Stripe receives its request.
 	beforeCreate func()
@@ -70,6 +74,7 @@ const (
 	fakeSave500                              // save a 500 under the key; create nothing
 	fakeRateLimit                            // 429: nothing saved, nothing created
 	fakeOutliveCtx                           // wait for the caller's context to end, then create it
+	fakeHang                                 // wait for the caller's context to end; create nothing (yet)
 	fakeCrashAfterCreate                     // create it, then the process dies
 	fakeCrashBeforeSend                      // the process dies before the request leaves
 )
@@ -198,6 +203,10 @@ func (f *fakeStripe) CreatePaymentIntent(ctx context.Context, p PaymentIntentPar
 		f.keys[key] = &fakeKey{sig: sig, pi: pi}
 		f.mu.Unlock()
 		return PaymentIntentResult{}, fmt.Errorf("Post \"https://api.stripe.com/v1/payment_intents\": %w", ctx.Err())
+	case fakeHang:
+		f.mu.Unlock()
+		<-ctx.Done()
+		return PaymentIntentResult{}, fmt.Errorf("Post \"https://api.stripe.com/v1/payment_intents\": %w", ctx.Err())
 	}
 
 	pi := f.newPI(p, mode.status)
@@ -261,10 +270,15 @@ func (f *fakeStripe) setStatus(id, status string) {
 	}
 }
 
-func (f *fakeStripe) searchCount() int {
+// setCreated dates a PaymentIntent's creation at Stripe.
+func (f *fakeStripe) setCreated(id string, at time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.searches
+	for _, pi := range f.pis {
+		if pi.id == id {
+			pi.created = at.Unix()
+		}
+	}
 }
 
 func (f *fakeStripe) countPIs() int {
@@ -349,6 +363,17 @@ func (f *fakeStripe) ListPaymentIntentsForCustomer(ctx context.Context, stripeCu
 		// answer from Stripe.
 		return nil, fakeUnreachableErr(`Get "https://api.stripe.com/v1/payment_intents": net/http: request canceled`)
 	}
+	out, err := f.listLocked(stripeCustomerID, createdGTE)
+	f.mu.Lock()
+	after := f.afterList
+	f.mu.Unlock()
+	if after != nil && err == nil {
+		after()
+	}
+	return out, err
+}
+
+func (f *fakeStripe) listLocked(stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lists++
