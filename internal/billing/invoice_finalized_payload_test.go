@@ -12,7 +12,8 @@ import (
 // invoiceFinalizedKeys is the invoice.finalized payload both senders build:
 // this engine (invoices born finalized, and the subscription handler's
 // proration invoice) and invoice.Service.Finalize (drafts). The invoice
-// package pins the same list, so the two payloads cannot drift apart.
+// package's test keeps a copy of this list by hand; a key added to one
+// sender must be added to both senders and both lists.
 var invoiceFinalizedKeys = []string{
 	"amount_due_cents",
 	"credits_applied_cents",

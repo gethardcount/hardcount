@@ -78,7 +78,7 @@ flowchart LR
 6. **A failed payment is tried again.** When a charge fails, Velox starts
    dunning: it retries the charge on a schedule and, once email is set up,
    emails the customer. Each retry first uses any credit the customer got
-   since the last try, so credit added later pays an older invoice. If
+   since the last try, so credit added later can pay an older invoice. If
    every retry fails, it does what your dunning policy says: pause or
    cancel the subscription, write off the invoice, both, or neither.
 

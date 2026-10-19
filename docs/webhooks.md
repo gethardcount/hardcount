@@ -306,8 +306,9 @@ after it sends `invoice.finalized`, usually within seconds. Then it charges
 the card for what is left. So in this event:
 
 - `amount_due_cents` is the amount before credit.
-- `credits_applied_cents` is the credit already on the invoice when the
-  event was sent. It is usually 0.
+- `credits_applied_cents` is the credit on the invoice when it was
+  finalized. It is 0, except on a draft made by a Velox version before
+  0.4.0, which could already carry credit.
 
 Credit is used again each time Velox tries to collect an unpaid invoice,
 such as a payment retry. So credit the customer gets later can pay an older

@@ -11,7 +11,7 @@ primary vendor docs (Stripe, Chargebee, Lago, Orb, Metronome — all claims
 
 A customer's credit balance applies automatically to every invoice: cycle close, threshold fires, a subscription's first invoice, the final invoice on cancel, and one-off manual invoices. The card is charged only what is left, and an invoice the balance fully covers is marked paid with no charge. There is no per-invoice or per-type opt-out, which matches Stripe, and no vendor surveyed skips a subscription's first or final invoice.
 
-The credit is applied when the invoice is collected, not when it is finalized. The invoice is finalized and `invoice.finalized` is sent first; the one collector (`processAutoCharge`, [ADR-116](116-collection-intent-at-finalize-one-collector.md)) then applies credit right before any charge, usually within seconds of finalize. Every later attempt to collect an unpaid invoice applies credit again, so credit granted later pays an older open invoice. So `amount_due_cents` in `invoice.finalized` is the amount before credit, and the payload carries `credits_applied_cents`. Amended 2026-10-19, see [the amendment](#amendment-2026-10-19-credit-is-applied-when-the-invoice-is-collected). Status: active, amended; prepaid commits ([ADR-078](078-prepaid-commits-phase-1.md)) keep their own rules.
+The credit is applied when the invoice is collected, not when it is finalized. The invoice is finalized and `invoice.finalized` is sent first; the one collector (`processAutoCharge`, [ADR-116](116-collection-intent-at-finalize-one-collector.md)) then applies credit right before any charge, usually within seconds of finalize. Every later attempt to collect an unpaid invoice applies credit again, so credit granted later can pay an older open invoice. So `amount_due_cents` in `invoice.finalized` is the amount before credit, and the payload carries `credits_applied_cents`. Amended 2026-10-19, see [the amendment](#amendment-2026-10-19-credit-is-applied-when-the-invoice-is-collected). Status: active, amended; prepaid commits ([ADR-078](078-prepaid-commits-phase-1.md)) keep their own rules.
 
 ## Decision
 
@@ -114,7 +114,7 @@ credit step into the collector, and the code has worked like this since:
 - Credit is applied again on every later attempt to collect an unpaid
   invoice: each sweep visit to a queued invoice, each dunning retry, and an
   operator's **Collect payment** (`POST /v1/invoices/{id}/collect`). So
-  credit granted later pays an older open invoice on its next attempt.
+  credit granted later can pay an older open invoice on its next attempt.
   ADR-116 relies on this: the sweep's visit "settles it when credits arrive".
 
 **Decision.** Keep the code's behaviour and fix the record (decided
