@@ -17,7 +17,7 @@ export interface WebhookDelivery {
   tenant_id?: string;
   livemode: boolean;
   webhook_endpoint_id: string;
-  /** The event this delivery sent. A replay's own id for a replay's delivery. */
+  /** The event this delivery belongs to. For a replay's delivery, the replay's own id; the message it sent carries the original event's `id`. */
   webhook_event_id: string;
   status: WebhookDeliveryStatus;
   /** HTTP status from the receiver. Left out when there was no response. */
