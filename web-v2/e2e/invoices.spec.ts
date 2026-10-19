@@ -223,10 +223,10 @@ test('an open invoice: a credit note lowers what is owed, an offline payment set
   const paid = (await getInvoice(invoice.id)).invoice
   expect(paid).toMatchObject({ status: 'paid', amount_due_cents: 0, amount_paid_cents: reduced.amount_due_cents })
   const timeline = await api<{ events: { event_type: string; description: string }[] }>('GET', `/invoices/${invoice.id}/payment-timeline`)
-  expect(timeline.events).toContainEqual(expect.objectContaining({ event_type: 'invoice.paid', description: 'Payment received (offline)' }))
+  expect(timeline.events).toContainEqual(expect.objectContaining({ event_type: 'invoice.paid', description: 'Offline payment received' }))
   await expect(statusPill(page, 'Paid')).toBeVisible()
   await expect(figure(page, 'Amount due')).toContainText(usd(0))
-  await expect(page.getByText('Payment received (offline)')).toBeVisible()
+  await expect(page.getByText('Offline payment received', { exact: true })).toBeVisible()
   // Nothing is left to collect, so the collection actions are gone.
   const menu = await invoiceActions(page)
   await expect(menu.getByRole('menuitem', { name: 'Issue credit note' })).toBeVisible()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,102 +71,99 @@ func TestPaymentTimeline_RefundRowReportsOutcomeNotIntent(t *testing.T) {
 		return resp
 	}
 
-	rowFor := func(t *testing.T, resp timelineResp, wantDetail string) (string, string) {
+	type cnRow struct{ desc, status, problem, detail string }
+	rowFor := func(t *testing.T, resp timelineResp, number string) cnRow {
 		t.Helper()
 		for _, e := range resp.Events {
 			d, _ := e["detail"].(string)
-			if d == wantDetail || (d != "" && len(d) >= len(wantDetail) && d[:len(wantDetail)] == wantDetail) {
+			if strings.HasPrefix(d, number) {
 				desc, _ := e["description"].(string)
 				status, _ := e["status"].(string)
-				return desc, status
+				problem, _ := e["error"].(string)
+				return cnRow{desc, status, problem, d}
 			}
 		}
-		t.Fatalf("no timeline row for %q; events=%v", wantDetail, resp.Events)
-		return "", ""
-	}
-	descFor := func(t *testing.T, resp timelineResp, wantDetail string) string {
-		t.Helper()
-		desc, _ := rowFor(t, resp, wantDetail)
-		return desc
+		t.Fatalf("no timeline row for %q; events=%v", number, resp.Events)
+		return cnRow{}
 	}
 
-	// Full-amount refund: the label is the whole story of the row.
+	// Since the activity line standard (ADR-128, decision 8) every credit
+	// note has one title, "Credit note issued", with its total. The refund's
+	// outcome moved out of the title into the tone (the dot) and the problem
+	// line — and the card part of the meta says "refunded" only when the
+	// money moved. Each status is asserted on all three channels, so none
+	// can claim a refund that did not happen.
 	t.Run("full refund", func(t *testing.T) {
 		cases := []struct {
-			status     domain.RefundStatus
-			want       string
-			wantStatus string
+			status      domain.RefundStatus
+			wantStatus  string
+			wantProblem string
+			wantCard    string
 		}{
-			{domain.RefundSucceeded, "Refund issued", "succeeded"},
-			{domain.RefundFailed, "Refund failed", "failed"},
-			{domain.RefundPending, "Refund pending", "pending"},
+			{domain.RefundSucceeded, "succeeded", "", "$10.00 refunded to card"},
+			{domain.RefundFailed, "failed", "Card refund failed.", "$10.00 to card"},
+			{domain.RefundPending, "warning", "The card refund is waiting on the payment provider.", "$10.00 to card"},
 			// Allocated but never executed. Must not borrow the success
 			// wording merely because it is not an explicit failure.
-			{domain.RefundNone, "Refund not processed", "pending"},
-			// Stripe gave no clear answer (#965). "Not processed" would tell
-			// the operator nothing moved, which invites a second refund by
-			// hand in Stripe; the customer may already have been refunded.
-			{domain.RefundUnknown, "Refund result unknown", "pending"},
+			{domain.RefundNone, "warning", "No refund was sent to the payment provider.", "$10.00 to card"},
+			// Stripe gave no clear answer (#965). "Not made" would tell the
+			// operator nothing moved, which invites a second refund by hand
+			// in Stripe; the customer may already have been refunded.
+			{domain.RefundUnknown, "warning", "The payment provider did not say whether the card refund went through.", "$10.00 to card"},
 		}
 		for _, tc := range cases {
 			t.Run(string(tc.status), func(t *testing.T) {
 				resp := seed(t, domain.CreditNote{
-					CreditNoteNumber: "CN-FULL", TotalCents: 1000,
+					CreditNoteNumber: "CN-FULL", TotalCents: 1000, Currency: "USD",
 					RefundAmountCents: 1000, RefundStatus: tc.status,
 				})
-				got, gotStatus := rowFor(t, resp, "CN-FULL")
-				// The status field drives the UI's verdict dot. It was
-				// hardcoded "succeeded" for every CN row, so a failed
-				// refund wore an emerald success dot beside the words
-				// "Refund failed" — the visual channel contradicting the
-				// text channel this test already pinned (2026-08-04
-				// invoice census). Both channels are asserted together
-				// now so they can never diverge again.
-				if gotStatus != tc.wantStatus {
-					t.Errorf("refund_status=%q: timeline status %q, want %q — the verdict dot must agree with the words", tc.status, gotStatus, tc.wantStatus)
+				got := rowFor(t, resp, "CN-FULL")
+				// The status field drives the UI's verdict dot. It was once
+				// hardcoded "succeeded" for every CN row, so a failed refund
+				// wore an emerald success dot beside the words "Refund
+				// failed" (2026-08-04 invoice census).
+				if got.status != tc.wantStatus {
+					t.Errorf("refund_status=%q: timeline status %q, want %q — the verdict dot must agree with the words", tc.status, got.status, tc.wantStatus)
 				}
-				if got != tc.want {
-					t.Errorf("refund_status=%q rendered %q, want %q", tc.status, got, tc.want)
+				if got.desc != "Credit note issued" || got.problem != tc.wantProblem {
+					t.Errorf("refund_status=%q rendered %q / problem %q, want %q / %q", tc.status, got.desc, got.problem, "Credit note issued", tc.wantProblem)
+				}
+				if got.detail != "CN-FULL · "+tc.wantCard {
+					t.Errorf("refund_status=%q detail %q, want %q", tc.status, got.detail, "CN-FULL · "+tc.wantCard)
 				}
 			})
 		}
 	})
 
-	// Partial refund: the row also carries credit/out-of-band, so the refund
-	// leg is a clause rather than the headline — but it must still be honest.
+	// Partial refund: the note also carries a credit-balance part, and the
+	// card part must still be honest.
 	t.Run("partial refund", func(t *testing.T) {
-		cases := []struct {
-			status domain.RefundStatus
-			want   string
+		for _, tc := range []struct {
+			status     domain.RefundStatus
+			wantDetail string
 		}{
-			{domain.RefundSucceeded, "Credit note issued — part refunded to card"},
-			{domain.RefundFailed, "Credit note issued — card refund failed"},
-			{domain.RefundPending, "Credit note issued — card refund pending"},
-			{domain.RefundNone, "Credit note issued — card refund not processed"},
-			{domain.RefundUnknown, "Credit note issued — card refund result unknown"},
-		}
-		for _, tc := range cases {
-			t.Run(string(tc.status), func(t *testing.T) {
-				resp := seed(t, domain.CreditNote{
-					CreditNoteNumber: "CN-PART", TotalCents: 8000,
-					RefundAmountCents: 1000, CreditAmountCents: 7000, RefundStatus: tc.status,
-				})
-				got := descFor(t, resp, "CN-PART")
-				if got != tc.want {
-					t.Errorf("refund_status=%q rendered %q, want %q", tc.status, got, tc.want)
-				}
+			{domain.RefundSucceeded, "CN-PART · $10.00 refunded to card · $70.00 to credit balance"},
+			{domain.RefundFailed, "CN-PART · $10.00 to card · $70.00 to credit balance"},
+			{domain.RefundUnknown, "CN-PART · $10.00 to card · $70.00 to credit balance"},
+		} {
+			resp := seed(t, domain.CreditNote{
+				CreditNoteNumber: "CN-PART", TotalCents: 8000, Currency: "USD",
+				RefundAmountCents: 1000, CreditAmountCents: 7000, RefundStatus: tc.status,
 			})
+			if got := rowFor(t, resp, "CN-PART"); got.desc != "Credit note issued" || got.detail != tc.wantDetail {
+				t.Errorf("refund_status=%q rendered %q / %q, want Credit note issued / %q", tc.status, got.desc, got.detail, tc.wantDetail)
+			}
 		}
 	})
 
 	// A note with no card leg at all is unaffected by refund status.
-	t.Run("no refund leg keeps the plain label", func(t *testing.T) {
+	t.Run("no refund leg is a plain success", func(t *testing.T) {
 		resp := seed(t, domain.CreditNote{
-			CreditNoteNumber: "CN-CREDIT", TotalCents: 1000,
+			CreditNoteNumber: "CN-CREDIT", TotalCents: 1000, Currency: "USD",
 			CreditAmountCents: 1000, RefundStatus: domain.RefundNone,
 		})
-		if got := descFor(t, resp, "CN-CREDIT"); got != "Credit note issued" {
-			t.Errorf("credit-only note rendered %q, want %q", got, "Credit note issued")
+		if got := rowFor(t, resp, "CN-CREDIT"); got.desc != "Credit note issued" || got.status != "succeeded" || got.problem != "" {
+			t.Errorf("credit-only note rendered %+v, want a plain success", got)
 		}
 	})
 }
