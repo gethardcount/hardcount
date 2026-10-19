@@ -918,10 +918,18 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 			-- A live hosted Checkout page blocks the claim the same way (one
 			-- payer at a time, domain.HostedCheckoutLiveSQL), so it is part of
 			-- the same exclusion.
+			--
+			-- So does a set charge hold (ADR-127): a charge running, or one
+			-- whose result was lost and waits for the stale-hold sweep. The
+			-- claim refuses it, and so does exhaustRun's final-action claim,
+			-- so a held run is not picked, not rewound and does not pin the
+			-- head of this LIMITed queue. It is picked on the first tick after
+			-- the hold clears.
 			AND NOT EXISTS (
 			  SELECT 1 FROM invoices i
 			  WHERE i.id = r.invoice_id
 			    AND (i.payment_status IN ('processing', 'unknown')
+			      OR i.auto_charge_claimed_until IS NOT NULL
 			      OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
 			    AND i.status NOT IN ('voided', 'uncollectible')
 			)
@@ -992,6 +1000,7 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 			-- every other run on the clock.
 			AND NOT (
 			  (i.payment_status IN ('processing', 'unknown')
+			    OR i.auto_charge_claimed_until IS NOT NULL
 			    OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
 			  AND i.status NOT IN ('voided', 'uncollectible')
 			)

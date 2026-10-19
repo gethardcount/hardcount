@@ -164,6 +164,14 @@ var (
 		[]string{"mode", "class"},
 	)
 
+	staleChargeHoldResolutions = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_stale_charge_hold_resolutions_total",
+			Help: "Stale charge holds checked with Stripe (ADR-127), by result: settled, adopted, canceled, released, cleared, failed, cannot_ask, lost_race.",
+		},
+		[]string{"result"},
+	)
+
 	scheduledCleanupRows = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_scheduled_cleanup_rows_total",
@@ -305,6 +313,15 @@ func RecordStripeBreakerState(state string) {
 // differently from "nothing is parked".
 func RecordParkedSearchError(mode, class string) {
 	parkedSearchErrors.WithLabelValues(mode, class).Inc()
+}
+
+// RecordStaleChargeHoldResolution counts one stale-hold check (ADR-127).
+// "cannot_ask" is a hold Stripe will not answer about (disconnected, key
+// rejected, customer missing): those invoices stay blocked from charging
+// until someone writes them off or fixes the connection, so alert on it
+// being non-zero. A steady "failed" is Stripe unreachable.
+func RecordStaleChargeHoldResolution(result string) {
+	staleChargeHoldResolutions.WithLabelValues(result).Inc()
 }
 
 // Metrics returns middleware that records HTTP request metrics.

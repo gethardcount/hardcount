@@ -44,7 +44,7 @@ type countingCharger struct {
 	store *invoice.PostgresStore
 }
 
-func (c *countingCharger) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c *countingCharger) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	time.Sleep(c.delay)
 	c.mu.Lock()
 	defer c.mu.Unlock()

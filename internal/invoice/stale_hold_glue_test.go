@@ -12,7 +12,7 @@ import (
 // collectCharger counts the charges Collect makes.
 type collectCharger struct{ calls int }
 
-func (c *collectCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c *collectCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.calls++
 	return inv, nil
 }

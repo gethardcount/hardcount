@@ -162,12 +162,12 @@ func (a *invoiceStoreAdapter) SetAutoChargePending(ctx context.Context, tenantID
 	return a.store.SetAutoChargePending(ctx, tenantID, id, pending)
 }
 
-func (a *invoiceStoreAdapter) ClaimAutoCharge(ctx context.Context, tenantID, id string) (bool, error) {
+func (a *invoiceStoreAdapter) ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
 	return a.store.ClaimAutoCharge(ctx, tenantID, id)
 }
 
-func (a *invoiceStoreAdapter) ReleaseAutoChargeClaim(ctx context.Context, tenantID, id string) error {
-	return a.store.ReleaseAutoChargeClaim(ctx, tenantID, id)
+func (a *invoiceStoreAdapter) ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error {
+	return a.store.ReleaseChargeHold(ctx, tenantID, id, hold)
 }
 
 func (a *invoiceStoreAdapter) ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {

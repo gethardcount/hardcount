@@ -36,7 +36,7 @@ func TestChargeInvoice_SyncSuccessSettlesInline(t *testing.T) {
 	dunning := &recordingDunningStarter{}
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
-	got, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test")
+	got, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 	if err != nil {
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestChargeInvoice_ProcessingStaysProcessing(t *testing.T) {
 	invoices.invoices["inv_1"] = finalizedPendingInvoice()
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil)
 
-	got, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test")
+	got, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 	if err != nil {
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestChargeAttemptFacts_RecordedAtChokepoint(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = finalizedPendingInvoice()
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
-	if _, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test"); err == nil {
+	if _, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err == nil {
 		t.Fatal("declined charge must return an error")
 	}
 	if len(invoices.chargeAttempts) != 1 {
@@ -124,7 +124,7 @@ func TestChargeAttemptFacts_RecordedAtChokepoint(t *testing.T) {
 	invoices = newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = finalizedPendingInvoice()
 	s = NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
-	if _, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test"); err != nil {
+	if _, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err != nil {
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
 	if len(invoices.chargeAttempts) != 1 {
@@ -151,7 +151,7 @@ func TestChargeLease_ReleasedOnDefinitiveOutcomes(t *testing.T) {
 		invoices := newMockInvoiceUpdater()
 		invoices.invoices["inv_1"] = finalizedPendingInvoice()
 		s := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
-		_, _ = s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test")
+		_, _ = s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 		return invoices
 	}
 
@@ -208,7 +208,7 @@ func TestChargeInvoice_RefusesWrittenOff_BeforeStripe(t *testing.T) {
 		dunning := &recordingDunningStarter{}
 		s := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
-		_, err := s.ChargeInvoice(context.Background(), "t1", inv, "cus_stripe_abc", "pm_test")
+		_, err := s.ChargeInvoice(context.Background(), "t1", inv, testHold, "cus_stripe_abc", "pm_test")
 		if err == nil {
 			t.Fatal("ChargeInvoice accepted a WRITTEN-OFF invoice — ADR-113: nothing initiates money against one")
 		}
@@ -228,7 +228,7 @@ func TestChargeInvoice_RefusesWrittenOff_BeforeStripe(t *testing.T) {
 		dunning := &recordingDunningStarter{}
 		s := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
-		_, _ = s.ChargeInvoice(context.Background(), "t1", inv, "cus_stripe_abc", "pm_test")
+		_, _ = s.ChargeInvoice(context.Background(), "t1", inv, testHold, "cus_stripe_abc", "pm_test")
 
 		if len(dunning.calls) == 0 {
 			t.Error("regression: an ordinary failed charge no longer starts dunning — the recovery guard is too wide")

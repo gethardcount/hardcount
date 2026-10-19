@@ -225,6 +225,16 @@ func classifyStripeError(err error) *PaymentError {
 // actionable signal ("connect Stripe under Settings → Payments").
 var ErrStripeNotConfigured = &PaymentError{Message: "stripe not configured for this mode"}
 
+// ErrStripeAuthFailed marks a read Stripe refused with 401: the tenant's
+// secret key is wrong or revoked. It will not succeed until someone fixes the
+// key, so the stale-hold sweep logs it as a check that cannot run (ADR-127).
+var ErrStripeAuthFailed = errors.New("stripe rejected the API key")
+
+// ErrStripeCustomerMissing marks a read Stripe refused because the customer
+// does not exist in this account (resource_missing on the customer): deleted,
+// or created under other credentials. It will not succeed on retry.
+var ErrStripeCustomerMissing = errors.New("stripe customer not found in this account")
+
 // ErrNoSavedCard is FetchCardDetails' "the Stripe customer has no card" — a
 // one-off payment where the customer did not save the card. It is the only
 // FetchCardDetails error that means "nothing to record"; any other is a
@@ -254,6 +264,14 @@ func NewLiveStripeClient(clients *StripeClients) *LiveStripeClient {
 // blip used to read as "not configured" — a definite failure that spent a
 // dunning attempt.
 func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
+	// No Stripe mode configured at all: NewLiveStripeClient returned nil, and
+	// router.go still hands it to the reconciler. The stale-hold sweep can
+	// meet a held invoice whose customer has a Stripe id even then (Stripe
+	// removed after charges ran), so answer "not configured" instead of
+	// panicking the tick.
+	if c == nil || c.clients == nil {
+		return nil, ErrStripeNotConfigured
+	}
 	sc, err := c.clients.ResolveCtx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: stripe credential lookup: %v", ErrPaymentTransient, err)
@@ -439,9 +457,16 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 		ID:                  pi.ID,
 		Status:              string(pi.Status),
 		ClientSecret:        pi.ClientSecret,
+		CreatedAt:           pi.Created,
 		Purpose:             pi.Metadata["velox_purpose"],
+		InvoiceID:           pi.Metadata["velox_invoice_id"],
 		AmountReceivedCents: pi.AmountReceived,
 		AnchorAt:            anchorFromPIMetadata(pi.Metadata),
+	}
+	// Only an expanded latest_charge says whether it was refunded; an
+	// unexpanded one carries just its id, and Refunded reads false.
+	if pi.LatestCharge != nil && pi.LatestCharge.Refunded {
+		res.FullyRefunded = true
 	}
 	if lpe := pi.LastPaymentError; lpe != nil {
 		res.DeclineCode = declineCodeOf(string(lpe.Type), string(lpe.Code), string(lpe.DeclineCode))
@@ -545,6 +570,61 @@ func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, 
 		})
 	}
 	return out, nil
+}
+
+// ListPaymentIntentsForCustomer is the stale-hold sweep's read (ADR-127):
+// every PaymentIntent of the Stripe customer created at or after createdGTE,
+// each with its velox_invoice_id, status, captured amount and whether its
+// latest charge was refunded in full (expand[]=data.latest_charge).
+//
+// Why List and not Search (Stripe's docs, fetched 2026-10-19): List is the
+// read-after-write API — "Don't use search for read-after-write flows… use the
+// various list APIs… These APIs aren't subject to the availability delays" —
+// and it is offered in every country, while Search "isn't available to
+// businesses in India". The sweep reads "no PaymentIntent for this invoice" as
+// "Stripe never received the charge", which only a consistent read supports.
+//
+// An error on any page fails the whole read: a partial list is never
+// returned, because a missing page could hold the payment. Errors are typed
+// for the sweep: ErrStripeNotConfigured, ErrStripeAuthFailed (401) and
+// ErrStripeCustomerMissing (resource_missing on the customer) will not
+// succeed on retry; anything else (5xx, 429, network, unreadable
+// credentials) may.
+func (c *LiveStripeClient) ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
+	sc, err := c.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	params := &stripe.PaymentIntentListParams{
+		Customer:     stripe.String(stripeCustomerID),
+		CreatedRange: &stripe.RangeQueryParams{GreaterThanOrEqual: createdGTE.Unix()},
+	}
+	params.Limit = stripe.Int64(100)
+	params.AddExpand("data.latest_charge")
+	var out []PaymentIntentResult
+	for pi, err := range sc.V1PaymentIntents.List(ctx, params) {
+		if err != nil {
+			return nil, fmt.Errorf("list PaymentIntents of Stripe customer %s: %w", stripeCustomerID, classifyListError(err))
+		}
+		out = append(out, paymentIntentResult(pi))
+	}
+	return out, nil
+}
+
+// classifyListError types a failed PaymentIntent list for the stale-hold
+// sweep: a 401 and a missing customer will not heal on retry; everything else
+// is classifyStripeError's, which the sweep retries.
+func classifyListError(err error) error {
+	var se *stripe.Error
+	if errors.As(err, &se) {
+		switch {
+		case se.HTTPStatusCode == http.StatusUnauthorized:
+			return fmt.Errorf("%w: %s", ErrStripeAuthFailed, errs.Scrub(se.Msg))
+		case se.Code == stripe.ErrorCodeResourceMissing && (se.Param == "customer" || strings.Contains(se.Msg, "customer")):
+			return fmt.Errorf("%w: %s", ErrStripeCustomerMissing, errs.Scrub(se.Msg))
+		}
+	}
+	return classifyStripeError(err)
 }
 
 // GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted

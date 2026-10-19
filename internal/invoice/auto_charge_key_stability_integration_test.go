@@ -61,11 +61,11 @@ func TestChargeKey_StableUntilAnOutcomeIsRecorded(t *testing.T) {
 	// ages out, the next sweep re-claims. (updated_at stability across the lease
 	// is TestClaimAutoCharge_UpdatedAtStable's job — asserted here only because
 	// it is the sequence the unrelated writes below interleave with.)
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !h.Held() {
 		t.Fatal("first claim must succeed")
 	}
 	expireLease(t, db, inv.ID)
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !h.Held() {
 		t.Fatal("claim after lease expiry must succeed")
 	}
 	assertKeyUnchanged("re-claiming after a stalled leader")

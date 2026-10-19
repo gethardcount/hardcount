@@ -210,7 +210,7 @@ func TestRetryPendingCharges_CardDeclineDoesNotEscalate(t *testing.T) {
 // left nil it models a decline whose outcome write failed.
 type fakeChargerDecline struct{ store *mockInvoices }
 
-func (c *fakeChargerDecline) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c *fakeChargerDecline) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.store.stampPaymentStatus(inv.ID, domain.PaymentFailed)
 	return inv, &payment.PaymentError{Message: "Card was declined.", DeclineCode: "card_declined"}
 }
@@ -333,7 +333,7 @@ func wireBaseTax(e *Engine) *Engine {
 // own charger fake — surface that as a loud error, not a silent success.
 type sentinelCharger struct{}
 
-func (sentinelCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (sentinelCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	return inv, errors.New("sentinelCharger: fixture reached ChargeInvoice without wiring a charger fake")
 }
 
@@ -900,7 +900,9 @@ type mockInvoices struct {
 	// clockQueue holds the ids ListAutoChargePendingForClock returns (the fake
 	// has no sub→clock mapping). Empty by default.
 	clockQueue map[string]bool
-	claimed    map[string]bool
+	claimed    map[string]domain.ChargeHold
+	holds      int      // tokens handed out so far
+	released   []string // invoice ids released, in order
 	invoices   []domain.Invoice
 	lineItems  []domain.InvoiceLineItem
 	// createErr, when set, is returned by CreateInvoiceWithLineItems[Tx] instead
@@ -1037,33 +1039,47 @@ func (m *mockInvoices) CreateInvoiceWithLineItemsTx(ctx context.Context, _ *sql.
 // pattern): it honors the real CAS semantics — predicate re-check +
 // exactly-one-winner — so engine tests exercising concurrent sweeps
 // prove the claim actually gates the charge leg.
-func (m *mockInvoices) ClaimAutoCharge(_ context.Context, _, id string) (bool, error) {
+// Each claim hands out its own token, and a release clears the hold only
+// with the token that took it, as the real store compares the value.
+func (m *mockInvoices) ClaimAutoCharge(_ context.Context, _, id string) (domain.ChargeHold, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.claimed == nil {
-		m.claimed = map[string]bool{}
+		m.claimed = map[string]domain.ChargeHold{}
 	}
-	if m.claimed[id] {
-		return false, nil
+	if m.claimed[id].Held() {
+		return domain.ChargeHold{}, nil
 	}
 	for _, inv := range m.invoices {
 		if inv.ID == id {
 			if !inv.AutoChargePending || inv.PaymentStatus != domain.PaymentPending ||
 				inv.Status != domain.InvoiceFinalized {
-				return false, nil
+				return domain.ChargeHold{}, nil
 			}
-			m.claimed[id] = true
-			return true, nil
+			m.holds++
+			h := domain.ChargeHold{Until: time.Date(2099, 1, 1, 0, 0, m.holds, 0, time.UTC)}
+			m.claimed[id] = h
+			return h, nil
 		}
 	}
-	return false, nil
+	return domain.ChargeHold{}, nil
 }
 
-func (m *mockInvoices) ReleaseAutoChargeClaim(_ context.Context, _, id string) error {
+func (m *mockInvoices) ReleaseChargeHold(_ context.Context, _, id string, hold domain.ChargeHold) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.claimed, id)
+	if m.claimed[id] == hold {
+		delete(m.claimed, id)
+	}
+	m.released = append(m.released, id)
 	return nil
+}
+
+// holdSet reports whether the invoice's hold is still taken.
+func (m *mockInvoices) holdSet(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.claimed[id].Held()
 }
 
 func (m *mockInvoices) SetNoPMNotifiedAt(_ context.Context, _, id string, at time.Time) error {

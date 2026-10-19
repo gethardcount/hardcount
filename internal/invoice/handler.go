@@ -53,7 +53,9 @@ type CreditNoteLister interface {
 
 // PaymentCharger creates a Stripe PaymentIntent for a finalized invoice.
 type PaymentCharger interface {
-	ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error)
+	// hold is the charge hold the caller's claim returned (ADR-127): the
+	// charge re-checks it right before sending and sends nothing without it.
+	ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error)
 }
 
 // PaymentSetupGetter checks if a customer has a payment method ready.
@@ -1095,12 +1097,20 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// between the read above and the charge below, meant a double charge
 	// or an overcharge at the stale pre-credit amount. The claim's CAS
 	// re-asserts the chargeable predicate against committed truth.
-	claimed, err := h.svc.ClaimChargeForManualCollect(r.Context(), tenantID, id)
+	hold, err := h.svc.ClaimChargeForManualCollect(r.Context(), tenantID, id)
 	if err != nil {
 		respond.InternalError(w, r)
 		return
 	}
-	if !claimed {
+	if !hold.Held() {
+		// A set hold is a charge running, or one whose result was lost and
+		// waits for the stale-hold sweep to confirm it with Stripe (ADR-127).
+		// Say so, with the same words void and offline payment use. The read
+		// only picks the words; the claim above was the gate.
+		if state, serr := h.svc.ChargeHoldState(r.Context(), tenantID, id); serr == nil && state != domain.ChargeHoldNone {
+			respond.ConflictCoded(w, r, "", "payment_in_flight", domain.ChargeHoldRefusalMessage)
+			return
+		}
 		respond.Validation(w, r, "a payment for this invoice is already in progress (a charge, or the customer paying on the payment page) or it is no longer chargeable — refresh and retry later")
 		return
 	}
@@ -1124,14 +1134,17 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// on file.
 	inv, err = h.svc.ApplyCreditBalance(r.Context(), tenantID, id)
 	if err != nil {
-		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id)
+		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id, hold)
 		respond.FromError(w, r, err, "credit")
 		return
 	}
 	if inv.AmountDueCents <= 0 {
 		// Credits covered it — settle without a card charge, and without ever
-		// asking whether there was a card.
+		// asking whether there was a card. No charge was sent, so the hold is
+		// released either way; left set, it would wait for the stale-hold
+		// sweep (ADR-127).
 		settled, serr := h.svc.SettleZeroDue(r.Context(), tenantID, id)
+		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id, hold)
 		if serr != nil {
 			respond.FromError(w, r, serr, "invoice")
 			return
@@ -1155,7 +1168,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		// locked out for the window. Any credit already applied STAYS applied:
 		// it was legitimately owed to this invoice, and amount_due is now
 		// correct for whatever settles it later.
-		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id)
+		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id, hold)
 		respond.Validation(w, r, "customer has no payment method set up")
 		return
 	}
@@ -1165,7 +1178,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// velox_anchor_at), which dates paid_at and a decline's first dunning
 	// retry. Unbound, a Collect on a later Advance dated the retry from the
 	// issue instant, in the past. A wall-clock invoice binds nothing.
-	charged, err := h.charger.ChargeInvoice(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	charged, err := h.charger.ChargeInvoice(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a
 		// *payment.PaymentError which respond.FromError detects and

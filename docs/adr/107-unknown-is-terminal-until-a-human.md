@@ -1,6 +1,6 @@
 # ADR-107: An unnameable charge attempt parks the invoice; it is never settled failed
 
-**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18)
+**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18, 2026-10-19)
 **Date:** 2026-07-31
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) as the answer to this
 problem. ADR-106's charge-intent ledger is **parked, not deleted** — see
@@ -408,3 +408,20 @@ to reconcile, not resend
 ([Stripe](https://docs.stripe.com/error-low-level#post-requests)). Velox
 does not stop a resend at that age yet. **Trigger:** the first unknown
 refund older than 24 hours in production.
+
+## Amendment 2026-10-19 — a parked invoice's stale hold is checked too
+
+[ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) leaves a
+charge's hold (`auto_charge_claimed_until`) set whenever its result is
+unclear. A sweep in the reconciler asks Stripe about every hold that ended
+more than 10 minutes ago, whatever the invoice's status. A parked invoice keeps
+the hold its charge took, so the sweep lists the Stripe customer's
+PaymentIntents for it (List, not Search, so it works in India too). A succeeded
+payment it finds settles the parked invoice, as ADR-108's search would; anything
+else only clears the hold and leaves the invoice parked. The park itself, and
+the write-off as its exit, are unchanged; a parked invoice stays writable-off
+whatever its hold says.
+
+Unclear answers with no PaymentIntent id still park when the caller's context
+is alive. Moving them onto the stale-hold check instead of parking is the
+follow-up named in ADR-127.

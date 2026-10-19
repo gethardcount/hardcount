@@ -258,8 +258,12 @@ func (m *memStore) UpdateStatusWithReversalPrior(ctx context.Context, tenantID, 
 // ChargeHeldTx: the fake does not model the charge lease (its claims ignore
 // it too), so no charge ever holds an invoice here. The hold is pinned
 // against real Postgres in charge_hold_guard_integration_test.go.
-func (m *memStore) ChargeHeldTx(_ context.Context, _ *sql.Tx, _ string) (bool, error) {
-	return false, nil
+func (m *memStore) ChargeHeldTx(_ context.Context, _ *sql.Tx, _ string) (domain.ChargeHoldState, domain.ChargeHold, error) {
+	return domain.ChargeHoldNone, domain.ChargeHold{}, nil
+}
+
+func (m *memStore) ChargeHoldStateOf(_ context.Context, _, _ string) (domain.ChargeHoldState, error) {
+	return domain.ChargeHoldNone, nil
 }
 
 // MarkPaidOffline: check sees the current in-memory invoice as the locked row.
@@ -811,27 +815,38 @@ func (m *memStore) AddLineItemAtomicAudited(ctx context.Context, tenantID, invoi
 	return out, inv, nil
 }
 
-func (m *memStore) ClaimAutoCharge(_ context.Context, _, id string) (bool, error) {
+// memHold is the token memStore's claims hand out: the fake does not model
+// the hold itself, only whether the claim's predicate admitted the invoice.
+var memHold = domain.ChargeHold{Until: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}
+
+func (m *memStore) ClaimAutoCharge(_ context.Context, _, id string) (domain.ChargeHold, error) {
 	inv, ok := m.invoices[id]
 	if !ok {
-		return false, errs.ErrNotFound
+		return domain.ChargeHold{}, errs.ErrNotFound
 	}
-	return inv.AutoChargePending && inv.PaymentStatus == domain.PaymentPending &&
-		inv.Status == domain.InvoiceFinalized, nil
+	if inv.AutoChargePending && inv.PaymentStatus == domain.PaymentPending && inv.Status == domain.InvoiceFinalized {
+		return memHold, nil
+	}
+	return domain.ChargeHold{}, nil
 }
 
-func (m *memStore) ClaimChargeForManualCollect(_ context.Context, _, id string) (bool, error) {
+func (m *memStore) ClaimChargeForManualCollect(_ context.Context, _, id string) (domain.ChargeHold, error) {
 	inv, ok := m.invoices[id]
 	if !ok {
-		return false, errs.ErrNotFound
+		return domain.ChargeHold{}, errs.ErrNotFound
 	}
-	// Mirrors claimChargeLease's predicate (sans the lease window, which
+	// Mirrors the manual-collect claim's predicate (sans the hold, which
 	// memStore doesn't model): finalized, pending/failed, owing.
-	return (inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed) &&
-		inv.Status == domain.InvoiceFinalized && inv.AmountDueCents > 0, nil
+	if (inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed) &&
+		inv.Status == domain.InvoiceFinalized && inv.AmountDueCents > 0 {
+		return memHold, nil
+	}
+	return domain.ChargeHold{}, nil
 }
 
-func (m *memStore) ReleaseAutoChargeClaim(_ context.Context, _, _ string) error { return nil }
+func (m *memStore) ReleaseChargeHold(_ context.Context, _, _ string, _ domain.ChargeHold) error {
+	return nil
+}
 
 func (m *memStore) SetAutoChargePending(_ context.Context, _, id string, pending bool) error {
 	inv, ok := m.invoices[id]

@@ -206,9 +206,9 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			ctx := auth.WithTenantID(context.Background(), "t1")
 			var err error
 			if tc.purpose == piPurposeDunningRetry {
-				_, err = s.ChargeInvoiceForDunningRetry(ctx, "t1", snapshot, "cus_stripe", "pm_on_file")
+				_, err = s.ChargeInvoiceForDunningRetry(ctx, "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
 			} else {
-				_, err = s.ChargeInvoice(ctx, "t1", snapshot, "cus_stripe", "pm_on_file")
+				_, err = s.ChargeInvoice(ctx, "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
 			}
 
 			// stripe-go itself sent the retry, under the same key.

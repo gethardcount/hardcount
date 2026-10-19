@@ -58,6 +58,7 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_invoice_pending_tax_reversals` | any row older than 24h | A voided `stripe_tax` invoice whose committed tax transaction has no confirmed reversal. See the note below the table |
 | `velox_creditnote_pending_issue_drafts` | sustained growth over days | Clawback drafts not issuing. Alert on growth or age, not presence. See [Clawback drafts](clawback-drafts-not-issuing.md) |
 | `velox_parked_invoices{mode}` | > 0, sustained | An invoice whose charge attempt could not be identified with the provider. **It will not resolve on its own and needs a human.** See [Parked invoices](parked-invoices.md) |
+| `velox_stale_charge_hold_resolutions_total{result="cannot_ask"}` | increase > 0 | An interrupted charge Velox cannot confirm with Stripe (disconnected, key rejected, customer gone). The invoice cannot be charged until it is fixed or written off. See [Interrupted charges](interrupted-charges.md) |
 | `velox_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}` | any increase | LiteLLM spend batches were refused for retry (usage store unreachable). See [LiteLLM spend gap](litellm-spend-gap.md) |
 | `velox_auto_charge_retries_total{result="failed"}` | growing rapidly | Many invoices stuck in retry |
 | `velox_audit_write_errors_total{outcome="row_lost"}` | rate > 0/s | **Audit evidence permanently lost.** Treat as a compliance incident. See [Audit write errors](audit-write-errors.md) |

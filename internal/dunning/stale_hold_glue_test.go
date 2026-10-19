@@ -12,8 +12,11 @@ import (
 // claimAutoCharge takes the auto-charge sweep's claim and reports whether it
 // was granted.
 func claimAutoCharge(ctx context.Context, store *invoice.PostgresStore, tenantID, invoiceID string) (bool, error) {
-	return store.ClaimAutoCharge(ctx, tenantID, invoiceID)
+	h, err := store.ClaimAutoCharge(ctx, tenantID, invoiceID)
+	return h.Held(), err
 }
 
 // wireChargeHolds wires the final action's charge hold as router.go does.
-func wireChargeHolds(_ *exhaustFixture) {}
+func wireChargeHolds(f *exhaustFixture) {
+	f.svc.SetChargeHoldClaimer(f.invoices)
+}

@@ -88,7 +88,7 @@ func TestChargeDecline_RecordsDeclineCodeAndCard(t *testing.T) {
 			s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, dunning)
 			s.SetEmailPaymentFailed(email, staticCustomerEmail{})
 
-			_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, "cus_stripe", "pm_on_file")
+			_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
 			var pe *PaymentError
 			if !errors.As(err, &pe) || pe.Unknown || pe.DeclineCode != tc.code || pe.PaymentIntentID != "pi_decl" {
 				t.Fatalf("charge error = %#v, want a definite %s decline naming pi_decl", err, tc.code)

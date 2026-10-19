@@ -63,12 +63,12 @@ func TestClaimAutoCharge_CollisionExactlyOne(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ok, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
+			h, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
 			if err != nil {
 				t.Errorf("claim: %v", err)
 				return
 			}
-			wins <- ok
+			wins <- h.Held()
 		}()
 	}
 	wg.Wait()
@@ -84,9 +84,9 @@ func TestClaimAutoCharge_CollisionExactlyOne(t *testing.T) {
 	}
 }
 
-// TestClaimAutoCharge_LeaseExpiryAndRelease: a held lease refuses
-// re-claims; an expired lease (or an explicit release on a pre-Stripe
-// skip path) re-admits.
+// TestClaimAutoCharge_LeaseExpiryAndRelease: a held hold refuses re-claims;
+// only its owner's release (by token) re-admits; an expired hold refuses too
+// (ADR-127).
 func TestClaimAutoCharge_LeaseExpiryAndRelease(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -94,19 +94,29 @@ func TestClaimAutoCharge_LeaseExpiryAndRelease(t *testing.T) {
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-CLAIM-LEASE")
 	store := invoice.NewPostgresStore(db)
 
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
+	first, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
+	if !first.Held() {
 		t.Fatal("first claim must succeed")
 	}
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); h.Held() {
 		t.Fatal("second claim inside the lease must fail")
 	}
 
-	// Release: explicit clear (provably-pre-Stripe skip path) re-admits
-	// immediately, no lease wait.
-	if err := store.ReleaseAutoChargeClaim(ctx, tenantID, inv.ID); err != nil {
+	// A release with another owner's token clears nothing: a late owner
+	// must never erase the hold of whoever holds the invoice now.
+	if err := store.ReleaseChargeHold(ctx, tenantID, inv.ID, domain.ChargeHold{Until: first.Until.Add(-time.Second)}); err != nil {
+		t.Fatalf("foreign release: %v", err)
+	}
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); h.Held() {
+		t.Fatal("a release with another owner's token cleared the hold")
+	}
+
+	// Release: the owner's clear (provably-pre-Stripe skip path) re-admits
+	// immediately, no wait.
+	if err := store.ReleaseChargeHold(ctx, tenantID, inv.ID, first); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !h.Held() {
 		t.Fatal("claim after explicit release must succeed")
 	}
 
@@ -115,13 +125,13 @@ func TestClaimAutoCharge_LeaseExpiryAndRelease(t *testing.T) {
 	// result was not saved, so the hold is NOT free (ADR-127, #976): every
 	// claim refuses it until the stale-hold sweep has asked Stripe.
 	expireLease(t, db, inv.ID)
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); h.Held() {
 		t.Fatal("claim on an expired hold must be refused: its charge may have taken the money (#976)")
 	}
-	if ok, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); ok {
+	if h, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); h.Held() {
 		t.Fatal("dunning claim on an expired hold must be refused (#976)")
 	}
-	if ok, _ := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID); ok {
+	if h, _ := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID); h.Held() {
 		t.Fatal("collect claim on an expired hold must be refused (#976)")
 	}
 }
@@ -182,7 +192,7 @@ func TestClaimAutoCharge_PredicateRecheck(t *testing.T) {
 			if err := tx.Commit(); err != nil {
 				t.Fatalf("commit: %v", err)
 			}
-			if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); ok {
+			if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); h.Held() {
 				t.Fatalf("claim must fail after %q — charging stale state is the double-charge path", m.name)
 			}
 		})
@@ -223,8 +233,8 @@ func TestClaimAutoCharge_ZeroDueIsClaimable(t *testing.T) {
 	if !found {
 		t.Error("a queued $0 invoice must be listed by the sweep so it can be settled")
 	}
-	if ok, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID); err != nil || !ok {
-		t.Fatalf("claim = %v, %v; want true — the collector settles a $0 invoice", ok, err)
+	if h, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID); err != nil || !h.Held() {
+		t.Fatalf("claim = %v, %v; want held — the collector settles a $0 invoice", h.Held(), err)
 	}
 }
 
@@ -249,13 +259,14 @@ func TestClaimAutoCharge_UpdatedAtStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
+	held, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
+	if !held.Held() {
 		t.Fatal("claim must succeed")
 	}
-	if err := store.ReleaseAutoChargeClaim(ctx, tenantID, inv.ID); err != nil {
+	if err := store.ReleaseChargeHold(ctx, tenantID, inv.ID, held); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !h.Held() {
 		t.Fatal("re-claim must succeed")
 	}
 	after, err := store.Get(ctx, tenantID, inv.ID)
@@ -280,7 +291,7 @@ func TestClaimAutoCharge_ListsStayClaimBlind(t *testing.T) {
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-CLAIM-BLIND")
 	store := invoice.NewPostgresStore(db)
 
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !h.Held() {
 		t.Fatal("claim must succeed")
 	}
 	listed, err := store.ListAutoChargePending(ctx, domain.InvoiceKeyset{}, 50)
@@ -311,19 +322,19 @@ func TestClaimChargeForDunningRetry_CrossPathExclusion(t *testing.T) {
 
 	// Sweep first, dunning refused.
 	a := seedClaimableInvoice(t, db, ctx, tenantID, "INV-XPATH-A")
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, a.ID); !ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, a.ID); !h.Held() {
 		t.Fatal("sweep claim must succeed")
 	}
-	if ok, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, a.ID); ok {
+	if h, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, a.ID); h.Held() {
 		t.Fatal("dunning claim must be refused while the sweep holds the lease — concurrent charges have divergent keys Stripe cannot dedupe")
 	}
 
 	// Dunning first, sweep refused.
 	b := seedClaimableInvoice(t, db, ctx, tenantID, "INV-XPATH-B")
-	if ok, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, b.ID); !ok {
+	if h, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, b.ID); !h.Held() {
 		t.Fatal("dunning claim must succeed")
 	}
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, b.ID); ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, b.ID); h.Held() {
 		t.Fatal("sweep claim must be refused while dunning holds the lease")
 	}
 }
@@ -361,26 +372,26 @@ func TestClaimChargeForDunningRetry_StatusMatrix(t *testing.T) {
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-STATUS-MATRIX")
 
 	// pending: dunning claimable.
-	if ok, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); !ok {
+	if h, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); !h.Held() {
 		t.Fatal("dunning claim on 'pending' must succeed (card-less enrolled, card attached)")
 	}
 
 	// failed: dunning claimable, sweep NOT.
 	set(t, inv.ID, "failed")
-	if ok, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); !ok {
+	if h, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); !h.Held() {
 		t.Fatal("dunning claim on 'failed' must succeed (the normal retry state)")
 	}
 	set(t, inv.ID, "failed")
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); h.Held() {
 		t.Fatal("sweep claim on 'failed' must be refused — dunning owns failed invoices")
 	}
 
 	// unknown: NEITHER path may charge — reconciler territory.
 	set(t, inv.ID, "unknown")
-	if ok, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); ok {
+	if h, _ := store.ClaimChargeForDunningRetry(ctx, tenantID, inv.ID); h.Held() {
 		t.Fatal("dunning claim on 'unknown' must be refused — the ambiguous PI may be a real payment; blind re-charge is the same-tick double-charge window")
 	}
-	if ok, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); ok {
+	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); h.Held() {
 		t.Fatal("sweep claim on 'unknown' must be refused")
 	}
 }
@@ -405,30 +416,30 @@ func TestClaimChargeForManualCollect_SharedLeaseAndPredicate(t *testing.T) {
 
 	// Sweep holds the lease → manual collect must lose.
 	claimed, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
-	if err != nil || !claimed {
-		t.Fatalf("sweep claim: claimed=%v err=%v", claimed, err)
+	if err != nil || !claimed.Held() {
+		t.Fatalf("sweep claim: claimed=%v err=%v", claimed.Held(), err)
 	}
 	manual, err := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID)
 	if err != nil {
 		t.Fatalf("manual claim: %v", err)
 	}
-	if manual {
+	if manual.Held() {
 		t.Fatal("manual collect must NOT claim while the sweep holds the lease")
 	}
 
 	// Released → manual collect wins; a second manual claim then loses.
-	if err := store.ReleaseAutoChargeClaim(ctx, tenantID, inv.ID); err != nil {
+	if err := store.ReleaseChargeHold(ctx, tenantID, inv.ID, claimed); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	manual, err = store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID)
-	if err != nil || !manual {
-		t.Fatalf("manual claim after release: claimed=%v err=%v", manual, err)
+	if err != nil || !manual.Held() {
+		t.Fatalf("manual claim after release: claimed=%v err=%v", manual.Held(), err)
 	}
 	second, err := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID)
 	if err != nil {
 		t.Fatalf("second manual claim: %v", err)
 	}
-	if second {
+	if second.Held() {
 		t.Fatal("second manual claim must lose while the first holds the lease")
 	}
 
@@ -439,7 +450,7 @@ func TestClaimChargeForManualCollect_SharedLeaseAndPredicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim unknown: %v", err)
 	}
-	if claimed {
+	if claimed.Held() {
 		t.Fatal("an invoice with payment_status='unknown' must never be claimable for manual collect")
 	}
 }

@@ -13829,8 +13829,11 @@ export interface operations {
                 };
             };
             /**
-             * @description An earlier charge has an unknown outcome and must be resolved
-             *     first. Code `payment_in_flight` or `payment_unidentifiable`.
+             * @description An earlier charge must be resolved first. Code
+             *     `payment_in_flight`: a charge on the invoice is running, or its
+             *     result was lost and Velox is confirming it with Stripe (within
+             *     about an hour). Code `payment_unidentifiable`: the earlier
+             *     charge's outcome is unknown and could not be identified.
              */
             409: {
                 headers: {
@@ -13842,8 +13845,8 @@ export interface operations {
             };
             /**
              * @description Code `validation_error`. The invoice is not finalized, is already
-             *     paid, or has no amount due; another charge is already running;
-             *     payments are not configured; or the customer has no payment
+             *     paid, or has no amount due; the customer is paying on the hosted
+             *     page; payments are not configured; or the customer has no payment
              *     method set up.
              */
             422: {

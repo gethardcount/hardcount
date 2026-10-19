@@ -44,10 +44,14 @@ import (
 // carry a 24h freshness window (anti-churn, #310) that bounds DETECTION only —
 // cn_tax_reversal promotes a marker-less orphan onto its unbounded marker
 // branch on the first failed re-drive (2026-08-30), so an orphan is never aged
-// out of recovery, only out of the cheap scan; and payment_unknown
-// keys on a payment_status the CHARGE path must have stamped — a crash before
-// that stamp is recovered by the auto-charge retry's stable Stripe idempotency
-// key instead, not by this sweep.
+// out of recovery, only out of the cheap scan. payment_unknown's state sync
+// covers a charge whose result was lost too, by a CO-TRANSACTIONAL marker: the
+// charge hold (auto_charge_claimed_until) is written by the claim, in its own
+// commit, before the Stripe call, and outlives a crash or a dead context. The
+// stale-hold sweep asks Stripe about every hold that ended without a saved
+// result (ADR-127); before it, this comment pointed at the auto-charge retry's
+// idempotency key, which another charge kind, a changed card or a pruned key
+// went around (#976).
 //
 // This is the seam the future obligation-queue drainer (ADR-062) plugs into:
 // when the four re-drive sweeps migrate onto the generalised webhook_outbox, the
@@ -89,7 +93,9 @@ func (s *Scheduler) reconcilers() []Reconciler {
 	if s.paymentReconciler != nil {
 		// payment_unknown is a STATE-SYNC against Stripe (3-valued:
 		// succeeded/failed/still-in-flight), NOT a re-drive of a local failed
-		// effect. It rides this driver only for uniform log+metric and will
+		// effect. It runs the stale-charge-hold check first (ADR-127), so an
+		// invoice it clears is charged by the auto-charge retry below in the
+		// same tick. It rides this driver only for uniform log+metric and will
 		// NEVER migrate to the obligation queue (ADR-062) — its truth lives at
 		// Stripe, there is no local obligation to enqueue.
 		rs = append(rs, reconcilerFunc{"payment_unknown", s.paymentReconciler.Run})

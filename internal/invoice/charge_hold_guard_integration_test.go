@@ -82,8 +82,8 @@ func requireHoldRefusal(t *testing.T, store *invoice.PostgresStore, ctx context.
 
 func claimAuto(t *testing.T, store *invoice.PostgresStore, ctx context.Context, tenantID, id string) {
 	t.Helper()
-	if ok, err := store.ClaimAutoCharge(ctx, tenantID, id); err != nil || !ok {
-		t.Fatalf("ClaimAutoCharge: ok=%v err=%v", ok, err)
+	if h, err := store.ClaimAutoCharge(ctx, tenantID, id); err != nil || !h.Held() {
+		t.Fatalf("ClaimAutoCharge: held=%v err=%v", h.Held(), err)
 	}
 }
 
@@ -107,8 +107,8 @@ func TestChargeHold_RefusesVoidWriteOffAndOfflinePayment(t *testing.T) {
 		t.Run(a.name+"/retry of a declined charge claimed (failed)", func(t *testing.T) {
 			inv := seedClaimableInvoice(t, db, ctx, tenantID, num("FAIL"))
 			stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "", "card_declined")
-			if ok, err := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID); err != nil || !ok {
-				t.Fatalf("ClaimChargeForManualCollect: ok=%v err=%v", ok, err)
+			if h, err := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID); err != nil || !h.Held() {
+				t.Fatalf("ClaimChargeForManualCollect: held=%v err=%v", h.Held(), err)
 			}
 			got, err := a.run(ctx, svc, tenantID, inv.ID)
 			requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
