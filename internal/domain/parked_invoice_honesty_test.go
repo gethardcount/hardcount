@@ -37,7 +37,11 @@ func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
 		t.Errorf("message = %q, want the approved copy %q", att.Message, want)
 	}
 	all := att.Message + " " + att.Detail
-	for _, stale := range []string{"will not resolve on its own", "keeps searching", "can't tell", "won't charge again"} {
+	// "never charged twice" is false since REC-5: after 24 hours Velox charges
+	// again, and if Stripe creates the original payment after that (ADR-127
+	// R10) the customer has paid twice; the second payment is flagged
+	// (payment.duplicate_charge), not prevented.
+	for _, stale := range []string{"will not resolve on its own", "keeps searching", "can't tell", "won't charge again", "charged twice"} {
 		if strings.Contains(all, stale) {
 			t.Errorf("the notice still says %q, which is no longer true", stale)
 		}
@@ -50,9 +54,9 @@ func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
 	if !strings.Contains(att.Detail, "paid another way") {
 		t.Errorf("detail = %q: it must say when to write the invoice off (the customer paid another way)", att.Detail)
 	}
-	// And why nothing is charged meanwhile, or the wait reads as a defect.
-	if !strings.Contains(strings.ToLower(all), "twice") {
-		t.Error("the notice does not say why no new charge is made during the wait")
+	// And that nothing is charged meanwhile, or the wait reads as a defect.
+	if !strings.Contains(att.Detail, "No new charge is made before then.") {
+		t.Errorf("detail = %q: it must say no new charge is made during the 24 hours", att.Detail)
 	}
 }
 

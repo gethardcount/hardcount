@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
@@ -36,6 +37,9 @@ type parkCause struct {
 	name     string
 	mode     fakeModeKind
 	deadline bool // the caller's deadline ends the call
+	// slowSave: the caller's deadline ends while the answer is being saved
+	// (the database write is slower than the time the caller had left).
+	slowSave bool
 }
 
 var (
@@ -46,7 +50,24 @@ var (
 	// Stripe had not answered: Stripe was slow, which is what an incident
 	// looks like.
 	parkDeadline = parkCause{name: "the caller's deadline ended the call", mode: fakeHang, deadline: true}
+	// Stripe answered 500 just before the caller's deadline, and the
+	// deadline passed while Velox saved that answer. Slow answers are what
+	// an incident looks like, so this is the same 500 as park500 and must
+	// get the same 24 hours, not the ~75-minute path of a lost result.
+	park500AtDeadline = parkCause{name: "Stripe answered 500 just before the caller's deadline", mode: fakeSave500, deadline: true, slowSave: true}
 )
+
+// slowAttemptSave makes saving the attempt row outlast the caller's
+// deadline: it waits, then saves on the context it was handed.
+type slowAttemptSave struct {
+	InvoiceUpdater
+	wait time.Duration
+}
+
+func (s slowAttemptSave) RecordChargeAttempt(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt) error {
+	time.Sleep(s.wait)
+	return s.InvoiceUpdater.RecordChargeAttempt(ctx, tenantID, a)
+}
 
 // park charges inv as kind and gets cause's unclear answer. It requires the
 // park on disk: unknown, no PaymentIntent, the counter moved once, the hold
@@ -59,6 +80,10 @@ func (r *shRig) park(inv domain.Invoice, kind chargeKind, cause parkCause) domai
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(r.ctx, 300*time.Millisecond)
 		defer cancel()
+	}
+	if cause.slowSave {
+		r.stripe.invoices = slowAttemptSave{InvoiceUpdater: r.invoices, wait: 500 * time.Millisecond}
+		defer func() { r.stripe.invoices = r.invoices }()
 	}
 	before := r.fake.countPIs()
 	_, err := r.chargeAs(ctx, kind, inv.ID, "pm_card_1")
@@ -107,12 +132,31 @@ func (r *shRig) assertStillParked(parked domain.Invoice, when string) {
 	}
 }
 
+// parkedAttemptProblem is the problem line the invoice's Activity card shows
+// for the parked attempt once the park has ended: the card prints a failed
+// attempt's mapped decline code, or else its stored reason
+// (activity.DeclineReason, as attemptLine does).
+func (r *shRig) parkedAttemptProblem(invoiceID string) string {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	var code, reason string
+	if err := tx.QueryRowContext(r.ctx, `SELECT decline_code, provider_reason FROM invoice_charge_attempts
+		WHERE invoice_id = $1 AND outcome = 'failed' AND stripe_payment_intent_id = ''`, invoiceID).Scan(&code, &reason); err != nil {
+		r.t.Fatalf("read the parked attempt: %v", err)
+	}
+	return activity.DeclineReason(code, reason)
+}
+
 // 1. Stripe shows nothing for the parked charge. For 24 hours the invoice
 // stays parked and nothing charges it (Stripe may still create the payment).
 // After that it goes back to pending with a fresh key, the parked attempt is
 // recorded as failed, and the next auto-charge takes one payment.
 func TestParked_StripeShowsNothing_WaitsADayThenChargedOnce(t *testing.T) {
-	for _, cause := range []parkCause{park500, parkDeadline} {
+	for _, cause := range []parkCause{park500, parkDeadline, park500AtDeadline} {
 		t.Run(cause.name, func(t *testing.T) {
 			r := newSHRig(t, "Parked Nothing")
 			inv := r.seed("INV-PK-NONE")
@@ -143,6 +187,13 @@ func TestParked_StripeShowsNothing_WaitsADayThenChargedOnce(t *testing.T) {
 			}
 			if n := r.attempts(inv.ID, domain.ChargeAttemptFailed); n != 1 {
 				t.Errorf("%d failed attempt rows, want 1 (the parked attempt)", n)
+			}
+			// The Activity card's problem line for that attempt. The saved
+			// answer was Go's error for a timed-out call ("Post
+			// \"https://api.stripe.com/...\": context deadline exceeded") or
+			// Stripe's 500 text, neither of which says what happened.
+			if got, want := r.parkedAttemptProblem(inv.ID), "Stripe showed no payment for this attempt 24 hours later."; got != want {
+				t.Errorf("Activity problem line = %q, want %q", got, want)
 			}
 
 			if _, err := r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1"); err != nil {
@@ -450,7 +501,10 @@ func TestParked_HoldClearedBeforeTheUpgrade_MigrationGivesItBack(t *testing.T) {
 
 // applyMigrationUp runs the Up section of the migration file named
 // *_<suffix>.sql against the test database, on rows the test seeded after
-// the test database was migrated.
+// the test database was migrated. It runs as the app role in a plain
+// transaction (no tenant, no bypass): a migrating user that row-level
+// security applies to, so the file's own bypass line is what lets it see the
+// rows. A check first proves the transaction sees no invoice without it.
 func (r *shRig) applyMigrationUp(suffix string) {
 	r.t.Helper()
 	files, err := filepath.Glob(filepath.Join("..", "platform", "migrate", "sql", "*_"+suffix+".sql"))
@@ -469,11 +523,18 @@ func (r *shRig) applyMigrationUp(suffix string) {
 		r.t.Fatalf("%s: no Down section", files[0])
 	}
 	up = strings.Replace(up, "-- +goose Up", "", 1)
-	tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
+	tx, err := r.db.Pool.BeginTx(r.ctx, nil)
 	if err != nil {
 		r.t.Fatal(err)
 	}
 	defer postgres.Rollback(tx)
+	var visible int
+	if err := tx.QueryRowContext(r.ctx, `SELECT count(*) FROM invoices`).Scan(&visible); err != nil {
+		r.t.Fatal(err)
+	}
+	if visible != 0 {
+		r.t.Fatalf("setup: the migration's transaction sees %d invoices before its own bypass line; it must run as a user row-level security applies to", visible)
+	}
 	if _, err := tx.ExecContext(r.ctx, up); err != nil {
 		r.t.Fatalf("%s: %v", files[0], err)
 	}
