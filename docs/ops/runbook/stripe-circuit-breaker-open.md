@@ -32,7 +32,7 @@ grep "dunning retry skipped — upstream transient" log | jq '{run_id, invoice_i
 ```
 
 ```sql
--- Retries that reached Stripe in the last hour
+-- Retries recorded in the last hour
 SELECT count(*) FROM invoice_dunning_events
 WHERE event_type = 'retry_attempted' AND created_at > now() - interval '1 hour';
 ```

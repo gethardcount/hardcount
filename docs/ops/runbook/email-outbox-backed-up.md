@@ -24,6 +24,8 @@ up on. Back to the [runbook index](index.md).
   - `554 Message rejected: Email address is not verified` (AWS SES): the
     sender is not verified with the relay. In the SES sandbox the
     recipient must be verified too.
+  - `550 The from address does not match a verified Sender Identity`
+    (SendGrid): the sender is not verified with the relay.
   - `535`: the relay rejected the SMTP username or password, often after a
     credential rotation.
   - `454`: the relay's sending quota or rate is used up, as in the SES
@@ -34,9 +36,10 @@ up on. Back to the [runbook index](index.md).
   with `cause="max_attempts"`.
 - **The address can never get mail.** It bounced, it is suppressed after an
   earlier bounce, or it is not a valid address. These are dead-lettered at
-  once, with `cause="permanent"`. A bounce is a reply from 550 to 553, or
-  one with a `5.1.x` or `5.2.x` status (an address or mailbox problem).
-  Every other reply is retried.
+  once, with `cause="permanent"`. A bounce is the relay's answer to the
+  recipient address: 550 to 553 without a `5.7.x` status, or any 5xx with
+  a `5.1.x` or `5.2.x` status. A refusal of the sender or of the message
+  is retried, whatever its code.
 - **The sending job is stopped or behind.** Due emails wait, and the oldest
   due age grows. One replica sends about 20 to 30 emails a minute, so a
   billing day that queues many invoice emails at once takes a while to
@@ -92,9 +95,10 @@ customer's email or CC list (or the member's email) and send again.
    `SMTP_USERNAME` and `SMTP_PASSWORD`, raise the relay's quota, or set
    `SMTP_HOST`. Velox reads the `SMTP_*` settings at start-up, so restart it
    after changing them.
-2. Once the relay accepts mail, the job drains the queue on its own.
-   Pending rows are sent on their `next_attempt_at` schedule.
-3. To recover faster, set `next_attempt_at` to now for every pending row:
+2. Once the relay accepts mail, run step 3. Otherwise each pending email
+   waits for its next try, up to 12 hours away, and
+   `velox_email_outbox_failing_emails` keeps paging until then.
+3. Set `next_attempt_at` to now for every pending row:
 
    ```sql
    UPDATE email_outbox SET next_attempt_at = now()
@@ -106,20 +110,30 @@ customer's email or CC list (or the member's email) and send again.
 
    ```sql
    -- status = 'failed' keeps this off emails that are being sent or were sent.
+   -- attempts >= 15 keeps it to emails that ran out of tries.
    UPDATE email_outbox
    SET status = 'pending', attempts = 0, next_attempt_at = now()
-   WHERE status = 'failed'
+   WHERE status = 'failed' AND attempts >= 15
+     AND email_type NOT IN ('password_reset', 'payment_setup_link', 'payment_setup_request')
      AND created_at > now() - interval '7 days';
    ```
 
    - A failed row keeps its links and PDF, so it can be sent again.
-   - An address that bounced fails again at once. Fix the customer's email
-     first.
+   - Emails that failed at once are left out: a bounce, or a suppressed or
+     invalid address. A requeued email goes to the address saved in it, so
+     it would fail again. Fix the customer's email, then send the email
+     again from the dashboard.
+   - Password resets and payment setup emails are left out: their links
+     expired before the emails ran out of tries (a reset link after 1 hour,
+     a setup link after 24 hours). The user asks for a new reset with
+     **Forgot password?**; send a new setup link from the customer's or the
+     invoice's page.
    - A payment reminder whose invoice was paid since is skipped, not sent.
    - To accept the loss instead, tell the affected customers.
 
 ## Verify
 
-`velox_email_outbox_failing_emails` falls to 0,
+`velox_email_outbox_failing_emails` falls to 0 as the pending emails are
+sent,
 `velox_email_outbox_oldest_due_age_seconds` stays near 0, and
 `velox_email_outbox_dead_lettered_total` stops rising.

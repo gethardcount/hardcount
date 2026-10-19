@@ -258,6 +258,15 @@ func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) erro
 	return nil
 }
 
+// recipientReplyError marks the server's answer to RCPT TO, the one SMTP
+// step that names a recipient. deliver wraps that step's error in it; a
+// refusal at any other step is about the sender or the message, and
+// isPermanentSMTPBounce never reads it as the customer's bounce.
+type recipientReplyError struct{ err error }
+
+func (e recipientReplyError) Error() string { return e.err.Error() }
+func (e recipientReplyError) Unwrap() error { return e.err }
+
 // isPermanentSMTPBounce checks an SMTP send error for a
 // recipient-rejection permanent-failure reply — the recipient address
 // itself is bad, so flagging the customer's email as bounced is the
@@ -267,7 +276,16 @@ func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) erro
 // customer to bounced would block future legitimate sends as soon as
 // the operator fixes their config.
 //
-// Classification per RFC 5321 + RFC 3463:
+// Only the reply to RCPT TO can be a bounce. A refusal after MAIL FROM or
+// after the message is about the sender or the message, whatever its
+// code: SendGrid answers an unverified sender after the message with
+// "550 The from address does not match a verified Sender Identity.", no
+// status code, and a 5.1.x status after MAIL FROM (553 5.1.8, the sender's
+// domain does not exist) names the sender's address. Read as bounces they
+// dead-lettered the email at once and marked every customer bounced, so
+// no relay-broken alert fired and fixing the relay did not unblock them.
+//
+// Classification of the RCPT TO reply, per RFC 5321 + RFC 3463:
 //
 //	Basic 5xx codes that ARE recipient bounces:
 //	  550 - mailbox unavailable / no such user
@@ -309,8 +327,12 @@ func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) erro
 // manual recovery — much worse, so the classifier is conservative
 // toward "not a bounce."
 func isPermanentSMTPBounce(err error) (bool, string) {
+	var rcpt recipientReplyError
+	if !errors.As(err, &rcpt) {
+		return false, ""
+	}
 	var reply *textproto.Error
-	if !errors.As(err, &reply) {
+	if !errors.As(rcpt.err, &reply) {
 		return false, ""
 	}
 	// A 4xx reply is transient even when its text quotes a 5.x.x status.
@@ -973,8 +995,10 @@ func (s *Sender) deliver(ctx context.Context, tenantID, to string, cc []string, 
 	if err := c.Mail(s.from); err != nil {
 		return fmt.Errorf("smtp mail from: %w", err)
 	}
+	// Only RCPT TO errors are wrapped as recipientReplyError: no other
+	// step's refusal is the recipient's bounce (see isPermanentSMTPBounce).
 	if err := c.Rcpt(to); err != nil {
-		return fmt.Errorf("smtp rcpt to: %w", err)
+		return fmt.Errorf("smtp rcpt to: %w", recipientReplyError{err})
 	}
 	for _, addr := range cc {
 		if err := c.Rcpt(addr); err != nil {
@@ -986,7 +1010,7 @@ func (s *Sender) deliver(ctx context.Context, tenantID, to string, cc []string, 
 				// never to the primary.
 				slog.Warn("smtp rcpt rejected for cc recipient — dropped from this send",
 					"cc", addr, "code", proto.Code, "error", err)
-				s.reportBounceIfPermanent(ctx, tenantID, addr, err)
+				s.reportBounceIfPermanent(ctx, tenantID, addr, recipientReplyError{err})
 				continue
 			}
 			// Transport/IO failure: nothing has been delivered (DATA not
