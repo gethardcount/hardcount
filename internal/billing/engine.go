@@ -1614,6 +1614,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		return TaxApplication{}, fmt.Errorf("settings store not wired")
 	}
 
+	subtotal = commitInvoiceSubtotal(lineItems, subtotal)
 	app := TaxApplication{
 		SubtotalCents: subtotal,
 		DiscountCents: discount,
@@ -1653,6 +1654,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		return TaxApplication{}, refuse(refusalTaxProvider, fmt.Errorf("resolve tax provider: %w", err))
 	}
 	app.TaxProvider = provider.Name()
+	commitReason := commitLineTaxReason(provider.Name())
 
 	var profile domain.CustomerBillingProfile
 	if e.profiles != nil && customerID != "" {
@@ -1702,6 +1704,22 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		return TaxApplication{}, err
 	}
 
+	// An invoice that only sells prepaid credit has nothing to tax (the
+	// purchase is an advance payment; ADR-078 amendment 2026-10-19). Every
+	// other line reaches the request, so an empty request over a non-empty
+	// invoice means every line is a commit line. The provider is not asked:
+	// there is nothing to calculate, so a provider outage cannot hold the
+	// invoice as pending, and a customer's exemption or reverse-charge status
+	// is not printed on a sale that is untaxed for another reason.
+	if len(reqLines) == 0 && len(lineItems) > 0 {
+		for i := range lineItems {
+			if lineItems[i].IsCommitLine() {
+				stampUntaxedCommitLine(&lineItems[i], commitReason)
+			}
+		}
+		return app, nil
+	}
+
 	req := tax.Request{
 		Currency: currency,
 		CustomerAddress: tax.Address{
@@ -1733,6 +1751,10 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		slog.Warn("tax: provider calculation failed, deferring invoice",
 			"error", err, "tenant_id", tenantID, "provider", provider.Name())
 		for i := range lineItems {
+			if lineItems[i].IsCommitLine() {
+				stampUntaxedCommitLine(&lineItems[i], commitReason)
+				continue
+			}
 			lineItems[i].TaxRate = 0
 			lineItems[i].TaxAmountCents = 0
 			lineItems[i].TotalAmountCents = lineItems[i].AmountCents
@@ -1786,10 +1808,16 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	// split rule); with no negative lines it is the provider's positional
 	// result unchanged. An empty Ref marks a line the provider never
 	// produced — leave that line item untouched, as the positional loop
-	// always has.
+	// always has. A commit line was never sent: it is stamped untaxed, and
+	// its price counts toward the net subtotal as it stands.
 	expanded := expandTaxResultLines(res.Lines, lineGroups, lineItems)
 	var netSubtotalSum int64
 	for i := range lineItems {
+		if lineItems[i].IsCommitLine() {
+			stampUntaxedCommitLine(&lineItems[i], commitReason)
+			netSubtotalSum += lineItems[i].AmountCents
+			continue
+		}
 		if i >= len(expanded) {
 			break
 		}

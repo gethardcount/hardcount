@@ -18,6 +18,8 @@ Set it in the dashboard under **Settings → Tax → Tax calculation → Tax pro
 | **Manual (flat rate)** | One rate on every line of every invoice, with a name you choose, such as "VAT" or "Sales Tax". | You sell in one place with one legal rate, or you have not set up Stripe Tax. |
 | **Stripe Tax** | Stripe works out the rate for each customer's location, and records each invoice in Stripe's tax reports. | You sell in several countries or US states, or you need Stripe's tax reports to include Velox's invoices. Needs Stripe connected under **Settings → Payments**. |
 
+One line is never taxed under any provider: a prepaid-commit purchase. It is not sent to Stripe Tax either, so a commit-only invoice has no Stripe Tax record. The usage the credit pays for is taxed when it is invoiced ([why](../ai-pricing.md#tax-on-prepaid-credit)).
+
 Velox never switches to another provider by itself. If Stripe Tax fails, the invoice waits; it is not issued at a guessed rate.
 
 ### Manual (flat rate)

@@ -7559,7 +7559,10 @@ export interface components {
              * @description Stripe-canonical structured `taxability_reason`
              *     (`standard_rated`, `reverse_charge`, `not_collecting`,
              *     `customer_exempt`, `product_exempt`, `zero_rated`, etc.).
-             *     Empty for non-Stripe providers.
+             *     `prepaid_credit_purchase` is Velox's own value, on a prepaid
+             *     commit purchase line under the manual or Stripe Tax provider:
+             *     the line is not taxed, and the usage the credit pays for is
+             *     taxed when invoiced. Otherwise empty for non-Stripe providers.
              */
             tax_reason?: string;
             /** Format: int64 */

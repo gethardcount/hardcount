@@ -1261,11 +1261,11 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 		return domain.Invoice{}, errs.ErrNotFound
 	}
 	inv := m.invoices[idx]
+	// Mirrors invoice.PostgresStore.UpdateTaxAtomic: draft is the only gate
+	// (the pending/failed rule is the engine's retry policy, and the operator
+	// finalize computes over an 'ok' draft), and it writes the same columns.
 	if inv.Status != domain.InvoiceDraft {
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf("invoice must be draft (current: %s)", inv.Status))
-	}
-	if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
-		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf("tax retry requires pending/failed (current: %s)", inv.TaxStatus))
 	}
 	byID := make(map[string]domain.InvoiceLineItem, len(lineItems))
 	for _, li := range lineItems {
@@ -1279,6 +1279,9 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 			m.lineItems[i].TaxRate = updated.TaxRate
 			m.lineItems[i].TaxAmountCents = updated.TaxAmountCents
 			m.lineItems[i].TotalAmountCents = updated.TotalAmountCents
+			m.lineItems[i].TaxJurisdiction = updated.TaxJurisdiction
+			m.lineItems[i].TaxCode = updated.TaxCode
+			m.lineItems[i].TaxabilityReason = updated.TaxabilityReason
 		}
 	}
 	inv.TaxAmountCents = update.TaxAmountCents
@@ -1294,7 +1297,12 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 	inv.TaxDeferredAt = update.TaxDeferredAt
 	inv.TaxPendingReason = update.TaxPendingReason
 	inv.TaxErrorCode = update.TaxErrorCode
-	inv.TaxRetryCount++
+	if !update.InitialAttempt {
+		inv.TaxRetryCount++
+	}
+	inv.TaxNextRetryAt = update.TaxNextRetryAt
+	inv.SubtotalCents = update.SubtotalCents
+	inv.DiscountCents = update.DiscountCents
 	inv.TotalAmountCents = update.TotalAmountCents
 	due := inv.TotalAmountCents - inv.AmountPaidCents - inv.CreditsAppliedCents
 	if due < 0 {

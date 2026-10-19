@@ -1,6 +1,6 @@
 # ADR-078: Prepaid commits + drawdown, phase 1
 
-**Status:** Accepted (2026-07-05; amended 2026-08-04; supplemented by [ADR-080](080-paid-commit-cn-relief.md) on 2026-07-06)
+**Status:** Accepted (2026-07-05; amended 2026-08-04 and 2026-10-19; supplemented by [ADR-080](080-paid-commit-cn-relief.md) on 2026-07-06)
 **Context:** `docs/design/prepaid-commits.md` (the locked design — peer-swept
 across Metronome/Lago/Stripe/AI-infra with adversarial quote-verification,
 then a 6-lens adversarial design panel; this ADR records the decisions, the
@@ -19,7 +19,9 @@ paid commit is refunded at the price paid through a relief credit note
 ([ADR-080](080-paid-commit-cn-relief.md)). Amended
 2026-08-04: the attention dashboard flags an unpaid commit invoice whose
 credit is still live (`commit_exposure`), and holding credit until payment
-stays deferred until a self-serve or auto-top-up build exists.
+stays deferred until a self-serve or auto-top-up build exists. Amended
+2026-10-19: the purchase of a commit is not taxed; the usage the credit pays
+for is taxed when it is invoiced, so tax is charged once.
 
 ## Decision
 
@@ -206,3 +208,103 @@ https://docs.metronome.com/launch-guides/prepaid-credits/
 have rested on: for negotiated Net-30 B2B the invoice is the commercial
 event and the customer expects to draw on day one. The peer evidence now
 corroborates that rather than being asked to carry it.
+
+## Amendment 2026-10-19 — the purchase is not taxed; the usage it pays for is
+
+Issue [#1271](https://github.com/getvelox/velox/issues/1271). With a tax
+provider on, a prepaid commit was taxed twice. The commit line was taxed on
+the purchase invoice like any other line. Later usage invoices were taxed
+again, and the credit paid their `amount_due`, which includes that tax. At
+20% tax, a customer paid $12,000 for $10,000 of credit, and each $1,000 of
+usage then drew $1,200 of it, so the credit covered about $8,333 of usage.
+The account reported tax on about $18,333 (the $10,000 purchase and the
+$8,333 of usage) for $8,333 of service.
+
+**Decision: the Lago model.** Buying credit is an advance payment, not a
+sale of a service. The commit line is left out of the tax request. It
+carries tax 0 and `tax_reason = 'prepaid_credit_purchase'`, and the PDF says
+why. Under the `none` provider the account collects no tax, so the line
+carries no reason and the invoice says nothing about it. The usage is taxed
+when it is invoiced, and the credit pays that invoice with its tax, as
+before. Lago, verified 2026-10-19:
+
+> "Taxes do not apply to credit purchases, which are considered as advance
+> payments."
+> — https://getlago.com/docs/guide/wallet-and-prepaid-credits/wallet-top-up-and-void
+
+> "They are deducted from the post-tax subtotal, after any credit notes have
+> been applied."
+> — https://getlago.com/docs/guide/wallet-and-prepaid-credits/overview
+
+**Why not Stripe's model.** The other option was to tax the purchase and
+apply credit before tax, as Stripe applies billing credits: "Credit grants
+apply to invoices after discounts, but before taxes" ([billing
+credits](https://docs.stripe.com/billing/subscriptions/usage-based/billing-credits),
+verified 2026-10-19). In Velox, credit is a cash offset applied after tax:
+it pays `min(amount_due, balance)`, and `amount_due` includes tax. Applying
+it before tax would change every invoice that credit pays, not only commit
+invoices. Lago's model fits the ledger as it is and changes one place.
+
+**Where it is enforced.** `collapseTaxRequestLines`
+(`internal/billing/tax_lines.go`) builds every tax request, for every path:
+the operator's finalize of a manual invoice, the retry family (operator
+retry, the tax-retry reconciler), and the engine's cycle, threshold, cancel
+and proration invoices. Commit lines exist only on manual invoices, so in
+practice the finalize and retry paths are the ones that see them.
+`ApplyTaxToLineItems` stamps the commit line untaxed. An invoice with only a
+commit line does not call the provider at all. An invoice with a commit line
+is taxed from the sum of its lines, not its stored subtotal
+(`commitInvoiceSubtotal`). A tax-inclusive draft computed before this change
+stored its subtotal with the commit line carved to net, while its lines kept
+the price entered; finalized now, it is invoiced at that price.
+
+**Consequences.**
+
+- A commit invoiced after this change has no tax calculation or Stripe Tax
+  transaction for its commit line. The usage it pays for is reported when
+  invoiced.
+- Refunding unused credit through relief (ADR-080) reverses no tax on these
+  commits: relief derives its tax from the purchase invoice's own tax, which
+  is 0. A commit invoiced before this change carried tax, and relief still
+  reverses its share.
+- Voiding an unpaid commit-only invoice has no tax transaction to reverse.
+  A mixed invoice under Stripe Tax still has a transaction for its other
+  lines, and voiding reverses it as before.
+- The credit pays each usage invoice with its tax, so with tax on it covers
+  less usage than its face value. At 20%, $10,000 of credit pays for about
+  $8,333 of usage and $1,667 of tax. That was already so. What changed is
+  that the purchase is no longer taxed as well.
+- On a discounted commit the usage is taxed at its list price, which is
+  more than the customer paid for the credit. At 10%, $10,000 of credit sold
+  for $9,000 pays for about $9,091 of usage, and all of it is taxed. Some
+  voucher rules tax the use of credit on the price paid for it instead. One
+  to check is the EU rule for multi-purpose vouchers (Article 73a of
+  Directive 2006/112/EC; not quoted here). Trigger: an account
+  sells discounted commits where the use of credit is taxed on the price
+  paid.
+- No discount reaches an invoice with a commit line today: nothing writes a
+  discount on a manual invoice. So the tax request's discount is not split
+  between the commit line and the taxed lines. Trigger: anything that lets a
+  manual invoice carry a discount must split it first, or the whole discount
+  lowers the taxed lines' base.
+- Issued invoices are not changed.
+
+**Tax rules for prepayments differ by country.** Some countries tax a
+prepayment when it is received. Others tax it when the service is used, or
+treat credit usable for several services as a voucher taxed on use. An
+account should check with its tax adviser:
+
+- whether its country taxes prepaid credit when it is bought or when it is
+  used;
+- whether that depends on what the credit can be spent on;
+- if it sells credit below face value, whether the use of the credit is
+  taxed on the price paid or on the usage (Velox taxes the usage);
+- what its invoices must say about an untaxed prepayment.
+
+Velox has no setting to tax the purchase instead. Trigger to build one: an
+account whose country taxes prepaid credit when it is bought, selling
+commits with tax on.
+
+**Promotional credit is unchanged.** Free promotional credit also pays the
+tax on the usage it covers. Whether it should apply before tax is a separate
+decision. Trigger: a partner uses promotional credit with tax on.
