@@ -167,7 +167,7 @@ var (
 	staleChargeHoldResolutions = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_stale_charge_hold_resolutions_total",
-			Help: "Stale charge holds checked with Stripe (ADR-127), by result: settled, adopted, canceled, released, cleared, failed, cannot_ask, lost_race.",
+			Help: "Stale charge holds checked with Stripe (ADR-127), by result: settled, adopted, canceled, waiting, released, cleared, failed, cannot_ask, lost_race.",
 		},
 		[]string{"result"},
 	)

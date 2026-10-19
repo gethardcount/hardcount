@@ -21,7 +21,9 @@ action does not run either. Write-off is the one action allowed on a stale
 hold. One sweep in the payment reconciler asks Stripe what the lost charge
 did. It records a payment it finds, adopts one still processing, and cancels
 an off-session one stuck waiting on the customer. When Stripe has nothing, it
-clears the hold. A lost result is resolved within about 70 minutes. No migration.
+clears the hold. A lost result is checked on the first billing tick at least
+10 minutes after its hold ends: with the hourly tick, usually within about an
+hour (R6). No migration.
 
 ## Context
 
@@ -90,28 +92,43 @@ refuse a stale hold as they refuse a live one; a cancel's or plan swap's
 prebill void too (it rolls back and is retried). Write-off is allowed on a
 stale hold. Collect answers 409 `payment_in_flight` with the same words.
 
-**Settles without a charge release.** The zero-due settle and the refresh
+**Paths that send no charge release.** The zero-due settle and the refresh
 failure in the auto-charge sweep, the credit-covered settle in the dunning
-retry, and Collect's credit-covered settle all release their hold.
+retry, and Collect's credit-covered settle all release their hold. So does a
+charge that sent nothing to Stripe: its re-check refused, the breaker was
+open (it refuses before any request), or the credentials could not be read.
+The breaker is shared by every tenant; kept, one 30-second open window held
+every invoice charged in it until the sweep reached it. A 429 keeps the hold:
+stripe-go resends after a network error, and a 429 to the resend can hide a
+first request Stripe is still running. A release runs to completion even
+after its caller's context ends (a closed tab, a shutdown).
 
 **The sweep** (`Reconciler.sweepStaleChargeHolds`, first in `Run`, on the
 billing leader). It lists invoices of any status whose hold ended at least
-10 minutes ago, rotating by `provider_synced_at`. For each, it lists the
-Stripe customer's PaymentIntents created since an hour before the hold,
-through List, never Search, and directly, never through the charge breaker.
-It keeps the ones whose `velox_invoice_id` is this invoice, then:
+10 minutes ago, open invoices (finalized, pending or failed) first, then
+rotating by `provider_synced_at`. It drains: page after page, each hold
+checked once, until none is left. It stops early when its 5-minute budget for
+the mode is spent, or after three Stripe reads in a row failed in a way that
+may heal; the rest wait for the next tick. Each check's Stripe calls are cut
+at 45 seconds (stripe-go alone allows about 90 s a page while Stripe is
+unreachable). For each hold, it lists the Stripe customer's PaymentIntents
+created since an hour before the hold, through List, never Search, and
+directly, never through the charge breaker. It keeps the ones whose
+`velox_invoice_id` is this invoice, then:
 
 | Found | Does |
 |---|---|
-| succeeded, not refunded in full | settles every one, oldest first (the first pays the invoice, each later one raises `payment.duplicate_charge`, money on a voided invoice raises `payment.received_on_voided_invoice`); clears |
+| succeeded, not refunded in full | settles every one, oldest first (the first pays the invoice, each later one raises `payment.duplicate_charge`, money on a voided invoice raises `payment.received_on_voided_invoice`); clears, unless a processing one the invoice does not follow is left (next rows) |
 | succeeded, refunded in full | counts it as not paid (ERROR log) |
-| processing, invoice open | stamps it on the invoice (`processing`), so the webhook and the processing sweep take over; clears |
+| processing, invoice open | stamps the newest on the invoice (`processing`), so the webhook and the processing sweep take over; clears |
+| processing, and the invoice is already processing or `unknown` with that same PaymentIntent | clears: the processing or unknown sweep follows it |
+| processing, any other (the invoice written off, voided or paid meanwhile; a second one) | keeps the hold, stamped, until it ends: a later check settles it or flags it. Cleared, nothing would record it if its webhook were lost |
 | Velox off-session `requires_*` not already the invoice's in-flight payment | cancels it at Stripe; keeps the hold for the next check |
 | nothing else, invoice open | clears and moves the counter (a fresh key for the next charge) |
 | nothing else, any other status | clears |
 | no Stripe customer on file | as "nothing": no charge can have been sent |
-| a read that may succeed later | keeps; stamps the row so it rotates |
-| Stripe not connected, key rejected, customer not in the account | keeps on an open invoice (ERROR every check; write-off is the exit); clears on a closed one |
+| a read that may succeed later | keeps; stamps the row so it rotates (not an `unknown` invoice: see below) |
+| Stripe not connected, key rejected (401) or without permission (403), customer not in the account | keeps on an open invoice (ERROR every check; write-off is the exit); clears on a closed one |
 
 ## Why this design
 
@@ -170,28 +187,48 @@ this deploy, and works for the hosted page's PaymentIntents.
 - **R2.** Credit notes, operator and automatic, are not held by a stale hold.
   A payment found later is flagged (`payment.duplicate_charge` or
   `payment.amount_mismatch`), not silent.
-- **R3.** A cancel or plan-swap void of an unused prebill is refused for up to
-  about 70 minutes after a lost charge (was 5 minutes); the caller retries.
+- **R3.** A cancel or plan-swap void of an unused prebill is refused while
+  that prebill holds a lost charge's hold (R6; was 5 minutes). The cancel or
+  swap rolls back, and the retry depends on who asked:
+  - an operator's cancel or swap answers 409 and is retried by hand;
+  - the scheduled-cancel scan retries on its next tick;
+  - dunning's final cancel is re-attempted 24 hours later (its failed-action
+    retry), not after the hour.
+
+  Dunning's own invoice is never the one refused. The final action does not
+  run while that invoice's hold is set, and it runs the cancel as that hold's
+  owner.
 - **R4.** A charger frozen after its re-check (a VM pause) can still send
   late; a later success is flagged as a duplicate.
 - **R5.** During a mixed-version rolling deploy, old replicas treat an expired
   hold as free until the rollout ends.
-- **R6.** The wait: up to about 70 minutes after a lost result (the hourly
-  tick plus 10 minutes). Meanwhile the dashboard shows Pending or Failed and
-  refusals say the charge is being confirmed with Stripe.
-- **R7.** One list call per hold left by `processing`, unknown, the breaker or
-  a 429. Old leftover holds drain through the rotating limit after deploy.
+- **R6.** The wait. A hold is checked on the first billing tick that starts
+  at least 10 minutes after it ends. With the hourly tick that is within about
+  75 minutes of the claim. Add the run time of a tick already under way when
+  the hold ends, since the sweep runs at the start of a tick. It takes longer
+  only when Stripe cannot be read, or when more stale holds are queued than
+  one run's 5-minute budget covers (open invoices go first). Meanwhile the dashboard shows
+  Pending or Failed, and refusals say the charge is being confirmed with
+  Stripe, "within about an hour".
+- **R7.** One list call per hold left by `processing`, unknown or a 429. Old
+  leftover holds (every expired hold, in any status, at deploy) drain through
+  the budgeted runs after deploy, open invoices first.
 - **R8.** A lost success from before the deploy, already re-claimed under the
   old rules, leaves no trace. A hold still set at deploy is found.
 - **R9.** An invoice whose Stripe customer was deleted, or whose tenant
   disconnected Stripe, can only be written off while its hold is set; an ERROR
   is logged every check until then.
 - The sweep's scan has no index on `auto_charge_claimed_until` (no
-  migration); it runs once per mode per tick. Add a partial index if it shows
-  up in query timings.
-- A failed check is retried after 30 minutes (`staleHoldRecheckAfter`), not
-  the hour ADR-108's search waits, so a stamp taken during one hourly tick
-  does not hide the row from the next.
+  migration); it runs once per page of 50 per mode per tick. Add a partial
+  index if it shows up in query timings.
+- A kept hold is stamped (`provider_synced_at`) and checked again after 30
+  minutes (`staleHoldRecheckAfter`), not the hour ADR-108's search waits, so a
+  stamp taken during one hourly tick does not hide the row from the next. The
+  stamp means "Velox last asked Stripe", whether or not Stripe answered. An
+  `unknown` invoice is never stamped by this sweep: the column is the unknown
+  sweep's rotation key and the parked search's cool-off, and those stamp it
+  themselves. Stamped here, a parked invoice whose check could not run (its
+  Stripe customer gone) was hidden from the search on every tick.
 - Not in this ADR: unclear answers with no PaymentIntent id still park when
   the caller's context is alive (follow-up B, ADR-107). A recorded off-session
   `requires_*` PaymentIntent still never ends (follow-up C).
@@ -208,7 +245,10 @@ this deploy, and works for the hosted page's PaymentIntents.
   (`chargeInvoice`).
 - Tests: `internal/payment/stale_hold_integration_test.go` (real Postgres, a
   fault-injecting Stripe fake), `internal/dunning/stale_hold_integration_test.go`,
-  `internal/payment/stripe_client_list_test.go`.
+  `internal/billing/dunning_cancel_voids_prebill_integration_test.go`,
+  `internal/invoice/stale_hold_store_integration_test.go`,
+  `internal/payment/stripe_client_list_test.go`,
+  `internal/payment/charge_nothing_sent_test.go`.
 - Stripe: [Search, data freshness](https://docs.stripe.com/search#data-freshness),
   [List PaymentIntents](https://docs.stripe.com/api/payment_intents/list),
   [Idempotent requests](https://docs.stripe.com/api/idempotent_requests).

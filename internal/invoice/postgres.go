@@ -2245,6 +2245,11 @@ func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool
 // again (#976). Shared by every claim so they cannot drift apart.
 const chargeHoldFree = `auto_charge_claimed_until IS NULL`
 
+// chargeHoldReleaseTimeout bounds a release detached from its caller's
+// context (ReleaseChargeHold): one UPDATE, so a stalled database cannot hold
+// a request or a shutdown for longer than this.
+const chargeHoldReleaseTimeout = 10 * time.Second
+
 // chargeHoldTTLSecs is domain.ChargeHoldTTL in the form the claims' SQL takes,
 // so the TTL has one source (TestChargeHoldTiming pins the relations).
 var chargeHoldTTLSecs = domain.ChargeHoldTTL.Seconds()
@@ -2321,16 +2326,25 @@ func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string
 // only trace that its charge may have been sent.
 //
 // Owners call it on paths that provably never reached Stripe (credit-apply
-// failure, no payment method, a settle that needed no charge), after a
+// failure, no payment method, a settle that needed no charge, the charge's
+// re-check refusing, the breaker open, unreadable credentials), after a
 // DEFINITE outcome (a decline, a settled success), and dunning's final action
-// after its subscription action. An unclear outcome (timeout, unknown,
-// breaker, 429) never releases: the call may have reached Stripe, and the
-// stale-hold sweep asks Stripe before anything can charge again. No
-// updated_at write (see ClaimAutoCharge).
+// after its subscription action. An unclear outcome (timeout, unknown, 429)
+// never releases: the call may have reached Stripe, and the stale-hold sweep
+// asks Stripe before anything can charge again. No updated_at write (see
+// ClaimAutoCharge).
+//
+// It runs to completion even when the caller's context has ended: Collect
+// releases on the request's context (an operator closing the tab) and the
+// auto-charge sweep on the tick's (a shutdown). A release lost that way left
+// an invoice whose charge was never sent refused by every charge, void and
+// offline payment until the stale-hold sweep asked Stripe, an hour or more.
 func (s *PostgresStore) ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error {
 	if !hold.Held() {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chargeHoldReleaseTimeout)
+	defer cancel()
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
@@ -2486,10 +2500,11 @@ func (s *PostgresStore) ClaimChargeHoldForFinalAction(ctx context.Context, tenan
 }
 
 // staleHoldRecheckAfter is how long a checked hold waits before the sweep
-// asks Stripe about it again. Every check stamps provider_synced_at, so a
-// hold whose check failed rotates to the back of the queue instead of heading
-// it forever (the 0167 rotation). Shorter than the hourly production tick on
-// purpose: a stamp taken during one tick must not hide the row from the next.
+// asks Stripe about it again. A kept hold's check stamps provider_synced_at
+// (MarkStaleHoldChecked), so a hold whose check failed rotates to the back of
+// the queue instead of heading it forever (the 0167 rotation). Shorter than
+// the hourly production tick on purpose: a stamp taken during one tick must
+// not hide the row from the next.
 const staleHoldRecheckAfter = 30 * time.Minute
 
 // ListStaleChargeHolds is the stale-hold sweep's input (ADR-127): invoices
@@ -2502,9 +2517,16 @@ const staleHoldRecheckAfter = 30 * time.Minute
 // TxBypass across tenants with an explicit livemode, like
 // ListParkedSearchable. Not gated on is_simulated: the hold is always written
 // on the database's wall clock, and a lost simulated charge is as real at
-// Stripe as any other (ADR-030's payment-sync exception). Oldest check first
-// (never-checked first), then oldest hold.
-func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int) ([]domain.StaleChargeHold, error) {
+// Stripe as any other (ADR-030's payment-sync exception).
+//
+// Open invoices (finalized, pending or failed) first: only their holds refuse
+// anyone (charges, the hosted page, void, offline payment, dunning), so when
+// the sweep's time budget cuts a run, a settled invoice's leftover hold never
+// takes an open one's place. Then oldest check first (never-checked first),
+// then oldest hold. skip is the ids the sweep has already checked in this
+// run: it reads page after page and checks each hold once, even one it could
+// not stamp.
+func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, skip []string) ([]domain.StaleChargeHold, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -2514,6 +2536,8 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int) ([]
 	if limit <= 0 {
 		limit = 50
 	}
+	// COALESCE: a nil skip list can reach Postgres as NULL, and
+	// NOT (id = ANY(NULL)) would filter out every row (see postgres.StringArray).
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedInvCols("i")+`, i.auto_charge_claimed_until, COALESCE(c.stripe_customer_id, '')
 		FROM invoices i
@@ -2521,9 +2545,11 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int) ([]
 		WHERE i.auto_charge_claimed_until < now() - make_interval(secs => $1)
 		  AND i.livemode = $2
 		  AND (i.provider_synced_at IS NULL OR i.provider_synced_at < now() - make_interval(secs => $3))
-		ORDER BY i.provider_synced_at ASC NULLS FIRST, i.auto_charge_claimed_until ASC
+		  AND NOT (i.id = ANY(COALESCE($5::text[], '{}')))
+		ORDER BY (i.status = 'finalized' AND i.payment_status IN ('pending', 'failed')) DESC,
+		         i.provider_synced_at ASC NULLS FIRST, i.auto_charge_claimed_until ASC, i.id ASC
 		LIMIT $4
-	`, domain.StaleChargeHoldWait.Seconds(), postgres.Livemode(ctx), staleHoldRecheckAfter.Seconds(), limit)
+	`, domain.StaleChargeHoldWait.Seconds(), postgres.Livemode(ctx), staleHoldRecheckAfter.Seconds(), limit, postgres.StringArray(skip))
 	if err != nil {
 		return nil, err
 	}
@@ -2591,6 +2617,13 @@ func (s *PostgresStore) ClearStaleChargeHold(ctx context.Context, tenantID, id s
 // time: provider_payment_status stays the verbatim PaymentIntent status the
 // payment sweeps last read, and no money column or updated_at is touched
 // (see RecordProviderSync).
+//
+// Not on an 'unknown' invoice. There the column is the unknown sweep's
+// rotation key and the parked search's cool-off (ADR-108), and those sweeps
+// stamp it on every check of their own. The stale sweep runs first in each
+// tick, so its stamp hid a parked invoice from the search on every tick
+// whenever the stale check could not run (the Stripe customer gone), though
+// the search finds the payment by velox_invoice_id without the customer.
 func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2598,7 +2631,7 @@ func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id s
 	}
 	defer postgres.Rollback(tx)
 
-	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET provider_synced_at = now() WHERE id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET provider_synced_at = now() WHERE id = $1 AND payment_status <> 'unknown'`, id); err != nil {
 		return err
 	}
 	return tx.Commit()

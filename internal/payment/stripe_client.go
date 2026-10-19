@@ -105,6 +105,12 @@ func humanizeDeclineCode(code string) string {
 // card sends a new one.
 var ErrPaymentTransient = errors.New("payment attempt skipped; upstream breaker open, timeout before Stripe, or Stripe rate limit")
 
+// ErrStripeCredentialsUnavailable is the ErrPaymentTransient for a request
+// that never left: the tenant's Stripe credentials could not be read (a
+// database blip). Unlike a 429 it says nothing could be running at Stripe, so
+// the charge releases its hold (ADR-127).
+var ErrStripeCredentialsUnavailable = fmt.Errorf("%w: stripe credentials could not be read", ErrPaymentTransient)
+
 // isRateLimited reports whether Stripe refused the request with HTTP 429. A
 // real test-mode reply (2026-10-14) is status 429, type "rate_limit_error",
 // code "rate_limit", with no PaymentIntent. Stripe sends 429 only before it
@@ -225,9 +231,10 @@ func classifyStripeError(err error) *PaymentError {
 // actionable signal ("connect Stripe under Settings → Payments").
 var ErrStripeNotConfigured = &PaymentError{Message: "stripe not configured for this mode"}
 
-// ErrStripeAuthFailed marks a read Stripe refused with 401: the tenant's
-// secret key is wrong or revoked. It will not succeed until someone fixes the
-// key, so the stale-hold sweep logs it as a check that cannot run (ADR-127).
+// ErrStripeAuthFailed marks a read Stripe refused with 401 or 403: the
+// tenant's key is wrong or revoked, or is a restricted key without permission
+// to read PaymentIntents. It will not succeed until someone fixes the key, so
+// the stale-hold sweep logs it as a check that cannot run (ADR-127).
 var ErrStripeAuthFailed = errors.New("stripe rejected the API key")
 
 // ErrStripeCustomerMissing marks a read Stripe refused because the customer
@@ -259,10 +266,10 @@ func NewLiveStripeClient(clients *StripeClients) *LiveStripeClient {
 }
 
 // client resolves the Stripe client for ctx: ErrStripeNotConfigured when the
-// tenant has no credentials for this mode, ErrPaymentTransient (nothing was
-// sent to Stripe; retry) when the credentials could not be read. A lookup
-// blip used to read as "not configured" — a definite failure that spent a
-// dunning attempt.
+// tenant has no credentials for this mode, ErrStripeCredentialsUnavailable
+// (an ErrPaymentTransient: nothing was sent to Stripe; retry) when the
+// credentials could not be read. A lookup blip used to read as "not
+// configured" — a definite failure that spent a dunning attempt.
 func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
 	// No Stripe mode configured at all: NewLiveStripeClient returned nil, and
 	// router.go still hands it to the reconciler. The stale-hold sweep can
@@ -274,7 +281,7 @@ func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
 	}
 	sc, err := c.clients.ResolveCtx(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: stripe credential lookup: %v", ErrPaymentTransient, err)
+		return nil, fmt.Errorf("%w: %v", ErrStripeCredentialsUnavailable, err)
 	}
 	if sc == nil {
 		return nil, ErrStripeNotConfigured
@@ -322,11 +329,11 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		if isRateLimited(err) {
 			// Stripe refused this request before processing it, so this
 			// request charged nothing (an earlier one that stripe-go resent
-			// may still be running; see isRateLimited). Treat it like the
-			// breaker short-circuit: no state write, the hold stays, and the
-			// next tick tries again. Classified as an error it would park the
-			// invoice at 'unknown' (an unrecognised type) for a person to
-			// resolve.
+			// may still be running; see isRateLimited). A transient skip: no
+			// state write, and the next tick tries again. Unlike the breaker
+			// short-circuit the hold stays, for that earlier request. Classified
+			// as an error it would park the invoice at 'unknown' (an
+			// unrecognised type) for a person to resolve.
 			return PaymentIntentResult{}, fmt.Errorf("%w: stripe rate limit: %v", ErrPaymentTransient, errs.Scrub(err.Error()))
 		}
 		return PaymentIntentResult{}, classifyStripeError(err)
@@ -586,7 +593,7 @@ func (c *LiveStripeClient) SearchPaymentIntentsByInvoiceID(ctx context.Context, 
 //
 // An error on any page fails the whole read: a partial list is never
 // returned, because a missing page could hold the payment. Errors are typed
-// for the sweep: ErrStripeNotConfigured, ErrStripeAuthFailed (401) and
+// for the sweep: ErrStripeNotConfigured, ErrStripeAuthFailed (401, 403) and
 // ErrStripeCustomerMissing (resource_missing on the customer) will not
 // succeed on retry; anything else (5xx, 429, network, unreadable
 // credentials) may.
@@ -612,13 +619,14 @@ func (c *LiveStripeClient) ListPaymentIntentsForCustomer(ctx context.Context, st
 }
 
 // classifyListError types a failed PaymentIntent list for the stale-hold
-// sweep: a 401 and a missing customer will not heal on retry; everything else
-// is classifyStripeError's, which the sweep retries.
+// sweep: a 401, a 403 (a restricted key without PaymentIntent read access)
+// and a missing customer will not heal on retry; everything else is
+// classifyStripeError's, which the sweep retries.
 func classifyListError(err error) error {
 	var se *stripe.Error
 	if errors.As(err, &se) {
 		switch {
-		case se.HTTPStatusCode == http.StatusUnauthorized:
+		case se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden:
 			return fmt.Errorf("%w: %s", ErrStripeAuthFailed, errs.Scrub(se.Msg))
 		case se.Code == stripe.ErrorCodeResourceMissing && (se.Param == "customer" || strings.Contains(se.Msg, "customer")):
 			return fmt.Errorf("%w: %s", ErrStripeCustomerMissing, errs.Scrub(se.Msg))

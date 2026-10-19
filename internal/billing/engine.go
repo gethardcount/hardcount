@@ -5246,8 +5246,14 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 			continue
 		}
 		// Every path below that sends no charge releases the hold (by its
-		// token): left set, it would wait for the stale-hold sweep.
-		release := func() { _ = e.invoices.ReleaseChargeHold(ctx, inv.TenantID, inv.ID, hold) }
+		// token): left set, it would wait for the stale-hold sweep. The store
+		// runs the release even after a shutdown ends ctx.
+		release := func() {
+			if err := e.invoices.ReleaseChargeHold(ctx, inv.TenantID, inv.ID, hold); err != nil {
+				slog.Warn("auto-charge: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
+					"invoice_id", inv.ID, "error", err)
+			}
+		}
 		// Work from the row as it is now, not the list snapshot: a rival
 		// collector may have applied credits or sent the no-payment-method
 		// email (and stamped no_pm_notified_at) between the list and the claim.

@@ -23,7 +23,7 @@ type mockReconcileStore struct {
 
 // The stale-hold sweep's store methods: these unit tests hold no stale
 // holds (the sweep is pinned on real Postgres, stale_hold_integration_test.go).
-func (m *mockReconcileStore) ListStaleChargeHolds(context.Context, int) ([]domain.StaleChargeHold, error) {
+func (m *mockReconcileStore) ListStaleChargeHolds(context.Context, int, []string) ([]domain.StaleChargeHold, error) {
 	return nil, nil
 }
 

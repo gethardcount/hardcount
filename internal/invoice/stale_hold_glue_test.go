@@ -20,5 +20,5 @@ func (c *collectCharger) ChargeInvoice(_ context.Context, _ string, inv domain.I
 
 // listStaleHolds is the stale-hold sweep's read, from the start.
 func listStaleHolds(ctx context.Context, store *invoice.PostgresStore, limit int) ([]domain.StaleChargeHold, error) {
-	return store.ListStaleChargeHolds(ctx, limit)
+	return store.ListStaleChargeHolds(ctx, limit, nil)
 }

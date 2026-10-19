@@ -95,7 +95,8 @@ The answer is 409 `payment_in_flight`: "a charge on this invoice is in
 progress — try again in a few minutes".
 
 - The hold is read as `COALESCE(auto_charge_claimed_until > now(), false)`,
-  the hosted-page claim's expression, on the database's clock.
+  the hosted-page claim's expression, on the database's clock. (Superseded
+  2026-10-19: an expired hold counts too. See the amendment below.)
 - It is consulted only on `pending` and `failed`. An unknown outcome keeps
   its hold for the full five minutes, and a parked invoice must stay
   writable-off (ADR-107).
@@ -110,7 +111,8 @@ progress — try again in a few minutes".
 **Accepted cost.** A breaker-open or credentials failure returns without
 releasing the hold, so an operator can be refused for up to five minutes
 when no charge was sent. Dunning's final write-off treats the refusal as a
-failed terminal action and retries it 24 hours later.
+failed terminal action and retries it 24 hours later. (Superseded
+2026-10-19: those failures now release the hold. See the amendment below.)
 
 **The engine's relief void too.** A cancel or plan swap voids a prepaid
 invoice whose period is wholly unused (`VoidUnchangedTx`), which happens on
@@ -122,6 +124,29 @@ on their own.
 **Not covered.** An amount-reducing credit note does not read the hold;
 that one is deferred under its own trigger in velox-ops dp-readiness.
 Pinned by the `TestChargeHold_*` tests in `internal/invoice`.
+
+## Amendment 2026-10-19: an expired hold is not free (ADR-127)
+
+[ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) (#976)
+changes two things in the 2026-10-14 amendment.
+
+**How the hold is read.** An expired hold no longer counts as free: it means
+a charge may have been sent and its result was lost. The check reads the hold
+as none, live or stale (`ChargeHeldTx`, under the row lock). Void, offline
+payment and the engine's relief void refuse a stale hold as they refuse a
+live one. Write-off is allowed on a stale hold: it moves no money, and a
+payment found later still settles the invoice. The stale-hold sweep in the
+payment reconciler asks Stripe what the lost charge did and clears the hold.
+It checks a hold on the first billing tick at least 10 minutes after the hold
+ends, usually within about an hour; until then these refusals stand.
+
+**The accepted cost is gone.** A charge that sent nothing releases its hold
+at once: the breaker refused it (it refuses before any request), or the
+credentials could not be read. Kept, such a hold would now wait for the
+sweep instead of expiring after five minutes, and the breaker is shared by
+every tenant. A 429 keeps its hold: a first request under the same key may
+still be running at Stripe. Dunning's final action does not run while any
+hold is set, so it no longer meets this refusal on its own invoice.
 
 ## Deferred / follow-ups
 

@@ -302,15 +302,15 @@ type InvoiceUpdater interface {
 	RecordChargeAttempt(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt) error
 	// ReleaseChargeHold frees the charge hold the caller's claim took,
 	// comparing its token (ADR-127). The chokepoint calls it on DEFINITIVE
-	// outcomes only (Stripe answered: declined, or settled) — the
-	// round-trip is complete, so no charge is in flight and holding it adds
-	// no protection — and when its re-check refuses to send. Unclear
-	// outcomes (unknown / timeout / still-processing / breaker / 429) never
-	// release: the call may have reached Stripe, and the stale-hold sweep
-	// asks Stripe before anything charges the invoice again. Found by the
-	// D1 walk: a declined dunning retry held the hold 5 wall-minutes,
-	// starving every later same-advance retry in test-clock catchup
-	// ("dunning catchup loop made no progress").
+	// outcomes (Stripe answered: declined, or settled) — the round-trip is
+	// complete, so no charge is in flight and holding it adds no protection
+	// — and when nothing was sent: its re-check refused, the breaker was
+	// open, or the credentials could not be read. Unclear outcomes (unknown
+	// / timeout / still-processing / 429) never release: the call may have
+	// reached Stripe, and the stale-hold sweep asks Stripe before anything
+	// charges the invoice again. Found by the D1 walk: a declined dunning
+	// retry held the hold 5 wall-minutes, starving every later same-advance
+	// retry in test-clock catchup ("dunning catchup loop made no progress").
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	// ConfirmChargeHold is the re-check right before a charge is sent: the
 	// caller's hold is still its own with domain.ChargeSendMargin left, the
@@ -381,9 +381,9 @@ func (s *Stripe) SetEventDispatcher(events domain.EventDispatcher) {
 
 // SetBreaker wires a global circuit breaker around Stripe calls. When
 // set, ChargeInvoice short-circuits with breaker.ErrOpen if the breaker
-// is rejecting — the Stripe call is not made and the invoice state is
-// left untouched so dunning treats it as "try later" without ticking
-// attempt_count.
+// is rejecting — the Stripe call is not made, the charge hold is released,
+// and the invoice state is left untouched so dunning treats it as "try
+// later" without ticking attempt_count.
 func (s *Stripe) SetBreaker(b *breaker.Breaker) {
 	s.breaker = b
 }
@@ -670,10 +670,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// so the hold is released and the next tick retries.
 	ok, cerr := s.invoices.ConfirmChargeHold(ctx, tenantID, inv.ID, hold, inv.ChargeAttemptSeq)
 	if cerr != nil || !ok {
-		if rerr := s.invoices.ReleaseChargeHold(ctx, tenantID, inv.ID, hold); rerr != nil {
-			slog.WarnContext(ctx, "release charge hold after a refused send failed — the stale-hold sweep clears it",
-				"invoice_id", inv.ID, "error", rerr)
-		}
+		s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "re-check refused")
 		slog.InfoContext(ctx, "charge not sent: this charger no longer holds the invoice, or the invoice changed since it was read",
 			"invoice_id", inv.ID, "charge_attempt_seq", inv.ChargeAttemptSeq, "error", cerr)
 		return domain.Invoice{}, ErrPaymentTransient
@@ -695,11 +692,16 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 			return s.client.CreatePaymentIntent(ctx, params)
 		})
 		if errors.Is(err, breaker.ErrOpen) {
-			// Breaker short-circuit: the call to Stripe was not made. Do NOT
-			// mutate invoice state — leaving payment_status as-is lets the
-			// scheduler try again on the next tick once cooldown elapses.
-			// Returning a distinct sentinel lets dunning treat this as a
-			// transient skip rather than ticking attempt_count.
+			// Breaker short-circuit: the breaker refused before calling the
+			// function, so no request was made. Do NOT mutate invoice state —
+			// leaving payment_status as-is lets the scheduler try again on the
+			// next tick once cooldown elapses. Returning a distinct sentinel
+			// lets dunning treat this as a transient skip rather than ticking
+			// attempt_count. The hold is released: it speaks for no charge,
+			// and the breaker is shared by every tenant, so one open window
+			// would otherwise block every invoice charged in it until the
+			// stale-hold sweep asked Stripe about each (ADR-127).
+			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "breaker open")
 			return domain.Invoice{}, ErrPaymentTransient
 		}
 		if out != nil {
@@ -710,11 +712,17 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	}
 	if errors.Is(err, ErrPaymentTransient) {
 		// This request charged nothing (the credentials could not be read, or
-		// Stripe answered 429): same as the breaker short-circuit above — no
-		// state write, the hold stays, the next tick retries. Classified below
-		// it would be an UNKNOWN outcome, parking the invoice for a reconciler
-		// that has no PaymentIntent to find. A 429 after stripe-go resent the
-		// request can hide a first request still running (ErrPaymentTransient).
+		// Stripe answered 429): no state write, the next tick retries.
+		// Classified below it would be an UNKNOWN outcome, parking the invoice
+		// for a reconciler that has no PaymentIntent to find.
+		//
+		// Unreadable credentials mean no request left, so the hold is
+		// released, as for the breaker. A 429 keeps it: stripe-go resends
+		// after a network error, and a 429 to the resend can hide a first
+		// request Stripe is still running, which the stale-hold sweep finds.
+		if errors.Is(err, ErrStripeCredentialsUnavailable) {
+			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "stripe credentials unreadable")
+		}
 		return domain.Invoice{}, ErrPaymentTransient
 	}
 	if err != nil {
@@ -923,6 +931,18 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		logRefusedChargeOutcome(ctx, current, domain.PaymentProcessing, result.ID, idempotencyKey)
 	}
 	return current, nil
+}
+
+// releaseUnsentHold frees the hold of a charge that provably sent nothing to
+// Stripe (the re-check refused, the breaker was open, the credentials could
+// not be read), so the invoice does not wait for the stale-hold sweep. The
+// store runs the release even after the caller's context has ended. A failed
+// release leaves a stale hold the sweep clears after asking Stripe.
+func (s *Stripe) releaseUnsentHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold, why string) {
+	if err := s.invoices.ReleaseChargeHold(ctx, tenantID, invoiceID, hold); err != nil {
+		slog.WarnContext(ctx, "release charge hold of a charge that sent nothing failed — the invoice waits for the stale-hold sweep",
+			"invoice_id", invoiceID, "reason", why, "error", err)
+	}
 }
 
 // logRefusedChargeOutcome names a charge whose outcome stamp was refused

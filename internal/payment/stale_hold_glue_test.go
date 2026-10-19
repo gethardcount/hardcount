@@ -44,10 +44,10 @@ func (r *shRig) release(c chargeClaim, invoiceID string) error {
 }
 
 // setStaleHoldCheckTimeout bounds each stale-hold check's Stripe calls.
-func setStaleHoldCheckTimeout(_ *Reconciler, _ time.Duration) {}
+func setStaleHoldCheckTimeout(rec *Reconciler, d time.Duration) { rec.staleHoldTimeout = d }
 
 // setStaleHoldBudget bounds one run of the stale-hold sweep.
-func setStaleHoldBudget(_ *Reconciler, _ time.Duration) {}
+func setStaleHoldBudget(rec *Reconciler, d time.Duration) { rec.staleHoldBudget = d }
 
 // setFakeListFields fills what the list read reports beyond the common
 // PaymentIntent fields: the invoice it is for, and whether its charge was

@@ -19,7 +19,9 @@ This page is for when that check cannot finish. Back to the
 
 A steady `velox_stale_charge_hold_resolutions_total{result="failed"}` is
 Stripe being unreachable; the check retries and needs nothing from you
-unless it lasts.
+unless it lasts. After three failed reads in a row it stops until the next
+hour and logs `stale charge check: Stripe could not be read several times in
+a row`.
 
 ## Why
 
@@ -27,7 +29,8 @@ The reconciler lists the customer's payments in Stripe to learn what the
 interrupted charge did. It cannot when:
 
 - the tenant disconnected Stripe for this mode (live or test);
-- Stripe rejects the tenant's secret key (revoked or rotated);
+- Stripe rejects the tenant's key (revoked or rotated), or the key is a
+  restricted key without permission to read PaymentIntents;
 - the Stripe customer is not in this Stripe account (deleted there, or
   created under other credentials).
 
@@ -55,12 +58,14 @@ look for a payment whose metadata `velox_invoice_id` is the invoice's id.
    key under Settings → Payments. The next hourly check then finishes on
    its own.
 2. **The customer is gone from Stripe, or Stripe will not be reconnected:**
-   - if Stripe shows a payment for this invoice, record it with **Record
-     offline payment** once the check has cleared, or wait for the
-     reconnect;
-   - if it shows none, **Mark uncollectible** (write-off). It moves no
-     money and is allowed while the check waits. After the write-off the
-     next check clears the hold, with one more ERROR.
+   on an open invoice the check never clears, and offline payment is refused
+   while it waits. In this order:
+   1. **Mark uncollectible** (write-off). It moves no money and is allowed
+      while the check waits.
+   2. Wait for the next check. It clears the claim on the written-off
+      invoice, with one more ERROR.
+   3. If Stripe shows a payment for this invoice, record it with **Record
+      offline payment**. That moves the invoice from uncollectible to paid.
 
 Do not clear `auto_charge_claimed_until` by hand: that is what lets the next
 charge go out, and the interrupted one may have succeeded.

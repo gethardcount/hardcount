@@ -350,7 +350,13 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 		return dunning.ErrTransientSkip
 	}
 	// Every path below that sends no charge releases the hold by its token.
-	release := func() { _ = a.invoiceStore.ReleaseChargeHold(ctx, tenantID, invoiceID, hold) }
+	// The store runs the release even after ctx ends.
+	release := func() {
+		if err := a.invoiceStore.ReleaseChargeHold(ctx, tenantID, invoiceID, hold); err != nil {
+			slog.WarnContext(ctx, "dunning retry: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
+				"invoice_id", invoiceID, "error", err)
+		}
+	}
 
 	// Re-apply customer credits before retrying the card — same contract as
 	// the auto-charge sweep (processAutoCharge): credits granted since the

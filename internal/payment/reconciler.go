@@ -117,6 +117,11 @@ type Reconciler struct {
 	hostedLedger HostedSessionLedger
 	hostedReader CheckoutSessionReader
 	hostedCards  CheckoutCardRecorder
+	// staleHoldTimeout and staleHoldBudget bound the stale-hold sweep
+	// (reconciler_stale_hold.go): one check's Stripe calls, and one run.
+	// Fields, not constants, so tests can shrink them.
+	staleHoldTimeout time.Duration
+	staleHoldBudget  time.Duration
 }
 
 // NewReconciler constructs a Reconciler. If olderThan <= 0, defaults to 60s
@@ -133,6 +138,8 @@ func NewReconciler(client StripeClient, invoices ReconcileInvoiceStore, olderTha
 		olderThanProcessing: 30 * time.Minute,
 		now:                 func() time.Time { return time.Now().UTC() },
 		searchDisabled:      map[string]bool{},
+		staleHoldTimeout:    staleHoldCheckTimeout,
+		staleHoldBudget:     staleHoldSweepBudget,
 	}
 }
 

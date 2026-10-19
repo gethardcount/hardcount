@@ -1106,7 +1106,10 @@ components:
         provider_synced_at:
           type: string
           format: date-time
-          description: When Velox last checked `provider_payment_status`.
+          description: |
+            When Velox last asked Stripe about this invoice's payment, whether
+            or not Stripe answered: a read of `provider_payment_status`, or a
+            check of a charge whose result was lost.
         public_token:
           type: string
           description: |

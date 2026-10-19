@@ -7487,7 +7487,9 @@ export interface components {
             provider_payment_status?: string;
             /**
              * Format: date-time
-             * @description When Velox last checked `provider_payment_status`.
+             * @description When Velox last asked Stripe about this invoice's payment, whether
+             *     or not Stripe answered: a read of `provider_payment_status`, or a
+             *     check of a charge whose result was lost.
              */
             provider_synced_at?: string;
             /**

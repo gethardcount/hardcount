@@ -1134,7 +1134,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// on file.
 	inv, err = h.svc.ApplyCreditBalance(r.Context(), tenantID, id)
 	if err != nil {
-		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id, hold)
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		respond.FromError(w, r, err, "credit")
 		return
 	}
@@ -1144,7 +1144,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		// released either way; left set, it would wait for the stale-hold
 		// sweep (ADR-127).
 		settled, serr := h.svc.SettleZeroDue(r.Context(), tenantID, id)
-		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id, hold)
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		if serr != nil {
 			respond.FromError(w, r, serr, "invoice")
 			return
@@ -1168,7 +1168,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		// locked out for the window. Any credit already applied STAYS applied:
 		// it was legitimately owed to this invoice, and amount_due is now
 		// correct for whatever settles it later.
-		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id, hold)
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		respond.Validation(w, r, "customer has no payment method set up")
 		return
 	}
@@ -1204,6 +1204,17 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusOK, charged)
+}
+
+// releaseCollectHold frees Collect's charge hold on a path that sent no
+// charge. The store runs the release even if the operator's request has gone
+// away; a failure is logged, and the hold then waits for the stale-hold
+// sweep (ADR-127), which refuses the invoice an hour or more.
+func (h *Handler) releaseCollectHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold) {
+	if err := h.svc.ReleaseChargeClaim(ctx, tenantID, invoiceID, hold); err != nil {
+		slog.WarnContext(ctx, "collect payment: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
+			"invoice_id", invoiceID, "error", err)
+	}
 }
 
 // resolveDunningRecovered closes the invoice's active dunning run, if any, as
