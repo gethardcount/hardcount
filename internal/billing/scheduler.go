@@ -272,15 +272,22 @@ func (s *Scheduler) Start(ctx context.Context) {
 // live-mode fallback from an unset ctx and silently hides test-mode rows
 // (reads) or misroutes writes into the live partition. Cross-mode cleanup
 // steps (token + idempotency purge) run once, outside the fan-out.
+//
+// Each step runs under one Panics guard. A step that panics (a nil
+// dereference on one unusual row) stops, every other step still runs in both
+// modes, and the first panic is raised again at the end. So the tick still
+// ends as panicked (the gate releases it as not completed, and the lease-lost
+// counter pages), but one bad row no longer stops billing for every tenant.
 func (s *Scheduler) runBillingHalf(ctx context.Context) {
 	start := time.Now() //nolint:forbidigo // wall-clock: measures how long the tick took
+	var panics scheduler.Panics
 
 	// Mode-scoped work: live first (the bulk of traffic), then test. One
 	// mode's errors do not gate the other — they share nothing at the
 	// DB level once the RLS predicate splits them.
 	for _, live := range []bool{true, false} {
 		modeCtx := postgres.WithLivemode(ctx, live)
-		s.runBillingCycleForMode(modeCtx, live)
+		s.runBillingCycleForMode(modeCtx, live, &panics)
 	}
 
 	duration := time.Since(start)
@@ -289,7 +296,8 @@ func (s *Scheduler) runBillingHalf(ctx context.Context) {
 	// Cross-mode cleanup: TxBypass DELETEs that are mode-agnostic by design
 	// (tokens / idempotency keys expire regardless of mode). Running these
 	// once saves two DB round-trips per tick.
-	s.runCrossModeCleanup(ctx)
+	s.runCrossModeCleanup(ctx, &panics)
+	panics.Repanic()
 }
 
 // runBillingCycleForMode runs a single mode's half-cycle, in the step order
@@ -302,7 +310,11 @@ func (s *Scheduler) runBillingHalf(ctx context.Context) {
 // There is NO scheduled "approaching-due"/reminder step here, and never has
 // been: payment reminders are dunning-driven (runDunningHalf) or operator-
 // triggered (AttentionActionSendReminder). The claim was stale prose from #13.
-func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
+//
+// Each step runs under panics' guard (see runBillingHalf). The livemode
+// assert below stays outside every guard: a missing mode is a wiring bug that
+// must crash, not be recovered and skipped.
+func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panics *scheduler.Panics) {
 	// Sanity: the only legitimate caller (runBillingHalf) always wraps ctx
 	// with WithLivemode before calling us. Assert here so a future refactor
 	// that skips the wrap crashes the test that exercises this path, not
@@ -324,14 +336,16 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 	// metered). The per-effect re-drive bodies and their eligibility SQL are
 	// unchanged in their own services. The future obligation-queue drainer
 	// (ADR-062) slots in here as one more Reconciler.
-	runReconcilers(ctx, mode, s.reconcilers(), s.batch)
+	runReconcilers(ctx, mode, s.reconcilers(), s.batch, panics)
 
 	// 0. Collect queued invoices: charge, settle $0, or (no card) email the
 	// setup link and start no-payment dunning. Visits every queued invoice,
 	// page by page (card-less ones stay queued, and a single oldest-first page
 	// filled up with them for good). The engine logs the sweep summary; it
 	// stamps liveness per page, like the billing drain.
-	if chargeRetried, chargeErrs := s.engine.RetryPendingCharges(ctx, s.batch, s.onRun); chargeRetried > 0 || len(chargeErrs) > 0 {
+	func() {
+		defer panics.Guard("step", "auto_charge_retry", "mode", mode)
+		chargeRetried, chargeErrs := s.engine.RetryPendingCharges(ctx, s.batch, s.onRun)
 		for i := 0; i < chargeRetried; i++ {
 			mw.RecordAutoChargeRetry("succeeded")
 		}
@@ -339,19 +353,22 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 			slog.Error("auto-charge retry error", "mode", mode, "error", e)
 			mw.RecordAutoChargeRetry("failed")
 		}
-	}
+	}()
 
 	// 0.5 Billing thresholds — early-invoice scan. Runs before the
 	// natural cycle so a threshold-fired invoice and (when reset_billing_cycle
 	// is true) the cycle advance both land on this tick. The partial unique
 	// index on invoices(tenant, sub, billing_period_start) WHERE
 	// billing_reason='threshold' makes this idempotent under retry.
-	if fired, tErrs := s.engine.ScanThresholds(ctx, s.batch); fired > 0 || len(tErrs) > 0 {
-		slog.Info("threshold scan", "mode", mode, "fired", fired, "errors", len(tErrs))
-		for _, err := range tErrs {
-			slog.Error("threshold scan error", "mode", mode, "error", err)
+	func() {
+		defer panics.Guard("step", "threshold_scan", "mode", mode)
+		if fired, tErrs := s.engine.ScanThresholds(ctx, s.batch); fired > 0 || len(tErrs) > 0 {
+			slog.Info("threshold scan", "mode", mode, "fired", fired, "errors", len(tErrs))
+			for _, err := range tErrs {
+				slog.Error("threshold scan error", "mode", mode, "error", err)
+			}
 		}
-	}
+	}()
 
 	// 0.9 Trial expiry — flip non-clock-pinned trialing subs to
 	// active at trial_end_at BEFORE the cycle scan reads the sub
@@ -362,13 +379,16 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 	// catchup orchestrator's Phase 0.5 instead (ADR-028 disjoint
 	// flows).
 	if s.trialExpirer != nil {
-		flipped, tErrs := s.trialExpirer.ProcessExpiredTrials(ctx, s.batch)
-		if flipped > 0 || len(tErrs) > 0 {
-			slog.Info("trial expiry", "mode", mode, "flipped", flipped, "errors", len(tErrs))
-		}
-		for _, err := range tErrs {
-			slog.Error("trial expiry error", "mode", mode, "error", err)
-		}
+		func() {
+			defer panics.Guard("step", "trial_expiry", "mode", mode)
+			flipped, tErrs := s.trialExpirer.ProcessExpiredTrials(ctx, s.batch)
+			if flipped > 0 || len(tErrs) > 0 {
+				slog.Info("trial expiry", "mode", mode, "flipped", flipped, "errors", len(tErrs))
+			}
+			for _, err := range tErrs {
+				slog.Error("trial expiry error", "mode", mode, "error", err)
+			}
+		}()
 	}
 
 	// 1. Billing cycle — bill every due sub before moving on (P27). The drain
@@ -377,26 +397,33 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 	// stamp normally fires between ticks, and the scheduler-stalled alert
 	// (velox_scheduler_last_run_timestamp_seconds) and the /health/ready
 	// body report it stale once it is 2x the interval old.
-	generated, errs := s.engine.RunCycle(ctx, s.batch, s.onRun)
-	// Record the cycle execution + its invoice count. Per-mode (live, then
-	// test), so billing_cycles_total counts mode-passes and invoices_generated
-	// accumulates the per-mode totals. Recorded unconditionally — a run with
-	// errors still ran and may have generated some invoices; the error counter
-	// (below) is the separate failure signal.
-	mw.RecordBillingCycle(generated)
-	if len(errs) > 0 {
-		slog.Error("billing cycle completed with errors",
-			"mode", mode,
-			"generated", generated,
-			"errors", len(errs),
-		)
-		for _, err := range errs {
-			slog.Error("billing cycle error", "mode", mode, "error", err)
-			mw.RecordBillingCycleError()
+	//
+	// A subscription whose bill panics is saved as failed, the drain bills
+	// the rest, and RunCycle then raises the panic again (drainDue). Its
+	// metrics are not recorded for that pass.
+	func() {
+		defer panics.Guard("step", "billing_cycle", "mode", mode)
+		generated, errs := s.engine.RunCycle(ctx, s.batch, s.onRun)
+		// Record the cycle execution + its invoice count. Per-mode (live, then
+		// test), so billing_cycles_total counts mode-passes and invoices_generated
+		// accumulates the per-mode totals. Recorded unconditionally — a run with
+		// errors still ran and may have generated some invoices; the error counter
+		// (below) is the separate failure signal.
+		mw.RecordBillingCycle(generated)
+		if len(errs) > 0 {
+			slog.Error("billing cycle completed with errors",
+				"mode", mode,
+				"generated", generated,
+				"errors", len(errs),
+			)
+			for _, err := range errs {
+				slog.Error("billing cycle error", "mode", mode, "error", err)
+				mw.RecordBillingCycleError()
+			}
+		} else if generated > 0 {
+			slog.Info("billing cycle completed", "mode", mode, "generated", generated)
 		}
-	} else if generated > 0 {
-		slog.Info("billing cycle completed", "mode", mode, "generated", generated)
-	}
+	}()
 
 	// 2. Pause auto-resume — clear pause_collection on any sub whose
 	// resumes_at has elapsed. It runs AFTER the billing run: a period that
@@ -407,29 +434,33 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 	// Wall-clock counterpart to the test-clock catchup's resume phase.
 	// Clock-pinned subs are excluded per ADR-028.
 	if s.pauseResumer != nil {
-		resumed, pErrs := s.pauseResumer.ProcessExpiredPauseCollections(ctx, s.batch)
-		if resumed > 0 || len(pErrs) > 0 {
-			slog.Info("pause auto-resume", "mode", mode, "resumed", resumed, "errors", len(pErrs))
-		}
-		for _, err := range pErrs {
-			slog.Error("pause auto-resume error", "mode", mode, "error", err)
-		}
+		func() {
+			defer panics.Guard("step", "pause_resume", "mode", mode)
+			resumed, pErrs := s.pauseResumer.ProcessExpiredPauseCollections(ctx, s.batch)
+			if resumed > 0 || len(pErrs) > 0 {
+				slog.Info("pause auto-resume", "mode", mode, "resumed", resumed, "errors", len(pErrs))
+			}
+			for _, err := range pErrs {
+				slog.Error("pause auto-resume error", "mode", mode, "error", err)
+			}
+		}()
 	}
 
 	// 3. Credit expiry sweep
 	if s.credits != nil {
-		expired, cErrs := s.credits.ExpireCredits(ctx)
-		if len(cErrs) > 0 {
+		func() {
+			defer panics.Guard("step", "credit_expiry", "mode", mode)
+			expired, cErrs := s.credits.ExpireCredits(ctx)
 			for _, e := range cErrs {
 				slog.Error("credit expiry error", "mode", mode, "error", e)
 			}
-		}
-		for i := 0; i < expired; i++ {
-			mw.RecordCreditOperation("expiry")
-		}
-		if expired > 0 {
-			slog.Info("credits expired", "mode", mode, "count", expired)
-		}
+			for i := 0; i < expired; i++ {
+				mw.RecordCreditOperation("expiry")
+			}
+			if expired > 0 {
+				slog.Info("credits expired", "mode", mode, "count", expired)
+			}
+		}()
 	}
 }
 
@@ -438,41 +469,50 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool) {
 // (an expired idempotency key or payment-update token is expired regardless
 // of which partition it belonged to), so fanning out would just double the
 // DB round-trips for no additional work.
-func (s *Scheduler) runCrossModeCleanup(ctx context.Context) {
+func (s *Scheduler) runCrossModeCleanup(ctx context.Context, panics *scheduler.Panics) {
 	// 5. Payment update token cleanup (expired > 7 days)
 	if s.tokenCleaner != nil {
-		cleaned, err := s.tokenCleaner.Cleanup(ctx)
-		if err != nil {
-			slog.Error("token cleanup error", "error", err)
-		} else if cleaned > 0 {
-			slog.Info("expired payment tokens cleaned up", "count", cleaned)
-			mw.RecordScheduledCleanup("payment_tokens", cleaned)
-		}
+		func() {
+			defer panics.Guard("step", "token_cleanup")
+			cleaned, err := s.tokenCleaner.Cleanup(ctx)
+			if err != nil {
+				slog.Error("token cleanup error", "error", err)
+			} else if cleaned > 0 {
+				slog.Info("expired payment tokens cleaned up", "count", cleaned)
+				mw.RecordScheduledCleanup("payment_tokens", cleaned)
+			}
+		}()
 	}
 
 	// 6. Idempotency key cleanup (expires_at < now, default 24h retention).
 	// Prevents unbounded growth of idempotency_keys, which would slow every
 	// cache lookup as the B-tree deepens.
 	if s.idempotencyClean != nil {
-		cleaned, err := s.idempotencyClean.Cleanup(ctx)
-		if err != nil {
-			slog.Error("idempotency cleanup error", "error", err)
-		} else if cleaned > 0 {
-			slog.Info("expired idempotency keys cleaned up", "count", cleaned)
-			mw.RecordScheduledCleanup("idempotency_keys", cleaned)
-		}
+		func() {
+			defer panics.Guard("step", "idempotency_cleanup")
+			cleaned, err := s.idempotencyClean.Cleanup(ctx)
+			if err != nil {
+				slog.Error("idempotency cleanup error", "error", err)
+			} else if cleaned > 0 {
+				slog.Info("expired idempotency keys cleaned up", "count", cleaned)
+				mw.RecordScheduledCleanup("idempotency_keys", cleaned)
+			}
+		}()
 	}
 
 	// 7. Sign-in throttle rows: no attempt for a day, no wait running, and
 	// no sign-in from that browser for 180 days.
 	if s.loginThrottle != nil {
-		cleaned, err := s.loginThrottle.Cleanup(ctx)
-		if err != nil {
-			slog.Error("login throttle cleanup error", "error", err)
-		} else if cleaned > 0 {
-			slog.Info("old sign-in throttle rows cleaned up", "count", cleaned)
-			mw.RecordScheduledCleanup("login_throttle", cleaned)
-		}
+		func() {
+			defer panics.Guard("step", "login_throttle_cleanup")
+			cleaned, err := s.loginThrottle.Cleanup(ctx)
+			if err != nil {
+				slog.Error("login throttle cleanup error", "error", err)
+			} else if cleaned > 0 {
+				slog.Info("old sign-in throttle rows cleaned up", "count", cleaned)
+				mw.RecordScheduledCleanup("login_throttle", cleaned)
+			}
+		}()
 	}
 }
 
@@ -484,6 +524,10 @@ func (s *Scheduler) runCrossModeCleanup(ctx context.Context) {
 // TxTenant and relies on ctx livemode for RLS — sees both partitions.
 // Tenant discovery runs once (ListTenantIDs is not mode-partitioned);
 // per-tenant dunning work is what needs the fan-out.
+//
+// Each tenant runs under one Panics guard: a tenant whose dunning panics
+// stops, every other tenant still runs in both modes, and the first panic is
+// raised again at the end (see runBillingHalf).
 func (s *Scheduler) runDunningHalf(ctx context.Context) {
 	if s.dunning == nil || s.tenants == nil {
 		return
@@ -495,16 +539,19 @@ func (s *Scheduler) runDunningHalf(ctx context.Context) {
 		return
 	}
 
+	var panics scheduler.Panics
 	for _, live := range []bool{true, false} {
 		modeCtx := postgres.WithLivemode(ctx, live)
-		s.runDunningForMode(modeCtx, live, tenantIDs)
+		s.runDunningForMode(modeCtx, live, tenantIDs, &panics)
 	}
+	panics.Repanic()
 }
 
 // runDunningForMode processes due dunning runs for every tenant under the
 // given livemode. Called twice per tick.
-func (s *Scheduler) runDunningForMode(ctx context.Context, live bool, tenantIDs []string) {
+func (s *Scheduler) runDunningForMode(ctx context.Context, live bool, tenantIDs []string, panics *scheduler.Panics) {
 	// Assert the fan-out site did its job; see note on runBillingCycleForMode.
+	// Outside the guards: a missing mode must crash, not be skipped.
 	ctx = postgres.WithRequiredLivemode(ctx)
 
 	mode := "live"
@@ -512,8 +559,9 @@ func (s *Scheduler) runDunningForMode(ctx context.Context, live bool, tenantIDs 
 		mode = "test"
 	}
 	for _, tid := range tenantIDs {
-		processed, dErrs := s.dunning.ProcessDueRuns(ctx, tid, 20)
-		if len(dErrs) > 0 {
+		func() {
+			defer panics.Guard("step", "dunning", "mode", mode, "tenant_id", tid)
+			processed, dErrs := s.dunning.ProcessDueRuns(ctx, tid, 20)
 			// One "failed" increment per error (a per-run failure or the
 			// list query itself) — the series the runbook's
 			// {outcome="failed"} dunning-machinery alert watches.
@@ -521,12 +569,12 @@ func (s *Scheduler) runDunningForMode(ctx context.Context, live bool, tenantIDs 
 				slog.Error("dunning error", "mode", mode, "tenant_id", tid, "error", e)
 				mw.RecordDunningRun("failed")
 			}
-		}
-		for i := 0; i < processed; i++ {
-			mw.RecordDunningRun("succeeded")
-		}
-		if processed > 0 {
-			slog.Info("dunning runs processed", "mode", mode, "tenant_id", tid, "processed", processed)
-		}
+			for i := 0; i < processed; i++ {
+				mw.RecordDunningRun("succeeded")
+			}
+			if processed > 0 {
+				slog.Info("dunning runs processed", "mode", mode, "tenant_id", tid, "processed", processed)
+			}
+		}()
 	}
 }

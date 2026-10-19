@@ -14,6 +14,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/payment/breaker"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // ReconcileInvoiceStore is the narrow interface the reconciler needs from
@@ -187,21 +188,57 @@ func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 // All route recovered terminals through the settler, so a backstop-recovered
 // settlement fires the full side-effects.
 // Returns the number resolved (succeeded or failed) and any per-invoice errors.
+//
+// A row whose check panics is stamped like a failed check (guardRow), and the
+// rows and sweeps after it still run. The first such panic is raised again
+// only after the last sweep, so the billing tick still ends as panicked and
+// pages. Raised sooner, it would stop the sweeps after it on every tick: an
+// 'unknown' invoice's stale-hold check is never stamped, so it comes back
+// first.
 func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 	// The parked-invoice count (ADR-107's alerting surface) is exported by
 	// every replica from the database at scrape time (metrics.go,
 	// velox_parked_invoices) — not stamped here, where only the billing
 	// leader would set it.
 
-	n0, e0 := r.sweepStaleChargeHolds(ctx, limit)
-	n1, e1 := r.sweep(ctx, "unknown", r.invoices.ListUnknownPayments, r.olderThan, limit)
-	n2, e2 := r.sweep(ctx, "processing", r.invoices.ListProcessingPayments, r.olderThanProcessing, limit)
-	n3, e3 := r.sweepParked(ctx, limit)
-	n4, e4 := r.sweepHostedSessions(ctx, limit)
+	var panics scheduler.Panics
+	n0, e0 := r.sweepStaleChargeHolds(ctx, limit, &panics)
+	n1, e1 := r.sweep(ctx, "unknown", r.invoices.ListUnknownPayments, r.olderThan, limit, &panics)
+	n2, e2 := r.sweep(ctx, "processing", r.invoices.ListProcessingPayments, r.olderThanProcessing, limit, &panics)
+	n3, e3 := r.sweepParked(ctx, limit, &panics)
+	n4, e4 := r.sweepHostedSessions(ctx, limit, &panics)
 	errs := append(e0, e1...)
 	errs = append(errs, e2...)
 	errs = append(errs, e3...)
-	return n0 + n1 + n2 + n3 + n4, append(errs, e4...)
+	errs = append(errs, e4...)
+	if panics.Panicked() {
+		// The panic drops errs, which only the caller logs. Log them here, so
+		// another row's failure is not hidden while one row keeps panicking.
+		mode := "live"
+		if !postgres.Livemode(ctx) {
+			mode = "test"
+		}
+		for _, err := range errs {
+			slog.ErrorContext(ctx, "reconciler error", "reconciler", "payment_unknown", "mode", mode, "error", err)
+		}
+		panics.Repanic()
+	}
+	return n0 + n1 + n2 + n3 + n4, errs
+}
+
+// guardRow runs one row of a sweep under panics' guard (args name the row in
+// the log) and reports whether it panicked. The caller then stamps the row as
+// checked. Every sweep here lists the least recently checked rows first and
+// stamps a row only once its check is done, so a row whose check panics would
+// otherwise come back first on every tick, and stop the rows behind it.
+func guardRow(panics *scheduler.Panics, check func(), args ...any) (panicked bool) {
+	panicked = true
+	func() {
+		defer panics.Guard(args...)
+		check()
+		panicked = false
+	}()
+	return panicked
 }
 
 // parkedSearchAge is how long an invoice must have been parked before the
@@ -225,7 +262,9 @@ const parkedSearchAge = time.Hour
 //     delays its PI's indexing, and a stale PI from a previous attempt can be
 //     indexed while the one that matters is not (both attack-verified,
 //     ADR-108). The deleted give-up write stays deleted.
-func (r *Reconciler) sweepParked(ctx context.Context, limit int) (int, []error) {
+//
+// A search that panics is stamped with the row's last observation (guardRow).
+func (r *Reconciler) sweepParked(ctx context.Context, limit int, panics *scheduler.Panics) (int, []error) {
 	before := r.now().Add(-parkedSearchAge)
 	invoices, err := r.invoices.ListParkedSearchable(ctx, before, limit)
 	if err != nil {
@@ -243,7 +282,13 @@ func (r *Reconciler) sweepParked(ctx context.Context, limit int) (int, []error) 
 		if r.searchDisabled[inv.TenantID+"/"+mode] {
 			continue
 		}
-		ok, serr := r.searchAndAdoptOne(ctx, inv, mode)
+		var ok bool
+		var serr error
+		if guardRow(panics, func() { ok, serr = r.searchAndAdoptOne(ctx, inv, mode) },
+			"step", "parked_search", "invoice_id", inv.ID, "tenant_id", inv.TenantID) {
+			r.recordSync(ctx, inv, inv.ProviderPaymentStatus)
+			continue
+		}
 		if serr != nil {
 			errs = append(errs, serr)
 		}
@@ -357,8 +402,9 @@ func (r *Reconciler) searchAndAdoptOne(ctx context.Context, inv domain.Invoice, 
 }
 
 // sweep lists invoices in one non-terminal state older than the given cool-off
-// and reconciles each against Stripe.
-func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.Context, time.Time, int) ([]domain.Invoice, error), olderThan time.Duration, limit int) (int, []error) {
+// and reconciles each against Stripe. A check that panics is stamped with the
+// row's last observation (guardRow).
+func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.Context, time.Time, int) ([]domain.Invoice, error), olderThan time.Duration, limit int, panics *scheduler.Panics) (int, []error) {
 	before := r.now().Add(-olderThan)
 	invoices, err := list(ctx, before, limit)
 	if err != nil {
@@ -370,7 +416,13 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 		errs     []error
 	)
 	for _, inv := range invoices {
-		changed, err := r.reconcileOne(ctx, inv)
+		var changed bool
+		var err error
+		if guardRow(panics, func() { changed, err = r.reconcileOne(ctx, inv) },
+			"step", "reconcile_"+label, "invoice_id", inv.ID, "tenant_id", inv.TenantID) {
+			r.recordSync(ctx, inv, inv.ProviderPaymentStatus)
+			continue
+		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, err))
 			continue

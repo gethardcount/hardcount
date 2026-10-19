@@ -183,7 +183,7 @@ var (
 	leaderLeaseLost = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_leader_lease_lost_total",
-			Help: "Led ticks that ended without completing (ADR-114), by role and reason. heartbeat_timeout = the holder could not renew within the abandon window and cancelled its own work; takeover = a renew found another holder; released = a renew found the row released; paused = an operator paused the role mid-tick (expected — exclude from paging); panicked = the tick's work panicked and the lease was released as not completed (stack in the 'scheduler panic recovered' log; it repeats every cooldown until the input is fixed, except a panic while billing one subscription, which repeats only when that subscription's retry wait ends). For lost leases correctness held via fence + row CAS; the cause (frozen process, DB stall, pooler) is what to look at.",
+			Help: "Led ticks that ended without completing (ADR-114), by role and reason. heartbeat_timeout = the holder could not renew within the abandon window and cancelled its own work; takeover = a renew found another holder; released = a renew found the row released; paused = an operator paused the role mid-tick (expected — exclude from paging); panicked = the tick's work panicked and the lease was released as not completed; in billing and dunning only that step or row stopped and the rest of the tick ran (stack on the first 'step panicked; running the rest' line; for the other roles on 'scheduler panic recovered'). It repeats one interval later until the input is fixed, except a panic while billing one subscription, which repeats only when that subscription's retry wait ends; for a dunning run that panics, pause that run (runbook background-job-stuck). For lost leases correctness held via fence + row CAS; the cause (frozen process, DB stall, pooler) is what to look at.",
 		},
 		[]string{"role", "reason"},
 	)
@@ -268,6 +268,19 @@ func RecordUsageUnpriced(meterID string, live bool, quantity float64) {
 // RecordLeaderLeaseLost counts a lost lease (leader.LostFunc adapter).
 func RecordLeaderLeaseLost(role, reason string) {
 	leaderLeaseLost.WithLabelValues(role, reason).Inc()
+}
+
+// InitLeaderLeaseLost exports velox_leader_lease_lost_total{role,
+// reason="panicked"} at 0 for each role, at boot. The page row is
+// increase(...[1h]) > 0, and a series first exported at 1 has no earlier
+// sample, so the first panicked tick after a start never paged. Prometheus:
+// export a default value such as 0 for any time series you know may exist.
+// Only "panicked" is created: a heartbeat_timeout series created now would
+// page on one timeout, which waits for the heartbeat fix (RL-F2).
+func InitLeaderLeaseLost(roles ...string) {
+	for _, role := range roles {
+		leaderLeaseLost.WithLabelValues(role, "panicked")
+	}
 }
 
 // LeaderStatusRow is one role's row from the leader_status view, as the

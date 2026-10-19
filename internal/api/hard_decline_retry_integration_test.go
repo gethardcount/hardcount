@@ -22,6 +22,7 @@ import (
 type scriptedCharges struct {
 	answers []scriptedCharge
 	charged []string // PaymentMethodID of every charge Stripe received
+	amounts []int64  // and its amount
 }
 
 type scriptedCharge struct {
@@ -31,6 +32,7 @@ type scriptedCharge struct {
 
 func (s *scriptedCharges) CreatePaymentIntent(_ context.Context, p payment.PaymentIntentParams) (payment.PaymentIntentResult, error) {
 	s.charged = append(s.charged, p.PaymentMethodID)
+	s.amounts = append(s.amounts, p.AmountCents)
 	if len(s.charged) > len(s.answers) {
 		return payment.PaymentIntentResult{}, errors.New("scriptedCharges: unexpected charge")
 	}
