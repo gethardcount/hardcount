@@ -709,11 +709,11 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The setup-link email tells the CUSTOMER "add a payment method and we'll
-	// collect it automatically". No charge path will ever collect an invoice
-	// whose payment is in flight — and for a parked one (ADR-107) that is
-	// permanent. Sending it would be an outbound promise the engine cannot
-	// keep, triggerable by an operator button (found by the honesty sweep,
-	// 2026-07-31).
+	// collect it automatically". No charge path collects an invoice whose
+	// payment is in flight — for a parked one (ADR-107), not until Stripe has
+	// shown no payment for a day. Sending it would be an outbound promise the
+	// engine cannot keep yet, triggerable by an operator button (found by the
+	// honesty sweep, 2026-07-31).
 	if b := domain.PaymentBlocksAction(inv, domain.ActionResendSetupLink); b.Blocked {
 		respond.ConflictCoded(w, r, "", b.Code, b.Message)
 		return
@@ -1055,7 +1055,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// and its three refusal gates existed only because the charged object
 	// carried stale state. Recovery of a returned customer runs on NORMAL
 	// rails — a fresh recovery invoice — and a written-off invoice is settled
-	// by RECORDING writers only (offline payment, ADR-108 adoption).
+	// by RECORDING writers only (offline payment, the stale-hold sweep's settle).
 	if inv.Status != domain.InvoiceFinalized {
 		respond.Validation(w, r, "can only collect payment on a finalized invoice — for a written-off debt, issue a recovery invoice or record an offline payment")
 		return

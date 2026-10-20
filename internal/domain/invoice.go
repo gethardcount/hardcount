@@ -100,6 +100,17 @@ func (i Invoice) PaymentInFlight() bool {
 	return i.PaymentStatus.IsInFlight()
 }
 
+// Parked reports whether the invoice's last charge got an unclear answer from
+// Stripe that named no PaymentIntent (ADR-107): payment_status 'unknown' with
+// no PaymentIntent id. No charge path takes it, and no sweep can look the
+// payment up by id. The stale-hold sweep finishes it from Stripe's list of the
+// customer's payments: it records or follows a payment that appears, and with
+// none ParkedNothingWait after the attempt it puts the invoice back where a
+// charge picks it up (ADR-127 amendment 2026-10-20).
+func (i Invoice) Parked() bool {
+	return i.PaymentStatus == PaymentUnknown && i.StripePaymentIntentID == ""
+}
+
 // OutOfBandPaymentIntentPrefix marks the synthetic PaymentIntent id that
 // RecordOfflinePayment stamps ("out_of_band:<RFC3339>") so an operator-recorded
 // bank transfer / cheque is distinguishable from an engine-collected card

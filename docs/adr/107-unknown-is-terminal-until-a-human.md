@@ -1,6 +1,6 @@
 # ADR-107: An unnameable charge attempt parks the invoice; it is never settled failed
 
-**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18, 2026-10-19)
+**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18, 2026-10-19, 2026-10-20)
 **Date:** 2026-07-31
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) as the answer to this
 problem. ADR-106's charge-intent ledger is **parked, not deleted** — see
@@ -10,7 +10,7 @@ in #678 and unaffected by this decision), ADR-049 (payment reconciler).
 
 ## Summary
 
-When a Stripe charge ends with an unclear result and no PaymentIntent id, Velox no longer marks the invoice `failed`. That used to make the invoice claimable again under a new idempotency key (`charge_attempt_seq`), so a retry could charge the customer twice. Now the invoice is parked at `payment_status='unknown'`, which no charge path accepts, and `TestUnknownPaymentIsUnchargeableByEveryClaimPath` fails the build if one ever does. That exclusion is the whole safeguard: the write that records `unknown` also bumps `charge_attempt_seq`, so the original attempt cannot be replayed (amendment of 2026-08-01). The parked state is logged as CRITICAL once, the reconciler sweep skips parked rows, and the invoice resolves when a webhook names the PaymentIntent or when Stripe search finds it (ADR-108). An empty search result writes nothing. The only manual exit is `MarkUncollectible`, which leaves `unknown` in place, so a charge that later succeeds still marks the invoice paid. Credit-note refunds follow the same rule since 2026-10-18: an unclear refund result is `unknown`, and **Retry refund** resends the same request under the same key (see the last amendment).
+When a Stripe charge ends with an unclear result and no PaymentIntent id, Velox no longer marks the invoice `failed`. That used to make the invoice claimable again under a new idempotency key (`charge_attempt_seq`), so a retry could charge the customer twice. Now the invoice is parked at `payment_status='unknown'`, which no charge path accepts, and `TestUnknownPaymentIsUnchargeableByEveryClaimPath` fails the build if one ever does. That exclusion is the whole safeguard: the write that records `unknown` also bumps `charge_attempt_seq`, so the original attempt cannot be replayed (amendment of 2026-08-01). The park is logged once, and the unknown sweep skips parked rows. Since 2026-10-20 the park ends without a person. The stale-hold sweep lists the customer's payments in Stripe and records or follows a payment that appears. With none 24 hours after the attempt, it puts the invoice back to `pending` or `failed` to be charged again ([ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md), last amendment). `MarkUncollectible` stays allowed, for a customer who paid another way; it leaves `unknown` in place, so a charge that later succeeds still marks the invoice paid. Credit-note refunds follow the same rule since 2026-10-18: an unclear refund result is `unknown`, and **Retry refund** resends the same request under the same key (see the last amendment).
 
 ## Context
 
@@ -425,3 +425,26 @@ whatever its hold says.
 Unclear answers with no PaymentIntent id still park when the caller's context
 is alive. Moving them onto the stale-hold check instead of parking is the
 follow-up named in ADR-127.
+
+## Amendment 2026-10-20 — a park ends without a person
+
+[ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md)'s
+2026-10-20 amendment finishes every parked invoice in its stale-hold sweep,
+through Stripe's List API. A payment the list shows is recorded (succeeded)
+or followed (processing) at the first check. When the list shows none 24
+hours after the attempt, the invoice goes back to `pending`, or `failed` when
+a dunning retry parked it, and is charged again as usual under a new
+idempotency key. Stripe may still create the payment for that long while it
+recovers from an incident, which is why absence waits and a found payment
+does not.
+
+What stays: a parked invoice is never charged while it is parked
+(`TestUnknownPaymentIsUnchargeableByEveryClaimPath`), absence never settles it
+`failed`, and write-off stays allowed. Write-off is no longer "the exit": it
+is the action for a customer who paid another way, and for a park Stripe
+cannot be asked about (the key revoked, the customer deleted there). The
+notice is a Warning that says what happens next, not a Critical that asks for
+a write-off. The title stays: ADR titles are history.
+
+A caller's deadline that ends the Stripe call now parks too: its outcome is
+saved on a context detached from the caller (ADR-127, "By cause").

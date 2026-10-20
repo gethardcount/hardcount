@@ -2,6 +2,7 @@ package middleware_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -321,5 +322,87 @@ func TestOutboxGauges_StallAndRelayBroken(t *testing.T) {
 	near("velox_webhook_outbox_oldest_pending_age_seconds", test, 45*minute)
 	if got := gaugeValue(t, "velox_webhook_outbox_oldest_pending_age_seconds", live); got != 0 {
 		t.Errorf("webhook outbox oldest pending age (live) = %v, want 0 with no live rows", got)
+	}
+}
+
+// TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins the parked-invoice
+// gauge to the parks Velox has not ended on schedule (REC-5, ADR-127
+// amendment 2026-10-20). Velox ends a park at the first hourly tick 24 hours
+// after its charge's hold (domain.ParkedNothingWait), so a park is counted
+// once its hold is more than 26 hours old, or when it has no hold, which
+// nothing checks. The real trigger for the predicate: a count of every park
+// stays above 0 for as long as parks keep arriving, so a Stripe incident that
+// parks invoices over a few hours, or two parks a day apart, kept the old
+// alert (open > 0 for 25h) firing on parks that were on schedule.
+func TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay(t *testing.T) {
+	db := vtestutil.SetupTestDB(t)
+	registerGauges(db)
+	ctx := context.Background()
+	const tenantID = "vlx_ten_pkgauge"
+
+	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	mustExec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'ParkedGauge', 'active')`, tenantID)
+	n := 0
+	// seed writes an invoice in the current mode; holdAge nil = no hold.
+	seed := func(customerID, status, paymentStatus, paymentIntent string, holdAge *time.Duration) {
+		t.Helper()
+		n++
+		var ageSecs any
+		if holdAge != nil {
+			ageSecs = holdAge.Seconds()
+		}
+		mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status,
+				stripe_payment_intent_id, auto_charge_claimed_until,
+				currency, subtotal_cents, total_amount_cents, amount_due_cents,
+				billing_period_start, billing_period_end)
+			VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''),
+				CASE WHEN $7::double precision IS NULL THEN NULL ELSE now() - make_interval(secs => $7::double precision) END,
+				'USD', 5000, 5000, 5000, now() - interval '30 days', now())`,
+			fmt.Sprintf("vlx_inv_pkgauge%d", n), tenantID, customerID, status, paymentStatus, paymentIntent, ageSecs)
+	}
+	ago := func(d time.Duration) *time.Duration { return &d }
+	onSchedule := ago(domain.ParkedNothingWait + 30*time.Minute) // the 24 hours are over; the next hourly tick ends it
+	overdue := ago(domain.ParkedNothingWait + 3*time.Hour)
+
+	mustExec(`SELECT set_config('app.livemode', 'off', true)`)
+	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ('cus_pkgauge_t', $1, 'pkt', 'ParkedGauge', '')`, tenantID)
+	seed("cus_pkgauge_t", "finalized", "unknown", "", ago(time.Hour))     // inside its 24 hours
+	seed("cus_pkgauge_t", "finalized", "unknown", "", onSchedule)         // ends at the next tick
+	seed("cus_pkgauge_t", "finalized", "unknown", "", overdue)            // counted
+	seed("cus_pkgauge_t", "finalized", "unknown", "", nil)                // no hold: nothing checks it; counted
+	seed("cus_pkgauge_t", "uncollectible", "unknown", "", overdue)        // written off, counted as such
+	seed("cus_pkgauge_t", "uncollectible", "unknown", "", ago(time.Hour)) // written off, inside its 24 hours
+	seed("cus_pkgauge_t", "finalized", "unknown", "pi_named", overdue)    // names its payment: not a park
+	seed("cus_pkgauge_t", "finalized", "pending", "", overdue)            // a stale hold, not a park
+	mustExec(`SELECT set_config('app.livemode', 'on', true)`)
+	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ('cus_pkgauge_l', $1, 'pkl', 'ParkedGauge', '')`, tenantID)
+	seed("cus_pkgauge_l", "finalized", "unknown", "", overdue)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	for _, c := range []struct {
+		mode, disposition string
+		want              float64
+	}{
+		{"test", "open", 2},
+		{"test", "written_off", 1},
+		{"live", "open", 1},
+		{"live", "written_off", 0},
+	} {
+		if got := gaugeValue(t, "velox_parked_invoices", map[string]string{"mode": c.mode, "disposition": c.disposition}); got != c.want {
+			t.Errorf("velox_parked_invoices{mode=%q,disposition=%q} = %v, want %v: only parks still parked 26 hours after their hold, or with no hold",
+				c.mode, c.disposition, got, c.want)
+		}
 	}
 }

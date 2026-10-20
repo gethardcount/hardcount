@@ -396,8 +396,8 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	// only double-charge guard between them. Claim-lose = the sweep (or
 	// a rival dunning leader) owns the invoice, or payment_status moved
 	// to a state that must not be re-charged ('unknown' waits for the
-	// reconciler) — map to ErrTransientSkip so the run does NOT burn an
-	// attempt on a charge that never reached Stripe.
+	// reconciler or the stale-hold sweep) — map to ErrTransientSkip so the run
+	// does NOT burn an attempt on a charge that never reached Stripe.
 	//
 	// A lost charge's hold refuses the claim too (ADR-127): the due-run scan
 	// already skips such a run, so this is the race where the hold appeared

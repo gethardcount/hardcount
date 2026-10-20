@@ -69,6 +69,12 @@ func TestPaymentBlocksAction_Matrix(t *testing.T) {
 			if strings.Contains(msg, "wait for") || strings.Contains(msg, "cancel it") {
 				t.Errorf("%s refusal tells the operator to wait or cancel — neither is possible for a parked invoice: %q", a, msg)
 			}
+			// What happens next without anyone (REC-5): a payment Stripe
+			// shows is recorded, and with none after 24 hours the invoice is
+			// charged again. "Will not resolve on its own" is no longer true.
+			if strings.Contains(msg, "will not resolve on its own") || !strings.Contains(msg, "24 hours") {
+				t.Errorf("%s refusal does not say what Velox does next (records a payment that appears, charges again after 24 hours): %q", a, msg)
+			}
 		}
 	})
 

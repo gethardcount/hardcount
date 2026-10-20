@@ -3432,9 +3432,11 @@ type Attention struct {
 // and audit logs key off the code. `reconcile_payment` opens the
 // payment in Stripe; it is offered on `payment_anomaly`, where the
 // refund or correction is made there. `mark_uncollectible` opens
-// the write-off and is offered only when a payment's outcome can
-// never be identified (payment status unknown with no payment
-// intent recorded). `void_invoice` is offered only
+// the write-off and is offered only on a parked invoice (payment
+// status unknown with no payment intent recorded), for a customer
+// who paid another way: Velox records a payment that Stripe shows,
+// and charges the invoice again if none appears within 24 hours.
+// Dashboards render it as a secondary action. `void_invoice` is offered only
 // on prepaid-commit exposure, and only while some of the granted
 // credit is still unspent: voiding retires the unspent balance
 // (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -3449,9 +3451,11 @@ type AttentionActionItem struct {
 	// and audit logs key off the code. `reconcile_payment` opens the
 	// payment in Stripe; it is offered on `payment_anomaly`, where the
 	// refund or correction is made there. `mark_uncollectible` opens
-	// the write-off and is offered only when a payment's outcome can
-	// never be identified (payment status unknown with no payment
-	// intent recorded). `void_invoice` is offered only
+	// the write-off and is offered only on a parked invoice (payment
+	// status unknown with no payment intent recorded), for a customer
+	// who paid another way: Velox records a payment that Stripe shows,
+	// and charges the invoice again if none appears within 24 hours.
+	// Dashboards render it as a secondary action. `void_invoice` is offered only
 	// on prepaid-commit exposure, and only while some of the granted
 	// credit is still unspent: voiding retires the unspent balance
 	// (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -4506,8 +4510,13 @@ type HostedInvoice struct {
 
 		// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 		// returned an ambiguous error (5xx, timeout, connection reset) where
-		// we cannot tell whether Stripe processed the charge — a reconciler
-		// resolves these by querying Stripe after a cool-off window.
+		// we cannot tell whether Stripe processed the charge. With a payment
+		// intent recorded, Velox asks Stripe for it after a short wait. With
+		// none (a parked invoice), Velox lists the customer's payments at
+		// Stripe every billing tick: it records a payment for the invoice that
+		// appears, and if none has appeared 24 hours after the attempt the
+		// invoice goes back to `pending` (`failed` after a dunning retry) and
+		// is charged again as usual.
 		PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
 		// Status Lifecycle state of the invoice. `uncollectible` marks an invoice
@@ -4647,13 +4656,21 @@ type Invoice struct {
 
 	// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 	// returned an ambiguous error (5xx, timeout, connection reset) where
-	// we cannot tell whether Stripe processed the charge — a reconciler
-	// resolves these by querying Stripe after a cool-off window.
+	// we cannot tell whether Stripe processed the charge. With a payment
+	// intent recorded, Velox asks Stripe for it after a short wait. With
+	// none (a parked invoice), Velox lists the customer's payments at
+	// Stripe every billing tick: it records a payment for the invoice that
+	// appears, and if none has appeared 24 hours after the attempt the
+	// invoice goes back to `pending` (`failed` after a dunning retry) and
+	// is charged again as usual.
 	PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
 	// ProviderPaymentStatus Stripe's PaymentIntent status the last time Velox checked it,
 	// word for word. For information only: `payment_status` is the
-	// invoice's payment state. Absent until Velox has checked.
+	// invoice's payment state. Absent until Velox has checked. An
+	// invoice checked by the Stripe Search sweep of releases before
+	// this one may still show `search_not_found`,
+	// `search_terminal_only` or `search_error`.
 	ProviderPaymentStatus string `json:"provider_payment_status,omitempty"`
 
 	// ProviderSyncedAt When Velox last asked Stripe about this invoice's payment, whether
@@ -4924,8 +4941,13 @@ type InvoiceLineType string
 
 // InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 // returned an ambiguous error (5xx, timeout, connection reset) where
-// we cannot tell whether Stripe processed the charge — a reconciler
-// resolves these by querying Stripe after a cool-off window.
+// we cannot tell whether Stripe processed the charge. With a payment
+// intent recorded, Velox asks Stripe for it after a short wait. With
+// none (a parked invoice), Velox lists the customer's payments at
+// Stripe every billing tick: it records a payment for the invoice that
+// appears, and if none has appeared 24 hours after the attempt the
+// invoice goes back to `pending` (`failed` after a dunning retry) and
+// is charged again as usual.
 type InvoicePaymentStatus string
 
 // InvoicePaymentTimeline defines model for InvoicePaymentTimeline.
@@ -5613,8 +5635,9 @@ type RecipeWebhook struct {
 // refusing to record it would only make the books wrong too.
 //
 // A written-off invoice is settled by RECORDING writers only — an
-// offline payment, or the provider-search reconciler adopting a charge
-// that turns out to have succeeded (ADR-108). Nothing initiates a card
+// offline payment, or Velox recording a card charge that Stripe shows
+// succeeded (its webhook, or the check of an unresolved charge).
+// Nothing initiates a card
 // charge against one (ADR-113): recovery of a returned customer runs on
 // normal rails via a fresh recovery invoice.
 //

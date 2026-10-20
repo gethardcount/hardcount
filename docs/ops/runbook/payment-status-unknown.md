@@ -49,5 +49,5 @@ LIMIT 20;
 The query above no longer returns the invoice, and the invoice no longer
 shows `payment_unconfirmed`.
 
-Related: an attempt that cannot be identified at Stripe at all becomes a
+Related: an unclear answer that names no PaymentIntent makes a
 [parked invoice](parked-invoices.md).
