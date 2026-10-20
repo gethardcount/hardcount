@@ -289,10 +289,13 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 		clockID = sim.TestClockID
 	}
 	// Who caused this email (ADR-128 §4), resolved exactly as the audit log
-	// resolves it: the operator or API key behind a resend, the customer on
-	// a public page, the system for the engine, dunning and the settle
-	// paths. Stamped here for the same reason as the sim anchor: this is the
-	// one insert, and the only moment the request identity is in hand.
+	// resolves it: whoever's request led to the write. That is the operator
+	// or API key behind a resend, the customer on a public page, and also
+	// the operator or API key whose finalize led to a charge that sends a
+	// receipt or a failure email. Only work no request started (the cycle
+	// scheduler, dunning, a webhook, the reconciler) records the system.
+	// Stamped here for the same reason as the sim anchor: this is the one
+	// insert, and the only moment the request identity is in hand.
 	actorType, actorID := audit.ResolveActor(ctx)
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO email_outbox (id, tenant_id, email_type, payload, status, attempts, next_attempt_at,

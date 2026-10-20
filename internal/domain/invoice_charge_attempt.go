@@ -20,7 +20,9 @@ type ChargeAttemptTrigger string
 
 const (
 	// ChargeTriggerAutoCharge: the saved-PM chokepoint charging on its own
-	// — cycle close, finalize, the auto-charge sweep.
+	// — cycle close, finalize, the auto-charge sweep. "On its own" means no
+	// one pressed Charge now; the actor can still be a person or an API key
+	// when their finalize request led to the charge.
 	ChargeTriggerAutoCharge ChargeAttemptTrigger = "auto_charge"
 	// ChargeTriggerChargeNow: the same chokepoint, because someone asked for
 	// it: "Charge now" in the dashboard, or POST /v1/invoices/{id}/collect.

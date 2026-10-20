@@ -4319,10 +4319,14 @@ func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID,
 // the attempt, so its trigger is the truth. Empty-PI attempts (the PI create
 // itself failed) insert-only; there is no twin to dedup against.
 //
-// The actor (ADR-128 §4) is who asked for the charge, resolved from ctx as
-// the audit log resolves it: the operator or API key behind Charge now, the
-// system for the engine and dunning. It follows trigger_source: kept once
-// written, and filled in on a row a report inserted first, which has none.
+// The actor (ADR-128 §4) is whoever's request led to the charge, resolved
+// from ctx as the audit log resolves it. That is the operator or API key
+// behind Charge now, and also behind POST /v1/invoices/{id}/finalize, whose
+// charge is an auto_charge made on their request. Only charges no request
+// started (cycle close, the auto-charge sweep, dunning) record the system,
+// so (auto_charge, user) and (auto_charge, api_key) are valid pairs. The
+// actor follows trigger_source: kept once written, and filled in on a row a
+// report inserted first, which has none.
 func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt) error {
 	actorType, actorID := audit.ResolveActor(ctx)
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)

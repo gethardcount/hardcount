@@ -17,8 +17,9 @@ import (
 
 // Who made a charge attempt (ADR-128 §4, PR 6). The charge call's write
 // (RecordChargeAttempt) records the request identity the way the audit log
-// does (audit.ResolveActor): an operator's Charge now names them, the
-// engine's own charges and dunning retries name the system. A settle report
+// does (audit.ResolveActor): an operator's Charge now names them, and so does
+// the auto_charge their finalize request leads to; charges no request started
+// (cycle close, the sweep, dunning retries) name the system. A settle report
 // (upsertChargeAttemptTx: the webhook, the reconciler, the inline settle)
 // does not know who paid, so a row it inserts records no actor, and it never
 // changes one the charge call recorded.
@@ -116,6 +117,10 @@ func TestRecordChargeAttempt_StampsActor(t *testing.T) {
 		{"operator Charge now", auth.WithUserID(r.ctx, "vlx_usr_op"), domain.ChargeTriggerChargeNow, [2]string{"user", "vlx_usr_op"}},
 		{"API collect", auth.WithKeyID(r.ctx, "vlx_key_op"), domain.ChargeTriggerChargeNow, [2]string{"api_key", "vlx_key_op"}},
 		{"engine auto-charge", r.ctx, domain.ChargeTriggerAutoCharge, [2]string{"system", "system"}},
+		// POST /v1/invoices/{id}/finalize collects on the request's ctx, so
+		// its auto_charge names the operator who finalized, as the audit log
+		// does. Not the system: a person's request caused the charge.
+		{"auto-charge from an operator's finalize", auth.WithUserID(r.ctx, "vlx_usr_fin"), domain.ChargeTriggerAutoCharge, [2]string{"user", "vlx_usr_fin"}},
 		{"dunning retry", r.ctx, domain.ChargeTriggerDunningRetry, [2]string{"system", "system"}},
 	}
 	for _, tc := range cases {

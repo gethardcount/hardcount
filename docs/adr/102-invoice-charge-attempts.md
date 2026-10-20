@@ -142,10 +142,15 @@ inserts these attempts with no test-clock time.
 **Change.** Writer 1 now records a third trigger. `charge_now` is a charge
 someone asked for: "Charge now" in the dashboard, or
 `POST /v1/invoices/{id}/collect`. `auto_charge` keeps the charges Velox
-makes on its own. The PaymentIntent and its idempotency key are the same
+makes without that button: cycle close, finalize and the auto-charge
+sweep. The PaymentIntent and its idempotency key are the same
 for both, so Stripe sees no change. Writer 1 also stamps `actor_type` and
 `actor_id` from `audit.ResolveActor`, the same values the audit log
-records. Writer 2 records no actor: a settle report does not know who
+records: whoever's request led to the charge. The trigger and the actor
+are separate facts. `POST /v1/invoices/{id}/finalize` charges on the
+request's identity, so its `auto_charge` attempt names the person or API
+key that finalized; only charges no request started (cycle close, the
+sweep, dunning) record `system`. Writer 2 records no actor: a settle report does not know who
 paid. When writer 1's row follows a report's `external` row, it fills in
 the trigger and the actor together.
 
@@ -153,3 +158,15 @@ the trigger and the actor together.
 line an actor, and "why was this charged?" needs Charge now apart from the
 automatic charges. Rows written before migration 189 keep `auto_charge`
 and no actor; nothing is guessed for them.
+
+**Rolling back.** The release before this one counts only `auto_charge`
+and `dunning_retry` as Velox's own attempts when it judges a late payment
+report (`veloxAttemptStandingTx`). It does not see a `charge_now` row, so
+a late decline for an older automatic attempt can look like the newest
+attempt. The invoice can then move back onto the older PaymentIntent, and
+a second failure email can go out. During a rolling deploy this needs a
+Charge now and a late decline for an earlier attempt within the minutes
+both releases serve; that window is accepted. Rolling the binary back for
+longer is not safe as is: first set those rows back with
+`UPDATE invoice_charge_attempts SET trigger_source = 'auto_charge' WHERE trigger_source = 'charge_now'`,
+the same statement migration 189's down step runs.

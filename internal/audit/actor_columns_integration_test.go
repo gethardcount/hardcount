@@ -17,6 +17,11 @@ import (
 // the audit log, and since ADR-128 PR 6 the email outbox and the charge
 // attempts. A kind a CHECK did not list would fail that insert: an email
 // never queued, an attempt row lost.
+//
+// The kinds come from the four contexts below, one per branch of
+// ResolveActor, written by hand. This test does not see a kind added to
+// ResolveActor without a context here: whoever adds a branch adds its
+// context to this list, and the CHECKs then fail until they allow it.
 func TestResolveActorKinds_MatchEveryActorCheck(t *testing.T) {
 	testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
