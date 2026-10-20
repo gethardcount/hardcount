@@ -235,20 +235,26 @@ func (e *Engine) dispatchInvoiceFinalized(ctx context.Context, sub domain.Subscr
 // the subscription handler's proration invoice, so it sends the payload the
 // engine sends for its own invoices (#1279). Drafts send nothing: they send
 // it from invoice.Service.Finalize when they finalize.
+//
+// It is sent before the collector applies the customer's credit (ADR-116), so
+// amount_due_cents is the amount before that credit. credits_applied_cents is
+// the credit on the invoice when the event is built, read from the invoice,
+// so the two add up as they do on the invoice itself (#1281).
 func (e *Engine) DispatchInvoiceFinalized(ctx context.Context, tenantID string, inv domain.Invoice) {
 	if inv.Status != domain.InvoiceFinalized {
 		return
 	}
 	if e.events != nil {
 		e.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, map[string]any{
-			"invoice_id":         inv.ID,
-			"invoice_number":     inv.InvoiceNumber,
-			"customer_id":        inv.CustomerID,
-			"status":             string(inv.Status),
-			"payment_status":     string(inv.PaymentStatus),
-			"total_amount_cents": inv.TotalAmountCents,
-			"amount_due_cents":   inv.AmountDueCents,
-			"currency":           inv.Currency,
+			"invoice_id":            inv.ID,
+			"invoice_number":        inv.InvoiceNumber,
+			"customer_id":           inv.CustomerID,
+			"status":                string(inv.Status),
+			"payment_status":        string(inv.PaymentStatus),
+			"total_amount_cents":    inv.TotalAmountCents,
+			"amount_due_cents":      inv.AmountDueCents,
+			"credits_applied_cents": inv.CreditsAppliedCents,
+			"currency":              inv.Currency,
 		})
 	}
 }
