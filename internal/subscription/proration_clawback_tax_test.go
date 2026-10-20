@@ -449,3 +449,53 @@ func TestUpdateItem_Downgrade_InFlightSource_DraftsInsteadOfDroppingCredit(t *te
 		})
 	}
 }
+
+// TestResolveClawbackPieces_OverflowPlacesWhatFits: earlier credit notes left
+// two paid funding invoices 500 and 300 of room (gross), and an item change
+// owes 2000 net. The pieces place the 800 that fits, none above its invoice's
+// room, and the change goes through. Before, the overflow was an error and the
+// change answered 500. Both allocators: proportional for a quantity or item
+// change, LIFO for a plan downgrade.
+//
+// Mutation seam: restore the `remainder > 0` error in resolveClawbackPieces →
+// both arms error.
+func TestResolveClawbackPieces_OverflowPlacesWhatFits(t *testing.T) {
+	baseInv := domain.Invoice{
+		ID: "base_inv", PaymentStatus: domain.PaymentSucceeded,
+		SubtotalCents: 2000, TaxFacts: domain.TaxFacts{TaxAmountCents: 200}, TotalAmountCents: 2200,
+		CreatedAt: proPeriodStart,
+	}
+	upInv := domain.Invoice{
+		ID: "up_inv", PaymentStatus: domain.PaymentSucceeded,
+		SubtotalCents: 4000, TaxFacts: domain.TaxFacts{TaxAmountCents: 400}, TotalAmountCents: 4400,
+		CreatedAt: proPeriodStart.AddDate(0, 0, 5),
+	}
+	room := map[string]int64{"base_inv": 500, "up_inv": 300}
+	for _, ct := range []domain.ItemChangeType{domain.ItemChangeTypeQuantity, domain.ItemChangeTypePlan} {
+		t.Run(string(ct), func(t *testing.T) {
+			h := NewHandler(NewService(newMemStore(), nil))
+			h.SetProrationDeps(&plansMock{}, &invoicesMock{sourceInvoice: baseInv, fundingInvoices: []domain.Invoice{baseInv, upInv}}, &creditsMock{})
+			h.SetCreditNoteIssuer(&fakeCNIssuer{credited: map[string]int64{
+				"base_inv": baseInv.TotalAmountCents - room["base_inv"],
+				"up_inv":   upInv.TotalAmountCents - room["up_inv"],
+			}})
+			ps, pe := proPeriodStart, proPeriodEnd
+			sub := domain.Subscription{ID: "sub_1", CurrentBillingPeriodStart: &ps, CurrentBillingPeriodEnd: &pe}
+
+			pieces, err := h.resolveClawbackPieces(context.Background(), "t1", sub, ct, 2000)
+			if err != nil {
+				t.Fatalf("resolveClawbackPieces: %v, want the pieces that fit", err)
+			}
+			var sum int64
+			for _, p := range pieces {
+				if p.GrossCents > room[p.InvoiceID] {
+					t.Errorf("piece %d on %s exceeds its room %d", p.GrossCents, p.InvoiceID, room[p.InvoiceID])
+				}
+				sum += p.GrossCents
+			}
+			if sum != 800 {
+				t.Errorf("pieces %+v sum to %d, want 800 (all the room left)", pieces, sum)
+			}
+		})
+	}
+}

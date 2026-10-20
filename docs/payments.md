@@ -118,14 +118,6 @@ payment failures, and the gaps still open.
   the attempt.** If the database is still down when Velox undoes the
   attempt, it stays counted. On the last retry, the policy's final action
   then runs without a final charge.
-- **After a partial waive, a cancel, plan swap or item change can return
-  less than before.** When customer credits paid part of an invoice and a
-  credit note waived the rest, the invoice is paid and can be credited only
-  up to those credits. A cancel or plan swap whose unused part is larger
-  gives no relief, and an item change that large is refused with a 500
-  ([ADR-061](adr/061-credit-note-issue-atomicity.md#amendment-2026-10-19-a-note-that-leaves-nothing-due-marks-the-invoice-paid)).
-  To return the credits, issue a credit note for them on the invoice first;
-  the cancel or change then goes through.
 - **A dunning retry that comes back `processing` closes dunning as
   recovered**, although the invoice is unpaid. If that payment then fails,
   nothing retries the invoice; collect it by hand

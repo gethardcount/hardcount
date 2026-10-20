@@ -2066,17 +2066,18 @@ func (h *Handler) enrollAutoChargeTx(ctx context.Context, tx *sql.Tx, tenantID s
 //     in subtotal proportion.
 //
 // Read-only (it issues nothing) — called inside the atomic item-change tx, so a
-// returned error (a clawback larger than the headroom left, or a lookup
-// failure) rolls the change back BEFORE it commits rather than leaving a
-// post-commit "reconcile manually" gap. The credit notes themselves are issued
-// post-commit by issueClawbackCreditNote.
+// returned error (a lookup failure) rolls the change back BEFORE it commits
+// rather than leaving a post-commit "reconcile manually" gap. The credit notes
+// themselves are issued post-commit by issueClawbackCreditNote.
 //
-// No headroom left on any funding invoice returns no pieces and no error: the
-// period is already fully credited, so nothing more is owed and the change
-// proceeds. That is ADR-118's rule for a cancel or plan swap, and the real
-// trigger is an operator who waived the invoice with a credit note (which
-// marks it paid, ADR-061 amendment 2026-10-19) and then removes an item or
-// lowers a quantity in the same period. Before, that answered 500.
+// A clawback larger than the room left is placed as far as it fits, and the
+// rest is logged (2026-10-20). The real triggers are an operator note on a
+// card-paid invoice, and a partial waive: customer credits paid part of the
+// invoice and a credit note waived the rest, which marks it paid with room
+// equal to the credits (ADR-061 amendment 2026-10-19). Before, the change
+// answered 500. No room left on any funding invoice returns no pieces and no
+// error: the period is already fully credited, so nothing more is owed and
+// the change proceeds. That is ADR-118's rule for a cancel or plan swap.
 func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, sub domain.Subscription, changeType domain.ItemChangeType, netCredit int64) ([]ClawbackPiece, error) {
 	if netCredit <= 0 || sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return nil, nil
@@ -2092,6 +2093,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		netCap   int64
 	}
 	caps := make([]fundingCap, 0, len(funding))
+	hasUnpaid := false
 	for _, f := range funding {
 		var grossCap int64
 		// An IN-FLIGHT funding invoice is capped like a PAID one, not like an
@@ -2111,6 +2113,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 			// Unpaid: what is still due plus the customer credits applied to
 			// it — the note returns the credits it displaces (ADR-061).
 			grossCap = f.UnpaidRelievableCents()
+			hasUnpaid = true
 		}
 		if grossCap <= 0 {
 			continue // no room left on this invoice
@@ -2159,7 +2162,27 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		nets, remainder = money.AllocateByWeightCapped(netCredit, weights, netCaps)
 	}
 	if remainder > 0 {
-		return nil, fmt.Errorf("clawback %d net exceeds funding headroom by %d across %d invoice(s)", netCredit, remainder, len(caps))
+		// Less room left than the change owes. Place what fits and log the
+		// rest, at the same levels as allocateUnusedAcrossFunding. With an
+		// unpaid invoice in the set, the residual is value it can't relieve
+		// beyond what is due plus its applied credits: nothing else was paid
+		// for it, so WARN. All paid: earlier credit notes used the room, and
+		// the caps keep each invoice's credit within its total. ERROR,
+		// because it can also mean drift.
+		ids := make([]string, len(caps))
+		for i := range caps {
+			ids[i] = caps[i].inv.ID
+		}
+		level := slog.LevelError
+		if hasUnpaid {
+			level = slog.LevelWarn
+		}
+		slog.Log(ctx, level, "downgrade clawback: funding invoices' remaining room is smaller than the credit; placed what fits",
+			"subscription_id", sub.ID,
+			"net_cents", netCredit,
+			"residual_cents", remainder,
+			"invoices", ids,
+		)
 	}
 
 	pieces := make([]ClawbackPiece, 0, len(caps))
