@@ -328,3 +328,31 @@ func TestReliefTx_AllocationErrors(t *testing.T) {
 		t.Fatal("a headroom read error must fail the relief, not read as already credited")
 	}
 }
+
+// TestReliefTx_PartialHeadroom_PlacesWhatFits: a paid funding invoice already
+// credited down to 2000 of room (an operator note, or a partial waive whose
+// credits applied are now its only headroom) and a cancel whose unused part
+// is 5000. The relief places the 2000 that fits and logs the rest. Before, an
+// all-paid set with any remainder gave no relief at all.
+//
+// Mutation seam: restore the all-paid `return nil, errHeadroomExhausted` arm
+// in allocateUnusedAcrossFunding → zero drafts.
+func TestReliefTx_PartialHeadroom_PlacesWhatFits(t *testing.T) {
+	baseInv, baseLine := paidBaseInvoice()
+	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
+	adjuster := &fakeCreditNoteAdjuster{}
+	e := wireCancelEngine(inv, pricing, adjuster)
+	e.SetCreditHeadroomReader(&fakeCreditHeadroom{credited: map[string]int64{"inv_base": 15000 - 2000}})
+
+	r, err := e.BillOnCancelDraftsTx(context.Background(), nil, sub)
+	if err != nil {
+		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+	}
+	const want = 2000 // the room left; the unused part is 5000
+	if len(adjuster.draftCall) != 1 || adjuster.draftCall[0].gross != want {
+		t.Fatalf("drafts = %+v, want one of gross %d (what fits)", adjuster.draftCall, want)
+	}
+	if r.CreditedCents != want {
+		t.Errorf("credited = %d, want %d", r.CreditedCents, want)
+	}
+}
