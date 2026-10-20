@@ -4731,12 +4731,6 @@ func (e *Engine) prepareSwapCredit(ctx context.Context, sub domain.Subscription,
 	}, true, nil
 }
 
-// errHeadroomExhausted is the allocator's "an ALL-PAID funding set cannot
-// absorb the owed credit": the period was already fully credited (an earlier
-// credit note took its headroom), so nothing more is owed. It is the only
-// allocation error the relief trunk lets the change proceed past.
-var errHeadroomExhausted = errors.New("unused-prebill credit exceeds the funding invoices' remaining headroom")
-
 // reliefTx is the shared in-tx trunk of BillOnCancelDraftsTx and
 // BillOnPlanSwapDraftsTx: funding lookup → allocation → one write per share on
 // the caller's tx. what labels log lines ("cancel proration" / "plan-swap
@@ -4810,14 +4804,10 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 		return r, nil
 	}
 
+	// What does not fit in the funding invoices' remaining room is logged by
+	// the allocator, and the shares carry what fits. A set already fully
+	// credited gets no shares, so the change proceeds with no relief.
 	shares, err := e.allocateUnusedAcrossFunding(ctx, sub, allocate, in.PeriodEnd, in.CancelAt, totalUnused)
-	if errors.Is(err, errHeadroomExhausted) {
-		// Already fully credited — nothing more is owed. Loud, because it can
-		// also mean drift, but not a reason to refuse the cancel or swap.
-		slog.ErrorContext(ctx, what+": funding invoices already fully credited; no further relief",
-			"subscription_id", sub.ID, "customer_id", sub.CustomerID, "error", err)
-		return r, nil
-	}
 	if err != nil {
 		return domain.Relief{}, fmt.Errorf("%s: allocate across funding invoices: %w", what, err)
 	}
@@ -4944,11 +4934,12 @@ type fundingShare struct {
 // allocateUnusedAcrossFunding is the PURE allocation half: weight each funding
 // invoice by its own unused net contribution, cap each at its remaining headroom
 // (PAID: creditable = total − already-credited; UNPAID: amount_due), water-fill
-// via AllocateByWeightCapped, and surface an unplaceable remainder LOUDLY (all-paid
-// fault) or as a WARN (mixed set). READS + MATH only — no Create/Issue — so it is
-// safe inside a coordinator tx. CRITICAL: the per-PAID-source net→gross clamp AND
-// the remainder loud-fail live HERE, so the #276/#277/#278 over-credit invariant
-// (cumulative credit ≤ funding headroom) holds for every relief write. The CreditedCents
+// via AllocateByWeightCapped, and return the shares that fit. A remainder that
+// fits nowhere is logged, as ERROR for an all-paid set and WARN for a mixed one,
+// and never placed. READS + MATH only — no Create/Issue — so it is safe inside a
+// coordinator tx. CRITICAL: the per-source caps and the net→gross clamp live
+// HERE, so the #276/#277/#278 over-credit invariant (cumulative credit ≤ funding
+// headroom) holds for every relief write. The CreditedCents
 // headroom read MUST stay off any coordinator tx — it counts non-voided notes
 // INCLUDING drafts, so an on-tx read would let an in-flight draft shrink its own
 // headroom.
@@ -5026,22 +5017,36 @@ func (e *Engine) allocateUnusedAcrossFunding(ctx context.Context, sub domain.Sub
 
 	nets, remainder := money.AllocateByWeightCapped(totalUnused, weights, netCaps)
 	if remainder > 0 {
-		if !hasUnpaid {
-			// All-paid funding set can't absorb the owed credit — a genuine fault
-			// (period already fully credited, or drift). Fail LOUD; never silently
-			// drop the customer's money.
-			return nil, fmt.Errorf("%w: %d of %d across %d invoice(s)", errHeadroomExhausted, remainder, totalUnused, len(sources))
+		var placed int64
+		for _, n := range nets {
+			placed += n
 		}
-		// Mixed/unpaid set: paid sources already absorbed all they could (the
-		// allocator water-fills overflow onto them first); the residual is value
-		// an UNPAID invoice can't relieve beyond its amount_due and applied
-		// credits — nothing else was paid for it, so there's nothing more to
-		// return. Not a fault, but log it.
-		slog.WarnContext(ctx, "unused-prebill credit: residual unplaceable on unpaid funding invoice(s)",
-			"subscription_id", sub.ID,
-			"residual_cents", remainder,
-			"total_unused", totalUnused,
-			"funding_invoices", len(sources))
+		if hasUnpaid {
+			// Mixed/unpaid set: paid sources already absorbed all they could
+			// (the allocator water-fills overflow onto them first); the
+			// residual is value an UNPAID invoice can't relieve beyond its
+			// amount_due and applied credits — nothing else was paid for it,
+			// so there's nothing more to return. Not a fault, but log it.
+			slog.WarnContext(ctx, "unused-prebill credit: residual unplaceable on unpaid funding invoice(s)",
+				"subscription_id", sub.ID,
+				"placed_cents", placed,
+				"residual_cents", remainder,
+				"total_unused", totalUnused,
+				"funding_invoices", len(sources))
+		} else {
+			// All-paid set: earlier credit notes (an operator note, or a
+			// waiver after customer credits paid part of the invoice) left
+			// less room than the unused part. Place what fits; the caps keep
+			// every invoice's credit within its total (#276-#278). Loud,
+			// because it can also mean drift. With no room at all, nothing is
+			// placed: the period is already fully credited.
+			slog.ErrorContext(ctx, "unused-prebill credit: funding invoices' remaining room is smaller than the unused part; placed what fits",
+				"subscription_id", sub.ID,
+				"placed_cents", placed,
+				"residual_cents", remainder,
+				"total_unused", totalUnused,
+				"funding_invoices", len(sources))
+		}
 	}
 
 	var shares []fundingShare
