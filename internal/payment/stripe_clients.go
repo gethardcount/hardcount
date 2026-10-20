@@ -39,6 +39,7 @@ type StripeCredentials interface {
 // not configured for this tenant+mode" and surface ErrStripeNotConfigured.
 type StripeClients struct {
 	fetcher StripeCredentials
+	http    *http.Client // nil: stripeHTTPClient
 }
 
 // NewStripeClients wires the per-tenant resolver. fetcher=nil returns nil so
@@ -49,6 +50,18 @@ func NewStripeClients(fetcher StripeCredentials) *StripeClients {
 		return nil
 	}
 	return &StripeClients{fetcher: fetcher}
+}
+
+// NewStripeClientsWithHTTPClient is NewStripeClients sending every Stripe
+// request through hc instead of the shared 30-second client. Tests outside
+// this package use it to answer as Stripe would, so the real client decodes
+// and classifies the reply.
+func NewStripeClientsWithHTTPClient(fetcher StripeCredentials, hc *http.Client) *StripeClients {
+	c := NewStripeClients(fetcher)
+	if c != nil {
+		c.http = hc
+	}
+	return c
 }
 
 // ForCtx derives tenantID from auth ctx and livemode from postgres ctx,
@@ -96,7 +109,11 @@ func (c *StripeClients) Resolve(ctx context.Context, tenantID string, livemode b
 	if creds.SecretKey == "" {
 		return nil, nil
 	}
-	return stripe.NewClient(creds.SecretKey, stripe.WithBackends(stripe.NewBackends(stripeHTTPClient))), nil
+	hc := stripeHTTPClient
+	if c.http != nil {
+		hc = c.http
+	}
+	return stripe.NewClient(creds.SecretKey, stripe.WithBackends(stripe.NewBackends(hc))), nil
 }
 
 // ResolveCtx is Resolve for the tenant and mode on ctx.

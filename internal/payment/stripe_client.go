@@ -94,7 +94,8 @@ func humanizeDeclineCode(code string) string {
 
 // ErrPaymentTransient signals that this charge request charged nothing, so
 // the invoice state is unchanged: the circuit breaker was open, the
-// credentials could not be read, or Stripe refused the request with 429. The
+// credentials could not be read, Stripe refused the request with 429, or
+// Stripe refused the key (StripeKeyError). The
 // scheduler/dunning path should treat this as "skip this tick" and not tick
 // the dunning attempt count, unlike a real payment failure.
 //
@@ -110,6 +111,51 @@ var ErrPaymentTransient = errors.New("payment attempt skipped; upstream breaker 
 // database blip). Unlike a 429 it says nothing could be running at Stripe, so
 // the charge releases its hold (ADR-127).
 var ErrStripeCredentialsUnavailable = fmt.Errorf("%w: stripe credentials could not be read", ErrPaymentTransient)
+
+// StripeKeyError is a charge that never ran because Stripe refused the
+// tenant's API key (401: the key is invalid or was rolled; 403: a restricted
+// key without permission to create PaymentIntents) or because no key is
+// connected for this mode. The key is wrong, not the card, so it is not a
+// decline: no dunning attempt is used, the invoice is not marked failed, and
+// no customer email carries Stripe's sentence. The operator is told instead
+// (a metric, an ERROR line, and the Settings → Payments notice).
+//
+// It wraps ErrPaymentTransient so every charge caller skips the tick
+// unchanged. It must not be or wrap a *PaymentError: the auto-charge sweep,
+// the dunning retry and Collect all check errors.As(*PaymentError) with
+// Unknown=false before ErrPaymentTransient, and would count it as a decline.
+// So ErrStripeNotConfigured, itself a PaymentError that refunds, the
+// checkout sync and the stale-hold sweep read, is not wrapped either.
+type StripeKeyError struct {
+	Reason  string // StripeKeyRejected or StripeKeyNotConfigured
+	Message string // Stripe's own sentence, scrubbed; empty for not_configured
+}
+
+// Reasons of a StripeKeyError; also the label of
+// velox_stripe_key_unusable_total.
+const (
+	StripeKeyRejected      = "rejected"
+	StripeKeyNotConfigured = "not_configured"
+)
+
+func (e *StripeKeyError) Error() string {
+	if e.Reason == StripeKeyNotConfigured {
+		return "payment attempt skipped: stripe not configured for this mode"
+	}
+	return "payment attempt skipped: stripe rejected the API key: " + e.Message
+}
+
+func (e *StripeKeyError) Unwrap() error { return ErrPaymentTransient }
+
+// OperatorSafeMessage implements respond.SafeMessageError. Stripe's own
+// sentence names the key's last characters or the missing permission; it
+// goes to the log and the Settings notice, not to this response.
+func (e *StripeKeyError) OperatorSafeMessage() string {
+	return "Stripe refused this account's API key (or none is connected for this mode). Nothing was charged. Update the key under Settings → Payments, then collect again."
+}
+
+// OperatorErrorCode names the fault so a caller can tell it from a decline.
+func (e *StripeKeyError) OperatorErrorCode() string { return "stripe_key_unusable" }
 
 // isRateLimited reports whether Stripe refused the request with HTTP 429. A
 // real test-mode reply (2026-10-14) is status 429, type "rate_limit_error",

@@ -115,7 +115,19 @@ type Stripe struct {
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
 	audit              AuditEmitter               // optional; ADR-090 in-tx emission for the checkout-completed PM flip
+	keyHealth          StripeKeyHealth            // optional; marks a refused key on the Settings → Payments card
 }
+
+// StripeKeyHealth records that Stripe refused a tenant's key for one mode, so
+// Settings → Payments shows it. Implemented by *tenantstripe.Service; wired
+// via SetKeyHealth in router.go.
+type StripeKeyHealth interface {
+	MarkKeyRejected(ctx context.Context, tenantID string, livemode bool, stripeMessage string) error
+}
+
+// SetKeyHealth wires the Settings mark for a refused key. Optional: nil
+// leaves only the metric and the log line.
+func (s *Stripe) SetKeyHealth(k StripeKeyHealth) { s.keyHealth = k }
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090).
 type AuditEmitter interface {
