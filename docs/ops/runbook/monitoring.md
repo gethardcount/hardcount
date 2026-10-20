@@ -43,6 +43,7 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_email_outbox_failing_emails{mode="live"}` | > 0 | Emails tried 3 or more times and queued over 30 minutes ago keep failing. Usually the SMTP relay refuses the sender or the credentials, or `SMTP_HOST` is unset. Left alone they are lost after about 72 hours. See [Emails not going out](email-outbox-backed-up.md) |
 | `velox_email_outbox_oldest_due_age_seconds{mode="live"}` | > 1800 | An email has been due for 30 minutes and no replica has sent it. The email job is stopped, or more emails came due than it sends: about 20 to 30 a minute on one replica. See [Emails not going out](email-outbox-backed-up.md) |
 | `velox_webhook_outbox_oldest_pending_age_seconds{mode="live"}` | > 1800 | A webhook event queued 30 minutes ago has no deliveries yet: the webhook outbox job is stopped, or writing the event fails. A failing endpoint does not show here. See [Webhook outbox backed up](webhook-outbox-backed-up.md) |
+| `velox_webhook_outbox_enqueue_failures_total{event_type}` | any new failure, including a newly appearing nonzero series | A webhook event could not be added to the outbox; an event may be missing. Split by `event_type` to identify the producer. See [Webhook outbox](webhook-outbox-backed-up.md) |
 
 ### Warn (Slack or email, not page)
 
