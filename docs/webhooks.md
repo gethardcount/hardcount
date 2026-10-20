@@ -273,7 +273,7 @@ caused them, so a crash cannot drop them (rule 3).
 
 | Event | Sent when |
 |---|---|
-| `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized |
+| `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized. `amount_due_cents` is before credit ([more](#invoicefinalized-shows-the-amount-before-credit)) |
 | `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment, or a credit note left nothing due. `amount_paid_cents` is what was paid at that moment, 0 when credit or a credit note covered the rest *(always sent)* |
 | `invoice.payment_recorded` | Someone recorded a payment made outside Velox, such as a bank transfer or cheque |
 | `invoice.marked_uncollectible` | An invoice was written off as bad debt |
@@ -298,6 +298,26 @@ receives is already the close, both events are sent with the closed status,
 in either order. Velox hears of a dispute only when Stripe's
 `charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`
 events are turned on for its Stripe webhook endpoint.
+
+### `invoice.finalized` shows the amount before credit
+
+Velox uses the customer's credit when it collects the invoice. That is
+after it sends `invoice.finalized`, usually within seconds. Then it charges
+the card for what is left. So in this event:
+
+- `amount_due_cents` is the amount before credit.
+- `credits_applied_cents` is the credit on the invoice when it was
+  finalized. It is 0, except on a draft made by a Velox version before
+  0.4.0, which could already carry credit.
+
+Credit is used again each time Velox tries to collect an unpaid invoice,
+such as a payment retry. So credit the customer gets later can pay an older
+invoice.
+
+No invoice event is sent when credit pays only part of an invoice. When
+credit pays all of it, `invoice.paid` is sent. To know what is still owed,
+read the invoice with `GET /v1/invoices/{id}`: its `amount_due_cents` and
+`credits_applied_cents` are current.
 
 ### Subscriptions
 
