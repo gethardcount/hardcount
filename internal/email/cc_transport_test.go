@@ -16,7 +16,8 @@ import (
 // accepted connection walks a real EHLO/MAIL/RCPT/DATA exchange;
 // rcptReplies maps an address to a custom reply line (e.g. "550 5.1.1
 // no such user"); dropOnRcpt kills the connection when that address is
-// RCPT'd (transport-failure simulation).
+// RCPT'd (transport-failure simulation); dataReply, when set, answers the
+// end of the message instead of "250 queued".
 type scriptedSMTP struct {
 	ln          net.Listener
 	mu          sync.Mutex
@@ -24,6 +25,7 @@ type scriptedSMTP struct {
 	data        []string
 	rcptReplies map[string]string
 	dropOnRcpt  string
+	dataReply   string
 }
 
 func newScriptedSMTP(t *testing.T) *scriptedSMTP {
@@ -127,8 +129,12 @@ func (s *scriptedSMTP) session(conn net.Conn) {
 			}
 			s.mu.Lock()
 			s.data = append(s.data, b.String())
+			reply := s.dataReply
 			s.mu.Unlock()
-			write("250 queued")
+			if reply == "" {
+				reply = "250 queued"
+			}
+			write(reply)
 		case strings.HasPrefix(upper, "QUIT"):
 			write("221 bye")
 			return

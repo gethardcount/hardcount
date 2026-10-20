@@ -1,6 +1,6 @@
 # ADR-112: Dunning exhaustion settles two questions, not one
 
-**Status:** Accepted (2026-08-05; amended 2026-10-08)
+**Status:** Accepted (2026-08-05; amended 2026-10-08 and twice on 2026-10-19)
 **Amends:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns —
 `final_action` and its 2026-05-16 four-value enum)
 **Relates to:** [ADR-110](110-written-off-invoices-close-self-service-payment.md)
@@ -20,6 +20,11 @@ platform should not make unasked, and the policy form now says the invoice
 stays open. Automatic void is refused, and every entry point rejects the old
 `final_action` key by name. The policy every new account starts with changes
 nothing ([ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md)).
+Neither action fires while a payment on the invoice may still take money: its
+payment is `processing` or `unknown`, or a charge hold is set (a charge running,
+or one whose result was lost, [ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
+The final action takes the hold itself, so no charge starts while it cancels.
+The run waits and is checked again ([amendments of 2026-10-19](#amendment-2026-10-19--no-final-action-while-a-payment-may-be-in-flight)).
 
 ## Context
 
@@ -279,3 +284,105 @@ no claim. A second processor could escalate a run twice or reopen it.
   render any `next_action_at` as a retry, including the lease and the
   action_failed re-attempt. Copy fix; UI needs a show-before-PR walk.
 
+## Amendment 2026-10-19 — no final action while a payment may be in flight
+
+**Gap.** Just before the final actions, `exhaustRun` reads the invoice again.
+That check closed the run when the invoice was paid, voided or written off.
+It did not ask whether a payment could still take money. So if the invoice's
+payment went `processing` or `unknown` after the run was picked, the
+subscription was still canceled or paused, and a cancel cannot be undone.
+
+Today that is a short race. The due-run pickers skip an open invoice that is
+`processing` or `unknown`. The final retry's own `processing` or unclear
+answer never reaches the final actions either: the first resolves the run as
+recovered, and the second is a skipped retry that does not count. The fix for
+[#976](https://github.com/getvelox/velox/issues/976) makes the hold a common
+path. It records each charge on the invoice before Velox calls Stripe. A crash
+during the final retry leaves that record, the payment status still `failed`,
+and the run at its last retry with its 15-minute exhaustion lease. Without
+this amendment, exhaust-on-entry would cancel the subscription when that lease
+ends, before the check with Stripe can find the payment.
+
+A timeout on the final retry takes a different path. It is an unclear answer,
+so the retry is skipped: the attempt and the lease are rewound, and the run
+never reaches the final actions. #976 handles that path in its own design.
+
+**Decision.**
+
+- The check asks `Invoice.PaymentInFlight()`, after the paid, voided and
+  written-off cases. While it is true, neither final action fires and nothing
+  is written. The run stays `active` with the lease it already carries as
+  `next_action_at`, so a dunning tick after the lease looks again. Both ways
+  into `exhaustRun` pass this check: inline after the final retry, and
+  exhaust-on-entry.
+- `Invoice.PaymentInFlight()` is the one answer to "may a payment be open on
+  this invoice?". Today it is `payment_status` `processing` or `unknown`; the
+  #976 record joins it there. The seven former callers of
+  `InvoicePaymentStatus.IsInFlight()` ask it instead, with no change in what
+  they do, and `TestPaymentInFlight_AskedOfTheInvoice` (`internal/arch`) fails
+  on a new direct call.
+
+**Consequences.**
+
+- A payment that succeeds closes the run as recovered, and the subscription
+  is untouched. One that fails gets the final actions on the next dunning
+  tick once the lease has ended.
+- A parked invoice ([ADR-107](107-unknown-is-terminal-until-a-human.md))
+  holds its run until an operator writes it off. The write-off closes the run
+  as not collectible, without the subscription action. That was already true,
+  because the pickers skip a parked invoice. The parked-invoices runbook now
+  says to apply the subscription action by hand, but only when the run had
+  used every retry. An invoice parked before dunning started, or with retries
+  left, never reached its final action.
+- A policy with no final actions waits too, so the escalation email is not
+  sent while the payment may still succeed.
+- Pinned on real Postgres by
+  `internal/dunning/exhaust_inflight_integration_test.go`, both ways in, with
+  a payment that definitely failed as the control.
+
+**Not covered yet.**
+
+- **A charge call still waiting on Stripe**, until the #976 record ships
+  (it has, as the charge hold: see the second amendment of 2026-10-19 below).
+  During the call the payment status is still `pending` or `failed`. Only the
+  5-minute charge hold says a charge is running, and `PaymentInFlight()` does
+  not read the hold. So an exhaust-on-entry that lands during an operator's
+  **Collect payment** still cancels or pauses the subscription. The write-off
+  half is refused, by the charge-hold check in `PaymentBlocksActionHeld`. The
+  record closes this, because it exists for the whole call.
+- **A final retry that itself comes back `processing`** resolves the run as
+  recovered at once. If that payment later fails, nothing retries the invoice
+  ([#1289](https://github.com/getvelox/velox/issues/1289)).
+
+**Deferred, with a trigger.** After a hold that began inline, the escalation
+records the final retry's instant: `exhaustStampAt` reads the untouched lease
+as an uninterrupted exhaustion. The run's `resolved_at` and the escalated
+timeline row both get that instant, which can be days before the failure that
+ended the hold. So the dunning API shows the run resolved too early, and on
+the invoice timeline the escalation can sit before that failure. Trigger: a
+walk or a tenant who reports the order.
+
+## Amendment 2026-10-19 (2) — the final action takes the charge hold
+
+[ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) makes the
+charge hold (`auto_charge_claimed_until`) mean "a charge may be taking money"
+for as long as it is set, live or stale. After the status checks above,
+`exhaustRun` now takes that hold (`ClaimChargeHoldForFinalAction`) before
+either action:
+
+- **Refused** (any hold is set, or a hosted page is live): neither action
+  fires and nothing is written, as for `processing`. The run keeps its lease,
+  the due-run pickers skip a run whose open invoice has a hold, and the first
+  tick after the hold clears looks again. A lost charge's hold clears once the
+  stale-hold sweep has asked Stripe: a payment it finds closes the run as
+  recovered.
+- **Taken:** the subscription action runs, the hold is released, then the
+  invoice action. While the cancel runs no charge can start — this closes the
+  race in which the hourly sweep charged a no-card invoice whose card had just
+  been attached while dunning canceled its subscription. The cancel runs as the
+  hold's owner, so its void of this same invoice, when it is a wholly unused
+  prebill, is not refused by its own hold.
+
+That closes the first item under "Not covered yet" above, for a Collect in
+progress and for a crash on the final retry. Pinned by
+`internal/dunning/stale_hold_integration_test.go`.

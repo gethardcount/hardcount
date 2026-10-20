@@ -177,6 +177,8 @@ type Service struct {
 	subPauseReader SubscriptionPauseReader
 	commitGrants   CommitGrantReader
 	paymentPages   PaymentPageReader
+	cardRefusals   CardRefusalReader
+	disputes       DisputeReader
 	creditApplier  CreditApplier
 	settings       TenantSettingsReader
 	audit          AuditLogger
@@ -427,6 +429,54 @@ type PaymentPageReader interface {
 // Retry, which a live page would refuse with a clear 422.
 func (s *Service) SetPaymentPageReader(r PaymentPageReader) {
 	s.paymentPages = r
+}
+
+// CardRefusalReader reports, for a page of invoices, which ones the bank
+// refused the customer's current default card on for good (#966): invoice id
+// → Stripe's decline code. Satisfied by *PostgresStore (HardDeclinesOnDefaultCards),
+// the same rule the dunning retry skips the card on.
+type CardRefusalReader interface {
+	HardDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error)
+}
+
+// SetCardRefusalReader wires the refused-card lookup for the attention
+// banner. Optional: when nil a refused card reads as an ordinary decline,
+// whose banner still offers Update payment method first.
+func (s *Service) SetCardRefusalReader(r CardRefusalReader) {
+	s.cardRefusals = r
+}
+
+// DisputeReader reads the card disputes Stripe reported against invoices
+// (#979). Satisfied by *PostgresStore, which also records them from the
+// charge.dispute.* webhooks.
+type DisputeReader interface {
+	ListDisputesByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDispute, error)
+	LostDisputesByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceDispute, error)
+}
+
+// SetDisputeReader wires the dispute records behind the dispute_lost notice,
+// the timeline's dispute rows and GET /v1/invoices/{id}/disputes. Optional:
+// when nil no dispute is reported.
+func (s *Service) SetDisputeReader(r DisputeReader) {
+	s.disputes = r
+}
+
+// ListDisputes returns the invoice's card disputes, oldest first. Empty when
+// no dispute reader is wired.
+func (s *Service) ListDisputes(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDispute, error) {
+	if s.disputes == nil {
+		return []domain.InvoiceDispute{}, nil
+	}
+	return s.disputes.ListDisputesByInvoice(ctx, tenantID, invoiceID)
+}
+
+// ListInvoiceDisputes is ListDisputes for one invoice the caller names:
+// errs.ErrNotFound when the invoice does not exist in this tenant and mode.
+func (s *Service) ListInvoiceDisputes(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDispute, error) {
+	if _, err := s.store.Get(ctx, tenantID, invoiceID); err != nil {
+		return nil, err
+	}
+	return s.ListDisputes(ctx, tenantID, invoiceID)
 }
 
 // collectionPaused reports whether the invoice's subscription has
@@ -815,23 +865,30 @@ func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domai
 	return s.store.MarkPaid(ctx, tenantID, id, "", s.clock.Now(ctx))
 }
 
-// ClaimChargeForManualCollect takes the per-invoice charge lease for the
-// operator's Collect Payment action — the same lease the auto-charge sweep
-// and dunning retry hold, so no two initiators charge one invoice
-// concurrently (2026-07-21 snapshot-race audit). false = another charge is
-// in flight (or the invoice left the chargeable state); the operator
-// retries after the lease window.
-func (s *Service) ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (bool, error) {
+// ClaimChargeForManualCollect takes the per-invoice charge hold for the
+// operator's Collect Payment action — the same hold the auto-charge sweep
+// and dunning retry take, so no two initiators charge one invoice
+// concurrently (2026-07-21 snapshot-race audit). The zero ChargeHold = the
+// claim was refused: another charge holds the invoice, a lost charge waits
+// for the stale-hold sweep (ADR-127), a hosted page is live, or the invoice
+// left the chargeable state.
+func (s *Service) ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
 	return s.store.ClaimChargeForManualCollect(ctx, tenantID, id)
 }
 
-// ReleaseChargeClaim frees the charge lease on provably-pre-Stripe skip
-// paths only (claim taken, then a gate failed BEFORE ChargeInvoice was
-// called). Never call it after a charge attempt — an ambiguous outcome
-// must wait out the lease precisely because the call may have reached
-// Stripe (see Store.ReleaseAutoChargeClaim).
-func (s *Service) ReleaseChargeClaim(ctx context.Context, tenantID, id string) error {
-	return s.store.ReleaseAutoChargeClaim(ctx, tenantID, id)
+// ReleaseChargeClaim frees the hold Collect took, on paths that never sent a
+// charge (claim taken, then a gate failed, or credits settled the invoice,
+// BEFORE ChargeInvoice was called). Never call it after a charge attempt — an
+// unclear outcome must keep the hold, because the call may have reached Stripe
+// (see Store.ReleaseChargeHold).
+func (s *Service) ReleaseChargeClaim(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error {
+	return s.store.ReleaseChargeHold(ctx, tenantID, id, hold)
+}
+
+// ChargeHoldState reads the invoice's charge hold outside any lock. It words
+// a refused claim; it is never a gate.
+func (s *Service) ChargeHoldState(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error) {
+	return s.store.ChargeHoldStateOf(ctx, tenantID, id)
 }
 
 // SetNoPMNotifiedAt stamps the send-once no-PM email marker (see Store).
@@ -865,11 +922,14 @@ func (s *Service) attachAttention(ctx context.Context, inv domain.Invoice) domai
 // pays for a read exactly when it did before.
 type attentionFacts struct {
 	stripeConnected bool
-	paymentReady    map[string]bool // customer id → ready payment method
-	hasEmail        map[string]bool // customer id → email on file
-	escalated       map[string]bool // invoice id → dunning run escalated
-	paused          map[string]bool // subscription id → pause_collection in force
-	pageLive        map[string]bool // invoice id → hosted payment page live
+	paymentReady    map[string]bool                  // customer id → ready payment method
+	hasEmail        map[string]bool                  // customer id → email on file
+	escalated       map[string]bool                  // invoice id → dunning run escalated
+	paused          map[string]bool                  // subscription id → pause_collection in force
+	pageLive        map[string]bool                  // invoice id → hosted payment page live
+	refusedCard     map[string]string                // invoice id → hard decline code on the default card
+	retrying        map[string]bool                  // invoice id → dunning run active and not paused
+	lostDispute     map[string]domain.InvoiceDispute // invoice id → newest dispute closed as lost
 }
 
 // attachAttentionAll decorates every invoice with its Attention, reading the
@@ -955,14 +1015,42 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		}
 	}
 
+	// A refused card (#966) changes only the payment-failure notice, so only
+	// failed, finalized invoices join the read. A read error leaves it empty:
+	// the notice then shows the ordinary decline, which still leads with
+	// Update payment method. Read before the dunning runs, which it gates.
+	if s.cardRefusals != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentFailed {
+				return inv.ID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			refused, err := s.cardRefusals.HardDeclinesOnDefaultCards(ctx, tenantID, ids)
+			if err != nil {
+				slog.Warn("invoice: attention could not read refused cards", "error", err,
+					"tenant_id", tenantID, "invoices", len(ids))
+			}
+			f.refusedCard = refused
+		}
+	}
+
 	// Same guard for the dunning-escalated signal (P1-4): only the
 	// finalized-unpaid-no-PM invoices that reach classifyNoPaymentMethod
 	// join the read. No run / read errors leave the zero-value (false) — the
 	// banner shows the normal pre-escalation copy, which is the safe
 	// direction of drift.
+	//
+	// The refused-card notice (#966) joins the same read: it may say that
+	// retries keep their schedule only while the run is active and not
+	// paused. No run, or a read error, leaves retrying false, and the notice
+	// then says no retry is scheduled — the direction that still sends the
+	// operator to get a new card, rather than waiting on a retry that may
+	// never run.
 	if s.dunningReader != nil {
 		ids := distinct(page, func(inv domain.Invoice) string {
-			if awaitsPaymentNoCard(inv, f.paymentReady[inv.CustomerID]) {
+			if awaitsPaymentNoCard(inv, f.paymentReady[inv.CustomerID]) || f.refusedCard[inv.ID] != "" {
 				return inv.ID
 			}
 			return ""
@@ -970,8 +1058,10 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		if len(ids) > 0 {
 			if runs, err := s.dunningReader.ListRunsByInvoices(ctx, tenantID, ids); err == nil {
 				f.escalated = make(map[string]bool, len(runs))
+				f.retrying = make(map[string]bool, len(runs))
 				for _, run := range runs {
 					f.escalated[run.InvoiceID] = run.State == domain.DunningEscalated
+					f.retrying[run.InvoiceID] = run.State == domain.DunningActive && !run.Paused
 				}
 			}
 		}
@@ -1019,6 +1109,29 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 			}
 		}
 	}
+
+	// A lost dispute (#979) can sit on any invoice that took a payment, and a
+	// paid invoice is where it usually does, so every non-draft row joins
+	// the read: one indexed query for the page. A read error leaves the map
+	// empty and the notice off (logged); the dispute itself stays on the
+	// invoice's timeline and in its disputes list.
+	if s.disputes != nil {
+		ids := distinct(page, func(inv domain.Invoice) string {
+			if inv.Status != domain.InvoiceDraft {
+				return inv.ID
+			}
+			return ""
+		})
+		if len(ids) > 0 {
+			lost, err := s.disputes.LostDisputesByInvoices(ctx, tenantID, ids)
+			if err != nil {
+				slog.Error("invoice: attention could not read lost disputes", "error", err,
+					"tenant_id", tenantID, "invoices", len(ids))
+			}
+			f.lostDispute = lost
+		}
+	}
+
 	return f
 }
 
@@ -1058,6 +1171,11 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 		atc.CollectionPaused = f.paused[inv.SubscriptionID]
 	}
 	atc.PaymentPageOpen = f.pageLive[inv.ID]
+	atc.RefusedCardDeclineCode = f.refusedCard[inv.ID]
+	atc.DunningRetrying = f.retrying[inv.ID]
+	if d, ok := f.lostDispute[inv.ID]; ok {
+		atc.LostDispute = &d
+	}
 	// A clock-pinned invoice's failure banner dates "since" from its latest
 	// failed charge's simulated instant. Simulated failed invoices only, so a
 	// live list page never pays this read.
@@ -1075,9 +1193,10 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// while the cash never arrived (ADR-078 D3 fast-follow). Read per row, but
 	// behind the tightest guard of any attention read — commit lines
 	// are manual-invoice-only and funded at finalize (ADR-078 D2/D3), so a
-	// draft, a subscription-cycle invoice, or a paid one can never carry a live
-	// grant and never pays for the lookup. What remains is one hit on the
-	// unique partial index idx_credit_ledger_commit_fund_dedup.
+	// draft or a subscription-cycle invoice can never carry a live grant, and
+	// a paid one has nothing to report (the cash arrived); none of them pays
+	// for the lookup, except the paid case below. What remains is one hit on
+	// the unique partial index idx_credit_ledger_commit_fund_dedup.
 	//
 	// The clock here is the RESOLVER's, deliberately unlike atc.Now a few lines
 	// above: that one ages an in-flight payment, which settles in the real
@@ -1089,9 +1208,16 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// A read error leaves both figures zero and claims no exposure. The
 	// alternative — a banner asserting a balance we could not read — is the
 	// failure worth avoiding, and the invoice's own cause banner still renders.
+	//
+	// One paid case joins the read: a lost dispute (#1287 review). The bank
+	// took the cash back while the credit stays spendable, and the
+	// dispute_lost notice must say so and point to commit relief instead of
+	// the credit note a commit invoice refuses. Only paid invoices with a lost
+	// dispute pay for it, which is almost none.
 	if s.commitGrants != nil && inv.ID != "" &&
 		inv.BillingReason == domain.BillingReasonManual &&
-		(inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible) {
+		(inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible ||
+			(inv.Status == domain.InvoicePaid && atc.LostDispute != nil)) {
 		if drawable, consumed, err := s.commitGrants.CommitGrantExposure(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx)); err == nil {
 			atc.CommitGrantDrawableCents = drawable
 			atc.CommitGrantConsumedCents = consumed
@@ -1335,16 +1461,21 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// reason as the audit row above: pre-fix the handler fired it, so the
 	// tax-retry auto-finalize chain (RetryTax → Finalize) silently never
 	// notified integrators that a tax-deferred invoice finalized.
+	// Same fields as the engine's sender (billing.DispatchInvoiceFinalized).
+	// The collector applies credit after this (ADR-116), so amount_due_cents
+	// is before that credit; credits_applied_cents is what the row already
+	// carries, so the two add up as they do on the invoice (#1281).
 	if s.events != nil {
 		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, map[string]any{
-			"invoice_id":         finalized.ID,
-			"invoice_number":     finalized.InvoiceNumber,
-			"customer_id":        finalized.CustomerID,
-			"status":             string(finalized.Status),
-			"payment_status":     string(finalized.PaymentStatus),
-			"total_amount_cents": finalized.TotalAmountCents,
-			"amount_due_cents":   finalized.AmountDueCents,
-			"currency":           finalized.Currency,
+			"invoice_id":            finalized.ID,
+			"invoice_number":        finalized.InvoiceNumber,
+			"customer_id":           finalized.CustomerID,
+			"status":                string(finalized.Status),
+			"payment_status":        string(finalized.PaymentStatus),
+			"total_amount_cents":    finalized.TotalAmountCents,
+			"amount_due_cents":      finalized.AmountDueCents,
+			"credits_applied_cents": finalized.CreditsAppliedCents,
+			"currency":              finalized.Currency,
 		})
 	}
 	return finalized, nil
@@ -1536,15 +1667,28 @@ func voidRefusal(inv domain.Invoice) error {
 // 'failed' and writes only the hold, so without this the three actions went
 // through while Stripe could be taking the money — a charge then succeeding
 // on a voided invoice, or a customer paying twice after an offline payment
-// (#975, ADR-059 amendment). The hold can outlive a charge that was never
-// sent (breaker open, credentials unreadable); that costs an operator a
-// refusal of at most five minutes, which is accepted.
+// (#975, ADR-059 amendment).
+//
+// Since ADR-127 a stale hold refuses void and offline payment too: its
+// charge's result was lost and Stripe may hold the payment. The stale-hold
+// sweep asks Stripe within about an hour, so an operator (or a cancel's
+// prebill void, R3) waits up to that long after a lost charge, and a hold left
+// by a charge that was never sent (breaker open, credentials unreadable)
+// costs the same wait. Write-off stays allowed on a stale hold (see
+// domain.PaymentBlocksActionHeld).
+//
+// The hold's own owner passes: dunning's final action takes the hold for the
+// subscription cancel, and the cancel's prebill void runs under that ctx
+// (domain.WithChargeHoldOwner).
 func (s *Service) refuseWhileChargeHeld(ctx context.Context, tx *sql.Tx, locked domain.Invoice, action domain.InvoiceAction) error {
-	held, err := s.store.ChargeHeldTx(ctx, tx, locked.ID)
+	state, hold, err := s.store.ChargeHeldTx(ctx, tx, locked.ID)
 	if err != nil {
 		return err
 	}
-	if b := domain.PaymentBlocksActionHeld(locked, action, held); b.Blocked {
+	if state == domain.ChargeHoldLive && domain.OwnsChargeHold(ctx, locked.ID, hold.Until) {
+		state = domain.ChargeHoldNone
+	}
+	if b := domain.PaymentBlocksActionHeld(locked, action, state); b.Blocked {
 		return errs.InvalidState(b.Message).WithCode(b.Code)
 	}
 	return nil
@@ -1566,6 +1710,9 @@ func (s *Service) VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID stri
 		// A fully-unused prebill is voided on its period's first day, which is
 		// when the first automatic charge fires: refuse while a charge holds
 		// it (#975), so the cancel or plan swap rolls back and is retried.
+		// A stale hold refuses too (ADR-127): the retry succeeds once the
+		// stale-hold sweep has confirmed the lost charge with Stripe, up to
+		// about an hour later (residual R3).
 		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionVoid); err != nil {
 			return err
 		}
@@ -1699,15 +1846,15 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Block until terminal. Stripe enforces the same ("can't mark uncollectible
 	// with open payments"). Guard sits BEFORE reverseInvoiceTax.
 	// A PARKED invoice is the exception (ADR-107): payment_status='unknown' with
-	// no PaymentIntent id means the attempt could not be identified at the
-	// provider and never will be. It is excluded from every charge path, so it
-	// can otherwise reach no terminal state at all — which violates the
-	// every-invoice-terminates rule and left the operator with literally no
-	// action (found by the honesty sweep, 2026-07-31).
+	// no PaymentIntent id means Stripe's answer was unclear and named no
+	// payment. The stale-hold sweep finishes it within a day (REC-5), and
+	// writing it off is the action for a customer who paid another way, or
+	// for a park Stripe cannot be asked about (found by the honesty sweep,
+	// 2026-07-31, when it had no exit at all).
 	//
 	// Writing it off is safe in a way voiding is not: it moves no money, and if
-	// the charge did succeed the payment webhook still marks the invoice paid
-	// through the ordinary recovery path, which audits recovered_from. Void
+	// the charge did succeed the payment webhook or the stale-hold sweep still
+	// marks the invoice paid, which audits recovered_from. Void
 	// stays refused because a voided-then-succeeded invoice is a contradiction,
 	// and RecordOfflinePayment stays refused because it would label a card
 	// charge as out-of-band.
@@ -1718,7 +1865,9 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Re-run under the row lock, with the charge hold: the check above read
 	// the invoice before the lock, and a charge can claim it in between
 	// (#975). A parked invoice still passes (the hold is not consulted on
-	// 'unknown'), so ADR-107's only exit stays open.
+	// 'unknown'), so ADR-107's only exit stays open, and so does an invoice
+	// whose hold is stale (ADR-127): writing off moves no money, and a payment
+	// the stale-hold sweep finds later still settles it.
 	updated, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceUncollectible, func(tx *sql.Tx, locked domain.Invoice) error {
 		return s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionMarkUncollectible)
 	})
@@ -1743,7 +1892,7 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Reversing here shipped a machine-driven under-remit with no human in it:
 	// an ambiguous charge parks an invoice (ADR-107), write-off is its only
 	// legal exit and the attention banner advises it, the reversal fires, then
-	// the ADR-108 provider search finds the charge succeeded and
+	// the stale-hold sweep finds the charge succeeded at Stripe and
 	// markPaidReportingTransition settles uncollectible -> paid — leaving a
 	// PAID invoice whose tax is un-reported and nothing to re-report it. The
 	// in-flight guard above catches only the payment already moving at
@@ -2112,16 +2261,39 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 }
 
 // RetryTax routes a "Retry tax" action through the billing engine.
-// Called from both the operator-triggered HTTP handler and the
-// background reconciler (RetryPendingTax). The engine owns the
+// Called from the operator-triggered HTTP handler, the background
+// reconciler (RetryPendingTax), the test-clock catch-up and the two
+// fan-outs (Stripe connect, billing-profile save). The engine owns the
 // recompute and atomic persist; this service method layers
 // auto-finalize on top: when the retry succeeds AND the invoice
 // is engine-generated (billing_reason != "manual"), finalize in
 // the same call. Manual invoices stay draft so the operator
 // retains the explicit finalize step.
 //
-// Returns the updated invoice with its Attention re-derived so
-// the caller renders the new state immediately.
+// Once the tax write commits, an engine draft with tax ok and no pause is
+// owed a finalize, and no sweep lists it again: every tax sweep lists only
+// pending or failed tax. So everything after the tax write runs on a
+// detached ctx. A SIGTERM or a lost lease cancels the tax_retry tick's ctx
+// (main.go); a finalize on that ctx failed and left the period unissued for
+// good. After a lease loss the new leader's sweep does not list this row
+// (its tax is ok). A rival that finalizes first (an operator's Finalize, or
+// a second RetryTax on the same row) wins the draft→finalized CAS; nothing
+// is owed then, so that returns nil. For the same reason, a failed pause
+// read or finalize is returned as an error naming the remedy, so the sweep
+// counts it. A paused draft is legal and returns nil.
+//
+// Still uncovered: a hard process death in the few milliseconds between the
+// tax commit and the finalize commit. That includes the connect fan-out
+// goroutine, which shutdown does not wait for, so it is covered only for its
+// own 5-minute timeout. It also includes a SIGTERM during the tax write's
+// COMMIT round trip: pgx commits on the BeginTx ctx, so the commit can apply
+// and still return context canceled, and RetryTax returns before the detach.
+// The full fix finalizes inside UpdateTaxAtomic's tx.
+//
+// Returns the updated invoice with its Attention re-derived so the caller
+// renders the new state immediately. Once the tax write has committed, an
+// error comes back with the taxed draft, so the handler still audits the
+// click's tax change.
 func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
 	if s.taxRetrier == nil {
@@ -2131,6 +2303,9 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 	if err != nil {
 		return domain.Invoice{}, err
 	}
+	// The tax write has committed: the pause read, finalize and its tail, and
+	// the $0 settle below must not stop on a cancelled ctx (see above).
+	ctx = context.WithoutCancel(ctx)
 	// A paused subscription keeps its invoices as drafts — that is the whole
 	// meaning of pause_collection's keep_as_draft, and the engine holds the
 	// same line at cycle close. Auto-finalize is the one path that ignored it,
@@ -2138,15 +2313,15 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 	// resolving the tax only clears one of them. Issuing it here would hand
 	// the operator an invoice they asked us not to send, and its banner would
 	// promise an automatic charge that collection (correctly) refuses to make.
-	// The draft simply waits for the resume or an explicit Finalize.
+	// The draft stays a draft until an operator finalizes it: resuming
+	// collection does not finalize it (Stripe: after a resume, "set
+	// auto_advance=true on each draft invoice").
 	if shouldAutoFinalizeAfterRetry(inv) {
 		paused, perr := s.collectionPaused(ctx, tenantID, inv.SubscriptionID)
 		if perr != nil {
 			// Unknown is not "not paused": leave the draft (tax is already
-			// persisted), exactly like a failed auto-finalize below.
-			slog.Warn("invoice: tax resolved but the pause state could not be read; leaving the invoice as a draft",
-				"error", perr, "tenant_id", tenantID, "invoice_id", invoiceID, "subscription_id", inv.SubscriptionID)
-			return s.attachAttention(ctx, inv), nil
+			// persisted), and return the error like a failed auto-finalize below.
+			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", perr)
 		}
 		if paused {
 			slog.Info("invoice: tax resolved but collection is paused on the subscription; leaving the invoice as a draft",
@@ -2157,16 +2332,18 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 	if shouldAutoFinalizeAfterRetry(inv) {
 		final, ferr := s.finalize(ctx, tenantID, invoiceID, false) // the calc is seconds old
 		if ferr != nil {
-			// Tax already updated and persisted; finalize-side
-			// failure shouldn't unwind the recompute. Return the
-			// post-retry invoice so the operator at least sees the
-			// tax decision; finalize remains available as a
-			// follow-up click. Logged so post-mortems can see why
-			// auto-finalize didn't fire.
-			slog.Warn("invoice: auto-finalize after tax retry failed; tax recomputed but invoice stays draft",
-				"error", ferr, "tenant_id", tenantID, "invoice_id", invoiceID,
-				"billing_reason", inv.BillingReason)
-			return s.attachAttention(ctx, inv), nil
+			// A rival finalized it first: the connect fan-out and the
+			// tax_retry sweep can retry the same provider_not_configured
+			// row at once, or an operator clicked Finalize. Nothing is
+			// owed, so that is not a failure.
+			if cur, gerr := s.store.Get(ctx, tenantID, invoiceID); gerr == nil && cur.Status != domain.InvoiceDraft {
+				return s.attachAttention(ctx, cur), nil
+			}
+			// Tax already updated and persisted; finalize-side failure
+			// does not unwind the recompute. No sweep lists a draft whose
+			// tax is ok, so return the error: the sweep counts it, and
+			// the operator's click fails.
+			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", ferr)
 		}
 		// Nothing owed after finalize (a $0 invoice): settle it now so the
 		// operator who clicked Retry tax sees it paid. The auto-charge sweep
@@ -2297,7 +2474,15 @@ func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domai
 		processed int
 		errs      []error
 	)
-	for _, inv := range stuck {
+	for i, inv := range stuck {
+		// Stop before the next row, as processTaxRetryBatch does. Unlike a
+		// sweep, a fan-out runs once, and the tax_retry sweep skips a
+		// customer_data_invalid row or one past its 8 tries. So the stop
+		// (the connect fan-out's 5-minute timeout, or the request ending)
+		// is reported.
+		if err := ctx.Err(); err != nil {
+			return processed, append(errs, fmt.Errorf("stopped before %d of %d invoices: %w", len(stuck)-i, len(stuck), err))
+		}
 		if _, retryErr := s.RetryTax(ctx, tenantID, inv.ID); retryErr != nil {
 			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, retryErr))
 			continue
@@ -2391,6 +2576,9 @@ func (s *Service) RetryPendingTaxCommit(ctx context.Context, batch int) (int, []
 	var errsOut []error
 	recovered := 0
 	for _, inv := range orphans {
+		if ctx.Err() != nil {
+			return recovered, errsOut // see processTaxRetryBatch
+		}
 		if err := s.taxCommitter.CommitTax(ctx, inv.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
 			errsOut = append(errsOut, fmt.Errorf("re-commit tax for invoice %s: %w", inv.ID, err))
 			continue
@@ -2423,6 +2611,9 @@ func (s *Service) RetryPendingTaxReversal(ctx context.Context, batch int) (int, 
 	var errsOut []error
 	recovered := 0
 	for _, inv := range pending {
+		if ctx.Err() != nil {
+			return recovered, errsOut // see processTaxRetryBatch
+		}
 		// reverseInvoiceTax already logs an ERROR + leaves tax_reversed_at NULL
 		// on failure (re-scanned next tick); aggregate the error for the return.
 		if rerr := s.reverseInvoiceTax(ctx, inv.TenantID, inv, "inv_taxrev_"+inv.ID); rerr != nil {
@@ -2478,6 +2669,14 @@ func (s *Service) processTaxRetryBatch(ctx context.Context, stuck []domain.Invoi
 		errs      []error
 	)
 	for _, inv := range stuck {
+		// Shutdown or a lost lease: stop before the next row. No error here,
+		// as in processAutoCharge, so one stop is not counted as a failed
+		// row per remaining row: the next tick lists them again. The same
+		// check stops RetryPendingTaxCommit and RetryPendingTaxReversal;
+		// retryStuck, which no tick repeats, reports its stop.
+		if ctx.Err() != nil {
+			return processed, errs
+		}
 		// RetryTax pins tenant via the engine entry point that
 		// already does WithTenantID. We pass the per-row tenant
 		// explicitly here rather than relying on ctx because this

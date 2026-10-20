@@ -8,7 +8,10 @@
 #   B  roles, then HEAD's `velox migrate` on the empty database (the
 #      baseline).
 # and compares their schema (owners and access rights included), their
-# data and their applied versions.
+# data and their applied versions. It also checks that each setup gives its
+# limited user the idle-transaction timeout (docs/ops/postgres-requirements.md,
+# "Timeouts on the limited user"). That is a role setting, which lives outside
+# the database, so the dumps cannot compare it.
 #
 #   compose  superuser velox; velox_app made by deploy/compose/postgres-init.sh
 #   managed  velox_owner, not a superuser, owns the database; the three
@@ -16,9 +19,14 @@
 #   citest   superuser velox; the velox_test database of docker/init.sql
 #
 # Then two more checks:
-#   restore drill  back up a v0.8.1 database, let HEAD take it over, restore
-#                  the backup over it with scripts/restore.sh: HEAD must
-#                  refuse and change nothing.
+#   restore drill  back up a v0.8.1 database. Restore the backup into an
+#                  empty database with scripts/restore.sh: it must succeed,
+#                  equal the database backed up, and HEAD must take it over.
+#                  Then let HEAD take the first database over and restore the
+#                  backup over it. Either the restore is refused because a
+#                  newer table refers to a backed-up one, and rolled back,
+#                  leaving the database exactly as HEAD left it, or it goes
+#                  through and HEAD must refuse and change nothing.
 #   Postgres 14    HEAD applies on postgres:14 and reports up to date.
 #
 # Needs Docker, psql and pg_restore on the host, and Go to build HEAD.
@@ -52,12 +60,13 @@ docker pull -q "$POSTGRES16_IMAGE" >/dev/null
 docker pull -q "$POSTGRES14_IMAGE" >/dev/null
 docker pull -q "$VELOX_V081_IMAGE" >/dev/null
 
-# start_pg NAME PORT IMAGE SETUP: starts Postgres for one role setup on a
-# host port. The roles exist when it returns. Callers add NAME to
+# start_pg NAME IMAGE SETUP: starts Postgres for one role setup on a host
+# port Docker picks (a fixed port can already be taken on the runner), and
+# sets PG_PORT to it. The roles exist when it returns. Callers add NAME to
 # CONTAINERS first: this runs in the caller's shell, not a subshell.
 start_pg() {
-  local name=$1 port=$2 image=$3 setup=$4
-  local args=(-d --name "$name" -p "127.0.0.1:$port:5432")
+  local name=$1 image=$2 setup=$3
+  local args=(-d --name "$name" -p "127.0.0.1::5432")
   case "$setup" in
     compose)
       args+=(-e POSTGRES_USER=velox -e POSTGRES_PASSWORD=velox -e POSTGRES_DB=velox
@@ -69,6 +78,9 @@ start_pg() {
       args+=(-e POSTGRES_USER=velox -e POSTGRES_PASSWORD=velox -e POSTGRES_DB=velox) ;;
   esac
   docker run "${args[@]}" "$image" >/dev/null
+  PG_PORT=$(docker port "$name" 5432/tcp | head -1)
+  PG_PORT=${PG_PORT##*:}
+  [ -n "$PG_PORT" ] || fail "$name has no host port"
   local user=velox
   [ "$setup" = managed ] && user=postgres
   for _ in $(seq 1 60); do
@@ -86,14 +98,15 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 SQL
-      # docs/ops/postgres-requirements.md, "The two database users", run
-      # as the admin user.
+      # docs/ops/postgres-requirements.md, "The two database users" and
+      # "Timeouts on the limited user", run as the admin user.
       docker exec -i "$name" psql -v ON_ERROR_STOP=1 -q -U velox_owner -d velox >&2 <<'SQL'
 CREATE ROLE velox_app WITH LOGIN PASSWORD 'velox-app-ci';
 GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
 GRANT ALL ON SCHEMA public TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
 SQL
       ;;
     citest)
@@ -133,6 +146,19 @@ dump() {
 
 versions() { q "$1" "$2" "SELECT string_agg(version_id::text, ',' ORDER BY version_id) FROM public.goose_db_version"; }
 
+# check_app_timeout CONTAINER SETUP: the limited user must start every
+# session with a 30s idle-transaction timeout, the value
+# docs/ops/postgres-requirements.md gives. Without it, a Velox process that
+# freezes mid-transaction keeps its locks until something ends the session.
+# It asks as that user, so it sees what the API's connections get.
+check_app_timeout() {
+  local c=$1 setup=$2 role=velox_app got
+  [ "$setup" = citest ] && role=velox_test_app
+  got=$(docker exec -i "$c" psql -v ON_ERROR_STOP=1 -qAt -U "$role" -d "$(dbname "$setup")" \
+        -c "SHOW idle_in_transaction_session_timeout")
+  [ "$got" = 30s ] || fail "$c: $role starts with idle_in_transaction_session_timeout = $got, want 30s"
+}
+
 # 0174's seed takes each row's token from clock_timestamp(), so the five
 # tokens can straddle a millisecond: they are checked for age, not equality.
 check_leases() {
@@ -145,12 +171,14 @@ check_leases() {
 converge() {
   local setup=$1
   say "setup $setup"
-  local a="mig-$setup-a" b="mig-$setup-b" pa=$2 pb=$3
+  local a="mig-$setup-a" b="mig-$setup-b" pa pb
   CONTAINERS+=("$a" "$b")
-  start_pg "$a" "$pa" "$POSTGRES16_IMAGE" "$setup"
-  start_pg "$b" "$pb" "$POSTGRES16_IMAGE" "$setup"
+  start_pg "$a" "$POSTGRES16_IMAGE" "$setup"; pa=$PG_PORT
+  start_pg "$b" "$POSTGRES16_IMAGE" "$setup"; pb=$PG_PORT
   local ua ub
   ua=$(dsn "$setup" "$pa"); ub=$(dsn "$setup" "$pb")
+  check_app_timeout "$a" "$setup"
+  check_app_timeout "$b" "$setup"
 
   echo "A: v0.8.1 migrate"
   v081_migrate "$ua"
@@ -200,10 +228,10 @@ converge() {
 }
 
 restore_drill() {
-  say "restore drill: a v0.8.1 backup restored over a database HEAD took over"
-  local c=mig-restore port=55437 url before after out
-  CONTAINERS+=("$c")
-  start_pg "$c" "$port" "$POSTGRES16_IMAGE" compose
+  say "restore drill: a v0.8.1 backup restored into an empty database, and over a database HEAD took over"
+  local c=mig-restore e=mig-restore-empty port url eurl before after out kind
+  CONTAINERS+=("$c" "$e")
+  start_pg "$c" "$POSTGRES16_IMAGE" compose; port=$PG_PORT
   url=$(dsn compose "$port")
   v081_migrate "$url"
   DATABASE_URL="$url" BACKUP_DIR="$WORK/backups" \
@@ -211,11 +239,68 @@ restore_drill() {
     "$ROOT/scripts/backup.sh"
   local backup
   backup=$(find "$WORK/backups" -type f -name 'velox_*.dump' | head -1) # not the latest.dump link
+  for kind in schema data; do
+    dump "$c" compose "$kind" > "$OUT/restore-source-$kind.sql"
+  done
+
+  # The documented path: the backup into an empty database. scripts/restore.sh
+  # must succeed, the restored database must equal the one backed up, and
+  # HEAD must take it over. This is the step that proves restore.sh restores
+  # anything; the over-an-upgraded-database case below can pass on a restore
+  # that is refused.
+  echo "restore into an empty database"
+  start_pg "$e" "$POSTGRES16_IMAGE" compose
+  eurl=$(dsn compose "$PG_PORT")
+  DATABASE_URL="$eurl" VELOX_RESTORE_CONFIRM=yes \
+    PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
+    "$ROOT/scripts/restore.sh" "$backup" 2>&1 | tee "$OUT/restore-empty.txt" \
+    || fail "restore drill: scripts/restore.sh failed to restore the backup into an empty database"
+  grep -q 'Restore complete' "$OUT/restore-empty.txt" \
+    || fail "restore drill: scripts/restore.sh into an empty database did not report a complete restore"
+  for kind in schema data; do
+    dump "$e" compose "$kind" > "$OUT/restore-empty-$kind.sql"
+    if ! diff -u "$OUT/restore-source-$kind.sql" "$OUT/restore-empty-$kind.sql" > "$OUT/restore-empty-$kind.diff"; then
+      head -100 "$OUT/restore-empty-$kind.diff"
+      fail "restore drill: the $kind restored into an empty database differs from the database backed up"
+    fi
+  done
+  head_velox "$eurl" migrate
+  head_velox "$eurl" migrate status | tee "$OUT/restore-empty-status.txt"
+  grep -q 'up to date, nothing to apply' "$OUT/restore-empty-status.txt" \
+    || fail "restore drill: HEAD did not take over the database restored from the v0.8.1 backup"
+  echo "restore drill: the backup restored into an empty database, and HEAD took it over"
+
+  echo "restore over the database HEAD took over"
   head_velox "$url" migrate
   before=$(versions "$c" compose)
-  DATABASE_URL="$url" VELOX_RESTORE_CONFIRM=yes \
+  dump "$c" compose schema > "$OUT/restore-before-schema.sql"
+  dump "$c" compose data > "$OUT/restore-before-data.sql"
+  if ! DATABASE_URL="$url" VELOX_RESTORE_CONFIRM=yes \
     PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
-    "$ROOT/scripts/restore.sh" "$backup" | tee "$OUT/restore.txt"
+    "$ROOT/scripts/restore.sh" "$backup" 2>&1 | tee "$OUT/restore.txt"; then
+    # pg_restore --clean drops each object the backup holds before it
+    # recreates it. Once a migration after 180 adds a table with a foreign
+    # key into one of them (invoice_disputes, migration 185), that drop
+    # fails, and the single-transaction restore is rolled back. That is the
+    # other safe outcome: nothing changed, and HEAD runs on the database it
+    # took over. Only that cause passes: any other failure fails the drill.
+    grep -q 'single-transaction restore was rolled back' "$OUT/restore.txt" \
+      || fail "restore drill: the restore failed without rolling back"
+    grep -E -q 'cannot drop .* because other objects depend on it' "$OUT/restore.txt" \
+      || fail "restore drill: the restore over the upgraded database failed, but not because a newer table refers to a backed-up one"
+    after=$(versions "$c" compose)
+    [ "$before" = "$after" ] || fail "restore drill: goose_db_version changed ($before -> $after)"
+    for kind in schema data; do
+      dump "$c" compose "$kind" > "$OUT/restore-after-$kind.sql"
+      diff -u "$OUT/restore-before-$kind.sql" "$OUT/restore-after-$kind.sql" > "$OUT/restore-$kind.diff" \
+        || fail "restore drill: the refused restore changed the $kind"
+    done
+    head_velox "$url" migrate status | tee "$OUT/restore-status.txt"
+    grep -q 'up to date, nothing to apply' "$OUT/restore-status.txt" \
+      || fail "restore drill: status after the refused restore is not up to date"
+    echo "restore drill: the restore was refused and rolled back, nothing changed"
+    return
+  fi
   if out=$(head_velox "$url" migrate 2>&1); then
     echo "$out"
     fail "restore drill: HEAD migrate accepted a v0.8.x backup restored over a database it had taken over"
@@ -232,18 +317,19 @@ restore_drill() {
 
 pg14() {
   say "Postgres 14: HEAD applies"
-  local c=mig-pg14 port=55438 url
+  local c=mig-pg14 port url
   CONTAINERS+=("$c")
-  start_pg "$c" "$port" "$POSTGRES14_IMAGE" compose
+  start_pg "$c" "$POSTGRES14_IMAGE" compose; port=$PG_PORT
+  check_app_timeout "$c" compose
   url=$(dsn compose "$port")
   head_velox "$url" migrate
   head_velox "$url" migrate status | tee "$OUT/pg14-status.txt"
   grep -q 'up to date, nothing to apply' "$OUT/pg14-status.txt" || fail "postgres 14: status is not up to date"
 }
 
-converge compose 55431 55432
-converge managed 55433 55434
-converge citest 55435 55436
+converge compose
+converge managed
+converge citest
 restore_drill
 pg14
 say "migrations: all checks passed"

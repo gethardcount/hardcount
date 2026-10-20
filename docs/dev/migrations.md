@@ -192,8 +192,27 @@ Every migration must work on a table that already holds millions of rows,
 while Velox keeps serving: installs upgrade with their data in place.
 
 - **Add a column.** `ADD COLUMN purchase_order TEXT`, or
-  `NOT NULL DEFAULT` with a constant. Both are instant: Postgres stores the
-  default without rewriting the table.
+  `NOT NULL DEFAULT` with a constant or `now()`. Both are instant: Postgres
+  stores the default without rewriting the table. Two other forms fail the
+  checks:
+  - **`NOT NULL` with no `DEFAULT`.** Postgres refuses it on a table that
+    has rows, so the upgrade stops on every install with data. Give the
+    column a constant default. Or add it nullable, fill it, and then make
+    it `NOT NULL` as described below.
+  - **A value computed for each row.** This means a default that calls a
+    volatile function (one that can return a new value on each call, such
+    as `gen_random_uuid()`), a `SERIAL` type, an identity column or a
+    stored generated column. Postgres fills the old rows by rewriting the
+    whole table, and every read and write waits until it ends. For a
+    default, add the column with no default, then run
+    `ALTER COLUMN ... SET DEFAULT gen_random_uuid()` in the same file. Only
+    new rows use it. The check accepts a default that calls only `now()`,
+    `transaction_timestamp()`, `statement_timestamp()`,
+    `CURRENT_TIMESTAMP`, `CURRENT_TIME`, `LOCALTIMESTAMP`, `LOCALTIME`,
+    `encode()`, `CAST`, `COALESCE`, `NULLIF`, `GREATEST` and `LEAST`. Any
+    other function might be volatile, `clock_timestamp()` among them. If
+    the one you call is `IMMUTABLE` or `STABLE`, add the
+    [opt-out line](#what-the-checks-enforce) and say so.
 - **Add an index.** Use an [index build](#an-index-build).
 - **Add a CHECK or a foreign key.** Write `ADD CONSTRAINT ... NOT VALID` in
   one file, then `VALIDATE CONSTRAINT` in the next file. `NOT VALID`
@@ -221,7 +240,8 @@ new installs. Write a new file instead.
 ## What the checks enforce
 
 `go test -short ./internal/platform/migrate/` runs these on every file in
-`sql/`. CI runs them in the `unit` job.
+`sql/`. CI runs them in the `unit` job. The checks are in
+[`lint_test.go`](../../internal/platform/migrate/lint_test.go).
 
 | Rule | Why |
 |---|---|
@@ -232,7 +252,8 @@ new installs. Write a new file instead.
 | Every statement ends with `;`, and a multi-line `$$` body sits between `StatementBegin` and `StatementEnd` | goose cuts statements at lines that end in `;` |
 | A normal file has no transaction control and uses only `SET LOCAL` | See [A normal file](#a-normal-file) |
 | A file with `NO TRANSACTION` has exactly the [index-build shape](#an-index-build), one statement per line, with a new index name; a drop names an index that exists | See [An index build](#an-index-build) |
-| No statement that blocks writes on an existing table: a plain `CREATE INDEX`, an `ADD CONSTRAINT` without `NOT VALID` or `USING INDEX`, `SET NOT NULL`, or a `VALIDATE` after another change to the same table in the file | On a large table, the lock stops every write until the statement ends. A table the same file creates is exempt |
+| No statement that blocks writes on an existing table: a plain `CREATE INDEX`, an `ADD CONSTRAINT` without `NOT VALID` or `USING INDEX`, `SET NOT NULL`, a `VALIDATE` after another change to the same table in the file, or an `ADD COLUMN` whose value is [computed for each row](#common-changes) | On a large table, the lock stops every write until the statement ends. A table the same file creates is exempt |
+| An `ADD COLUMN ... NOT NULL` on an existing table has a `DEFAULT` | Without one, Postgres refuses the column on a table with rows, and the upgrade stops. A table the same file creates is exempt. The opt-out line below does not cover this rule |
 
 When blocking is safe, for example on a table known to stay small, say so
 in the file. The reason must be at least 15 characters:

@@ -11,6 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // RetryError is the adapter's decline wrapper: it carries the Stripe
@@ -24,18 +25,23 @@ import (
 type RetryError struct {
 	PaymentIntentID string
 	Err             error
+	// CardNeedsReplacing marks a decline after which the card must not be
+	// charged again for this invoice (domain.IsHardDecline, #966). The
+	// attempt counts as usual; what changes is the customer's warning email,
+	// which asks for a different card instead of promising a retry.
+	CardNeedsReplacing bool
 }
 
 func (e *RetryError) Error() string { return e.Err.Error() }
 func (e *RetryError) Unwrap() error { return e.Err }
 
-// ErrTransientSkip signals that the PaymentRetrier could not attempt a
-// charge this tick — the Stripe call never happened, so dunning must NOT
-// tick attempt_count or emit a failure event. Typical causes: per-tenant
-// circuit breaker open, context timeout fired before the Stripe API call.
-// The adapter that bridges payment → dunning maps payment's internal
-// sentinel to this dunning-visible one so peer domains don't import each
-// other.
+// ErrTransientSkip signals that this tick's retry got no definite answer, so
+// dunning must NOT tick attempt_count or emit a failure event; the next tick
+// retries. The PaymentRetrier returns it for everything except a definite
+// decline, no card, or a card refused for good: the circuit breaker open,
+// Stripe rate limiting or unreachable, an unconfirmed outcome, a database
+// error before or after the charge. The adapter maps payment's errors to
+// this dunning-visible sentinel so peer domains don't import each other.
 var ErrTransientSkip = errors.New("dunning retry skipped: upstream transient")
 
 // PaymentRetrier retries a payment for an invoice.
@@ -69,6 +75,16 @@ type InvoiceUncollectibleMarker interface {
 // InvoiceGetter gets invoice details for finding the subscription.
 type InvoiceGetter interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
+}
+
+// ChargeHoldClaimer takes and releases the invoice's charge hold around
+// dunning's final action (ADR-112 amendment, ADR-127). While dunning holds it
+// no charge can start on the invoice, and the final action does not run at
+// all while any hold is set: a charge running, or one whose result was lost
+// and may have taken the money. Implemented by *invoice.PostgresStore.
+type ChargeHoldClaimer interface {
+	ClaimChargeHoldForFinalAction(ctx context.Context, tenantID, invoiceID string) (domain.ChargeHold, error)
+	ReleaseChargeHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold) error
 }
 
 // SubscriptionTerminalState reports whether a subscription can still be
@@ -120,7 +136,12 @@ type EmailNotifier interface {
 	// reason renders without the diagnostic block. No final-attempt
 	// tone exists: the exhausting attempt sends the escalation email
 	// instead of a warning (see the warning-enqueue gate in processRun).
-	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error
+	//
+	// cardNeedsReplacing selects the "use a different card" copy: the bank
+	// refused the card for good, so dunning will not charge it again and
+	// the email must not promise a retry on a date (#966). failureReason is
+	// empty then.
+	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
 	// outcome is what exhaustion actually did to THIS invoice, not what
 	// the policy asked for — the copy is composed from it (ADR-112).
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
@@ -129,7 +150,7 @@ type EmailNotifier interface {
 	// so a failover between the two can no longer lose the email with the
 	// state standing. The store wraps the call in a SAVEPOINT — returning an
 	// error skips the email, never the money write.
-	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error
+	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
 	SendDunningEscalationTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 }
 
@@ -149,6 +170,7 @@ type Service struct {
 	subState         SubscriptionStateReader
 	invoiceUncollect InvoiceUncollectibleMarker
 	invoiceGet       InvoiceGetter
+	chargeHolds      ChargeHoldClaimer
 	events           domain.EventDispatcher
 	emailNotifier    EmailNotifier
 	customerEmail    CustomerEmailFetcher
@@ -247,6 +269,13 @@ func (s *Service) SetSubscriptionCanceler(c SubscriptionCanceler) {
 // invoice half.
 func (s *Service) SetSubscriptionStateReader(r SubscriptionStateReader) {
 	s.subState = r
+}
+
+// SetChargeHoldClaimer wires the final action's charge hold (ADR-127). The
+// producer always wires it; unwired (narrow tests) the final action runs
+// without the hold, as before ADR-127.
+func (s *Service) SetChargeHoldClaimer(c ChargeHoldClaimer) {
+	s.chargeHolds = c
 }
 
 // SetInvoiceUncollectibleMarker configures the write-off terminal action.
@@ -554,15 +583,33 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 // processRunsBatch is the shared per-run body of ProcessDueRuns and
 // ProcessDueRunsForClock. The candidate list shape differs by trigger;
 // the per-run state-machine step is identical.
+//
+// A run whose processing panics stops, the other runs are still processed,
+// and the first panic is raised again at the end, so the tick still ends as
+// panicked; the other runs' errors are logged first. A panic in the retry
+// itself has already been rewound (processRun).
 func (s *Service) processRunsBatch(ctx context.Context, tenantID string, dueRuns []domain.InvoiceDunningRun, isCatchup bool) (int, []error) {
+	var panics scheduler.Panics
 	processed := 0
 	var runErrs []error
 	for _, run := range dueRuns {
-		if err := s.processRun(ctx, tenantID, run, isCatchup); err != nil {
-			runErrs = append(runErrs, fmt.Errorf("run %s: %w", run.ID, err))
-			continue
+		func() {
+			defer panics.Guard("step", "dunning_run", "run_id", run.ID, "invoice_id", run.InvoiceID, "tenant_id", tenantID)
+			if err := s.processRun(ctx, tenantID, run, isCatchup); err != nil {
+				runErrs = append(runErrs, fmt.Errorf("run %s: %w", run.ID, err))
+				return
+			}
+			processed++
+		}()
+	}
+	if panics.Panicked() {
+		// The panic drops runErrs, which only the caller logs and counts. Log
+		// them here, so another run's failure is not hidden while one run
+		// keeps panicking.
+		for _, err := range runErrs {
+			slog.ErrorContext(ctx, "dunning error", "tenant_id", tenantID, "error", err)
 		}
-		processed++
+		panics.Repanic()
 	}
 	return processed, runErrs
 }
@@ -716,16 +763,27 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 
 	// Actually retry the payment
 	retryErr := fmt.Errorf("payment retrier not configured")
+	// A panic in the retry (a nil dereference on one unusual row) is not a
+	// decline. It is handled as a transient skip, so the rewind below undoes
+	// the attempt recorded above, and is then raised again. Without this the
+	// run stayed due with the attempt spent: every rerun spent another (and,
+	// after a decline had released the charge hold, charged the card again),
+	// and exhaust-on-entry fired the final action within a few reruns.
+	var retryPanic scheduler.Panics
 	if s.retrier != nil {
-		retryErr = s.retrier.RetryPayment(ctx, tenantID, run.InvoiceID, run.CustomerID)
+		retryErr = ErrTransientSkip // kept when RetryPayment panics
+		func() {
+			defer retryPanic.Guard("step", "dunning_retry", "run_id", run.ID, "invoice_id", run.InvoiceID, "tenant_id", tenantID)
+			retryErr = s.retrier.RetryPayment(ctx, tenantID, run.InvoiceID, run.CustomerID)
+		}()
 	}
 
-	// Transient skip: the Stripe call never happened (circuit breaker open or
-	// timeout before the call). This is NOT a dunning attempt — rewind the attempt we
-	// recorded above (count + last_attempt_at) so the run looks as it did before this
-	// tick, don't log a failure event or reschedule, and let the next scheduler tick
-	// retry. A five-minute Stripe outage should not burn a tenant's entire retry
-	// budget.
+	// Transient skip: no definite answer (see ErrTransientSkip). This is NOT a
+	// dunning attempt — rewind the attempt we recorded above (count +
+	// last_attempt_at) so the run looks as it did before this tick, don't log a
+	// failure event or reschedule, and let the next scheduler tick retry. A
+	// five-minute Stripe outage or a dropped database connection should not
+	// burn a tenant's retry budget.
 	if errors.Is(retryErr, ErrTransientSkip) {
 		run.AttemptCount--
 		run.LastAttemptAt = prevLastAttemptAt
@@ -742,7 +800,8 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 			slog.Warn("dunning transient-skip: failed to rewind the pre-charge attempt persist",
 				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
 		}
-		slog.Info("dunning retry skipped — upstream transient (breaker/timeout)",
+		retryPanic.Repanic()
+		slog.Info("dunning retry skipped — no definite answer",
 			"run_id", run.ID, "invoice_id", run.InvoiceID)
 		return nil
 	}
@@ -770,11 +829,15 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		}
 		// A card-less "attempt" records the same no_payment_method cause
 		// vocabulary the start event uses — the timeline renders it as a
-		// reminder tick, not a charge failure. Real declines keep their
-		// provider reason text.
+		// reminder tick, not a charge failure. A retry that skipped a card
+		// the bank refused for good charged nothing either, and says so
+		// (#966). Real declines keep their provider reason text.
 		evtReason := retryErr.Error()
-		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) {
+		switch {
+		case errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry):
 			evtReason = string(domain.DunningCauseNoPaymentMethod)
+		case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
+			evtReason = domain.DunningRetryReasonCardRefused
 		}
 		_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
 			RunID:        run.ID,
@@ -866,13 +929,19 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// failure is internal phrasing — mapped to empty so the warning renders
 	// without the diagnostic callout (2026-07-22 payment-surfacing audit,
 	// P2-3); real decline reasons pass through.
+	//
+	// A card the bank refused for good (#966) gets the "use a different
+	// card" copy, on the retry that drew the decline and on every retry that
+	// then skips the card: "we'll try again on <date>" would promise a charge
+	// that cannot succeed.
 	var warnTx func(tx *sql.Tx) error
 	if run.AttemptCount < policy.MaxRetryAttempts && s.emailNotifier != nil && s.customerEmail != nil {
+		needsNewCard := cardNeedsReplacing(retryErr)
 		reason := retryErr.Error()
-		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) {
+		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || needsNewCard {
 			reason = ""
 		}
-		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason)
+		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason, needsNewCard)
 	}
 	if applied, err := s.store.UpdateRunIfActive(ctx, tenantID, run, run.AttemptCount, warnTx); err != nil {
 		return err
@@ -933,7 +1002,9 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// mid-tick would otherwise cancel a paying customer's subscription here. Re-
 	// read invoice status as late as possible and, if it is now terminal, resolve
 	// the run (CAS-safe) instead of firing the terminal action. Same STATUS gate
-	// as the tick-start check. This one read also feeds both terminal actions
+	// as the tick-start check, plus one the tick-start check does not need: a
+	// payment that may still take money holds both actions (ADR-112 amendment
+	// 2026-10-19). This one read also feeds both terminal actions
 	// below, so the state they act on is the state this check just cleared.
 	// A fetch ERROR means the state is unknown: neither action fires, and the
 	// run is re-queued through the action-failed path (the old behaviour fell
@@ -961,9 +1032,56 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			case loaded.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(loaded.Status), nil)
 				return rerr
+			case loaded.PaymentInFlight():
+				// A payment that may still take money: neither final action
+				// fires and nothing is written. A cancel cannot be undone, and
+				// canceling a customer whose payment then succeeds is what this
+				// prevents. The run stays active with the lease it already
+				// carries as next_action_at (the final retry and the
+				// exhaust-on-entry claim both wrote it), so a dunning tick after
+				// the lease looks again: a payment that succeeded resolves the
+				// run as recovered, and one that failed reaches the final
+				// actions through exhaust-on-entry. While the payment is
+				// processing or unknown the due-run pickers skip the run, so the
+				// wait costs no ticks. A parked invoice waits for the
+				// stale-hold sweep: a payment Stripe shows settles it, and with
+				// none a day after the attempt it goes back to failed or
+				// pending and this run goes on. An operator's write-off closes
+				// the run as not collectible without the subscription action.
+				slog.Info("dunning final action held: a payment on this invoice may still go through; a later dunning tick checks again",
+					"run_id", run.ID, "invoice_id", run.InvoiceID,
+					"payment_status", loaded.PaymentStatus,
+					"final_subscription_action", policy.FinalSubscriptionAction,
+					"final_invoice_action", policy.FinalInvoiceAction)
+				return nil
 			}
 			inv, invRead = loaded, true
 		}
+	}
+
+	// Take the invoice's charge hold for the final action (ADR-127). Refused
+	// means a hold is set: a charge is running (an auto-charge whose card
+	// was just attached, a Collect), or one whose result was lost waits for
+	// the stale-hold sweep to ask Stripe — which may find the customer paid.
+	// Neither action fires and nothing is written, exactly like the
+	// payment-in-flight branch above: the run keeps its lease as
+	// next_action_at, the due-run pickers skip it while the hold is set, and
+	// the first tick after the hold clears looks again. Held, no charge can
+	// start until the subscription action has run.
+	var hold domain.ChargeHold
+	if invRead && s.chargeHolds != nil {
+		h, err := s.chargeHolds.ClaimChargeHoldForFinalAction(ctx, tenantID, run.InvoiceID)
+		if err != nil {
+			return fmt.Errorf("dunning exhaust: take the charge hold on invoice %s: %w", run.InvoiceID, err)
+		}
+		if !h.Held() {
+			slog.Info("dunning final action held: a charge holds this invoice (running, or its result is being confirmed with Stripe); a later dunning tick checks again",
+				"run_id", run.ID, "invoice_id", run.InvoiceID,
+				"final_subscription_action", policy.FinalSubscriptionAction,
+				"final_invoice_action", policy.FinalInvoiceAction)
+			return nil
+		}
+		hold = h
 	}
 
 	// Exhaustion fires TWO independent actions (ADR-112): one on the
@@ -1017,13 +1135,18 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// SUBSCRIPTION first: it is the half that stops future money movement,
 	// and it matches Stripe's causality (there the subscription setting is
 	// what marks the invoice uncollectible).
+	//
+	// The action runs as the hold's owner: a cancel can void this very
+	// invoice (a wholly unused prebill, ADR-118), and that void refuses while
+	// a hold is set unless the caller owns it.
+	subCtx := domain.WithChargeHoldOwner(ctx, run.InvoiceID, hold)
 	if !actionFailed && policy.FinalSubscriptionAction != domain.SubActionNone {
 		if !invRead {
 			slog.Warn("dunning subscription action skipped — no invoice reader wired, so no subscription to act on",
 				"run_id", run.ID, "invoice_id", run.InvoiceID)
 		} else {
 			subApplied, subFailed := s.applySubscriptionAction(
-				ctx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID)
+				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID)
 			actionFailed = actionFailed || subFailed
 			switch {
 			case !subApplied:
@@ -1032,6 +1155,17 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			case policy.FinalSubscriptionAction == domain.SubActionCancel:
 				outcome.SubscriptionCanceled = true
 			}
+		}
+	}
+
+	// Release the hold before the invoice action: the write-off refuses
+	// while a live hold is set, and re-checks the hold under its own row
+	// lock. A failed release leaves the hold to expire; the write-off is then
+	// refused and re-attempted with the rest of a failed exhaustion.
+	if hold.Held() {
+		if err := s.chargeHolds.ReleaseChargeHold(ctx, tenantID, run.InvoiceID, hold); err != nil {
+			slog.Warn("dunning exhaust: releasing the charge hold failed — the stale-hold sweep clears it",
+				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", err)
 		}
 	}
 
@@ -1630,7 +1764,7 @@ func (s *Service) GetStats(ctx context.Context, tenantID string) (Stats, error) 
 // hook that enqueues the dunning-warning email on the reschedule's own tx
 // (ADR-040). nil when the recipient cannot be resolved — logged, best-effort,
 // exactly the old posture.
-func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string) func(tx *sql.Tx) error {
+func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string, cardNeedsReplacing bool) func(tx *sql.Tx) error {
 	email, name, cc, err := s.customerEmail.GetCustomerEmail(ctx, tenantID, run.CustomerID)
 	if err != nil || email == "" {
 		slog.Warn("skip dunning warning email — cannot resolve customer email",
@@ -1656,8 +1790,20 @@ func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, ru
 		nextRetry = run.NextActionAt.In(domain.LoadLocationOrUTC(billTZ)).Format("January 2, 2006")
 	}
 	return func(tx *sql.Tx) error {
-		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.MaxRetryAttempts, nextRetry, retryErrMsg, publicToken)
+		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.MaxRetryAttempts, nextRetry, retryErrMsg, publicToken, cardNeedsReplacing)
 	}
+}
+
+// cardNeedsReplacing reports whether a failed retry leaves the customer
+// needing a different card (#966): the retry skipped a card the bank had
+// refused for good (domain.ErrCardNeedsReplacing), or its charge drew such a
+// refusal (RetryError.CardNeedsReplacing).
+func cardNeedsReplacing(retryErr error) bool {
+	if errors.Is(retryErr, domain.ErrCardNeedsReplacing) {
+		return true
+	}
+	var re *RetryError
+	return errors.As(retryErr, &re) && re.CardNeedsReplacing
 }
 
 // buildDunningEscalationTx is the escalation counterpart of

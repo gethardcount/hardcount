@@ -23,6 +23,8 @@ type settledCall struct {
 	piID          string
 	failMsg       string
 	suppressEmail bool
+	declineCode   string // #966: what the reconciler read from last_payment_error
+	declinedCard  string
 }
 
 func (r *recordingSettler) SettleSucceeded(_ context.Context, _ string, inv domain.Invoice, piID string, _ int64, _ SettlementSource) error {
@@ -31,7 +33,8 @@ func (r *recordingSettler) SettleSucceeded(_ context.Context, _ string, inv doma
 }
 
 func (r *recordingSettler) SettleFailed(_ context.Context, _ string, inv domain.Invoice, f PaymentFailure, _ SettlementSource) error {
-	r.failed = append(r.failed, settledCall{invoiceID: inv.ID, piID: f.PaymentIntentID, failMsg: f.Message, suppressEmail: failureEmailSuppressed(f.Purpose)})
+	r.failed = append(r.failed, settledCall{invoiceID: inv.ID, piID: f.PaymentIntentID, failMsg: f.Message, suppressEmail: failureEmailSuppressed(f.Purpose),
+		declineCode: f.DeclineCode, declinedCard: f.PaymentMethodID})
 	return nil
 }
 

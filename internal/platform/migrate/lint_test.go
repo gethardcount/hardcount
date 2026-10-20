@@ -169,6 +169,8 @@ func lintMigrationFile(body []byte, noTx bool, known indexSet) []string {
 			"Use the write-safe form (docs/dev/migrations.md), or, if blocking is safe here, add a line `%s <why>` "+
 			"(at least %d characters)", strings.Join(blocking, "\n  - "), blockingDDLOptOut, minOptOutReason))
 	}
+	required, _ := requiredColumnFindings(up)
+	out = append(out, required...)
 
 	known.addFrom(up)
 	return out
@@ -583,6 +585,12 @@ func blockingDDLFindings(body []byte) ([]string, error) {
 		if !ddlValidateOnly.MatchString(rest) {
 			locked[table] = true
 		}
+		for _, c := range addedColumns(rest) {
+			if why, fix := columnRewrite(c); why != "" {
+				out = append(out, fmt.Sprintf("ADD COLUMN %s on %s (%s) rewrites %s to fill every existing row, which blocks "+
+					"reads and writes to %s until it ends%s", c.name, lt, why, lt, lt, fix))
+			}
+		}
 	}
 	return out, nil
 }
@@ -597,6 +605,188 @@ func blockingDDLOptOutReason(body []byte) string {
 		}
 	}
 	return ""
+}
+
+// ---- Added columns (#1231) ------------------------------------------------
+
+// CI applies migrations to empty tables, where every ADD COLUMN works and is
+// quick. On an install with data, two forms are not:
+//
+//   - NOT NULL with no DEFAULT. Postgres has no value for the rows already
+//     there, so it refuses the column and the upgrade stops.
+//     requiredColumnFindings reports it, and the opt-out line does not
+//     cover it: a constant DEFAULT always works instead.
+//   - A value Postgres computes for each existing row: a default that calls
+//     a volatile function, a SERIAL type, an identity column, or a stored
+//     generated column. Postgres then rewrites the whole table under a lock
+//     that blocks reads and writes, so blockingDDLFindings reports it. A
+//     default that calls only IMMUTABLE or STABLE functions is computed
+//     once and stored, with no rewrite.
+//
+// The lint cannot ask Postgres whether a function is volatile, so a default
+// may call only the functions in nonVolatileDefaultCalls, and any other
+// call counts as volatile. Like the rules above, these skip a table the
+// same file creates. TestAddColumnRulesMatchPostgres checks the answers
+// against Postgres.
+
+// nonVolatileDefaultCalls are the calls a default may make: now() and the
+// rest of its family, which Postgres computes once for the statement; SQL
+// forms written like calls; and encode(), which Velox's ID defaults wrap
+// around gen_random_bytes(). Any other function might be volatile.
+var nonVolatileDefaultCalls = map[string]bool{
+	"NOW": true, "CURRENT_TIMESTAMP": true, "CURRENT_TIME": true, "LOCALTIMESTAMP": true, "LOCALTIME": true,
+	"TRANSACTION_TIMESTAMP": true, "STATEMENT_TIMESTAMP": true,
+	"CAST": true, "COALESCE": true, "NULLIF": true, "GREATEST": true, "LEAST": true,
+	"ENCODE": true,
+}
+
+var (
+	ddlAddConstraint = regexp.MustCompile(`^ADD (?:CONSTRAINT|PRIMARY KEY|UNIQUE|CHECK|FOREIGN KEY|EXCLUDE)\b`)
+	ddlAddColumn     = regexp.MustCompile(`^ADD (?:COLUMN )?(?:IF NOT EXISTS )?(\S+) (.+)$`)
+	ddlSerialType    = regexp.MustCompile(`^(?:SMALLSERIAL|SERIAL[248]?|BIGSERIAL)\b`)
+	ddlGenerated     = regexp.MustCompile(`\bGENERATED\b`)
+	ddlIdentity      = regexp.MustCompile(`\bGENERATED\b.*\bAS IDENTITY\b`)
+	ddlStored        = regexp.MustCompile(`\bGENERATED\b.*\bSTORED\b`)
+	ddlNotNull       = regexp.MustCompile(`\bNOT NULL\b`)
+	ddlDefault       = regexp.MustCompile(`\bDEFAULT\b`)
+	// ddlDefaultEnd is the first clause after a default's expression.
+	ddlDefaultEnd = regexp.MustCompile(`\b(?:NOT NULL|NULL|CHECK|REFERENCES|UNIQUE|PRIMARY KEY|CONSTRAINT|COLLATE|GENERATED|DEFERRABLE|NOT DEFERRABLE|INITIALLY)\b`)
+	// ddlCall is a function call. Group 1 is set when the name follows ::
+	// or AS, so it is a type with a modifier, as in '0'::numeric(10,2).
+	ddlCall = regexp.MustCompile(`((?:::|\bAS\b)\s*(?:(?:CHARACTER|CHAR|BIT)\s+)?)?("?[A-Z_][A-Z0-9_$]*"?(?:\s*\.\s*"?[A-Z_][A-Z0-9_$]*"?)?)\s*\(`)
+)
+
+// addedColumn is one column an ALTER TABLE adds, from a normalized
+// statement: its name, then its type and clauses as sqlShape returns them.
+type addedColumn struct {
+	name, lit, top string
+}
+
+// sqlShape returns s twice, at the same length: lit with the text of each
+// string literal blanked, and top with everything inside parentheses and
+// quotes blanked as well. A keyword or comma found in top belongs to the
+// statement itself, not to an expression or a literal.
+func sqlShape(s string) (lit, top string) {
+	l, t := []byte(s), []byte(s)
+	depth, quote := 0, byte(0)
+	for i := 0; i < len(s); i++ {
+		c, inside := s[i], quote != 0
+		switch {
+		case inside && c == quote:
+			quote = 0
+		case inside:
+			if quote == '\'' {
+				l[i] = ' '
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		}
+		if inside || depth > 0 || c == ')' {
+			t[i] = ' '
+		}
+	}
+	return string(l), string(t)
+}
+
+// addedColumns returns the columns one ALTER TABLE adds, given the text
+// after the table's name.
+func addedColumns(actions string) []addedColumn {
+	_, top := sqlShape(actions)
+	var out []addedColumn
+	start := 0
+	for i := 0; i <= len(top); i++ {
+		if i < len(top) && top[i] != ',' {
+			continue
+		}
+		action := strings.TrimSpace(actions[start:i])
+		start = i + 1
+		m := ddlAddColumn.FindStringSubmatch(action)
+		if m == nil || ddlAddConstraint.MatchString(action) {
+			continue
+		}
+		c := addedColumn{name: strings.ToLower(strings.ReplaceAll(m[1], `"`, ""))}
+		c.lit, c.top = sqlShape(m[2])
+		out = append(out, c)
+	}
+	return out
+}
+
+// defaultExpr is the column's DEFAULT expression with its literals
+// blanked, or "" when it has none or DEFAULT NULL.
+func (c addedColumn) defaultExpr() string {
+	loc := ddlDefault.FindStringIndex(c.top)
+	if loc == nil {
+		return ""
+	}
+	end := len(c.top)
+	if e := ddlDefaultEnd.FindStringIndex(c.top[loc[1]:]); e != nil {
+		end = loc[1] + e[0]
+	}
+	return strings.TrimSpace(c.lit[loc[1]:end])
+}
+
+// columnRewrite says what makes Postgres compute the column for each
+// existing row, and how to avoid it, or returns "" when nothing does.
+func columnRewrite(c addedColumn) (why, fix string) {
+	switch {
+	case ddlSerialType.MatchString(c.top):
+		return "type " + strings.Fields(c.top)[0], ""
+	case ddlIdentity.MatchString(c.top):
+		return "GENERATED ... AS IDENTITY", ""
+	case ddlStored.MatchString(c.top):
+		return "GENERATED ... STORED", ""
+	}
+	var calls []string
+	for _, m := range ddlCall.FindAllStringSubmatch(c.defaultExpr(), -1) {
+		name := strings.NewReplacer(`"`, "", " ", "").Replace(m[2])
+		if m[1] != "" || nonVolatileDefaultCalls[strings.TrimPrefix(name, "PG_CATALOG.")] {
+			continue
+		}
+		calls = append(calls, strings.ToLower(name)+"()")
+	}
+	if len(calls) == 0 {
+		return "", ""
+	}
+	return "a default that calls " + strings.Join(calls, ", "),
+		fmt.Sprintf(". Add the column with no default, then ALTER COLUMN %s SET DEFAULT, which only new rows use. "+
+			"A default that calls only IMMUTABLE or STABLE functions does not rewrite", c.name)
+}
+
+// requiredColumnFindings lists the columns a migration body adds as NOT
+// NULL with no DEFAULT to a table it did not create.
+func requiredColumnFindings(body []byte) ([]string, error) {
+	stmts, err := splitSQLStatements(body)
+	if err != nil {
+		return nil, err
+	}
+	created := map[string]bool{}
+	var out []string
+	for _, raw := range stmts {
+		s := normalizeDDL(raw)
+		if m := ddlCreateTable.FindStringSubmatch(s); m != nil {
+			created[ddlTableName(m[1])] = true
+			continue
+		}
+		m := ddlAlterTable.FindStringSubmatch(s)
+		if m == nil || created[ddlTableName(m[1])] {
+			continue
+		}
+		lt := strings.ToLower(ddlTableName(m[1]))
+		for _, c := range addedColumns(m[2]) {
+			filled := ddlGenerated.MatchString(c.top) || ddlSerialType.MatchString(c.top) // Postgres computes a value
+			if ddlNotNull.MatchString(c.top) && c.defaultExpr() == "" && !filled {
+				out = append(out, fmt.Sprintf("adds column %s to %s as NOT NULL with no DEFAULT. Postgres refuses that on a "+
+					"table with rows, so the upgrade would stop on every install with data. Give the column a constant "+
+					"DEFAULT, or add it nullable, backfill it, then SET NOT NULL after a validated CHECK (%s IS NOT NULL): "+
+					"see \"Make a column NOT NULL\" in docs/dev/migrations.md", c.name, lt, c.name))
+			}
+		}
+	}
+	return out, nil
 }
 
 // ---- Transaction control --------------------------------------------------

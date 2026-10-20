@@ -154,6 +154,11 @@ func serve() {
 	gate := leader.New(appPool, func(role leader.Role, reason string) {
 		mw.RecordLeaderLeaseLost(string(role), reason)
 	})
+	roles := make([]string, 0, len(leader.Roles))
+	for _, r := range leader.Roles {
+		roles = append(roles, string(r))
+	}
+	mw.InitLeaderLeaseLost(roles...)
 	mw.RegisterLeaderStatus(func(ctx context.Context) ([]mw.LeaderStatusRow, error) {
 		rows, err := leader.Status(ctx, appPool)
 		if err != nil {
@@ -183,7 +188,8 @@ func serve() {
 	// traffic — including hosted-invoice pay pages — while /health/ready
 	// stays ok). config.validateFatal already rejects an UNSET REDIS_URL
 	// in production; this catches invalid/unreachable. Other environments
-	// warn and run fail-open.
+	// warn and run fail-open, except /v1/auth, whose limiter counts in the
+	// process.
 	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
 	rdb, err := mw.OpenRedis(pingCtx, cfg.RedisURL)
 	cancelPing()
@@ -192,12 +198,15 @@ func serve() {
 		os.Exit(1)
 	}
 	if err != nil {
-		slog.Warn("redis unavailable — rate limiting fails open in this environment", "env", cfg.Env, "error", err)
+		slog.Warn("redis unavailable — rate limiting fails open in this environment, except /v1/auth, which counts in this process", "env", cfg.Env, "error", err)
 	} else if rdb != nil {
 		slog.Info("redis connected for rate limiting")
 	}
 
-	server := api.NewServer(db, nil, rdb, api.WithInvoiceGrace(cfg.InvoiceGracePeriod))
+	server := api.NewServer(db, nil, rdb,
+		api.WithInvoiceGrace(cfg.InvoiceGracePeriod),
+		api.WithAppEnv(cfg.Env),
+		api.WithRateLimits(cfg.RateLimits))
 
 	billingInterval := 1 * time.Hour
 	if cfg.Env == "local" {
@@ -215,6 +224,7 @@ func serve() {
 	// exactly that in theory until the 2026-08-11 module audit.)
 	scheduler.SetTokenCleaner(server.TokenSvc)
 	scheduler.SetIdempotencyCleaner(mw.NewIdempotencyCleaner(db))
+	scheduler.SetLoginThrottleCleaner(server.LoginThrottle)
 	scheduler.SetTaxRetrier(server.InvoiceSvc)
 	// Re-issue clawback credit-note drafts whose post-commit Issue() failed
 	// (created atomically with a subscription downgrade/removal). ADR-056
@@ -387,10 +397,14 @@ func serve() {
 
 	// Stage 3 (≤ 30s): scheduler + dispatchers. Their ticks run on ctx
 	// (cancelled above) and abort atomically at their next DB call; this
-	// wait exists for the WithoutCancel completions — a Stripe charge
-	// bounded by the 30s client timeout, an outbox row's detached mark —
-	// so a mid-tick run lands its result instead of leaving a claimed row
-	// for the lease to expire. Bounded so a hung worker cannot prevent exit.
+	// wait exists for the WithoutCancel completions — a Stripe charge, a
+	// tax retry's finalize and its CommitTax, an outbox row's detached
+	// mark — so a mid-tick run lands its result instead of leaving a
+	// claimed row for the lease to expire. Each Stripe attempt is bounded
+	// by the 30s client timeout, but stripe-go retries a timeout up to
+	// twice, so this stage's own bound caps the wait; the tax_commit sweep
+	// re-commits a CommitTax it cuts. Bounded so a hung worker cannot
+	// prevent exit.
 	done := make(chan struct{})
 	go func() {
 		workers.Wait()

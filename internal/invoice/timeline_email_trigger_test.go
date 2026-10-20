@@ -71,10 +71,10 @@ func TestPaymentTimeline_SetupLinkRowsCarryTheirCause(t *testing.T) {
 	if len(details) != 2 {
 		t.Fatalf("want 2 setup-link rows on the timeline, got %d (%v)", len(details), details)
 	}
-	if details["email:em1"] != "Sent automatically — no payment method on file at finalize" {
+	if details["email:em1"] != "No payment method when the invoice was finalized · Automatic" {
 		t.Errorf("finalize row detail = %q", details["email:em1"])
 	}
-	if details["email:em2"] != "Resent by an operator" {
+	if details["email:em2"] != "The invoice was already closed · Resent" {
 		t.Errorf("resend row detail = %q", details["email:em2"])
 	}
 	if details["email:em1"] == details["email:em2"] {

@@ -27,12 +27,12 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.9.0`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.9.0`.
+A release is a tested version with a number, such as `v0.8.2`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.2`.
 
 1. Get the files for that release.
 
    ```bash
-   VELOX_VERSION=v0.9.0
+   VELOX_VERSION=v0.8.2
    sudo git clone --branch "$VELOX_VERSION" https://github.com/getvelox/velox.git /opt/velox
    sudo chown -R "$USER" /opt/velox
    cd /opt/velox/deploy/compose
@@ -78,7 +78,7 @@ A release is a tested version with a number, such as `v0.9.0`. Production runs a
    docker compose exec velox-api /usr/local/bin/velox version
    ```
 
-   **You see:** five containers start, then `velox v0.9.0`.
+   **You see:** five containers start, then `velox v0.8.2`.
 
 4. Check that it is healthy. On the first start Velox sets up its database (runs its migrations), which takes about 10 seconds. Until then the check fails with a 502, so this command retries every 2 seconds and gives up after 2 minutes.
 
@@ -135,7 +135,7 @@ Caddy is a web server that gets a free HTTPS certificate from Let's Encrypt and 
 
    **You see:** the dashboard, in test mode. Nothing in test mode charges real money.
 
-`APP_ENV=production` is already set in `.env`. It marks the sign-in cookie as HTTPS-only, which is why sign-in works only at your `https://` address or on `localhost`.
+`APP_ENV=production` is already set in `.env`. It always marks the sign-in cookie `Secure`, so browsers keep it only on HTTPS and at `http://localhost`. Sign in at your `https://` address. Through an SSH tunnel to `http://localhost:8080`, sign-in works in Chrome and Firefox but not in Safari, which does not keep a `Secure` cookie over plain HTTP, even at localhost.
 
 Velox reads each visitor's real address from the headers Caddy and nginx forward. Caddy's requests reach Velox through Docker's private network, which the Compose stack's default `TRUST_PROXY` already trusts, so leave that setting as it is.
 
@@ -189,6 +189,7 @@ docker compose logs velox-api | grep '"level":"WARN"'
 | `METRICS_TOKEN not set` | `/metrics` answers 401 to everyone. | Only if you collect metrics with Prometheus. See [What to watch](self-host.md#what-to-watch). |
 | `VELOX_API_BASE_URL NOT SET` | The link you copy to share a customer's cost dashboard (a page of their usage and charges) is a path, not a full address. | Only if you share cost dashboards. Set it in `.env` to your HTTPS address. |
 | `RUN_MIGRATIONS_ON_BOOT=true in production` | Velox updates its database as it starts. | No. On one VM this is how upgrades apply. The warning is for setups with several copies of Velox. |
+| `DASHBOARD_BASE_URL is an http:// address`, or the same for another address setting | That setting starts with `http://`, so Velox is served without HTTPS there. Sign-in needs HTTPS, and links to that address are not encrypted. | Yes. Change it to your `https://` address, as in [step 4](#4-set-the-web-addresses). |
 
 To set `VELOX_EMAIL_BIDX_KEY`, add a random key and restart. Set it before you add customers: Velox indexes a customer's email only when the customer is created or edited.
 
@@ -241,7 +242,7 @@ Start in test mode. Connect live mode the same way when you are ready to take re
    **You see:** "Verified as" and your Stripe account name.
 
 3. Step 2, **Deliver Stripe events to Velox**, shows a webhook URL. A webhook is a message Stripe sends to Velox when something happens, for example when a card payment succeeds. Copy the URL. It looks like `https://billing.example.com/v1/webhooks/stripe/vlx_spc_…`.
-4. In Stripe, open **Developers → Webhooks** and add an endpoint. Paste the URL and pick the events that Velox lists under the URL.
+4. In Stripe, open **Developers → Webhooks** and add an endpoint. Paste the URL and pick the events that Velox lists under the URL. Also pick `charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`, so Velox records card disputes ([Card disputes](ops/runbook/card-disputes.md)).
 5. Stripe shows the endpoint's signing secret (`whsec_…`). Paste it into step 2 in Velox and click **Finish setup**.
 
    **You see:** the card's badge reads **Connected**.
@@ -340,12 +341,37 @@ A backup counts only once you have restored it. This test restores the newest du
 
 Repeat this test every few months, and after every upgrade. More on what to back up, and on point-in-time restore: [Backups](ops/backup-considerations.md).
 
+## Who can sign in to the dashboard
+
+Anyone who can open your address and knows a team member's password can sign in. Velox protects sign-in with no setup:
+
+- **Passwords are stored only as bcrypt hashes,** which are slow to crack.
+- **About 30,000 common leaked passwords are refused** when a password is set or reset.
+- **Sign-in is rate-limited:** one address can try only so many times a minute.
+- **Repeated wrong passwords slow down,** from one address or spread over many, instead of locking the account. A browser that signed in before is not slowed by other people's guesses ([how it works](self-host.md#repeated-wrong-passwords)).
+- **The sign-in cookie travels only over HTTPS** outside `localhost`, because `.env` sets `APP_ENV=production` ([step 3](#3-add-https-with-caddy)).
+
+Velox has no two-factor sign-in yet, so a stolen password is enough to sign in. If your team wants a second factor, you can put sign-in behind your own SSO or VPN. This is optional: Velox runs in production without it.
+
+To do it, let only your team reach `/v1/auth/`. Every sign-in, password reset and invite acceptance goes through that path, and the dashboard shows no data until someone signs in. If your SSO tool needs a page to send people through, add the sign-in page, `/login`.
+
+Keep these paths reachable from the internet. The dashboard shares its address with them:
+
+| Path | Who uses it |
+|---|---|
+| `/v1/webhooks/` | Stripe, to tell Velox about payments. Postmark too, if you send email through it. |
+| `/invoice/…`, `/update-payment`, `/payment-method-added` | Your customers: the invoice page, the page to add a card, and the page Stripe sends them back to |
+| `/v1/public/` | The customer pages above, and shared cost dashboards |
+| `/assets/`, `/favicon.svg` | The page files. The customer pages and the dashboard load the same ones. |
+| The rest of `/v1/` | Your app, which sends an API key with each call |
+
 ## You are live when
 
 Check each line before the first real customer.
 
 - [ ] `docker compose exec velox-api /usr/local/bin/velox version` shows a release, not `dev`.
 - [ ] `https://billing.example.com/health/ready` answers `"status":"ok"`.
+- [ ] `docker compose exec postgres psql -U velox_app -d velox -tAc "SHOW idle_in_transaction_session_timeout"` shows `30s`. If it shows `0`, set it as [Postgres requirements](ops/postgres-requirements.md#timeouts-on-the-limited-user) says.
 - [ ] You can sign in at `https://billing.example.com`.
 - [ ] A password-reset email arrived, and its link opens your `https://` address.
 - [ ] **Settings → Payments** reads **Connected** in test mode, and a test charge worked ([Stripe end-to-end test](dev/stripe-end-to-end-test.md)).
@@ -360,7 +386,7 @@ Check each line before the first real customer.
 Velox is down while the new version starts. Database changes (migrations) run by themselves as it starts.
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every release between yours and the new one.
-2. Take a backup.
+2. Take a backup. If the upgrade goes wrong, it is how you go back ([Going back](#going-back)).
 
    ```bash
    sudo velox-backup
@@ -399,16 +425,60 @@ Velox is down while the new version starts. Database changes (migrations) run by
 
    **You see:** `velox v0.9.0`, and `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again.
 
-If the upgrade stops with an error, nothing needs repair: a failed migration is undone. Follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md) to find the cause, then start the API again.
+If the upgrade stops with an error, Velox does not start, and nothing needs repair: a failed migration is undone. `docker compose logs --tail 20 velox-api` shows the error. Compose keeps starting the API again, and each start tries the upgrade again, so stop it while you find the cause:
 
-If it says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query. Start the API again, or see [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md).
+```bash
+docker compose stop velox-api
+```
+
+Then follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md). If the error says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query: see [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md). When the cause is fixed, start the API again:
+
+```bash
+docker compose up -d velox-api
+```
 
 ### Going back
 
-Never roll the database back with `velox migrate rollback`: it runs only with `APP_ENV=local`, because it loses data the newer release wrote. To go back to the old release:
+Never roll the database back with `velox migrate rollback`: it runs only with `APP_ENV=local`, because it loses data the newer release wrote. To go back, restore the backup from step 2. That is why every upgrade starts with a backup: without one, a database upgrade cannot be undone.
 
-- **Restore the backup from step 2 into an empty database**, then start the old release. See [Restore a backup](ops/backup-considerations.md#4-restore-a-backup).
-- **From v0.9.0 to v0.8.x only, when v0.9.0 applied no migration after 180,** you can also start the old images as they are: v0.8.x reads its own record, still at 180, and changes nothing. `velox migrate status` (with v0.9.0) shows `database:     180` when this applies.
+**From v0.9.0 to v0.8.x only, when v0.9.0 applied no migration after 180,** you can also start the old images as they are, with no restore. v0.8.x reads its own record, still at 180, and changes nothing. `velox migrate status` (with v0.9.0) shows `database:     180` when this applies.
+
+**A restore loses everything written after the backup.** The old release kept running after step 2, and the new one ran after step 5. The restore removes what both wrote: usage events your app sent, invoices Velox built and charged, payments and refunds, and changes made in the dashboard or through the API. The longer the new release runs, the more a restore loses.
+
+To go back with a restore:
+
+1. Stop the API, so nothing more is written.
+
+   ```bash
+   docker compose stop velox-api
+   ```
+
+   **You see:** a `Container … Stopped` line.
+
+2. Find the backup from step 2. Its name holds the time it started, in UTC. Use that file, not a newer nightly backup: a backup taken after step 5 already holds the new release's changes.
+
+   ```bash
+   ls -l /var/backups/velox/
+   ```
+
+   **You see:** files such as `velox_20261019_143000.dump`, a backup started at 14:30:00 UTC on 19 October 2026.
+
+3. List the invoices created or changed since that time, and keep the list. Run this in the database shell (`docker compose exec postgres psql -U velox -d velox`), with your backup's time:
+
+   ```sql
+   SELECT id, livemode, status, payment_status, total_amount_cents, updated_at
+   FROM invoices
+   WHERE updated_at >= '2026-10-19 14:30:00+00'
+   ORDER BY updated_at;
+   ```
+
+   **You see:** one row for each invoice that the restore removes, or takes back to how it was at the backup.
+
+4. Restore the backup into an empty database, then start the old release. See [Restore a backup](ops/backup-considerations.md#4-restore-a-backup).
+5. Put back what the restore removed.
+   - **Usage events.** Have your app send again every event it sent after the backup time, with the same `idempotency_key`. Velox counts each key once, so an event the backup already holds is not counted twice. An event that is not sent again is not billed.
+   - **Payments.** The restored database does not know about a payment Stripe took after the backup. A subscription's invoice built after the backup is built again by the next billing run, and the customer's card can be charged again. Check each invoice on your list in Stripe, and refund a second charge.
+   - **Everything else.** Run the [checks after a restore](ops/backup-considerations.md#checks-after-a-restore).
 
 Do not run v0.8.x's `migrate rollback` or `migrate force` on a database v0.9.0 took over. If one runs, v0.9.0 refuses to start until the records agree again; see [Two migration records](ops/runbook/migration-failed-midway.md#two-migration-records).
 

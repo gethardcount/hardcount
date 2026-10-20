@@ -42,8 +42,8 @@ type v08Record struct {
 	marked  bool // carries v08Marker
 }
 
-// clean180 is the only v0.8 record this release takes over: v0.8.0 and
-// v0.8.1 both end at 180.
+// clean180 is the only v0.8 record this release takes over: v0.8.0, v0.8.1
+// and v0.8.2 all end at 180.
 func (r v08Record) clean180() bool {
 	return r.exists && r.rows == 1 && r.version == baselineVersion && !r.dirty
 }

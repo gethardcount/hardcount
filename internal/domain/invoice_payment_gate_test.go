@@ -1,11 +1,13 @@
 package domain
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestPaymentBlocksAction_Matrix makes the whole rule visible in one place, so a
@@ -66,6 +68,12 @@ func TestPaymentBlocksAction_Matrix(t *testing.T) {
 			}
 			if strings.Contains(msg, "wait for") || strings.Contains(msg, "cancel it") {
 				t.Errorf("%s refusal tells the operator to wait or cancel — neither is possible for a parked invoice: %q", a, msg)
+			}
+			// What happens next without anyone (REC-5): a payment Stripe
+			// shows is recorded, and with none after 24 hours the invoice is
+			// charged again. "Will not resolve on its own" is no longer true.
+			if strings.Contains(msg, "will not resolve on its own") || !strings.Contains(msg, "24 hours") {
+				t.Errorf("%s refusal does not say what Velox does next (records a payment that appears, charges again after 24 hours): %q", a, msg)
 			}
 		}
 	})
@@ -221,35 +229,43 @@ func TestEmailActionsRefuseAnUnresolvedPayment(t *testing.T) {
 	}
 }
 
-// TestPaymentBlocksActionHeld_Matrix (#975): the charge hold refuses only on
-// 'pending' and 'failed'. On 'unknown' the hold is ignored, so a parked
-// invoice stays writable-off with a live hold (ADR-107); 'processing' and
-// 'unknown' with a PaymentIntent keep their own refusal.
+// TestPaymentBlocksActionHeld_Matrix (#975, ADR-127): the charge hold refuses
+// only on 'pending' and 'failed'. A live hold refuses all three actions; a
+// stale one (a charge whose result was lost) refuses void and offline payment
+// but allows write-off, which moves no money. On 'unknown' the hold is
+// ignored, so a parked invoice stays writable-off with a hold (ADR-107);
+// 'processing' and 'unknown' with a PaymentIntent keep their own refusal.
 func TestPaymentBlocksActionHeld_Matrix(t *testing.T) {
 	actions := []InvoiceAction{ActionVoid, ActionMarkUncollectible, ActionRecordOfflinePayment}
 	cases := []struct {
 		name     string
 		ps       InvoicePaymentStatus
 		pi       string
-		held     bool
+		hold     ChargeHoldState
 		action   InvoiceAction
 		wantCode string // "" = allowed
 	}{
-		{"pending held", PaymentPending, "", true, "", "payment_in_flight"},
-		{"failed held", PaymentFailed, "pi_1", true, "", "payment_in_flight"},
-		{"pending free", PaymentPending, "", false, "", ""},
-		{"failed free", PaymentFailed, "pi_1", false, "", ""},
-		{"processing free", PaymentProcessing, "pi_1", false, "", "payment_in_flight"},
-		{"parked held, write-off", PaymentUnknown, "", true, ActionMarkUncollectible, ""},
-		{"parked held, void", PaymentUnknown, "", true, ActionVoid, "payment_unidentifiable"},
-		{"parked held, offline", PaymentUnknown, "", true, ActionRecordOfflinePayment, "payment_unidentifiable"},
+		{"pending live", PaymentPending, "", ChargeHoldLive, "", "payment_in_flight"},
+		{"failed live", PaymentFailed, "pi_1", ChargeHoldLive, "", "payment_in_flight"},
+		{"pending stale, void", PaymentPending, "", ChargeHoldStale, ActionVoid, "payment_in_flight"},
+		{"pending stale, offline", PaymentPending, "", ChargeHoldStale, ActionRecordOfflinePayment, "payment_in_flight"},
+		{"pending stale, write-off", PaymentPending, "", ChargeHoldStale, ActionMarkUncollectible, ""},
+		{"failed stale, void", PaymentFailed, "pi_1", ChargeHoldStale, ActionVoid, "payment_in_flight"},
+		{"failed stale, write-off", PaymentFailed, "pi_1", ChargeHoldStale, ActionMarkUncollectible, ""},
+		{"pending free", PaymentPending, "", ChargeHoldNone, "", ""},
+		{"failed free", PaymentFailed, "pi_1", ChargeHoldNone, "", ""},
+		{"processing free", PaymentProcessing, "pi_1", ChargeHoldNone, "", "payment_in_flight"},
+		{"parked live, write-off", PaymentUnknown, "", ChargeHoldLive, ActionMarkUncollectible, ""},
+		{"parked stale, write-off", PaymentUnknown, "", ChargeHoldStale, ActionMarkUncollectible, ""},
+		{"parked live, void", PaymentUnknown, "", ChargeHoldLive, ActionVoid, "payment_unidentifiable"},
+		{"parked live, offline", PaymentUnknown, "", ChargeHoldLive, ActionRecordOfflinePayment, "payment_unidentifiable"},
 	}
 	for _, c := range cases {
 		for _, a := range actions {
 			if c.action != "" && c.action != a {
 				continue
 			}
-			b := PaymentBlocksActionHeld(Invoice{Status: InvoiceFinalized, PaymentStatus: c.ps, StripePaymentIntentID: c.pi}, a, c.held)
+			b := PaymentBlocksActionHeld(Invoice{Status: InvoiceFinalized, PaymentStatus: c.ps, StripePaymentIntentID: c.pi}, a, c.hold)
 			if b.Code != c.wantCode || b.Blocked != (c.wantCode != "") {
 				t.Errorf("%s / %s: got blocked=%v code=%q, want code %q", c.name, a, b.Blocked, b.Code, c.wantCode)
 			}
@@ -257,5 +273,42 @@ func TestPaymentBlocksActionHeld_Matrix(t *testing.T) {
 				t.Errorf("%s / %s: a refusal must say what to do", c.name, a)
 			}
 		}
+	}
+}
+
+// TestChargeHoldTiming pins the numbers that make the stale-hold sweep's
+// "Stripe has nothing" final (ADR-127): the charge sends only with at least
+// ChargeSendMargin left on its hold and bounds its Stripe call by
+// ChargeSendBudget, so no request for an attempt can start after its hold
+// ends (TTL - margin + budget <= TTL); and the sweep waits ten more minutes
+// for Stripe to finish anything it received.
+func TestChargeHoldTiming(t *testing.T) {
+	if ChargeHoldTTL-ChargeSendMargin+ChargeSendBudget > ChargeHoldTTL {
+		t.Errorf("a charge sent at the last allowed moment could still be running at Stripe after its hold ends: TTL %v, margin %v, budget %v",
+			ChargeHoldTTL, ChargeSendMargin, ChargeSendBudget)
+	}
+	if ChargeSendMargin >= ChargeHoldTTL {
+		t.Errorf("margin %v >= TTL %v: no charge could ever send", ChargeSendMargin, ChargeHoldTTL)
+	}
+	if StaleChargeHoldWait != 10*time.Minute {
+		t.Errorf("StaleChargeHoldWait = %v, want 10m (the design's wait after a hold ends)", StaleChargeHoldWait)
+	}
+}
+
+// TestChargeHoldOwner: only the exact hold on the exact invoice is owned.
+func TestChargeHoldOwner(t *testing.T) {
+	until := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	ctx := WithChargeHoldOwner(context.Background(), "inv_1", ChargeHold{Until: until})
+	if !OwnsChargeHold(ctx, "inv_1", until) {
+		t.Error("the owner of a hold does not own it")
+	}
+	if OwnsChargeHold(ctx, "inv_2", until) {
+		t.Error("a hold on one invoice is owned on another")
+	}
+	if OwnsChargeHold(ctx, "inv_1", until.Add(time.Microsecond)) {
+		t.Error("another hold value on the same invoice is owned: a later owner's hold must not pass")
+	}
+	if OwnsChargeHold(WithChargeHoldOwner(context.Background(), "inv_1", ChargeHold{}), "inv_1", until) {
+		t.Error("a refused claim (zero hold) owns something")
 	}
 }

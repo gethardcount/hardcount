@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +21,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/billing"
+	"github.com/sagarsuperuser/velox/internal/config"
 	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/customer"
@@ -115,6 +115,9 @@ type Server struct {
 	SubscriptionSvc     *subscription.Service
 	TokenSvc            *payment.TokenService
 	PaymentReconciler   *payment.Reconciler
+	// LoginThrottle is the sign-in throttle; main.go wires its Cleanup into
+	// the leader's cleanup steps.
+	LoginThrottle *user.LoginThrottle
 
 	// TestClockSvc lets main.go wire the async catchup queue + worker
 	// (per ADR-015 — Stripe-style async test-clock advance) and run
@@ -125,17 +128,33 @@ type Server struct {
 }
 
 // ServerOption sets a boot-time value NewServer threads into the services it
-// builds. cmd/velox passes the ones read from config; tests pass what they
-// exercise and get the zero value otherwise.
+// builds. cmd/velox passes the ones config.Load read; tests pass what they
+// exercise and otherwise run as an install with none of them set.
 type ServerOption func(*serverOptions)
 
 type serverOptions struct {
 	invoiceGrace time.Duration
+	appEnv       string
+	rateLimits   config.RateLimits
+}
+
+// WithAppEnv sets the environment, config.Config.Env: APP_ENV as config.Load
+// normalised it, so every consumer below compares the same string. Without
+// it NewServer runs as "local", as an unset APP_ENV does.
+func WithAppEnv(env string) ServerOption {
+	return func(o *serverOptions) { o.appEnv = env }
+}
+
+// WithRateLimits sets the VELOX_RATE_LIMIT_* limits config.Load parsed.
+// Without it NewServer uses config.DefaultRateLimits.
+func WithRateLimits(rl config.RateLimits) ServerOption {
+	return func(o *serverOptions) { o.rateLimits = rl }
 }
 
 // WithInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). One value feeds the
-// three places that must agree on when a period is due: the billing runs'
-// due scans, the billing backlog gauges, and the credit-expiry sweep.
+// two places that must agree on when a period is due: the billing runs' due
+// scans and the billing backlog gauges. The credit-expiry sweep does not use
+// it: it holds a grant until the close that draws on it has run (ADR-071 §2).
 func WithInvoiceGrace(d time.Duration) ServerOption {
 	return func(o *serverOptions) { o.invoiceGrace = d }
 }
@@ -144,7 +163,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if clk == nil {
 		clk = clock.Real()
 	}
-	var o serverOptions
+	o := serverOptions{appEnv: "local", rateLimits: config.DefaultRateLimits()}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -272,7 +291,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	creditStore := credit.NewPostgresStore(db)
 	creditSvc := credit.NewService(creditStore)
 	creditSvc.SetCustomerReader(customerStore)
-	creditSvc.SetExpiryGrace(o.invoiceGrace)
 	creditH := credit.NewHandler(creditSvc)
 	creditNoteStore := creditnote.NewPostgresStore(db)
 	// The credit-note issue stamp copies customer PII, so it needs the
@@ -297,7 +315,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if sharedEnc != nil {
 		webhookOutStore.SetEncryptor(sharedEnc)
 	}
-	webhookOutSvc := webhook.NewService(webhookOutStore, nil)
+	webhookOutSvc := webhook.NewService(webhookOutStore, nil, o.appEnv)
 	webhookOutH := webhook.NewHandler(webhookOutSvc)
 
 	// Transactional outbox for outbound events (RES-1). Producers persist an
@@ -444,10 +462,19 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Reconcile async refund outcomes (pending→succeeded/failed) from refund
 	// webhooks onto the credit note — the create-call only sees the initial state.
 	stripeAdapter.SetRefundStatusUpdater(creditNoteSvc)
+	// Record card disputes (charge.dispute.*) against the disputed invoice,
+	// with payment.dispute_opened / .closed queued in the same tx (#979).
+	stripeAdapter.SetDisputeRecorder(invoiceStore)
 	// Resolve an active dunning run promptly when a card payment settles (the
 	// background-settle paths already resolve via the engine; this closes the
 	// card-success symmetry — #317 follow-up). dunningSvc implements ResolveByInvoice.
 	stripeAdapter.SetDunningResolver(dunningSvc)
+	// A charge Stripe refuses for the key (401/403) shows on the Settings →
+	// Payments card, as a failed Connect check does.
+	stripeAdapter.SetKeyHealth(tenantStripeSvc)
+	// A credit note that leaves a dunned invoice with nothing due marks it
+	// paid; this closes its dunning run too, escalated runs included.
+	creditNoteSvc.SetDunningResolver(dunningSvc)
 
 	// Wire payment retrier now that stripeAdapter exists
 	dunningSvc.SetRetrier(&paymentRetrierAdapter{
@@ -477,6 +504,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// invoice service which is defined just above; other dunning
 	// adapters (pauser, canceler) wire earlier next to dunningSvc.
 	dunningSvc.SetInvoiceUncollectibleMarker(&invoiceUncollectibleAdapter{svc: invoiceSvc})
+	// Dunning's final action takes the invoice's charge hold (ADR-127), so no
+	// charge starts while it cancels or pauses the subscription, and it does
+	// not run while a lost charge waits for the stale-hold sweep.
+	dunningSvc.SetChargeHoldClaimer(invoiceStore)
 	// Route the dunning manual-resolve void through the invoice service (single
 	// void writer: guards + in-flight block + tax reversal + invoice.voided
 	// event) instead of the raw store. Same lazy wire as the marker above.
@@ -580,7 +611,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The legacy direct-SMTP-from-producer path (VELOX_EMAIL_OUTBOX_ENABLED
 	// =false) was cut 2026-05-30 per ADR-040 — same shape as the webhook
 	// outbox cut above.
-	emailSender := email.NewSender()
+	emailSender := email.NewSender(o.appEnv)
 	// Wire tenant settings so customer-facing emails pull per-tenant
 	// branding (logo, brand color, company name, support URL). Cold-start
 	// tenants without settings gracefully fall back to Velox defaults.
@@ -697,7 +728,15 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	invoiceH.SetAuditLogger(auditLogger)
 	// ADR-104: timeline lifecycle rows join their wall-clock audit stamps.
 	invoiceH.SetAuditStamps(&invoiceAuditStampsAdapter{logger: auditLogger})
+	// ADR-128: invoice activity rows link the invoice's subscription by name.
+	invoiceH.SetSubscriptionLabeler(&invoiceSubscriptionLabelAdapter{store: subStore})
+	// ADR-128: the Dunning page's recovery timeline carries the lines the
+	// invoice's Activity card shows for the same events, built by the
+	// invoice handler from the same sources.
+	dunningH.SetEventLiner(invoiceH)
 	subH.SetAuditLogger(auditLogger)
+	// ADR-128: subscription activity rows link the invoices they name.
+	subH.SetInvoiceLabeler(&subscriptionInvoiceLabelAdapter{store: invoiceStore})
 	creditNoteH.SetAuditLogger(auditLogger)
 	// CN document email (ADR-082 rider) rides the transactional outbox
 	// like every other customer email.
@@ -873,7 +912,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// per-run level.
 	subSvc.SetResolver(engine)
 	// Handler-side resolver for proration math + changeAt stamps on
-	// clock-pinned subs (PR-12). Without this, remainingPeriodFactor
+	// clock-pinned subs (PR-12). Without this, remainingPeriodRatio
 	// + handleItemProration would use wall-clock now even when the
 	// underlying sub is in simulated time.
 	subH.SetResolver(engine)
@@ -887,6 +926,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// invoices — pre-fix the handler hardcoded Net 30, so a Net-15 tenant's
 	// proration invoice carried a different due date than its siblings.
 	subH.SetNetTermsReader(engine)
+	// A proration invoice born finalized writes the engine's finalize audit
+	// row and sends its invoice.finalized payload (#1279). audit.MustWired
+	// below refuses to boot without it.
+	subH.SetInvoiceFinalizeRecorder(engine)
 	// Wire the db handle so addItem (and updateItem / removeItem when
 	// they migrate to the same pattern) can open an outer tx wrapping
 	// the sub-item insert + proration writes — atomic guarantee that
@@ -933,6 +976,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Live hosted payment page for the attention banner: Velox holds its own
 	// charges while one is open (ADR-068), so the banner must not offer Retry.
 	invoiceSvc.SetPaymentPageReader(invoiceStore)
+	// A card the bank refused for good (#966) turns the decline notice into
+	// "needs a different card", by the same rule the dunning retry skips it.
+	invoiceSvc.SetCardRefusalReader(invoiceStore)
+	// Card disputes (#979): the dispute_lost notice, the timeline's dispute
+	// rows and GET /v1/invoices/{id}/disputes.
+	invoiceSvc.SetDisputeReader(invoiceStore)
 	invoiceSvc.SetCreditApplier(creditSvc)
 	// Tenant net-terms fallback: a manual invoice created without an explicit
 	// net_payment_term_days inherits the tenant's configured default (then 30),
@@ -1223,7 +1272,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		slog.Warn("DASHBOARD_BASE_URL NOT SET — password-reset emails will NOT be sent (the reset link origin is never derived from request headers, to prevent host-header poisoning / token theft). Set this to your canonical dashboard URL (e.g. http://localhost:5173 in dev) to enable password-reset emails.")
 	}
 	dashboardAuthH := user.NewHandler(
-		userSvc, sessionSvc, session.DefaultCookieConfig(),
+		userSvc, sessionSvc, session.DefaultCookieConfig(o.appEnv),
 		&passwordResetEmailAdapter{sender: passwordResetEmail},
 		dashboardBaseURL,
 		emailSender.IsConfigured(),
@@ -1233,6 +1282,18 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// per-tenant audit_log. This is the DASHBOARD (session) auth handler —
 	// distinct from authH (the API-key handler) wired above.
 	dashboardAuthH.SetAuditLogger(auditLogger)
+
+	// The sign-in throttle (ADR-094, amended 2026-10-18): Postgres-only, so it
+	// works without Redis and every replica shares one count. Its HMAC key is
+	// derived from VELOX_ENCRYPTION_KEY, which production requires and config
+	// validates; with no key (local development) it uses a fixed one.
+	throttleKey, err := user.ThrottleKey(strings.TrimSpace(os.Getenv("VELOX_ENCRYPTION_KEY")))
+	if err != nil {
+		slog.Error("invalid VELOX_ENCRYPTION_KEY: the sign-in throttle uses the local development key", "error", err)
+		throttleKey, _ = user.ThrottleKey("")
+	}
+	loginThrottle := user.NewLoginThrottle(db, throttleKey, session.DefaultCookieConfig(o.appEnv))
+	dashboardAuthH.SetLoginThrottle(loginThrottle)
 
 	// Team membership: invite / accept / remove (minimal — no RBAC; every
 	// member gets the full owner permission set until roles land). Invite
@@ -1249,8 +1310,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		dashboardBaseURL,
 	)
 	membersSvc.SetEmailConfigured(emailSender.IsConfigured())
-	membersH := dashmembers.NewHandler(membersSvc, sessionSvc, session.DefaultCookieConfig())
+	membersH := dashmembers.NewHandler(membersSvc, sessionSvc, session.DefaultCookieConfig(o.appEnv))
 	membersH.SetAuditLogger(auditLogger)
+	// An accepted invite counts as a sign-in for the throttle.
+	membersH.SetSignInRecorder(loginThrottle)
 
 	// Settings → Email: read-only SMTP status, the link env vars and a test
 	// send to the signed-in member.
@@ -1311,6 +1374,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		SubscriptionSvc:     subSvc,
 		TokenSvc:            tokenSvc,
 		PaymentReconciler:   paymentReconciler,
+		LoginThrottle:       loginThrottle,
 		TestClockSvc:        testClockSvc,
 	}
 
@@ -1320,42 +1384,44 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// main.go covers "unreachable/invalid"), because the general and
 	// hosted-invoice limiters fail CLOSED without it and a replica would
 	// otherwise boot green and answer 429 to its share of traffic. rdb is
-	// nil only outside production, where every limiter fails open. The
-	// split below describes the RUNTIME direction for a Redis outage
-	// after boot: general + hosted-invoice fail CLOSED in production (DDoS
-	// posture), ingest and /v1/auth always fail open (revenue events and
-	// operator login must survive a Redis blip).
-	prod := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
-	// Login brute-force protection: v1 ships NO automatic per-account throttle.
-	// The old users.locked_until auto-lockout (fragmenting across Redis↔in-memory
-	// and weaponizable — any known operator email → a 15-min lockout on demand)
-	// was removed, and the interim Postgres throttle that briefly replaced it was
-	// removed too, to keep v1 lean until the full control lands. The per-IP
-	// /v1/auth limiter below is the brute-force floor; the full design (a
-	// non-weaponizable throttle + MFA + login-time breached-password check) is
-	// documented in ADR-094 and deferred as one unit.
-	rateLimiter := mw.NewRateLimiter(rdb, "general",
-		envInt("VELOX_RATE_LIMIT_GENERAL_PER_MIN", 100), time.Minute)
+	// nil only outside production, where every limiter but /v1/auth's fails
+	// open. The split below describes the RUNTIME direction for a Redis
+	// outage after boot: general + hosted-invoice fail CLOSED in production
+	// (DDoS posture), ingest always fails open (revenue events must survive
+	// a Redis blip), and /v1/auth counts in this process (operator login
+	// must survive a Redis blip, and so must its throttle).
+	prod := o.appEnv == "production"
+	// Login brute-force protection has two layers. The per-IP /v1/auth limiter
+	// below is the outer one. The sign-in throttle (user.LoginThrottle, wired
+	// above) is the inner one: per (address × email) and per email, in
+	// Postgres, never a lockout (ADR-094). The old users.locked_until
+	// auto-lockout (fragmenting across Redis↔in-memory and weaponizable — any
+	// known operator email → a 15-min lockout on demand) stays removed.
+	rateLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
 	// In production, refuse requests when Redis is unreachable rather than
 	// silently disabling rate limiting (DDoS vector). The general/IP limiter
 	// deliberately stays fail-open in non-prod: per the industry split (OWASP
 	// ASVS + practitioner consensus) generic API rate limiting should fail
-	// open on a store blip. v1 has no dedicated per-account login throttle
-	// (deferred — ADR-094); the per-IP /v1/auth limiter below is the floor.
+	// open on a store blip. The sign-in throttle does not depend on Redis.
 	if prod {
 		rateLimiter.SetFailClosed(true)
 	}
 	// /v1/auth gets its OWN limiter instance — same Redis namespace and
 	// limits as the general one (shared buckets), but NEVER fail-closed:
 	// locking operators out of login during a Redis blip re-introduces
-	// the DoS the #21 design avoids. This per-IP limiter is the only
-	// brute-force floor on auth in v1 — a per-(IP×account) login throttle
-	// is deferred (ADR-094). The HA-readiness audit (docs/dev/
+	// the DoS the #21 design avoids. Login keeps a brute-force floor even
+	// then: the sign-in throttle lives in Postgres. The HA-readiness audit (docs/dev/
 	// docs/records/ha-readiness-2026-07-06.md) found the prior wiring mounted the
 	// fail-closed general limiter on /v1/auth, contradicting this
 	// stated design — a prod Redis outage killed dashboard login.
-	authLimiter := mw.NewRateLimiter(rdb, "general",
-		envInt("VELOX_RATE_LIMIT_GENERAL_PER_MIN", 100), time.Minute)
+	//
+	// Not fail-open either: that left password guessing unlimited for as
+	// long as Redis was down. Without Redis (unset, or a call fails) it
+	// counts in this process with the same limit (ADR-095 amendment
+	// 2026-10-18). That count is per replica, so N replicas allow one
+	// address up to N times the limit until Redis is back.
+	authLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
+	authLimiter.SetLocalFallback()
 
 	// Dedicated, much larger bucket for the ingest surface (/v1/usage-events*
 	// + the LiteLLM adapter). The general 100/min bucket was sized for
@@ -1374,8 +1440,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// authenticated (secret key required), and failing closed would turn a
 	// Redis blip into dropped revenue data — for ingest, lost-events risk
 	// outranks the DoS argument that closes the general bucket.
-	ingestLimiter := mw.NewRateLimiter(rdb, "ingest",
-		envInt("VELOX_RATE_LIMIT_INGEST_PER_SEC", 1000), time.Second)
+	ingestLimiter := mw.NewRateLimiter(rdb, "ingest", o.rateLimits.IngestPerSecond, time.Second)
 
 	// Tighter bucket for the public hosted-invoice surface. Industry
 	// practice (Stripe, Paddle) is to rate-limit payment pages more
@@ -1428,15 +1493,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	if corsEnv == "" {
 		corsEnv = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
 	}
-	// Trimmed here, once, for both consumers (CORS and the CSRF origin
-	// allowlist). CORS matches entries exactly, so "a, b" would otherwise
-	// never allow " b"; a blank entry would match a request with no Origin.
-	var allowedOrigins []string
-	for _, o := range strings.Split(corsEnv, ",") {
-		if o = strings.TrimSpace(o); o != "" {
-			allowedOrigins = append(allowedOrigins, o)
-		}
-	}
+	// Parsed here, once, for both consumers (CORS and the CSRF origin
+	// allowlist), by the parser behind the boot check. Both match entries
+	// exactly, so entries are trimmed ("a, b" must allow "b") and blanks
+	// dropped (a blank entry would match a request with no Origin). The
+	// error is ignored: config.Load already refused to start on it, and the
+	// list returned with it holds only the usable entries.
+	allowedOrigins, _ := config.ParseCORSOrigins(corsEnv)
 	r.Use(mw.CORS(allowedOrigins))
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)
@@ -1450,7 +1513,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		})
 	})
 
-	r.Use(mw.SecurityHeaders())
+	r.Use(mw.SecurityHeaders(o.appEnv))
 
 	// Audit-coverage detector (ADR-090). A PURE OBSERVER: it reports any
 	// mutating 2xx that produced no audit row and is not declared exempt in the
@@ -1476,7 +1539,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Public
 	r.Get("/health", handleHealth)
 	r.Get("/health/ready", handleDeepHealth(db))
-	r.Handle("/metrics", mw.MetricsAuth(mw.MetricsHandler()))
+	r.Handle("/metrics", mw.MetricsAuth(o.appEnv, mw.MetricsHandler()))
 
 	// Bootstrap — one-time setup (no auth, only works when no tenants
 	// exist). The deps wire the peer user package into
@@ -1970,22 +2033,6 @@ func loggablePath(r *http.Request) string {
 		}
 	}
 	return path
-}
-
-// envInt reads an integer env override, falling back on empty/malformed
-// values. Used for the rate-limit knobs — a bad value silently reverting
-// to the default is acceptable here (the default is safe; a boot failure
-// over a limiter tweak is not).
-func envInt(key string, fallback int) int {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		return fallback
-	}
-	return n
 }
 
 // isIngestPath scopes the dedicated ingest rate-limit bucket: the

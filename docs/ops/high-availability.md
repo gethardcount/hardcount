@@ -10,7 +10,7 @@ One VM with Docker Compose is also a supported production setup, for a small tea
 
 - Two or more `velox-api` copies behind a load balancer.
 - A managed Postgres with automatic failover and point-in-time restore.
-- A managed Redis. Velox uses it only for rate limiting.
+- A managed Redis. Velox uses it only for rate limiting, and all copies share its counts. If Redis goes down after start-up, see [Redis going down after boot](runbook/replica-will-not-start.md#redis-going-down-after-boot).
 - A connection pooler, if you want one. PgBouncer in transaction mode works, and CI runs the test suite through it. RDS Proxy is expected to behave the same way but has not been tested ([details](postgres-requirements.md)). Run database upgrades (migrations) over a direct connection.
 
 The settings for each copy are in [Self-host](../self-host.md#settings). Every copy uses the same settings and the same database.
@@ -36,7 +36,7 @@ One feature still assumes a single copy. The dashboard's live webhook event stre
 
 2. Set `TRUST_PROXY` on every copy to the address range (CIDR) of the load balancer. Separate several ranges with commas.
 
-   Without it, every request seems to come from the load balancer. The per-address limits on the public payment pages (60 a minute) and on sign-in, `/v1/auth` (100 a minute), then become one shared limit for every customer and every operator of the install. Set `TRUST_PROXY=none` only when the copies take client connections directly, with no proxy in front.
+   Without it, every request seems to come from the load balancer. The per-address limits on the public payment pages (60 a minute) and on sign-in, `/v1/auth` (100 a minute), then become one shared limit for every customer and every operator of the install. The sign-in throttle also counts every try as if it came from one address, so 5 wrong passwords for an email, from anyone, make every new browser wait to sign in with it. Set `TRUST_PROXY=none` only when the copies take client connections directly, with no proxy in front.
 
    **You see:** the copy starts. In `production`, a copy with `TRUST_PROXY` unset refuses to start with `TRUST_PROXY is required in production`.
 
@@ -74,7 +74,7 @@ A grace period shorter than 120 seconds can kill a copy (SIGKILL) halfway throug
 
 ## Upgrades
 
-Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Whether you can upgrade one copy at a time (a rolling upgrade) depends on the release's migrations, below.
+Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Then take a backup, or note the time if your Postgres has point-in-time restore: going back after an upgrade means restoring the database to that point ([Going back](../production-one-vm.md#going-back)). Whether you can upgrade one copy at a time (a rolling upgrade) depends on the release's migrations, below.
 
 **Database upgrades (migrations):** `RUN_MIGRATIONS_ON_BOOT=true` is safe when several copies start at once: they take turns through a Postgres lock, and each one applies only what is still missing. A waiting copy gives up after 30 minutes and is restarted. What is not covered is old code running on a new schema, so the release notes decide the order:
 

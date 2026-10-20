@@ -85,7 +85,7 @@ func TestAdditionalEmails_StoreRoundTripEncrypted(t *testing.T) {
 }
 
 // TestAdditionalEmails_ServiceValidation is the normalization matrix:
-// cap, primary-collision, display-name stripping, CRLF rejection,
+// cap, primary-collision, display-name refusal, CRLF rejection,
 // case-dedupe, and the tri-state Update pointer semantics.
 func TestAdditionalEmails_ServiceValidation(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -122,11 +122,15 @@ func TestAdditionalEmails_ServiceValidation(t *testing.T) {
 		t.Errorf("CRLF payload: got %v, want validation error", err)
 	}
 
-	// Display-name form → normalized to bare lowercased addr-spec;
-	// case-duplicates collapse.
-	c, err := mk("cus_v4", []string{"Bob <Bob@Acme.Test>", "bob@acme.test", "  Fin@Acme.Test "})
+	// Display-name form → 422: an entry must be one bare address.
+	if _, err := mk("cus_v5", []string{"Bob <bob@acme.test>"}); !errors.Is(err, errs.ErrValidation) {
+		t.Errorf("display-name entry: got %v, want validation error", err)
+	}
+
+	// Bare addresses → trimmed and lowercased; case-duplicates collapse.
+	c, err := mk("cus_v4", []string{"Bob@Acme.Test", "bob@acme.test", "  Fin@Acme.Test "})
 	if err != nil {
-		t.Fatalf("create with display-name forms: %v", err)
+		t.Fatalf("create with mixed-case addresses: %v", err)
 	}
 	if !reflect.DeepEqual(c.AdditionalEmails, []string{"bob@acme.test", "fin@acme.test"}) {
 		t.Errorf("normalization: got %v, want [bob@acme.test fin@acme.test]", c.AdditionalEmails)

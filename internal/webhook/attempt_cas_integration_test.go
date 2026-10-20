@@ -121,7 +121,7 @@ func TestUpdateDelivery_AttemptCountCAS(t *testing.T) {
 // remove the guard from the fake and this fails.
 func TestScheduleRetryOrFail_StaleAttempterIsDropped(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, nil)
+	svc := NewService(store, nil, "local")
 	ctx := context.Background()
 
 	d := domain.WebhookDelivery{

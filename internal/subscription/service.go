@@ -431,24 +431,23 @@ func (s *Service) rejectMixedItemIntervals(ctx context.Context, tenantID string,
 	return nil
 }
 
-// rejectMeterOverlap is the double-billing guard: no two live (draft /
-// trialing / active) subscriptions of a customer may bill the same meter,
-// and no two items on one subscription may either. Usage aggregation is
-// customer+meter scoped with NO subscription filter (engine.go
-// AggregateForBillingPeriodByAgg), so overlapping meter sets would invoice
-// the same usage once per subscription — silent double-billing. Migration
-// 0026 dropped the one-live-sub-per-customer index deferring to
-// "application policy"; this is that policy, scoped to the actual money
-// invariant (disjoint-meter subs stay allowed).
-//
-// planIDs is the incoming plan set (all items on Create; the added /
-// swapped-to plan on item mutations). currentSubID is the sub being
-// mutated ("" on Create — it doesn't exist yet) and only steers the error
-// message: a same-sub conflict means "this sub already has an item on that
-// meter". excludeItemID skips the item being plan-swapped so its outgoing
-// plan's meters don't self-conflict ("" for creates and adds). Skipped
-// when PlanReader isn't wired (narrow unit tests) — mirrors every sibling
-// guard.
+// rejectArchivedPlans refuses plans that are archived, for the writes that
+// put new business on a plan: Create and both add-item paths (ADR-067). An
+// archived plan keeps billing the items already on it (archive is not
+// cancel); it only takes no new ones. The two plan-swap paths keep their own
+// check on the plan they have already read. Callers check s.plans != nil.
+func (s *Service) rejectArchivedPlans(ctx context.Context, tenantID string, planIDs []string) error {
+	for _, pid := range planIDs {
+		plan, err := s.plans.GetPlan(ctx, tenantID, pid)
+		if err != nil {
+			return errs.Invalid("items", fmt.Sprintf("plan %q not found", pid))
+		}
+		if plan.Status == domain.PlanArchived {
+			return errs.InvalidState(fmt.Sprintf("plan %q is archived — unarchive it or pick an active plan", pid))
+		}
+	}
+	return nil
+}
 
 // guardSwapCurrency assembles the currency-pin inputs for a plan swap: the
 // incoming plan, the sub's OTHER items' plans, and the outgoing plan of the
@@ -546,6 +545,24 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 	return nil
 }
 
+// rejectMeterOverlap is the double-billing guard: no two live (draft /
+// trialing / active) subscriptions of a customer may bill the same meter,
+// and no two items on one subscription may either. Usage aggregation is
+// customer+meter scoped with NO subscription filter (engine.go
+// AggregateForBillingPeriodByAgg), so overlapping meter sets would invoice
+// the same usage once per subscription — silent double-billing. Migration
+// 0026 dropped the one-live-sub-per-customer index deferring to
+// "application policy"; this is that policy, scoped to the actual money
+// invariant (disjoint-meter subs stay allowed).
+//
+// planIDs is the incoming plan set (all items on Create; the added /
+// swapped-to plan on item mutations). currentSubID is the sub being
+// mutated ("" on Create — it doesn't exist yet) and only steers the error
+// message: a same-sub conflict means "this sub already has an item on that
+// meter". excludeItemID skips the item being plan-swapped so its outgoing
+// plan's meters don't self-conflict ("" for creates and adds). Skipped
+// when PlanReader isn't wired (narrow unit tests) — mirrors every sibling
+// guard.
 func (s *Service) rejectMeterOverlap(ctx context.Context, tenantID, customerID, currentSubID, excludeItemID string, planIDs []string) error {
 	if s.plans == nil {
 		return nil
@@ -734,22 +751,16 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// remained fully subscribable via the API — archive only hid it from
 	// the picker. Skipped when PlanReader isn't wired (narrow unit tests).
 	if s.plans != nil {
-		for _, it := range items {
-			plan, err := s.plans.GetPlan(ctx, tenantID, it.PlanID)
-			if err != nil {
-				return domain.Subscription{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", it.PlanID))
-			}
-			if plan.Status == domain.PlanArchived {
-				return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("plan %q is archived — unarchive it or pick an active plan", it.PlanID))
-			}
-		}
-
-		// Double-billing guard: the new sub's meters must be disjoint from
-		// every other live sub of this customer (and from each other).
 		planIDs := make([]string, 0, len(items))
 		for _, it := range items {
 			planIDs = append(planIDs, it.PlanID)
 		}
+		if err := s.rejectArchivedPlans(ctx, tenantID, planIDs); err != nil {
+			return domain.Subscription{}, err
+		}
+
+		// Double-billing guard: the new sub's meters must be disjoint from
+		// every other live sub of this customer (and from each other).
 		if err := s.rejectMeterOverlap(ctx, tenantID, input.CustomerID, "", "", planIDs); err != nil {
 			return domain.Subscription{}, err
 		}
@@ -1030,6 +1041,19 @@ type ItemChangeResult struct {
 	// BillOnPlanSwapDraftsTx; FinalizeCrossIntervalSwap runs its post-commit
 	// legs.
 	swapRelief domain.Relief
+	// pricedFrom is the state the change replaced: the subscription and the
+	// item as UpdateItemTx or RemoveItemTx found them under the subscription
+	// row lock (#1270); for AddItemTx, the subscription only. The handler
+	// prices the proration from it, never from the read it made before the
+	// transaction. Internal — not serialized.
+	pricedFrom itemChangeBase
+}
+
+// itemChangeBase is a subscription and one of its items, read together under
+// the subscription row lock.
+type itemChangeBase struct {
+	sub  domain.Subscription
+	item domain.SubscriptionItem
 }
 
 type ProrationDetail struct {
@@ -1085,6 +1109,11 @@ type ProrationDetail struct {
 	// proration invoice, never on the dedup-replay path (that invoice may
 	// already be paid). Empty for credit/adjustment paths. Internal.
 	AutoChargeInvoiceID string `json:"-"`
+	// finalizedInvoice is the proration invoice this change created already
+	// finalized, for the invoice.finalized webhook sent after commit
+	// (dispatchProrationFinalized). nil for a draft, a credit and the dedup
+	// replay.
+	finalizedInvoice *domain.Invoice
 }
 
 // ClawbackPiece is one funding invoice's slice of a multi-invoice downgrade
@@ -1096,127 +1125,129 @@ type ClawbackPiece struct {
 	GrossCents int64
 }
 
-func (s *Service) AddItem(ctx context.Context, tenantID, subscriptionID string, input AddItemInput) (domain.SubscriptionItem, error) {
+// addItemQuantity checks the request alone and returns the quantity to
+// write.
+func addItemQuantity(input AddItemInput) (int64, error) {
 	if input.PlanID == "" {
-		return domain.SubscriptionItem{}, errs.Required("plan_id")
+		return 0, errs.Required("plan_id")
 	}
 	qty := input.Quantity
 	if qty == 0 {
 		qty = 1
 	}
 	if qty < 1 {
-		return domain.SubscriptionItem{}, errs.Invalid("quantity", "must be >= 1")
+		return 0, errs.Invalid("quantity", "must be >= 1")
 	}
+	return qty, nil
+}
 
-	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
-	if err != nil {
-		return domain.SubscriptionItem{}, err
-	}
+// validateAddItem checks an add against sub, the subscription AddItemTx
+// read under the subscription row lock (#1270).
+//
+// Its other reads (plans, meter conflicts, currencies) run in their own
+// transactions. That is enough for this subscription's items: every write
+// to them takes the same lock first, so the reads see every change to them
+// that committed before the lock, and none can commit until the caller's
+// transaction ends. Two adds of plans that bill one meter are therefore
+// checked one after the other. The unique index on (subscription, plan) is
+// the write-time gate for duplicates. Archiving a plan writes only the plan
+// row, so an archive that commits between this check and the insert orders
+// as "added, then archived": an existing item on an archived plan, which
+// keeps billing (ADR-067).
+func (s *Service) validateAddItem(ctx context.Context, tenantID string, sub domain.Subscription, planID string) error {
 	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
-		return domain.SubscriptionItem{}, errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
+		return errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
 	}
 
-	// Mixed-interval guard: new item's plan must match the sub's
-	// existing item intervals. Same rationale as Create — the period
-	// anchor is per-sub, so adding a yearly item to a monthly sub
-	// would have no coherent cycle. Skipped when PlanReader isn't
-	// wired (narrow unit tests).
-	if s.plans != nil && len(sub.Items) > 0 {
-		newPlusExisting := append([]domain.SubscriptionItem{{PlanID: input.PlanID}}, sub.Items...)
-		if err := s.rejectMixedItemIntervals(ctx, tenantID, newPlusExisting); err != nil {
-			return domain.SubscriptionItem{}, err
+	// Skipped when PlanReader isn't wired (narrow unit tests).
+	if s.plans != nil {
+		// An archived plan takes no new business (ADR-067), and an added
+		// item is new business on its plan. Same refusal as Create.
+		if err := s.rejectArchivedPlans(ctx, tenantID, []string{planID}); err != nil {
+			return err
+		}
+		// Mixed-interval guard: new item's plan must match the sub's
+		// existing item intervals. Same rationale as Create — the period
+		// anchor is per-sub, so adding a yearly item to a monthly sub
+		// would have no coherent cycle.
+		if len(sub.Items) > 0 {
+			newPlusExisting := append([]domain.SubscriptionItem{{PlanID: planID}}, sub.Items...)
+			if err := s.rejectMixedItemIntervals(ctx, tenantID, newPlusExisting); err != nil {
+				return err
+			}
 		}
 	}
 
 	// Double-billing guard: the added plan's meters must be disjoint from
 	// every live sub of the customer — including this sub's other items.
-	if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, "", []string{input.PlanID}); err != nil {
-		return domain.SubscriptionItem{}, err
+	if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, sub.ID, "", []string{planID}); err != nil {
+		return err
 	}
 	// Currency pin (ADR-100): the added plan + this sub's existing items
 	// must share one currency (and match profile + the customer's other
 	// subs — this sub is excluded from the cross-sub query, so its own
 	// items ride in planIDs).
-	{
-		pin := []string{input.PlanID}
-		for _, it := range sub.Items {
-			pin = append(pin, it.PlanID)
-		}
-		if err := s.rejectCurrencyMismatch(ctx, tenantID, sub.CustomerID, subscriptionID, pin, ""); err != nil {
-			return domain.SubscriptionItem{}, err
-		}
+	pin := []string{planID}
+	for _, it := range sub.Items {
+		pin = append(pin, it.PlanID)
 	}
-
-	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
-	return s.store.AddItem(ctx, tenantID, domain.SubscriptionItem{
-		SubscriptionID: subscriptionID,
-		PlanID:         input.PlanID,
-		Quantity:       qty,
-	})
+	return s.rejectCurrencyMismatch(ctx, tenantID, sub.CustomerID, sub.ID, pin, "")
 }
 
-// AddItemTx is the in-transaction variant used by the handler's atomic
-// AddItem-with-proration flow. Runs the same validation as AddItem
-// (required fields, status gate, mixed-interval guard) but writes the
-// item via the store's AddItemTx so the insert shares the caller's tx.
-// Without this, the item committed in its own tx and a subsequent
-// proration failure left an orphan item (the bug fixed by ADR-030
-// atomic-proration follow-through, 2026-05-29).
-func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, input AddItemInput) (domain.SubscriptionItem, error) {
-	if input.PlanID == "" {
-		return domain.SubscriptionItem{}, errs.Required("plan_id")
-	}
-	qty := input.Quantity
-	if qty == 0 {
-		qty = 1
-	}
-	if qty < 1 {
-		return domain.SubscriptionItem{}, errs.Invalid("quantity", "must be >= 1")
-	}
+// AddItem adds an item in a transaction of its own: AddItemTx's lock,
+// checks and write, for an add the handler does not prorate (a trialing
+// subscription, the last hours of a period).
+func (s *Service) AddItem(ctx context.Context, tenantID, subscriptionID string, input AddItemInput) (domain.SubscriptionItem, error) {
+	var res ItemChangeResult
+	err := s.store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		var err error
+		res, err = s.AddItemTx(ctx, tx, tenantID, subscriptionID, input)
+		return err
+	})
+	return res.Item, err
+}
 
-	// Re-read sub for status + mixed-interval guard. The reads happen
-	// in their own tx via store.Get (a snapshot of the pre-tx state is
-	// fine for guard checks — concurrent mutations on the same sub
-	// would race regardless, and the unique index on (sub, plan) is
-	// the real correctness gate at write time).
-	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
+// AddItemTx adds an item on the caller's tx: the handler's atomic
+// add-with-proration tx, so a failed proration rolls the insert back too
+// (ADR-030 atomic-proration follow-through), or AddItem's own.
+//
+// Its first statement locks the subscription row; the checks and the period
+// check run on the state read under that lock (#1270). Two adds of plans
+// that bill one meter are checked one after the other, and an add that
+// waited on a plan swap or a period close sees what it wrote. The result
+// carries that state: the handler prices the add from it, never from its own
+// read before the tx.
+func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, input AddItemInput) (ItemChangeResult, error) {
+	qty, err := addItemQuantity(input)
 	if err != nil {
-		return domain.SubscriptionItem{}, err
+		return ItemChangeResult{}, err
 	}
-	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
-		return domain.SubscriptionItem{}, errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
-	}
-
-	if s.plans != nil && len(sub.Items) > 0 {
-		newPlusExisting := append([]domain.SubscriptionItem{{PlanID: input.PlanID}}, sub.Items...)
-		if err := s.rejectMixedItemIntervals(ctx, tenantID, newPlusExisting); err != nil {
-			return domain.SubscriptionItem{}, err
-		}
-	}
-
-	// Double-billing guard — same as the non-Tx AddItem. Runs its own
-	// read tx (like the sub re-read above); the unique index stays the
-	// write-time gate for same-plan duplicates.
-	if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, "", []string{input.PlanID}); err != nil {
-		return domain.SubscriptionItem{}, err
-	}
-	// Currency pin (ADR-100) — same as the non-Tx AddItem.
-	{
-		pin := []string{input.PlanID}
-		for _, it := range sub.Items {
-			pin = append(pin, it.PlanID)
-		}
-		if err := s.rejectCurrencyMismatch(ctx, tenantID, sub.CustomerID, subscriptionID, pin, ""); err != nil {
-			return domain.SubscriptionItem{}, err
-		}
-	}
-
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
-	return s.store.AddItemTx(ctx, tx, tenantID, domain.SubscriptionItem{
+	sub, err := s.store.LockForItemChangeTx(ctx, tx, tenantID, subscriptionID)
+	if err != nil {
+		return ItemChangeResult{}, err
+	}
+	if err := s.validateAddItem(ctx, tenantID, sub, input.PlanID); err != nil {
+		return ItemChangeResult{}, err
+	}
+	now := s.clock.Now(ctx)
+	// As in changeItemUnderLock: the boundary can pass after the handler's
+	// CloseEndedPeriodFirst. An item added to a due period is missing from
+	// the invoice the billing run builds for it. The same condition as
+	// CloseEndedPeriodFirst: a subscription with no items cannot be billed,
+	// so refusing its add would leave its period due for good.
+	if sub.Status == domain.SubscriptionActive && len(sub.Items) > 0 && domain.BillingDueAt(sub, now) {
+		return ItemChangeResult{}, errUnbilledPeriod(sub)
+	}
+	item, err := s.store.AddItemTx(ctx, tx, tenantID, domain.SubscriptionItem{
 		SubscriptionID: subscriptionID,
 		PlanID:         input.PlanID,
 		Quantity:       qty,
 	})
+	if err != nil {
+		return ItemChangeResult{}, err
+	}
+	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub}}, nil
 }
 
 // UpdateItemTx is the in-transaction variant of UpdateItem for the
@@ -1225,9 +1256,10 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 // (applyCrossIntervalPlanSwapTx); the non-Tx UpdateItem refuses it. The
 // scheduled-change path needs no tx (no proration emission).
 //
-// ADR-030 atomic-proration follow-through (2026-05-29). Cross-interval
-// swap atomicity is a documented follow-up — the engine-level write
-// composition is bigger than the handler-level work this PR scoped.
+// The checks below read the item and the subscription before the tx. The
+// write then runs from the state read under the subscription row lock
+// (changeItemUnderLock, or the swap's period CAS plus its item check), and
+// the result carries that state for the handler to price from (#1270).
 func (s *Service) UpdateItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string, input UpdateItemInput) (ItemChangeResult, error) {
 	if input.Quantity == nil && input.NewPlanID == "" {
 		return ItemChangeResult{}, errs.Invalid("body", "one of quantity or new_plan_id is required")
@@ -1235,16 +1267,16 @@ func (s *Service) UpdateItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 	if input.Quantity != nil && input.NewPlanID != "" {
 		return ItemChangeResult{}, errs.Invalid("body", "quantity and new_plan_id cannot be set together; issue two requests")
 	}
-	item, err := s.store.GetItem(ctx, tenantID, itemID)
-	if err != nil {
-		return ItemChangeResult{}, err
-	}
-	if item.SubscriptionID != subscriptionID {
-		return ItemChangeResult{}, errs.ErrNotFound
-	}
 	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
 	if err != nil {
 		return ItemChangeResult{}, err
+	}
+	// The item comes from the same read as sub.Items, which the swap's item
+	// check compares under the lock: a change that commits between two reads
+	// cannot slip past it.
+	item, ok := findItem(sub.Items, itemID)
+	if !ok {
+		return ItemChangeResult{}, errs.ErrNotFound
 	}
 	if sub.Status != domain.SubscriptionActive {
 		return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
@@ -1256,14 +1288,9 @@ func (s *Service) UpdateItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 		if *input.Quantity < 1 {
 			return ItemChangeResult{}, errs.Invalid("quantity", "must be >= 1")
 		}
-		if *input.Quantity == item.Quantity {
-			return ItemChangeResult{}, errs.Invalid("quantity", "new quantity is the same as current quantity")
-		}
-		updated, err := s.store.UpdateItemQuantityTx(ctx, tx, tenantID, itemID, *input.Quantity)
-		if err != nil {
-			return ItemChangeResult{}, err
-		}
-		return ItemChangeResult{Item: updated, EffectiveAt: now}, nil
+		// The "same as current" check runs under the lock, against the
+		// quantity the change is priced from.
+		return s.changeItemUnderLock(ctx, tx, tenantID, subscriptionID, item, input)
 	}
 
 	// Plan-change branch. Same-interval + same-cadence immediate is the simple
@@ -1354,17 +1381,147 @@ func (s *Service) UpdateItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 			// THIS tx. The OLD-period refund + the new invoice's tax-commit and
 			// auto-charge run POST-commit in the handler (external Stripe steps
 			// must never ride the DB tx).
-			return s.applyCrossIntervalPlanSwapTx(ctx, tx, tenantID, subscriptionID, itemID, input.NewPlanID, sub, newInterval, newTiming, now)
+			res, err := s.applyCrossIntervalPlanSwapTx(ctx, tx, tenantID, subscriptionID, itemID, input.NewPlanID, sub, newInterval, newTiming, now)
+			if err != nil {
+				return ItemChangeResult{}, err
+			}
+			// The swap proved this snapshot under the row lock: the period by
+			// its CAS, the items by its item check.
+			res.pricedFrom = itemChangeBase{sub: sub, item: item}
+			return res, nil
 		}
 	}
 	if !input.Immediate {
 		return ItemChangeResult{}, errAtomicNotApplicable
 	}
-	updated, err := s.store.ApplyItemPlanImmediatelyTx(ctx, tx, tenantID, itemID, input.NewPlanID, now)
+	return s.changeItemUnderLock(ctx, tx, tenantID, subscriptionID, item, input)
+}
+
+// changeItemUnderLock writes a quantity change, a same-interval immediate
+// plan change or a scheduled plan change from the state read under the
+// subscription row lock (#1270). It is the first statement of the change on
+// the caller's tx: UpdateItemTx's, or UpdateItem's own for a change that
+// prorates nothing. checked is the item the caller ran its checks on, before
+// the tx.
+//
+// A change that committed in between is seen here, not overwritten: a
+// quantity change is priced from the quantity and plan the item holds now,
+// and a request that now changes nothing is refused as a no-op. A plan
+// change whose checks ran on another plan (bill timing, interval, meters,
+// currency) is refused with item_changed rather than written unchecked, and
+// its meter check runs again against the other items as they are now.
+func (s *Service) changeItemUnderLock(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, checked domain.SubscriptionItem, input UpdateItemInput) (ItemChangeResult, error) {
+	sub, item, err := s.lockItemForChange(ctx, tx, tenantID, subscriptionID, checked.ID)
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
-	return ItemChangeResult{Item: updated, EffectiveAt: now}, nil
+	if sub.Status != domain.SubscriptionActive {
+		return ItemChangeResult{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
+	}
+	// Read after the lock, so the change is stamped after any change that
+	// committed before it.
+	now := s.clock.Now(ctx)
+	// The handler closed an ended period before its read
+	// (CloseEndedPeriodFirst); the boundary can pass after that.
+	if domain.BillingDueAt(sub, now) {
+		return ItemChangeResult{}, errUnbilledPeriod(sub)
+	}
+	pricedFrom := itemChangeBase{sub: sub, item: item}
+
+	if input.Quantity != nil {
+		if *input.Quantity == item.Quantity {
+			return ItemChangeResult{}, errs.Invalid("quantity", "new quantity is the same as current quantity")
+		}
+		updated, err := s.store.UpdateItemQuantityTx(ctx, tx, tenantID, item.ID, *input.Quantity)
+		if err != nil {
+			return ItemChangeResult{}, err
+		}
+		return ItemChangeResult{Item: updated, EffectiveAt: now, pricedFrom: pricedFrom}, nil
+	}
+
+	if input.NewPlanID == item.PlanID {
+		return ItemChangeResult{}, errs.Invalid("new_plan_id", "new plan is the same as current plan")
+	}
+	if item.PlanID != checked.PlanID {
+		return ItemChangeResult{}, errItemChanged()
+	}
+	// The meter check before the lock read the subscription's other items
+	// as they were then. An add, or a plan change on another item, that
+	// committed since may bill a meter the new plan bills; run it again now
+	// that no change to these items can commit. It refuses only a change
+	// that conflicts.
+	if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, item.ID, []string{input.NewPlanID}); err != nil {
+		return ItemChangeResult{}, err
+	}
+	if !input.Immediate {
+		// Scheduled: the change takes effect when the period found under the
+		// lock ends. It prorates nothing now.
+		effectiveAt := now
+		if sub.CurrentBillingPeriodEnd != nil {
+			effectiveAt = *sub.CurrentBillingPeriodEnd
+		}
+		updated, err := s.store.SetItemPendingPlanTx(ctx, tx, tenantID, item.ID, input.NewPlanID, effectiveAt)
+		if err != nil {
+			return ItemChangeResult{}, err
+		}
+		return ItemChangeResult{Item: updated, EffectiveAt: effectiveAt, pricedFrom: pricedFrom}, nil
+	}
+	updated, err := s.store.ApplyItemPlanImmediatelyTx(ctx, tx, tenantID, item.ID, input.NewPlanID, now)
+	if err != nil {
+		return ItemChangeResult{}, err
+	}
+	return ItemChangeResult{Item: updated, EffectiveAt: now, pricedFrom: pricedFrom}, nil
+}
+
+// lockItemForChange locks the subscription row on tx and returns the
+// subscription and the item as they stand under that lock (#1270).
+// ErrNotFound when the item was removed, or is not on this subscription.
+func (s *Service) lockItemForChange(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string) (domain.Subscription, domain.SubscriptionItem, error) {
+	sub, err := s.store.LockForItemChangeTx(ctx, tx, tenantID, subscriptionID)
+	if err != nil {
+		return domain.Subscription{}, domain.SubscriptionItem{}, err
+	}
+	item, ok := findItem(sub.Items, itemID)
+	if !ok {
+		return domain.Subscription{}, domain.SubscriptionItem{}, errs.ErrNotFound
+	}
+	return sub, item, nil
+}
+
+// findItem returns the live item itemID among items.
+func findItem(items []domain.SubscriptionItem, itemID string) (domain.SubscriptionItem, bool) {
+	for _, it := range items {
+		if it.ID == itemID {
+			return it, true
+		}
+	}
+	return domain.SubscriptionItem{}, false
+}
+
+// errItemChanged refuses a change whose checks or prices were computed from
+// items that another change replaced before this one took the subscription
+// row lock (#1270).
+func errItemChanged() error {
+	return errs.InvalidState("The subscription's items changed while this request was running. Refresh the page and try again.").WithCode("item_changed")
+}
+
+// sameItems reports whether two reads of a subscription's live items hold
+// the same items on the same plans at the same quantities.
+func sameItems(a, b []domain.SubscriptionItem) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	byID := make(map[string]domain.SubscriptionItem, len(a))
+	for _, it := range a {
+		byID[it.ID] = it
+	}
+	for _, it := range b {
+		was, ok := byID[it.ID]
+		if !ok || was.PlanID != it.PlanID || was.Quantity != it.Quantity {
+			return false
+		}
+	}
+	return true
 }
 
 // errAtomicNotApplicable signals that the requested UpdateItem variant
@@ -1412,20 +1569,12 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 	// catchup picks up the rollover at the operator's next Advance,
 	// not at wall-clock-2026.
 	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
-	now := s.clock.Now(ctx)
 
 	if input.Quantity != nil {
 		if *input.Quantity < 1 {
 			return ItemChangeResult{}, errs.Invalid("quantity", "must be >= 1")
 		}
-		if *input.Quantity == item.Quantity {
-			return ItemChangeResult{}, errs.Invalid("quantity", "new quantity is the same as current quantity")
-		}
-		updated, err := s.store.UpdateItemQuantity(ctx, tenantID, itemID, *input.Quantity)
-		if err != nil {
-			return ItemChangeResult{}, err
-		}
-		return ItemChangeResult{Item: updated, EffectiveAt: now}, nil
+		return s.changeItemInOwnTx(ctx, tenantID, subscriptionID, item, input)
 	}
 
 	if input.NewPlanID == item.PlanID {
@@ -1557,25 +1706,22 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 		}
 	}
 
-	if !input.Immediate {
-		var effectiveAt time.Time
-		if sub.CurrentBillingPeriodEnd != nil {
-			effectiveAt = *sub.CurrentBillingPeriodEnd
-		} else {
-			effectiveAt = now
-		}
-		updated, err := s.store.SetItemPendingPlan(ctx, tenantID, itemID, input.NewPlanID, effectiveAt)
-		if err != nil {
-			return ItemChangeResult{}, err
-		}
-		return ItemChangeResult{Item: updated, EffectiveAt: effectiveAt}, nil
-	}
+	// A scheduled change, or an immediate one the handler does not prorate.
+	return s.changeItemInOwnTx(ctx, tenantID, subscriptionID, item, input)
+}
 
-	updated, err := s.store.ApplyItemPlanImmediately(ctx, tenantID, itemID, input.NewPlanID, now)
-	if err != nil {
-		return ItemChangeResult{}, err
-	}
-	return ItemChangeResult{Item: updated, EffectiveAt: now}, nil
+// changeItemInOwnTx runs changeItemUnderLock in a transaction of its own,
+// for a change the handler does not prorate (a scheduled plan change, an
+// immediate change in the last hours of a period): its checks run on the
+// state under the subscription row lock as on the prorating path (#1270).
+func (s *Service) changeItemInOwnTx(ctx context.Context, tenantID, subscriptionID string, checked domain.SubscriptionItem, input UpdateItemInput) (ItemChangeResult, error) {
+	var res ItemChangeResult
+	err := s.store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		var err error
+		res, err = s.changeItemUnderLock(ctx, tx, tenantID, subscriptionID, checked, input)
+		return err
+	})
+	return res, err
 }
 
 // mapPeriodMoved turns the store's stale-snapshot sentinel into the 409 an
@@ -1654,6 +1800,19 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 		if err := s.store.ClosePeriodTx(ctx, tx, tenantID, subscriptionID, expected, *sub.CurrentBillingPeriodStart, now, now, swapAnchorDay); err != nil {
 			return ItemChangeResult{}, mapPeriodMoved(err)
 		}
+	}
+
+	// The refund and the new-period invoice below are priced from sub.Items
+	// (#1270). An item change that committed after UpdateItemTx's read did
+	// not move the period, so the CAS above passed. Every item writer takes
+	// this row first, so with the row held, read the items again and refuse
+	// if they are not the ones this swap priced.
+	locked, err := s.store.LockForItemChangeTx(ctx, tx, tenantID, subscriptionID)
+	if err != nil {
+		return ItemChangeResult{}, err
+	}
+	if !sameItems(locked.Items, sub.Items) {
+		return ItemChangeResult{}, errItemChanged()
 	}
 
 	// Fire-vs-swap residual (ADR-115): a reset=false threshold fire that
@@ -1739,12 +1898,48 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 //   - FinalizeOnCreateInvoice (tax commit + auto-charge) for the new in_advance
 //     day-1 invoice committed inside the swap tx, if one was created.
 func (s *Service) FinalizeCrossIntervalSwap(ctx context.Context, tenantID string, subBefore domain.Subscription, result ItemChangeResult) {
+	var inv domain.Invoice
+	if result.crossAxisNewInvoice != nil {
+		inv = *result.crossAxisNewInvoice
+	}
+	s.finishReliefThenCollect(ctx, subBefore, result.swapRelief, inv)
+}
+
+// finishReliefThenCollect runs the post-commit legs of a committed cancel or
+// cross-interval swap, in this order (ADR-118, amended 2026-10-19):
+//
+//  1. FinishRelief issues the relief's credit notes. A paid share's note puts
+//     its credit on the customer's balance.
+//  2. FinalizeOnCreateInvoice commits the tax of the invoice the change wrote,
+//     if it wrote one, and collects it. Collection applies the balance before
+//     it charges the card (ADR-088), so the relief reduces this invoice.
+//
+// In the other order a card on file was charged the whole final invoice of a
+// cancel, and the relief was left on the balance of a customer with no
+// subscription. With no card, the no-card email and no-payment dunning went
+// out for the whole amount.
+//
+// If a step fails here, the credit notes, the tax commit and the collection
+// are each picked up by their own sweep (RetryPendingClawbackIssue,
+// RetryPendingTaxCommit, the auto-charge sweep). The invoice.finalized
+// webhook is not: no sweep sends it again.
+func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscription, r domain.Relief, inv domain.Invoice) {
+	// The change has committed, so both legs run to the end even if the
+	// caller's context ends now: an API request's timeout or a client
+	// disconnect, a billing run stopping on shutdown or a lost lease, a
+	// dunning tick stopping. Collection already ignores the caller's
+	// cancellation (CollectInvoice). If the relief did not, Issue failed on
+	// its first database call, and the card was charged the whole final
+	// invoice with the credit left on the balance (#1286 review). Each Stripe
+	// call is bounded by the client's own 30s timeout, and shutdown's
+	// published budget bounds how long the process waits for this.
+	ctx = context.WithoutCancel(ctx)
 	if s.biller == nil {
 		return
 	}
-	s.biller.FinishRelief(ctx, subBefore, result.swapRelief)
-	if result.crossAxisNewInvoice != nil {
-		s.biller.FinalizeOnCreateInvoice(ctx, subBefore, *result.crossAxisNewInvoice)
+	s.biller.FinishRelief(ctx, sub, r)
+	if inv.ID != "" {
+		s.biller.FinalizeOnCreateInvoice(ctx, sub, inv)
 	}
 }
 
@@ -1786,58 +1981,49 @@ func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscri
 // subscription is rejected — a subscription with zero priced lines has no
 // valid billing semantics. Callers wanting to end billing altogether should
 // Cancel the subscription.
+//
+// It runs RemoveItemTx in a transaction of its own, for a removal the
+// handler does not prorate (the last hours of a period, a subscription that
+// is not active), so its checks run under the subscription row lock too:
+// two removals of the two items of a subscription cannot both pass the
+// last-item check (#1270).
 func (s *Service) RemoveItem(ctx context.Context, tenantID, subscriptionID, itemID string) error {
-	item, err := s.store.GetItem(ctx, tenantID, itemID)
-	if err != nil {
+	return s.store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		_, err := s.RemoveItemTx(ctx, tx, tenantID, subscriptionID, itemID)
 		return err
-	}
-	if item.SubscriptionID != subscriptionID {
-		return errs.ErrNotFound
-	}
-	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
-	if err != nil {
-		return err
-	}
-	if sub.Status == domain.SubscriptionActive && len(sub.Items) <= 1 {
-		return errs.InvalidState("A subscription needs at least one item. To stop billing, cancel the subscription instead.")
-	}
-	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
-	return s.store.RemoveItem(ctx, tenantID, itemID)
+	})
 }
 
-// RemoveItemTx is the in-transaction variant — same validation as
-// RemoveItem but the actual DELETE goes through store.RemoveItemTx
-// so it shares the caller's tx. Used by the atomic
-// RemoveItem-with-proration flow so a failed proration-credit grant
-// rolls back the item delete too. ADR-030 atomic-proration follow-
-// through (2026-05-29).
-func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string) error {
-	item, err := s.store.GetItem(ctx, tenantID, itemID)
+// RemoveItemTx removes an item on the caller's tx: the atomic
+// RemoveItem-with-proration flow's, so a failed proration-credit grant
+// rolls back the item delete too (ADR-030 atomic-proration follow-through,
+// 2026-05-29), or RemoveItem's own.
+//
+// Its first statement locks the subscription row, and the checks run on the
+// state read under that lock (#1270). The result carries that state: Item is
+// the item as it was removed, EffectiveAt the removal instant, and the
+// handler prices the removal credit from them.
+func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string) (ItemChangeResult, error) {
+	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
+	sub, item, err := s.lockItemForChange(ctx, tx, tenantID, subscriptionID, itemID)
 	if err != nil {
-		return err
-	}
-	if item.SubscriptionID != subscriptionID {
-		return errs.ErrNotFound
-	}
-	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
-	if err != nil {
-		return err
+		return ItemChangeResult{}, err
 	}
 	if sub.Status == domain.SubscriptionActive && len(sub.Items) <= 1 {
-		return errs.InvalidState("A subscription needs at least one item. To stop billing, cancel the subscription instead.")
+		return ItemChangeResult{}, errs.InvalidState("A subscription needs at least one item. To stop billing, cancel the subscription instead.")
 	}
-	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
-	return s.store.RemoveItemTx(ctx, tx, tenantID, itemID)
+	now := s.clock.Now(ctx)
+	// As in changeItemUnderLock: the boundary can pass after the handler's
+	// CloseEndedPeriodFirst.
+	if sub.Status == domain.SubscriptionActive && domain.BillingDueAt(sub, now) {
+		return ItemChangeResult{}, errUnbilledPeriod(sub)
+	}
+	if err := s.store.RemoveItemTx(ctx, tx, tenantID, itemID); err != nil {
+		return ItemChangeResult{}, err
+	}
+	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub, item: item}}, nil
 }
 
-// Cancel returns the canceled subscription, the cents-amount of any
-// cancel-proration credit granted (0 when none — in_arrears sub,
-// clean cancel, unpaid source invoice), and an error. The handler
-// surfaces the credit amount in the audit-log entry so the activity
-// timeline shows "Subscription canceled · Prorated credit $X.XX"
-// (industry standard — Stripe / Lago / Chargebee / Orb all surface
-// the credit on the subscription timeline, not just the customer's
-// credit balance).
 // cancelActorLabel derives the timeline's "canceled by …" vocabulary from
 // the request identity (ADR-090 D16): a dashboard session or API key reads
 // as "operator", a stamped customer actor as "customer". Background callers
@@ -1959,15 +2145,9 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 
 	afterBillCommit()
 
-	// Post-commit external legs — identical to Cancel: finalize (tax commit +
-	// auto-charge) for the final invoice, then the relief's legs (each
-	// recovered by its own sweep if this fails).
-	if s.biller != nil && finalInv.ID != "" {
-		s.biller.FinalizeOnCreateInvoice(ctx, canceled, finalInv)
-	}
-	if s.biller != nil {
-		s.biller.FinishRelief(ctx, canceled, relief)
-	}
+	// Post-commit legs, as in Cancel: the relief first, so its credit reduces
+	// the final invoice, then the final invoice's tax commit and collection.
+	s.finishReliefThenCollect(ctx, canceled, relief, finalInv)
 	return nil
 }
 
@@ -2045,6 +2225,14 @@ func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string
 	return sub, nil
 }
 
+// Cancel returns the canceled subscription, the cents-amount of any
+// cancel-proration credit granted (0 when none — in_arrears sub,
+// clean cancel, unpaid source invoice), and an error. The cancel's own
+// audit row, written in the cancel transaction (ADR-090), carries the
+// credit amount so the activity timeline shows "Subscription canceled ·
+// Prorated credit $X.XX" (industry standard — Stripe / Lago / Chargebee /
+// Orb all surface the credit on the subscription timeline, not just the
+// customer's credit balance).
 func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 
@@ -2075,8 +2263,10 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	// revenue leak (there is no final-on-cancel reconciler; the prior "G3
 	// deferred reconciler" referenced here never existed). That includes a
 	// period that ended unbilled (canceled_at at/after current_period_end):
-	// the biller refuses it. The build runs BEFORE relief so the credit grant
-	// doesn't pre-apply against this invoice.
+	// the biller refuses it. The relief is written after it on the same tx.
+	// Neither write applies credits; after commit the relief is issued first
+	// and the final invoice collected second, so the relief's balance credit
+	// reduces this invoice (finishReliefThenCollect).
 	var finalInv domain.Invoice
 	afterBillCommit := func() {}
 	var relief domain.Relief
@@ -2130,10 +2320,9 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 		}
 		finalInv = inv
 		afterBillCommit = afterCommit
-		// Cancel-proration relief (ADR-057, ADR-118): written IN this tx AFTER
-		// the final invoice (so the credit isn't sized against it), for every
-		// funding invoice, paid or unpaid. Any failure rolls the whole cancel
-		// back.
+		// Cancel-proration relief (ADR-057, ADR-118): written IN this tx after
+		// the final invoice, for every funding invoice, paid or unpaid. Any
+		// failure rolls the whole cancel back.
 		r, reliefErr := s.biller.BillOnCancelDraftsTx(ctx, tx, c)
 		if reliefErr != nil {
 			return fmt.Errorf("cancel proration relief: %w", reliefErr)
@@ -2147,24 +2336,18 @@ func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	}
 	afterBillCommit()
 
-	// Post-commit external finalize for the final invoice (audit + tax commit +
-	// auto-charge) — Stripe calls must never ride a DB tx; the invoice is now
-	// durable + atomic with the cancel. Recoverable by the existing reconciler /
-	// retry sweeps if a step fails.
-	if s.biller != nil && finalInv.ID != "" {
-		s.biller.FinalizeOnCreateInvoice(ctx, canceled, finalInv)
-	}
+	// Post-commit legs; Stripe calls must never ride a DB tx. The relief and
+	// the final invoice are durable and atomic with the cancel. The relief's
+	// credit notes are issued first, then the final invoice's tax is
+	// committed and it is collected, so the relief's balance credit reduces
+	// it (ADR-088; ADR-118 amendment of 2026-10-19).
+	s.finishReliefThenCollect(ctx, canceled, relief, finalInv)
 
-	// ADR-031 / ADR-057 / ADR-118: the relief for the unused part of an
-	// already-billed in_advance period is durable (written in the cancel tx
-	// above); here its external legs run. The credited amount stamps the
-	// timeline's "Prorated credit $X.XX" line.
+	// The credited amount stamps the timeline's "Prorated credit $X.XX" line.
 	var prorationCreditCents int64
 	if s.biller != nil {
-		s.biller.FinishRelief(ctx, canceled, relief)
 		prorationCreditCents = relief.CreditedCents
 	}
-
 	return canceled, prorationCreditCents, nil
 }
 
@@ -2235,7 +2418,7 @@ func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (RetryB
 			ResourceID:    sub.ID,
 			ResourceLabel: sub.Code,
 			Metadata: map[string]any{
-				"action":            "billing_retried",
+				"action":            domain.SubAuditBillingRetried,
 				"customer_id":       sub.CustomerID,
 				"attempts_before":   cleared.Attempts,
 				"was_parked":        cleared.Parked,
@@ -2467,7 +2650,7 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 			triggeredBy = "operator"
 		}
 		meta := map[string]any{
-			"action":       "collection_paused",
+			"action":       domain.SubAuditCollectionPaused,
 			"customer_id":  sub.CustomerID,
 			"behavior":     string(input.Behavior),
 			"triggered_by": triggeredBy,
@@ -2508,7 +2691,7 @@ func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (do
 	}
 	if s.audit != nil {
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":       "collection_resumed",
+			"action":       domain.SubAuditCollectionResumed,
 			"customer_id":  sub.CustomerID,
 			"triggered_by": "operator",
 		})
@@ -2590,22 +2773,6 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 	return activated, nil
 }
 
-// ProcessExpiredTrialsForClock is the catchup Phase 0.5 entry point —
-// scans subs pinned to this clock whose trial has elapsed in sim time
-// and flips each from 'trialing' to 'active' at trial_end_at (not at
-// the later cycle close). Bug #8: without this, status stays
-// 'trialing' for the gap between trial_end_at and the first
-// chargeable cycle close (up to ~30 days for calendar billing).
-//
-// Per sub: ActivateAfterTrial(at=trial_end_at) for the atomic status
-// flip + activated_at stamp, then BillOnCreate to cover in_advance
-// items' first paid period at trial_end_at (Bug #6 coverage carries
-// through). Failures collected but don't abort the batch — one bad
-// sub doesn't stall the others. Returns (processed_count, errors).
-//
-// Subscriptions matched by the scan but already-EndTrial'd by an
-// operator race will land in ActivateAfterTrial's InvalidState
-// branch — treated as a no-op (already correct state).
 // trialCancelDue reports whether the sub's schedule means "cancel at trial
 // end" (ADR-069): the flag on a trialing sub, or an explicit cancel_at at or
 // before trial_end.
@@ -2642,7 +2809,7 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 		return false, err
 	}
 	meta := map[string]any{
-		"action":       "trial_end_cancel",
+		"action":       domain.SubAuditTrialEndCancel,
 		"customer_id":  canceled.CustomerID,
 		"triggered_by": "schedule",
 		"canceled_at":  canceled.CanceledAt.UTC().Format(time.RFC3339),
@@ -2667,6 +2834,24 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 	return true, nil
 }
 
+// ProcessExpiredTrialsForClock is the catchup Phase 0.5 entry point —
+// scans subs pinned to this clock whose trial has elapsed in sim time
+// and flips each from 'trialing' to 'active' at trial_end_at (not at
+// the later cycle close). Bug #8: without this, status stays
+// 'trialing' for the gap between trial_end_at and the first
+// chargeable cycle close (up to ~30 days for calendar billing).
+//
+// Per sub: ActivateAfterTrialWithBill(at=trial_end_at) does the status
+// flip + activated_at stamp and bills in_advance items' first paid
+// period at trial_end_at in the same tx (ADR-056; Bug #6 coverage
+// carries through). A sub whose cancel schedule is due at trial end is
+// canceled free instead (ADR-069, cancelTrialAtEnd). Failures collected
+// but don't abort the batch — one bad sub doesn't stall the others.
+// Returns (processed_count, errors).
+//
+// Subscriptions matched by the scan but already-EndTrial'd by an
+// operator race will land in ActivateAfterTrialWithBill's InvalidState
+// branch — treated as a no-op (already correct state).
 func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time) (int, []error) {
 	expired, err := s.store.ListExpiredTrialsForClock(ctx, tenantID, clockID, frozen, 100)
 	if err != nil {
@@ -2745,7 +2930,7 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			// sim_effective_at) comes from the ctx binding on `bound`, which the
 			// audit writer owns. See cancelTrialAtEnd.
 			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
-				"action":       "trial_ended",
+				"action":       domain.SubAuditTrialEnded,
 				"customer_id":  activated.CustomerID,
 				"triggered_by": "schedule",
 				"trial_end_at": trialEndAt.UTC().Format(time.RFC3339),
@@ -2857,7 +3042,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		// trial_ended row — no sim metadata, this scan excludes clock-pinned subs).
 		if s.audit != nil {
 			_ = s.audit.Log(ctx, activated.TenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
-				"action":       "trial_ended",
+				"action":       domain.SubAuditTrialEnded,
 				"customer_id":  activated.CustomerID,
 				"triggered_by": "schedule",
 			})
@@ -2932,7 +3117,7 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 		}
 		if s.audit != nil {
 			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
-				"action":       "collection_resumed",
+				"action":       domain.SubAuditCollectionResumed,
 				"customer_id":  cleared.CustomerID,
 				"resumed_at":   resumeAt.UTC(),
 				"triggered_by": "schedule",
@@ -2990,7 +3175,7 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 		}
 		if s.audit != nil {
 			_ = s.audit.Log(ctx, sub.TenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
-				"action":       "collection_resumed",
+				"action":       domain.SubAuditCollectionResumed,
 				"customer_id":  cleared.CustomerID,
 				"resumed_at":   resumeAt.UTC(),
 				"triggered_by": "schedule",

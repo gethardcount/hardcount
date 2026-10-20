@@ -29,7 +29,9 @@ That gives you a working [tenant](glossary.md): one business account with its ow
 
 To run it for real customers, follow [Production on one VM](production-one-vm.md). It adds HTTPS, the web address settings, email, Stripe, nightly backups with a restore test, a go-live checklist and upgrade steps.
 
-**Signing in before you add TLS.** The stack serves plain HTTP on port 80. Until you put TLS in front, sign in to the dashboard at `http://localhost/` on the server, or through an SSH tunnel. Sign-in does not work at `http://<server-ip>/`. The [compose guide](../deploy/compose/README.md#tls) covers both.
+**Signing in before you add TLS.** The stack serves plain HTTP on port 80, and in production mode the sign-in cookie is always `Secure`. Until you put TLS in front, sign in at `http://localhost/` on the server, or through an SSH tunnel, in Chrome or Firefox. Safari does not keep a `Secure` cookie over plain HTTP, even at localhost, and no browser keeps it at `http://<server-ip>/`. The [compose guide](../deploy/compose/README.md#5-sign-in-to-the-dashboard) covers both. The quickstart (`./quickstart.sh`) runs in local mode, so it works in every browser.
+
+**Who can sign in.** Velox has no two-factor sign-in yet. What protects sign-in, and how to put it behind your own SSO or VPN: [Who can sign in to the dashboard](production-one-vm.md#who-can-sign-in-to-the-dashboard).
 
 **What to expect from one VM:**
 
@@ -69,14 +71,14 @@ VELOX_BOOTSTRAP_EMAIL=you@example.com VELOX_BOOTSTRAP_PASSWORD=change-me-please1
 make dev
 ```
 
-The email and password are optional. Without them, the owner is `admin@velox.local` and bootstrap prints a generated password. A password needs at least 12 characters.
+The email and password are optional. Without them, the owner is `admin@velox.local` and bootstrap prints a generated password. A password needs at least 12 characters, and Velox refuses common passwords from leaked-password lists.
 
 You now have:
 
 | Service | Where | Notes |
 |---|---|---|
 | Postgres | `:5432` | Password `velox`. Data is kept in a Docker volume. |
-| Redis | `:6379` | Used for rate limiting. Optional outside production. |
+| Redis | `:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
 | Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Velox sends, so nothing leaves your machine. |
 | The API | `:8080` | Started by `make dev`. Not a container. |
 
@@ -94,7 +96,7 @@ dashboard users and API keys. To add another one, run the bootstrap tool
 again with a different owner email:
 
 ```bash
-make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@local \
+make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@velox.local \
   VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \
   VELOX_BOOTSTRAP_TENANT='Tenant B'
 ```
@@ -132,7 +134,10 @@ GRANT ALL PRIVILEGES ON DATABASE velox TO velox_app;
 GRANT ALL ON SCHEMA public TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
 ```
+
+The last line is required. If a Velox process freezes in the middle of a transaction, the subscription it was billing stays locked until something ends that session, and this timeout does. The Compose stack sets it only on a new data volume. To check an older one, see [Timeouts on the limited user](ops/postgres-requirements.md#timeouts-on-the-limited-user).
 
 With `APP_ENV` set to `staging` or `production`, Velox refuses to start when `APP_DATABASE_URL`:
 
@@ -153,12 +158,12 @@ A migration is a versioned script that changes the database schema. Velox applie
 - **A failed migration leaves nothing to repair.** Each one runs in one transaction, so a failure undoes all of it. Fix the cause the error names and run the upgrade again. An index build runs without a transaction and may leave an INVALID index; running the upgrade again drops it and builds it again. See [A database upgrade stopped](ops/runbook/migration-failed-midway.md).
 - **Never roll back in production.** `velox migrate rollback` runs only with `APP_ENV=local`. To go back after an upgrade, restore the backup you took before it; see [Going back](production-one-vm.md#going-back).
 - **Each migration waits at most 5 seconds for a table lock.** While a migration waits for a lock, other queries on that table wait behind it, so Velox stops the upgrade instead of letting the table stall. The migration leaves nothing behind; run the upgrade again when the table is quieter. `MIGRATION_LOCK_TIMEOUT` changes the limit. See [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md).
-- **From v0.8.x,** v0.9.0 takes over a database at version 180 (v0.8.0 or v0.8.1) without changing a table. Older databases upgrade to v0.8.1 first. The [changelog](../CHANGELOG.md) has the steps.
+- **From v0.8.x,** v0.9.0 takes over a database at version 180 (v0.8.0, v0.8.1 or v0.8.2) without changing a table. Older databases upgrade to v0.8.1 first. The [changelog](../CHANGELOG.md) has the steps.
 
 ## Upgrading
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every version between yours and the new one.
-2. Take a backup. See [backups](ops/backup-considerations.md).
+2. Take a backup. If the upgrade goes wrong, it is how you go back, and a restore loses everything written after it ([Going back](production-one-vm.md#going-back)). See [backups](ops/backup-considerations.md).
 3. See the plan: run the new version's `velox migrate status`.
 
    **You see:** `state:` with the migrations it will apply, and `running now:  no`. A `refused` state names its next step; follow it before you go on.
@@ -167,7 +172,7 @@ A migration is a versioned script that changes the database schema. Velox applie
 
    **You see:** `/health/ready` answers 200 again.
 
-On one VM there is one copy, so Velox is down while the new version starts. For the Compose commands, see [Day-to-day commands](../deploy/compose/README.md#day-to-day-commands). With two or more copies, see [Upgrades](ops/high-availability.md#upgrades).
+On one VM there is one copy, so Velox is down while the new version starts. For the Compose commands, see [Upgrade to a new release](production-one-vm.md#upgrade-to-a-new-release), or [Upgrade](../deploy/compose/README.md#upgrade) for a stack built from source. With two or more copies, see [Upgrades](ops/high-availability.md#upgrades).
 
 ## Settings
 
@@ -180,16 +185,18 @@ Velox reads its settings from environment variables. The tables below list the m
 | `DATABASE_URL` | Postgres connection URL for the admin user |
 | `APP_DATABASE_URL` | Postgres connection URL for the limited user. Required in `staging` and `production`. |
 | `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data. 64 hex characters. Required in `production`. |
-| `REDIS_URL` | Redis, for rate limiting. Required in `production`. |
+| `REDIS_URL` | Redis, for rate limiting. Required in `production`. If Redis goes down later, sign-in stays rate-limited, but each copy counts on its own. |
 | `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward. Use `none` if there is no proxy. Required in `production`. Velox refuses to start if an entry is not an IP address or CIDR. |
 
-Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit. The audit log and dashboard sign-in records would also show the load balancer's address.
+Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit. The audit log and dashboard sign-in records would also show the load balancer's address. And the sign-in throttle would treat everyone as one address: 5 wrong passwords for an email, from anyone, would make every new browser wait to sign in with it.
+
+To check it, sign in, switch the dashboard to test mode and open the audit log. The newest `login` entry shows the address Velox saw. It should be yours, not the load balancer's.
 
 **Read once, when creating the first tenant** (by `make bootstrap`, not by the server)
 
 | Variable | What it is |
 |---|---|
-| `VELOX_BOOTSTRAP_EMAIL` | The dashboard owner's email. Default `admin@velox.local`. |
+| `VELOX_BOOTSTRAP_EMAIL` | The dashboard owner's email: one address with a dot in the domain, such as `you@example.com`. Default `admin@velox.local`. |
 | `VELOX_BOOTSTRAP_PASSWORD` | The owner's password. If unset, one is generated and printed once. |
 | `VELOX_BOOTSTRAP_TENANT` | The tenant's name. Default `Demo Tenant`. |
 
@@ -197,23 +204,44 @@ Why `TRUST_PROXY` is required: without it, every request behind a load balancer 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `APP_ENV` | `local` | `local`, `staging` or `production`. Outside `local`, cookies are marked secure and the start-up checks on this page apply. A value that starts with `prod` but is not exactly `production`, such as `prod`, stops start-up. Any other unrecognised value starts with a warning and is treated as not production. |
-| `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. With `false`, run `velox migrate` before starting a new release. |
+| `APP_ENV` | `local` | `local`, `staging` or `production`. In `staging` and `production` the sign-in cookie is always marked `Secure`, so the dashboard needs HTTPS, and the start-up checks on this page apply. An address setting such as `DASHBOARD_BASE_URL` that starts with `http://` then logs a warning at start-up. `local` is for your own machine over plain HTTP; the quickstart uses it. A value that starts with `prod` but is not exactly `production`, such as `prod`, stops start-up. Any other unrecognised value starts with a warning and is treated as not production. |
+| `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. With `false`, run `velox migrate` before starting a new release. A value other than `true` or `false` (or `yes`, `no`, `1`, `0`) stops start-up. |
 | `MIGRATION_LOCK_TIMEOUT` | `5s` | How long a database upgrade waits for a table lock before it stops. A duration such as `30s`, or `0` for no limit. Any other value stops the upgrade. |
 | `DASHBOARD_BASE_URL` | unset | The dashboard's address, used in password-reset links. If unset, no password-reset emails are sent. For local development use `http://localhost:5173`. |
 | `CUSTOMER_PORTAL_URL` | unset | The dashboard's address, with no path. Stripe returns a customer here after they save a card. If unset, Stripe sends them to `http://localhost:5173`, which exists only in local development; the card is still saved. |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000`, `:5173` and `:5174` | Other web addresses whose pages may call the API from a browser, comma-separated, each in full, such as `https://app.example.com`. A dashboard at the API's own address, as in the Compose stack, needs none. A listed address may send the sign-in cookie, so a dashboard at another address can sign in. `*` on its own lets any site call the API with an API key, never with the sign-in cookie. Velox refuses to start on an entry with a `*` inside, such as `https://*.example.com`, or on `*` beside other addresses. |
 | `SMTP_HOST`, `SMTP_PORT` | unset | Your email server. If unset, Velox sends no email. The local `.env.example` points these at Mailpit; the Compose stack leaves them unset. See [email setup](ops/email-setup.md). |
 | `VELOX_BOOTSTRAP_TOKEN` | unset | Allows the `POST /v1/bootstrap` call that creates the first tenant. At least 16 characters outside `local`. |
 | `METRICS_TOKEN` | unset | The bearer token a scraper must send to read `/metrics`. If unset, `/metrics` answers 401 in `production` and is open elsewhere. |
+| `VELOX_RATE_LIMIT_GENERAL_PER_MIN` | `100` | Requests a minute for each API key, for each tenant's dashboard users together, or for each client address before sign-in. Sign-in attempts from one address use the same limit. A whole number of 1 or more; any other value stops start-up. |
+| `VELOX_RATE_LIMIT_INGEST_PER_SEC` | `1000` | Usage events and LiteLLM callbacks a second for each API key. A whole number of 1 or more; any other value stops start-up. |
 | `INVOICE_GRACE_PERIOD` | `1h` | How long Velox waits after a billing period ends before it builds the invoice, so usage that arrives late but belongs to the period is billed. See below. A duration from `0` to `72h`, such as `30m` or `24h`. Any other value stops start-up. `0` builds the invoice as soon as the period ends. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Your OpenTelemetry collector's OTLP/HTTP address, such as `http://otel-collector:4318`. If unset, Velox sends no traces. |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | all traces | Which traces to keep, using the standard OpenTelemetry values. To keep 1 in 10, set `parentbased_traceidratio` and `0.1`. |
 
 Stripe is not set here. Each tenant connects its own Stripe account in the dashboard, under Settings → Payments. The Stripe API keys and the webhook signing secret (`whsec_…`) are stored per tenant, in the database.
 
-**`INVOICE_GRACE_PERIOD` delays every period-end invoice**, not only invoices with usage. A subscription's period-end invoice, and the final invoice of a cancel scheduled for a date, is built on the first billing run after the period end plus the grace. The billing run is hourly, so with the default the invoice is built 1 to 2 hours after the period ends. Everything that follows the invoice moves with it: the `invoice.finalized` webhook, the tax record, credits applied, the charge, and the first payment-failure retry. The invoice's dates and amounts do not move: it is issued and dated at the period end. A cancel or a plan change scheduled for a date also takes effect at that close, up to the grace after its date: until then the subscription is still `active` on its old plan, and `subscription.canceled` is sent then. Its dates do not move: `canceled_at` is the scheduled date. A scheduled resume of paused collection that falls after a period end waits for that period's close too. A credit grant is retired up to the grace after its `expires_at`, and the balance shows it until then.
+**`INVOICE_GRACE_PERIOD` delays every period-end invoice**, not only invoices with usage. A subscription's period-end invoice, and the final invoice of a cancel scheduled for a date, is built on the first billing run after the period end plus the grace. The billing run is hourly, so with the default the invoice is built 1 to 2 hours after the period ends. Everything that follows the invoice moves with it: the `invoice.finalized` webhook, the tax record, credits applied, the charge, and the first payment-failure retry. The invoice's dates and amounts do not move: it is issued and dated at the period end. A cancel or a plan change scheduled for a date also takes effect at that close, up to the grace after its date: until then the subscription is still `active` on its old plan, and `subscription.canceled` is sent then. Its dates do not move: `canceled_at` is the scheduled date. A scheduled resume of paused collection that falls after a period end waits for that period's close too. A credit grant that expires after a period ends stays in the balance until that period's invoice has been built and collected. That invoice still draws on it.
 
 Raise it if your usage pipeline can deliver an event more than an hour late. Usage stamped inside a period that arrives after its invoice is built is stored but not billed (see [late events](api-surface.md)). Other billing products use 1 hour (Stripe), 12 hours (Orb) and 24 hours (Metronome).
 
 These close a period at once, with no grace: an immediate cancel, `POST /v1/subscriptions/{id}/retry-billing`, any other change to a subscription whose period has ended, and advancing a test clock. `POST /v1/billing/run` waits for the grace, like the hourly run.
+
+## Repeated wrong passwords
+
+Velox slows down anyone who guesses passwords at the dashboard sign-in, instead of locking the account. It needs no setup and no Redis: the count is kept in Postgres, so every copy of the server shares it.
+
+- **One address and one email:** the first 5 wrong passwords are checked as usual. After that, each try waits 1 minute, then 2, 4 and 8, then 15 minutes.
+- **One email from many addresses:** the same waits start after 10 tries in total. This stops guesses spread over many addresses.
+- **A browser that signed in before is not slowed by other people's guesses.** A sign-in leaves a `velox_device` cookie in the browser. Its tries count only against that browser.
+- **A new browser waits while the guessing goes on.** While someone keeps guessing at an email, every browser that never signed in with it waits too, from any address.
+- **The right password clears the count for its address.** From a new browser it also clears the email's count. From a browser that signed in before, it leaves the email's count running, so a sign-in never ends someone else's wait early.
+- **A completed password reset and an accepted invite** mark the browser, which can then sign in during a wait.
+- **The answer is the same whether or not the email has an account,** so a wait tells no one which emails exist.
+
+During a wait the sign-in page says "Too many sign-in attempts. Try again in N minutes." A count with no try for 24 hours starts over. The count uses the client address, so set `TRUST_PROXY` correctly (see [Settings](#settings)).
+
+If a team member is held out on a new browser, they can sign in from a browser they used before. Or they can reset their password from the new browser, which then signs in. A reset needs email set up (`SMTP_HOST` and `DASHBOARD_BASE_URL`). Without email, run `DELETE FROM login_throttle;` in `psql` to clear every count; see [Sign-in says "Too many sign-in attempts"](ops/runbook/sign-in-throttled.md).
 
 ## How much load it takes
 
@@ -242,6 +270,7 @@ The metrics worth an alert:
 | `velox_audit_write_errors_total` | Audit log entries that failed to save |
 | `velox_audit_uncovered_mutation_total` | Changes made with no audit log entry. Should stay at zero. |
 | `velox_stripe_breaker_state` | Whether Velox has paused calls to Stripe after repeated failures. 0 is normal, 2 is paused. |
+| `velox_auth_login_total` | Dashboard sign-ins by `outcome`. A rising `throttled` or `bad_credentials` count means someone is guessing passwords. |
 
 What to do when one fires: the [operations runbook](ops/runbook/index.md).
 

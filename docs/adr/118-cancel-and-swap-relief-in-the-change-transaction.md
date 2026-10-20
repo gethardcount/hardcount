@@ -1,7 +1,10 @@
 # ADR-118: Cancel and plan-swap relief is written in the change's transaction
 
 **Date:** 2026-10-12
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-19: after a cancel commits, the relief
+is issued before the final invoice is collected, so the relief reduces the
+final invoice; see the
+[amendment](#amendment-2026-10-19-the-relief-is-issued-before-the-final-invoice-is-collected))
 
 ## Summary
 
@@ -15,6 +18,10 @@ in the same transaction as the cancel or swap. There are three kinds:
 
 If any part fails, the cancel or swap rolls back and is retried. The
 post-commit fallback paths that could lose relief silently are deleted.
+
+After the commit, the relief's credit notes are issued before the cancel's
+final invoice is collected, so the relief reduces that invoice (amended
+2026-10-19).
 
 ## Context
 
@@ -61,9 +68,11 @@ one relief per funding share on the caller's transaction:
 Any error rolls the cancel or swap back. That covers a funding-lookup failure,
 an allocation failure, a draft or a void.
 
-One case is not an error: an all-paid funding set that is already fully
-credited. The allocator's `errHeadroomExhausted` means nothing more is owed,
-so the change proceeds with an ERROR log.
+One case is not an error: an all-paid funding set with less room left than
+the unused part. Amended 2026-10-20: the allocator places what fits and logs
+the residual at ERROR, and the change proceeds. Before, it returned
+`errHeadroomExhausted` and the change proceeded with no relief at all. A set
+already fully credited still gets none (ADR-061, decision 2026-10-20).
 
 The result is a `domain.Relief` (draft ids, voided invoices, and the balance
 credit for the timeline). After commit, `FinishRelief` issues the drafts and
@@ -182,3 +191,94 @@ inside the lock, and the retry reads fresh data.
 - Code: `internal/billing/engine.go` (`reliefTx`, `unpaidRelief`,
   `FinishRelief`), `internal/invoice/service.go` (`VoidUnchangedTx`,
   `AfterVoid`), `internal/domain/relief.go`
+
+## Amendment 2026-10-19: the relief is issued before the final invoice is collected
+
+**Decision.** The relief reduces the final invoice of a cancel. This is the
+rule of [ADR-088](088-credit-balance-applies-to-all-invoices.md): the credit
+balance applies to every invoice when it is finalized, the final invoice of
+a cancel included. The owner, Sagar, decided it on #1272 on 2026-10-18. A
+card on file and no card must end with the same amounts.
+
+**What was wrong.** After the cancel committed, `Cancel` and
+`FireDueScheduledCancel` ran `FinalizeOnCreateInvoice` first and
+`FinishRelief` second. Collecting the final invoice applies the customer's
+balance and charges the card in one call (`processAutoCharge`). The relief's
+credit notes were not issued yet, so a paid share's credit was not on the
+balance yet:
+
+- With a card on file, the card was charged the whole final invoice. The
+  relief then landed on the balance of a customer with no subscription.
+  Getting it back took a manual refund.
+- With no card, the email asking for a card, and the no-payment dunning
+  run, were for the whole amount. The auto-charge sweep applied the relief
+  on a later tick.
+
+The cross-interval swap (`FinalizeCrossIntervalSwap`) already ran the relief
+first. The cancel order came from a code comment of 2026-05-18 ("so the
+credit grant doesn't pre-apply against this invoice"). That comment is older
+than ADR-088, and no later ADR decided the order again.
+
+**What changed** (#1286). All three callers run their post-commit legs
+through one helper, `Service.finishReliefThenCollect` in
+`internal/subscription/service.go`. It runs `FinishRelief`, then
+`FinalizeOnCreateInvoice`. The writes inside the transaction, and their
+order, are unchanged. Neither of those writes applies credits.
+
+The helper runs both legs on a context the caller cannot cancel, as
+collection already did. The caller's context can end right after the commit:
+an API request's timeout or a client disconnect, a billing run stopping on
+shutdown or a lost lease, a dunning tick stopping. Before, the relief's
+`Issue` then failed on its first database call while collection still ran,
+so the card was charged the whole final invoice.
+
+What the relief now does to the final invoice, by share:
+
+- **Paid share.** Its credit note credits the balance, and collection
+  applies that credit to the final invoice. The card is charged only the
+  rest. A relief larger than the final invoice pays it with no charge, and
+  the rest stays on the balance.
+- **Unpaid share, partly used.** Its credit note reduces the amount due of
+  its own invoice, as before. Customer credits that the note takes off that
+  invoice go back to the balance, and now apply to the final invoice too.
+- **Void.** Unchanged. The void returns the credits applied to the voided
+  invoice inside the cancel's transaction, before either leg runs.
+
+**Residual, not closed.** The relief reduces the final invoice only when
+`FinishRelief` issues the credit notes before the final invoice is
+collected. In four cases the final invoice is collected first, without the
+relief, as it was before this amendment:
+
+- The process crashes between the commit and `FinishRelief`.
+  `RetryPendingClawbackIssue` and the auto-charge sweep both recover their
+  half, on separate schedules and in no fixed order.
+- `Issue` fails during `FinishRelief`. `RetryPendingClawbackIssue` issues
+  the note later.
+- An auto-charge sweep tick claims the final invoice between the commit and
+  the end of `FinishRelief`.
+- The credit note's invoice is unpaid and still a draft, or has a charge in
+  flight. `Issue` holds the note and returns no error (ADR-059 for a charge
+  in flight, this ADR for a draft), so nothing is logged and collection
+  runs. `RetryPendingClawbackIssue` issues the note once that invoice is
+  finalized or its charge settles. If the charge succeeded, the invoice is
+  paid by then, so the note credits the balance.
+
+In each case no money is lost. The customer pays the final invoice in full
+and gets the relief later: as balance credit, or as a lower amount due on
+the invoice the note was held for. Closing the first three would move the
+credit grant into the cancel's transaction, which ADR-118 keeps after
+commit. That waits until one of them is seen in production. The fourth is
+the hold doing its job: what the note can relieve is not known until the
+charge settles or the draft is finalized.
+
+**Tests.**
+
+- `internal/billing/cancel_relief_reduces_final_invoice_integration_test.go`
+  runs on real Postgres. It covers the immediate and the scheduled cancel,
+  each with a card on file and with no card. In one case the relief is
+  smaller than the final invoice; in the other it is larger.
+  A third case has an unpaid day-1 invoice with customer credits applied:
+  the credits the relief returns reduce the final invoice.
+- `internal/subscription/relief_before_collect_test.go` checks the order on
+  all three callers, and that both legs still run on a live context when
+  the caller's context ends right after the commit.

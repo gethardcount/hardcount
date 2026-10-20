@@ -1,7 +1,7 @@
 # ADR-120: A period's invoice is built after a grace period, and late usage after it is not billed automatically
 
 **Date:** 2026-10-14
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace)
 
 ## Summary
 
@@ -58,7 +58,7 @@ difference on a later invoice
    `internal/config` (`loadInvoiceGracePeriod`). Unset is `1h`. Outside
    0 to 72h, or not a duration, start-up fails. It is passed to
    `api.NewServer` as `WithInvoiceGrace`, which threads the one value into
-   the engine, the backlog gauges and the credit-expiry sweep.
+   the engine and the backlog gauges.
 2. **What waits.** A due instant is a period end (`next_billing_at`) or a
    mid-period `cancel_at`. The two wall-clock billing runs, the scheduler's
    `RunCycle` and `POST /v1/billing/run` (`RunCycleForTenant`), admit a
@@ -78,8 +78,12 @@ difference on a later invoice
 4. **Gauges.** `velox_billing_due_subscriptions` and
    `velox_billing_oldest_due_age_seconds` use the same shifted instant. The
    age is counted from the due instant plus the grace.
-5. **Credit expiry.** The wall-clock sweep retires a grant once the grace
-   has passed after its `expires_at`. The test-clock sweep is unchanged.
+5. **Credit expiry does not use the grace** (amended 2026-10-19). Both
+   expiry sweeps skip a grant while a close or a period invoice that can
+   draw on it is owed (ADR-071 §2). Inside the grace the subscription's
+   due instant is still before the grant's `expires_at`, so the grant is
+   held until the close runs. The first version of this decision retired
+   a grant once the grace had passed after its `expires_at`.
 6. **Dates.** `billOnePeriod` still runs at the due instant: the invoice's
    period, `issued_at` and `due_at` stay at the boundary, and a scheduled
    cancel is stamped at its `cancel_at`.
@@ -110,12 +114,14 @@ wait would refuse the cancel with `unbilled_period` for up to the grace.
 arrives relative to an advance, and every existing clock flow expects the
 invoice at the boundary.
 
-**The credit sweep waits.** The close draws on grants that were live at the
-period end. The sweep runs every tick, after the billing run. Before, the
-first tick after a boundary closed the period before it swept, so a grant
-expiring just after the boundary still paid that period. With a grace longer
-than the tick, a tick inside the grace would retire the grant first, and the
-customer would lose credit that was live when the period ended.
+**The credit sweep waits for the close, not for the grace.** The close
+draws on grants that were live at the period end. With a grace longer than
+the tick, a tick inside the grace would retire such a grant before the
+close, and the customer would lose credit that was live when the period
+ended. Waiting out the grace after `expires_at` did not cover a close that
+fails and waits on the ADR-119 retry ladder, or a draft whose tax is
+computed hours later (#653). So the sweep skips a grant while its customer
+still owes such a close or such an invoice (ADR-071 §2).
 
 **1 hour by default.** It is Stripe's default and the short end of the
 peers (Orb 12h, Metronome 24h). Today's hourly tick already delayed a close
@@ -173,12 +179,12 @@ pipeline lags longer raises it.
   balance leaves it out, until the invoice is built. A grant created during
   the grace is drawn by the ended period's invoice. Deferred until a
   spend-cap complaint.
-- **An expired grant stays in the ledger balance for up to the grace
-  longer.** No later invoice draws from it, because the draw filters on the
-  invoice instant.
-- **The sweep and the close read "now" at different instants in one tick.**
-  A grant can still be retired before a close if the drain takes longer
-  than the gap between them. This was already possible with no grace.
+- **An expired grant stays in the ledger balance while a close or a period
+  invoice that can draw on it is owed.** That is the grace, and longer
+  while a close is failing or a period invoice waits for tax or
+  collection. Only a period or threshold invoice issued before the expiry
+  draws from it, at its first collection or a dunning retry (ADR-071 §2).
+  Every other draw tests expiry at its own instant.
 - **Late usage after the invoice is silent.** There is no alert and no list
   of the events that missed an invoice. `velox_usage_late_event_total`
   counts events more than 24 hours old on arrival, which is a different
@@ -193,13 +199,14 @@ pipeline lags longer raises it.
 
 ## References
 
-- ADR-028 (test clocks and wall-clock runs are separate), ADR-097 (mid-period
-  scheduled cancel), ADR-115 (one closer per period), ADR-119 (billing
-  failure record).
+- ADR-028 (test clocks and wall-clock runs are separate), ADR-097
+  (mid-period scheduled cancel), ADR-115 (one closer per period), ADR-119
+  (billing failure record).
+- ADR-071 §2: the expiry sweep waits for owed draws.
 - #961 (late usage), #1038 and #1039 (writes and pauses in the gap).
 - `internal/config/config.go` `loadInvoiceGracePeriod`;
   `internal/billing/engine.go` `SetInvoiceGrace`, `RunCycle`,
   `RunCycleForTenant`, `billSubscription`;
   `internal/subscription/postgres.go` `GetDueBilling`,
   `GetDueBillingForTenant`; `internal/api/middleware/metrics.go`;
-  `internal/credit/postgres.go` `ListExpiredGrants`.
+  `internal/domain/credit_expiry.go` `CreditDrawOwedSQL`.

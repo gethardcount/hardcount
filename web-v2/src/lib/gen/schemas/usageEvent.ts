@@ -7,14 +7,35 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { UsageEventProperties } from './usageEventProperties';
+import type { UsageEventDimensions } from './usageEventDimensions';
+import type { UsageEventOrigin } from './usageEventOrigin';
+import type { UsageEventProviderCostSource } from './usageEventProviderCostSource';
 
 export interface UsageEvent {
-  id?: string;
-  customer_id?: string;
-  meter_id?: string;
-  quantity?: number;
-  properties?: UsageEventProperties;
+  id: string;
+  tenant_id?: string;
+  customer_id: string;
+  meter_id: string;
+  /** Exact quantity as a decimal string (e.g. "1.5"). */
+  quantity: string;
+  /** The dimension values sent with the event. Absent when none were sent. */
+  dimensions?: UsageEventDimensions;
   idempotency_key?: string;
-  timestamp?: string;
+  timestamp: string;
+  /** How the event arrived. `backfill` means `POST /v1/usage-events/backfill`. */
+  origin?: UsageEventOrigin;
+  /**
+     * What serving this event cost you at your provider, in millionths
+     * of a dollar, priced from your provider cost rates when the event
+     * arrived. Absent when no rate matched or the event has no costed
+     * dimensions.
+     */
+  provider_cost_micros?: number;
+  /**
+     * Where `provider_cost_micros` came from: `table` (your provider
+     * cost rates), `observed` (the cost the sender reported), or
+     * `not_applicable` (the meter has no costed dimensions). Absent when
+     * the cost is unknown.
+     */
+  provider_cost_source?: UsageEventProviderCostSource;
 }

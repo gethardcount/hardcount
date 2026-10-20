@@ -7,7 +7,7 @@
 
 ## Summary
 
-Every time-driven scheduler job (auto-charge retry, tax retry, threshold scan, dunning, credit expiry) is split into two separate flows. The wall-clock cron query excludes entities attached to a test clock. A per-clock variant (`*ForClock`) processes those entities only when an operator clicks Advance, through `testclock.CatchupWorker`. Each entity is processed by exactly one flow, so the cron can no longer charge a test-clock invoice, and simulated time moves only on Advance. The tax-commit reconciler (`RetryPendingTaxCommit`) also excludes test-clock invoices but has no per-clock variant, because those invoices are test-mode only. Amended 2026-06-13: the invoice-reminder job was removed. Amended 2026-10-10: the payment reconciler is not split, and a rule now decides which test-clock defects get fixed (see the amendment below).
+Every time-driven scheduler job (auto-charge retry, tax retry, threshold scan, dunning, credit expiry) is split into two separate flows. The wall-clock cron query excludes entities attached to a test clock. A per-clock variant (`*ForClock`) processes those entities only when an operator clicks Advance, through `testclock.CatchupWorker`. Each entity is processed by exactly one flow, so the cron can no longer charge a test-clock invoice, and simulated time moves only on Advance. The tax-commit reconciler (`RetryPendingTaxCommit`) also excludes test-clock invoices but has no per-clock variant, because those invoices are test-mode only. Amended 2026-06-13: the invoice-reminder job was removed. Amended 2026-10-10: the payment reconciler is not split, and a rule now decides which test-clock defects get fixed (see the amendment below). Amended 2026-10-20: credit expiry runs after dunning again, as the orchestration sequence below first had it.
 
 ## Context
 
@@ -297,6 +297,16 @@ Registered under this rule on 2026-10-10, in the velox-ops DP-readiness register
 - the reconciler cool-off above;
 - a clock invoice that failed without a dunning run is never enrolled, because the backfill excludes simulated invoices;
 - `velox_anchor_at` in the idempotent PaymentIntent params (plausible, not reproduced).
+
+## Amendment 2026-10-20: credit expiry runs after dunning
+
+The orchestration sequence above ran dunning (its Phase 4) before credit expiry (its Phase 5). The steps shipped in rollout order instead, so the code ran credit expiry first and kept the rollout names: Phase 4 is credit expiry and Phase 5 is dunning. `RunCatchup` now runs Phase 5 before Phase 4, restoring the designed order. The names stay, because about 15 comments and `AdvanceSummary` use them.
+
+"Ordering doesn't matter" stopped being true once a dunning retry re-applies credit before it charges (`paymentRetrierAdapter.retryPayment` in `internal/api/adapters.go`). Every credit draw judges expiry at its own instant: `drainPositiveBlocks` takes only blocks with `expires_at` after the draw, and a retry draws at its scheduled instant. Expiry retires every grant with `expires_at` before `frozen_time`, and a retired grant is never drawn again (ADR-071). So expiry first took a grant that was still live at an earlier retry's instant, and that retry charged the card in full. The case: a customer in dunning gets a 7-day goodwill credit, and the operator advances a month. The retry on day 3 should settle the invoice from the credit.
+
+Expiry last gives nothing up. A draw after a grant's expiry still cannot take it, because of the same filter, and ADR-071's "retirement wins" holds. A panic in Phase 5 now skips expiry for that advance; Retry advance runs it. Test: `TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore`.
+
+Later the same day (#1305, ADR-071 §2): a period or threshold invoice tests expiry at its `issued_at`, at every collection including a dunning retry. So a retry of such an invoice draws a grant that expired after the period ended and before the retry; only a grant that expired before the period ended is out of reach. Expiry last is what lets the retry find that grant on a test clock. The wall-clock sweep does not yet hold it for an invoice in dunning (ADR-071 §2, "Not covered").
 
 ## Test strategy
 

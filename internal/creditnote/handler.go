@@ -243,10 +243,10 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
 }
 
 // retryRefund re-attempts the Stripe refund leg of an issued CN whose
-// refund_status is failed or pending. Operator-triggered via dashboard
-// when the CN was issued during a Stripe outage / before Stripe was
-// connected. Uses the same idempotency key as Issue() so retries
-// converge cleanly.
+// refund_status is failed, unknown, pending or none. Operator-triggered via
+// dashboard when the CN was issued during a Stripe outage / before Stripe was
+// connected. Svc.RetryRefund looks for the refund at Stripe before any
+// create, so retries converge (see its contract).
 func (h *Handler) retryRefund(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
@@ -432,6 +432,12 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		respond.BadRequest(w, r, "email is required")
 		return
 	}
+	// The To address gets the same check as a customer's stored email.
+	to, err := domain.ValidateEmail("email", body.Email)
+	if err != nil {
+		respond.FromError(w, r, err, "credit_note_email")
+		return
+	}
 
 	cn, items, err := h.svc.GetWithLineItems(r.Context(), tenantID, id)
 	if errors.Is(err, errs.ErrNotFound) {
@@ -460,7 +466,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// CC resolution (ADR-082 tri-state).
 	var cc []string
 	if body.AdditionalEmails != nil {
-		cc, err = domain.NormalizeAdditionalEmails(*body.AdditionalEmails, body.Email)
+		cc, err = domain.NormalizeAdditionalEmails(*body.AdditionalEmails, to)
 		if err != nil {
 			respond.FromError(w, r, err, "credit_note_email")
 			return
@@ -472,7 +478,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, a := range cust.AdditionalEmails {
-			if !strings.EqualFold(a, strings.TrimSpace(body.Email)) {
+			if !strings.EqualFold(a, to) {
 				cc = append(cc, a)
 			}
 		}
@@ -492,7 +498,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.emailSender.SendCreditNote(ctx, tenantID, body.Email, cc,
+	if err := h.emailSender.SendCreditNote(ctx, tenantID, to, cc,
 		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.Currency, pdfBytes); err != nil {
 		respond.FromError(w, r, err, "credit_note_email")
 		return

@@ -246,6 +246,8 @@ Send one invoice email and follow it.
 
 If the email stays `pending`, Velox is retrying it. The server log shows the provider's error; fix the cause it names. Velox retries for about 72 hours, then marks the email failed.
 
+If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. Velox refuses these when they are entered, since 2026-10-18, but an address stored before is kept as it was. Velox does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
+
 ## Bounces and spam complaints
 
 A bounce is an email that could not be delivered. Velox stops emailing an address that bounced or that marked Velox's email as spam.
@@ -254,16 +256,15 @@ Both ways below need `VELOX_EMAIL_BIDX_KEY` (64 hex characters, `openssl rand -h
 
 ### When the SMTP server rejects the address
 
-Velox marks the customer's `email_status` as `bounced`, and sends no more email to that address. A rejection is a 550, 551, 552 or 553 reply, or any 5xx reply whose status starts with 5.1 or 5.2. This catches failures that happen while Velox is still connected.
+Velox marks the customer's `email_status` as `bounced`, and sends no more email to that address. A rejection is the server's answer to the recipient address: a 550, 551, 552 or 553 reply, or any 5xx reply whose status starts with 5.1 or 5.2. This catches failures that happen while Velox is still connected.
 
 These do not mark a customer bounced, and Velox retries them:
 
 - an authentication error (535),
 - a policy rejection (a 5.7.x status such as `550 5.7.1 relaying denied`),
 - a 4xx reply,
-- a network error such as a timeout.
-
-A 550 to 553 reply with no 5.7.x status counts as a bounce at any stage of the conversation, including a rejected From address.
+- a network error such as a timeout,
+- a refusal of the sender or of the message, whatever its code, such as SendGrid's `550 The from address does not match a verified Sender Identity`.
 
 ### When Postmark reports a bounce later
 

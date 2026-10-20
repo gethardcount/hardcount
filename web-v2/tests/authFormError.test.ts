@@ -1,7 +1,7 @@
 // What the sign-in pages say when a request fails.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { authFormError } from '../src/lib/authFormError.ts'
+import { authFormError, signInRateLimitMessage } from '../src/lib/authFormError.ts'
 
 class FakeApiError extends Error {
   status: number
@@ -47,4 +47,18 @@ test('another refusal keeps the server sentence', () => {
 
 test('too many requests', () => {
   assert.equal(authFormError(new FakeApiError('too many requests', 429)), 'Too many requests. Wait a moment, then try again.')
+})
+
+test('sign-in throttled: the server names the wait', () => {
+  assert.equal(
+    signInRateLimitMessage(new FakeApiError('Too many sign-in attempts. Try again in 3 minutes.', 429, { code: 'login_throttled' })),
+    'Too many sign-in attempts. Try again in 3 minutes.',
+  )
+})
+
+test('the per-address rate limit on sign-in keeps the generic line', () => {
+  assert.equal(
+    signInRateLimitMessage(new FakeApiError('too many requests — please retry after the rate limit resets', 429, { code: 'rate_limited' })),
+    'Too many attempts. Please wait a moment and try again.',
+  )
 })

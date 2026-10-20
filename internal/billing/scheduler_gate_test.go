@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // roleGate is a leader.Gate double that leads exactly the roles in lead and
@@ -158,7 +159,7 @@ func TestScheduler_RunDunningForMode_PanicsWithoutLivemode(t *testing.T) {
 			t.Fatalf("panic should mention missing livemode; got %q", msg)
 		}
 	}()
-	s.runDunningForMode(context.Background(), true, []string{"t_1"})
+	s.runDunningForMode(context.Background(), true, []string{"t_1"}, &scheduler.Panics{})
 }
 
 // TestScheduler_Start_RefusesWithoutGate: an ungated scheduler at N>=2 is a

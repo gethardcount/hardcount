@@ -15,14 +15,15 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/user/breachedpw"
 )
 
 // Service is the auth-side surface for user accounts. ADR-011.
 //
 // The recipe is intentionally boring: bcrypt cost 12 for hashing,
-// crypto/rand for tokens, sha256 for token storage. v1 has NO automatic login
-// brute-force throttle — the interim one was removed; ADR-094 records the
-// deferred design. All of this is well-trodden Go stdlib + x/crypto territory.
+// crypto/rand for tokens, sha256 for token storage. The sign-in throttle
+// (throttle.go, ADR-094) runs in the handler before Authenticate. All of this
+// is well-trodden Go stdlib + x/crypto territory.
 type Service struct {
 	store Store
 	clock clock.Clock
@@ -56,32 +57,8 @@ const (
 	PasswordResetTokenTTL = 1 * time.Hour
 )
 
-// CommonPasswords is the top-1000 most-used passwords from the 2023
-// HaveIBeenPwned breach corpus (lower-cased). Login flow rejects
-// passwords on this list at signup/reset so trivially-guessable
-// credentials never enter our DB. Embedded as a tiny in-memory set.
-//
-// Not exhaustive — a real "weak password" feel needs zxcvbn — but
-// catches the 90th percentile of bad passwords (password, 123456,
-// qwerty123, etc).
-var commonPasswords = map[string]struct{}{
-	"password":       {},
-	"password123":    {},
-	"123456789012":   {},
-	"qwertyuiopasdf": {},
-	"administrator":  {},
-	"changeme123":    {},
-	"letmein12345":   {},
-	"iloveyou1234":   {},
-	"welcome12345":   {},
-	"admin12345678":  {},
-	// ... in production we'd embed the full top-1000 list. For v1
-	// this seed catches the most embarrassing cases. Expand when a
-	// security review asks for stronger denial.
-}
-
 // HashPassword applies bcrypt to a candidate plaintext. Validates
-// length and common-password-list before hashing. Returns the hash
+// length and the breached-password list before hashing. Returns the hash
 // suitable for `users.password_hash`.
 func HashPassword(plaintext string) (string, error) {
 	if err := ValidatePassword(plaintext); err != nil {
@@ -112,7 +89,11 @@ func ValidatePassword(plaintext string) error {
 		// bytes: an accented letter is 2 in UTF-8, most other scripts 3.
 		return errs.Invalid("password", "is too long. Use at most 72 characters; accented and non-Latin letters count as two or more")
 	}
-	if _, blocked := commonPasswords[strings.ToLower(plaintext)]; blocked {
+	// The embedded breached-password list (ADR-095 Phase 0(a)): about
+	// 30,000 passwords of 12 or more characters from the top million of a
+	// breach corpus, matched in any letter case. Checked only when a
+	// password is set (bootstrap, reset, invite accept), never at login.
+	if breachedpw.Contains(plaintext) {
 		return errs.Invalid("password",
 			"is one of the most common passwords. Pick a different one")
 	}
@@ -137,6 +118,24 @@ func VerifyPassword(hash, plaintext string) error {
 // Same error for both so an attacker can't enumerate registered
 // emails by timing the response. Handler maps to 401.
 var ErrBadCredentials = errs.New("bad_credentials", "invalid email or password")
+
+// wrongPasswordError is ErrBadCredentials for an email that has an account.
+// It carries the user id only for the failed-login log line, which must not
+// hold the typed email. The response stays the same generic 401.
+type wrongPasswordError struct{ userID string }
+
+func (e *wrongPasswordError) Error() string { return ErrBadCredentials.Error() }
+func (e *wrongPasswordError) Unwrap() error { return ErrBadCredentials }
+
+// wrongPasswordUserID returns the account's user id when err is a wrong
+// password for an existing account, and "" otherwise.
+func wrongPasswordUserID(err error) string {
+	var wp *wrongPasswordError
+	if errors.As(err, &wp) {
+		return wp.userID
+	}
+	return ""
+}
 
 // CreateUser inserts a new user with hashed password and binds them
 // to the given tenant with the supplied role. Used by the bootstrap
@@ -175,9 +174,10 @@ func (s *Service) GetByID(ctx context.Context, id string) (domain.User, error) {
 // dummy bcrypt), so response timing can't be used to enumerate registered emails.
 // On success: stamps last_login_at.
 //
-// There is no account-lock check: v1 has no automatic login throttle or lockout
-// (deferred as one unit — ADR-094). An account under active attack is handled by
-// password reset / session revocation, not by refusing login.
+// There is no account-lock check, and there never is: the sign-in throttle
+// (throttle.go) slows guesses before this runs and does not lock an account
+// (ADR-094). An account under active attack is handled by password reset /
+// session revocation, not by refusing login.
 func (s *Service) Authenticate(ctx context.Context, email, plaintext string) (domain.User, []domain.UserTenant, error) {
 	u, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
@@ -194,6 +194,9 @@ func (s *Service) Authenticate(ctx context.Context, email, plaintext string) (do
 	}
 
 	if err := VerifyPassword(u.PasswordHash, plaintext); err != nil {
+		if errors.Is(err, ErrBadCredentials) {
+			return domain.User{}, nil, &wrongPasswordError{userID: u.ID}
+		}
 		return domain.User{}, nil, err
 	}
 

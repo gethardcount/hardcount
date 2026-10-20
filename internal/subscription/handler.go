@@ -22,6 +22,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -43,7 +44,11 @@ type PlanReader interface {
 // plan_changed_at) would collide between them. The store's dedup index
 // matches this tuple.
 type ProrationInvoiceCreator interface {
-	CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
+	// CreateInvoiceWithLineItemsAudited writes the invoice in its own
+	// transaction and runs emit on it before commit (nil emit = none). The
+	// non-atomic path uses it so the finalize audit row commits with the
+	// invoice, as on the atomic path.
+	CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error)
 	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
 	// FindBaseInvoiceForPeriod gates immediate in_advance proration on
@@ -77,6 +82,17 @@ type ProrationInvoiceCreator interface {
 	// SetAutoChargePendingTx is the tx-aware variant — enrolls inside the caller's
 	// tx so enrollment commits atomically with the proration item change.
 	SetAutoChargePendingTx(ctx context.Context, tx *sql.Tx, tenantID, id string, pending bool) error
+}
+
+// InvoiceFinalizeRecorder records that an invoice was born finalized: the
+// finalize audit row, on the transaction that inserts the invoice, and the
+// invoice.finalized webhook, after that transaction commits. *billing.Engine
+// satisfies it, so a proration invoice gets the row and the payload the engine
+// writes for a cycle or first invoice (#1279). Both calls skip a draft, which
+// gets them from invoice.Service.Finalize when it finalizes.
+type InvoiceFinalizeRecorder interface {
+	EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain.Invoice) error
+	DispatchInvoiceFinalized(ctx context.Context, tenantID string, inv domain.Invoice)
 }
 
 // ProrationCreditGranter grants credits for downgrade proration. Dedup key is
@@ -206,6 +222,11 @@ type Handler struct {
 	tax         ProrationTaxApplier
 	events      domain.EventDispatcher
 	auditLogger auditRecorder
+	// finalizeAudit writes the finalize audit row and sends invoice.finalized
+	// for a proration invoice born finalized. Its name holds "audit" so
+	// audit.MustWired refuses to boot without it; nil (narrow tests) writes
+	// neither.
+	finalizeAudit InvoiceFinalizeRecorder
 	// Resolver binds effective-now from the sub pin at handler entry
 	// for proration math + changeAt stamping (PR-12, ADR-030 follow-
 	// through). Without it, mid-cycle plan changes on clock-pinned
@@ -221,6 +242,9 @@ type Handler struct {
 	// orphan-item warning in the failure path. ADR-030 atomic-proration
 	// follow-through (2026-05-29).
 	db *postgres.DB
+	// invoiceLabels names the invoices activity rows link to (ADR-128).
+	// Optional: unset, rows name no invoice by link.
+	invoiceLabels InvoiceLabeler
 }
 
 func NewHandler(svc *Service) *Handler {
@@ -229,6 +253,10 @@ func NewHandler(svc *Service) *Handler {
 
 // SetAuditLogger configures audit logging for financial operations.
 func (h *Handler) SetAuditLogger(l auditRecorder) { h.auditLogger = l }
+
+// SetInvoiceFinalizeRecorder wires the finalize audit row and invoice.finalized
+// webhook for proration invoices (the billing engine; router.go).
+func (h *Handler) SetInvoiceFinalizeRecorder(r InvoiceFinalizeRecorder) { h.finalizeAudit = r }
 
 // SetResolver wires the clock.Resolver used to bind effective-now at
 // proration entry points so wall-clock-time computations on
@@ -246,7 +274,7 @@ func (h *Handler) SetDB(db *postgres.DB) { h.db = db }
 
 // bindForSub returns ctx with effective-now bound from the sub pin
 // when the resolver is wired. Used at proration handler entries so
-// remainingPeriodFactor / changeAt stamps land in simulated time on
+// remainingPeriodRatio / changeAt stamps land in simulated time on
 // clock-pinned subs. Falls through unchanged when resolver isn't set
 // or the sub isn't clock-pinned (resolver returns wall-clock).
 func (h *Handler) bindForSub(ctx context.Context, tenantID, subID string) context.Context {
@@ -619,13 +647,20 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		meta := map[string]any{
-			"action":               "cancel_scheduled",
+			"action":               domain.SubAuditCancelScheduled,
 			"customer_id":          sub.CustomerID,
 			"cancel_at_period_end": sub.CancelAtPeriodEnd,
 		}
 		if sub.CancelAt != nil {
 			meta["cancel_at"] = sub.CancelAt.UTC()
 		}
+		// When it lands, and the status it was scheduled in: at period end
+		// on a trialing subscription means at trial end (ADR-069), and the
+		// activity line says which.
+		if sub.CancelEffectiveAt != nil {
+			meta["cancel_effective_at"] = sub.CancelEffectiveAt.UTC()
+		}
+		meta["status"] = string(sub.Status)
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
 
@@ -696,7 +731,7 @@ func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      "trial_ended",
+			"action":      domain.SubAuditTrialEnded,
 			"customer_id": sub.CustomerID,
 		})
 	}
@@ -764,7 +799,7 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      "trial_extended",
+			"action":      domain.SubAuditTrialExtended,
 			"customer_id": sub.CustomerID,
 			"trial_end":   body.TrialEnd.UTC(),
 		})
@@ -834,7 +869,9 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 	// h.plans, which the service doesn't have. We hydrate the sub's items,
 	// fetch each item's plan, and reject when the set spans more than one
 	// currency. A threshold expressed in cents only makes sense against a
-	// single-currency line set.
+	// single-currency line set. The one currency rides the audit row, so the
+	// activity line can show the amount as money (ADR-128, B9).
+	var thresholdCurrency string
 	if h.plans != nil {
 		// A read error fails the request: skipping it would let a cents
 		// threshold onto a mixed-currency sub.
@@ -860,6 +897,9 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 					"billing thresholds are not supported on multi-currency subscriptions")
 				return
 			}
+			for c := range seen {
+				thresholdCurrency = c
+			}
 		}
 	}
 
@@ -871,10 +911,13 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		meta := map[string]any{
-			"action":               "billing_thresholds_set",
+			"action":               domain.SubAuditThresholdsSet,
 			"customer_id":          sub.CustomerID,
 			"amount_gte":           input.AmountGTE,
 			"item_threshold_count": len(input.ItemThresholds),
+		}
+		if thresholdCurrency != "" {
+			meta["currency"] = thresholdCurrency
 		}
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
@@ -898,7 +941,7 @@ func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request)
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      "billing_thresholds_cleared",
+			"action":      domain.SubAuditThresholdsCleared,
 			"customer_id": sub.CustomerID,
 		})
 	}
@@ -921,7 +964,7 @@ func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      "cancel_cleared",
+			"action":      domain.SubAuditCancelCleared,
 			"customer_id": sub.CustomerID,
 		})
 	}
@@ -947,8 +990,8 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 
 	// Bind effective-now from the sub pin so proration math runs in
 	// simulated time on clock-pinned subs (ADR-030). Without binding,
-	// `remainingPeriodFactor(sub, time.Now())` would compute the
-	// wrong factor for a clock-pinned sub whose current_period is in
+	// `remainingPeriodRatio(sub, time.Now())` would compute the
+	// wrong ratio for a clock-pinned sub whose current_period is in
 	// the simulated future. PR-12.
 	ctx := h.bindForSub(r.Context(), tenantID, id)
 	r = r.WithContext(ctx)
@@ -960,9 +1003,12 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Snapshot the pre-add subscription for proration. Factor is computed
-	// from the period boundaries which don't change when an item is added
-	// mid-cycle, so a pre-add read is equivalent to a post-add read here.
+	// Read the subscription to decide whether the add prorates. On the
+	// atomic path this read only routes the request: the add is priced from
+	// the subscription AddItemTx reads under the subscription row lock, so an
+	// add that waited on a period close or a plan swap is priced on the
+	// period it lands in (#1270). Only the legacy path with no database
+	// wired prices from this read.
 	var subBefore domain.Subscription
 	var prorationRemainingDays, prorationTotalDays int64
 	if h.plans != nil && h.invoices != nil {
@@ -973,32 +1019,14 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 			respond.FromError(w, r, serr, "subscription")
 			return
 		}
-		{
-			subBefore = sub
-			if sub.Status == domain.SubscriptionActive {
-				prorationRemainingDays, prorationTotalDays = remainingPeriodRatio(sub, clock.Now(ctx))
-				// Day-grade clamp (ADR-012 amendment 2026-07-26): an item
-				// added ON the period-start calendar day (tenant TZ) owes
-				// the whole period — the add day counts whole, matching
-				// the cycle-close segment clamp in billing.itemBaseSegments.
-				// Without this a post-noon day-1 add pays 30/31 in_advance
-				// while its in_arrears twin bills the full period at close.
-				// Adds only: plan/quantity/remove changes stay instant-
-				// precise per ADR-012's Consequences, so their handlers
-				// don't clamp.
-				if prorationRemainingDays > 0 && sub.CurrentBillingPeriodStart != nil {
-					loc, err := h.tenantLoc(ctx, tenantID)
-					if err != nil {
-						slog.ErrorContext(ctx, "add item refused: tenant timezone unreadable for proration",
-							"subscription_id", id, "error", err)
-						respond.InternalError(w, r)
-						return
-					}
-					if domain.SameCalendarDayIn(clock.Now(ctx), *sub.CurrentBillingPeriodStart, loc) {
-						prorationRemainingDays = prorationTotalDays
-					}
-				}
-			}
+		subBefore = sub
+		var derr error
+		prorationRemainingDays, prorationTotalDays, derr = h.addProrationDays(ctx, tenantID, sub, clock.Now(ctx))
+		if derr != nil {
+			slog.ErrorContext(ctx, "add item refused: tenant timezone unreadable for proration",
+				"subscription_id", id, "error", derr)
+			respond.InternalError(w, r)
+			return
 		}
 	}
 
@@ -1018,7 +1046,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 	var addErr error
 	var addProration *ProrationDetail
 	if atomic {
-		item, addProration, addErr = h.atomicAddItemWithProration(ctx, tenantID, id, input, subBefore, prorationRemainingDays, prorationTotalDays)
+		item, addProration, addErr = h.atomicAddItemWithProration(ctx, tenantID, id, input)
 	} else {
 		item, addErr = h.svc.AddItem(ctx, tenantID, id, input)
 	}
@@ -1029,7 +1057,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		payload := map[string]any{
-			"action":   "item_added",
+			"action":   domain.SubAuditItemAdded,
 			"item_id":  item.ID,
 			"plan_id":  item.PlanID,
 			"quantity": item.Quantity,
@@ -1094,7 +1122,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 				"error", prorationErr,
 			)
 			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, id), tenantID, "subscription.proration_failed", "subscription", id, "", map[string]any{
+				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, id), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", id, "", map[string]any{
 					"item_id":                  item.ID,
 					"change_type":              string(domain.ItemChangeTypeAdd),
 					"plan_id":                  item.PlanID,
@@ -1148,9 +1176,11 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture the pre-change item/plan only when we're about to drive proration
-	// — the old plan id, old quantity, and the subscription's remaining period
-	// all come from a snapshot taken before UpdateItem mutates the row.
+	// Read the item and subscription only when the change may prorate. On the
+	// atomic path this read only routes the request (does it prorate, is it a
+	// cross-interval swap); the proration is priced from the state
+	// UpdateItemTx reads under the subscription row lock (#1270). Only the
+	// legacy path with no database wired prices from this read.
 	var oldPlanID string
 	var oldQuantity int64
 	var prorationRemainingDays, prorationTotalDays int64
@@ -1232,10 +1262,14 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		atomicErr error
 	)
 	if atomic {
-		result, atomicErr = h.atomicUpdateItemWithProration(ctx, tenantID, subID, itemID, input, subBefore, oldPlanID, oldQuantity, prorationRemainingDays, prorationTotalDays)
+		result, atomicErr = h.atomicUpdateItemWithProration(ctx, tenantID, subID, itemID, input)
 		if errors.Is(atomicErr, errAtomicNotApplicable) {
 			atomic = false
 			atomicErr = nil
+		}
+		if atomicErr == nil && result.pricedFrom.item.ID != "" {
+			// The plan the change moved from, read under the lock (#1270).
+			oldPlanID = result.pricedFrom.item.PlanID
 		}
 	}
 	if !atomic {
@@ -1330,7 +1364,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 				"error", prorationErr,
 			)
 			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, "subscription.proration_failed", "subscription", subID, "", map[string]any{
+				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", subID, "", map[string]any{
 					"item_id":                  result.Item.ID,
 					"change_type":              string(spec.changeType),
 					"old_plan_id":              oldPlanID,
@@ -1363,13 +1397,27 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			"immediate": input.Immediate,
 		}
 		addProrationMeta(payload, result.Proration, h.planCurrency(ctx, tenantID, result.Item.PlanID))
+		// The item as the change found it under the subscription row lock
+		// (#1270): the plan and quantity it moved from. Every path sets it,
+		// a scheduled change included, which keeps the item on this plan
+		// until the boundary; oldPlanID and oldQuantity are read only for
+		// changes that prorate.
+		was := result.pricedFrom.item
 		if input.Quantity != nil {
-			payload["action"] = "item_quantity_changed"
+			payload["action"] = domain.SubAuditItemQuantityChanged
 			payload["quantity"] = *input.Quantity
+			payload["plan_id"] = result.Item.PlanID
+			if was.Quantity > 0 {
+				payload["old_quantity"] = was.Quantity
+			}
 		} else {
-			payload["action"] = "item_plan_changed"
-			payload["old_plan_id"] = oldPlanID
+			payload["action"] = domain.SubAuditItemPlanChanged
+			payload["old_plan_id"] = was.PlanID
 			payload["new_plan_id"] = input.NewPlanID
+			// A scheduled change names the boundary it lands on.
+			if !input.Immediate && result.Item.PendingPlanEffectiveAt != nil {
+				payload["effective_at"] = result.Item.PendingPlanEffectiveAt.UTC()
+			}
 		}
 		// Sim-time context (ADR-030): re-fetch the post-change sub for its
 		// UpdatedAt (the change instant) + test_clock_id so a clock-pinned
@@ -1378,7 +1426,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		if s, err := h.svc.Get(ctx, tenantID, subID); err == nil {
 			auditSub = s
 		}
-		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, "subscription.item_updated", "subscription", subID, auditSub.Code, payload)
+		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, domain.AuditActionSubscriptionItemUpdated, "subscription", subID, auditSub.Code, payload)
 	}
 
 	// Event dispatch. Quantity changes and immediate plan changes are
@@ -1419,7 +1467,7 @@ func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request
 
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionUpdate, "subscription", subID, "", map[string]any{
-			"action":  "cancel_pending_item_plan_change",
+			"action":  domain.SubAuditPendingPlanChangeCanceled,
 			"item_id": item.ID,
 		})
 	}
@@ -1453,10 +1501,11 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture the pre-delete item + sub for proration. Removing mid-period
-	// should credit back the unused portion of what the customer already paid
-	// for this item. RemoveItem is a hard delete so the snapshot must be
-	// taken before the call.
+	// Read the item and subscription to decide whether the removal credits
+	// the unused portion of what the customer already paid for this item. On
+	// the atomic path the credit is priced from the state RemoveItemTx reads
+	// under the subscription row lock (#1270); only the legacy path with no
+	// database wired prices from this read.
 	var removedPlanID string
 	var removedQuantity int64
 	var subBefore domain.Subscription
@@ -1492,12 +1541,14 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	atomic := h.db != nil && wantProration
 	var removeProration *ProrationDetail
 	if atomic {
-		detail, err := h.atomicRemoveItemWithProration(ctx, tenantID, subID, itemID, subBefore, removedPlanID, removedQuantity, prorationRemainingDays, prorationTotalDays)
+		removed, detail, err := h.atomicRemoveItemWithProration(ctx, tenantID, subID, itemID)
 		if err != nil {
 			respond.FromError(w, r, err, "subscription item")
 			return
 		}
 		removeProration = detail
+		// The plan the removal credited, read under the lock (#1270).
+		removedPlanID = removed.PlanID
 	} else {
 		if err := h.svc.RemoveItem(ctx, tenantID, subID, itemID); err != nil {
 			respond.FromError(w, r, err, "subscription item")
@@ -1507,7 +1558,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		payload := map[string]any{
-			"action":  "item_removed",
+			"action":  domain.SubAuditItemRemoved,
 			"item_id": itemID,
 			// Which plan left — captured for proration math anyway;
 			// without it the feed said "Item removed" with no noun.
@@ -1548,7 +1599,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 				"error", prorationErr,
 			)
 			if h.auditLogger != nil {
-				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, "subscription.proration_failed", "subscription", subID, "", map[string]any{
+				_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionSubscriptionProrationFailed, "subscription", subID, "", map[string]any{
 					"item_id":                  itemID,
 					"change_type":              string(domain.ItemChangeTypeRemove),
 					"plan_id":                  removedPlanID,
@@ -1606,10 +1657,6 @@ type itemProrationSpec struct {
 	newQuantity   int64
 }
 
-// handleItemProration generates the invoice or credit for a single item
-// mutation. Dedup key is (tenant, subscription, item, change_type, change_at)
-// — retries of the same mutation converge on the existing artifact via the
-// proration dedup index.
 // atomicAddItemWithProration opens one outer transaction that wraps
 // the subscription-item insert + the proration invoice/credit insert.
 // A failure on either side rolls back BOTH via the deferred Rollback —
@@ -1621,12 +1668,15 @@ type itemProrationSpec struct {
 // Returns the new item on success; on any error, the entire operation
 // is rolled back and the caller sees a failure (no half-committed
 // state for them to reconcile).
+//
+// The add is priced from result.pricedFrom.sub: the subscription AddItemTx
+// read under the subscription row lock (#1270), never from addItem's read
+// before the tx, whose period a plan swap or a period close that committed
+// in between has replaced.
 func (h *Handler) atomicAddItemWithProration(
 	ctx context.Context,
 	tenantID, subID string,
 	input AddItemInput,
-	subBefore domain.Subscription,
-	remainingDays, totalDays int64,
 ) (domain.SubscriptionItem, *ProrationDetail, error) {
 	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1634,9 +1684,14 @@ func (h *Handler) atomicAddItemWithProration(
 	}
 	defer postgres.Rollback(tx)
 
-	item, err := h.svc.AddItemTx(ctx, tx, tenantID, subID, input)
+	result, err := h.svc.AddItemTx(ctx, tx, tenantID, subID, input)
 	if err != nil {
 		return domain.SubscriptionItem{}, nil, err
+	}
+	item, locked := result.Item, result.pricedFrom.sub
+	remainingDays, totalDays, err := h.addProrationDays(ctx, tenantID, locked, result.EffectiveAt)
+	if err != nil {
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("proration days in atomic addItem tx: %w", err)
 	}
 
 	changeAt := item.CreatedAt
@@ -1654,7 +1709,7 @@ func (h *Handler) atomicAddItemWithProration(
 		newPlanID:     item.PlanID,
 		newQuantity:   item.Quantity,
 	}
-	detail, err := h.handleItemProration(ctx, tenantID, subBefore, spec, tx)
+	detail, err := h.handleItemProration(ctx, tenantID, locked, spec, tx)
 	if err != nil {
 		// A deliberate ADR-050 block (charge against an unpaid source) is an
 		// operator-facing 409, not an internal failure — pass it through
@@ -1683,6 +1738,9 @@ func (h *Handler) atomicAddItemWithProration(
 	if err := tx.Commit(); err != nil {
 		return domain.SubscriptionItem{}, nil, fmt.Errorf("commit atomic addItem tx: %w", err)
 	}
+	// invoice.finalized for the charge invoice, now that it is durable (its
+	// finalize audit row committed in the tx above).
+	h.dispatchProrationFinalized(ctx, tenantID, detail)
 	// Commit proration tax AFTER the tx is durable — CommitTax is an external
 	// Stripe call and must not ride the DB tx (a rollback would orphan the
 	// committed tax transaction). No-op unless a stripe_tax calculation exists.
@@ -1697,18 +1755,49 @@ func (h *Handler) atomicAddItemWithProration(
 	return item, detail, nil
 }
 
+// addProrationDays is the share of sub's current period an item added at
+// `at` pays for in advance: the days left and the period's days, or zero
+// when sub is not active or the days left round to zero.
+//
+// Day-grade clamp (ADR-012 amendment 2026-07-26): an item added ON the
+// period-start calendar day (tenant TZ) owes the whole period — the add day
+// counts whole, matching the cycle-close segment clamp in
+// billing.itemBaseSegments. Without this a post-noon day-1 add pays 30/31
+// in_advance while its in_arrears twin bills the full period at close. Adds
+// only: plan/quantity/remove changes stay instant-precise per ADR-012's
+// Consequences, so their handlers don't clamp.
+func (h *Handler) addProrationDays(ctx context.Context, tenantID string, sub domain.Subscription, at time.Time) (remainingDays, totalDays int64, err error) {
+	if sub.Status != domain.SubscriptionActive {
+		return 0, 0, nil
+	}
+	remainingDays, totalDays = remainingPeriodRatio(sub, at)
+	if remainingDays > 0 && sub.CurrentBillingPeriodStart != nil {
+		loc, err := h.tenantLoc(ctx, tenantID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if domain.SameCalendarDayIn(at, *sub.CurrentBillingPeriodStart, loc) {
+			remainingDays = totalDays
+		}
+	}
+	return remainingDays, totalDays, nil
+}
+
 // atomicUpdateItemWithProration mirrors atomicAddItemWithProration for
 // the UpdateItem path: open one outer tx, write the item update + the
 // proration in the same tx, commit on success. Returns
 // errAtomicNotApplicable if the input routes to the cross-interval or
 // scheduled path (caller falls back to legacy non-atomic flow).
+//
+// The proration is priced from result.pricedFrom: the subscription and the
+// item as UpdateItemTx read them under the subscription row lock (#1270).
+// Never from updateItem's read before the tx, which a change to the same
+// item that committed in between makes stale: two overlapping changes would
+// both be priced from the state they started from.
 func (h *Handler) atomicUpdateItemWithProration(
 	ctx context.Context,
 	tenantID, subID, itemID string,
 	input UpdateItemInput,
-	subBefore domain.Subscription,
-	oldPlanID string, oldQuantity int64,
-	remainingDays, totalDays int64,
 ) (ItemChangeResult, error) {
 	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1720,6 +1809,7 @@ func (h *Handler) atomicUpdateItemWithProration(
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
+	base := result.pricedFrom
 
 	// Cross-interval swap: UpdateItemTx restructured the cycle atomically on
 	// this tx (plan write + watermark + new in_advance invoice). It did its OWN
@@ -1731,11 +1821,11 @@ func (h *Handler) atomicUpdateItemWithProration(
 		if err := tx.Commit(); err != nil {
 			return ItemChangeResult{}, fmt.Errorf("commit atomic cross-interval swap tx: %w", err)
 		}
-		h.svc.FinalizeCrossIntervalSwap(ctx, tenantID, subBefore, result)
+		h.svc.FinalizeCrossIntervalSwap(ctx, tenantID, base.sub, result)
 		return result, nil
 	}
 
-	// Build the proration spec mirroring the legacy handler logic.
+	remainingDays, totalDays := remainingPeriodRatio(base.sub, result.EffectiveAt)
 	var spec itemProrationSpec
 	if input.NewPlanID != "" && input.Immediate {
 		var changeAt time.Time
@@ -1750,7 +1840,7 @@ func (h *Handler) atomicUpdateItemWithProration(
 			remainingDays: remainingDays,
 			totalDays:     totalDays,
 			itemID:        result.Item.ID,
-			oldPlanID:     oldPlanID,
+			oldPlanID:     base.item.PlanID,
 			oldQuantity:   result.Item.Quantity,
 			newPlanID:     result.Item.PlanID,
 			newQuantity:   result.Item.Quantity,
@@ -1766,13 +1856,13 @@ func (h *Handler) atomicUpdateItemWithProration(
 			remainingDays: remainingDays,
 			totalDays:     totalDays,
 			itemID:        result.Item.ID,
-			oldPlanID:     oldPlanID,
-			oldQuantity:   oldQuantity,
+			oldPlanID:     base.item.PlanID,
+			oldQuantity:   base.item.Quantity,
 			newPlanID:     result.Item.PlanID,
 			newQuantity:   result.Item.Quantity,
 		}
 	}
-	detail, err := h.handleItemProration(ctx, tenantID, subBefore, spec, tx)
+	detail, err := h.handleItemProration(ctx, tenantID, base.sub, spec, tx)
 	if err != nil {
 		// A deliberate ADR-050 block (charge against an unpaid source) is an
 		// operator-facing 409, not an internal failure — pass it through
@@ -1799,6 +1889,9 @@ func (h *Handler) atomicUpdateItemWithProration(
 	if err := tx.Commit(); err != nil {
 		return ItemChangeResult{}, fmt.Errorf("commit atomic updateItem tx: %w", err)
 	}
+	// invoice.finalized for an upgrade or seat-increase invoice, now that it
+	// is durable (see atomicAddItemWithProration).
+	h.dispatchProrationFinalized(ctx, tenantID, detail)
 	// Commit proration tax AFTER the tx is durable (external Stripe call;
 	// must not ride the DB tx). No-op unless a stripe_tax calculation exists.
 	h.commitProrationTax(ctx, tenantID, detail)
@@ -1820,37 +1913,46 @@ func (h *Handler) atomicUpdateItemWithProration(
 // side rolls back the item delete — customer keeps the item (and its
 // future cycle billing) but at least there's no orphan-credit gap.
 // ADR-030 atomic-proration follow-through (2026-05-29).
+//
+// The credit is priced from the item and subscription RemoveItemTx read
+// under the subscription row lock (#1270), so a quantity change that
+// committed while this request was reading is credited too. Returns the
+// item as it was removed.
 func (h *Handler) atomicRemoveItemWithProration(
 	ctx context.Context,
 	tenantID, subID, itemID string,
-	subBefore domain.Subscription,
-	oldPlanID string, oldQuantity int64,
-	remainingDays, totalDays int64,
-) (*ProrationDetail, error) {
+) (domain.SubscriptionItem, *ProrationDetail, error) {
 	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("begin atomic removeItem tx: %w", err)
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("begin atomic removeItem tx: %w", err)
 	}
 	defer postgres.Rollback(tx)
 
-	if err := h.svc.RemoveItemTx(ctx, tx, tenantID, subID, itemID); err != nil {
-		return nil, err
+	result, err := h.svc.RemoveItemTx(ctx, tx, tenantID, subID, itemID)
+	if err != nil {
+		return domain.SubscriptionItem{}, nil, err
 	}
+	base := result.pricedFrom
 
+	// Only an active subscription's unused prebill is credited.
+	var remainingDays, totalDays int64
+	if base.sub.Status == domain.SubscriptionActive {
+		remainingDays, totalDays = remainingPeriodRatio(base.sub, result.EffectiveAt)
+	}
 	spec := itemProrationSpec{
 		changeType:    domain.ItemChangeTypeRemove,
-		changeAt:      clock.Now(ctx),
+		changeAt:      result.EffectiveAt,
 		remainingDays: remainingDays,
 		totalDays:     totalDays,
 		itemID:        itemID,
-		oldPlanID:     oldPlanID,
-		oldQuantity:   oldQuantity,
+		oldPlanID:     base.item.PlanID,
+		oldQuantity:   base.item.Quantity,
 		newPlanID:     "",
 		newQuantity:   0,
 	}
-	detail, err := h.handleItemProration(ctx, tenantID, subBefore, spec, tx)
+	detail, err := h.handleItemProration(ctx, tenantID, base.sub, spec, tx)
 	if err != nil {
-		return nil, fmt.Errorf("proration in atomic removeItem tx: %w", err)
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("proration in atomic removeItem tx: %w", err)
 	}
 
 	// Create the item-removal clawback credit-note DRAFT(s) IN this tx so the
@@ -1859,10 +1961,10 @@ func (h *Handler) atomicRemoveItemWithProration(
 	// "a credit failure rolls back the delete" contract actually hold). Issued
 	// post-commit below.
 	if err := h.createClawbackDraftsTx(ctx, tx, tenantID, detail); err != nil {
-		return nil, fmt.Errorf("create clawback draft in atomic removeItem tx: %w", err)
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("create clawback draft in atomic removeItem tx: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit atomic removeItem tx: %w", err)
+		return domain.SubscriptionItem{}, nil, fmt.Errorf("commit atomic removeItem tx: %w", err)
 	}
 	// Remove proration is a credit (no invoice/tax) so commitProrationTax
 	// no-ops, but keep the post-tx commit uniform across the atomic wrappers.
@@ -1874,7 +1976,34 @@ func (h *Handler) atomicRemoveItemWithProration(
 	h.issueClawbackDrafts(ctx, tenantID, detail)
 	// Return the credit detail so removeItem's audit row can show the
 	// clawback amount (see atomicUpdateItemWithProration).
-	return detail, nil
+	return base.item, detail, nil
+}
+
+// finalizeAuditEmit returns the emission that writes the finalize audit row
+// for a proration invoice born finalized, on the transaction that inserts it.
+// nil when no recorder is wired. A draft gets no row here: it gets one from
+// invoice.Service.Finalize when it finalizes.
+func (h *Handler) finalizeAuditEmit(ctx context.Context, tenantID, subID string) func(tx *sql.Tx, out domain.Invoice) error {
+	if h.finalizeAudit == nil {
+		return nil
+	}
+	actx := h.auditCtx(ctx, tenantID, subID)
+	return func(tx *sql.Tx, out domain.Invoice) error {
+		if out.Status != domain.InvoiceFinalized {
+			return nil
+		}
+		return h.finalizeAudit.EmitFinalizeAuditTx(actx, tx, out)
+	}
+}
+
+// dispatchProrationFinalized sends invoice.finalized for the proration invoice
+// this change created finalized. Called after the row is durable, never inside
+// a transaction. No-op for a draft, a credit or a dedup replay.
+func (h *Handler) dispatchProrationFinalized(ctx context.Context, tenantID string, detail *ProrationDetail) {
+	if h.finalizeAudit == nil || detail == nil || detail.finalizedInvoice == nil {
+		return
+	}
+	h.finalizeAudit.DispatchInvoiceFinalized(ctx, tenantID, *detail.finalizedInvoice)
 }
 
 // commitProrationTax turns the proration invoice's provider tax calculation
@@ -1924,21 +2053,6 @@ func (h *Handler) enrollAutoChargeTx(ctx context.Context, tx *sql.Tx, tenantID s
 	return h.invoices.SetAutoChargePendingTx(ctx, tx, tenantID, detail.AutoChargeInvoiceID, true)
 }
 
-// issueClawbackCreditNote issues the tax-reversing adjustment credit note for a
-// downgrade clawback recorded on the detail (ADR-048). Issued AFTER the atomic
-// tx is durable — the credit-note service is not tx-aware and its tax reversal
-// is an external Stripe call, so it must not ride the DB tx (a rollback would
-// orphan a committed CN + balance grant). The downgrade branch calls it inline
-// on the non-atomic path. No-op unless that branch recorded a clawback (CN
-// issuer wired + PAID source invoice resolved).
-//
-// On error the item change is already durable but the customer was not
-// credited — log at error level so it surfaces for reconciliation. The
-// operation still reports success: the downgrade itself committed, and a client
-// retry is rejected at Service.UpdateItem's no-op gate (so we never double-
-// issue), so returning an error here would be misleading and unrecoverable by
-// retry anyway. The source invoice's over-credit cap bounds any aggregate
-// over-credit.
 // resolveClawbackPieces fans a downgrade/qty-decrease/item-removal clawback of
 // netCredit (net, the unconsumed removed value) across EVERY invoice that funded
 // the current period, each piece capped at that invoice's remaining headroom
@@ -1952,10 +2066,18 @@ func (h *Handler) enrollAutoChargeTx(ctx context.Context, tx *sql.Tx, tenantID s
 //     in subtotal proportion.
 //
 // Read-only (it issues nothing) — called inside the atomic item-change tx, so a
-// returned error (headroom genuinely exhausted, or a lookup failure) rolls the
-// change back BEFORE it commits rather than leaving a post-commit "reconcile
-// manually" gap. The credit notes themselves are issued post-commit by
-// issueClawbackCreditNote.
+// returned error (a lookup failure) rolls the change back BEFORE it commits
+// rather than leaving a post-commit "reconcile manually" gap. The credit notes
+// themselves are issued post-commit by issueClawbackCreditNote.
+//
+// A clawback larger than the room left is placed as far as it fits, and the
+// rest is logged (2026-10-20). The real triggers are an operator note on a
+// card-paid invoice, and a partial waive: customer credits paid part of the
+// invoice and a credit note waived the rest, which marks it paid with room
+// equal to the credits (ADR-061 amendment 2026-10-19). Before, the change
+// answered 500. No room left on any funding invoice returns no pieces and no
+// error: the period is already fully credited, so nothing more is owed and
+// the change proceeds. That is ADR-118's rule for a cancel or plan swap.
 func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, sub domain.Subscription, changeType domain.ItemChangeType, netCredit int64) ([]ClawbackPiece, error) {
 	if netCredit <= 0 || sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return nil, nil
@@ -1971,6 +2093,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		netCap   int64
 	}
 	caps := make([]fundingCap, 0, len(funding))
+	hasUnpaid := false
 	for _, f := range funding {
 		var grossCap int64
 		// An IN-FLIGHT funding invoice is capped like a PAID one, not like an
@@ -1980,7 +2103,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		// that matters is what the source could still be credited for
 		// (total − already credited); whether the in-flight charge ultimately
 		// succeeds is decided later, by creditnote.Issue's paid/unpaid branch.
-		if f.PaymentStatus == domain.PaymentSucceeded || f.PaymentStatus.IsInFlight() {
+		if f.PaymentStatus == domain.PaymentSucceeded || f.PaymentInFlight() {
 			credited, cerr := h.creditNotes.CreditedCents(ctx, tenantID, f.ID)
 			if cerr != nil {
 				return nil, fmt.Errorf("read creditable headroom for %s: %w", f.ID, cerr)
@@ -1990,6 +2113,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 			// Unpaid: what is still due plus the customer credits applied to
 			// it — the note returns the credits it displaces (ADR-061).
 			grossCap = f.UnpaidRelievableCents()
+			hasUnpaid = true
 		}
 		if grossCap <= 0 {
 			continue // no room left on this invoice
@@ -2001,7 +2125,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		caps = append(caps, fundingCap{inv: f, grossCap: grossCap, netCap: netCap})
 	}
 	if len(caps) == 0 {
-		return nil, fmt.Errorf("no creditable funding invoice for period")
+		return nil, nil // already fully credited: nothing more is owed
 	}
 
 	netCaps := make([]int64, len(caps))
@@ -2038,7 +2162,27 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		nets, remainder = money.AllocateByWeightCapped(netCredit, weights, netCaps)
 	}
 	if remainder > 0 {
-		return nil, fmt.Errorf("clawback %d net exceeds funding headroom by %d across %d invoice(s)", netCredit, remainder, len(caps))
+		// Less room left than the change owes. Place what fits and log the
+		// rest, at the same levels as allocateUnusedAcrossFunding. With an
+		// unpaid invoice in the set, the residual is value it can't relieve
+		// beyond what is due plus its applied credits: nothing else was paid
+		// for it, so WARN. All paid: earlier credit notes used the room, and
+		// the caps keep each invoice's credit within its total. ERROR,
+		// because it can also mean drift.
+		ids := make([]string, len(caps))
+		for i := range caps {
+			ids[i] = caps[i].inv.ID
+		}
+		level := slog.LevelError
+		if hasUnpaid {
+			level = slog.LevelWarn
+		}
+		slog.Log(ctx, level, "downgrade clawback: funding invoices' remaining room is smaller than the credit; placed what fits",
+			"subscription_id", sub.ID,
+			"net_cents", netCredit,
+			"residual_cents", remainder,
+			"invoices", ids,
+		)
 	}
 
 	pieces := make([]ClawbackPiece, 0, len(caps))
@@ -2059,6 +2203,21 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 	return pieces, nil
 }
 
+// issueClawbackCreditNote issues the tax-reversing adjustment credit note for a
+// downgrade clawback recorded on the detail (ADR-048). Issued AFTER the atomic
+// tx is durable — the credit-note service is not tx-aware and its tax reversal
+// is an external Stripe call, so it must not ride the DB tx (a rollback would
+// orphan a committed CN + balance grant). The downgrade branch calls it inline
+// on the non-atomic path. No-op unless that branch recorded a clawback (CN
+// issuer wired + PAID source invoice resolved).
+//
+// On error the item change is already durable but the customer was not
+// credited — log at error level so it surfaces for reconciliation. The
+// operation still reports success: the downgrade itself committed, and a client
+// retry is rejected at Service.UpdateItem's no-op gate (so we never double-
+// issue), so returning an error here would be misleading and unrecoverable by
+// retry anyway. The source invoice's over-credit cap bounds any aggregate
+// over-credit.
 func (h *Handler) issueClawbackCreditNote(ctx context.Context, tenantID string, detail *ProrationDetail) {
 	if h.creditNotes == nil || detail == nil {
 		return
@@ -2160,6 +2319,10 @@ func (h *Handler) issueClawbackDrafts(ctx context.Context, tenantID string, deta
 	}
 }
 
+// handleItemProration generates the invoice or credit for a single item
+// mutation. Dedup key is (tenant, subscription, item, change_type, change_at)
+// — retries of the same mutation converge on the existing artifact via the
+// proration dedup index.
 func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, tx *sql.Tx) (*ProrationDetail, error) {
 	// Resolve plans needed for pricing and naming. The "effective" plan drives
 	// currency and pricing — for a remove it's the old plan; for
@@ -2299,7 +2462,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		// how the source actually resolved. All of that needs one thing from us:
 		// a DRAFT must exist. So an in-flight source falls through to the
 		// draft-creating path below instead of being settled inline.
-		if resolved.PaymentStatus.IsInFlight() {
+		if resolved.PaymentInFlight() {
 			slog.InfoContext(ctx, "item proration: source payment in flight — clawback will be drafted and issued once it settles (ADR-059)",
 				"subscription_id", sub.ID,
 				"item_id", spec.itemID,
@@ -2555,11 +2718,20 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		}
 		invoice.InvoiceNumber = invoiceNumber
 
+		// The finalize audit row commits with the invoice (ADR-090 shared
+		// fate): on the caller's tx, or inside the store's own tx on the
+		// non-atomic path. Its failure rolls the item change back.
+		emit := h.finalizeAuditEmit(ctx, tenantID, sub.ID)
 		var inv domain.Invoice
 		if tx != nil {
 			inv, err = h.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, tenantID, invoice, lineItems)
+			if err == nil && emit != nil {
+				if aerr := emit(tx, inv); aerr != nil {
+					return nil, fmt.Errorf("finalize audit for proration invoice: %w", aerr)
+				}
+			}
 		} else {
-			inv, err = h.invoices.CreateInvoiceWithLineItems(ctx, tenantID, invoice, lineItems)
+			inv, err = h.invoices.CreateInvoiceWithLineItemsAudited(ctx, tenantID, invoice, lineItems, emit)
 		}
 		if err != nil {
 			// Only the proration-dedup constraint maps to an idempotent
@@ -2628,7 +2800,17 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		// back would orphan it). Mirrors the engine's post-finalize commit.
 		detail.TaxProvider = inv.TaxProvider
 		detail.TaxCalculationID = inv.TaxCalculationID
+		// invoice.finalized goes out once the row is durable: here on the
+		// non-atomic path, after the caller's commit on the atomic one. Only
+		// this fresh creation sets it. The dedup replay above sends nothing:
+		// the attempt that created the invoice sent it, unless the process
+		// died between that commit and the send (#974, as for the engine).
+		if inv.Status == domain.InvoiceFinalized {
+			created := inv
+			detail.finalizedInvoice = &created
+		}
 		if tx == nil {
+			h.dispatchProrationFinalized(ctx, tenantID, detail)
 			h.commitProrationTax(ctx, tenantID, detail)
 			h.enrollAutoCharge(ctx, tenantID, detail)
 		}
@@ -2671,6 +2853,18 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				// returned error rolls the change back BEFORE it commits — nothing
 				// half-applies. Cleaner than the old post-commit reconcile gap.
 				return nil, fmt.Errorf("downgrade clawback: %w", perr)
+			}
+			if len(pieces) == 0 {
+				// Every funding invoice is already fully credited (a waiver,
+				// or earlier notes), so nothing more is owed. Loud, as for a
+				// cancel or plan swap (ADR-118), because it can also mean drift.
+				slog.ErrorContext(ctx, "downgrade clawback: funding invoices already fully credited; no further credit",
+					"subscription_id", sub.ID,
+					"item_id", spec.itemID,
+					"change_type", spec.changeType,
+					"net_cents", creditAmount,
+				)
+				return nil, nil
 			}
 			var grossCredit int64
 			for _, p := range pieces {
@@ -2913,9 +3107,6 @@ func clawbackReason(ct domain.ItemChangeType) string {
 	}
 }
 
-// remainingPeriodFactor returns the fraction of the current billing period
-// that is still ahead of `now`, clamped to [0, 1]. Used to scale a proration
-// charge/credit against the per-period price.
 // remainingPeriodRatio returns the integer day counts that drive proration
 // math. Per ADR-042 (2026-05-31) Velox switched from float64 prorationFactor
 // to integer day-ratio (`amount * remaining / total`) matching engine.go's
@@ -3028,6 +3219,29 @@ type timelineEvent struct {
 	// TestClockID identifies which test clock the SimEffectiveAt
 	// belongs to. Empty when SimEffectiveAt is empty.
 	TestClockID string `json:"test_clock_id,omitempty"`
+	// Error is the line's problem: what went wrong on a failure row, what it
+	// means on a warning row.
+	Error string `json:"error,omitempty"`
+	// Line is the row as the activity line standard words it (ADR-128):
+	// keyed by its audit row, with the actor from that row. Description,
+	// Detail, DetailTimestamp, Error and Status above are filled from it
+	// (fillFromLine), so a client that reads only the older fields shows the
+	// same words.
+	Line activity.Line `json:"line"`
+}
+
+// fillFromLine stamps the line's id, actor and times and copies its words
+// into the older fields: the title is the description, the meta line
+// without the actor is the detail (the card shows the actor from
+// actor_name), the problem is the error and the tone is the status.
+func (e *timelineEvent) fillFromLine(id string, actor *activity.Actor) {
+	e.Line.ID = id
+	e.Line.Actor = actor
+	e.Line = activity.Stamp(e.Line, e.sortAt, e.recordedAt, e.IsSimulated)
+	e.Description = e.Line.Title
+	e.Detail, e.DetailTimestamp = legacyDetail(e.Line)
+	e.Error = e.Line.Problem
+	e.Status = legacyStatus(e.Line.Tone)
 }
 
 // planLabel renders an operator-facing plan reference: prefer the
@@ -3044,20 +3258,6 @@ func planLabel(planID string, planNames map[string]string) string {
 	return planID
 }
 
-// describeSubscriptionAction maps audit_log action + metadata to a
-// human-readable sentence + sub-line + status tag the UI colors by.
-// Unknown actions pass through with a neutral info tag rather than
-// hiding — the feed should never silently drop an event.
-//
-// Detail is the optional sub-line beneath the main description. Used
-// for human-meaningful context (dates, counts, plan names) that
-// bloats the title if inlined. Mirrors the invoice timeline shape.
-//
-// planNames is a lookup from plan_id → plan.Name used to resolve
-// raw IDs in metadata to operator-friendly labels. The caller
-// (activityTimeline) batch-fetches every plan_id referenced in the
-// audit entries before invoking this function. Missing entries fall
-// back to the raw ID (deleted plan / lookup miss).
 // addProrationMeta stamps the proration OUTCOME (the invoice/credit/
 // adjustment a mid-period change produced) into a subscription audit-row
 // payload, so the activity timeline can show "Plan changed · … · Proration
@@ -3072,6 +3272,11 @@ func addProrationMeta(payload map[string]any, detail *ProrationDetail, currency 
 	payload["proration_amount_cents"] = detail.AmountCents
 	if detail.InvoiceID != "" {
 		payload["proration_invoice_id"] = detail.InvoiceID
+	}
+	// An adjustment reduces the open invoice the change was billed on; the
+	// activity line links it (ADR-128 rule 8).
+	if detail.Type == "adjustment" && detail.ClawbackInvoiceID != "" {
+		payload["adjusted_invoice_id"] = detail.ClawbackInvoiceID
 	}
 	if currency != "" {
 		payload["currency"] = currency
@@ -3091,245 +3296,6 @@ func (h *Handler) planCurrency(ctx context.Context, tenantID, planID string) str
 	return ""
 }
 
-// prorationPartLabel renders the proration OUTCOME segment of a timeline row
-// from the audit metadata stamped by addProrationMeta — "Proration invoice
-// $50.00" / "Credit $19.80" / "Open invoice adjusted $54.44". Empty when no
-// proration metadata is present. Shared across the plan-change, quantity-
-// change, item-add, and item-remove renderers so the wording can't drift.
-func prorationPartLabel(meta map[string]any) string {
-	// Tolerate both int64 (an in-memory map straight from addProrationMeta)
-	// and float64 (the same value after an audit-store JSON round-trip).
-	// Production reads come back float64; this keeps the helper correct if
-	// ever called on an un-round-tripped map.
-	var amt int64
-	switch v := meta["proration_amount_cents"].(type) {
-	case float64:
-		amt = int64(v)
-	case int64:
-		amt = v
-	case int:
-		amt = int64(v)
-	default:
-		return ""
-	}
-	cur, _ := meta["currency"].(string)
-	switch t, _ := meta["proration_type"].(string); t {
-	case "invoice":
-		return "Proration invoice " + formatAmountForTimeline(amt, cur)
-	case "credit":
-		return "Credit " + formatAmountForTimeline(amt, cur)
-	case "adjustment":
-		return "Open invoice adjusted " + formatAmountForTimeline(amt, cur)
-	}
-	return ""
-}
-
-// formatAmountForTimeline renders cents for the activity feed with the
-// right currency marker — the previous hardcoded "$" mislabeled every
-// non-USD tenant's amounts. Symbols for the common cases, ISO code
-// suffix otherwise.
-func formatAmountForTimeline(cents int64, currency string) string {
-	v := float64(cents) / 100
-	switch strings.ToUpper(currency) {
-	case "USD", "":
-		return fmt.Sprintf("$%.2f", v)
-	case "EUR":
-		return fmt.Sprintf("€%.2f", v)
-	case "GBP":
-		return fmt.Sprintf("£%.2f", v)
-	case "INR":
-		return fmt.Sprintf("₹%.2f", v)
-	default:
-		return fmt.Sprintf("%.2f %s", v, strings.ToUpper(currency))
-	}
-}
-
-func describeSubscriptionAction(action string, meta map[string]any, planNames map[string]string) (desc, detail, detailTimestamp, status string) {
-	switch action {
-	case domain.AuditActionCreate:
-		return "Subscription created", "", "", "info"
-	case domain.AuditActionActivate:
-		return "Subscription activated", "", "", "succeeded"
-	case domain.AuditActionCancel:
-		by := ""
-		if v, ok := meta["canceled_by"].(string); ok && v != "" {
-			by = " by " + v
-		}
-		// Surface cancel-proration credit (in_advance unused-base
-		// refund) on the timeline. Pre-fix the credit was only
-		// visible on the customer's credit ledger; operators had to
-		// cross-reference to learn how much was refunded for this
-		// specific cancel. Industry standard — Stripe / Lago /
-		// Chargebee / Orb link the credit to the subscription event.
-		d := ""
-		if v, ok := meta["prorated_credit_cents"].(float64); ok && v > 0 {
-			cur, _ := meta["currency"].(string)
-			d = "Prorated credit issued: " + formatAmountForTimeline(int64(v), cur)
-		}
-		return "Subscription canceled" + by, d, "", "canceled"
-	case domain.AuditActionUpdate:
-		// AuditActionUpdate is a catch-all bucket; the meaningful
-		// discriminator is meta["action"]. Every operator-driven
-		// mutation that doesn't have its own audit action (cancel,
-		// activate, create) routes through here with a sub-action tag.
-		a, _ := meta["action"].(string)
-		switch a {
-		case "cancel_scheduled":
-			if v, ok := meta["cancel_at_period_end"].(bool); ok && v {
-				return "Cancellation scheduled", "At end of current period", "", "warning"
-			}
-			if t, ok := meta["cancel_at"].(string); ok && t != "" {
-				return "Cancellation scheduled", "On", t, "warning"
-			}
-			return "Cancellation scheduled", "", "", "warning"
-		case "cancel_cleared":
-			return "Scheduled cancellation cleared", "", "", "info"
-		case "collection_paused":
-			d := ""
-			ts := ""
-			if r, ok := meta["resumes_at"].(string); ok && r != "" {
-				d = "Auto-resumes"
-				ts = r
-			} else {
-				d = "Cycle keeps drafting; no charge until resumed"
-			}
-			title := "Collection paused"
-			if tb, _ := meta["triggered_by"].(string); tb == "dunning" {
-				title = "Collection paused by dunning"
-			}
-			return title, d, ts, "warning"
-		case "collection_resumed":
-			if tb, _ := meta["triggered_by"].(string); tb == "schedule" {
-				return "Collection auto-resumed", "Scheduled resume date reached", "", "succeeded"
-			}
-			return "Collection resumed", "", "", "succeeded"
-		case "trial_ended":
-			return "Trial ended early", "", "", "info"
-		case "billing_retried":
-			d := ""
-			if v, ok := meta["attempts_before"].(float64); ok && v > 0 {
-				d = fmt.Sprintf("After %d failed attempt%s", int(v), plural(int(v)))
-			}
-			return "Billing retried", d, "", "info"
-		case "trial_extended":
-			d := ""
-			ts := ""
-			if t, ok := meta["trial_end"].(string); ok && t != "" {
-				d = "New trial end:"
-				ts = t
-			}
-			return "Trial extended", d, ts, "info"
-		case "billing_thresholds_set":
-			parts := []string{}
-			if v, ok := meta["amount_gte"].(float64); ok && v > 0 {
-				parts = append(parts, fmt.Sprintf("Amount ≥ %d¢", int64(v)))
-			}
-			if v, ok := meta["item_threshold_count"].(float64); ok && v > 0 {
-				parts = append(parts, fmt.Sprintf("%d item threshold%s", int(v), plural(int(v))))
-			}
-			return "Billing thresholds set", strings.Join(parts, " · "), "", "info"
-		case "billing_thresholds_cleared":
-			return "Billing thresholds cleared", "", "", "info"
-		case "item_added":
-			parts := []string{}
-			if v, ok := meta["plan_id"].(string); ok && v != "" {
-				parts = append(parts, planLabel(v, planNames))
-			}
-			if q, ok := meta["quantity"].(float64); ok && q > 0 {
-				parts = append(parts, fmt.Sprintf("qty %d", int(q)))
-			}
-			if pp := prorationPartLabel(meta); pp != "" {
-				parts = append(parts, pp)
-			}
-			return "Item added", strings.Join(parts, " · "), "", "info"
-		case "item_removed":
-			// Plan NAME (resolved via planNames) is the operator-legible
-			// noun; the vlx_si_ item id stays out of the row.
-			parts := []string{}
-			if pid, _ := meta["plan_id"].(string); pid != "" {
-				parts = append(parts, planLabel(pid, planNames))
-			}
-			if pp := prorationPartLabel(meta); pp != "" {
-				parts = append(parts, pp)
-			}
-			return "Item removed", strings.Join(parts, " · "), "", "info"
-		case "cancel_pending_item_plan_change":
-			return "Pending plan change canceled", "", "", "info"
-		}
-		// Unknown sub-action — surface the bucket label rather than
-		// hiding the row. Better than silently dropping audit context.
-		return "Subscription updated", "", "", "info"
-	case "subscription.item_updated":
-		// Item-level plan + quantity changes go through this dedicated
-		// action (not AuditActionUpdate) so the metadata discriminator
-		// lives in meta["action"]: "item_plan_changed" or
-		// "item_quantity_changed".
-		a, _ := meta["action"].(string)
-		immediate, _ := meta["immediate"].(bool)
-		when := "At next period"
-		if immediate {
-			when = "Immediate"
-		}
-		switch a {
-		case "item_plan_changed":
-			parts := []string{}
-			oldPlan, _ := meta["old_plan_id"].(string)
-			newPlan, _ := meta["new_plan_id"].(string)
-			if oldPlan != "" && newPlan != "" {
-				parts = append(parts, planLabel(oldPlan, planNames)+" → "+planLabel(newPlan, planNames))
-			}
-			parts = append(parts, when)
-			if pp := prorationPartLabel(meta); pp != "" {
-				parts = append(parts, pp)
-			}
-			return "Plan changed", strings.Join(parts, " · "), "", "info"
-		case "item_quantity_changed":
-			parts := []string{}
-			if q, ok := meta["quantity"].(float64); ok {
-				parts = append(parts, fmt.Sprintf("To qty %d", int(q)))
-			}
-			parts = append(parts, when)
-			if pp := prorationPartLabel(meta); pp != "" {
-				parts = append(parts, pp)
-			}
-			return "Quantity changed", strings.Join(parts, " · "), "", "info"
-		}
-		return "Item updated", "", "", "info"
-	case "subscription.pending_change_applied":
-		oldPlan, _ := meta["old_plan_id"].(string)
-		newPlan, _ := meta["new_plan_id"].(string)
-		d := ""
-		if oldPlan != "" && newPlan != "" {
-			d = planLabel(oldPlan, planNames) + " → " + planLabel(newPlan, planNames)
-		}
-		return "Scheduled plan change applied", d, "", "success"
-	case "subscription.threshold_crossed":
-		d := ""
-		if num, _ := meta["invoice_number"].(string); num != "" {
-			d = "Invoice " + num + " issued early"
-			if amt, ok := meta["amount_cents"].(float64); ok {
-				cur, _ := meta["currency"].(string)
-				d += " — " + formatAmountForTimeline(int64(amt), cur)
-			}
-		}
-		return "Spending threshold crossed", d, "", "warning"
-	case "subscription.threshold_deferred":
-		// ADR-066 §4b loudness floor. Peak/last-style charges can't be split
-		// across an early invoice and the cycle close, so the fire waits.
-		return "Spending threshold reached — invoice deferred",
-			"This subscription's spend is priced on peak usage, which bills once at the end of the cycle. The invoice will be issued at cycle close.",
-			"", "info"
-	case "subscription.proration_failed":
-		d := ""
-		if e, ok := meta["error"].(string); ok && e != "" {
-			d = e
-		}
-		return "Proration failed", d, "", "warning"
-	default:
-		return action, "", "", "info"
-	}
-}
-
 // plural returns "s" for n != 1, else "". Tiny helper to avoid the
 // "1 thresholds" / "2 threshold" pluralization mistake.
 func plural(n int) string {
@@ -3337,6 +3303,41 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// InvoiceLabeler names an invoice a subscription activity row links to: a
+// proration invoice, the open invoice an adjustment reduced, or a spend
+// threshold's early invoice (ADR-128 rule 8). An error (the invoice no longer
+// exists, or could not be read) leaves the row's invoice as plain text.
+type InvoiceLabeler interface {
+	InvoiceNumber(ctx context.Context, tenantID, invoiceID string) (string, error)
+}
+
+// SetInvoiceLabeler wires the invoice numbers the timeline's links show.
+// Unset, rows name no invoice by link.
+func (h *Handler) SetInvoiceLabeler(l InvoiceLabeler) { h.invoiceLabels = l }
+
+// invoiceNumbers looks up the number of every invoice the entries name, once
+// each. An invoice that cannot be read is left out, so its row links nothing.
+func (h *Handler) invoiceNumbers(ctx context.Context, tenantID string, entries []domain.AuditEntry) map[string]string {
+	out := map[string]string{}
+	if h.invoiceLabels == nil {
+		return out
+	}
+	tried := map[string]bool{}
+	for _, e := range entries {
+		for _, key := range []string{"proration_invoice_id", "adjusted_invoice_id", "invoice_id"} {
+			id := metaString(e.Metadata, key)
+			if id == "" || tried[id] {
+				continue
+			}
+			tried[id] = true
+			if num, err := h.invoiceLabels.InvoiceNumber(ctx, tenantID, id); err == nil && num != "" {
+				out[id] = num
+			}
+		}
+	}
+	return out
 }
 
 func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
@@ -3427,8 +3428,9 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			labels := lineLabels{plans: planNames, invoices: h.invoiceNumbers(r.Context(), tenantID, entries)}
 			for _, e := range entries {
-				desc, detail, detailTS, status := describeSubscriptionAction(e.Action, e.Metadata, planNames)
+				line := describeSubscriptionAction(e.Action, e.Metadata, labels)
 				// Per-row sim context. metadata.sim_effective_at is
 				// mirrored by the audit writer from the ctx clock binding
 				// on writes affecting clock-pinned subs (ADR-090 §5; the
@@ -3445,23 +3447,22 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 						sortAt = t
 					}
 				}
-				events = append(events, timelineEvent{
-					Timestamp:       e.CreatedAt.UTC().Format(time.RFC3339),
-					Source:          "audit",
-					EventType:       e.Action,
-					Status:          status,
-					Description:     desc,
-					Detail:          detail,
-					DetailTimestamp: detailTS,
-					ActorType:       e.ActorType,
-					ActorName:       e.ActorName,
-					ActorID:         e.ActorID,
-					IsSimulated:     simAt != "",
-					SimEffectiveAt:  simAt,
-					TestClockID:     clockID,
-					sortAt:          sortAt,
-					recordedAt:      e.CreatedAt,
-				})
+				ev := timelineEvent{
+					Timestamp:      e.CreatedAt.UTC().Format(time.RFC3339),
+					Source:         "audit",
+					EventType:      e.Action,
+					ActorType:      e.ActorType,
+					ActorName:      e.ActorName,
+					ActorID:        e.ActorID,
+					IsSimulated:    simAt != "",
+					SimEffectiveAt: simAt,
+					TestClockID:    clockID,
+					sortAt:         sortAt,
+					recordedAt:     e.CreatedAt,
+					Line:           line,
+				}
+				ev.fillFromLine(e.ID, activity.ActorFromAudit(e.ActorType, e.ActorName))
+				events = append(events, ev)
 			}
 		} else {
 			// Audit rows are this endpoint's ONLY event source — an empty

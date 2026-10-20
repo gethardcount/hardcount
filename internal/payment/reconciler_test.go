@@ -3,7 +3,6 @@ package payment
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -19,6 +18,29 @@ type mockReconcileStore struct {
 	// a webhook winning the race during the GetPaymentIntent round-trip (the
 	// sweep listed a stale snapshot; Get re-reads the now-settled invoice).
 	getResult map[string]domain.Invoice
+}
+
+// The stale-hold sweep's store methods: these unit tests hold no stale
+// holds (the sweep is pinned on real Postgres, stale_hold_integration_test.go).
+func (m *mockReconcileStore) ListStaleChargeHolds(context.Context, int, []string) ([]domain.StaleChargeHold, error) {
+	return nil, nil
+}
+
+func (m *mockReconcileStore) ClearStaleChargeHold(context.Context, string, string, time.Time, int64, bool) (bool, error) {
+	return false, nil
+}
+
+func (m *mockReconcileStore) MarkStaleHoldChecked(context.Context, string, string) error { return nil }
+
+func (m *mockReconcileStore) UnparkAfterNoPayment(context.Context, string, string, time.Time, int64) (domain.InvoicePaymentStatus, bool, error) {
+	return "", false, nil
+}
+
+func (m *mockReconcileStore) StampChargeOutcome(_ context.Context, _, id string, _ int64, _ domain.InvoicePaymentStatus, _, _ string) (domain.Invoice, bool, error) {
+	if inv, ok := m.byID[id]; ok {
+		return *inv, false, nil
+	}
+	return domain.Invoice{}, false, errs.ErrNotFound
 }
 
 func newMockReconcileStore(unknowns ...domain.Invoice) *mockReconcileStore {
@@ -86,45 +108,6 @@ func (m *mockReconcileStore) RecordProviderSync(_ context.Context, _, id, provid
 	now := time.Now().UTC()
 	inv.ProviderSyncedAt = &now
 	return nil
-}
-
-// ListParkedSearchable mirrors the REAL predicate (parked shape + park age)
-// rather than returning a canned slice — a fake that ignores the predicate
-// would let sweep tests pass while the SQL selects the wrong rows.
-// The cool-off half (provider_synced_at) is honored too: a row synced within
-// the hour is not re-listed.
-func (m *mockReconcileStore) ListParkedSearchable(_ context.Context, olderThan time.Time, _ int) ([]domain.Invoice, error) {
-	var out []domain.Invoice
-	for _, inv := range m.byID {
-		if inv.Status == domain.InvoiceFinalized &&
-			inv.PaymentStatus == domain.PaymentUnknown &&
-			inv.StripePaymentIntentID == "" &&
-			inv.UpdatedAt.Before(olderThan) &&
-			(inv.ProviderSyncedAt == nil || inv.ProviderSyncedAt.Before(time.Now().Add(-time.Hour))) {
-			out = append(out, *inv)
-		}
-	}
-	return out, nil
-}
-
-// AdoptPaymentIntentIfParked mirrors the REAL CAS: it mutates only while the
-// row still matches the full parked shape, and reports won/lost — so race
-// tests exercise the same lost-CAS branch production hits.
-func (m *mockReconcileStore) AdoptPaymentIntentIfParked(_ context.Context, _, id, piID string) (bool, error) {
-	if piID == "" {
-		return false, errors.New("adopt requires a PaymentIntent id")
-	}
-	inv, ok := m.byID[id]
-	if !ok {
-		return false, errs.ErrNotFound
-	}
-	if inv.Status != domain.InvoiceFinalized || inv.PaymentStatus != domain.PaymentUnknown || inv.StripePaymentIntentID != "" {
-		return false, nil
-	}
-	inv.PaymentStatus = domain.PaymentProcessing
-	inv.StripePaymentIntentID = piID
-	inv.ChargeAttemptSeq++
-	return true, nil
 }
 
 func (m *mockReconcileStore) ListProcessingPayments(_ context.Context, _ time.Time, _ int) ([]domain.Invoice, error) {
@@ -257,10 +240,6 @@ func TestReconciler_NoPaymentIntentIDStaysUnknown(t *testing.T) {
 }
 
 type errStripeClient struct{ mockStripeClient }
-
-func (e *errStripeClient) SearchPaymentIntentsByInvoiceID(_ context.Context, _ string) ([]PaymentIntentResult, error) {
-	return nil, errors.New("search boom")
-}
 
 func (e *errStripeClient) GetPaymentIntent(_ context.Context, _ string) (PaymentIntentResult, error) {
 	return PaymentIntentResult{}, fmt.Errorf("stripe 502 on reconcile")

@@ -340,14 +340,6 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 	return subs, total, nil
 }
 
-// CancelAtomic terminates a subscription. Cancellation is allowed from
-// every non-terminal status — draft (operator scrapping a never-activated
-// row), trialing (customer abandoning during trial — by far the dominant
-// industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
-// and active. Only canceled/archived are rejected (the row already
-// terminated). Note: the `paused` source state was removed in PR-8
-// when the hard-pause API was deleted — no path now produces
-// status='paused', so it's not in allowedFrom.
 func cancelSpec() transitionSpec {
 	return transitionSpec{
 		targetStatus: string(domain.SubscriptionCanceled),
@@ -361,6 +353,14 @@ func cancelSpec() transitionSpec {
 	}
 }
 
+// CancelAtomic terminates a subscription. Cancellation is allowed from
+// every non-terminal status — draft (operator scrapping a never-activated
+// row), trialing (customer abandoning during trial — by far the dominant
+// industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
+// and active. Only canceled/archived are rejected (the row already
+// terminated). Note: the `paused` source state was removed in PR-8
+// when the hard-pause API was deleted — no path now produces
+// status='paused', so it's not in allowedFrom.
 func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	return s.transitionAtomic(ctx, tenantID, id, cancelSpec())
 }
@@ -779,12 +779,6 @@ func (s *PostgresStore) ActivateAfterTrial(ctx context.Context, tenantID, id str
 	return s.ActivateAfterTrialWithBill(ctx, tenantID, id, at, nil)
 }
 
-// ActivateAfterTrialWithBill flips 'trialing' → 'active' AND runs billFn (the
-// day-1 in_advance invoice insert) in the SAME transaction, so a billing
-// failure rolls the activation back rather than leaving an active sub with no
-// first-period invoice (the cycle scheduler skips the just-elapsed in_advance
-// segment, so a lost day-1 invoice is a permanent revenue leak). ADR-056.
-// billFn may be nil.
 // ActivateDraftWithBill — see the Store interface doc. Draft→active flip +
 // period/anchor stamps + day-1 bill in one tx (the ADR-056 pattern applied to
 // the plain-draft path).
@@ -846,6 +840,12 @@ func (s *PostgresStore) ActivateDraftWithBill(ctx context.Context, tenantID, id 
 	return sub, nil
 }
 
+// ActivateAfterTrialWithBill flips 'trialing' → 'active' AND runs billFn (the
+// day-1 in_advance invoice insert) in the SAME transaction, so a billing
+// failure rolls the activation back rather than leaving an active sub with no
+// first-period invoice (the cycle scheduler skips the just-elapsed in_advance
+// segment, so a lost day-1 invoice is a permanent revenue leak). ADR-056.
+// billFn may be nil.
 func (s *PostgresStore) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1707,6 +1707,60 @@ func (s *PostgresStore) ClosePeriod(ctx context.Context, tenantID, id string, ex
 // Item CRUD
 // ---------------------------------------------------------------------------
 
+// lockSubscriptionRow is the first statement of every write to
+// subscription_items (#1270). It locks the subscription row FOR NO KEY
+// UPDATE, the mode the period closers' compare-and-swap UPDATE takes
+// (ADR-115). That mode leaves the FOR KEY SHARE of an invoice insert's
+// foreign-key check free.
+//
+// With every item writer taking this row first, all writers of a
+// subscription's state lock in one order: subscription row, item rows,
+// billing_intervals, invoices. So two of them cannot deadlock, and a change
+// that read the state under this lock (LockForItemChangeTx) has seen every
+// item change that committed before it. A transaction that already holds the
+// row (the plan swap after its period CAS, an item change after
+// LockForItemChangeTx) takes it again without waiting.
+func lockSubscriptionRow(ctx context.Context, tx *sql.Tx, subscriptionID string) error {
+	var id string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, subscriptionID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return errs.ErrNotFound
+	}
+	return err
+}
+
+// lockSubscriptionOfItem is lockSubscriptionRow for a writer that has only
+// the item id. An item never moves to another subscription, so reading its
+// subscription_id without a lock is safe.
+func lockSubscriptionOfItem(ctx context.Context, tx *sql.Tx, itemID string) error {
+	var id string
+	err := tx.QueryRowContext(ctx, `
+		SELECT s.id FROM subscriptions s
+		 WHERE s.id = (SELECT i.subscription_id FROM subscription_items i WHERE i.id = $1)
+		   FOR NO KEY UPDATE OF s`, itemID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return errs.ErrNotFound
+	}
+	return err
+}
+
+// LockForItemChangeTx: see the Store interface. tenantID is accepted for
+// symmetry with the store's other *Tx methods; RLS scoping rides the tx.
+func (s *PostgresStore) LockForItemChangeTx(ctx context.Context, tx *sql.Tx, _ string, subscriptionID string) (domain.Subscription, error) {
+	var sub domain.Subscription
+	err := scanSubRow(tx.QueryRowContext(ctx, `SELECT `+subCols+` FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, subscriptionID), &sub)
+	if err == sql.ErrNoRows {
+		return domain.Subscription{}, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	return sub, nil
+}
+
 func (s *PostgresStore) ListItems(ctx context.Context, tenantID, subscriptionID string) ([]domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1765,6 +1819,9 @@ func (s *PostgresStore) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID stri
 // addItemInTx is the shared implementation. AddItem opens+commits its
 // own tx; AddItemTx delegates commit to the caller.
 func (s *PostgresStore) addItemInTx(ctx context.Context, tx *sql.Tx, tenantID string, item domain.SubscriptionItem) (domain.SubscriptionItem, error) {
+	if err := lockSubscriptionRow(ctx, tx, item.SubscriptionID); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	qty := item.Quantity
 	if qty <= 0 {
 		qty = 1
@@ -1816,12 +1873,18 @@ func (s *PostgresStore) UpdateItemQuantityTx(ctx context.Context, tx *sql.Tx, _ 
 }
 
 func (s *PostgresStore) updateItemQuantityInTx(ctx context.Context, tx *sql.Tx, itemID string, quantity int64) (domain.SubscriptionItem, error) {
+	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	now := clock.Now(ctx)
 	var stored domain.SubscriptionItem
+	// deleted_at IS NULL: a removed item has no open interval to move, so a
+	// change racing its removal is not found rather than failing in
+	// intervalTransition.
 	err := tx.QueryRowContext(ctx, `
 		UPDATE subscription_items
 		SET quantity = $1, updated_at = $2
-		WHERE id = $3
+		WHERE id = $3 AND deleted_at IS NULL
 		RETURNING `+itemCols,
 		quantity, now, itemID,
 	).Scan(scanItemDest(&stored)...)
@@ -1863,7 +1926,11 @@ func (s *PostgresStore) ApplyItemPlanImmediatelyTx(ctx context.Context, tx *sql.
 }
 
 func (s *PostgresStore) applyItemPlanImmediatelyInTx(ctx context.Context, tx *sql.Tx, itemID, newPlanID string, changedAt time.Time) (domain.SubscriptionItem, error) {
+	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	// Clears any scheduled change — an immediate swap supersedes a pending one.
+	// deleted_at IS NULL: as in updateItemQuantityInTx.
 	var stored domain.SubscriptionItem
 	err := tx.QueryRowContext(ctx, `
 		UPDATE subscription_items
@@ -1872,7 +1939,7 @@ func (s *PostgresStore) applyItemPlanImmediatelyInTx(ctx context.Context, tx *sq
 		    pending_plan_id = NULL,
 		    pending_plan_effective_at = NULL,
 		    updated_at = $2
-		WHERE id = $3
+		WHERE id = $3 AND deleted_at IS NULL
 		RETURNING `+itemCols,
 		newPlanID, changedAt, itemID,
 	).Scan(scanItemDest(&stored)...)
@@ -1899,15 +1966,36 @@ func (s *PostgresStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID
 		return domain.SubscriptionItem{}, err
 	}
 	defer postgres.Rollback(tx)
+	stored, err := s.setItemPendingPlanInTx(ctx, tx, itemID, pendingPlanID, effectiveAt)
+	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	return stored, nil
+}
 
+// SetItemPendingPlanTx is SetItemPendingPlan on the caller's tx: the
+// service schedules a change from the state it read under the subscription
+// row lock (#1270).
+func (s *PostgresStore) SetItemPendingPlanTx(ctx context.Context, tx *sql.Tx, _ string, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
+	return s.setItemPendingPlanInTx(ctx, tx, itemID, pendingPlanID, effectiveAt)
+}
+
+func (s *PostgresStore) setItemPendingPlanInTx(ctx context.Context, tx *sql.Tx, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
+	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	now := clock.Now(ctx)
 	var stored domain.SubscriptionItem
-	err = tx.QueryRowContext(ctx, `
+	// deleted_at IS NULL: as in updateItemQuantityInTx.
+	err := tx.QueryRowContext(ctx, `
 		UPDATE subscription_items
 		SET pending_plan_id = $1,
 		    pending_plan_effective_at = $2,
 		    updated_at = $3
-		WHERE id = $4
+		WHERE id = $4 AND deleted_at IS NULL
 		RETURNING `+itemCols,
 		pendingPlanID, effectiveAt, now, itemID,
 	).Scan(scanItemDest(&stored)...)
@@ -1915,9 +2003,6 @@ func (s *PostgresStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID
 		return domain.SubscriptionItem{}, errs.ErrNotFound
 	}
 	if err != nil {
-		return domain.SubscriptionItem{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	return stored, nil
@@ -1929,6 +2014,9 @@ func (s *PostgresStore) ClearItemPendingPlan(ctx context.Context, tenantID, item
 		return domain.SubscriptionItem{}, err
 	}
 	defer postgres.Rollback(tx)
+	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 
 	now := clock.Now(ctx)
 	var stored domain.SubscriptionItem
@@ -1959,6 +2047,9 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
+	if err := lockSubscriptionRow(ctx, tx, subscriptionID); err != nil {
+		return nil, err
+	}
 
 	// Swap every item under the subscription whose pending change is due.
 	// All items move in one statement so a caller reading the result sees a
@@ -2039,6 +2130,9 @@ func (s *PostgresStore) removeItemInTx(ctx context.Context, tx *sql.Tx, itemID s
 	// the first cycle. Marking the row deleted preserves the FK
 	// back-pointer for auditors while making the item invisible to
 	// active-state queries via their `deleted_at IS NULL` filter.
+	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
+		return err
+	}
 	now := clock.Now(ctx)
 	var subID string
 	err := tx.QueryRowContext(ctx,

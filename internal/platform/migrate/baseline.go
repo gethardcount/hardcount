@@ -10,7 +10,7 @@ import (
 )
 
 // baselineVersion is migration 180: the last of the 178 golang-migrate
-// files Velox v0.8.0 and v0.8.1 shipped, and the version their databases
+// files Velox v0.8.0 to v0.8.2 shipped, and the version their databases
 // record. Version numbers do not change across the switch to goose, so new
 // files start at 00181.
 const baselineVersion int64 = 180

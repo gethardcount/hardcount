@@ -162,8 +162,8 @@ func TestAdvance_RejectsBackwardTime(t *testing.T) {
 	}
 }
 
-// TestAdvance_RejectsAdvanceOverOneYear asserts the Stripe-parity
-// per-call advance window cap (ADR-028 amendment). Operators chunk
+// TestAdvance_RejectsAdvanceOverOneYear asserts Velox's own per-call
+// advance window cap (ADR-028 amendment). Operators chunk
 // longer simulations into successive advances; a single call may
 // not shift frozen_time by more than 1 year.
 func TestAdvance_RejectsAdvanceOverOneYear(t *testing.T) {

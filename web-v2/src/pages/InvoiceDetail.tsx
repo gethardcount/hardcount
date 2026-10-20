@@ -471,10 +471,19 @@ export default function InvoiceDetailPage() {
     },
     onSuccess: (pause) => {
       invalidateAll()
+      const subId = invoice?.subscription_id
+      // The pause changed the subscription. This page's written-off notice
+      // and the subscription page both read ['subscription', id]; without
+      // this they kept showing it as still billing.
+      if (pause === 'paused' && subId) {
+        queryClient.invalidateQueries({ queryKey: ['subscription', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscription-preview', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscription-activity-timeline', subId] })
+        queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
+      }
       setShowMarkUncollectibleConfirm(false)
       setPauseSubOnWriteOff(false)
       const outcome = writeOffOutcome(invoice?.invoice_number ?? '', pause)
-      const subId = invoice?.subscription_id
       showOutcome(outcome, outcome.openSubscription && subId
         ? { label: 'Open subscription', onClick: () => navigate(`/subscriptions/${subId}`) }
         : undefined)
@@ -514,7 +523,10 @@ export default function InvoiceDetailPage() {
         })
       }
     },
-    onError: err => showApiError(err, 'Failed to retry tax'),
+    // A failed retry can still have saved the tax: the finalize after it is
+    // what failed. Reload so the page shows the draft and its Finalize button
+    // instead of the old "tax pending" notice.
+    onError: err => { invalidateAll(); showApiError(err, 'Failed to retry tax') },
   })
 
   const acting = finalizeMutation.isPending || voidMutation.isPending || collectMutation.isPending || rotatePublicTokenMutation.isPending
@@ -733,10 +745,10 @@ export default function InvoiceDetailPage() {
                 </DropdownMenuItem>
               )}
               {/* Mark uncollectible is the DELIBERATE exception (ADR-107). It is
-                  the only action permitted on a parked invoice — the one whose
-                  charge could not be identified — so hiding it here would leave
-                  that invoice with no way to reach any terminal state, which is
-                  the gap the write-off exists to close. A payment that is
+                  the only action permitted on a parked invoice (Stripe's answer
+                  was unclear and named no payment) while Velox waits up to a day
+                  for Stripe: the action for a customer who paid another way, and
+                  the exit when Stripe cannot be asked. A payment that is
                   genuinely still resolving is a different matter and is still
                   excluded. */}
               {invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' &&
@@ -812,7 +824,7 @@ export default function InvoiceDetailPage() {
               {/* Refused while the payment is unresolved: voiding an invoice
                   whose charge may have succeeded would annul something that was
                   in fact paid. Mark uncollectible stays available above — it is
-                  the one exit for a parked invoice. */}
+                  the one action allowed on a parked invoice. */}
               {invoice.status !== 'voided' && invoice.status !== 'paid' &&
                 !paymentIsUnresolved(invoice.payment_status) && (
                 <>
@@ -1484,8 +1496,11 @@ export default function InvoiceDetailPage() {
                 return (
                 <div key={event.id ?? `${event.source}:${event.event_type}:${event.timestamp}:${event.payment_intent_id ?? ''}`} className="flex gap-4 pb-2 last:pb-0">
                   <div className="flex flex-col items-center">
+                    {/* The status is the line's tone (ADR-128): neutral grey,
+                        success green, warning amber, failure red. */}
                     <div className={cn(
                       'w-2.5 h-2.5 rounded-full mt-1.5',
+                      event.status === 'neutral' ? 'bg-muted-foreground' :
                       event.status === 'succeeded' || event.status === 'resolved' ? 'bg-emerald-500' :
                       event.status === 'failed' || event.status === 'canceled' ? 'bg-destructive' :
                       event.status === 'processing' || event.status === 'scheduled' ? 'bg-blue-500' :
@@ -1499,20 +1514,18 @@ export default function InvoiceDetailPage() {
                       <p className="text-sm text-foreground min-w-0">{event.description}</p>
                       <span className="text-xs text-muted-foreground ml-4 whitespace-nowrap">{formatDateTime(event.timestamp)}</span>
                     </div>
-                    {event.error && (event.status === 'failed' || event.status === 'canceled') && (
-                      <p className="text-xs text-destructive mt-0.5">{event.error}</p>
+                    {/* The problem line: what went wrong on a failure row,
+                        what it means on a warning row. */}
+                    {event.error && (event.status === 'failed' || event.status === 'warning') && (
+                      <p className={cn('text-xs mt-0.5', event.status === 'failed' ? 'text-destructive' : 'text-warning-foreground')}>{event.error}</p>
                     )}
                     {event.amount_cents != null && event.amount_cents > 0 && (
                       <p className="text-xs text-muted-foreground mt-0.5">{formatCents(event.amount_cents, invoice.currency)}</p>
                     )}
-                    {/* Sub-line: payment instrument, attempt count, etc. */}
+                    {/* Meta line: the row's details and who did it, worded
+                        by the backend ("Visa •••• 4242 · After 2 retries"). */}
                     {event.detail && (
                       <p className="text-xs text-muted-foreground mt-0.5">{event.detail}</p>
-                    )}
-                    {event.event_type === 'invoice.paid' && (event.attempt_count ?? 0) > 0 && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        after {event.attempt_count} retry attempt{event.attempt_count === 1 ? '' : 's'}
-                      </p>
                     )}
                     {/* Operator contract, Invariant A: a row whose primary
                         timestamp is on the invoice's simulated calendar but
@@ -2100,6 +2113,12 @@ function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCreated }:
   const canSubmit =
     reasonOk && amountOk && allocationMatches && !refundOverCap && !amountOverCreditable && !submitting
 
+  // One Idempotency-Key per dialog open, sent with every submit from it. A
+  // retry after a lost answer (a timeout while Stripe is slow) then gets the
+  // first request's credit note back instead of making a second one. The
+  // dialog unmounts on close, so the next open makes a new key.
+  const [idemKey] = useState(() => crypto.randomUUID())
+
   // Single-flight: the per-invoice lock only enforces the over-credit CAP, not
   // dedup — a double-fire that still fits under the remaining creditable amount
   // issues a SECOND credit note (a real second card refund / balance credit).
@@ -2121,7 +2140,7 @@ function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCreated }:
           : {}),
         auto_issue: true,
         lines: [{ description: reason.trim(), quantity: 1, unit_amount_cents: amountCents }],
-      })
+      }, idemKey)
       onCreated()
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to create credit note')

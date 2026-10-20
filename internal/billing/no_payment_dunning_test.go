@@ -127,3 +127,37 @@ func TestCollector_NoDunningUnlessOwedAndCardless(t *testing.T) {
 		})
 	}
 }
+
+// A failed read of the customer's payment method is an error, not a skip
+// (CT-F7). The real triggers: a database error, or a missing
+// VELOX_ENCRYPTION_KEY, which fails every customer decrypt. The sweep used to
+// skip the invoice with no log and no count, so collection could stop for
+// every customer while the sweep reported nothing wrong. Now each such invoice
+// returns an error that wraps the cause, which the scheduler logs and counts
+// as a failed retry. The hold is released, and no email goes out and no
+// dunning starts: a read that failed does not mean there is no card.
+func TestCollector_PaymentMethodReadErrorIsReported(t *testing.T) {
+	inv := &mockInvoices{invoices: []domain.Invoice{pendingInvoice()}}
+	engine := noPMEngine(t, inv)
+	starter := &recordingDunningStarter{}
+	engine.SetDunningStarter(starter)
+	notifier := &triggerNoPMNotifier{}
+	engine.SetNoPaymentMethodNotifier(notifier)
+	blip := errors.New("db blip")
+	engine.paymentSetups = &erroringPaymentSetups{err: blip}
+
+	_, errs := engine.RetryPendingCharges(context.Background(), 10, nil)
+
+	if len(errs) != 1 || !errors.Is(errs[0], blip) {
+		t.Fatalf("errors = %v, want one error wrapping the read failure", errs)
+	}
+	if len(inv.released) != 1 || inv.released[0] != "inv_1" || inv.holdSet("inv_1") {
+		t.Fatalf("released %v (hold still set: %v), want the hold on inv_1 released", inv.released, inv.holdSet("inv_1"))
+	}
+	if len(notifier.triggers) != 0 {
+		t.Fatalf("setup-link emails %v, want none", notifier.triggers)
+	}
+	if len(starter.causes) != 0 {
+		t.Fatalf("dunning starts %v, want none", starter.causes)
+	}
+}

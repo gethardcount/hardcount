@@ -16,11 +16,20 @@
 # this container). psql's :'var' quoting is used so any legal password
 # survives — do NOT inline it into the SQL string.
 #
+# The idle-transaction timeout is required (docs/ops/postgres-requirements.md,
+# "Timeouts on the limited user"). Closing a billing period locks the
+# subscription row until the invoice is saved; if a Velox process freezes in
+# between (a paused VM, say), the timeout ends its session and frees the lock.
+# Only velox_app gets it: migrations run as $POSTGRES_USER.
+#
 # Existing pgdata volumes: this script does NOT re-run. Rotate the role
 # password manually instead:
 #   docker compose exec postgres psql -U velox -d velox \
 #     -v pw="$VELOX_APP_DB_PASSWORD" \
 #     -c "ALTER ROLE velox_app PASSWORD :'pw'"
+# and set the timeout once (new connections pick it up):
+#   docker compose exec postgres psql -U velox -d velox \
+#     -c "ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s'"
 set -euo pipefail
 
 : "${VELOX_APP_DB_PASSWORD:?VELOX_APP_DB_PASSWORD is required — set it in .env (see .env.example)}"
@@ -34,4 +43,5 @@ GRANT ALL PRIVILEGES ON DATABASE :"dbname" TO velox_app;
 GRANT ALL ON SCHEMA public TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO velox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
+ALTER ROLE velox_app SET idle_in_transaction_session_timeout = '30s';
 EOSQL

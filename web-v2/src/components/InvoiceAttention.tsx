@@ -307,10 +307,13 @@ function ActionButton({
         />
       )
     case 'mark_uncollectible':
-      // The parked invoice's one way out (ADR-107). Opens the page's existing
-      // write-off confirmation, which states the consequences.
+      // A parked invoice's write-off (ADR-107), for a customer who paid
+      // another way. Always the secondary style: the usual next step is to
+      // wait, since Velox records the payment if Stripe shows it and charges
+      // again after 24 hours if not. Opens the page's existing write-off
+      // confirmation, which states the consequences.
       return (
-        <Button variant={variant} size="sm" onClick={onMarkUncollectible} disabled={!onMarkUncollectible}>
+        <Button variant="outline" size="sm" onClick={onMarkUncollectible} disabled={!onMarkUncollectible}>
           {display}
         </Button>
       )

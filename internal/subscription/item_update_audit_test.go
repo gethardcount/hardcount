@@ -154,6 +154,57 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 	}
 }
 
+// A plan change scheduled for renewal names the plan it changes from: its
+// line reads "Basic → Pro at renewal on <date>" (S-17), not "at renewal on
+// <date>" with no plans. The item keeps its plan until the boundary, and the
+// handler reads the old plan before the change only for changes that prorate,
+// so the scheduled row was written with an empty old_plan_id.
+func TestHandler_UpdateItem_ScheduledPlanChangeAuditNamesBothPlans(t *testing.T) {
+	ctx := context.Background()
+	tenantID := "t1"
+
+	store := newMemStore()
+	subID, itemID := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
+
+	svc := NewService(store, nil)
+	plans := &plansMock{plans: map[string]domain.Plan{
+		"plan_old": {ID: "plan_old", Name: "Basic", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
+		"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
+	}}
+	h := NewHandler(svc)
+	h.SetProrationDeps(plans, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}, &creditsMock{})
+	rec := &capturingAudit{}
+	h.SetAuditLogger(rec)
+
+	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: false})
+	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
+	rr := httptest.NewRecorder()
+	h.updateItem(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
+	}
+
+	entry, ok := rec.firstOf(domain.AuditActionSubscriptionItemUpdated)
+	if !ok {
+		t.Fatalf("expected a subscription.item_updated audit row; got actions=%v", rec.actions())
+	}
+	if entry.meta["old_plan_id"] != "plan_old" || entry.meta["new_plan_id"] != "plan_new" {
+		t.Errorf("old_plan_id, new_plan_id: got %v, %v; want plan_old, plan_new", entry.meta["old_plan_id"], entry.meta["new_plan_id"])
+	}
+	effectiveAt, ok := entry.meta["effective_at"].(time.Time)
+	if !ok {
+		t.Fatalf("effective_at: got %T %v, want the boundary the change lands on", entry.meta["effective_at"], entry.meta["effective_at"])
+	}
+
+	l := describeSubscriptionAction(entry.action, entry.meta, lineLabels{plans: map[string]string{"plan_old": "Basic", "plan_new": "Pro"}})
+	if l.Title != "Plan change scheduled" {
+		t.Errorf("title: got %q, want Plan change scheduled", l.Title)
+	}
+	if got, ts := legacyDetail(l); got != "Basic → Pro at renewal on" || ts != effectiveAt.UTC().Format(time.RFC3339) {
+		t.Errorf("detail: got %q, %q; want %q, %q", got, ts, "Basic → Pro at renewal on", effectiveAt.UTC().Format(time.RFC3339))
+	}
+}
+
 // A plan change on a WALL-CLOCK (non-pinned) subscription must NOT inject
 // sim-time context — h.auditCtx is a no-op there, so the row's sim columns stay
 // NULL and it never appears in the simulated slice.

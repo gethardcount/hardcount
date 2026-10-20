@@ -113,8 +113,9 @@ type RecipientSuppressionChecker interface {
 // NewSender creates an email sender from environment variables. When
 // SMTP_HOST is unset every send returns ErrSMTPNotConfigured —
 // `make dev` should run MailHog (docs/ops/email-setup.md) so the
-// dev path exercises the same error contract as production.
-func NewSender() *Sender {
+// dev path exercises the same error contract as production. appEnv is
+// config.Config.Env.
+func NewSender(appEnv string) *Sender {
 	tlsMode := strings.ToLower(strings.TrimSpace(os.Getenv("SMTP_TLS")))
 	switch tlsMode {
 	case "starttls", "implicit", "none":
@@ -127,7 +128,7 @@ func NewSender() *Sender {
 		slog.Warn("SMTP_TLS unrecognized, defaulting to starttls", "got", tlsMode)
 		tlsMode = "starttls"
 	}
-	prodEnv := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+	prodEnv := appEnv == "production"
 	// One line of boot-time truth about the transport mode: strict
 	// STARTTLS is the default, and a stale env pointing at a no-TLS
 	// sandbox will now fail loudly at send — this log is how the
@@ -210,6 +211,29 @@ func (s *Sender) SetSuppressionChecker(c RecipientSuppressionChecker) { s.suppre
 // "delivered" if they care; most callers swallow it.
 var ErrRecipientSuppressed = errors.New("email: recipient suppressed (bounced or complained)")
 
+// ErrInvalidRecipient marks a send whose To or Cc address is not one bare
+// address (domain.ValidateEmail). Every entry point has refused such an
+// address since 2026-10-18, but addresses stored before are not rewritten,
+// so the sender checks again: the send fails before any SMTP traffic,
+// IsPermanentSendError moves the outbox row to failed at once, and no
+// bounce is recorded. The operator fixes the address and sends again.
+var ErrInvalidRecipient = errors.New("email: recipient is not a single valid email address")
+
+// checkRecipients applies domain.ValidateEmail to the To address and each
+// Cc address. The error names no address: it is stored as the outbox row's
+// last_error, which erasure does not scrub.
+func checkRecipients(to string, cc []string) error {
+	if _, err := domain.ValidateEmail("to", to); err != nil {
+		return fmt.Errorf("%w (the To address)", ErrInvalidRecipient)
+	}
+	for _, a := range cc {
+		if _, err := domain.ValidateEmail("cc", a); err != nil {
+			return fmt.Errorf("%w (a Cc address)", ErrInvalidRecipient)
+		}
+	}
+	return nil
+}
+
 func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) error {
 	if s.suppression == nil || tenantID == "" || to == "" {
 		return nil
@@ -234,6 +258,15 @@ func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) erro
 	return nil
 }
 
+// recipientReplyError marks the server's answer to RCPT TO, the one SMTP
+// step that names a recipient. deliver wraps that step's error in it; a
+// refusal at any other step is about the sender or the message, and
+// isPermanentSMTPBounce never reads it as the customer's bounce.
+type recipientReplyError struct{ err error }
+
+func (e recipientReplyError) Error() string { return e.err.Error() }
+func (e recipientReplyError) Unwrap() error { return e.err }
+
 // isPermanentSMTPBounce checks an SMTP send error for a
 // recipient-rejection permanent-failure reply — the recipient address
 // itself is bad, so flagging the customer's email as bounced is the
@@ -243,7 +276,16 @@ func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) erro
 // customer to bounced would block future legitimate sends as soon as
 // the operator fixes their config.
 //
-// Classification per RFC 5321 + RFC 3463:
+// Only the reply to RCPT TO can be a bounce. A refusal after MAIL FROM or
+// after the message is about the sender or the message, whatever its
+// code: SendGrid answers an unverified sender after the message with
+// "550 The from address does not match a verified Sender Identity.", no
+// status code, and a 5.1.x status after MAIL FROM (553 5.1.8, the sender's
+// domain does not exist) names the sender's address. Read as bounces they
+// dead-lettered the email at once and marked every customer bounced, so
+// no relay-broken alert fired and fixing the relay did not unblock them.
+//
+// Classification of the RCPT TO reply, per RFC 5321 + RFC 3463:
 //
 //	Basic 5xx codes that ARE recipient bounces:
 //	  550 - mailbox unavailable / no such user
@@ -285,8 +327,12 @@ func (s *Sender) checkSuppression(ctx context.Context, tenantID, to string) erro
 // manual recovery — much worse, so the classifier is conservative
 // toward "not a bounce."
 func isPermanentSMTPBounce(err error) (bool, string) {
+	var rcpt recipientReplyError
+	if !errors.As(err, &rcpt) {
+		return false, ""
+	}
 	var reply *textproto.Error
-	if !errors.As(err, &reply) {
+	if !errors.As(rcpt.err, &reply) {
 		return false, ""
 	}
 	// A 4xx reply is transient even when its text quotes a 5.x.x status.
@@ -444,11 +490,18 @@ func (s *Sender) SendPaymentReceipt(ctx context.Context, tenantID, to string, cc
 // willExhaustThisAttempt in internal/dunning/service.go).
 // CTA is a "Pay invoice" button on the hosted invoice page (Stripe
 // Checkout there handles both PM update and pay).
-func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error {
+func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 
+	// A card the bank refused for good (#966) gets its own copy: no retry
+	// date is promised, because dunning will not charge that card again.
 	subject, contentHTML, ctaURL, ctaLabel := renderDunningWarningHTML(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
+	textBody := dunningWarningTextBody(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
+	if cardNeedsReplacing {
+		subject, contentHTML, ctaURL, ctaLabel = renderCardRefusedWarningHTML(customerName, invoiceNumber, hostedURL)
+		textBody = cardRefusedWarningTextBody(customerName, invoiceNumber, hostedURL)
+	}
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
 		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
@@ -457,7 +510,6 @@ func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc
 	if err != nil {
 		return fmt.Errorf("render dunning warning html: %w", err)
 	}
-	textBody := dunningWarningTextBody(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID: tenantID, To: to, Cc: cc, Subject: subject,
@@ -703,6 +755,18 @@ func dunningWarningTextBody(customerName, invoiceNumber string, attemptNumber, m
 	return b.String()
 }
 
+// cardRefusedWarningTextBody is the plain-text part of the "use a different
+// card" warning (renderCardRefusedWarningHTML).
+func cardRefusedWarningTextBody(customerName, invoiceNumber, hostedURL string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
+	fmt.Fprintf(&b, "%s\n%s\n\n", cardRefusedSentence(invoiceNumber), cardRefusedAsk)
+	if hostedURL != "" {
+		fmt.Fprintf(&b, "Pay invoice: %s\n", hostedURL)
+	}
+	return b.String()
+}
+
 func dunningEscalationTextBody(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string) string {
 	// Same customer copy as the HTML alternative (dunningEscalationCopy).
 	// Pre-fix this text part still rendered the raw internal enum —
@@ -729,7 +793,7 @@ func paymentFailedTextBody(customerName, invoiceNumber, reason, hostedURL string
 		fmt.Fprintf(&b, "Reason: %s\n", reason)
 	}
 	if hostedURL != "" {
-		fmt.Fprintf(&b, "\nUpdate payment method: %s\n", hostedURL)
+		fmt.Fprintf(&b, "\nPay invoice: %s\n", hostedURL)
 	}
 	return b.String()
 }
@@ -787,6 +851,9 @@ type richMessage struct {
 func (s *Sender) sendRich(ctx context.Context, msg richMessage) error {
 	if !s.IsConfigured() {
 		return ErrSMTPNotConfigured
+	}
+	if err := checkRecipients(msg.To, msg.Cc); err != nil {
+		return err
 	}
 	if err := s.checkSuppression(ctx, msg.TenantID, msg.To); err != nil {
 		// Primary suppressed = the whole send is blocked, never
@@ -928,8 +995,10 @@ func (s *Sender) deliver(ctx context.Context, tenantID, to string, cc []string, 
 	if err := c.Mail(s.from); err != nil {
 		return fmt.Errorf("smtp mail from: %w", err)
 	}
+	// Only RCPT TO errors are wrapped as recipientReplyError: no other
+	// step's refusal is the recipient's bounce (see isPermanentSMTPBounce).
 	if err := c.Rcpt(to); err != nil {
-		return fmt.Errorf("smtp rcpt to: %w", err)
+		return fmt.Errorf("smtp rcpt to: %w", recipientReplyError{err})
 	}
 	for _, addr := range cc {
 		if err := c.Rcpt(addr); err != nil {
@@ -941,7 +1010,7 @@ func (s *Sender) deliver(ctx context.Context, tenantID, to string, cc []string, 
 				// never to the primary.
 				slog.Warn("smtp rcpt rejected for cc recipient — dropped from this send",
 					"cc", addr, "code", proto.Code, "error", err)
-				s.reportBounceIfPermanent(ctx, tenantID, addr, err)
+				s.reportBounceIfPermanent(ctx, tenantID, addr, recipientReplyError{err})
 				continue
 			}
 			// Transport/IO failure: nothing has been delivered (DATA not
@@ -967,6 +1036,9 @@ func (s *Sender) deliver(ctx context.Context, tenantID, to string, cc []string, 
 func (s *Sender) sendPlain(ctx context.Context, tenantID, to, fromName, subject, body string) error {
 	if !s.IsConfigured() {
 		return ErrSMTPNotConfigured
+	}
+	if err := checkRecipients(to, nil); err != nil {
+		return err
 	}
 	if err := s.checkSuppression(ctx, tenantID, to); err != nil {
 		return err

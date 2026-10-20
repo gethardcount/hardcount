@@ -484,6 +484,9 @@ export const api = {
 
   // Credit Notes
   listCreditNotes: (params?: string) => apiRequest<{ data: CreditNote[] }>('GET', `/credit-notes${params ? '?' + params : ''}`),
+  // The key is required: an issued note can refund a card, and the server's
+  // per-invoice cap stops over-crediting but not a repeat. A retry sent with
+  // the same key gets the first request's answer instead of a second note.
   createCreditNote: (data: {
     invoice_id: string
     reason: string
@@ -493,7 +496,7 @@ export const api = {
     refund_type?: string
     auto_issue?: boolean
     lines: { description: string; quantity: number; unit_amount_cents: number }[]
-  }) => apiRequest<CreditNote>('POST', '/credit-notes', data),
+  }, idempotencyKey: string) => apiRequest<CreditNote>('POST', '/credit-notes', data, { idempotencyKey }),
   issueCreditNote: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/issue`),
   voidCreditNote: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/void`),
   retryCreditNoteRefund: (id: string) => apiRequest<CreditNote>('POST', `/credit-notes/${id}/retry-refund`),
@@ -1001,7 +1004,8 @@ export interface LineItem {
   tax_code?: string
   // tax_reason is the Stripe-canonical structured taxability_reason
   // (e.g. "standard_rated", "reverse_charge", "not_collecting",
-  // "customer_exempt"). Empty for non-Stripe providers. The dashboard
+  // "customer_exempt"), or Velox's own "prepaid_credit_purchase" on a
+  // prepaid commit purchase line. Otherwise empty for non-Stripe providers. The dashboard
   // surfaces a small badge for non-trivial values; see taxReasonLabel
   // in lib/taxReasons.ts for the rendering contract.
   tax_reason?: string
@@ -1039,8 +1043,8 @@ export interface TimelineEvent {
   // event types may add their own contextual detail later.
   // ADR-020.
   detail?: string
-  // RFC3339 timestamp the detail prefix refers to (e.g. for the
-  // "Auto-resumes" / "On" / "New trial end:" cases). When set, the
+  // RFC3339 timestamp the end of detail refers to (the subscription
+  // timeline's "Trial now ends", "Resumes", "On" cases). When set, the
   // renderer formats it in tenant TZ via formatDateTime so the sub-
   // line stays consistent with the main row timestamp instead of
   // mixing the operator's TZ with backend-baked UTC.

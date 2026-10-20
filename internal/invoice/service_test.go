@@ -258,8 +258,12 @@ func (m *memStore) UpdateStatusWithReversalPrior(ctx context.Context, tenantID, 
 // ChargeHeldTx: the fake does not model the charge lease (its claims ignore
 // it too), so no charge ever holds an invoice here. The hold is pinned
 // against real Postgres in charge_hold_guard_integration_test.go.
-func (m *memStore) ChargeHeldTx(_ context.Context, _ *sql.Tx, _ string) (bool, error) {
-	return false, nil
+func (m *memStore) ChargeHeldTx(_ context.Context, _ *sql.Tx, _ string) (domain.ChargeHoldState, domain.ChargeHold, error) {
+	return domain.ChargeHoldNone, domain.ChargeHold{}, nil
+}
+
+func (m *memStore) ChargeHoldStateOf(_ context.Context, _, _ string) (domain.ChargeHoldState, error) {
+	return domain.ChargeHoldNone, nil
 }
 
 // MarkPaidOffline: check sees the current in-memory invoice as the locked row.
@@ -811,27 +815,38 @@ func (m *memStore) AddLineItemAtomicAudited(ctx context.Context, tenantID, invoi
 	return out, inv, nil
 }
 
-func (m *memStore) ClaimAutoCharge(_ context.Context, _, id string) (bool, error) {
+// memHold is the token memStore's claims hand out: the fake does not model
+// the hold itself, only whether the claim's predicate admitted the invoice.
+var memHold = domain.ChargeHold{Until: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}
+
+func (m *memStore) ClaimAutoCharge(_ context.Context, _, id string) (domain.ChargeHold, error) {
 	inv, ok := m.invoices[id]
 	if !ok {
-		return false, errs.ErrNotFound
+		return domain.ChargeHold{}, errs.ErrNotFound
 	}
-	return inv.AutoChargePending && inv.PaymentStatus == domain.PaymentPending &&
-		inv.Status == domain.InvoiceFinalized, nil
+	if inv.AutoChargePending && inv.PaymentStatus == domain.PaymentPending && inv.Status == domain.InvoiceFinalized {
+		return memHold, nil
+	}
+	return domain.ChargeHold{}, nil
 }
 
-func (m *memStore) ClaimChargeForManualCollect(_ context.Context, _, id string) (bool, error) {
+func (m *memStore) ClaimChargeForManualCollect(_ context.Context, _, id string) (domain.ChargeHold, error) {
 	inv, ok := m.invoices[id]
 	if !ok {
-		return false, errs.ErrNotFound
+		return domain.ChargeHold{}, errs.ErrNotFound
 	}
-	// Mirrors claimChargeLease's predicate (sans the lease window, which
+	// Mirrors the manual-collect claim's predicate (sans the hold, which
 	// memStore doesn't model): finalized, pending/failed, owing.
-	return (inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed) &&
-		inv.Status == domain.InvoiceFinalized && inv.AmountDueCents > 0, nil
+	if (inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed) &&
+		inv.Status == domain.InvoiceFinalized && inv.AmountDueCents > 0 {
+		return memHold, nil
+	}
+	return domain.ChargeHold{}, nil
 }
 
-func (m *memStore) ReleaseAutoChargeClaim(_ context.Context, _, _ string) error { return nil }
+func (m *memStore) ReleaseChargeHold(_ context.Context, _, _ string, _ domain.ChargeHold) error {
+	return nil
+}
 
 func (m *memStore) SetAutoChargePending(_ context.Context, _, id string, pending bool) error {
 	inv, ok := m.invoices[id]
@@ -1928,22 +1943,27 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 		}
 	})
 
-	t.Run("read error → stays draft (never charge on a guess)", func(t *testing.T) {
+	// The draft does not wait for anything: its tax is ok, so no sweep lists
+	// it again. RetryTax returns the error so the sweep counts it (G7).
+	t.Run("read error → stays draft (never charge on a guess) and RetryTax errors", func(t *testing.T) {
 		store := newMemStore()
 		newStuckInvoice(store)
 		svc := NewService(store, nil, nil)
 		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
 		svc.SetSubscriptionPauseReader(&stubPauseReader{err: errors.New("connection reset")})
 
-		out, err := svc.RetryTax(context.Background(), "t1", "inv_paused")
-		if err != nil {
-			t.Fatalf("RetryTax: %v (the tax result is persisted; the draft just waits)", err)
+		if _, err := svc.RetryTax(context.Background(), "t1", "inv_paused"); err == nil {
+			t.Fatal("RetryTax = nil on an unread pause state: the sweep counts a draft no sweep revisits as advanced")
 		}
-		if out.Status != domain.InvoiceDraft {
-			t.Errorf("status = %s, want draft — an unreadable pause state must not issue and queue a charge", out.Status)
+		got := store.invoices["inv_paused"]
+		if got.Status != domain.InvoiceDraft {
+			t.Errorf("status = %s, want draft — an unreadable pause state must not issue and queue a charge", got.Status)
 		}
-		if store.invoices["inv_paused"].AutoChargePending {
+		if got.AutoChargePending {
 			t.Error("auto_charge_pending set on an unread pause state")
+		}
+		if got.TaxStatus != domain.InvoiceTaxOK {
+			t.Errorf("tax_status = %s, want ok (the tax write is kept)", got.TaxStatus)
 		}
 	})
 }

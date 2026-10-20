@@ -83,9 +83,10 @@ type PreviewResult struct {
 	Warnings           []string       `json:"warnings"`
 	GeneratedAt        time.Time      `json:"generated_at"`
 
-	// unpriced is each meter bucket that matched no price, for the
-	// threshold fire (not part of the API response).
-	unpriced []unpricedBucket
+	// leftOut is each meter bucket priced at nothing (no price matched it,
+	// or it was below zero), for the threshold fire (not part of the API
+	// response).
+	leftOut []leftOutBucket
 }
 
 // Preview generates a dry-run invoice for a subscription without persisting
@@ -246,13 +247,13 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	// fail-loud contract for exactly the money path it matters on.
 	usageLineCount := 0
 	for _, meterID := range allMeterIDs {
-		meterLines, warnings, unpriced, err := e.previewMeter(ctx, sub.TenantID, sub.CustomerID, meterID, periodStart, periodEnd)
+		meterLines, warnings, leftOut, err := e.previewMeter(ctx, sub.TenantID, sub.CustomerID, meterID, periodStart, periodEnd)
 		if err != nil {
 			return PreviewResult{}, fmt.Errorf("preview meter %q: %w", meterID, err)
 		}
 		result.Lines = append(result.Lines, meterLines...)
 		result.Warnings = append(result.Warnings, warnings...)
-		result.unpriced = append(result.unpriced, unpriced...)
+		result.leftOut = append(result.leftOut, leftOut...)
 		usageLineCount += len(meterLines)
 	}
 
@@ -411,16 +412,31 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 			}
 		}
 	}
-	meterIntervals, _ := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough)
-	capped := sub.UsageCapUnits != nil && *sub.UsageCapUnits > 0 && sub.OverageAction == "block"
-	ladder := newUsageLadder(wm, capped)
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough)
+	// The tier ladder runs only after a threshold fire, and the close turns
+	// it off only when the block usage cap binds; the preview works the cap
+	// out the same way for that switch (usage_cap.go). It does not scale its
+	// lines by the cap (capWarning says so).
+	capBinds := false
+	if wm.exists() {
+		meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
+		if err != nil {
+			return PreviewResult{}, fmt.Errorf("preview: %w", err)
+		}
+		usageCap, err := e.usageCapFor(ctx, sub, meterIntervalsFull, newWindowUsage(e, sub, meterAggs))
+		if err != nil {
+			return PreviewResult{}, fmt.Errorf("preview: %w", err)
+		}
+		capBinds = usageCap.binds()
+	}
+	ladder := newUsageLadder(wm, capBinds)
 	usageLineCount := 0
 	for _, meterID := range order {
 		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
 			return ladder.price(rule, meterID, bucketKey, mode, qty)
 		}
 		for _, iv := range mergeUsageIntervals(meterIntervals[meterID]) {
-			lines, warnings, unpriced, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
+			lines, warnings, leftOut, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
 			if err != nil {
 				return PreviewResult{}, fmt.Errorf("preview meter %q: %w", meterID, err)
 			}
@@ -429,7 +445,7 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 			}
 			result.Lines = append(result.Lines, lines...)
 			result.Warnings = append(result.Warnings, warnings...)
-			result.unpriced = append(result.unpriced, unpriced...)
+			result.leftOut = append(result.leftOut, leftOut...)
 			usageLineCount += len(lines)
 		}
 	}
@@ -516,7 +532,7 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, p
 // AggregateByPricingRules + ComputeAmountCents path, so each line
 // produced here matches the invoice_line_item the cycle scan would
 // persist.
-func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID string, from, to time.Time) ([]PreviewLine, []string, []unpricedBucket, error) {
+func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID string, from, to time.Time) ([]PreviewLine, []string, []leftOutBucket, error) {
 	return e.rateMeterWindow(ctx, tenantID, customerID, meterID, from, to, from, nil)
 }
 
@@ -532,9 +548,10 @@ type bucketPricer func(rule domain.RatingRuleVersion, bucketKey string, mode dom
 // the fire's watermark), and price, which lets the caller continue a tier
 // ladder across the fire the way the period close does. A nil price rates the
 // bucket on its own, which is the preview and threshold-fire behavior.
-// The unpriced buckets come back both as a warning (for people) and as data
-// (for the threshold fire, which reports them).
-func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, meterID string, from, to, pinAt time.Time, price bucketPricer) ([]PreviewLine, []string, []unpricedBucket, error) {
+// The buckets priced at nothing (unpriced, or below zero) come back both as
+// a warning (for people) and as data (for the threshold fire, which reports
+// them).
+func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, meterID string, from, to, pinAt time.Time, price bucketPricer) ([]PreviewLine, []string, []leftOutBucket, error) {
 	meter, err := e.pricing.GetMeter(ctx, tenantID, meterID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("get meter: %w", err)
@@ -557,7 +574,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 
 	var lines []PreviewLine
 	var warnings []string
-	var unpriced []unpricedBucket
+	var leftOut []leftOutBucket
 
 	for _, agg := range aggs {
 		if agg.Quantity.IsZero() {
@@ -566,11 +583,12 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 		// Ingest accepts negative corrections, so a bucket's period-to-date
 		// total can be negative until new usage overtakes it. That is a
 		// legitimate state, not a pricing error: it contributes nothing to
-		// a preview or a threshold, with a warning. (Pricing it would fail —
-		// ComputeAmountCents refuses negative quantities — and abort the
-		// whole threshold evaluation for the subscription.)
+		// a preview or a threshold, with a warning — the rule every invoice
+		// path follows (net_negative.go, #1193). (Pricing it would fail —
+		// ComputeAmountCents refuses negative quantities.)
 		if agg.Quantity.IsNegative() {
 			warnings = append(warnings, fmt.Sprintf("meter %q: net-negative usage so far (%s) after corrections — counted as 0", meter.Key, agg.Quantity.String()))
+			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, MeterName: meter.Name, Mode: agg.AggregationMode, Quantity: agg.Quantity, BelowZero: true})
 			continue
 		}
 
@@ -582,7 +600,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 			// The quantity is what the operator needs to bill it by hand
 			// (a one-off invoice), so the warning carries it (#981).
 			warnings = append(warnings, fmt.Sprintf("meter %q: %s %s matched no pricing rule and the meter has no default price — not billed", meter.Key, agg.Quantity.String(), meter.Unit))
-			unpriced = append(unpriced, unpricedBucket{MeterID: meterID, MeterKey: meter.Key, Mode: agg.AggregationMode, Quantity: agg.Quantity})
+			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, MeterName: meter.Name, Mode: agg.AggregationMode, Quantity: agg.Quantity})
 			continue
 		}
 
@@ -648,7 +666,7 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 		})
 	}
 
-	return lines, warnings, unpriced, nil
+	return lines, warnings, leftOut, nil
 }
 
 // computePreviewTotals groups each line's amount by currency and emits

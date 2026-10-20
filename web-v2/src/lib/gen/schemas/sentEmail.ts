@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ActivityLine } from './activityLine';
 import type { SentEmailDeliveryState } from './sentEmailDeliveryState';
 import type { SentEmailEmailType } from './sentEmailEmailType';
 import type { SentEmailStatus } from './sentEmailStatus';
@@ -23,4 +24,14 @@ export interface SentEmail {
   last_error?: string;
   created_at: string;
   dispatched_at?: string;
+  /**
+     * The email in the words of the activity line standard (ADR-128),
+     * the same as on the invoice's payment timeline: its name and
+     * what happened to it ("Receipt email delivered"), why it was not
+     * sent, the invoice it was about, and who it went to. Dated at the
+     * time on the customer's test clock that caused it, with the real
+     * send time as `recorded_at`. Present for every email type this
+     * list returns.
+     */
+  line?: ActivityLine;
 }

@@ -32,8 +32,11 @@ func TestStripeClient_CredentialReadErrorIsTransient(t *testing.T) {
 		t.Fatalf("read error: err = %v, want ErrPaymentTransient", err)
 	}
 	c = NewLiveStripeClient(NewStripeClients(credsFetcher{err: errs.ErrNotFound}))
-	if _, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{}); !errors.Is(err, ErrStripeNotConfigured) {
-		t.Fatalf("no credentials: err = %v, want ErrStripeNotConfigured", err)
+	// No credentials is a charge not attempted (G2): a StripeKeyError, not
+	// the ErrStripeNotConfigured PaymentError that counted as a decline.
+	var ke *StripeKeyError
+	if _, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{}); !errors.As(err, &ke) || ke.Reason != StripeKeyNotConfigured {
+		t.Fatalf("no credentials: err = %v, want a not_configured StripeKeyError", err)
 	}
 }
 
@@ -84,7 +87,7 @@ func TestChargeInvoice_CredentialReadErrorLeavesInvoiceUntouched(t *testing.T) {
 	transient := fmt.Errorf("%w: stripe credential lookup: %v", ErrPaymentTransient, errBlip)
 	s := NewStripe(&mockStripeClient{shouldFail: true, failErr: transient}, invoices, newMockWebhookStore(), nil, nil)
 
-	_, err := s.ChargeInvoice(context.Background(), "t1", snapshot, "cus_stripe", "pm_test")
+	_, err := s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if !errors.Is(err, ErrPaymentTransient) {
 		t.Fatalf("err = %v, want ErrPaymentTransient", err)
 	}

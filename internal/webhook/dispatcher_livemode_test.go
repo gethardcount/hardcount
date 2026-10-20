@@ -46,7 +46,7 @@ func TestDispatcher_Handle_PropagatesRowLivemodeIntoCtx(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			store := &livemodeCapturingStore{memStore: newMemStore()}
-			d := &Dispatcher{svc: NewService(store, nil)}
+			d := &Dispatcher{svc: NewService(store, nil, "local")}
 
 			err := d.handle(context.Background(), OutboxRow{
 				TenantID:  "t1",

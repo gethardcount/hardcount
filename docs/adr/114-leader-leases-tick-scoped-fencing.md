@@ -4,6 +4,7 @@
 **Date:** 2026-08-30
 **Amended:** 2026-08-30 — migration 0175 adds `not_before` (cooldown after a lost tick) so `last_tick_*` means completed ticks only (sweep S5)
 **Amended:** 2026-10-08 (a panicked tick is released as not completed).
+**Amended:** 2026-10-19 (a panic stops one step, not the tick; a panicked tick waits one full interval).
 **Partly superseded:** by [ADR-115](115-one-closer-for-the-billing-period.md) on 2026-08-30 (the billing-period watermark compare-and-swap).
 **Amends:** ADR-006 (background scheduler; the leader gate it assumed), ADR-072 (transport lease model — unchanged, now composed with a leader fence), ADR-073 (boot contract — `VerifyAdvisoryLockTopology` retired)
 **Plan of record:** [docs/records/ha-readiness-2026-07-06.md](../records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
@@ -297,8 +298,101 @@ which logs it with the stack. A deterministic panic now retries at most once
 per cooldown, pages on the lease-lost counter at once, and ages the stall
 gauge. Each retry re-runs the tick's work up to the panic point; every effect
 there is CAS- or key-guarded (the effect table above), so the cost is load,
-not duplicated money. A panic in a tick whose lease was already lost reports
+not duplicated money. *(Corrected 2026-10-19: not true for dunning. A retry
+records its attempt before the charge, so each rerun spent an attempt, and
+charged the card again once a decline had released the hold. See the
+amendment of that date.)* A panic in a tick whose lease was already lost reports
 only the loss reason, once. The counter's role as the TTL-revisit trigger
 (Observability above) counts only the lost-lease reasons: `panicked` is a
 code or data defect and `paused` an operator action, so both are excluded. Pinned by `TestLease_PanickedTickIsNotACompletion` (real Postgres) and
 `TestRun_PanicUnwindsThroughTheGate`, both mutation-verified.
+
+## Amendment 2026-10-19 — one more `invoice.finalized` site, outside the leader
+
+The effect table (2026-08-30) lists the engine's `invoice.finalized` sites.
+Another site sends the same webhook: the proration invoice of a mid-period
+upgrade, seat increase or added item (#1279). An API request sends it, not a
+leader tick, through `Engine.DispatchInvoiceFinalized` once the item-change
+transaction commits. That transaction also writes the finalize audit row.
+A retried change hits `idx_invoices_proration_dedup`, returns the invoice
+the first attempt made, and sends nothing.
+
+## Amendment 2026-10-19 — a panic stops one step, not the tick
+
+The 2026-10-08 amendment made a panicked tick visible, but the tick still
+ended at the panic. The real trigger is a nil dereference on one unusual
+row, as in flexprice #1615 (#1299 had to add a nil-client guard "instead of
+panicking the tick"). Such a panic stopped every later step, the test-mode
+pass and the cleanup, for every tenant. The next tick, 60 s later, panicked on the same
+row, so nothing was billed or charged until a hotfix. In dunning it was
+worse than load: a retry records its attempt before the charge, so a panic
+in the retry skipped both the rewind and the reschedule. Each rerun spent
+another attempt, charged the card again once a decline had released the
+charge hold, and within minutes exhaust-on-entry fired the final action
+(cancel, pause or write-off). Found by the 2026-10-19 loops review (G1).
+
+What changed:
+
+1. **One guard, `scheduler.Panics`.** Each billing step, each reconciler,
+   each cleanup call and each dunning tenant runs under it. A step that
+   panics stops; the guard logs the panic with its stack and the step or row
+   (`step panicked; running the rest`), keeps the first, and the other steps
+   run. `runBillingHalf` and `runDunningHalf` raise the first panic again at
+   the end, so `Lead` still releases the tick as panicked and the lease-lost
+   counter pages. The livemode asserts stay outside the guards. A panic logs
+   that line once per guard it passes on the way up; the first has its own
+   stack. `Reconciler.Run` and a dunning batch log the errors they
+   collected before they raise a panic again, since the panic drops their
+   return (the billing run's per-subscription failures are logged where
+   they happen, by `attemptSub`). The other three roles are
+   unchanged: a panic ends their tick, with the stack on `scheduler panic
+   recovered`.
+2. **The billing run bills past a panicking subscription.** `attemptSub`
+   saves the failure as before; the run (`drainDue`) leaves that
+   subscription out, bills the rest, and raises the panic at the end. The
+   operator's run and the test-clock catch-up use the same drain.
+3. **Each payment-reconciler sweep guards each row.** The stale-hold,
+   unknown, processing, parked and hosted-session sweeps all list the least
+   recently checked rows first, and stamp a row only once its check is
+   done. So a row whose check panicked came back first on every tick and
+   stopped the rows behind it. A check that panics now counts as failed, and its
+   row is stamped so it rotates. `Reconciler.Run` raises the panic only
+   after its last sweep. Every charge claim refuses an `unknown` invoice,
+   so this sweep (or a webhook) is its only way out, as it is for a stale
+   hold.
+4. **A panic in a dunning retry is rewound.** It goes through the guarded
+   transient-skip rewind, so the run is as it was listed. It is then raised
+   again, after the batch has processed its other runs. This is the same rule as
+   "only a definite decline counts", applied to a panic.
+5. **A panicked tick waits one full interval.** RELEASE outcome 3 sets
+   `not_before = now() + interval`. With 1-4, every other step and row has
+   already run in the panicked tick. A 60 s rerun would only re-drive the
+   rows that panic: in billing, 60 times the Stripe reads, threshold scans
+   and charge-queue writes an hour. An hourly rerun also gives the paged
+   operator time to pause the dunning run that panics (the runbook says
+   how; pausing the role would stop dunning for every tenant). A lost
+   lease keeps `min(interval, 60 s)`, and so does a lost tick whose work
+   then panics on the cancelled ctx: `Lead` checks the lost cause first,
+   as its single `onLost` report already did. A tick a shutdown cancelled
+   is released as interrupted even if its work then panicked, so a deploy
+   (often the one with the fix) adds no wait; the panic is still reported.
+   Roles faster than 60 s are unchanged.
+6. **`velox_leader_lease_lost_total{role, reason="panicked"}` starts at 0.**
+   The page row is `increase(...[1h]) > 0`, and a series first exported at 1
+   has no earlier sample, so the first panicked tick after a start never
+   paged. Only `panicked` is created at boot; a `heartbeat_timeout` series
+   would page on one timeout, which waits for the heartbeat fix (RL-F2).
+
+After the fix for a panic ships, the role still waits out its `not_before`.
+To run it at once: `UPDATE leader_leases SET not_before = NULL WHERE role =
+'<role>'`. `leader_unpause` does not clear `not_before`.
+
+Pinned by `TestScheduler_StepPanic_RestOfTheTickRuns`,
+`TestBillingFailure_PanicIsRecordedThenRepanics`,
+`TestProcessDueRuns_RetryPanic_RewindsAndRunsTheRest`,
+`TestStaleHold_PanickingCheck_RestOfTheRunGoesOn`,
+`TestReconcile_PanickingRow_RotatesAndTheRestGoesOn`,
+`TestLease_PanickedTickIsNotACompletion` and
+`TestLease_PanicAfterShutdownReleasesAsInterrupted` (real Postgres), and by
+unit tests for the reconcilers, the hosted sweep, the dunning tenants, the
+errors a re-raised panic would drop, and the pre-created series.

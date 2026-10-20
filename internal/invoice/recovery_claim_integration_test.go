@@ -74,7 +74,7 @@ func TestManualCollectClaim_RefusesWrittenOff(t *testing.T) {
 	writtenOff := seedWrittenOff(t, db, ctx, tenantID, "INV-113-A", "")
 	if got, err := store.ClaimChargeForManualCollect(ctx, tenantID, writtenOff.ID); err != nil {
 		t.Fatalf("claim: %v", err)
-	} else if got {
+	} else if got.Held() {
 		t.Fatal("ClaimChargeForManualCollect admitted a WRITTEN-OFF invoice — ADR-113 removed charge-in-place recovery; a written-off invoice is settled by recording writers only")
 	}
 
@@ -100,7 +100,7 @@ func TestManualCollectClaim_RefusesWrittenOff(t *testing.T) {
 	}
 	if got, err := store.ClaimChargeForManualCollect(ctx, tenantID, finalized.ID); err != nil {
 		t.Fatalf("claim finalized: %v", err)
-	} else if !got {
+	} else if !got.Held() {
 		t.Fatal("claim refused a finalized/failed invoice — the operator retry path must survive the ADR-113 narrowing")
 	}
 }
@@ -126,7 +126,7 @@ func TestManualCollectClaim_RefusalIsStatusNotGates(t *testing.T) {
 		inv := seedWrittenOff(t, db, ctx, tenantID, tc.num, tc.mutate)
 		if got, err := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID); err != nil {
 			t.Fatalf("%s: %v", tc.num, err)
-		} else if got {
+		} else if got.Held() {
 			t.Errorf("%s (mutate %q): claim admitted a written-off invoice", tc.num, tc.mutate)
 		}
 	}

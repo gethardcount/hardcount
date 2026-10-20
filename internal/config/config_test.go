@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +80,9 @@ func TestValidate_ProductionWarnsMissingRedis(t *testing.T) {
 
 func TestValidate_ValidConfig(t *testing.T) {
 	t.Setenv("VELOX_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	for _, name := range publicAddressSettings {
+		t.Setenv(name, "https://billing.example.com")
+	}
 
 	cfg := Config{
 		Port:       "8080",
@@ -288,7 +292,7 @@ func TestLoad_AppEnvIsCaseNormalised(t *testing.T) {
 // AppEnv is the one normalisation Load and `velox migrate rollback` share:
 // the rollback check must call " Local " local, and an unset APP_ENV local.
 func TestAppEnv(t *testing.T) {
-	for raw, want := range map[string]string{"": "local", " Local ": "local", "staging": "staging", "PRODUCTION": "production"} {
+	for raw, want := range map[string]string{"": "local", " Local ": "local", "staging": "staging", " Staging ": "staging", "PRODUCTION": "production", " Production ": "production"} {
 		t.Setenv("APP_ENV", raw)
 		if got := AppEnv(); got != want {
 			t.Errorf("APP_ENV=%q: got %q, want %q", raw, got, want)
@@ -422,6 +426,58 @@ func TestLoad_RejectsNearMissOfProduction(t *testing.T) {
 	}
 }
 
+// In staging and production the sign-in cookie is always Secure, and browsers
+// keep a Secure cookie only over HTTPS. An address setting that starts with
+// http:// says Velox is served without TLS there, so start-up names it. Local
+// is plain HTTP by design and stays quiet.
+func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
+	base := Config{
+		Port:       "8080",
+		RedisURL:   "redis://localhost:6379",
+		TrustProxy: "none",
+		DB:         DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
+	}
+	settings := []string{
+		"DASHBOARD_BASE_URL", "CUSTOMER_PORTAL_URL", "HOSTED_INVOICE_BASE_URL",
+		"PAYMENT_UPDATE_URL", "PAYMENT_UPDATE_RETURN_URL", "VELOX_API_BASE_URL",
+	}
+	for _, name := range settings {
+		t.Run(name, func(t *testing.T) {
+			for _, other := range settings {
+				t.Setenv(other, "")
+			}
+			for _, c := range []struct {
+				env, value string
+				warn       bool
+			}{
+				{"production", "http://billing.example.com", true},
+				{"production", " HTTP://billing.example.com/pay ", true},
+				{"production", "http://localhost:8080", true},
+				{"staging", "http://staging.example.com", true},
+				{"production", "https://billing.example.com", false},
+				{"production", "", false},
+				{"local", "http://localhost:5173", false},
+			} {
+				t.Setenv(name, c.value)
+				cfg := base
+				cfg.Env = c.env
+				var got []string
+				for _, w := range cfg.Validate() {
+					if strings.HasPrefix(w, name+" is an http:// address") {
+						got = append(got, w)
+					}
+				}
+				if c.warn && (len(got) != 1 || !strings.Contains(got[0], "https://")) {
+					t.Errorf("APP_ENV=%s %s=%q: want one warning that asks for an https:// address, got %q", c.env, name, c.value, got)
+				}
+				if !c.warn && len(got) != 0 {
+					t.Errorf("APP_ENV=%s %s=%q: want no warning, got %q", c.env, name, c.value, got)
+				}
+			}
+		})
+	}
+}
+
 // A TRUST_PROXY value the router cannot parse used to pass the "is it set"
 // gate and then behave exactly as unset. Every entry must parse, in every
 // environment.
@@ -445,6 +501,64 @@ func TestLoad_TrustProxyMustParse(t *testing.T) {
 			if _, err := Load(); err != nil {
 				t.Errorf("APP_ENV=%s TRUST_PROXY=%q must boot, got: %v", env, ok, err)
 			}
+		}
+	}
+}
+
+// An origin with a * inside it, such as https://*.example.com, is not a
+// pattern: Velox matches origins exactly, so it would allow nothing. "*"
+// beside other origins turns the sign-in cookie off for them too. Both stop
+// start-up, in every environment.
+func TestLoad_CORSAllowedOriginsRefusesPatterns(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
+	t.Setenv("VELOX_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("TRUST_PROXY", "none")
+
+	for _, env := range []string{"production", "local"} {
+		t.Setenv("APP_ENV", env)
+		for _, bad := range []string{"https://*.example.com", "h*", "https://app.example.com,*.example.com", "**", "*,https://app.example.com", "https://app.example.com, *"} {
+			t.Setenv("CORS_ALLOWED_ORIGINS", bad)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS") {
+				t.Errorf("APP_ENV=%s CORS_ALLOWED_ORIGINS=%q must refuse to boot naming CORS_ALLOWED_ORIGINS, got: %v", env, bad, err)
+			}
+		}
+		for _, ok := range []string{"", "*", " * ", "https://app.example.com", " https://a.example.com , https://b.example.com ,", "http://localhost:5173"} {
+			t.Setenv("CORS_ALLOWED_ORIGINS", ok)
+			if _, err := Load(); err != nil {
+				t.Errorf("APP_ENV=%s CORS_ALLOWED_ORIGINS=%q must boot, got: %v", env, ok, err)
+			}
+		}
+	}
+}
+
+// ParseCORSOrigins feeds the boot check, CORS and the CSRF guard. The usable
+// entries come back alongside the error naming the refused ones.
+func TestParseCORSOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		spec string
+		want []string
+		err  string
+	}{
+		{"", nil, ""},
+		{" , ", nil, ""},
+		{" https://a.example.com , https://b.example.com ,", []string{"https://a.example.com", "https://b.example.com"}, ""},
+		{" * ", []string{"*"}, ""},
+		{"*,*", []string{"*"}, ""},
+		{"https://a.example.com, https://*.example.com, h*", []string{"https://a.example.com"}, `"https://*.example.com", "h*"`},
+		{"*, https://a.example.com", []string{"https://a.example.com"}, "* beside other origins"},
+	} {
+		got, err := ParseCORSOrigins(tc.spec)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("ParseCORSOrigins(%q) = %q, want %q", tc.spec, got, tc.want)
+		}
+		switch {
+		case tc.err == "" && err != nil:
+			t.Errorf("ParseCORSOrigins(%q): unexpected error %v", tc.spec, err)
+		case tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)):
+			t.Errorf("ParseCORSOrigins(%q): error %v, want one containing %q", tc.spec, err, tc.err)
 		}
 	}
 }
@@ -501,5 +615,76 @@ func TestLoad_RejectsUnparseableInt(t *testing.T) {
 	}
 	if cfg.DB.MaxOpenConns != 40 {
 		t.Errorf("max_open_conns: got %d, want 40", cfg.DB.MaxOpenConns)
+	}
+}
+
+// VELOX_RATE_LIMIT_* used to be read by the router, which fell back to the
+// default without a word on a value it could not parse, or on 0. Load now
+// owns them, and a bad value stops start-up naming the setting.
+func TestLoad_RateLimits(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_ENV", "local")
+	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("TRUST_PROXY", "")
+	const general, ingest = "VELOX_RATE_LIMIT_GENERAL_PER_MIN", "VELOX_RATE_LIMIT_INGEST_PER_SEC"
+
+	t.Setenv(general, "")
+	t.Setenv(ingest, "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unset: %v", err)
+	}
+	if want := (RateLimits{GeneralPerMinute: 100, IngestPerSecond: 1000}); cfg.RateLimits != want || DefaultRateLimits() != want {
+		t.Fatalf("unset: got %+v, defaults %+v, want %+v", cfg.RateLimits, DefaultRateLimits(), want)
+	}
+
+	t.Setenv(general, " 250 ")
+	t.Setenv(ingest, "5000")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if want := (RateLimits{GeneralPerMinute: 250, IngestPerSecond: 5000}); cfg.RateLimits != want {
+		t.Fatalf("set: got %+v, want %+v", cfg.RateLimits, want)
+	}
+
+	for _, key := range []string{general, ingest} {
+		for _, bad := range []string{"abc", "0", "-5", "1.5", "100/min"} {
+			t.Run(key+"="+bad, func(t *testing.T) {
+				t.Setenv(general, "")
+				t.Setenv(ingest, "")
+				t.Setenv(key, bad)
+				_, err := Load()
+				if err == nil || !strings.Contains(err.Error(), key+"=") {
+					t.Fatalf("Load with %s=%q must fail naming it, got: %v", key, bad, err)
+				}
+			})
+		}
+	}
+}
+
+// RUN_MIGRATIONS_ON_BOOT=ture used to start without the upgrades. A value
+// that is not true or false now stops start-up.
+func TestLoad_RunMigrationsOnBootMustParse(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
+	t.Setenv("APP_ENV", "local")
+	t.Setenv("VELOX_ENCRYPTION_KEY", "")
+	t.Setenv("TRUST_PROXY", "")
+
+	for raw, want := range map[string]bool{"": false, "true": true, " TRUE ": true, "yes": true, "1": true, "false": false, "no": false, "0": false} {
+		t.Setenv("RUN_MIGRATIONS_ON_BOOT", raw)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("RUN_MIGRATIONS_ON_BOOT=%q: %v", raw, err)
+		}
+		if cfg.Migrate != want {
+			t.Errorf("RUN_MIGRATIONS_ON_BOOT=%q: got %v, want %v", raw, cfg.Migrate, want)
+		}
+	}
+	for _, bad := range []string{"ture", "on", "2"} {
+		t.Setenv("RUN_MIGRATIONS_ON_BOOT", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RUN_MIGRATIONS_ON_BOOT=") {
+			t.Errorf("RUN_MIGRATIONS_ON_BOOT=%q must fail naming it, got: %v", bad, err)
+		}
 	}
 }

@@ -35,6 +35,15 @@ type Handler struct {
 	sessions *session.Service
 	cookie   session.CookieConfig
 	audit    AuditRecorder
+	signIns  SignInRecorder
+}
+
+// SignInRecorder is told when an invite accept signs a new member in. The
+// sign-in throttle (internal/user) implements it: the accept proved the
+// inbox, so it marks the browser as known for the email, and guesses from
+// elsewhere no longer slow that browser. Wired in internal/api.
+type SignInRecorder interface {
+	InboxProved(w http.ResponseWriter, r *http.Request, email string) error
 }
 
 // AuditRecorder is the narrow audit surface (same shape as the auth
@@ -50,6 +59,10 @@ func NewHandler(svc *Service, sessions *session.Service, cookie session.CookieCo
 // SetAuditLogger wires audit rows for membership changes (invite,
 // revoke, remove, accept). Optional: nil skips audit writes.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.audit = a }
+
+// SetSignInRecorder wires the sign-in throttle. Optional: nil skips it, and
+// the member's browser is then marked at their first sign-in instead.
+func (h *Handler) SetSignInRecorder(s SignInRecorder) { h.signIns = s }
 
 // Routes is the authed surface (mounted under /v1/members).
 func (h *Handler) Routes() chi.Router {
@@ -276,7 +289,12 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(ctx, "accept-invite: session issue failed — user must log in manually",
 				"user_id", res.UserID, "error", err)
 		} else {
-			h.cookie.SetCookie(w, r, rawID, sess.ExpiresAt)
+			h.cookie.SetCookie(w, rawID, sess.ExpiresAt)
+			if h.signIns != nil {
+				if err := h.signIns.InboxProved(w, r, res.Email); err != nil {
+					slog.ErrorContext(ctx, "accept-invite: sign-in throttle did not mark the browser", "user_id", res.UserID, "error", err)
+				}
+			}
 			out["session_minted"] = true
 			out["livemode"] = sess.Livemode
 			out["expires_at"] = sess.ExpiresAt.Format(rfc3339)

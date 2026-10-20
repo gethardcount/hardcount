@@ -7,12 +7,42 @@ the screen, and that the main things an operator does work end to end.
 - `smoke.spec.ts` opens every page at 1440px and 390px wide. A page fails if
   the browser logs a console error, an API call answers 400 or more, the page
   scrolls sideways, or its heading is missing. Each page is its own test, so a
-  failure names the page.
+  failure names the page. Public pages (sign-in, password reset, invite,
+  update payment, the Stripe return page, the hosted invoice) are opened
+  signed out, and the emailed-link pages with no code.
 - `journeys.spec.ts` signs in, creates a customer, creates a subscription,
   advances a test clock to the renewal and opens the new invoice, opens the
-  public invoice page, and grants credits. Each journey checks that the screen
+  public invoice page, and grants credits. It also checks that six wrong
+  passwords in a row make the sign-in page say how long to wait. Each journey checks that the screen
   shows what the API returned. The arithmetic behind the numbers is tested in
   Go, not here.
+- `subscriptions.spec.ts` changes subscriptions on screen: a plan change now
+  (with its proration invoice) and at renewal, cancel at period end, undo and
+  cancel now, quantity and item changes against the upcoming invoice, and the
+  trial and collection controls. Each journey checks the page, the toast and
+  any invoice the change made against the API.
+- `account-setup.spec.ts` sets up what an operator sells and how they
+  collect. It creates a price, a meter on it and a plan, and checks that a
+  meter with no price is refused. It previews and installs a recipe, then
+  installs it again. It adds and ends a customer's price override and checks
+  the upcoming invoice each time. It creates and edits a dunning policy,
+  assigns it to a customer, tries to delete it and makes it the default. The
+  recipe and dunning journeys run one after the other, because both move the
+  default dunning policy. The dunning journey puts the old default back.
+- `invoices.spec.ts` takes invoices through their life on screen: a one-off
+  invoice from draft to finalized (and Save & send), a credit note before and
+  after an offline payment, void and write-off, and the credit notes page.
+  Each journey checks the dashboard and the customer's payment page against
+  the API.
+- `activity.spec.ts` takes screenshots of the activity cards for people to
+  compare: the invoice and subscription Activity cards, a Dunning run and the
+  customer's Sent emails, at 1440px and 390px wide. It runs each story for a
+  customer on the real clock and for one on a test clock frozen at
+  2027-02-01 04:30 UTC. The steps that need days to pass, such as payment
+  retries and a trial running out, happen only on the test clock. Of the
+  screen it checks only that each card shows: a person reads the shots. The
+  files go to `activity-shots/`, which CI uploads as the `activity-shots`
+  artifact on every run (see [Activity screenshots](#activity-screenshots)).
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.
@@ -54,6 +84,25 @@ Useful flags: `npx playwright test smoke -g invoices` runs one page,
 `--ui` opens the test runner, and `npx playwright show-trace <trace.zip>`
 opens a trace from a CI failure (CI uploads them as the `playwright-report`
 artifact).
+
+Emails fail without a mail server. CI runs Mailpit, so its emails read as
+sent. To do the same locally, run `docker compose up -d mailpit` and start
+the API with `SMTP_HOST=localhost SMTP_PORT=1025 SMTP_TLS=none`.
+
+## Activity screenshots
+
+A change to an activity card is reviewed by comparing its screenshots with
+main's. Download both sets from the `e2e` job's runs, each into its own
+folder:
+
+```bash
+gh run download <run-id> -n activity-shots -D before   # main's latest run
+gh run download <run-id> -n activity-shots -D after    # the PR's run
+```
+
+Each file is `<surface>-<real|test>-<width>.png`. Real-clock times and the
+"Recorded" times on test-clock rows are the time of the run, so they change
+every run. The test-clock dates stay the same.
 
 ## Rules
 

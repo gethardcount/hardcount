@@ -1,6 +1,6 @@
 # ADR-108: Parked invoices are resolved by provider search — adopt what you can name, never settle absence
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) (amendment 2026-10-20)
 **Date:** 2026-08-02
 **Builds on:** ADR-105 (seq-seeded idempotency key), ADR-107 (park, never settle
 an unknown outcome), migration 0167 (provider observation columns).
@@ -10,7 +10,7 @@ is the constructive half.
 
 ## Summary
 
-A parked invoice is one whose charge ended with an unclear result and no PaymentIntent id ([ADR-107](107-unknown-is-terminal-until-a-human.md)). Once it has been parked for an hour, a reconciler sweep searches Stripe for PaymentIntents carrying the invoice's id in their metadata, including parked invoices already written off. A succeeded PaymentIntent settles the invoice paid, and a live one is attached to the invoice, only if it is still parked, so the normal sweeps and webhooks finish it. Finding nothing, only failed attempts, or a search error writes no money outcome, because search results can lag and cannot prove that no charge exists. Status: active; an invoice the search cannot resolve stays parked, and writing it off remains the manual exit.
+A parked invoice is one whose charge ended with an unclear result and no PaymentIntent id ([ADR-107](107-unknown-is-terminal-until-a-human.md)). Once it has been parked for an hour, a reconciler sweep searches Stripe for PaymentIntents carrying the invoice's id in their metadata, including parked invoices already written off. A succeeded PaymentIntent settles the invoice paid, and a live one is attached to the invoice, only if it is still parked, so the normal sweeps and webhooks finish it. Finding nothing, only failed attempts, or a search error writes no money outcome, because search results can lag and cannot prove that no charge exists. Status: superseded on 2026-10-20. The search sweep is deleted; parked invoices are finished by the stale-hold sweep's List read ([ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md), last amendment).
 
 ## Context
 
@@ -133,3 +133,27 @@ resolution.
   with nothing else we do.
 - If Stripe search is degraded during an incident, adoption is merely late —
   absence writes nothing, so a delayed index can never cause a wrong write.
+
+## Amendment 2026-10-20 — superseded: List replaces Search
+
+The search sweep is deleted. Parked invoices keep their claim's hold, so the
+stale-hold sweep ([ADR-127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md))
+already lists them, through Stripe's List API. Stripe says List is the API
+for reading data just written: "use the various list APIs… These APIs aren't
+subject to the availability delays mentioned above." So an answer from it is
+not an index state.
+
+This ADR's rule "absence never writes a money outcome" becomes: absence read
+from List, 24 hours after the attempt, puts the invoice back where a charge
+picks it up. Stripe may still create a payment for that long after a 500, so
+absence waits; a payment found is acted on at once. A succeeded payment still
+settles the invoice, a processing one is still followed, and a written-off
+invoice is still only settled, never charged (ADR-113).
+
+Removed with the sweep: `SearchPaymentIntentsByInvoiceID`,
+`ListParkedSearchable`, `AdoptPaymentIntentIfParked` (the stale-hold sweep
+follows a processing payment through `StampChargeOutcome`), the latch for
+accounts without Search, and the metric `velox_parked_search_errors_total`.
+Rows this sweep stamped keep `provider_payment_status` values
+`search_not_found`, `search_terminal_only` or `search_error`; nothing reads
+them.

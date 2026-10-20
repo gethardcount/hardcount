@@ -1,7 +1,10 @@
 # ADR-014: SSO Direction — Embedded OIDC/SAML, No SaaS Auth Vendor
 
 **Date:** 2026-05-02
-**Status:** Accepted
+**Status:** Accepted. Corrected 2026-10-18: `zitadel/saml` serves the
+identity-provider side, so it is withdrawn and the SAML library is
+chosen when SSO is built; see the
+[amendment](#amendment-2026-10-18-the-saml-library-serves-the-other-side).
 
 ## Status
 Accepted
@@ -11,7 +14,7 @@ Accepted
 
 ## Summary
 
-Not built yet: this ADR records the direction for when a design partner asks for SSO. Velox will embed OIDC and SAML client libraries (`github.com/zitadel/oidc/v3`, `github.com/zitadel/saml`) in the binary and point each tenant at its own identity provider. It will not use a SaaS auth vendor (WorkOS, Auth0, Clerk) or require a separate identity server, because self-hosted and air-gapped installs must work without outside calls. Password login stays homegrown ([ADR-011](011-email-password-auth-and-clean-api-keys.md)), team members have no enforced roles today ([ADR-081](081-minimal-team-invites.md)), and the MFA design is [ADR-095](095-login-security-roadmap-and-mfa.md). Status: active as a direction.
+Not built yet: this ADR records the direction for when a design partner asks for SSO. Velox will embed OIDC and SAML client libraries in the binary and point each tenant at its own identity provider. The OIDC library is `github.com/zitadel/oidc/v3`. Corrected 2026-10-18: the SAML library named below, `github.com/zitadel/saml`, implements an identity provider, not the service provider Velox would be, so the SAML library is chosen when SSO is built. It will not use a SaaS auth vendor (WorkOS, Auth0, Clerk) or require a separate identity server, because self-hosted and air-gapped installs must work without outside calls. Password login stays homegrown ([ADR-011](011-email-password-auth-and-clean-api-keys.md)), team members have no enforced roles today ([ADR-081](081-minimal-team-invites.md)), and the MFA design is [ADR-095](095-login-security-roadmap-and-mfa.md). Status: active as a direction.
 
 ## Context
 
@@ -154,3 +157,14 @@ When SSO becomes a real DP requirement (the trigger named in ADR-011 +
 - `feedback_amend_decisions_when_course_changes` memory — the WorkOS
   ambiguity in the previous version of `project_auth_decision` is
   exactly the silent-deviation pattern this ADR closes.
+
+## Amendment 2026-10-18: the SAML library serves the other side
+
+Decision 2 names `github.com/zitadel/saml`. That library implements a SAML identity provider: its README calls it "a server implementation" of SAML, and its feature table covers only the identity provider. In this design Velox is the service provider. The tenant's identity provider (Okta, Entra and so on) signs an assertion, and Velox checks it and signs the user in. `zitadel/saml` does not do that, so it is withdrawn.
+
+The SAML library is chosen when SSO is built, by testing each candidate against the identity providers a design partner names. Service-provider libraries to test first:
+
+- `github.com/russellhaering/gosaml2` (Apache-2.0; v0.12.0, 2026-08-05), for service providers only.
+- `github.com/crewjam/saml` (BSD-2-Clause; v0.5.1), whose `samlsp` package is a service provider.
+
+The OIDC choice stands: `zitadel/oidc/v3` has a relying-party (client) package, `pkg/client/rp`. `github.com/coreos/go-oidc/v3` (Apache-2.0) is the smaller client to compare it with at build time. The rest of the decision is unchanged. Found by the build-vs-library audit of 2026-10-17.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
@@ -151,7 +152,7 @@ func TestScheduler_BillingDrainStampsLivenessPerPage(t *testing.T) {
 	stamps := 0
 	s := &Scheduler{engine: tenantRunEngine(subs), batch: 1, onRun: func() { stamps++ }}
 
-	s.runBillingCycleForMode(postgres.WithLivemode(context.Background(), true), true)
+	s.runBillingCycleForMode(postgres.WithLivemode(context.Background(), true), true, &scheduler.Panics{})
 
 	if stamps != 3 {
 		t.Fatalf("liveness stamped %d times during a 3-page drain, want 3", stamps)
@@ -180,7 +181,7 @@ func TestScheduler_PauseResumeRunsAfterBillingRun(t *testing.T) {
 			return 0, nil
 		})}
 
-	s.runBillingCycleForMode(postgres.WithLivemode(context.Background(), true), true)
+	s.runBillingCycleForMode(postgres.WithLivemode(context.Background(), true), true, &scheduler.Panics{})
 
 	if resumerCalls != 1 {
 		t.Fatalf("pause resumer ran %d times in one mode pass, want 1", resumerCalls)
@@ -231,7 +232,7 @@ func TestScheduler_ChargeSweepStampsLivenessPerPage(t *testing.T) {
 	stamps := 0
 	s := &Scheduler{engine: e, batch: 1, onRun: func() { stamps++ }}
 
-	s.runBillingCycleForMode(postgres.WithLivemode(context.Background(), true), true)
+	s.runBillingCycleForMode(postgres.WithLivemode(context.Background(), true), true, &scheduler.Panics{})
 
 	if stamps != 3 {
 		t.Fatalf("liveness stamped %d times while sweeping 3 queued invoices one per page, want 3", stamps)
@@ -245,9 +246,9 @@ type cancelingCharger struct {
 	cancel context.CancelFunc
 }
 
-func (c *cancelingCharger) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, cus, pm string) (domain.Invoice, error) {
+func (c *cancelingCharger) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, cus, pm string) (domain.Invoice, error) {
 	defer c.cancel()
-	return c.recordingCharger.ChargeInvoice(ctx, tenantID, inv, cus, pm)
+	return c.recordingCharger.ChargeInvoice(ctx, tenantID, inv, hold, cus, pm)
 }
 
 // A sweep whose ctx ends mid-page stops before claiming the next invoice:

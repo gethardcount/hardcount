@@ -69,6 +69,14 @@ func newLagRig(t *testing.T, timing string, withAddOn bool) *lagRig {
 // invoice grace).
 func newLagRigWith(t *testing.T, timing string, withAddOn bool, opts ...ServerOption) *lagRig {
 	t.Helper()
+	return newLagRigGranted(t, timing, withAddOn, 0, opts...)
+}
+
+// newLagRigGranted is newLagRigWith with grantCents of customer credit
+// granted before the subscription is created, so its first invoice applies
+// them (ADR-088). 0 grants nothing.
+func newLagRigGranted(t *testing.T, timing string, withAddOn bool, grantCents int64, opts ...ServerOption) *lagRig {
+	t.Helper()
 	db := testutil.SetupTestDB(t)
 	clk := clock.NewFake(lagP0)
 	r := &lagRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil, opts...), timing: timing, custExt: "lag_cust"}
@@ -97,6 +105,11 @@ func newLagRigWith(t *testing.T, timing string, withAddOn bool, opts ...ServerOp
 		"external_id": r.custExt, "display_name": "Lag Customer", "email": "lag@example.test",
 	}, http.StatusCreated)
 	r.custID = cust["id"].(string)
+	if grantCents > 0 {
+		r.must(http.MethodPost, "/v1/credits/grant", lagP0, map[string]any{
+			"customer_id": r.custID, "amount_cents": grantCents, "description": "lag rig fixture",
+		}, http.StatusCreated)
+	}
 	items := []map[string]any{{"plan_id": r.planA, "quantity": 1}}
 	if withAddOn {
 		items = append(items, map[string]any{"plan_id": r.planC, "quantity": 1})

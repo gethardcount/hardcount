@@ -1,11 +1,11 @@
 # ADR-021: Hosted-invoice Pay flow saves the card to the customer's Stripe customer
 
-**Status:** Accepted (amended 2026-10-11)
+**Status:** Accepted (amended 2026-10-11 and 2026-10-18)
 **Date:** 2026-05-03
 
 ## Summary
 
-Paying on the hosted invoice page saves the card for later off-session charges. The Stripe Checkout session names the customer's Stripe customer (created on first use) and sets `setup_future_usage=off_session`, so future invoices can charge the card without the customer present. Amended 2026-10-11: Velox also records that card in its own `payment_methods`, through `Stripe.RecordCheckoutCard`, from the webhook or the reconciler's hosted sweep. The card becomes the default only when the customer had no card on file. Status: active, amended.
+Paying on the hosted invoice page saves the card for later off-session charges. The Stripe Checkout session names the customer's Stripe customer (created on first use) and sets `setup_future_usage=off_session`, so future invoices can charge the card without the customer present. Amended 2026-10-11: Velox also records that card in its own `payment_methods`, through `Stripe.RecordCheckoutCard`, from the webhook or the reconciler's hosted sweep. The card becomes the default only when the customer had no card on file. Amended 2026-10-18 (ADR-126): it also replaces a default the bank refused for good. Status: active, amended.
 
 ## Context
 
@@ -148,3 +148,18 @@ The attach follows the store's existing default rule:
 **Lost webhooks.** The reconciler's hosted sweep (ADR-068 amendment) now
 records the card too, for a paid session whose webhooks were lost. Before,
 it recorded the payment only.
+
+## Amendment 2026-10-18: a card refused for good is replaced
+
+[ADR-126](126-a-card-refused-for-good-is-not-retried.md) stops dunning from
+charging a card the bank refused for good (lost, stolen and the rest of
+Stripe's hard decline codes). Its retries charge only once another card is
+the default. Under this ADR's rule, a card the customer then saved, on the
+hosted page or through a setup link, was added beside the refused default,
+so every retry still skipped and dunning ran out.
+
+So the open choice above is now decided for one case. When a charge
+attempt recorded a hard decline on the customer's current default card,
+the card being saved becomes the default. The switch happens in the
+attach's own transaction. A working default is still never replaced: after
+any other decline, or none, a new card is added beside it.

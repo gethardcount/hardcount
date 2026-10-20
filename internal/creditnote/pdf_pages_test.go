@@ -68,12 +68,45 @@ var longOrig = OriginalInvoiceInfo{
 	ExemptReason: "Nonprofit certificate 123",
 }
 
+// textGap is how close two pieces of text on one line may come, in points.
+const textGap = 4.0
+
+// isWatermark: the VOID mark sits behind the text on purpose.
+func isWatermark(r pdftest.Run) bool { return r.Size >= 72 }
+
+// isTableChrome: what a page break adds in the description column.
+func isTableChrome(r pdftest.Run) bool {
+	return r.Text == "Description" || strings.HasSuffix(r.Text, "(continued)")
+}
+
+// Where the description column starts, and where it ends: the Qty column
+// starts there.
+const (
+	descColX   = 40.0
+	descColEnd = 280.0
+)
+
+// descriptionLines finds each line's description, in order, in the
+// description column, and returns the lines it was drawn on. The test
+// fails if one is not printed whole (#1228).
+func descriptionLines(t *testing.T, pages []pdftest.Page, items []domain.CreditNoteLineItem) [][]pdftest.Line {
+	t.Helper()
+	descs := make([]string, len(items))
+	for i, item := range items {
+		descs[i] = item.Description
+	}
+	return pdftest.FindWrapped(t, pages, descColX, descs, isTableChrome)
+}
+
 // checkPages asserts what every credit-note PDF must satisfy, whatever its
-// length: all text inside a page; each line exactly once and in order; the
-// table header above the first line on every page that has lines; and the
-// totals, the settlement and the footer together on the last page, below
-// the last line. A multi-page PDF numbers its pages and marks each page
-// after the first as continued; a one-page PDF has no number.
+// length: all text inside a page and none drawn over other text; each
+// line's description printed whole, in order, inside its column, its lines
+// one under another on one page (a one-line description exactly once);
+// the table header above the first line on every page that has lines, and
+// on no other page; and the totals, the settlement and the footer together
+// on the last page, below the last line. A multi-page PDF numbers its
+// pages and marks each page after the first as continued; a one-page PDF
+// has no number.
 func checkPages(t *testing.T, pages []pdftest.Page, items []domain.CreditNoteLineItem, creditTotal string) {
 	t.Helper()
 	if len(pages) == 0 {
@@ -82,23 +115,51 @@ func checkPages(t *testing.T, pages []pdftest.Page, items []domain.CreditNoteLin
 	for _, m := range pdftest.Misplaced(pages, edgeGap, bodyFloor, isPageNumber) {
 		t.Error(m)
 	}
+	for _, m := range pdftest.Overlapping(pages, textGap, isWatermark) {
+		t.Error(m)
+	}
 
 	type at struct {
 		page int
 		y    float64
 	}
 	var prev at
-	for i, item := range items {
-		var found []at
-		for pi, p := range pages {
-			for _, r := range p.Find(item.Description) {
-				found = append(found, at{pi, r.Y})
+	rows := descriptionLines(t, pages, items)
+	for pi, p := range pages {
+		hdr := p.Find("Description")
+		if len(hdr) == 0 {
+			continue
+		}
+		under := false
+		for _, lines := range rows {
+			for _, l := range lines {
+				under = under || (l.Page == pi && l.Y < hdr[0].Y)
 			}
 		}
-		if len(found) != 1 {
-			t.Fatalf("line %q found %d times, want once", item.Description, len(found))
+		if !under && len(items) > 0 {
+			t.Errorf("page %d: the table header has no line under it", pi+1)
 		}
-		cur := found[0]
+	}
+	for i, lines := range rows {
+		item := items[i]
+		if len(lines) == 1 {
+			found := 0
+			for _, p := range pages {
+				found += len(p.Find(item.Description))
+			}
+			if found != 1 {
+				t.Fatalf("line %q found %d times, want once", item.Description, found)
+			}
+		}
+		for j, l := range lines {
+			if l.X+l.W > descColEnd {
+				t.Errorf("line %q: %q ends at x %.1f, past the description column (%.0f)", item.Description, l.Text, l.X+l.W, descColEnd)
+			}
+			if j > 0 && (l.Page != lines[0].Page || l.Y >= lines[j-1].Y) {
+				t.Errorf("line %q: %q (page %d, y %.1f) is not under the line before it on the same page", item.Description, l.Text, l.Page+1, l.Y)
+			}
+		}
+		cur := at{lines[0].Page, lines[0].Y}
 		if i > 0 && (cur.page < prev.page || (cur.page == prev.page && cur.y >= prev.y)) {
 			t.Errorf("line %q (page %d, y %.1f) is not after the line before it (page %d, y %.1f)", item.Description, cur.page+1, cur.y, prev.page+1, prev.y)
 		}
@@ -108,7 +169,8 @@ func checkPages(t *testing.T, pages []pdftest.Page, items []domain.CreditNoteLin
 				t.Errorf("page %d: no table header above its first line %q", cur.page+1, item.Description)
 			}
 		}
-		prev = cur
+		last := lines[len(lines)-1]
+		prev = at{last.Page, last.Y}
 	}
 
 	last := pages[len(pages)-1]

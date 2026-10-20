@@ -1,12 +1,12 @@
 # ADR-095: Login-security roadmap & MFA design — minimal-complete for a self-hostable B2B money dashboard
 
 Date: 2026-07-17
-Status: Accepted as the DESIGN OF RECORD. The **decision** is settled — pull **MFA + offline breached-password forward** out of ADR-094's indefinite "deferred," build them in the *safe-complete* form below, and mark the consumer-scale controls **never** for this product shape. **Phasing amended 2026-07-18 (landing gates).** Split the deferred work. The two Phase-0 **floor** items — the embedded breached-password set + prod-TLS/`Secure` cookie — are **decoupled from the MFA bundle** and made a **hard pre-first-deployment gate**: cheap, non-weaponizable, **zero rework** when MFA lands, so deferring them alongside Phase 1 buys nothing. **Phase 1** (homegrown TOTP MFA **+** the ADR-094 per-account throttle, shipped as one unit) stays deferred but is itself a **hard gate — no first external/production deployment ("first DP") goes live without it** — the moment the NIST §5.2.2 per-account-failure gap stops being theoretical (rotating IPs otherwise give unlimited per-account guesses). No code ships from this ADR; these are the landing conditions. **Corrected 2026-10-18:** the process caveat's claim that `ClientIP` was already fixed was false; see the [amendment](#amendment-2026-10-18-the-session-ip-was-not-fixed).
+Status: Accepted as the DESIGN OF RECORD. The **decision** is settled — pull **MFA + offline breached-password forward** out of ADR-094's indefinite "deferred," build them in the *safe-complete* form below, and mark the consumer-scale controls **never** for this product shape. **Phasing amended 2026-07-18 (landing gates).** Split the deferred work. The two Phase-0 **floor** items — the embedded breached-password set + prod-TLS/`Secure` cookie — are **decoupled from the MFA bundle** and made a **hard pre-first-deployment gate**: cheap, non-weaponizable, **zero rework** when MFA lands, so deferring them alongside Phase 1 buys nothing. **Phase 1** (homegrown TOTP MFA **+** the ADR-094 per-account throttle, shipped as one unit) stays deferred but is itself a **hard gate — no first external/production deployment ("first DP") goes live without it** — the moment the NIST §5.2.2 per-account-failure gap stops being theoretical (rotating IPs otherwise give unlimited per-account guesses). *(Withdrawn 2026-10-18: MFA no longer gates go-live, and the throttle ships on its own. See the [amendment](#amendment-2026-10-18-mfa-is-no-longer-a-go-live-gate).)* No code ships from this ADR; these are the landing conditions. **Corrected 2026-10-18:** the process caveat's claim that `ClientIP` was already fixed was false; see the [amendment](#amendment-2026-10-18-the-session-ip-was-not-fixed). **Phase 0(a) shipped 2026-10-18:** the embedded breached-password list replaced the `commonPasswords` stub; see the [amendment](#amendment-2026-10-18-the-breached-password-list-shipped). **Corrected 2026-10-18:** `pquerna/otp` is Apache-2.0, not MIT, and `zitadel/saml` serves the identity-provider side; see the [amendment](#amendment-2026-10-18-two-library-facts). **Phase 0(b) shipped 2026-10-18:** staging and production always mark the session cookie `Secure`, and the Compose quickstart runs as `local`; see the [amendment](#amendment-2026-10-18-the-session-cookie-is-always-secure-in-production). **Amended 2026-10-18 (go-live gate):** MFA is built when a trigger fires, not before go-live; see the [amendment](#amendment-2026-10-18-mfa-is-no-longer-a-go-live-gate). **Amended 2026-10-18 (sign-in limiter without Redis):** the per-address `/v1/auth` limiter counts in the process when Redis is down or not configured. Production has required Redis to start since 2026-08-30. See the [amendment](#amendment-2026-10-18-the-sign-in-limiter-without-redis).
 Relates: ADR-011 (email+password auth), ADR-014 (homegrown/embedded SSO+MFA, no SaaS vendor, air-gap constraint), ADR-081 (team invites, **no RBAC** — every member holds full permissions), ADR-093 (CSRF gate), ADR-094 (login brute-force protection — this ADR **refines** its deferred plan).
 
 ## Summary
 
-This ADR is the design of record. No code ships from it, and as of now neither control below is built. Velox keeps its existing login protections and adds two controls that were previously deferred: multi-factor authentication (MFA) with time-based one-time codes (TOTP), and a check that rejects known-breached passwords when a password is set. By default both run inside the `velox` binary with no outside service, because self-hosted deployments may have no internet access. MFA must ship complete, not as bare TOTP. A correct password only opens a short-lived partial session, which is capped on wrong codes and guarded against code reuse. Recovery codes and a break-glass reset command cover lost devices. MFA is forced on the bootstrap operator, and sensitive actions such as revealing Stripe keys ask the user to re-authenticate. Consumer-scale controls such as CAPTCHA, automatic account lockout and risk-based login are never built for this operator-only dashboard. Amended 2026-07-18: the embedded breached-password set and required TLS with a `Secure` cookie in production must ship before the first deployment, separately from MFA. TOTP MFA and the per-account login throttle ship together and must be live before the first external or production deployment. The throttle is keyed on IP and account together and slows repeated failures down without ever locking the account.
+This ADR is the design of record. MFA is not built. The breached-password check shipped on 2026-10-18 (Phase 0(a)). When a password is set or reset, Velox refuses about 30,000 passwords of 12 or more characters, in any letter case. They come from the top million of a leaked-password list, compiled into the binary. The `Secure` cookie shipped the same day (Phase 0(b)). In staging and production the session cookie is always `Secure`, so browsers send it only over HTTPS or to `localhost`. Plain HTTP is for `APP_ENV=local`, which the Compose quickstart now uses. Velox keeps its existing login protections and adds two controls that were previously deferred: multi-factor authentication (MFA) with time-based one-time codes (TOTP), and a check that rejects known-breached passwords when a password is set. By default both run inside the `velox` binary with no outside service, because self-hosted deployments may have no internet access. MFA must ship complete, not as bare TOTP. A correct password only opens a short-lived partial session, which is capped on wrong codes and guarded against code reuse. Recovery codes and a break-glass reset command cover lost devices. MFA is forced on the bootstrap operator, and sensitive actions such as revealing Stripe keys ask the user to re-authenticate. Consumer-scale controls such as CAPTCHA, automatic account lockout and risk-based login are never built for this operator-only dashboard. Amended 2026-07-18: the embedded breached-password set and required TLS with a `Secure` cookie in production must ship before the first deployment, separately from MFA. Amended 2026-10-18: MFA is no longer a go-live gate. It is built when an operator or partner asks for two-factor sign-in, or a customer's security review requires it. Before go-live, Velox ships what protects sign-in with no setup: the breached-password check, TLS with a `Secure` cookie in production, and the per-account login throttle, which now ships on its own. The throttle slows repeated failures down instead of locking the account. As shipped (ADR-094 amendment of the same date), it counts per IP and account together and per account over all addresses, and a browser that signed in before is counted on its own. A team that wants two-factor sign-in sooner can put the dashboard behind its own SSO or VPN; Velox requires neither. Corrected 2026-10-18: the TOTP library `pquerna/otp` is Apache-2.0, not MIT, and needs v1.5.0 or later; the SAML library named for Phase 2 is withdrawn, as in ADR-014. Amended 2026-10-18: the per-address sign-in limiter on `/v1/auth` never stops limiting. It counts in Redis, shared by every copy, while Redis answers. When a Redis call fails, or no Redis is configured, it counts in the process with the same limit, so each copy counts on its own. Production has required a reachable Redis to start since 2026-08-30, for the other rate limiters.
 
 ## Context
 
@@ -80,7 +80,7 @@ Structurally mismatched to an operator-only, air-gapped, tiny-user-set money eng
 - **Full 850M-hash HIBP corpus + login-time recheck**, and **runtime HIBP API as the default** — ~1 GB / maintenance burden that stops paying off once MFA is enforced; outbound HTTPS breaks air-gap.
 - **IP-prefix bucketing on the throttle** — consumer-scale botnet defense for pressure that doesn't exist (Phase-3 conditional at most).
 - **Edge-first bcrypt-DoS appliance / WAF tier** — incoherent with a single-binary self-host model (no shared edge to place it at).
-- **Redis as a hard dependency** for throttling/lockout — self-host stays single-binary + Postgres.
+- **Redis as a hard dependency** for throttling/lockout — self-host stays single-binary + Postgres. *(Production has required Redis to start since 2026-08-30; the sign-in limiter does not need it. See the [amendment](#amendment-2026-10-18-the-sign-in-limiter-without-redis).)*
 - **Dedicated MFA-secret KMS/HSM/pepper-rotation subsystem** — one env AES-GCM key is enough for secret-at-rest.
 - **SaaS auth vendor** (Auth0/WorkOS/Clerk/Cognito/Duo/Stytch) — ADR-014 hard constraint.
 
@@ -103,3 +103,79 @@ The process caveat above says the panel's `ClientIP` finding was "Already fixed 
 The rate limiter and the audit log were already safe when this ADR was written. Both read `r.RemoteAddr` after `TrustedRealIP` has run; the audit log has done so since #226 (2026-06-12). The session IP is a record only. Nothing reads it, and a session is not bound to it.
 
 Fixed in #1203. `session.ClientIP` is deleted. Login and invite accept now store `audit.ExtractClientIP(r)`, the address the audit row records, without the port. Found by the build-vs-library audit of 2026-10-17.
+
+## Amendment 2026-10-18: the breached-password list shipped
+
+Phase 0(a) is done (#1222). `ValidatePassword` no longer uses the 10-entry `commonPasswords` stub. It checks an embedded list, `internal/user/breachedpw/passwords.txt`, whenever a password is set: bootstrap (the CLI and `POST /v1/bootstrap`), reset confirm and invite accept. Login does not check it, as decided above. The refusal text is unchanged: "is one of the most common passwords. Pick a different one".
+
+Where it differs from the design above, and why:
+
+- **Source.** `ignis-1M.txt` from `ignis-sec/Pwdb-Public`, MIT licence: the top million passwords by count in about a billion leaked credentials. The package comment pins its commit and SHA-256, and the licence sits next to the list.
+- **Only entries a user could choose.** `ValidatePassword` refuses anything shorter than 12 bytes before it looks at the list, so the list keeps only entries of 12 bytes or more: 29,983 of the million. At that size an exact list costs less than tuning a bloom filter, which settles the "Breach-corpus shape/size" open decision.
+- **Any letter case.** Entries are stored in lower case and the password is lower-cased before the lookup, as the stub did. `PASSWORD1234` is refused because `password1234` is listed. This refuses more than an exact match would, never less.
+- **The stub's entries stay.** Its entries of 12 bytes or more are added, so `admin12345678`, which the source lacks, is still refused.
+- **Cost.** The list is 427,514 bytes. The `velox` binary grew by 430,192 bytes, from 56.07 MB to 56.50 MB (darwin/arm64). The first password set allocates a slice of about 480 KB, and a lookup is a binary search.
+
+To refresh the list, download a newer source and rebuild in a release with `go run ./internal/user/breachedpw/gen`; it is never fetched at runtime.
+
+## Amendment 2026-10-18: two library facts
+
+- **`pquerna/otp` is Apache-2.0, not MIT** (the MFA "Method" bullet). Apache-2.0 allows vendoring too, so the choice stands. Pin v1.5.0 or later. v1.5.0 (2025-05-16) fixes key generation: a short read from the random source could leave part of a generated secret not random ([pquerna/otp#100](https://github.com/pquerna/otp/pull/100)).
+- **`zitadel/saml` serves the identity-provider side** (Phase 2). Its README calls it "a server implementation" of SAML, and its feature table covers only the identity provider. Velox would be the service provider, which checks the assertion the tenant's identity provider signs. [ADR-014's amendment](014-sso-direction-embedded-oidc-saml.md#amendment-2026-10-18-the-saml-library-serves-the-other-side) withdraws it; `zitadel/oidc` stands.
+
+Found by the build-vs-library audit of 2026-10-17.
+
+## Amendment 2026-10-18: the session cookie is always Secure in production
+
+Phase 0(b) is done (#1226). In `staging` and `production` the session cookie is `Secure` on every response that sets it (sign-in and invite accept) or clears it (logout), whatever page the browser is on. In `local` it never is. An unrecognised `APP_ENV`, such as `dev`, still gets no `Secure`, and a near miss of `production`, such as `prod`, still stops start-up.
+
+What changed. Since #1045 (2026-10-14) the cookie dropped `Secure` when the browser's `Origin` or `Referer` was plain http at a loopback address. The Compose quickstart ran in production mode at `http://localhost`, and Safari does not keep a `Secure` cookie over plain HTTP, even at localhost. That exception is removed. The quickstart now writes `APP_ENV=local` into its `.env`, so Safari still signs in there.
+
+How "plain HTTP is dev-only" holds. The browser enforces it: it does not keep a `Secure` cookie at a plain-HTTP address. Chrome and Firefox treat `http://localhost` as secure and keep it there, which covers an SSH tunnel to the server; Safari does not. Velox cannot see the browser's scheme when it starts, so it checks the addresses it is given. In staging and production, each of `DASHBOARD_BASE_URL`, `CUSTOMER_PORTAL_URL`, `HOSTED_INVOICE_BASE_URL`, `PAYMENT_UPDATE_URL`, `PAYMENT_UPDATE_RETURN_URL` and `VELOX_API_BASE_URL` that starts with `http://` logs a start-up warning naming it. It warns rather than refuses: the cookie rule already keeps sign-in off plain HTTP, and a refusal would stop billing on an upgrade over a setting that may only feed email links.
+
+## Amendment 2026-10-18: MFA is no longer a go-live gate
+
+On 2026-10-18 the owner, Sagar, was asked whether to build MFA now or let partners go live without it. His decision, in his words: "go for pragmatic approaches but still people can use velox in production with ease..".
+
+What changes:
+
+- **MFA no longer gates go-live.** The 2026-07-18 rule that no first external or production deployment goes live without Phase 1 is withdrawn.
+- **MFA is built when a trigger fires:** an operator or a partner asks for two-factor sign-in, or a customer's security review requires it. This replaces the Phase 1 trigger in the roadmap above. The design above stays the design of record: when MFA is built, it is built in its safe-complete form.
+- **Before go-live, Velox ships what protects sign-in with no setup:**
+  - the breached-password check (Phase 0(a), shipped in #1222);
+  - TLS with a `Secure` session cookie in production (Phase 0(b), shipped in #1226);
+  - the `(IP × account)` login throttle, as designed in the throttle section above.
+- **No VPN or SSO requirement.** Production use must stay easy, so Velox requires neither. A team that wants two-factor sign-in can put the dashboard behind its own SSO or VPN. [Who can sign in to the dashboard](../production-one-vm.md#who-can-sign-in-to-the-dashboard) says which path to put behind it, and which paths must stay reachable from outside.
+
+**Why the throttle now ships on its own.** The 2026-07-18 amendment shipped the throttle and MFA as one unit, because each alone is half a fix. That is still true of what each covers, but it no longer decides when each ships:
+
+- The throttle caps distributed guessing against one account, so rotating addresses no longer buy unlimited guesses. It needs no setup from the operator and nothing from team members, so it ships before go-live and production stays easy.
+- MFA covers what the throttle cannot: a correct password that was stolen or reused. It asks every member to enroll an authenticator app. Until MFA is built, a stolen password is covered only for a team that puts the dashboard behind its own SSO or VPN.
+
+**What stays open.** By default, a stolen or phished password signs in. With no RBAC (ADR-081), one member's password opens the whole account. This decision accepts that gap until a trigger fires.
+
+## Amendment 2026-10-18: the sign-in limiter without Redis
+
+The "Do NOT build" list above rules out Redis as a hard dependency for throttling. Production already has one. Since #863 (2026-08-30), a production copy refuses to start without a reachable Redis (`internal/config/config.go`, `cmd/velox/main.go`), because the general and hosted-invoice limiters refuse every request without it. Sign-in was the other way round: its per-address limiter let every request through while Redis was down, so an outage made password guessing unlimited.
+
+Fixed in #1255. The per-address limiter on `/v1/auth` now behaves like this:
+
+| Redis | What the sign-in limiter does |
+|---|---|
+| Configured and answering | Counts in Redis, shared by every copy: 100 requests a minute per address by default (`VELOX_RATE_LIMIT_GENERAL_PER_MIN`). Unchanged. |
+| Configured, but a call fails | Counts that request in the process, with the same limit. Each copy counts on its own, so with N copies one address gets up to N times the limit until Redis answers again. Each such request logs `rate_limiter: redis error, counting in this process`. |
+| Not configured (outside production only) | Counts in the process, as in the row above. Before, it let every request through. |
+
+The in-process count is a token bucket from `golang.org/x/time/rate` with the Redis limit's rate and burst, so it allows the same requests as the Redis count, per copy. The process drops an address's bucket once it has refilled, so memory holds only recent addresses.
+
+**Why two counts are acceptable here.** ADR-094 removed a lockout whose count was split between Redis and memory: during a Redis flap the split loosened a 5-attempt lock to about twice that. The sign-in limiter differs in three ways:
+
+- The alternative is no limit at all while Redis is down. The split loosens the limit by a known factor: the number of copies, or one more while Redis answers only some calls.
+- It is keyed on the address, never on an account, so nobody can use it to lock an operator out.
+- It stores no email.
+
+**What stays as it was.**
+
+- In production, the general and hosted-invoice limiters still answer 429 to every request while Redis is down, and the ingest limiter still lets every request through.
+- Production still refuses to start without a reachable Redis.
+- The `(IP × account)` throttle designed above keeps its count in Postgres when it is built, so it will not depend on Redis either.

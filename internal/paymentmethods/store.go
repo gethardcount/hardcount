@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -18,9 +19,10 @@ type Store interface {
 
 	// Upsert writes a payment_methods row keyed by stripe_payment_method_id.
 	// Webhooks can fire more than once for the same setup intent (Stripe
-	// retries on 5xx), so the webhook path must be idempotent. If first is
-	// true and no existing active default for the customer, the new row is
-	// promoted to default atomically in the same tx.
+	// retries on 5xx), so the webhook path must be idempotent. The row is
+	// made the default in the same tx when the customer has no active
+	// default, or when the bank refused the current default for good
+	// (ADR-126).
 	Upsert(ctx context.Context, tenantID string, pm PaymentMethod) (PaymentMethod, error)
 
 	// SetDefault atomically clears any existing default for (customerID)
@@ -154,6 +156,17 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, pmID string) (Payment
 // webhook. If no active default exists for the customer, the new row is
 // promoted to default in the same tx (enforces "first PM is default").
 //
+// A default the bank refused for good is replaced (ADR-126, #966): when a
+// charge attempt recorded a hard decline (domain.IsHardDecline) on the
+// customer's current default card, the card being saved becomes the
+// default, on the insert and the conflict path alike. That card cannot be
+// charged again, and Stripe Billing's rule is the same: after a hard decline
+// a retry runs only once it detects a new payment method. Otherwise a card
+// the customer saved through the update link, asked for a different card,
+// sat beside the refused one while every retry skipped it until dunning ran
+// out. A working default is never replaced (ADR-021: a new card is added
+// beside it).
+//
 // Dedupe-by-fingerprint (ADR-0099): when a customer re-runs Add and
 // produces a new pm_xxx with a fingerprint that already exists as an
 // active row for this customer, the old row is detached in the same
@@ -218,6 +231,38 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 	}
 	promote := !hasDefault || carryDefault
 
+	// The current default was refused for good on one of this customer's
+	// invoices: the card being saved takes its place. Cleared first, in this
+	// tx, so the one-default-per-customer index never sees two.
+	replaceRefused := false
+	if hasDefault && !carryDefault {
+		if err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM payment_methods pm
+				JOIN invoices i ON i.tenant_id = pm.tenant_id AND i.customer_id = pm.customer_id
+				JOIN invoice_charge_attempts a ON a.tenant_id = i.tenant_id AND a.invoice_id = i.id
+					AND a.stripe_payment_method_id = pm.stripe_payment_method_id
+				WHERE pm.tenant_id = $1 AND pm.customer_id = $2
+				  AND pm.is_default AND pm.detached_at IS NULL
+				  AND pm.stripe_payment_method_id <> $3
+				  AND a.decline_code = ANY($4::text[]))`,
+			tenantID, pm.CustomerID, pm.StripePaymentMethodID, postgres.StringArray(domain.HardDeclineCodes()),
+		).Scan(&replaceRefused); err != nil {
+			return PaymentMethod{}, fmt.Errorf("check refused default: %w", err)
+		}
+	}
+	if replaceRefused {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE payment_methods SET is_default = false, updated_at = now()
+			WHERE tenant_id = $1 AND customer_id = $2
+			  AND is_default = true AND detached_at IS NULL
+			  AND stripe_payment_method_id <> $3`,
+			tenantID, pm.CustomerID, pm.StripePaymentMethodID); err != nil {
+			return PaymentMethod{}, fmt.Errorf("clear refused default: %w", err)
+		}
+		promote = true
+	}
+
 	var out PaymentMethod
 	if err := scanPM(tx.QueryRowContext(ctx, `
 		INSERT INTO payment_methods
@@ -234,13 +279,17 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 		    card_exp_month   = EXCLUDED.card_exp_month,
 		    card_exp_year    = EXCLUDED.card_exp_year,
 		    card_fingerprint = COALESCE(EXCLUDED.card_fingerprint, payment_methods.card_fingerprint),
+		    -- Kept, except when this attach replaced a refused default: the
+		    -- old default was cleared above, so this row must take its place
+		    -- or the customer would be left with none.
+		    is_default       = payment_methods.is_default OR $11,
 		    detached_at      = NULL,
 		    updated_at       = now()
 		RETURNING `+pmSelectCols,
 		tenantID, pm.CustomerID, pm.StripePaymentMethodID, defaultString(pm.Type, "card"),
 		pm.CardBrand, pm.CardLast4, pm.CardExpMonth, pm.CardExpYear,
 		pm.CardFingerprint,
-		promote), &out); err != nil {
+		promote, replaceRefused), &out); err != nil {
 		return PaymentMethod{}, fmt.Errorf("upsert payment method: %w", err)
 	}
 

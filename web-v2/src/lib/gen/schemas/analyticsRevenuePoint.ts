@@ -11,7 +11,7 @@
 export interface AnalyticsRevenuePoint {
   /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
   date: string;
-  /** Sum of invoice totals paid in the bucket. */
+  /** What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted. */
   revenue_cents: number;
   invoice_count: number;
 }

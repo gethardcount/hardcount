@@ -39,5 +39,9 @@ The replica starts on the next attempt.
 This is a different situation:
 
 - General and hosted-invoice requests answer 429 (they fail closed).
-- Usage ingest and `/v1/auth` keep working (they fail open).
+- Usage ingest keeps working with no limit (it fails open).
+- Sign-in, `/v1/auth`, keeps working and stays limited. Each replica
+  counts sign-in requests on its own, so with three replicas one address
+  can make up to three times the limit (100 a minute by default). The log
+  shows `rate_limiter: redis error, counting in this process`.
 - Restore Redis. No restart is needed.

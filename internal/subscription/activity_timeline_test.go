@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 )
 
 // auditRecorderMock fakes the handler's audit seam for timeline tests —
@@ -245,14 +247,38 @@ func TestActivityTimeline_SortsByDisplayedSimAxis(t *testing.T) {
 // audit row (ADR-119) reads as a sentence on the subscription timeline. The
 // metadata arrives as JSON, so the count is a float64.
 func TestDescribeSubscriptionAction_BillingRetried(t *testing.T) {
-	desc, detail, _, status := describeSubscriptionAction(domain.AuditActionUpdate,
-		map[string]any{"action": "billing_retried", "attempts_before": float64(8), "was_parked": true}, nil)
-	if desc != "Billing retried" || detail != "After 8 failed attempts" || status != "info" {
-		t.Fatalf("got %q / %q / %q", desc, detail, status)
+	l := describeSubscriptionAction(domain.AuditActionUpdate,
+		map[string]any{"action": "billing_retried", "attempts_before": float64(8), "was_parked": true}, lineLabels{})
+	if l.Title != "Billing retried" || activity.MetaText(l) != "After 8 failed tries" || l.Tone != activity.ToneNeutral {
+		t.Fatalf("got %q / %q / %q", l.Title, activity.MetaText(l), l.Tone)
 	}
-	_, detail, _, _ = describeSubscriptionAction(domain.AuditActionUpdate,
-		map[string]any{"action": "billing_retried", "attempts_before": float64(1)}, nil)
-	if detail != "After 1 failed attempt" {
-		t.Fatalf("singular: got %q", detail)
+	l = describeSubscriptionAction(domain.AuditActionUpdate,
+		map[string]any{"action": "billing_retried", "attempts_before": float64(1)}, lineLabels{})
+	if got := activity.MetaText(l); got != "After 1 failed try" {
+		t.Fatalf("singular: got %q", got)
+	}
+}
+
+// TestDescribeSubscriptionAction_NetNegativeUsage: the row an invoice decision
+// writes when a meter's usage was below zero after corrections (#1193) names
+// each meter by its name and its amount, says what to do, and is a warning.
+// A row written before the name was recorded shows the meter's key. The
+// metadata arrives as JSON, so the meter list is []any.
+func TestDescribeSubscriptionAction_NetNegativeUsage(t *testing.T) {
+	l := describeSubscriptionAction("subscription.net_negative_usage", map[string]any{
+		"billing_reason": "subscription_cycle",
+		"meters": []any{
+			map[string]any{"meter_id": "mtr_1", "meter_key": "api_calls", "meter_name": "API calls", "quantity": "-50"},
+			map[string]any{"meter_id": "mtr_2", "meter_key": "tokens", "quantity": "-12.5"},
+		},
+	}, lineLabels{})
+	if l.Title != "Usage below zero billed as zero" || l.Tone != activity.ToneWarning {
+		t.Fatalf("got %q / %q, want the net-negative title as a warning", l.Title, l.Tone)
+	}
+	if got := activity.MetaText(l); got != "API calls -50 · tokens -12.5" {
+		t.Errorf("meta %q", got)
+	}
+	if !strings.Contains(l.Problem, "credit note") {
+		t.Errorf("problem %q does not say what to do", l.Problem)
 	}
 }

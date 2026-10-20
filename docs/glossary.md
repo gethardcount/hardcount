@@ -137,14 +137,16 @@ works](how-velox-works.md). Back to the [docs index](README.md).
 - **prepaid commit**: Usage credit the customer pays for up front, sold as
   a line on a one-off invoice. When that invoice is finalized, Velox adds a
   credit block to the customer's balance. The credit can be more than the
-  price (pay $9k, get $10k). [More](ai-pricing.md)
+  price (pay $9k, get $10k). The purchase is not taxed; the usage the
+  credit pays for is. [More](ai-pricing.md#tax-on-prepaid-credit)
 - **drawdown**: Using a customer's credit balance to pay part of an invoice
   when it is billed, so less is charged. Free promotional credit is used
   before paid credit. Within each, the credit that expires soonest goes
   first. A commit's own purchase invoice can never be paid with credit.
   [More](design/prepaid-commits.md#d7-drawdown-order-null-safe)
 - **credit note (CN)**: A document that lowers what a customer owes on an
-  invoice. On an unpaid invoice it lowers the amount due. On a paid one,
+  invoice. On an unpaid invoice it lowers the amount due; if nothing is left
+  due, the invoice is marked paid. On a paid one,
   its total is split between a refund to the card, credit to the
   customer's balance, and money returned outside Velox (out of band). Its
   status is draft, issued or voided.
@@ -174,10 +176,12 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   settles it. If no PaymentIntent ID was recorded, the invoice is parked.
   [More](adr/107-unknown-is-terminal-until-a-human.md)
 - **parked invoice**: An invoice whose charge result is unknown and that has
-  no PaymentIntent ID recorded, so Velox cannot tell if the customer paid.
-  Nothing charges it. It leaves this state when a Stripe webhook or Velox's
-  Stripe search finds the charge, or when an operator writes it off.
-  [More](adr/108-parked-invoices-search-and-adopt.md)
+  no PaymentIntent ID recorded, so Velox cannot yet tell if the customer
+  paid. Nothing charges it. Velox lists the customer's payments in Stripe
+  every hour: a payment that appears is recorded, and if none has appeared
+  24 hours after the charge, the invoice is charged again as usual. An
+  operator can write it off meanwhile.
+  [More](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)
 - **parked subscription**: A subscription whose billing failed eight times
   in a row for the same period. Velox stops trying to bill it, so it stays
   due and no invoice is issued for that period. It leaves this state when an
@@ -231,8 +235,15 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   exists only in test mode. [More](quick-start.md)
 - **catch-up (catchup)**: The work Velox does after a test clock moves forward. It
   runs every trial end, billing period, threshold, retry, dunning step and
-  credit expiry that fell in the skipped time. The clock then returns to
-  `ready`, or to `internal_failure` if any step failed.
+  credit expiry that fell in the skipped time. It runs them by kind, not in
+  time order: trial ends and billing periods first, then payment retries
+  and dunning steps, then credit expiries. So when a dunning policy cancels
+  or pauses a subscription, move the clock to the time of the invoice's
+  last retry first, then to the next billing date. Velox dates the cancel
+  or pause at the time the clock moves to, and one longer move bills a
+  period a real clock would not
+  ([#1276](https://github.com/getvelox/velox/issues/1276)). The clock then
+  returns to `ready`, or to `internal_failure` if any step failed.
   [More](adr/015-test-clock-async-catchup.md)
 - **clock-pinned**: Describes a customer on a test clock, and everything it
   owns (subscriptions, invoices, credits). Its time comes from the clock,

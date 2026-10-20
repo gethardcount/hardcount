@@ -1,5 +1,5 @@
 // Settings → Email: what this server can send, in plain words. Plain
-// functions so node --test can check every state.
+// functions so tests/emailSettings.test.ts can check every state.
 //
 // Email is configured in the server environment, not in the dashboard. The
 // status comes from GET /v1/settings/email; nothing here is editable.

@@ -85,6 +85,32 @@ func TestAggregateForBillingPeriodByAgg(t *testing.T) {
 		}
 	})
 
+	// #1193: corrections larger than the usage leave a total below zero. The
+	// store returns it as it is, so the billing engine can bill it 0 and
+	// record it; it used to drop it, which hid it. A total that nets to
+	// exactly zero stays absent, like a meter with no events.
+	t.Run("a total below zero is returned, a zero total is absent", func(t *testing.T) {
+		tenantID := testutil.CreateTestTenant(t, db, "Agg Below Zero")
+		customerID := insertTestCustomer(t, db, tenantID, "cus_below")
+		negMeter := insertTestMeter(t, db, tenantID, "mtr_neg", "k_neg")
+		zeroMeter := insertTestMeter(t, db, tenantID, "mtr_zero", "k_zero")
+
+		ingest(t, ctx, store, tenantID, customerID, negMeter, decimal.NewFromInt(3), nil)
+		ingest(t, ctx, store, tenantID, customerID, negMeter, decimal.NewFromInt(-10), nil)
+		ingest(t, ctx, store, tenantID, customerID, zeroMeter, decimal.NewFromInt(5), nil)
+		ingest(t, ctx, store, tenantID, customerID, zeroMeter, decimal.NewFromInt(-5), nil)
+
+		got, err := store.AggregateForBillingPeriodByAgg(ctx, tenantID, customerID,
+			map[string]string{negMeter: "sum", zeroMeter: "sum"}, from, to)
+		if err != nil {
+			t.Fatalf("aggregate: %v", err)
+		}
+		assertTotals(t, got, map[string]decimal.Decimal{negMeter: decimal.NewFromInt(-7)})
+		if v, present := got[zeroMeter]; present {
+			t.Errorf("meter netting to zero present in totals: %v", v)
+		}
+	})
+
 	t.Run("events outside the period are excluded", func(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Agg Window")
 		customerID := insertTestCustomer(t, db, tenantID, "cus_window")

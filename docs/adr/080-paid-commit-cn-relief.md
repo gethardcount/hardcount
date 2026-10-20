@@ -90,6 +90,17 @@ refund at face (over-refund); charging consumption at face under-refunds.
   commit PI leaves the invoice paid while cash is pulled; the card refund
   leg fails safe at Stripe (loud `refund_status=failed`), the out_of_band
   channel has no backstop. Trigger: first dispute-modeling ask.
+  *(2026-10-19, #979: the trigger fired. Disputes are now recorded. A lost
+  dispute on a paid commit invoice raises `dispute_lost`, whose message
+  states the still-spendable credit and names relief (`retire_all`, the
+  amount as `out_of_band_amount_cents`), since an ordinary credit note is
+  refused here. Velox still retires nothing by itself: a loss does not tell
+  it whether the customer owes the money again, so the operator decides, as
+  for every other lost dispute. Relief returns at most f(remaining), so a
+  loss on a commit with spent credit leaves the rest to the operator's own
+  books. Still open: nothing stops a relief from also refunding to the card
+  after a loss; Stripe refuses that refund (`charge_disputed`), and it
+  shows as a failed refund.)*
 - Dashboard relief dialog is a fast-follow; the API carries the full
   contract (grants burndown endpoint reports remaining; error messages
   carry live max-refundable figures).

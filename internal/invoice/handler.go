@@ -22,6 +22,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/timeline"
 )
 
@@ -52,7 +53,9 @@ type CreditNoteLister interface {
 
 // PaymentCharger creates a Stripe PaymentIntent for a finalized invoice.
 type PaymentCharger interface {
-	ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error)
+	// hold is the charge hold the caller's claim returned (ADR-127): the
+	// charge re-checks it right before sending and sends nothing without it.
+	ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error)
 }
 
 // PaymentSetupGetter checks if a customer has a payment method ready.
@@ -60,17 +63,32 @@ type PaymentSetupGetter interface {
 	GetPaymentSetup(ctx context.Context, tenantID, customerID string) (domain.CustomerPaymentSetup, error)
 }
 
-// AuditStampFetcher returns the audit entries for one invoice — the
-// wall-clock record of its operator/engine transitions. The timeline
-// uses it as READ-TIME enrichment (ADR-104 Invariant A, corrected
-// twice): lifecycle rows are derived from invoice state columns, whose
-// stamps follow the entity's calendar (ADR-030), so their real-world
-// moment lives only in the audit log. Joining it here is the
-// subscription timeline's model applied to the invoice page — exact
-// keys (action + the frozen-vocabulary metadata discriminator), never
-// a time-window match. Consumer-defined; backed by audit.Logger.Query.
+// AuditStampFetcher returns the audit entries for one resource — the
+// wall-clock record of its operator/engine transitions, and who made
+// each one. The timeline uses it as READ-TIME enrichment:
+//
+//   - the invoice's own rows (resource "invoice") give its lifecycle rows
+//     their actor (ADR-128 rule 4) and, on a test clock, their Recorded
+//     stamp (ADR-104 Invariant A): lifecycle rows are derived from invoice
+//     state columns, whose stamps follow the entity's calendar (ADR-030),
+//     so their real-world moment and actor live only in the audit log;
+//   - a credit note's rows (resource "credit_note") give its issue actor
+//     and a failed refund's provider reason;
+//   - a payment-recovery run's rows (resource "dunning_run") give the
+//     actor of an operator's resolve.
+//
+// Exact keys only (action + the frozen-vocabulary metadata
+// discriminator), never a time-window match. Consumer-defined; backed by
+// audit.Logger.Query.
 type AuditStampFetcher interface {
-	ListByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.AuditEntry, error)
+	ListByResource(ctx context.Context, tenantID, resourceType, resourceID string) ([]domain.AuditEntry, error)
+}
+
+// SubscriptionLabeler names an invoice's subscription for the link on its
+// activity rows (ADR-128 rule 8). errs.ErrNotFound when it no longer
+// exists, in which case no link is drawn.
+type SubscriptionLabeler interface {
+	SubscriptionLabel(ctx context.Context, tenantID, subscriptionID string) (string, error)
 }
 
 // NoPaymentMethodNotifier emails the customer a payment-update link when a
@@ -164,6 +182,19 @@ type EmailEventRow struct {
 	// live-mode mail and for legacy rows enqueued before the anchor
 	// existed — those render at their wall stamp.
 	SimEffectiveAt *time.Time
+	// SendFailure classifies a failed row's error into one the activity
+	// line can name in plain words (activity.SendFailure*); empty when the
+	// row did not fail or its error has no plain-words name. The raw error
+	// stays in LastError and never reaches the screen.
+	SendFailure string
+	// SkipReason is the state the invoice reached that made the dispatcher
+	// skip a queued email (email_outbox.skip_reason): paid, voided,
+	// uncollectible or gone. Empty for rows not skipped, and for rows
+	// skipped before the reason was recorded.
+	SkipReason string
+	// CreditNoteNumber is the credit note a credit-note email sent (payload
+	// credit_note_number); empty for other types.
+	CreditNoteNumber string
 }
 
 // RefundIssuer issues a direct refund on a paid invoice. Concretely this
@@ -228,6 +259,7 @@ type Handler struct {
 	auditLogger     auditWriter
 	noPMNotifier    NoPaymentMethodNotifier
 	auditStamps     AuditStampFetcher
+	subscriptions   SubscriptionLabeler
 	collector       Collector
 	// emailConfigured is whether this server can send email (SMTP_HOST set).
 	// Sends are queued, so a queued email on a server with no SMTP fails
@@ -281,8 +313,12 @@ func (h *Handler) SetEmailSender(sender EmailSender) {
 // answer 409 email_not_configured.
 func (h *Handler) SetEmailConfigured(configured bool) { h.emailConfigured = configured }
 
-// SetAuditStamps wires the timeline's audit enrichment (ADR-104).
+// SetAuditStamps wires the timeline's audit enrichment (ADR-104, ADR-128).
 func (h *Handler) SetAuditStamps(f AuditStampFetcher) { h.auditStamps = f }
+
+// SetSubscriptionLabeler wires the subscription name the timeline links to
+// (ADR-128). Optional: when nil, rows carry no subscription link.
+func (h *Handler) SetSubscriptionLabeler(l SubscriptionLabeler) { h.subscriptions = l }
 
 // SetNoPaymentMethodNotifier wires the dispatcher behind the operator's
 // "resend payment setup link" action. Optional; nil disables the resend.
@@ -332,6 +368,7 @@ func (h *Handler) Routes() chi.Router {
 	// operator do it directly without waiting for retries.
 	r.Post("/{id}/mark-uncollectible", h.markUncollectible)
 	r.Get("/{id}/payment-timeline", h.paymentTimeline)
+	r.Get("/{id}/disputes", h.listDisputes)
 	return r
 }
 
@@ -677,11 +714,11 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The setup-link email tells the CUSTOMER "add a payment method and we'll
-	// collect it automatically". No charge path will ever collect an invoice
-	// whose payment is in flight — and for a parked one (ADR-107) that is
-	// permanent. Sending it would be an outbound promise the engine cannot
-	// keep, triggerable by an operator button (found by the honesty sweep,
-	// 2026-07-31).
+	// collect it automatically". No charge path collects an invoice whose
+	// payment is in flight — for a parked one (ADR-107), not until Stripe has
+	// shown no payment for a day. Sending it would be an outbound promise the
+	// engine cannot keep yet, triggerable by an operator button (found by the
+	// honesty sweep, 2026-07-31).
 	if b := domain.PaymentBlocksAction(inv, domain.ActionResendSetupLink); b.Blocked {
 		respond.ConflictCoded(w, r, "", b.Code, b.Message)
 		return
@@ -890,6 +927,12 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		respond.BadRequest(w, r, "email is required")
 		return
 	}
+	// The To address gets the same check as a customer's stored email.
+	to, err := domain.ValidateEmail("email", body.Email)
+	if err != nil {
+		respond.FromError(w, r, err, "invoice_email")
+		return
+	}
 
 	inv, items, err := h.svc.GetWithLineItems(r.Context(), tenantID, id)
 	if errors.Is(err, errs.ErrNotFound) {
@@ -920,7 +963,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// 2026-07-29 walk caught after the anchor shipped.
 	ctx := h.svc.bindForInvoice(r.Context(), tenantID, inv.ID)
 
-	cc, err := resolveSendCC(ctx, h.customers, tenantID, inv.CustomerID, body.Email, body.AdditionalEmails)
+	cc, err := resolveSendCC(ctx, h.customers, tenantID, inv.CustomerID, to, body.AdditionalEmails)
 	if err != nil {
 		respond.FromError(w, r, err, "invoice_email")
 		return
@@ -941,7 +984,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	// AmountDueCents, not Total: the email template labels this figure
 	// "Amount due", and credits/partial payments make the two differ —
 	// telling a customer they owe the pre-credit total is wrong.
-	if err := h.emailSender.SendInvoice(ctx, tenantID, body.Email, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken); err != nil {
+	if err := h.emailSender.SendInvoice(ctx, tenantID, to, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken); err != nil {
 		// Sanitize at the boundary — SMTP errors / outbox-store errors
 		// would otherwise leak to the operator toast. ADR-026.
 		respond.FromError(w, r, err, "invoice_email")
@@ -1017,7 +1060,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// and its three refusal gates existed only because the charged object
 	// carried stale state. Recovery of a returned customer runs on NORMAL
 	// rails — a fresh recovery invoice — and a written-off invoice is settled
-	// by RECORDING writers only (offline payment, ADR-108 adoption).
+	// by RECORDING writers only (offline payment, the stale-hold sweep's settle).
 	if inv.Status != domain.InvoiceFinalized {
 		respond.Validation(w, r, "can only collect payment on a finalized invoice — for a written-off debt, issue a recovery invoice or record an offline payment")
 		return
@@ -1059,12 +1102,20 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// between the read above and the charge below, meant a double charge
 	// or an overcharge at the stale pre-credit amount. The claim's CAS
 	// re-asserts the chargeable predicate against committed truth.
-	claimed, err := h.svc.ClaimChargeForManualCollect(r.Context(), tenantID, id)
+	hold, err := h.svc.ClaimChargeForManualCollect(r.Context(), tenantID, id)
 	if err != nil {
 		respond.InternalError(w, r)
 		return
 	}
-	if !claimed {
+	if !hold.Held() {
+		// A set hold is a charge running, or one whose result was lost and
+		// waits for the stale-hold sweep to confirm it with Stripe (ADR-127).
+		// Say so, with the same words void and offline payment use. The read
+		// only picks the words; the claim above was the gate.
+		if state, serr := h.svc.ChargeHoldState(r.Context(), tenantID, id); serr == nil && state != domain.ChargeHoldNone {
+			respond.ConflictCoded(w, r, "", "payment_in_flight", domain.ChargeHoldRefusalMessage)
+			return
+		}
 		respond.Validation(w, r, "a payment for this invoice is already in progress (a charge, or the customer paying on the payment page) or it is no longer chargeable — refresh and retry later")
 		return
 	}
@@ -1088,14 +1139,17 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// on file.
 	inv, err = h.svc.ApplyCreditBalance(r.Context(), tenantID, id)
 	if err != nil {
-		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id)
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		respond.FromError(w, r, err, "credit")
 		return
 	}
 	if inv.AmountDueCents <= 0 {
 		// Credits covered it — settle without a card charge, and without ever
-		// asking whether there was a card.
+		// asking whether there was a card. No charge was sent, so the hold is
+		// released either way; left set, it would wait for the stale-hold
+		// sweep (ADR-127).
 		settled, serr := h.svc.SettleZeroDue(r.Context(), tenantID, id)
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		if serr != nil {
 			respond.FromError(w, r, serr, "invoice")
 			return
@@ -1119,7 +1173,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		// locked out for the window. Any credit already applied STAYS applied:
 		// it was legitimately owed to this invoice, and amount_due is now
 		// correct for whatever settles it later.
-		_ = h.svc.ReleaseChargeClaim(r.Context(), tenantID, id)
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		respond.Validation(w, r, "customer has no payment method set up")
 		return
 	}
@@ -1129,7 +1183,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// velox_anchor_at), which dates paid_at and a decline's first dunning
 	// retry. Unbound, a Collect on a later Advance dated the retry from the
 	// issue instant, in the past. A wall-clock invoice binds nothing.
-	charged, err := h.charger.ChargeInvoice(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	charged, err := h.charger.ChargeInvoice(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a
 		// *payment.PaymentError which respond.FromError detects and
@@ -1155,6 +1209,17 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusOK, charged)
+}
+
+// releaseCollectHold frees Collect's charge hold on a path that sent no
+// charge. The store runs the release even if the operator's request has gone
+// away; a failure is logged, and the hold then waits for the stale-hold
+// sweep (ADR-127), which refuses the invoice an hour or more.
+func (h *Handler) releaseCollectHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold) {
+	if err := h.svc.ReleaseChargeClaim(ctx, tenantID, invoiceID, hold); err != nil {
+		slog.WarnContext(ctx, "collect payment: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
+			"invoice_id", invoiceID, "error", err)
+	}
 }
 
 // resolveDunningRecovered closes the invoice's active dunning run, if any, as
@@ -1267,7 +1332,11 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 // success or post-retry failure (a "still failing" retry is not an
 // HTTP error — the dashboard wants the new code to render). 409 when
 // the gate fails (status != draft, or tax_status not retryable). 404
-// when the invoice doesn't exist.
+// when the invoice doesn't exist. When the tax resolves but the
+// auto-finalize does not happen (the pause state could not be read, or
+// finalize failed), the call fails: 500 for a database error, 409 for a
+// state conflict. The invoice stays a draft with its tax saved, for the
+// operator to finalize, and the retry_tax audit row is still written.
 func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
@@ -1277,16 +1346,9 @@ func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	before, _ := h.svc.Get(r.Context(), tenantID, id)
 
 	inv, err := h.svc.RetryTax(r.Context(), tenantID, id)
-	if errors.Is(err, errs.ErrNotFound) {
-		respond.NotFound(w, r, "invoice")
-		return
-	}
-	if err != nil {
-		respond.FromError(w, r, err, "invoice")
-		return
-	}
-
-	if h.auditLogger != nil {
+	// RetryTax returns an invoice whenever its tax write committed, with or
+	// without an error: the click changed the tax and total, so audit it.
+	if inv.ID != "" && h.auditLogger != nil {
 		var beforeReason, afterReason string
 		if before.Attention != nil {
 			beforeReason = string(before.Attention.Reason)
@@ -1303,6 +1365,14 @@ func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 			"after_attention":  afterReason,
 			"tax_error_code":   inv.TaxErrorCode,
 		})
+	}
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "invoice")
+		return
+	}
+	if err != nil {
+		respond.FromError(w, r, err, "invoice")
+		return
 	}
 
 	respond.JSON(w, r, http.StatusOK, inv)
@@ -1326,8 +1396,12 @@ const (
 	rankEscalated         = 50
 	rankLifecycleTerminal = 60 // paid / voided / uncollectible
 	rankCreditNote        = 70
-	rankDunningResolved   = 80
-	rankEmail             = 90 // external lane; rank is a formality
+	// A dispute opens after the payment it disputes, and closes after it
+	// opened.
+	rankDisputeOpened   = 74
+	rankDisputeClosed   = 76
+	rankDunningResolved = 80
+	rankEmail           = 90 // last: an email follows the event it announces (ADR-104)
 )
 
 func dunningEventRank(eventType domain.DunningEventType) int {
@@ -1352,18 +1426,18 @@ func rfc3339OrEmpty(t time.Time) string {
 	return t.Format(time.RFC3339)
 }
 
-// lifecycleRecordedStamps joins an invoice's audit entries to the
-// lifecycle event types they transition (ADR-104 Invariant A, corrected
-// boundary №2). EXACT keys only: the top-level action for
+// lifecycleAuditRows joins an invoice's audit entries to the lifecycle
+// event types they transition (ADR-104 Invariant A, corrected boundary №2;
+// ADR-128 rule 4). EXACT keys only: the top-level action for
 // create/finalize/void, the frozen-vocabulary metadata discriminator for
 // the two update-flavored transitions (ADR-090 froze the action set, so
 // mark-uncollectible and record-payment ride action=update). Earliest
 // row wins — each transition happens once, and Query returns
 // newest-first, so the walk runs backwards. A transition with no audit
-// row is simply absent: its timeline row renders bare, honest for
-// pre-audit history.
-func lifecycleRecordedStamps(entries []domain.AuditEntry) map[string]time.Time {
-	out := map[string]time.Time{}
+// row is simply absent: its timeline row names no actor and, on a test
+// clock, renders without a Recorded stamp, honest for pre-audit history.
+func lifecycleAuditRows(entries []domain.AuditEntry) map[string]domain.AuditEntry {
+	out := map[string]domain.AuditEntry{}
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
 		key := ""
@@ -1382,8 +1456,8 @@ func lifecycleRecordedStamps(entries []domain.AuditEntry) map[string]time.Time {
 				key = "invoice.paid"
 			}
 		}
-		if key != "" && out[key].IsZero() {
-			out[key] = e.CreatedAt
+		if _, seen := out[key]; key != "" && !seen {
+			out[key] = e
 		}
 	}
 	return out
@@ -1492,6 +1566,32 @@ type timelineEvent struct {
 	// muted "Recorded <wall>" subline, mirroring the subscription
 	// timeline. Empty when the calendars coincide.
 	RecordedAt string `json:"recorded_at,omitempty"`
+	// Line is the row as the activity line standard words it (ADR-128).
+	// Description, Detail, Error, Status, AmountCents and Currency above
+	// are filled from it (fillFromLine), so a client that reads only the
+	// older fields shows the same words.
+	Line activity.Line `json:"line"`
+	// dunningEventID is the payment-recovery event a row tells; empty on
+	// every other row. RecoveryRunLines keys the Dunning page's lines by it.
+	dunningEventID string
+}
+
+// fillFromLine stamps the line's id and times and copies its words into the
+// older fields: the title is the description, the meta line (detail parts
+// and actor) is the detail, the problem is the error, the tone is the
+// status, and the line's amount is the row's amount.
+func (e *timelineEvent) fillFromLine() {
+	e.Line.ID = e.ID
+	e.Line = activity.Stamp(e.Line, e.sortAt, e.recordedSort, e.IsSimulated)
+	e.Description = e.Line.Title
+	e.Detail = activity.MetaText(e.Line)
+	e.Error = e.Line.Problem
+	e.Status = legacyStatus(e.Line.Tone)
+	e.AmountCents, e.Currency = nil, ""
+	if e.Line.Amount != nil {
+		c := e.Line.Amount.Cents
+		e.AmountCents, e.Currency = &c, e.Line.Amount.Currency
+	}
 }
 
 func piFromEventMetadata(meta map[string]any) string {
@@ -1505,7 +1605,7 @@ func piFromEventMetadata(meta map[string]any) string {
 // Exactly two suppressions, both exact-keyed, no heuristics:
 //
 //   - a dunning row already carrying this attempt's PaymentIntent
-//     absorbs it: the campaign row ("Payment retry #2 attempted" with
+//     absorbs it: the campaign row ("Payment retry 2 failed" with
 //     its cause subline) is the richer telling of the same charge, and
 //     it lifts the attempt's provider reason + amount onto itself;
 //   - a SUCCEEDED attempt on a paid invoice defers to the "Invoice
@@ -1517,14 +1617,7 @@ func piFromEventMetadata(meta map[string]any) string {
 // that), and a succeeded attempt on a NOT-paid invoice does render —
 // that shape is an anomaly worth seeing.
 func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceChargeAttempt, inv domain.Invoice) []timelineEvent {
-	dunningIdxByPI := map[string]int{}
-	for i, e := range events {
-		if e.Source == "dunning" && e.PaymentIntentID != "" {
-			if _, dup := dunningIdxByPI[e.PaymentIntentID]; !dup {
-				dunningIdxByPI[e.PaymentIntentID] = i
-			}
-		}
-	}
+	dunningIdxByPI := recoveryRowsByPI(events)
 	sawSucceeded := false
 	for _, a := range attempts {
 		if a.Outcome == domain.ChargeAttemptSucceeded {
@@ -1557,19 +1650,7 @@ func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceCharg
 		// The dunning row tells this charge better — hand it the
 		// provider facts and drop the attempt row.
 		if idx, ok := dunningIdxByPI[a.StripePaymentIntentID]; ok && a.StripePaymentIntentID != "" {
-			d := &events[idx]
-			// The attempt owns payment truth, so its verbatim provider
-			// reason replaces the dunning event's internally-wrapped copy
-			// ("payment failed: Your card was declined." → "Your card was
-			// declined.").
-			if a.ProviderReason != "" {
-				d.Error = a.ProviderReason
-			}
-			if d.AmountCents == nil && a.AmountCents > 0 {
-				amt := a.AmountCents
-				d.AmountCents = &amt
-				d.Currency = inv.Currency
-			}
+			liftAttempt(&events[idx], a, inv)
 			continue
 		}
 		events = append(events, chargeAttemptRow(a, inv))
@@ -1599,18 +1680,6 @@ func chargeAttemptRow(a domain.InvoiceChargeAttempt, inv domain.Invoice) timelin
 		recorded = a.OccurredAt
 		sim = true
 	}
-	desc, status := "Payment failed", "failed"
-	switch a.Outcome {
-	case domain.ChargeAttemptUnknown:
-		desc, status = "Charge attempted — outcome unconfirmed", "processing"
-	case domain.ChargeAttemptSucceeded:
-		desc, status = "Payment collected", "succeeded"
-	}
-	var amtPtr *int64
-	if a.AmountCents > 0 {
-		amt := a.AmountCents
-		amtPtr = &amt
-	}
 	return timelineEvent{
 		ID:              "attempt:" + a.ID,
 		Timestamp:       ts.Format(time.RFC3339),
@@ -1618,15 +1687,11 @@ func chargeAttemptRow(a domain.InvoiceChargeAttempt, inv domain.Invoice) timelin
 		tieRank:         rankChargeAttempt,
 		Source:          "payment",
 		EventType:       "charge_attempt." + string(a.Outcome),
-		Status:          status,
-		Description:     desc,
-		Error:           a.ProviderReason,
-		AmountCents:     amtPtr,
-		Currency:        inv.Currency,
 		PaymentIntentID: a.StripePaymentIntentID,
 		IsSimulated:     sim,
 		RecordedAt:      rfc3339OrEmpty(recorded),
 		recordedSort:    recorded,
+		Line:            attemptLine(a, inv),
 	}
 }
 
@@ -1709,241 +1774,50 @@ func titleCaseSnake(s string) string {
 	return strings.Join(parts, " ")
 }
 
-// relevantDunningEvents filters to only operator-meaningful events.
-var relevantDunningEvents = map[string]bool{
-	"dunning_started": true,
-	"retry_attempted": true,
-	"resolved":        true,
-	"escalated":       true,
-}
-
 // emailRowInstant resolves an email row's position on the timeline
-// (ADR-104). The PRIMARY instant is the billing instant that caused the
-// send — the outbox anchor stamped at enqueue from bound ctx; rankEmail
-// then places the row after the money event it announces, since a
+// (ADR-104), by the one rule every email surface uses
+// (activity.EmailInstant): the PRIMARY instant is the billing instant that
+// caused the send — the outbox anchor stamped at enqueue from bound ctx;
+// rankEmail then places the row after the money event it announces, since a
 // notification is only ever an effect. The real-world send instant
-// (dispatched_at once the relay took it, enqueue time until then)
-// survives as `recorded` — the operator contract's Invariant A: a row
-// whose two calendars differ shows both. Legacy rows without an anchor
-// keep their wall stamp — misplaced but honest; inferring an anchor at
-// read time is the heuristic the no-heuristic-proxies rule bans.
+// (dispatched_at once the relay took it, enqueue time until then) survives
+// as `recorded` — the operator contract's Invariant A: a row whose two
+// calendars differ shows both. Legacy rows without an anchor keep their wall
+// stamp — misplaced but honest; inferring an anchor at read time is the
+// heuristic the no-heuristic-proxies rule bans.
 func emailRowInstant(evt EmailEventRow) (ts time.Time, recorded time.Time, sim bool) {
-	wall := evt.CreatedAt
-	if evt.DispatchedAt != nil {
-		wall = *evt.DispatchedAt
-	}
-	if evt.SimEffectiveAt != nil {
-		return *evt.SimEffectiveAt, wall, true
-	}
-	return wall, time.Time{}, false
+	return activity.EmailInstant(evt.email())
 }
 
-// describeEmailEvent maps an email_outbox row to a timeline-friendly
-// description + status. Returns empty description for email types
-// that don't belong on the invoice timeline (catch-all so adding new
-// templates doesn't accidentally surface them). Status maps to the
-// existing dot-color grammar: succeeded (emerald), processing (blue),
-// failed (red).
-func describeEmailEvent(emailType, outboxStatus, deliveryState string) (string, string) {
-	desc := ""
-	switch emailType {
-	case "invoice":
-		desc = "Invoice emailed to customer"
-	case "payment_receipt":
-		desc = "Payment receipt emailed"
-	case "payment_failed":
-		desc = "Payment-failed email sent to customer"
-	case "payment_setup_request":
-		desc = "Customer notified — set up payment method"
-	case "credit_note":
-		desc = "Credit note emailed to customer"
-	case "dunning_warning":
-		desc = "Dunning reminder emailed"
-	case "dunning_escalation":
-		desc = "Dunning escalation emailed"
-	default:
-		return "", ""
+// metaNumber reads a number an audit row's metadata carries (JSON decodes
+// it as float64; a row built in Go may hold an int).
+func metaNumber(m map[string]any, key string) (int64, bool) {
+	switch v := m[key].(type) {
+	case float64:
+		return int64(v), true
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case json.Number:
+		n, err := v.Int64()
+		return n, err == nil
 	}
-	// Map outbox row status to timeline-status grammar, layering the
-	// provider-confirmed outcome (ADR-098) over a completed handoff:
-	// 'dispatched' alone only means the relay accepted the message —
-	// delivered/bounced/complained is what the provider then learned.
-	switch outboxStatus {
-	case "dispatched":
-		switch deliveryState {
-		case "delivered":
-			return desc + " — delivered", "succeeded"
-		case "bounced":
-			return desc + " — bounced", "failed"
-		case "complained":
-			return desc + " — recipient marked it as spam", "failed"
-		}
-		return desc, "succeeded"
-	case "failed":
-		return desc + " (delivery failed)", "failed"
-	case "pending":
-		return desc + " (queued)", "processing"
-	case "skipped":
-		// Deliberately not sent — the invoice reached a TERMINAL state while
-		// the row sat queued (0155). Pre-ADR-098 this fell through to the
-		// default "succeeded" rendering, showing a never-sent email as sent.
-		//
-		// Says "closed", not "settled": the dispatcher skips on ANY terminal
-		// state (dispatcher.go reads InvoiceTerminalState, which answers paid /
-		// voided / uncollectible / gone). "Settled first" was true only for the
-		// paid case and asserted a payment on invoices that were written off or
-		// annulled — found on a written-off invoice whose row read "not sent —
-		// invoice settled first" beside a "Marked uncollectible" row two lines
-		// above it. The real state IS recorded (outbox last_error carries
-		// "reached <state> before delivery") but is not plumbed to the
-		// timeline, so this says only what it can know.
-		return desc + " (not sent — the invoice was already closed)", "info"
-	}
-	return desc, "succeeded"
+	return 0, false
 }
 
-// emailTriggerDetail maps an email row's enqueue trigger to the cause
-// subline rendered beneath its timeline row. Only the setup-link email
-// carries one today: it is the one type where two rows on one invoice
-// are otherwise indistinguishable (the finalize-time send and an
-// operator's Resend land with identical copy, and on a frozen clock,
-// identical timestamps). Legacy rows enqueued before the trigger was
-// recorded return "" and render exactly as before — degraded to the
-// old ambiguity, never to a guessed cause.
-func emailTriggerDetail(emailType, trigger string) string {
-	if emailType != "payment_setup_request" {
-		return ""
-	}
-	switch trigger {
-	case "finalize_no_pm":
-		return "Sent automatically — no payment method on file at finalize"
-	case "auto_charge_retry_no_pm":
-		return "Sent automatically — a charge attempt found no payment method"
-	case "operator_resend":
-		return "Resent by an operator"
-	}
-	return ""
-}
-
-// emailClause renders a suppressed dunning email row as a lowercase
-// clause for threading into the matching dunning row's detail subline
-// ("reminder sent — bounced"). Same status/verdict grammar as
-// describeEmailEvent — the row is real outbox data, just displayed on
-// the retry row instead of as its own timeline entry (the entry lives
-// on the customer page's "Sent emails" card, Stripe shape).
-func emailClause(noun string, em EmailEventRow) string {
-	switch em.Status {
-	case "failed":
-		return noun + " failed to send"
-	case "pending":
-		return noun + " queued"
-	case "skipped":
-		return noun + " skipped — the invoice was already closed"
-	}
-	switch em.DeliveryState {
-	case "delivered":
-		return noun + " sent — delivered"
-	case "bounced":
-		return noun + " sent — bounced"
-	case "complained":
-		return noun + " sent — recipient marked it as spam"
-	}
-	return noun + " sent"
-}
-
-// capFirst uppercases the leading ASCII letter so an emailClause can
-// stand alone as a detail subline.
-func capFirst(s string) string {
-	if s == "" || s[0] < 'a' || s[0] > 'z' {
-		return s
-	}
-	return string(s[0]-'a'+'A') + s[1:]
-}
-
-// describeDunningEvent renders one dunning lifecycle row: uniform
-// machine-event TITLES ("Payment recovery started", "Payment retry #N
-// attempted" — the timeline's title=event, subline=detail grammar, and
-// the same "Payment recovery" vocabulary the Diagnostic card uses),
-// with the row's CAUSE as the detail subline. The cause is recorded at
-// write time by the caller (never re-derived): pre-fix the start row
-// was cause-blind over a hardcoded payment_failed reason (repaired in
-// 0161), and card-less retry rows read as real charge attempts.
-func describeDunningEvent(eventType, reason string, attemptCount int) (desc, status, detail string) {
-	switch eventType {
-	case "dunning_started":
-		switch reason {
-		case string(domain.DunningCausePaymentFailed):
-			return "Payment recovery started", "failed", "Card was declined — automatic retries scheduled"
-		case string(domain.DunningCauseNoPaymentMethod):
-			return "Payment recovery started", "scheduled", "No payment method — reminders until a card is added"
-		}
-		// Legacy rows with no recorded cause: the start is still true,
-		// the cause is honestly absent.
-		return "Payment recovery started", "scheduled", ""
-	case "retry_attempted":
-		desc := fmt.Sprintf("Payment retry #%d attempted", attemptCount)
-		switch reason {
-		case "succeeded":
-			// The recovering attempt (its own row since the I5 walk).
-			return desc, "succeeded", ""
-		case string(domain.DunningCauseNoPaymentMethod), domain.ErrNoPaymentMethodOnRetry.Error():
-			// Nothing was charged — there was no card. The tick counted
-			// the attempt and reminded the customer. Rendering it as a
-			// bare "attempted" read as a repeat charge failure (legacy
-			// sentinel matched for pre-normalization rows: our own
-			// single-writer string, not an operator spelling). The
-			// reminder clause ("reminder sent — bounced") is composed
-			// by the timeline builder from the actual email_outbox row
-			// — claimed here it would assert a send this function
-			// can't see.
-			return desc, "scheduled", "No payment method"
-		}
-		return desc, "processing", ""
-	case "resolved":
-		// Substring, not equality: this one reason field carries three
-		// spellings by construction — ResolveRun writes the bare resolution
-		// ("invoice_voided"), ResolveByInvoice prefixes it ("invoice
-		// invoice_voided"), and the engine floor derives its own from the
-		// invoice status ("invoice_voided" / "invoice_uncollectible"). The
-		// equality version below silently fell through to the generic label
-		// for two of the three. Unlike the ADR-020 FOLD — which must never
-		// key on this string — a missed spelling here only costs a less
-		// specific label, and the default arm catches it.
-		switch {
-		case strings.Contains(reason, "payment_recovered"):
-			return "Payment recovered via retry", "succeeded", ""
-		case strings.Contains(reason, "not_collectible"), strings.Contains(reason, "uncollectible"):
-			return "Invoice written off", "resolved", ""
-		case strings.Contains(reason, "voided"), reason == string(domain.ResolutionManuallyResolved):
-			return "Invoice voided", "resolved", ""
-		default:
-			return "Dunning resolved", "resolved", ""
-		}
-	case "escalated":
-		// reason carries the policy.final_action that fired. ADR-036
-		// amendment aligned the enum with Stripe/Lago/Recurly: pause
-		// now means pause-collection (keep_as_draft), not hard pause;
-		// write_off_later → mark_uncollectible; new cancel_subscription.
-		switch reason {
-		case "pause":
-			return "Collection paused — retries exhausted", "escalated", ""
-		case "mark_uncollectible":
-			return "Marked uncollectible — retries exhausted", "escalated", ""
-		case "cancel_subscription":
-			return "Subscription canceled — retries exhausted", "escalated", ""
-		default:
-			return "Escalated for manual review", "escalated", ""
-		}
-	default:
-		return eventType, "info", ""
-	}
+// dunningRunEvents is one payment-recovery run and its events.
+type dunningRunEvents struct {
+	run    domain.InvoiceDunningRun
+	events []domain.InvoiceDunningEvent
 }
 
 func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
+	ctx := r.Context()
+	tenantID := auth.TenantID(ctx)
 	id := chi.URLParam(r, "id")
 
-	inv, err := h.svc.Get(r.Context(), tenantID, id)
+	inv, err := h.svc.Get(ctx, tenantID, id)
 	if errors.Is(err, errs.ErrNotFound) {
 		respond.NotFound(w, r, "invoice")
 		return
@@ -1968,522 +1842,441 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	// false and dropped their badge despite simulated timestamps; (2) the badge
 	// now survives a later clock unpin, since the old sub.Get was a mutable
 	// read-time snapshot (the heuristic feedback_no_heuristic_proxies bans).
-	// Stripe-webhook + email events stay wall-clock either way (real-world
-	// dispatch time), so they don't carry this flag.
+	// It also decides, for every row the invoice owns, whether the line
+	// carries a Recorded time (ADR-128 rule 6).
 	isSimulated := inv.IsSimulated
-
-	var events []timelineEvent
-
-	// lifecycle rows come from the invoice row itself (a failure there
-	// 500s above); side lanes degrade LOUDLY instead: named in `degraded`,
-	// logged, and bannered by the UI. `truncated` discloses the one capped
-	// lane (credit notes, CreditNoteLaneCap). Declared up here because the
-	// audit-stamp join below is the first fallible lane.
-	degraded := []string{}
-	truncated := false
-	degrade := func(lane string, err error) {
-		degraded = append(degraded, lane)
-		slog.ErrorContext(r.Context(), "payment timeline: lane degraded", "lane", lane, "invoice_id", inv.ID, "error", err)
-	}
-
-	// Wall-clock stamps for the lifecycle rows (ADR-104 Invariant A,
-	// corrected boundary №2 — operator nudge, same afternoon as the CN
-	// one): lifecycle rows derive from invoice state columns whose stamps
-	// follow the entity's calendar, so their real-world moment lives only
-	// in the audit log. Exact-keyed join; earliest row wins; a missing
-	// entry leaves the row bare — honest for pre-audit history. Fetch
-	// failure degrades the lane like every other source.
-	lifecycleRecorded := map[string]time.Time{}
-	if isSimulated && h.auditStamps != nil {
-		if entries, err := h.auditStamps.ListByInvoice(r.Context(), tenantID, inv.ID); err != nil {
-			degrade("audit", err)
-		} else {
-			lifecycleRecorded = lifecycleRecordedStamps(entries)
-		}
-	}
-
-	// Lifecycle events synthesised from invoice columns. Without these,
-	// freshly-finalized invoices that haven't seen a Stripe charge yet
-	// render an empty timeline — operators have no chronology to read.
-	// Mirrors Stripe's "Invoice activity" section which always anchors
-	// on Created → Finalized regardless of payment progress.
-	events = append(events, timelineEvent{
-		ID:           "lifecycle:created:" + inv.ID,
-		Timestamp:    inv.CreatedAt.Format(time.RFC3339),
-		sortAt:       inv.CreatedAt,
-		tieRank:      rankInvoiceCreated,
-		Source:       "lifecycle",
-		EventType:    "invoice.created",
-		Status:       "succeeded",
-		Description:  "Invoice created",
-		IsSimulated:  isSimulated,
-		RecordedAt:   rfc3339OrEmpty(lifecycleRecorded["invoice.created"]),
-		recordedSort: lifecycleRecorded["invoice.created"],
-	})
-	if inv.IssuedAt != nil {
-		amt := inv.AmountDueCents
-		events = append(events, timelineEvent{
-			ID:           "lifecycle:finalized:" + inv.ID,
-			Timestamp:    inv.IssuedAt.Format(time.RFC3339),
-			sortAt:       *inv.IssuedAt,
-			tieRank:      rankInvoiceFinalized,
-			Source:       "lifecycle",
-			EventType:    "invoice.finalized",
-			Status:       "succeeded",
-			Description:  "Invoice finalized",
-			RecordedAt:   rfc3339OrEmpty(lifecycleRecorded["invoice.finalized"]),
-			recordedSort: lifecycleRecorded["invoice.finalized"],
-			AmountCents:  &amt,
-			Currency:     inv.Currency,
-			IsSimulated:  isSimulated,
-		})
-	}
-	// (Removed: synthetic "Payment deadline" event keyed off due_at.
-	// Activity is for things that happened — charges, state
-	// transitions, dunning attempts. A future deadline isn't an
-	// activity. The deadline is already surfaced honestly in the
-	// invoice header and the InvoiceAttention banner's `DueBy` line.)
-	if inv.VoidedAt != nil {
-		events = append(events, timelineEvent{
-			ID:           "lifecycle:voided:" + inv.ID,
-			Timestamp:    inv.VoidedAt.Format(time.RFC3339),
-			sortAt:       *inv.VoidedAt,
-			tieRank:      rankLifecycleTerminal,
-			Source:       "lifecycle",
-			EventType:    "invoice.voided",
-			Status:       "canceled",
-			Description:  "Invoice voided",
-			RecordedAt:   rfc3339OrEmpty(lifecycleRecorded["invoice.voided"]),
-			recordedSort: lifecycleRecorded["invoice.voided"],
-			IsSimulated:  isSimulated,
-		})
-	}
-	if inv.UncollectibleAt != nil {
-		events = append(events, timelineEvent{
-			ID:           "lifecycle:uncollectible:" + inv.ID,
-			Timestamp:    inv.UncollectibleAt.Format(time.RFC3339),
-			sortAt:       *inv.UncollectibleAt,
-			tieRank:      rankLifecycleTerminal,
-			Source:       "lifecycle",
-			EventType:    "invoice.marked_uncollectible",
-			Status:       "canceled",
-			Description:  "Marked uncollectible — written off as bad debt",
-			RecordedAt:   rfc3339OrEmpty(lifecycleRecorded["invoice.marked_uncollectible"]),
-			recordedSort: lifecycleRecorded["invoice.marked_uncollectible"],
-			IsSimulated:  isSimulated,
-		})
-	}
-	if inv.PaidAt != nil {
-		amt := inv.AmountPaidCents
-		desc := "Invoice paid"
-		detail := formatPaymentCardDetail(inv.PaymentCardBrand, inv.PaymentCardLast4)
-		// Operator-recorded offline payments (cheque/wire/cash) stamp a
-		// synthetic out_of_band: payment-intent id — surface them as what
-		// they are instead of rendering identically to a card payment.
-		if strings.HasPrefix(inv.StripePaymentIntentID, "out_of_band:") {
-			// One word, one sense (operator-ambiguity tiebreaker,
-			// 2026-07-29): this row once said "recorded" three ways —
-			// title, agent line, timestamp label. The timestamp label
-			// owns the word product-wide (Invariant C), so the title
-			// states the FACT (payment received out of band) and the
-			// agent line uses "entered".
-			desc = "Payment received (offline)"
-			detail = "Entered by an operator — cheque, wire, or other out-of-band payment"
-		}
-		events = append(events, timelineEvent{
-			ID:           "lifecycle:paid:" + inv.ID,
-			Timestamp:    inv.PaidAt.Format(time.RFC3339),
-			sortAt:       *inv.PaidAt,
-			tieRank:      rankLifecycleTerminal,
-			Source:       "lifecycle",
-			EventType:    "invoice.paid",
-			Status:       "succeeded",
-			RecordedAt:   rfc3339OrEmpty(lifecycleRecorded["invoice.paid"]),
-			recordedSort: lifecycleRecorded["invoice.paid"],
-			Description:  desc,
-			AmountCents:  &amt,
-			Currency:     inv.Currency,
-			Detail:       detail,
-			IsSimulated:  isSimulated,
-		})
-	}
 
 	// Lane-degradation disclosure (2026-07-19 audit, finding 4): a
 	// side-lane fetch failure used to be swallowed (`if err == nil`) — the
 	// lane silently vanished, and a timeline missing its dunning rows is
 	// indistinguishable from an invoice that never saw dunning. The core
+	// lifecycle rows come from the invoice row itself (a failure there
+	// 500s above); side lanes degrade LOUDLY instead: named in `degraded`,
+	// logged, and bannered by the UI. `truncated` discloses the one capped
+	// lane (credit notes, CreditNoteLaneCap).
+	degraded := []string{}
+	truncated := false
+	degradedLane := map[string]bool{}
+	degrade := func(lane string, err error) {
+		slog.ErrorContext(ctx, "payment timeline: lane degraded", "lane", lane, "invoice_id", inv.ID, "error", err)
+		if !degradedLane[lane] {
+			degradedLane[lane] = true
+			degraded = append(degraded, lane)
+		}
+	}
+	// auditRows reads one resource's audit trail; a failure degrades the
+	// audit lane (once) and the rows it would have enriched name no actor.
+	auditRows := func(resourceType, resourceID string) []domain.AuditEntry {
+		if h.auditStamps == nil {
+			return nil
+		}
+		entries, err := h.auditStamps.ListByResource(ctx, tenantID, resourceType, resourceID)
+		if err != nil {
+			degrade("audit", err)
+			return nil
+		}
+		return entries
+	}
 
-	// Credit-note chronology rows. The settlement waterfall on the page
-	// already shows credit notes channel-by-channel; these rows give the
-	// SAME facts a place in the chronology ("Invoice paid" then silence
-	// after a refund read as nothing-happened). Issued notes only —
-	// drafts aren't activity yet, voided notes vanish from the story the
-	// same way Stripe's do. Each row carries the CN's OWN is_simulated:
-	// operator-HTTP CNs stamp WALL-CLOCK issued_at (the HTTP path doesn't
-	// bind the customer clock) → is_simulated=false → real-time lane;
-	// engine clawbacks (downgrade/cancel proration) issue under the
-	// clock-pinned sub's bound time → is_simulated=true → billing
-	// (Activity) lane, sorted with the other simulated rows. Pre-fix all
-	// CNs were tagged with the INVOICE's flag and routed to the real-time
-	// lane, so an engine CN showed a simulated timestamp in the wall-clock
-	// lane (migration 0117 added the per-CN flag).
+	// ── Read every source first, in lane order; build rows after. ──
+
+	// The invoice's audit rows: its lifecycle rows' actors (ADR-128 rule
+	// 4), and on a test clock their Recorded stamps (ADR-104 Invariant A,
+	// corrected boundary №2): lifecycle rows derive from invoice state
+	// columns whose stamps follow the entity's calendar, so their real-world
+	// moment and their actor live only in the audit log.
+	lifecycle := lifecycleAuditRows(auditRows("invoice", inv.ID))
+
+	// Credit notes. Issued notes only — drafts aren't activity yet, voided
+	// notes vanish from the story the same way Stripe's do.
+	var cns []domain.CreditNote
 	if h.creditNotes != nil {
-		if cns, err := h.creditNotes.List(r.Context(), tenantID, inv.ID); err != nil {
+		if list, err := h.creditNotes.List(ctx, tenantID, inv.ID); err != nil {
 			degrade("credit_notes", err)
 		} else {
 			// The lister fetches at most CreditNoteLaneCap notes; at the
 			// cap we can't know what fell off, only that something may
 			// have (the interface carries no total).
-			if len(cns) >= CreditNoteLaneCap {
+			if len(list) >= CreditNoteLaneCap {
 				truncated = true
 			}
 			// Store returns created_at DESC — reverse so residual
 			// exact-tie insertion order is causal (oldest first).
-			slices.Reverse(cns)
-			for _, cn := range cns {
-				if cn.Status != domain.CreditNoteIssued || cn.IssuedAt == nil {
-					continue
-				}
-				total := cn.TotalCents
-				// RefundAmountCents is what was ALLOCATED to the card;
-				// RefundStatus is whether that money actually moved. Labelling
-				// from the allocation alone reported an intention as an outcome:
-				// a credit note whose Stripe refund failed still read "Refund
-				// issued" on the invoice an operator opens to ask what happened
-				// (found walking FLOW C2 2026-08-03 on CN-000027 —
-				// refund_status=failed, no stripe_refund_id, no money moved,
-				// timeline said "Refund issued · $10.00"). The credit note row
-				// and the needs-attention queue both already carry the truth;
-				// this surface simply wasn't reading it.
-				desc := "Credit note issued"
-				if cn.RefundAmountCents > 0 {
-					full := cn.RefundAmountCents == cn.TotalCents
-					// Exhaustive on purpose: "money moved" is the ONLY state
-					// that may render as issued. `none` with an allocation is a
-					// real stored state (a leg that never executed — e.g. no
-					// refunder configured), and it must not borrow the
-					// success wording just because it isn't an explicit failure.
-					switch cn.RefundStatus {
-					case domain.RefundSucceeded, "":
-						desc = "Refund issued"
-						if !full {
-							desc = "Credit note issued — part refunded to card"
-						}
-					case domain.RefundFailed:
-						desc = "Refund failed"
-						if !full {
-							desc = "Credit note issued — card refund failed"
-						}
-					case domain.RefundPending:
-						desc = "Refund pending"
-						if !full {
-							desc = "Credit note issued — card refund pending"
-						}
-					default:
-						desc = "Refund not processed"
-						if !full {
-							desc = "Credit note issued — card refund not processed"
-						}
-					}
-				}
-				// The row's STATUS drives the UI's verdict dot, and it must
-				// agree with the words beside it: the description switch
-				// above tells the truth per refund_status, but the status
-				// was hardcoded "succeeded" — so a CN whose card refund
-				// FAILED rendered an emerald success dot next to the words
-				// "Refund failed" (2026-08-04 failed-refund invoice census;
-				// the text channel was fixed 2026-08-03, the visual channel
-				// was not). Refund-less CNs (credit / out-of-band / pure
-				// adjustment) settle inside the Issue transaction, so
-				// "succeeded" stays true for them.
-				cnStatus := "succeeded"
-				if cn.RefundAmountCents > 0 {
-					switch cn.RefundStatus {
-					case domain.RefundSucceeded, "":
-						cnStatus = "succeeded"
-					case domain.RefundFailed:
-						cnStatus = "failed"
-					default:
-						// pending, and none-with-allocation ("not
-						// processed"): money has not moved — never green.
-						cnStatus = "pending"
-					}
-				}
-				detail := cn.CreditNoteNumber
-				if cn.Reason != "" {
-					detail = cn.CreditNoteNumber + " — " + cn.Reason
-				}
-				// Invariant A (boundary corrected post-walk): a credit
-				// note on a clock-pinned invoice is dated on the entity's
-				// calendar, so its real-world insert instant renders as
-				// the same "Recorded" subline emails and attempts carry.
-				// Nil RecordedAt (pre-0164 rows) → no subline, honestly.
-				var cnRecorded time.Time
-				if cn.IsSimulated && cn.RecordedAt != nil {
-					cnRecorded = *cn.RecordedAt
-				}
-				events = append(events, timelineEvent{
-					ID:           "cn:" + cn.ID,
-					Timestamp:    cn.IssuedAt.Format(time.RFC3339),
-					sortAt:       *cn.IssuedAt,
-					tieRank:      rankCreditNote,
-					Source:       "credit_note",
-					RecordedAt:   rfc3339OrEmpty(cnRecorded),
-					recordedSort: cnRecorded,
-					EventType:    "credit_note.issued",
-					Status:       cnStatus,
-					Description:  desc,
-					AmountCents:  &total,
-					Currency:     cn.Currency,
-					Detail:       detail,
-					IsSimulated:  cn.IsSimulated,
-				})
-			}
+			slices.Reverse(list)
+			cns = list
 		}
 	}
 
-	// Customer-notification email events. Surfaces "Customer notified
-	// — payment method required" / "Receipt sent" / "Dunning warning
-	// emailed" alongside the Stripe + dunning rows. Without this,
-	// operators have no signal that the customer was actually told
-	// about the issue — the email outbox is the durable trace.
-	//
-	// Suppressed dunning emails are captured here and threaded into
-	// the matching dunning rows' detail sublines below, so a bounced
-	// reminder is visible from the invoice without re-introducing the
-	// wall-clock rows. Warnings pair by payload attempt_number =
-	// run.AttemptCount at send time (exact key, no index heuristics);
-	// the payload carries no run id, so across multiple runs on one
-	// invoice a repeated attempt number keeps the newest email —
+	// Customer emails. The payment-recovery emails (reminder, final notice)
+	// are not rows of their own: each is a clause on the retry or
+	// retries-ran-out row it belongs to, and its own entry lives on the
+	// customer page's Sent emails card (Stripe shape —
+	// docs.stripe.com/invoicing/send-email lists the email log on the
+	// customer page). Reminders pair with their retry by the payload's
+	// attempt_number = run.AttemptCount at send time (exact key, no index
+	// heuristics); the payload carries no run id, so across multiple runs on
+	// one invoice a repeated attempt number keeps the newest email —
 	// accepted display nuance on an already-rare shape.
+	var emails []EmailEventRow
 	reminderByAttempt := map[int]EmailEventRow{}
 	var escalationEmail *EmailEventRow
 	if h.emailEvents != nil {
-		emailEvts, err := h.emailEvents.ListByInvoice(r.Context(), tenantID, inv.InvoiceNumber)
-		if err != nil {
+		if list, err := h.emailEvents.ListByInvoice(ctx, tenantID, inv.InvoiceNumber); err != nil {
 			degrade("emails", err)
 		} else {
-			for _, evt := range emailEvts {
-				// Dunning warning + escalation emails are surfaced in the
-				// per-customer "Sent emails" section on CustomerDetail
-				// (Stripe shape — `docs.stripe.com/invoicing/send-email`
-				// lists the email log on the customer page, not the
-				// invoice page). Suppressing the rows here avoids the
-				// wall-clock-vs-simulated-time visual mismatch in the
-				// invoice activity timeline — those rows would show
-				// "May 16, 2026" send times next to dunning state rows
-				// at simulated cycle dates like "Mar 4, 2025."
-				//
-				// payment_failed (initial charge) still flows through as
-				// its own row. It used to be folded onto the charge
-				// failure as a "Customer notified by email" sub-line;
-				// ADR-103 dropped that fold because pairing the two
-				// needed a time window, and telling the customer is a
-				// distinct fact with its own timestamp.
-				if evt.EmailType == "dunning_warning" || evt.EmailType == "dunning_escalation" {
-					if evt.EmailType == "dunning_warning" && evt.AttemptNumber > 0 {
-						reminderByAttempt[evt.AttemptNumber] = evt
-					} else if evt.EmailType == "dunning_escalation" {
-						e := evt
-						escalationEmail = &e
-					}
-					continue
-				}
-				desc, status := describeEmailEvent(evt.EmailType, evt.Status, evt.DeliveryState)
-				if desc == "" {
-					continue
-				}
-				ts, recorded, sim := emailRowInstant(evt)
-				events = append(events, timelineEvent{
-					ID:          "email:" + evt.ID,
-					Timestamp:   ts.Format(time.RFC3339),
-					sortAt:      ts,
-					tieRank:     rankEmail,
-					Source:      "email",
-					EventType:   "email." + evt.EmailType,
-					Status:      status,
-					Description: desc,
-					// Cause subline (PR #640 pattern: uniform machine title,
-					// cause underneath). Without it, a finalize-time setup
-					// link and an operator's Resend rendered byte-identical —
-					// two rows, same instant, no way to answer "why twice?".
-					Detail:       emailTriggerDetail(evt.EmailType, evt.Trigger),
-					Error:        evt.LastError,
-					IsSimulated:  sim,
-					RecordedAt:   rfc3339OrEmpty(recorded),
-					recordedSort: recorded,
-				})
-			}
+			emails, reminderByAttempt, escalationEmail = recoveryEmails(list)
 		}
 	}
 
-	// Stripe webhook rows are NOT a display source (ADR-103). The
-	// webhook table is ingestion infrastructure — idempotency + replay —
-	// and it emits 2-3 rows of provider chatter per charge (created,
-	// then succeeded/failed). Payments are rendered from the ONE thing
-	// Velox owns about them: invoice_charge_attempts, resolved inside
-	// the settle transaction. That deleted three separate reconciliation
-	// mechanisms (lifecycle dedup, failed-twin folding by PI-then-index,
-	// and email folding by a 2-minute time window) along with their
-	// heuristics.
-
-	// Fetch dunning events. Track the max attempt count across the
-	// run so we can attach it to the lifecycle invoice.paid row
-	// when this run resolved into payment success — the operator
-	// then sees "Invoice paid · after 3 retry attempts" in one row
-	// instead of separate paid + dunning-resolved entries.
-	maxAttemptCount := 0
+	// Payment-recovery runs and their events. ListRuns returns created_at
+	// DESC — reverse so multi-run invoices append run 1 before run 2.
+	var dunningRuns []dunningRunEvents
 	if h.dunningTimeline != nil {
-		runs, err := h.dunningTimeline.ListRunsByInvoice(r.Context(), tenantID, id)
-		if err != nil {
+		if runs, err := h.dunningTimeline.ListRunsByInvoice(ctx, tenantID, id); err != nil {
 			degrade("dunning", err)
 		} else {
-			// ListRuns returns created_at DESC — reverse so multi-run
-			// invoices append run 1 before run 2 (residual exact-tie
-			// insertion order stays causal).
 			slices.Reverse(runs)
-			dunningDegraded := false
 			for _, run := range runs {
-				runEvents, err := h.dunningTimeline.ListEvents(r.Context(), tenantID, run.ID)
+				evts, err := h.dunningTimeline.ListEvents(ctx, tenantID, run.ID)
 				if err != nil {
 					// One run's events failing still loses a slice of the
-					// lane — disclose it (once), don't just skip the run.
-					if !dunningDegraded {
-						dunningDegraded = true
-						degrade("dunning", err)
-					}
+					// lane — disclose it, don't just skip the run.
+					degrade("dunning", err)
 					continue
 				}
-				for _, evt := range runEvents {
-					if !relevantDunningEvents[string(evt.EventType)] {
-						continue
-					}
-					if evt.AttemptCount > maxAttemptCount {
-						maxAttemptCount = evt.AttemptCount
-					}
-					// Suppress dunning 'resolved' when a lifecycle cause row
-					// already says it (ADR-020 fold): "Invoice paid" owns a
-					// recovered run, "Marked uncollectible" owns a write-off,
-					// "Invoice voided" owns a void-flavored resolution. Gated
-					// on the invoice's own transition FIELDS — never the
-					// event's reason string, because each resolver spells its
-					// reason differently ("manually_resolved",
-					// "invoice_voided", "invoice manually_resolved" from
-					// ResolveByInvoice, …) and a reason-matched fold silently
-					// misses the next spelling (found live twice on FLOW I13:
-					// first the write-off twin, then NIM-000233's void twin
-					// surviving the reason-matched version of this fold). A
-					// failed propagation (run resolved, invoice never
-					// transitioned) sets none of the fields, so the dunning
-					// row stays as the only surviving record.
-					if string(evt.EventType) == "resolved" &&
-						(inv.PaidAt != nil || inv.UncollectibleAt != nil || inv.VoidedAt != nil) {
-						continue
-					}
-					desc, status, detail := describeDunningEvent(string(evt.EventType), evt.Reason, evt.AttemptCount)
-					// Reason is machine vocabulary (cause enums, our no-PM
-					// sentinel) once a detail subline carries the operator
-					// copy — don't ship it as red error text. Decline
-					// retries keep their provider reason; the start row's
-					// provider message lifts in via the Stripe fold.
-					rowErr := evt.Reason
-					if detail != "" || evt.EventType == domain.DunningEventStarted {
-						rowErr = ""
-					}
-					// Thread the suppressed dunning email's delivery
-					// verdict (ADR-098) into the row it belongs to.
-					// Skipped for the succeeded retry: warnings are only
-					// enqueued after FAILED attempts, so a same-numbered
-					// email would belong to another run's failure.
-					if status != "succeeded" {
-						switch evt.EventType {
-						case domain.DunningEventRetryAttempted:
-							if em, ok := reminderByAttempt[evt.AttemptCount]; ok {
-								clause := emailClause("reminder", em)
-								if detail != "" {
-									detail += " — " + clause
-								} else {
-									detail = capFirst(clause)
-								}
-							}
-						case domain.DunningEventEscalated:
-							if escalationEmail != nil {
-								detail = capFirst(emailClause("escalation email", *escalationEmail))
-							}
-						}
-					}
-					var dunRecorded time.Time
-					if isSimulated && evt.RecordedAt != nil {
-						dunRecorded = *evt.RecordedAt
-					}
-					events = append(events, timelineEvent{
-						ID:           "dunning:" + evt.ID,
-						Timestamp:    evt.CreatedAt.Format(time.RFC3339),
-						sortAt:       evt.CreatedAt,
-						tieRank:      dunningEventRank(evt.EventType),
-						Source:       "dunning",
-						RecordedAt:   rfc3339OrEmpty(dunRecorded),
-						recordedSort: dunRecorded,
-						EventType:    string(evt.EventType),
-						Status:       status,
-						Description:  desc,
-						Detail:       detail,
-						Error:        rowErr,
-						AttemptCount: evt.AttemptCount,
-						IsSimulated:  isSimulated,
-						// Exact-attribution key written by the dunning
-						// retry path (RetryError); empty on legacy rows.
-						PaymentIntentID: piFromEventMetadata(evt.Metadata),
-					})
+				dunningRuns = append(dunningRuns, dunningRunEvents{run: run, events: evts})
+			}
+		}
+	}
+
+	// Card disputes (#979).
+	disputes, derr := h.svc.ListDisputes(ctx, tenantID, inv.ID)
+	if derr != nil {
+		degrade("disputes", derr)
+	}
+
+	// Charge attempts: the one owner of payment rows (ADR-103).
+	attempts, aerr := h.svc.ListChargeAttempts(ctx, tenantID, inv.ID)
+	if aerr != nil {
+		degrade("charge_attempts", aerr)
+	}
+
+	// What the payment-recovery events tell the lifecycle rows: how many
+	// retries ran (the paid row says "After N retries"), and whether
+	// exhaustion wrote the invoice off (the uncollectible row says "Payment
+	// retries ran out").
+	maxAttemptCount := 0
+	writtenOffByRecovery := false
+	for _, re := range dunningRuns {
+		for _, evt := range re.events {
+			if evt.AttemptCount > maxAttemptCount {
+				maxAttemptCount = evt.AttemptCount
+			}
+			if evt.EventType == domain.DunningEventEscalated && escalationTokens(evt.Reason)[tokenInvoiceWrittenOff] {
+				writtenOffByRecovery = true
+			}
+		}
+	}
+
+	sub := h.subscriptionLink(ctx, tenantID, inv)
+
+	// ── Rows ──
+
+	var events []timelineEvent
+
+	// Lifecycle rows synthesised from invoice columns. Without these,
+	// freshly-finalized invoices that haven't seen a charge yet render an
+	// empty timeline. Mirrors Stripe's "Invoice activity" section, which
+	// always anchors on Created → Finalized.
+	lifecycleActor := func(key string) *activity.Actor {
+		if e, ok := lifecycle[key]; ok {
+			return actorFrom(&e)
+		}
+		return nil
+	}
+	addLifecycle := func(idKind, eventType string, at time.Time, rank int, line activity.Line) int {
+		var recorded time.Time
+		if e, ok := lifecycle[eventType]; ok && isSimulated {
+			recorded = e.CreatedAt
+		}
+		events = append(events, timelineEvent{
+			ID:           "lifecycle:" + idKind + ":" + inv.ID,
+			Timestamp:    at.Format(time.RFC3339),
+			sortAt:       at,
+			tieRank:      rank,
+			Source:       "lifecycle",
+			EventType:    eventType,
+			IsSimulated:  isSimulated,
+			RecordedAt:   rfc3339OrEmpty(recorded),
+			recordedSort: recorded,
+			Line:         line,
+		})
+		return len(events) - 1
+	}
+	addLifecycle("created", "invoice.created", inv.CreatedAt, rankInvoiceCreated,
+		createdLine(inv, lifecycleActor("invoice.created"), sub))
+	if inv.IssuedAt != nil {
+		addLifecycle("finalized", "invoice.finalized", *inv.IssuedAt, rankInvoiceFinalized,
+			finalizedLine(inv, lifecycleActor("invoice.finalized")))
+	}
+	// (Removed: synthetic "Payment deadline" event keyed off due_at.
+	// Activity is for things that happened. The deadline is already
+	// surfaced in the invoice header and the attention banner's `DueBy`
+	// line.)
+	if inv.VoidedAt != nil {
+		addLifecycle("voided", "invoice.voided", *inv.VoidedAt, rankLifecycleTerminal,
+			voidedLine(inv, lifecycleActor("invoice.voided")))
+	}
+	if inv.UncollectibleAt != nil {
+		// The amount written off is what the write-off's own audit row
+		// recorded. Without that row, the amount still due is it — unless
+		// the invoice was paid since, when nothing on record says it.
+		var writtenOff *int64
+		if e, ok := lifecycle["invoice.marked_uncollectible"]; ok {
+			if n, ok := metaNumber(e.Metadata, "amount_due_cents"); ok {
+				writtenOff = &n
+			}
+		}
+		if writtenOff == nil && inv.PaidAt == nil {
+			n := inv.AmountDueCents
+			writtenOff = &n
+		}
+		addLifecycle("uncollectible", "invoice.marked_uncollectible", *inv.UncollectibleAt, rankLifecycleTerminal,
+			uncollectibleLine(inv, writtenOff, writtenOffByRecovery, lifecycleActor("invoice.marked_uncollectible")))
+	}
+	// Each issued credit note's audit trail, read once: the paid row and the
+	// credit-note rows both use it.
+	cnAudit := map[string][]domain.AuditEntry{}
+	for _, cn := range cns {
+		if cn.Status == domain.CreditNoteIssued && cn.IssuedAt != nil {
+			cnAudit[cn.ID] = auditRows("credit_note", cn.ID)
+		}
+	}
+	if inv.PaidAt != nil {
+		// A credit note that left nothing due marked the invoice paid when
+		// its issue row says so (ADR-061 amendment 2026-10-19): the paid row
+		// names it, and whoever issued it, instead of the failed retries.
+		var byNote *activity.Part
+		var byNoteActor *activity.Actor
+		for _, cn := range cns {
+			for _, e := range cnAudit[cn.ID] {
+				if e.Action == "credit_note.issued" && e.Metadata["marked_invoice_paid"] == true {
+					link := activity.L(activity.LinkCreditNote, cn.ID, cn.CreditNoteNumber)
+					byNote = &link
+					ec := e
+					byNoteActor = actorFrom(&ec)
 				}
 			}
 		}
+		// "After N retries" when payment recovery was running — NOT on a
+		// bad-debt recovery. A written-off invoice's retries all FAILED —
+		// that is why it was written off — so crediting a later payment to
+		// them would show the count of failures as the cause of success.
+		// The write-off stamp is the discriminator: it is set only on
+		// invoices whose collection was abandoned, and it survives the
+		// recovery.
+		retries := 0
+		if inv.UncollectibleAt == nil && byNote == nil {
+			retries = maxAttemptCount
+		}
+		var note string
+		if e, ok := lifecycle["invoice.paid"]; ok {
+			note, _ = e.Metadata["note"].(string)
+		}
+		actor := lifecycleActor("invoice.paid")
+		if actor == nil {
+			actor = byNoteActor
+		}
+		i := addLifecycle("paid", "invoice.paid", *inv.PaidAt, rankLifecycleTerminal,
+			paidLine(inv, retries, note, actor, byNote))
+		events[i].AttemptCount = retries
 	}
 
-	// Attach attempt count to the lifecycle invoice.paid row when
-	// the invoice was collected via dunning retry. The frontend
-	// renders "after N retry attempts" as a sub-line, replacing
-	// the now-suppressed dunning 'resolved' row.
-	//
-	// NOT on a bad-debt recovery. A written-off invoice's retries all FAILED —
-	// that is why it was written off, and its run resolved
-	// invoice_not_collectible. Crediting "paid after N retry attempts" to a
-	// recovery would hand the operator's manual collection to the campaign that
-	// gave up on it, and it is the count of failures being shown as the cause
-	// of success. The write-off stamp is the discriminator: it is set only on
-	// invoices whose collection was abandoned, and it survives the recovery
-	// (which is exactly why it can be used here).
-	if inv.PaidAt != nil && inv.UncollectibleAt == nil && maxAttemptCount > 0 {
-		for i := range events {
-			if events[i].Source == "lifecycle" && events[i].EventType == "invoice.paid" {
-				events[i].AttemptCount = maxAttemptCount
-				break
+	// Credit-note rows. The settlement waterfall on the page already shows
+	// credit notes channel-by-channel; these rows give the SAME facts a
+	// place in the chronology. There is one timeline (ADR-104): every CN
+	// row sorts by its issued_at on the invoice's calendar — operator CNs
+	// and engine clawbacks both issue under the invoice's clock. A CN's
+	// is_simulated is its source invoice's; it gates the Recorded part.
+	cnLinks := map[string]activity.Part{}
+	for _, cn := range cns {
+		if cn.CreditNoteNumber != "" {
+			cnLinks[cn.CreditNoteNumber] = activity.L(activity.LinkCreditNote, cn.ID, cn.CreditNoteNumber)
+		}
+		if cn.Status != domain.CreditNoteIssued || cn.IssuedAt == nil {
+			continue
+		}
+		// The issue row is written in the Issue transaction (ADR-090), so
+		// every issued note has one: it names who issued it. A failed card
+		// refund's provider reason is on its refund_status_changed row.
+		var issuedBy *activity.Actor
+		var refundFailure string
+		for _, e := range cnAudit[cn.ID] {
+			switch {
+			case e.Action == "credit_note.issued" && issuedBy == nil:
+				ec := e
+				issuedBy = actorFrom(&ec)
+			case refundFailure == "" && e.Metadata["action"] == "refund_status_changed" && e.Metadata["refund_status"] == string(domain.RefundFailed):
+				refundFailure, _ = e.Metadata["provider_failure_reason"].(string)
 			}
 		}
+		var cnRecorded time.Time
+		if cn.IsSimulated && cn.RecordedAt != nil {
+			cnRecorded = *cn.RecordedAt
+		}
+		events = append(events, timelineEvent{
+			ID:           "cn:" + cn.ID,
+			Timestamp:    cn.IssuedAt.Format(time.RFC3339),
+			sortAt:       *cn.IssuedAt,
+			tieRank:      rankCreditNote,
+			Source:       "credit_note",
+			EventType:    "credit_note.issued",
+			IsSimulated:  cn.IsSimulated,
+			RecordedAt:   rfc3339OrEmpty(cnRecorded),
+			recordedSort: cnRecorded,
+			Line:         creditNoteLine(cn, issuedBy, refundFailure),
+		})
 	}
 
-	// Payments render from ONE owner: the charge-attempt facts
-	// (ADR-103). A dunning row that already carries the attempt's
-	// PaymentIntent absorbs it (the campaign row is the richer telling
-	// of the same charge) — an EXACT id match, not the old
-	// PI-then-positional-index guess. Everything else renders as its
-	// own row.
-	if attempts, aerr := h.svc.ListChargeAttempts(r.Context(), tenantID, inv.ID); aerr != nil {
-		degrade("charge_attempts", aerr)
-	} else {
+	// Customer-notification email rows: the durable trace that the
+	// customer was told.
+	for _, evt := range emails {
+		var cnLink *activity.Part
+		if evt.EmailType == "credit_note" && evt.CreditNoteNumber != "" {
+			p, ok := cnLinks[evt.CreditNoteNumber]
+			if !ok {
+				p = activity.T(evt.CreditNoteNumber)
+			}
+			cnLink = &p
+		}
+		line, ok := emailLine(evt, cnLink)
+		if !ok {
+			continue
+		}
+		ts, recorded, sim := emailRowInstant(evt)
+		events = append(events, timelineEvent{
+			ID:           "email:" + evt.ID,
+			Timestamp:    ts.Format(time.RFC3339),
+			sortAt:       ts,
+			tieRank:      rankEmail,
+			Source:       "email",
+			EventType:    "email." + evt.EmailType,
+			IsSimulated:  sim,
+			RecordedAt:   rfc3339OrEmpty(recorded),
+			recordedSort: recorded,
+			Line:         line,
+		})
+	}
+
+	// Payment-recovery rows, with the invoice page's folds: a row the
+	// invoice's own lifecycle row already tells is left out.
+	events = append(events, recoveryRows(recoveryRowsInput{
+		inv: inv, runs: dunningRuns, reminders: reminderByAttempt, escalation: escalationEmail, sub: sub,
+		resolvedBy: func(runID string) *activity.Actor { return resolvedByIn(auditRows("dunning_run", runID)) },
+		fold:       true,
+	})...)
+
+	// Card disputes: an opened row at Stripe's creation time, and a closed
+	// row once Stripe closes it. Both are real-world Stripe instants, never
+	// the invoice's simulated calendar (an open question the dates PR
+	// settles, ADR-128).
+	if derr == nil {
+		events = append(events, disputeTimelineEvents(disputes)...)
+	}
+
+	// Payments render from ONE owner: the charge-attempt facts (ADR-103).
+	// A dunning row that already carries the attempt's PaymentIntent
+	// absorbs it (the campaign row is the richer telling of the same
+	// charge) — an EXACT id match. Everything else renders as its own row.
+	if aerr == nil {
 		events = renderChargeAttempts(events, attempts, inv)
 	}
 
+	for i := range events {
+		events[i].fillFromLine()
+	}
+
 	// Full-precision ascending with CAUSAL tie ranks — see
-	// sortInvoiceTimeline. The prior string sort compared second-
-	// truncated timestamps and fell back to source-major insertion
-	// order, which was anti-causal for every same-instant pair the
-	// TIMELINE-ORDER flow didn't pin (escalation vs write-off, failed
-	// retry vs same-second settle) and preserved the DESC orientation
-	// of the runs/credit-note source queries within collided seconds.
+	// sortInvoiceTimeline.
 	sortInvoiceTimeline(events)
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{"events": events, "degraded": degraded, "truncated": truncated})
+}
+
+// subscriptionLink is the link part to the invoice's subscription, or nil
+// when it has none, no labeler is wired, or the subscription is gone. A
+// failed lookup draws no link: the row still says everything else.
+func (h *Handler) subscriptionLink(ctx context.Context, tenantID string, inv domain.Invoice) *activity.Part {
+	if inv.SubscriptionID == "" || h.subscriptions == nil {
+		return nil
+	}
+	label, err := h.subscriptions.SubscriptionLabel(ctx, tenantID, inv.SubscriptionID)
+	if err != nil {
+		if !errors.Is(err, errs.ErrNotFound) {
+			slog.WarnContext(ctx, "payment timeline: subscription label lookup failed; rows carry no subscription link",
+				"invoice_id", inv.ID, "subscription_id", inv.SubscriptionID, "error", err)
+		}
+		return nil
+	}
+	if label == "" {
+		label = inv.SubscriptionID
+	}
+	p := activity.L(activity.LinkSubscription, inv.SubscriptionID, label)
+	return &p
+}
+
+// disputeTimelineEvents renders each dispute as the rows it has earned so
+// far: "Payment disputed" when Stripe opened it, and "Dispute closed" with
+// its outcome once Stripe closed it.
+func disputeTimelineEvents(disputes []domain.InvoiceDispute) []timelineEvent {
+	var out []timelineEvent
+	for _, d := range disputes {
+		opened, closed := disputeLines(d)
+		out = append(out, timelineEvent{
+			ID:              "dispute:opened:" + d.ID,
+			Timestamp:       d.OpenedAt.Format(time.RFC3339),
+			sortAt:          d.OpenedAt,
+			tieRank:         rankDisputeOpened,
+			Source:          "dispute",
+			EventType:       domain.EventPaymentDisputeOpened,
+			PaymentIntentID: d.StripePaymentIntentID,
+			Line:            opened,
+		})
+		if closed == nil {
+			continue
+		}
+		out = append(out, timelineEvent{
+			ID:              "dispute:closed:" + d.ID,
+			Timestamp:       d.ClosedAt.Format(time.RFC3339),
+			sortAt:          *d.ClosedAt,
+			tieRank:         rankDisputeClosed,
+			Source:          "dispute",
+			EventType:       domain.EventPaymentDisputeClosed,
+			PaymentIntentID: d.StripePaymentIntentID,
+			Line:            *closed,
+		})
+	}
+	return out
+}
+
+// listDisputes returns the card disputes Stripe reported against the
+// invoice's payments (#979), oldest first. An invoice without any returns an
+// empty list.
+func (h *Handler) listDisputes(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.TenantID(r.Context())
+	id := chi.URLParam(r, "id")
+
+	disputes, err := h.svc.ListInvoiceDisputes(r.Context(), tenantID, id)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "invoice")
+		return
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "list invoice disputes", "invoice_id", id, "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, map[string]any{"data": disputes})
 }
 
 func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {

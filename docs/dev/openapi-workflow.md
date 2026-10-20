@@ -15,7 +15,10 @@ their SDKs aligned with their HTTP surface.
    body schema (under `components.schemas` if reusable, inline otherwise),
    and the response shape. Include error responses such as `404`, so the
    generated TS types narrow on status and callers get the right body type
-   per status code.
+   per status code. A `POST`, `PUT` or `PATCH` under `/v1` also lists
+   `$ref: "#/components/parameters/IdempotencyKey"` in its `parameters`.
+   The exceptions are `/v1/auth/*`, `/v1/public/*`, the inbound webhooks,
+   `/v1/tenants` and `/v1/bootstrap`: the server ignores the header there.
 2. **Run `make gen` from the repo root.** It runs both Go and TS codegen,
    refreshes `web-v2/public/openapi.yaml`, and rewrites the generated files
    in place.
@@ -64,6 +67,25 @@ changed anything in the working tree. So both of these fail CI:
 
 The rule: generated files must equal what `make gen` produces from the
 committed spec.
+
+A unit test also ties the spec to the router. `TestOpenAPISpec_MatchesRouter`
+in `internal/api/openapi_routes_test.go` walks the chi router and fails when:
+
+- a route the server answers is not in the spec with the same method and
+  path parameter names;
+- an operation in the spec matches no route.
+
+A route that no caller should use can go in `routesNotInSpec` in that test
+instead, with the reason. Today that is only the methods other than `GET` on
+`/metrics`, which exist because `/metrics` is registered for every method.
+
+`TestOpenAPISpec_IdempotencyKeyHeader` in the same file checks the
+`Idempotency-Key` header. It fails when:
+
+- a `POST`, `PUT` or `PATCH` route behind the idempotency middleware does
+  not list the `IdempotencyKey` parameter in the spec;
+- an operation lists it but the middleware does not run on that route, so
+  the server would ignore the header.
 
 ## Why it is built this way
 
@@ -115,6 +137,11 @@ They regenerate from the same spec on `make gen`, and they do different jobs:
   "field absent" from "field present and empty" at the type level. For
   Velox's domain types, every empty string means the same as "absent", so
   that is the right call.
+- **Generated hooks cannot send `Idempotency-Key` yet.** The spec declares
+  the header, but orval leaves header parameters out of the hooks it
+  generates, and `orvalClient` passes only the method, path and body to
+  `apiRequest`. A dashboard call that must send the header stays on
+  `apiRequest` until the mutator forwards headers.
 - **Hooks return the bare body.**
   `output.override.fetch.includeHttpResponseReturnType: false` keeps the
   orval hook return types as the body (`Promise<InvoiceWithLineItems>`),

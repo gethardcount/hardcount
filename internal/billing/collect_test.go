@@ -309,7 +309,7 @@ type ctxProbeCharger struct {
 	hadDeadline  bool
 }
 
-func (c *ctxProbeCharger) ChargeInvoice(ctx context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c *ctxProbeCharger) ChargeInvoice(ctx context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.ctxErrAtCall = ctx.Err()
 	_, c.hadDeadline = ctx.Deadline()
 	return inv, nil
@@ -421,7 +421,7 @@ func TestCycleClose_CollectsAtThePeriodBoundary(t *testing.T) {
 // Records payment_status='failed' on store first, as the real charger does.
 type refusingCharger struct{ store *mockInvoices }
 
-func (c refusingCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c refusingCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.store.stampPaymentStatus(inv.ID, domain.PaymentFailed)
 	return inv, &payment.PaymentError{Message: "No such PaymentMethod"}
 }

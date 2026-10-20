@@ -75,7 +75,7 @@ func (f *settleRaceStripe) GetPaymentIntent(_ context.Context, piID string) (pay
 	return payment.PaymentIntentResult{ID: piID, Status: "succeeded", AmountReceivedCents: settleDue}, nil
 }
 
-func (f *settleRaceStripe) SearchPaymentIntentsByInvoiceID(context.Context, string) ([]payment.PaymentIntentResult, error) {
+func (f *settleRaceStripe) ListPaymentIntentsForCustomer(context.Context, string, time.Time) ([]payment.PaymentIntentResult, error) {
 	return nil, nil
 }
 
@@ -311,9 +311,20 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			webhookRacer := func() error {
 				return r.stripe.HandleWebhook(r.ctx, tenantID, succeededEvent(evtID, piID, inv.ID))
 			}
+			// The charge runs under its claim, as every initiator's does.
+			hold, err := r.invStore.ClaimChargeForManualCollect(r.ctx, tenantID, inv.ID)
+			if err != nil || !hold.Held() {
+				t.Fatalf("round %d: claim: held=%v err=%v", round, hold.Held(), err)
+			}
 			errs := race([]func() error{
 				func() error {
-					_, err := r.stripe.ChargeInvoice(r.ctx, tenantID, inv, "cus_stripe_race", "pm_race_4242")
+					_, err := r.stripe.ChargeInvoice(r.ctx, tenantID, inv, hold, "cus_stripe_race", "pm_race_4242")
+					if errors.Is(err, payment.ErrPaymentTransient) {
+						// A webhook racer settled the invoice before the charge was
+						// sent, so its re-check refused to send (ADR-127): the
+						// payment is still recorded once, by the webhook.
+						return nil
+					}
 					return err
 				},
 				webhookRacer, webhookRacer, webhookRacer,
@@ -347,7 +358,11 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			r.client.createRes = payment.PaymentIntentResult{}
 			r.client.createErr = &payment.PaymentError{Message: "stripe: timeout", PaymentIntentID: piID, Unknown: true}
 			r.client.mu.Unlock()
-			if _, err := r.stripe.ChargeInvoice(r.ctx, tenantID, inv, "cus_stripe_race", "pm_race_4242"); err == nil {
+			hold, err := r.invStore.ClaimChargeForManualCollect(r.ctx, tenantID, inv.ID)
+			if err != nil || !hold.Held() {
+				t.Fatalf("round %d: claim: held=%v err=%v", round, hold.Held(), err)
+			}
+			if _, err := r.stripe.ChargeInvoice(r.ctx, tenantID, inv, hold, "cus_stripe_race", "pm_race_4242"); err == nil {
 				t.Fatalf("round %d: ambiguous charge returned no error", round)
 			}
 			parked, err := r.invStore.Get(r.ctx, tenantID, inv.ID)

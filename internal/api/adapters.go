@@ -23,6 +23,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/payment"
 	"github.com/sagarsuperuser/velox/internal/paymentmethods"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/crypto"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -312,21 +313,81 @@ func (a *refundIssuerAdapter) IssueRefund(ctx context.Context, tenantID string, 
 	})
 }
 
+// retryInvoiceStore is the part of the invoice store a dunning retry calls.
+// *invoice.PostgresStore implements it; a test wraps the real store to fail
+// one call.
+type retryInvoiceStore interface {
+	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
+	ClaimChargeForDunningRetry(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
+	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
+	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
+	SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error)
+	HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
+}
+
 // paymentRetrierAdapter bridges Stripe + invoice/customer stores → dunning.PaymentRetrier.
 type paymentRetrierAdapter struct {
 	charger       *payment.Stripe
-	invoiceStore  *invoice.PostgresStore
+	invoiceStore  retryInvoiceStore
 	paymentSetups payment.PaymentSetupStore
 	credits       *credit.Service
 }
 
+// RetryPayment counts a retry only when it got a definite answer; see
+// classifyDunningRetryResult.
 func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invoiceID, customerID string) error {
+	return classifyDunningRetryResult(ctx, invoiceID, a.retryPayment(ctx, tenantID, invoiceID, customerID))
+}
+
+// classifyDunningRetryResult is the one rule for which retry results use up a
+// dunning attempt: a decline Stripe returned (*payment.PaymentError with
+// Unknown=false), no card to charge (counted so a card-less invoice reaches
+// its dunning terminal, ADR-060), or a card the bank refused for good.
+// Everything else becomes dunning.ErrTransientSkip, which dunning does not
+// count: a database error, Stripe unreachable or rate limiting, an outcome
+// Stripe did not confirm, a settle that failed after Stripe took the money.
+// Counting those spent an attempt on a dropped connection, put the error
+// text in the customer's warning email, and on the last attempt ran the
+// final action with no final charge. The rule sits here, at the boundary,
+// because the class was fixed one call site at a time three times (#940,
+// #978, #1302).
+func classifyDunningRetryResult(ctx context.Context, invoiceID string, err error) error {
+	if err == nil || errors.Is(err, dunning.ErrTransientSkip) ||
+		errors.Is(err, domain.ErrNoPaymentMethodOnRetry) || errors.Is(err, domain.ErrCardNeedsReplacing) {
+		return err
+	}
+	var pe *payment.PaymentError
+	if errors.As(err, &pe) && !pe.Unknown {
+		return err
+	}
+	slog.WarnContext(ctx, "dunning retry: no definite answer; skipping this attempt uncounted",
+		"invoice_id", invoiceID, "error", err)
+	return dunning.ErrTransientSkip
+}
+
+func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invoiceID, customerID string) error {
 	inv, err := a.invoiceStore.Get(ctx, tenantID, invoiceID)
 	if err != nil {
 		return fmt.Errorf("get invoice: %w", err)
 	}
 	if inv.AmountDueCents <= 0 {
-		return nil // Nothing to charge
+		// Nothing to charge. The run closes as recovered only if the invoice
+		// is paid, so settle it first: a credit balance applied by an earlier
+		// pass whose mark-paid failed leaves it open at $0. Before, this
+		// returned nil and the run closed with the invoice still unpaid.
+		inv, _, err = a.invoiceStore.SettleZeroDue(ctx, tenantID, invoiceID, clock.Now(ctx))
+		if err != nil {
+			return fmt.Errorf("settle invoice with nothing due: %w", err)
+		}
+		if inv.Status != domain.InvoicePaid {
+			// A charge hold is set (a charge running, or one whose result was
+			// lost), or the invoice is no longer open. The next pass looks
+			// again; the paid pre-check closes a voided or written-off one.
+			slog.InfoContext(ctx, "dunning retry: invoice has nothing due but was not marked paid; skipping this attempt",
+				"invoice_id", invoiceID, "status", inv.Status, "payment_status", inv.PaymentStatus)
+			return dunning.ErrTransientSkip
+		}
+		return nil
 	}
 
 	// Per-invoice charge lease, shared with the auto-charge sweep (HA
@@ -335,14 +396,26 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 	// only double-charge guard between them. Claim-lose = the sweep (or
 	// a rival dunning leader) owns the invoice, or payment_status moved
 	// to a state that must not be re-charged ('unknown' waits for the
-	// reconciler) — map to ErrTransientSkip so the run does NOT burn an
-	// attempt on a charge that never reached Stripe.
-	claimed, err := a.invoiceStore.ClaimChargeForDunningRetry(ctx, tenantID, invoiceID)
+	// reconciler or the stale-hold sweep) — map to ErrTransientSkip so the run
+	// does NOT burn an attempt on a charge that never reached Stripe.
+	//
+	// A lost charge's hold refuses the claim too (ADR-127): the due-run scan
+	// already skips such a run, so this is the race where the hold appeared
+	// after the listing.
+	hold, err := a.invoiceStore.ClaimChargeForDunningRetry(ctx, tenantID, invoiceID)
 	if err != nil {
 		return fmt.Errorf("claim dunning retry charge: %w", err)
 	}
-	if !claimed {
+	if !hold.Held() {
 		return dunning.ErrTransientSkip
+	}
+	// Every path below that sends no charge releases the hold by its token.
+	// The store runs the release even after ctx ends.
+	release := func() {
+		if err := a.invoiceStore.ReleaseChargeHold(ctx, tenantID, invoiceID, hold); err != nil {
+			slog.WarnContext(ctx, "dunning retry: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
+				"invoice_id", invoiceID, "error", err)
+		}
 	}
 
 	// Re-apply customer credits before retrying the card — same contract as
@@ -350,25 +423,29 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 	// original failure (or whose application failed at cycle close) must
 	// reduce the charge, not sit unconsumed while the card is hit for the
 	// full amount. ApplyToInvoiceAt is idempotent (drains min(due, balance)).
-	// An apply FAILURE maps to ErrTransientSkip: the retry never reaches
-	// Stripe, so it must not burn a dunning attempt.
+	// An apply failure never reaches Stripe, so RetryPayment logs it and skips
+	// it uncounted.
 	if a.credits != nil {
 		at := clock.Now(ctx) // sim-aware: catchup binds effective-now on ctx
 		if _, err := a.credits.ApplyToInvoiceAt(ctx, tenantID, customerID, invoiceID, inv.AmountDueCents, at, inv.InvoiceNumber); err != nil {
 			// Provably pre-Stripe: release so the next due tick retries
-			// without waiting out the lease.
-			_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
-			return dunning.ErrTransientSkip
+			// without waiting for the stale-hold sweep.
+			release()
+			return fmt.Errorf("apply credits: %w", err)
 		}
 		inv, err = a.invoiceStore.Get(ctx, tenantID, invoiceID)
 		if err != nil {
+			release() // provably pre-Stripe
 			return fmt.Errorf("refresh invoice after credit apply: %w", err)
 		}
 		if inv.AmountDueCents <= 0 {
 			// Fully covered by credits — settle without a card charge. nil
 			// return = recovered, so the dunning run resolves; MarkPaid fires
-			// the transactional invoice.paid event.
-			if _, err := a.invoiceStore.MarkPaid(ctx, tenantID, invoiceID, "", at); err != nil {
+			// the transactional invoice.paid event. No charge is sent, so the
+			// hold is released either way.
+			_, err := a.invoiceStore.MarkPaid(ctx, tenantID, invoiceID, "", at)
+			release()
+			if err != nil {
 				return fmt.Errorf("mark credit-covered invoice paid: %w", err)
 			}
 			return nil
@@ -380,7 +457,7 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 		// A read error is not "no card": reporting ErrNoPaymentMethodOnRetry
 		// spent a counted dunning attempt (and could drive the invoice to its
 		// terminal action) on a database blip. Skip this tick, uncounted.
-		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		release()
 		slog.WarnContext(ctx, "dunning retry: payment setup read failed; skipping this attempt",
 			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
 		return dunning.ErrTransientSkip
@@ -389,8 +466,31 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 		// Provably pre-Stripe: release the lease before reporting.
 		// Typed sentinel so the dunning warning email renders clean
 		// customer copy instead of this internal string (P2-3).
-		_ = a.invoiceStore.ReleaseAutoChargeClaim(ctx, tenantID, invoiceID)
+		release()
 		return domain.ErrNoPaymentMethodOnRetry
+	}
+
+	// A card the bank refused for good on this invoice (lost, stolen and the
+	// rest of domain.IsHardDecline, #966) is not charged again: the retry
+	// cannot succeed, and the card networks charge merchants for trying.
+	// Stripe Billing does the same — its schedule and attempt count carry on,
+	// but a retry charges only once it sees a new payment method. So this
+	// attempt counts and charges nothing until a different card is the
+	// customer's default; then the next scheduled retry charges that card.
+	// Provably pre-Stripe, so the lease is released. A read error is not "no
+	// refusal": skip this tick uncounted, as for the payment-setup read.
+	refusedCode, err := a.invoiceStore.HardDeclineOnCard(ctx, tenantID, invoiceID, ps.StripePaymentMethodID)
+	if err != nil {
+		release()
+		slog.WarnContext(ctx, "dunning retry: refused-card read failed; skipping this attempt",
+			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
+		return dunning.ErrTransientSkip
+	}
+	if refusedCode != "" {
+		release()
+		slog.InfoContext(ctx, "dunning retry: not charging a card the bank refused for good; waiting for a different default card",
+			"invoice_id", invoiceID, "customer_id", customerID, "decline_code", refusedCode)
+		return domain.ErrCardNeedsReplacing
 	}
 
 	// 15s bound on the Stripe leg. Scheduler ticks run tens of retries
@@ -408,43 +508,28 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 	// receives two emails per failed retry: "Payment failed for invoice
 	// X" plus dunning's "Action required — payment retry for invoice X
 	// (Attempt N of M)".
-	_, err = a.charger.ChargeInvoiceForDunningRetry(chargeCtx, tenantID, inv, ps.StripeCustomerID, ps.StripePaymentMethodID)
-	if cerr := classifyDunningRetryError(err); cerr != nil {
-		// Counted declines carry their PI id across the boundary (typed
-		// dunning wrapper, no payment import in dunning) so the failed
-		// retry's timeline row can be matched to its exact
-		// payment_intent.payment_failed webhook twin. Transient skips
-		// pass through untouched — no attempt row is written for them.
-		var pe *payment.PaymentError
-		if !errors.Is(cerr, dunning.ErrTransientSkip) && errors.As(err, &pe) && pe.PaymentIntentID != "" {
-			return &dunning.RetryError{PaymentIntentID: pe.PaymentIntentID, Err: cerr}
+	_, err = a.charger.ChargeInvoiceForDunningRetry(chargeCtx, tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	// A definite decline carries its PI id across the boundary (typed dunning
+	// wrapper, no payment import in dunning) so the failed retry's timeline
+	// row can be matched to its exact payment_intent.payment_failed webhook
+	// twin. A hard decline is flagged so the customer's warning asks for a
+	// different card (#966); the next retry's HardDeclineOnCard read is what
+	// stops the card being charged again. RetryPayment classifies the rest.
+	var pe *payment.PaymentError
+	if errors.As(err, &pe) && !pe.Unknown && pe.PaymentIntentID != "" {
+		return &dunning.RetryError{
+			PaymentIntentID:    pe.PaymentIntentID,
+			Err:                err,
+			CardNeedsReplacing: domain.IsHardDecline(pe.DeclineCode),
 		}
-		return cerr
-	}
-	return nil
-}
-
-// classifyDunningRetryError maps a dunning-retry CHARGE result to the signal
-// dunning's processRun consumes. A "call never happened" transient
-// (payment.ErrPaymentTransient) AND an AMBIGUOUS outcome (Stripe
-// 5xx/timeout/network — the PaymentIntent may have actually succeeded) both
-// map to dunning.ErrTransientSkip, so dunning does NOT tick attempt_count or
-// exhaust on an outcome that might be a real payment. The inline charge path
-// already defers unknowns to the reconciler the same way; pre-fix the
-// dunning-retry path counted an unknown as a failed attempt and could
-// exhaust → cancel / write off a possibly-PAID invoice. A DEFINITE decline
-// (*PaymentError{Unknown:false}) returns the raw error so dunning counts it
-// and the campaign advances to its terminal. Applied ONLY to the charge
-// result — the earlier "no payment method" return is a real counted failure
-// (drives the no-card invoice to its dunning terminal, ADR-060), unchanged.
-func classifyDunningRetryError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, payment.ErrPaymentTransient) || payment.IsUnknownPaymentFailure(err) {
-		return dunning.ErrTransientSkip
 	}
 	return err
+}
+
+// dunningRunStarter is the minimal slice of dunning.Service the adapter
+// needs — an interface so the disabled-skip branch is unit-testable.
+type dunningRunStarter interface {
+	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
 }
 
 // dunningStarterAdapter bridges billing.DunningStarter → dunning.Service so
@@ -462,12 +547,6 @@ func classifyDunningRetryError(err error) error {
 // case — so the per-tick sweep doesn't emit a spurious error for every stalled
 // invoice. A genuine error (DB down, etc.) is NOT InvalidState and still
 // propagates as a sweep error (fail loud).
-// dunningRunStarter is the minimal slice of dunning.Service the adapter
-// needs — an interface so the disabled-skip branch is unit-testable.
-type dunningRunStarter interface {
-	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
-}
-
 type dunningStarterAdapter struct {
 	dunning dunningRunStarter
 }
@@ -552,27 +631,63 @@ func (a *invoiceUncollectibleAdapter) MarkUncollectible(ctx context.Context, ten
 }
 
 // invoiceAuditStampsAdapter bridges audit.Logger.Query → invoice.AuditStampFetcher
-// (ADR-104: the timeline's read-time wall-stamp enrichment for lifecycle rows).
-// Narrow on purpose: one resource's entries, capped — an invoice's audit trail
-// is dozens of rows at most, and the join only consumes the transition actions.
+// (ADR-104: the timeline's read-time wall-stamp enrichment for lifecycle rows;
+// ADR-128: who did it, for lifecycle, credit-note and resolve rows). Narrow on
+// purpose: one resource's entries, capped — an invoice's, a credit note's or a
+// payment-recovery run's audit trail is dozens of rows at most, and the join
+// only consumes the transition actions.
 type invoiceAuditStampsAdapter struct {
 	logger *audit.Logger
 }
 
-func (a *invoiceAuditStampsAdapter) ListByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.AuditEntry, error) {
+func (a *invoiceAuditStampsAdapter) ListByResource(ctx context.Context, tenantID, resourceType, resourceID string) ([]domain.AuditEntry, error) {
 	// 100 is Query's hard cap (it CLAMPS above that — asking for more
-	// would be a silent fallback). Newest-first: an invoice with >100
+	// would be a silent fallback). Newest-first: a resource with >100
 	// audit rows would lose its OLDEST entries — exactly the transition
 	// stamps the join wants — so such a row renders bare rather than
 	// wrong. Accepted: reaching 100 audit rows on one invoice means ~90
 	// operator sends/exports; revisit with an Action-filtered query if a
 	// real invoice ever gets there.
 	entries, _, err := a.logger.Query(ctx, tenantID, audit.QueryFilter{
-		ResourceType: "invoice",
-		ResourceID:   invoiceID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
 		Limit:        100,
 	})
 	return entries, err
+}
+
+// invoiceSubscriptionLabelAdapter bridges subscription.PostgresStore →
+// invoice.SubscriptionLabeler: the name an invoice's activity rows show on
+// their link to its subscription (ADR-128 rule 8).
+type invoiceSubscriptionLabelAdapter struct {
+	store *subscription.PostgresStore
+}
+
+func (a *invoiceSubscriptionLabelAdapter) SubscriptionLabel(ctx context.Context, tenantID, subscriptionID string) (string, error) {
+	sub, err := a.store.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
+		return "", err
+	}
+	if sub.DisplayName != "" {
+		return sub.DisplayName, nil
+	}
+	return sub.Code, nil
+}
+
+// subscriptionInvoiceLabelAdapter bridges invoice.PostgresStore →
+// subscription.InvoiceLabeler: the number a subscription's activity rows
+// show on their link to an invoice (ADR-128 rule 8). A missing invoice is an
+// error, so its row links nothing.
+type subscriptionInvoiceLabelAdapter struct {
+	store *invoice.PostgresStore
+}
+
+func (a *subscriptionInvoiceLabelAdapter) InvoiceNumber(ctx context.Context, tenantID, invoiceID string) (string, error) {
+	inv, err := a.store.Get(ctx, tenantID, invoiceID)
+	if err != nil {
+		return "", err
+	}
+	return inv.InvoiceNumber, nil
 }
 
 // dunningTimelineAdapter bridges dunning.Store → invoice.DunningTimelineFetcher.
@@ -659,21 +774,46 @@ func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID,
 		// stamp attempt_number for pairing with retry rows.
 		attempt, _ := r.Payload["attempt_number"].(float64)
 		trigger, _ := r.Payload["trigger"].(string)
+		cnNumber, _ := r.Payload["credit_note_number"].(string)
 		out = append(out, invoice.EmailEventRow{
-			ID:             r.ID,
-			EmailType:      r.EmailType,
-			Status:         r.Status,
-			DeliveryState:  r.DeliveryState,
-			CreatedAt:      r.CreatedAt,
-			DispatchedAt:   r.DispatchedAt,
-			LastError:      r.LastError,
-			To:             to,
-			AttemptNumber:  int(attempt),
-			Trigger:        trigger,
-			SimEffectiveAt: r.SimEffectiveAt,
+			ID:               r.ID,
+			EmailType:        r.EmailType,
+			Status:           r.Status,
+			DeliveryState:    r.DeliveryState,
+			CreatedAt:        r.CreatedAt,
+			DispatchedAt:     r.DispatchedAt,
+			LastError:        r.LastError,
+			To:               to,
+			AttemptNumber:    int(attempt),
+			Trigger:          trigger,
+			SimEffectiveAt:   r.SimEffectiveAt,
+			SendFailure:      emailSendFailure(r.Status, r.LastError),
+			SkipReason:       r.SkipReason,
+			CreditNoteNumber: cnNumber,
 		})
 	}
 	return out, nil
+}
+
+// emailSendFailure classifies a failed outbox row's stored error into a send
+// failure the activity line names in plain words (activity.SendFailure*). The
+// stored error is the dispatcher's hErr.Error(), which keeps each sentinel's
+// own message, so matching the sentinel's text is an exact key into this
+// package's own errors. Anything else has no plain-words name and stays in the
+// server's records.
+func emailSendFailure(status, lastError string) string {
+	if status != "failed" || lastError == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(lastError, email.ErrSMTPNotConfigured.Error()):
+		return activity.SendFailureSMTPNotConfigured
+	case strings.Contains(lastError, email.ErrRecipientSuppressed.Error()):
+		return activity.SendFailureRecipientSuppressed
+	case strings.Contains(lastError, email.ErrInvalidRecipient.Error()):
+		return activity.SendFailureInvalidRecipient
+	}
+	return ""
 }
 
 // paymentSetupEmailSender is the narrow interface noPaymentMethodNotifierAdapter
@@ -686,8 +826,10 @@ type paymentSetupEmailSender interface {
 
 // customerSentEmailsAdapter bridges email.OutboxStore.ListByCustomer →
 // customer.SentEmailsLister. Pure shape conversion plus payload field
-// extraction (recipient, invoice_number) so the customer package
-// doesn't import the email package.
+// extraction (recipient, invoice and credit-note numbers, trigger) and the
+// send-failure classification the invoice timeline uses, so the customer
+// package doesn't import the email package and both cards word an email
+// from the same facts.
 type customerSentEmailsAdapter struct {
 	store *email.OutboxStore
 }
@@ -701,19 +843,36 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 	for _, r := range rows {
 		to, _ := r.Payload["to"].(string)
 		invNum, _ := r.Payload["invoice_number"].(string)
+		cnNumber, _ := r.Payload["credit_note_number"].(string)
+		trigger, _ := r.Payload["trigger"].(string)
 		out = append(out, customer.SentEmailOutboxRow{
-			ID:            r.ID,
-			EmailType:     r.EmailType,
-			Recipient:     to,
-			Status:        r.Status,
-			DeliveryState: r.DeliveryState,
-			LastError:     r.LastError,
-			CreatedAt:     r.CreatedAt,
-			DispatchedAt:  r.DispatchedAt,
-			InvoiceNumber: invNum,
+			ID:               r.ID,
+			EmailType:        r.EmailType,
+			Recipient:        to,
+			Status:           r.Status,
+			DeliveryState:    r.DeliveryState,
+			LastError:        r.LastError,
+			CreatedAt:        r.CreatedAt,
+			DispatchedAt:     r.DispatchedAt,
+			InvoiceNumber:    invNum,
+			InvoiceID:        r.InvoiceID,
+			CreditNoteNumber: cnNumber,
+			CreditNoteID:     r.CreditNoteID,
+			Trigger:          trigger,
+			SendFailure:      emailSendFailure(r.Status, r.LastError),
+			SkipReason:       r.SkipReason,
+			SimEffectiveAt:   r.SimEffectiveAt,
 		})
 	}
 	return out, nil
+}
+
+// canEmailSetupLinks reports whether a setup-link email can be sent at all:
+// it needs SMTP, and the link needs the payment-update page to point at
+// (NotifyNoPaymentMethod refuses without it). The invoice notices read this to
+// decide whether to say a link is emailed and whether to offer Resend.
+func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL string) bool {
+	return smtpConfigured && paymentUpdateURL != ""
 }
 
 // noPaymentMethodNotifierAdapter bridges email.SendPaymentSetupRequest
@@ -731,14 +890,6 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 // email link the customer clicks days after issuance: the operator can
 // invalidate tokens at any time, and the SPA shows "for invoice X, $Y"
 // before sending the customer to Stripe.
-// canEmailSetupLinks reports whether a setup-link email can be sent at all:
-// it needs SMTP, and the link needs the payment-update page to point at
-// (NotifyNoPaymentMethod refuses without it). The invoice notices read this to
-// decide whether to say a link is emailed and whether to offer Resend.
-func canEmailSetupLinks(smtpConfigured bool, paymentUpdateURL string) bool {
-	return smtpConfigured && paymentUpdateURL != ""
-}
-
 type noPaymentMethodNotifierAdapter struct {
 	email            paymentSetupEmailSender
 	customerEmail    *customerEmailFetcherAdapter
@@ -849,8 +1000,8 @@ type prorationInvoiceCreatorAdapter struct {
 	numberer invoice.InvoiceNumberer
 }
 
-func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.CreateWithLineItems(ctx, tenantID, inv, items)
+func (a *prorationInvoiceCreatorAdapter) CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
+	return a.CreateWithLineItemsAudited(ctx, tenantID, inv, items, emit)
 }
 
 func (a *prorationInvoiceCreatorAdapter) NextInvoiceNumber(ctx context.Context, tenantID string) (string, error) {

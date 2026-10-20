@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
 // HostedSessionLedger is the slice of the checkout-session ledger the hosted
@@ -72,7 +73,9 @@ func (r *Reconciler) SetHostedSessions(ledger HostedSessionLedger, reader Checko
 // It calls SettleSucceeded directly rather than r.settle, whose "already
 // paid, skip" shortcut would swallow exactly the duplicate this sweep exists
 // to surface.
-func (r *Reconciler) sweepHostedSessions(ctx context.Context, limit int) (int, []error) {
+//
+// A check that panics is touched like one that failed (guardRow).
+func (r *Reconciler) sweepHostedSessions(ctx context.Context, limit int, panics *scheduler.Panics) (int, []error) {
 	if r.hostedLedger == nil || r.hostedReader == nil || r.settler == nil {
 		return 0, nil
 	}
@@ -83,7 +86,12 @@ func (r *Reconciler) sweepHostedSessions(ctx context.Context, limit int) (int, [
 	var errs []error
 	resolved := 0
 	for _, c := range rows {
-		done, err := r.reconcileHostedSession(ctx, c)
+		// A panic leaves done false and err nil, so the session is touched
+		// below.
+		var done bool
+		var err error
+		guardRow(panics, func() { done, err = r.reconcileHostedSession(ctx, c) },
+			"step", "hosted_session", "claim_id", c.ID, "invoice_id", c.InvoiceID, "tenant_id", c.TenantID)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("checkout session %s: %w", c.ID, err))
 		}

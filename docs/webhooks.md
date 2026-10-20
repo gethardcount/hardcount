@@ -36,12 +36,13 @@ export VELOX_KEY=vlx_secret_test_…   # your test key
 2. **Pick the address Velox will call.** It depends on how you run Velox.
 
    - **From source** (`make dev`): use `http://localhost:9099/ok`.
-   - **In Docker** (the [quick start](quick-start.md) or a server): this
-     setup refuses `localhost` and private network addresses, so Velox
-     cannot reach the receiver directly. In a second terminal, start a
-     tunnel, which gives your computer a public `https://` address. For
-     example: `cloudflared tunnel --url http://localhost:9099`. Use the
-     `https://` address it prints, plus `/ok`.
+   - **In Docker** (the [quick start](quick-start.md) or a server): inside
+     its container, `localhost` is the container itself, and Velox refuses
+     private network addresses, so it cannot reach the receiver directly.
+     In a second terminal, start a tunnel, which gives your computer a
+     public `https://` address. For example:
+     `cloudflared tunnel --url http://localhost:9099`. Use the `https://`
+     address it prints, plus `/ok`.
 
    ```bash
    export HOOK_URL=http://localhost:9099/ok   # or https://<tunnel address>/ok
@@ -100,8 +101,10 @@ retries on the schedule below.
 
 ## Three rules for your receiver
 
-1. **The same event can arrive more than once.** Store each event's `id`
-   and skip one you have seen before.
+1. **The same event can arrive more than once.** Once you have handled an
+   event, store its `id`, and skip any event whose `id` you have stored.
+   Store it after handling, not on arrival: otherwise a failure in between
+   makes you skip the retry and any replay, and the event is never handled.
 2. **Events can arrive out of order.** Do not work out the current state
    from the order they arrive. Read the event's data, or fetch the
    invoice or subscription from the API.
@@ -125,8 +128,9 @@ Every message is an HTTP `POST` to your URL with
 }
 ```
 
-- `id` is the event's ID. It stays the same on every retry and replay, so
-  use it to skip repeats (rule 1).
+- `id` is the event's ID and `created_at` is when Velox created the event.
+  Both stay the same on every retry and replay, so use `id` to skip repeats
+  (rule 1).
 - `data` holds the event's details. The [catalog](#event-catalog) says what
   each event carries.
 
@@ -244,6 +248,9 @@ status within 10 seconds. Anything else is retried on this schedule:
 That is six attempts over about 26.5 hours. After the last one, the
 delivery is marked failed.
 
+Velox does not follow redirects, so a `3xx` answer is retried like any
+other failure: register the URL that answers with the `2xx` itself.
+
 **If your endpoint was down for longer:** failed deliveries stay visible in
 the dashboard, with each endpoint's success rate and each event's delivery
 history. Send any event again from there, or with
@@ -266,8 +273,8 @@ caused them, so a crash cannot drop them (rule 3).
 
 | Event | Sent when |
 |---|---|
-| `invoice.finalized` | An invoice is final and ready to pay |
-| `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment *(always sent)* |
+| `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized. `amount_due_cents` is before credit ([more](#invoicefinalized-shows-the-amount-before-credit)) |
+| `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment, or a credit note left nothing due. `amount_paid_cents` is what was paid at that moment, 0 when credit or a credit note covered the rest *(always sent)* |
 | `invoice.payment_recorded` | Someone recorded a payment made outside Velox, such as a bank transfer or cheque |
 | `invoice.marked_uncollectible` | An invoice was written off as bad debt |
 | `invoice.voided` | An invoice was voided |
@@ -278,6 +285,39 @@ caused them, so a crash cannot drop them (rule 3).
 | `payment.duplicate_charge` | A second charge succeeded on an invoice that was already paid. Refund it. |
 | `payment.amount_mismatch` | A charge settled for a different amount than the invoice owed |
 | `payment.received_on_voided_invoice` | Money arrived for a voided invoice. Refund it. |
+| `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Velox recorded it against the invoice. Sent once per dispute. Carries `stripe_dispute_id`, `status`, `reason`, `amount_cents` and `evidence_due_by`, the deadline to respond in Stripe. *(always sent)* |
+| `payment.dispute_closed` | A recorded dispute closed. `status` is `won`, `lost`, `warning_closed` (an inquiry that never became a chargeback) or `prevented`. Sent again if Stripe turns a loss into a win. *(always sent)* |
+
+A dispute changes nothing else in Velox: the invoice stays paid and no money
+moves. Respond to it in Stripe; if it is lost, decide what the invoice should
+say ([Card disputes](ops/runbook/card-disputes.md)). Both events carry
+`invoice_id`, `invoice_number`, `customer_id`, `dispute_id`,
+`payment_intent_id`, `stripe_charge_id`, `currency` and `opened_at`, and
+`closed_at` once the dispute is closed. When the first Stripe event Velox
+receives is already the close, both events are sent with the closed status,
+in either order. Velox hears of a dispute only when Stripe's
+`charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`
+events are turned on for its Stripe webhook endpoint.
+
+### `invoice.finalized` shows the amount before credit
+
+Velox uses the customer's credit when it collects the invoice. That is
+after it sends `invoice.finalized`, usually within seconds. Then it charges
+the card for what is left. So in this event:
+
+- `amount_due_cents` is the amount before credit.
+- `credits_applied_cents` is the credit on the invoice when it was
+  finalized. It is 0, except on a draft made by a Velox version before
+  0.4.0, which could already carry credit.
+
+Credit is used again each time Velox tries to collect an unpaid invoice,
+such as a payment retry. So credit the customer gets later can pay an older
+invoice.
+
+No invoice event is sent when credit pays only part of an invoice. When
+credit pays all of it, `invoice.paid` is sent. To know what is still owed,
+read the invoice with `GET /v1/invoices/{id}`: its `amount_due_cents` and
+`credits_applied_cents` are current.
 
 ### Subscriptions
 

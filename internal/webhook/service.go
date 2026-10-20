@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -113,12 +112,19 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-func NewService(store Store, client HTTPClient) *Service {
-	allowLoopback := !strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+// NewService builds the outbound webhook service. appEnv is
+// config.Config.Env; in production the loopback exception is off.
+func NewService(store Store, client HTTPClient, appEnv string) *Service {
+	allowLoopback := appEnv != "production"
 	if client == nil {
 		client = &http.Client{
 			Timeout:   10 * time.Second,
 			Transport: ssrfHardenedTransport(allowLoopback),
+			// A redirect is a failed delivery, as at Stripe: the 3xx is
+			// recorded and retried. Following it sends a 301 or 302 on as
+			// a GET with no body, and that URL's 200 would mark the event
+			// delivered.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		}
 	}
 	return &Service{store: store, client: client, bus: NewEventBus(), allowLoopback: allowLoopback}
@@ -269,7 +275,7 @@ func (s *Service) publishFrameForEventID(ctx context.Context, tenantID, eventID,
 
 // NewTestService creates a service with synchronous delivery (no goroutines).
 func NewTestService(store Store, client HTTPClient) *Service {
-	svc := NewService(store, client)
+	svc := NewService(store, client, "local")
 	svc.syncDeliver = true
 	return svc
 }
@@ -769,13 +775,15 @@ type ReplayResult struct {
 
 // Replay clones an existing webhook event into a fresh row (with
 // replay_of_event_id pointing at the original) and dispatches it to
-// every matching active endpoint. The clone is what gets delivered, so
-// the original's deliveries are never mutated — every replay produces
-// a brand-new row in the timeline. A second replay of the same
-// original event is therefore not idempotent in the DB-row sense (it
-// creates another clone), but is idempotent in the audit-trail sense:
-// the original delivery history is preserved and the operator sees N
-// distinct replay attempts on the timeline.
+// every matching active endpoint. The clone's delivery rows are what get
+// attempted, so the original's deliveries are never mutated — every
+// replay produces a brand-new row in the timeline. A second replay of
+// the same original event is therefore not idempotent in the DB-row
+// sense (it creates another clone), but is idempotent in the audit-trail
+// sense: the original delivery history is preserved and the operator
+// sees N distinct replay attempts on the timeline. A receiver gets the
+// root event again: every send carries its id and created_at
+// (attemptDelivery).
 func (s *Service) Replay(ctx context.Context, tenantID, eventID string) (ReplayResult, error) {
 	original, err := s.store.GetEvent(ctx, tenantID, eventID)
 	if err != nil {
@@ -1086,10 +1094,18 @@ func (s *Service) retryOne(ctx context.Context, d domain.WebhookDelivery) {
 // tail flips pending→succeeded/failed on BOTH paths (the retry path
 // previously never updated the tail).
 func (s *Service) attemptDelivery(ctx context.Context, d domain.WebhookDelivery, ep domain.WebhookEndpoint, event domain.WebhookEvent) {
+	// A replay is the same event sent again, as at Stripe and Svix: it
+	// goes out under the root event's id and created_at, so a receiver
+	// that skips seen ids (docs/webhooks.md) skips it. The replay row's
+	// own id is the dashboard's record of the resend.
+	id, createdAt := event.ID, event.CreatedAt
+	if event.ReplayOfEventID != nil {
+		id, createdAt = *event.ReplayOfEventID, event.ReplayOfCreatedAt
+	}
 	body := map[string]any{
-		"id":         event.ID,
+		"id":         id,
 		"event_type": event.EventType,
-		"created_at": event.CreatedAt.Format(time.RFC3339),
+		"created_at": createdAt.UTC().Format(time.RFC3339),
 		"data":       event.Payload,
 	}
 	bodyBytes, _ := json.Marshal(body)

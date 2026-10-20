@@ -1,0 +1,2212 @@
+[
+  {
+    "case": "create",
+    "line": {
+      "id": "create",
+      "kind": "subscription.created",
+      "title": "Subscription created",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription created",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "activate",
+    "line": {
+      "id": "activate",
+      "kind": "subscription.activated",
+      "title": "Subscription activated",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription activated",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=operator",
+    "line": {
+      "id": "cancel/canceled_by=operator",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=operator/credit",
+    "line": {
+      "id": "cancel/canceled_by=operator/credit",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "Prorated credit "
+          },
+          {
+            "money": {
+              "cents": 1200,
+              "currency": "CAD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: Prorated credit CA$12.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=customer",
+    "line": {
+      "id": "cancel/canceled_by=customer",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=customer/credit",
+    "line": {
+      "id": "cancel/canceled_by=customer/credit",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "Prorated credit "
+          },
+          {
+            "money": {
+              "cents": 1200,
+              "currency": "CAD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: Prorated credit CA$12.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=schedule",
+    "line": {
+      "id": "cancel/canceled_by=schedule",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "Scheduled cancellation"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: Scheduled cancellation",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=schedule/credit",
+    "line": {
+      "id": "cancel/canceled_by=schedule/credit",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "Scheduled cancellation"
+          }
+        ],
+        [
+          {
+            "text": "Prorated credit "
+          },
+          {
+            "money": {
+              "cents": 1200,
+              "currency": "CAD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: Scheduled cancellation · Prorated credit CA$12.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=dunning",
+    "line": {
+      "id": "cancel/canceled_by=dunning",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "Payment retries ran out"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: Payment retries ran out",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=dunning/credit",
+    "line": {
+      "id": "cancel/canceled_by=dunning/credit",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "Payment retries ran out"
+          }
+        ],
+        [
+          {
+            "text": "Prorated credit "
+          },
+          {
+            "money": {
+              "cents": 1200,
+              "currency": "CAD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: Payment retries ran out · Prorated credit CA$12.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=system",
+    "line": {
+      "id": "cancel/canceled_by=system",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=system/credit",
+    "line": {
+      "id": "cancel/canceled_by=system/credit",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "Prorated credit "
+          },
+          {
+            "money": {
+              "cents": 1200,
+              "currency": "CAD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: Prorated credit CA$12.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=",
+    "line": {
+      "id": "cancel/canceled_by=",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/canceled_by=/credit",
+    "line": {
+      "id": "cancel/canceled_by=/credit",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "Prorated credit "
+          },
+          {
+            "money": {
+              "cents": 1200,
+              "currency": "CAD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: Prorated credit CA$12.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.pending_change_applied",
+    "line": {
+      "id": "subscription.pending_change_applied",
+      "kind": "subscription.plan_change_applied",
+      "title": "Scheduled plan change applied",
+      "detail": [
+        [
+          {
+            "text": "Pro → Basic"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Scheduled plan change applied",
+      "meta: Pro → Basic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.threshold_crossed/linked",
+    "line": {
+      "id": "subscription.threshold_crossed/linked",
+      "kind": "subscription.spend_threshold_crossed",
+      "title": "Spend threshold crossed",
+      "detail": [
+        [
+          {
+            "text": "Invoice "
+          },
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          },
+          {
+            "text": " issued early"
+          }
+        ],
+        [
+          {
+            "money": {
+              "cents": 5000,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend threshold crossed",
+      "meta: Invoice VLX-000123 issued early · $50.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.threshold_crossed/invoice gone",
+    "line": {
+      "id": "subscription.threshold_crossed/invoice gone",
+      "kind": "subscription.spend_threshold_crossed",
+      "title": "Spend threshold crossed",
+      "detail": [
+        [
+          {
+            "text": "Invoice VLX-000099 issued early"
+          }
+        ],
+        [
+          {
+            "money": {
+              "cents": 5000,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend threshold crossed",
+      "meta: Invoice VLX-000099 issued early · $50.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.threshold_crossed/no number",
+    "line": {
+      "id": "subscription.threshold_crossed/no number",
+      "kind": "subscription.spend_threshold_crossed",
+      "title": "Spend threshold crossed",
+      "detail": [
+        [
+          {
+            "text": "Invoice issued early"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend threshold crossed",
+      "meta: Invoice issued early",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.threshold_deferred",
+    "line": {
+      "id": "subscription.threshold_deferred",
+      "kind": "subscription.spend_threshold_crossed",
+      "title": "Spend threshold crossed",
+      "detail": [
+        [
+          {
+            "text": "Billed at the end of the cycle, because this price bills on peak usage"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend threshold crossed",
+      "meta: Billed at the end of the cycle, because this price bills on peak usage",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.proration_failed/change_type=add",
+    "line": {
+      "id": "subscription.proration_failed/change_type=add",
+      "kind": "subscription.proration_not_applied",
+      "title": "Proration not applied",
+      "problem": "The item was added, but its prorated charge was not billed. Velox will not retry it; bill it with a one-off invoice.",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Proration not applied",
+      "problem: The item was added, but its prorated charge was not billed. Velox will not retry it; bill it with a one-off invoice.",
+      "meta: Seat",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "subscription.proration_failed/change_type=plan",
+    "line": {
+      "id": "subscription.proration_failed/change_type=plan",
+      "kind": "subscription.proration_not_applied",
+      "title": "Proration not applied",
+      "problem": "The plan changed, but the prorated difference was not billed or credited.",
+      "detail": [
+        [
+          {
+            "text": "Starter → Pro"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Proration not applied",
+      "problem: The plan changed, but the prorated difference was not billed or credited.",
+      "meta: Starter → Pro",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "subscription.proration_failed/change_type=quantity",
+    "line": {
+      "id": "subscription.proration_failed/change_type=quantity",
+      "kind": "subscription.proration_not_applied",
+      "title": "Proration not applied",
+      "problem": "The quantity changed, but the prorated difference was not billed or credited.",
+      "detail": [
+        [
+          {
+            "text": "3 → 5"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Proration not applied",
+      "problem: The quantity changed, but the prorated difference was not billed or credited.",
+      "meta: 3 → 5",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "subscription.proration_failed/change_type=remove",
+    "line": {
+      "id": "subscription.proration_failed/change_type=remove",
+      "kind": "subscription.proration_not_applied",
+      "title": "Proration not applied",
+      "problem": "The item was removed, but its prorated credit was not issued. Issue a credit note by hand.",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Proration not applied",
+      "problem: The item was removed, but its prorated credit was not issued. Issue a credit note by hand.",
+      "meta: Seat",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "subscription.proration_failed/change_type=",
+    "line": {
+      "id": "subscription.proration_failed/change_type=",
+      "kind": "subscription.proration_not_applied",
+      "title": "Proration not applied",
+      "problem": "The change was made, but its prorated amount was not billed or credited.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Proration not applied",
+      "problem: The change was made, but its prorated amount was not billed or credited.",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "subscription.net_negative_usage/named",
+    "line": {
+      "id": "subscription.net_negative_usage/named",
+      "kind": "subscription.usage_below_zero",
+      "title": "Usage below zero billed as zero",
+      "problem": "Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
+      "detail": [
+        [
+          {
+            "text": "API calls -120"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Usage below zero billed as zero",
+      "problem: Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
+      "meta: API calls -120",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "subscription.net_negative_usage/two meters",
+    "line": {
+      "id": "subscription.net_negative_usage/two meters",
+      "kind": "subscription.usage_below_zero",
+      "title": "Usage below zero billed as zero",
+      "problem": "Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
+      "detail": [
+        [
+          {
+            "text": "API calls -120"
+          }
+        ],
+        [
+          {
+            "text": "Tokens -0.5"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Usage below zero billed as zero",
+      "problem: Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
+      "meta: API calls -120 · Tokens -0.5",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "subscription.net_negative_usage/legacy key only",
+    "line": {
+      "id": "subscription.net_negative_usage/legacy key only",
+      "kind": "subscription.usage_below_zero",
+      "title": "Usage below zero billed as zero",
+      "problem": "Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
+      "detail": [
+        [
+          {
+            "text": "api_calls -120"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Usage below zero billed as zero",
+      "problem: Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
+      "meta: api_calls -120",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "update/cancel_scheduled/at period end",
+    "line": {
+      "id": "update/cancel_scheduled/at period end",
+      "kind": "subscription.cancel_scheduled",
+      "title": "Cancellation scheduled",
+      "detail": [
+        [
+          {
+            "text": "At the end of the current period ("
+          },
+          {
+            "time": "2027-03-03T04:30:00Z"
+          },
+          {
+            "text": ")"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Cancellation scheduled",
+      "meta: At the end of the current period (Mar 3, 2027 04:30 UTC)",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/cancel_scheduled/at period end while trialing",
+    "line": {
+      "id": "update/cancel_scheduled/at period end while trialing",
+      "kind": "subscription.cancel_scheduled",
+      "title": "Cancellation scheduled",
+      "detail": [
+        [
+          {
+            "text": "At trial end ("
+          },
+          {
+            "time": "2027-02-15T04:30:00Z"
+          },
+          {
+            "text": ")"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Cancellation scheduled",
+      "meta: At trial end (Feb 15, 2027 04:30 UTC)",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/cancel_scheduled/at period end legacy",
+    "line": {
+      "id": "update/cancel_scheduled/at period end legacy",
+      "kind": "subscription.cancel_scheduled",
+      "title": "Cancellation scheduled",
+      "detail": [
+        [
+          {
+            "text": "At the end of the current period"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Cancellation scheduled",
+      "meta: At the end of the current period",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/cancel_scheduled/on a date",
+    "line": {
+      "id": "update/cancel_scheduled/on a date",
+      "kind": "subscription.cancel_scheduled",
+      "title": "Cancellation scheduled",
+      "detail": [
+        [
+          {
+            "text": "On "
+          },
+          {
+            "time": "2027-03-18T04:30:00Z"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Cancellation scheduled",
+      "meta: On Mar 18, 2027 04:30 UTC",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/cancel_scheduled/no date",
+    "line": {
+      "id": "update/cancel_scheduled/no date",
+      "kind": "subscription.cancel_scheduled",
+      "title": "Cancellation scheduled",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Cancellation scheduled",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/cancel_cleared",
+    "line": {
+      "id": "update/cancel_cleared",
+      "kind": "subscription.cancel_cleared",
+      "title": "Scheduled cancellation cleared",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Scheduled cancellation cleared",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/collection_paused/by dunning",
+    "line": {
+      "id": "update/collection_paused/by dunning",
+      "kind": "subscription.collection_paused",
+      "title": "Collection paused",
+      "detail": [
+        [
+          {
+            "text": "Payment retries ran out"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Collection paused",
+      "meta: Payment retries ran out",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "update/collection_paused/until a date",
+    "line": {
+      "id": "update/collection_paused/until a date",
+      "kind": "subscription.collection_paused",
+      "title": "Collection paused",
+      "detail": [
+        [
+          {
+            "text": "Resumes "
+          },
+          {
+            "time": "2027-03-03T04:30:00Z"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Collection paused",
+      "meta: Resumes Mar 3, 2027 04:30 UTC",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "update/collection_paused/open ended",
+    "line": {
+      "id": "update/collection_paused/open ended",
+      "kind": "subscription.collection_paused",
+      "title": "Collection paused",
+      "detail": [
+        [
+          {
+            "text": "Invoices are created but not charged until collection resumes"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Collection paused",
+      "meta: Invoices are created but not charged until collection resumes",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "update/collection_resumed/on schedule",
+    "line": {
+      "id": "update/collection_resumed/on schedule",
+      "kind": "subscription.collection_resumed",
+      "title": "Collection resumed",
+      "detail": [
+        [
+          {
+            "text": "On its scheduled date"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Collection resumed",
+      "meta: On its scheduled date",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/collection_resumed/by hand",
+    "line": {
+      "id": "update/collection_resumed/by hand",
+      "kind": "subscription.collection_resumed",
+      "title": "Collection resumed",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Collection resumed",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/trial_ended/on schedule",
+    "line": {
+      "id": "update/trial_ended/on schedule",
+      "kind": "subscription.trial_ended",
+      "title": "Trial ended",
+      "detail": [
+        [
+          {
+            "text": "Subscription is now active"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Trial ended",
+      "meta: Subscription is now active",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/trial_ended/by hand",
+    "line": {
+      "id": "update/trial_ended/by hand",
+      "kind": "subscription.trial_ended_early",
+      "title": "Trial ended early",
+      "detail": [
+        [
+          {
+            "text": "Subscription is now active"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Trial ended early",
+      "meta: Subscription is now active",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/trial_extended",
+    "line": {
+      "id": "update/trial_extended",
+      "kind": "subscription.trial_extended",
+      "title": "Trial extended",
+      "detail": [
+        [
+          {
+            "text": "Trial now ends "
+          },
+          {
+            "time": "2027-02-22T04:30:00Z"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Trial extended",
+      "meta: Trial now ends Feb 22, 2027 04:30 UTC",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/trial_extended/no date",
+    "line": {
+      "id": "update/trial_extended/no date",
+      "kind": "subscription.trial_extended",
+      "title": "Trial extended",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Trial extended",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/billing_retried/attempts_before=0",
+    "line": {
+      "id": "update/billing_retried/attempts_before=0",
+      "kind": "subscription.billing_retried",
+      "title": "Billing retried",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Billing retried",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/billing_retried/attempts_before=1",
+    "line": {
+      "id": "update/billing_retried/attempts_before=1",
+      "kind": "subscription.billing_retried",
+      "title": "Billing retried",
+      "detail": [
+        [
+          {
+            "text": "After 1 failed try"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Billing retried",
+      "meta: After 1 failed try",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/billing_retried/attempts_before=3",
+    "line": {
+      "id": "update/billing_retried/attempts_before=3",
+      "kind": "subscription.billing_retried",
+      "title": "Billing retried",
+      "detail": [
+        [
+          {
+            "text": "After 3 failed tries"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Billing retried",
+      "meta: After 3 failed tries",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/billing_thresholds_set/amount and items",
+    "line": {
+      "id": "update/billing_thresholds_set/amount and items",
+      "kind": "subscription.spend_thresholds_set",
+      "title": "Spend thresholds set",
+      "detail": [
+        [
+          {
+            "money": {
+              "cents": 5000,
+              "currency": "USD"
+            }
+          },
+          {
+            "text": " total"
+          }
+        ],
+        [
+          {
+            "text": "2 item thresholds"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend thresholds set",
+      "meta: $50.00 total · 2 item thresholds",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/billing_thresholds_set/large amount, other currency",
+    "line": {
+      "id": "update/billing_thresholds_set/large amount, other currency",
+      "kind": "subscription.spend_thresholds_set",
+      "title": "Spend thresholds set",
+      "detail": [
+        [
+          {
+            "money": {
+              "cents": 123456789,
+              "currency": "INR"
+            }
+          },
+          {
+            "text": " total"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend thresholds set",
+      "meta: ₹1,234,567.89 total",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/billing_thresholds_set/one item threshold",
+    "line": {
+      "id": "update/billing_thresholds_set/one item threshold",
+      "kind": "subscription.spend_thresholds_set",
+      "title": "Spend thresholds set",
+      "detail": [
+        [
+          {
+            "text": "1 item threshold"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend thresholds set",
+      "meta: 1 item threshold",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/billing_thresholds_set/legacy no currency",
+    "line": {
+      "id": "update/billing_thresholds_set/legacy no currency",
+      "kind": "subscription.spend_thresholds_set",
+      "title": "Spend thresholds set",
+      "detail": [
+        [
+          {
+            "money": {
+              "cents": 5000,
+              "currency": ""
+            }
+          },
+          {
+            "text": " total"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend thresholds set",
+      "meta: 50.00 total",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/billing_thresholds_cleared",
+    "line": {
+      "id": "update/billing_thresholds_cleared",
+      "kind": "subscription.spend_thresholds_removed",
+      "title": "Spend thresholds removed",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Spend thresholds removed",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_added/proration adjustment",
+    "line": {
+      "id": "update/item_added/proration adjustment",
+      "kind": "subscription.item_added",
+      "title": "Item added",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Quantity 3"
+          }
+        ],
+        [
+          {
+            "text": "Open invoice "
+          },
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_src",
+              "label": "VLX-000120"
+            }
+          },
+          {
+            "text": " adjusted by "
+          },
+          {
+            "money": {
+              "cents": 5444,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item added",
+      "meta: Seat · Quantity 3 · Open invoice VLX-000120 adjusted by $54.44",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_added/proration adjustment legacy",
+    "line": {
+      "id": "update/item_added/proration adjustment legacy",
+      "kind": "subscription.item_added",
+      "title": "Item added",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Quantity 3"
+          }
+        ],
+        [
+          {
+            "text": "Open invoice adjusted by "
+          },
+          {
+            "money": {
+              "cents": 5444,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item added",
+      "meta: Seat · Quantity 3 · Open invoice adjusted by $54.44",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_added/proration credit",
+    "line": {
+      "id": "update/item_added/proration credit",
+      "kind": "subscription.item_added",
+      "title": "Item added",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Quantity 3"
+          }
+        ],
+        [
+          {
+            "text": "Credit "
+          },
+          {
+            "money": {
+              "cents": 1980,
+              "currency": "EUR"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item added",
+      "meta: Seat · Quantity 3 · Credit €19.80",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_added/proration invoice",
+    "line": {
+      "id": "update/item_added/proration invoice",
+      "kind": "subscription.item_added",
+      "title": "Item added",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Quantity 3"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          },
+          {
+            "text": " "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item added",
+      "meta: Seat · Quantity 3 · Proration invoice VLX-000123 $18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_added/proration invoice gone",
+    "line": {
+      "id": "update/item_added/proration invoice gone",
+      "kind": "subscription.item_added",
+      "title": "Item added",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Quantity 3"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item added",
+      "meta: Seat · Quantity 3 · Proration invoice $18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_added/proration invoice no currency",
+    "line": {
+      "id": "update/item_added/proration invoice no currency",
+      "kind": "subscription.item_added",
+      "title": "Item added",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Quantity 3"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": ""
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item added",
+      "meta: Seat · Quantity 3 · Proration invoice 18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_added/proration none",
+    "line": {
+      "id": "update/item_added/proration none",
+      "kind": "subscription.item_added",
+      "title": "Item added",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Quantity 3"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item added",
+      "meta: Seat · Quantity 3",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_added/deleted plan",
+    "line": {
+      "id": "update/item_added/deleted plan",
+      "kind": "subscription.item_added",
+      "title": "Item added",
+      "detail": [
+        [
+          {
+            "text": "pln_deleted"
+          }
+        ],
+        [
+          {
+            "text": "Quantity 1"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item added",
+      "meta: pln_deleted · Quantity 1",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_removed/proration adjustment",
+    "line": {
+      "id": "update/item_removed/proration adjustment",
+      "kind": "subscription.item_removed",
+      "title": "Item removed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Open invoice "
+          },
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_src",
+              "label": "VLX-000120"
+            }
+          },
+          {
+            "text": " adjusted by "
+          },
+          {
+            "money": {
+              "cents": 5444,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item removed",
+      "meta: Seat · Open invoice VLX-000120 adjusted by $54.44",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_removed/proration adjustment legacy",
+    "line": {
+      "id": "update/item_removed/proration adjustment legacy",
+      "kind": "subscription.item_removed",
+      "title": "Item removed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Open invoice adjusted by "
+          },
+          {
+            "money": {
+              "cents": 5444,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item removed",
+      "meta: Seat · Open invoice adjusted by $54.44",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_removed/proration credit",
+    "line": {
+      "id": "update/item_removed/proration credit",
+      "kind": "subscription.item_removed",
+      "title": "Item removed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Credit "
+          },
+          {
+            "money": {
+              "cents": 1980,
+              "currency": "EUR"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item removed",
+      "meta: Seat · Credit €19.80",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_removed/proration invoice",
+    "line": {
+      "id": "update/item_removed/proration invoice",
+      "kind": "subscription.item_removed",
+      "title": "Item removed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          },
+          {
+            "text": " "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item removed",
+      "meta: Seat · Proration invoice VLX-000123 $18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_removed/proration invoice gone",
+    "line": {
+      "id": "update/item_removed/proration invoice gone",
+      "kind": "subscription.item_removed",
+      "title": "Item removed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item removed",
+      "meta: Seat · Proration invoice $18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_removed/proration invoice no currency",
+    "line": {
+      "id": "update/item_removed/proration invoice no currency",
+      "kind": "subscription.item_removed",
+      "title": "Item removed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": ""
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item removed",
+      "meta: Seat · Proration invoice 18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/item_removed/proration none",
+    "line": {
+      "id": "update/item_removed/proration none",
+      "kind": "subscription.item_removed",
+      "title": "Item removed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Item removed",
+      "meta: Seat",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "update/cancel_pending_item_plan_change",
+    "line": {
+      "id": "update/cancel_pending_item_plan_change",
+      "kind": "subscription.plan_change_canceled",
+      "title": "Scheduled plan change canceled",
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Scheduled plan change canceled",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "cancel/trial_end_cancel",
+    "line": {
+      "id": "cancel/trial_end_cancel",
+      "kind": "subscription.canceled",
+      "title": "Subscription canceled",
+      "detail": [
+        [
+          {
+            "text": "At trial end"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription canceled",
+      "meta: At trial end",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/now/proration adjustment",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/now/proration adjustment",
+      "kind": "subscription.plan_changed",
+      "title": "Plan changed",
+      "detail": [
+        [
+          {
+            "text": "Starter → Pro"
+          }
+        ],
+        [
+          {
+            "text": "Open invoice "
+          },
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_src",
+              "label": "VLX-000120"
+            }
+          },
+          {
+            "text": " adjusted by "
+          },
+          {
+            "money": {
+              "cents": 5444,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan changed",
+      "meta: Starter → Pro · Open invoice VLX-000120 adjusted by $54.44",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/now/proration adjustment legacy",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/now/proration adjustment legacy",
+      "kind": "subscription.plan_changed",
+      "title": "Plan changed",
+      "detail": [
+        [
+          {
+            "text": "Starter → Pro"
+          }
+        ],
+        [
+          {
+            "text": "Open invoice adjusted by "
+          },
+          {
+            "money": {
+              "cents": 5444,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan changed",
+      "meta: Starter → Pro · Open invoice adjusted by $54.44",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/now/proration credit",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/now/proration credit",
+      "kind": "subscription.plan_changed",
+      "title": "Plan changed",
+      "detail": [
+        [
+          {
+            "text": "Starter → Pro"
+          }
+        ],
+        [
+          {
+            "text": "Credit "
+          },
+          {
+            "money": {
+              "cents": 1980,
+              "currency": "EUR"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan changed",
+      "meta: Starter → Pro · Credit €19.80",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/now/proration invoice",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/now/proration invoice",
+      "kind": "subscription.plan_changed",
+      "title": "Plan changed",
+      "detail": [
+        [
+          {
+            "text": "Starter → Pro"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          },
+          {
+            "text": " "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan changed",
+      "meta: Starter → Pro · Proration invoice VLX-000123 $18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/now/proration invoice gone",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/now/proration invoice gone",
+      "kind": "subscription.plan_changed",
+      "title": "Plan changed",
+      "detail": [
+        [
+          {
+            "text": "Starter → Pro"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan changed",
+      "meta: Starter → Pro · Proration invoice $18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/now/proration invoice no currency",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/now/proration invoice no currency",
+      "kind": "subscription.plan_changed",
+      "title": "Plan changed",
+      "detail": [
+        [
+          {
+            "text": "Starter → Pro"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": ""
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan changed",
+      "meta: Starter → Pro · Proration invoice 18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/now/proration none",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/now/proration none",
+      "kind": "subscription.plan_changed",
+      "title": "Plan changed",
+      "detail": [
+        [
+          {
+            "text": "Starter → Pro"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan changed",
+      "meta: Starter → Pro",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/at renewal",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/at renewal",
+      "kind": "subscription.plan_change_scheduled",
+      "title": "Plan change scheduled",
+      "detail": [
+        [
+          {
+            "text": "Pro → Basic at renewal on "
+          },
+          {
+            "time": "2027-03-01T04:30:00Z"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan change scheduled",
+      "meta: Pro → Basic at renewal on Mar 1, 2027 04:30 UTC",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/at renewal legacy",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/at renewal legacy",
+      "kind": "subscription.plan_change_scheduled",
+      "title": "Plan change scheduled",
+      "detail": [
+        [
+          {
+            "text": "Pro → Basic at renewal"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan change scheduled",
+      "meta: Pro → Basic at renewal",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_plan_changed/at renewal legacy no old plan",
+    "line": {
+      "id": "subscription.item_updated/item_plan_changed/at renewal legacy no old plan",
+      "kind": "subscription.plan_change_scheduled",
+      "title": "Plan change scheduled",
+      "detail": [
+        [
+          {
+            "text": "To Basic at renewal"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Plan change scheduled",
+      "meta: To Basic at renewal",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_quantity_changed",
+    "line": {
+      "id": "subscription.item_updated/item_quantity_changed",
+      "kind": "subscription.quantity_changed",
+      "title": "Quantity changed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "3 → 5"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Quantity changed",
+      "meta: Seat · 3 → 5",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_quantity_changed/proration invoice",
+    "line": {
+      "id": "subscription.item_updated/item_quantity_changed/proration invoice",
+      "kind": "subscription.quantity_changed",
+      "title": "Quantity changed",
+      "detail": [
+        [
+          {
+            "text": "Seat"
+          }
+        ],
+        [
+          {
+            "text": "3 → 5"
+          }
+        ],
+        [
+          {
+            "text": "Proration invoice "
+          },
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          },
+          {
+            "text": " "
+          },
+          {
+            "money": {
+              "cents": 1800,
+              "currency": "USD"
+            }
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Quantity changed",
+      "meta: Seat · 3 → 5 · Proration invoice VLX-000123 $18.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "subscription.item_updated/item_quantity_changed/legacy",
+    "line": {
+      "id": "subscription.item_updated/item_quantity_changed/legacy",
+      "kind": "subscription.quantity_changed",
+      "title": "Quantity changed",
+      "detail": [
+        [
+          {
+            "text": "To 5"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Quantity changed",
+      "meta: To 5",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "actor/user",
+    "line": {
+      "id": "actor/user",
+      "kind": "subscription.created",
+      "title": "Subscription created",
+      "detail": [],
+      "actor": {
+        "kind": "person",
+        "name": "alice@example.com"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription created",
+      "meta: by alice@example.com",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "actor/api_key",
+    "line": {
+      "id": "actor/api_key",
+      "kind": "subscription.created",
+      "title": "Subscription created",
+      "detail": [],
+      "actor": {
+        "kind": "api_key",
+        "name": "billing-sync"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription created",
+      "meta: by API key billing-sync",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "actor/customer",
+    "line": {
+      "id": "actor/customer",
+      "kind": "subscription.created",
+      "title": "Subscription created",
+      "detail": [],
+      "actor": {
+        "kind": "customer",
+        "name": "Northwind"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription created",
+      "meta: Customer",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "actor/system",
+    "line": {
+      "id": "actor/system",
+      "kind": "subscription.created",
+      "title": "Subscription created",
+      "detail": [],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Subscription created",
+      "meta: Automatic",
+      "tone: neutral"
+    ]
+  }
+]

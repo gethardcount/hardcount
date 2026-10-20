@@ -119,8 +119,8 @@ func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
 			paidRows = append(paidRows, e)
 		}
 	}
-	if len(paidRows) != 1 || flowStr(paidRows[0], "description") != "Payment received (offline)" || flowInt(paidRows[0], "amount_cents") != 12000 {
-		t.Errorf("timeline paid rows = %v, want one \"Payment received (offline)\" row for 12000", paidRows)
+	if len(paidRows) != 1 || flowStr(paidRows[0], "description") != "Offline payment received" || flowInt(paidRows[0], "amount_cents") != 12000 {
+		t.Errorf("timeline paid rows = %v, want one \"Offline payment received\" row for 12000", paidRows)
 	}
 	if d, _ := timeline.body["degraded"].([]any); len(d) != 0 {
 		t.Errorf("timeline degraded lanes: %v", d)

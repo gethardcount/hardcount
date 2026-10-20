@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -107,7 +108,7 @@ func TestChargeClaims_SkipInvoiceWithLiveHostedPage(t *testing.T) {
 
 	claims := []struct {
 		name  string
-		claim func(ctx context.Context, tenantID, id string) (bool, error)
+		claim func(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
 	}{
 		{"auto-charge", store.ClaimAutoCharge},
 		{"dunning retry", store.ClaimChargeForDunningRetry},
@@ -126,8 +127,8 @@ func TestChargeClaims_SkipInvoiceWithLiveHostedPage(t *testing.T) {
 				if err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if got == c.block {
-					t.Fatalf("claimed = %v, want %v", got, !c.block)
+				if got.Held() == c.block {
+					t.Fatalf("claimed = %v, want %v", got.Held(), !c.block)
 				}
 			})
 		}
@@ -150,14 +151,15 @@ func TestClaimOpen_RefusedWhileVeloxChargesOrAfterAnUnrecordedPayment(t *testing
 
 	t.Run("charge lease held", func(t *testing.T) {
 		invID := seedClaimInvoice(t, db, ctx, tenantID, "finalized", "failed", 5000)
-		if ok, err := invoices.ClaimChargeForDunningRetry(ctx, tenantID, invID); err != nil || !ok {
-			t.Fatalf("take lease: ok=%v err=%v", ok, err)
+		held, err := invoices.ClaimChargeForDunningRetry(ctx, tenantID, invID)
+		if err != nil || !held.Held() {
+			t.Fatalf("take lease: held=%v err=%v", held.Held(), err)
 		}
 		if _, _, err := sessions.ClaimOpen(ctx, tenantID, invID, 5000, "USD", false); !errors.Is(err, ErrChargeInFlight) {
 			t.Fatalf("err = %v, want ErrChargeInFlight", err)
 		}
 		// Negative control: the charge finished and released the lease.
-		if err := invoices.ReleaseAutoChargeClaim(ctx, tenantID, invID); err != nil {
+		if err := invoices.ReleaseChargeHold(ctx, tenantID, invID, held); err != nil {
 			t.Fatalf("release: %v", err)
 		}
 		if _, winner, err := sessions.ClaimOpen(ctx, tenantID, invID, 5000, "USD", false); err != nil || !winner {
@@ -232,10 +234,11 @@ func TestChargeClaim_SeesHostedClaimCommittedWhileItWaited(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		ok, err := invoices.ClaimChargeForDunningRetry(ctx, tenantID, invID)
-		done <- result{ok, err}
+		h, err := invoices.ClaimChargeForDunningRetry(ctx, tenantID, invID)
+		done <- result{h.Held(), err}
 	}()
-	waitForLockWait(t, db, ctx)
+	// The claim queues on its lock-first read behind the hosted FOR SHARE.
+	testutil.WaitForLockWaiter(t, ctx, testutil.AdminPool(t), "SELECT 1 FROM invoices WHERE id = $1 FOR UPDATE")
 
 	if err := hosted.Commit(); err != nil {
 		t.Fatalf("commit hosted: %v", err)
@@ -251,33 +254,6 @@ func TestChargeClaim_SeesHostedClaimCommittedWhileItWaited(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("charge claim did not finish after the hosted claim committed")
 	}
-}
-
-// waitForLockWait blocks until some backend in this database is waiting on a
-// lock, so the interleaving test commits only once the claim is queued.
-func waitForLockWait(t *testing.T, db *postgres.DB, ctx context.Context) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		var n int
-		err = tx.QueryRowContext(ctx, `
-			SELECT count(*) FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock'
-		`).Scan(&n)
-		postgres.Rollback(tx)
-		if err != nil {
-			t.Fatalf("pg_stat_activity: %v", err)
-		}
-		if n > 0 {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("charge claim never queued behind the hosted claim's lock")
 }
 
 // TestListHostedToReconcile_Selection: the sweep looks at sessions whose

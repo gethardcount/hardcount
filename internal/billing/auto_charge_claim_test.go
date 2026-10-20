@@ -17,7 +17,7 @@ type countingCharger struct {
 	calls map[string]int
 }
 
-func (c *countingCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _, _ string) (domain.Invoice, error) {
+func (c *countingCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.calls == nil {
@@ -97,7 +97,7 @@ func TestProcessAutoCharge_ReleasesClaimOnPreStripeSkips(t *testing.T) {
 		pending, _ := inv.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
 		_, _ = engine.processAutoCharge(context.Background(), pending, nil, noPMTriggerSweep)
 
-		if ok, _ := inv.ClaimAutoCharge(context.Background(), "t1", "inv_nopm"); !ok {
+		if h, _ := inv.ClaimAutoCharge(context.Background(), "t1", "inv_nopm"); !h.Held() {
 			t.Fatal("claim must be re-takeable immediately after the no-PM skip — the lease was not released")
 		}
 	})
@@ -119,8 +119,92 @@ func TestProcessAutoCharge_ReleasesClaimOnPreStripeSkips(t *testing.T) {
 		if charger.calls["inv_credfail"] != 0 {
 			t.Fatal("charge must not fire when credit re-apply failed (overcharge guard)")
 		}
-		if ok, _ := inv.ClaimAutoCharge(context.Background(), "t1", "inv_credfail"); !ok {
+		if h, _ := inv.ClaimAutoCharge(context.Background(), "t1", "inv_credfail"); !h.Held() {
 			t.Fatal("claim must be re-takeable immediately after the credit-apply skip — the lease was not released")
+		}
+	})
+}
+
+// tokenCharger records the hold each charge was handed.
+type tokenCharger struct {
+	got []domain.ChargeHold
+}
+
+func (c *tokenCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, hold domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+	c.got = append(c.got, hold)
+	return inv, nil
+}
+
+// failAfterCredits fails every read of the invoice once credits were
+// applied: the collector's refresh after the credit apply.
+type failAfterCredits struct {
+	*mockInvoices
+	credits *fakeCreditApplier
+}
+
+func (f *failAfterCredits) GetInvoice(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
+	if f.credits.calls > 0 {
+		return domain.Invoice{}, errors.New("injected refresh failure")
+	}
+	return f.mockInvoices.GetInvoice(ctx, tenantID, id)
+}
+
+// The collector hands the charge the hold its claim took (ADR-127: the charge
+// re-checks that exact token right before sending), and releases the hold on
+// every path that sends no charge — a settle that needed none, and a refresh
+// that failed after the credit apply — so the invoice does not wait for the
+// stale-hold sweep for nothing.
+func TestProcessAutoCharge_HoldTokenAndNoChargeReleases(t *testing.T) {
+	t.Run("the charge gets the claim's token", func(t *testing.T) {
+		inv := &mockInvoices{invoices: []domain.Invoice{{
+			ID: "inv_tok", TenantID: "t1", CustomerID: "cus_1",
+			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+			AutoChargePending: true, AmountDueCents: 1000,
+		}}}
+		charger := &tokenCharger{}
+		engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, inv, nil, &mockSettings{}, &fakePaymentSetups{ready: true, stripeCustomerID: "cus_s"}, charger, billingTestClock()))
+		pending, _ := inv.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
+		_, _ = engine.processAutoCharge(context.Background(), pending, nil, noPMTriggerSweep)
+		if len(charger.got) != 1 || !charger.got[0].Held() || charger.got[0] != inv.claimed["inv_tok"] {
+			t.Fatalf("charge got holds %v, want exactly the token the claim took (%v)", charger.got, inv.claimed["inv_tok"])
+		}
+	})
+
+	t.Run("nothing owed: settled and released", func(t *testing.T) {
+		inv := &mockInvoices{invoices: []domain.Invoice{{
+			ID: "inv_zero", TenantID: "t1", CustomerID: "cus_1",
+			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+			AutoChargePending: true, AmountDueCents: 0,
+		}}}
+		charger := &countingCharger{}
+		engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, inv, nil, &mockSettings{}, &fakePaymentSetups{ready: true, stripeCustomerID: "cus_s"}, charger, billingTestClock()))
+		pending, _ := inv.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
+		_, _ = engine.processAutoCharge(context.Background(), pending, nil, noPMTriggerSweep)
+		if charger.calls["inv_zero"] != 0 {
+			t.Fatal("charged an invoice with nothing owed")
+		}
+		if inv.holdSet("inv_zero") {
+			t.Fatal("the hold is still set after a settle that sent no charge")
+		}
+	})
+
+	t.Run("refresh after the credit apply fails: released", func(t *testing.T) {
+		base := &mockInvoices{invoices: []domain.Invoice{{
+			ID: "inv_refresh", TenantID: "t1", CustomerID: "cus_1",
+			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+			AutoChargePending: true, AmountDueCents: 1000,
+		}}}
+		credits := &fakeCreditApplier{inv: base, applyCents: 100}
+		inv := &failAfterCredits{mockInvoices: base, credits: credits}
+		charger := &countingCharger{}
+		engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, inv, credits, &mockSettings{}, &fakePaymentSetups{ready: true, stripeCustomerID: "cus_s"}, charger, billingTestClock()))
+		pending, _ := base.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
+		_, _ = engine.processAutoCharge(context.Background(), pending, nil, noPMTriggerSweep)
+		if charger.calls["inv_refresh"] != 0 {
+			t.Fatal("charged after a failed refresh")
+		}
+		if base.holdSet("inv_refresh") {
+			t.Fatal("the hold is still set after a refresh failure that sent no charge")
 		}
 	})
 }

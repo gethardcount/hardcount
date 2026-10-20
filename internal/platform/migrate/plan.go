@@ -19,7 +19,7 @@ const (
 	// PlanEmpty: no Velox tables and no record; migration 180 runs the
 	// baseline, then the files after it.
 	PlanEmpty PlanState = "empty"
-	// PlanAdopt: a v0.8.0 or v0.8.1 database at (180, false); migration
+	// PlanAdopt: a v0.8.0, v0.8.1 or v0.8.2 database at (180, false); migration
 	// 180 records 180 in goose_db_version and changes no table.
 	PlanAdopt PlanState = "ready to move"
 	// PlanBehind: `velox migrate` would apply Plan.Pending.

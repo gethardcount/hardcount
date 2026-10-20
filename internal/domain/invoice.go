@@ -79,8 +79,36 @@ const (
 // sale that may complete, or under-records amount_paid against a lowered
 // amount_due. Stripe enforces the same rule ("you can't void, edit, or mark
 // uncollectible an invoice with open payments").
+//
+// Code outside this file asks Invoice.PaymentInFlight instead, which answers
+// for the whole invoice row; internal/arch pins that.
 func (s InvoicePaymentStatus) IsInFlight() bool {
 	return s == PaymentProcessing || s == PaymentUnknown
+}
+
+// PaymentInFlight reports whether a payment may be open on this invoice: one
+// that may still take money, so its outcome is not known yet. Every action
+// that must refuse or wait while that is true asks here: void, write-off,
+// offline payment, credit notes, Collect, invoice emails, the hosted Pay
+// button, proration's credit path and dunning's final action.
+//
+// Today the answer is the payment status alone (IsInFlight). It lives on the
+// invoice rather than on the status so that a fact stored elsewhere on the
+// invoice row can join it here, once, instead of at each caller (#976 adds a
+// record of a charge sent to Stripe whose result is not saved yet).
+func (i Invoice) PaymentInFlight() bool {
+	return i.PaymentStatus.IsInFlight()
+}
+
+// Parked reports whether the invoice's last charge got an unclear answer from
+// Stripe that named no PaymentIntent (ADR-107): payment_status 'unknown' with
+// no PaymentIntent id. No charge path takes it, and no sweep can look the
+// payment up by id. The stale-hold sweep finishes it from Stripe's list of the
+// customer's payments: it records or follows a payment that appears, and with
+// none ParkedNothingWait after the attempt it puts the invoice back where a
+// charge picks it up (ADR-127 amendment 2026-10-20).
+func (i Invoice) Parked() bool {
+	return i.PaymentStatus == PaymentUnknown && i.StripePaymentIntentID == ""
 }
 
 // OutOfBandPaymentIntentPrefix marks the synthetic PaymentIntent id that
@@ -504,10 +532,12 @@ type InvoiceLineItem struct {
 	TaxCode         string          `json:"tax_code,omitempty"`
 	// TaxabilityReason carries the Stripe-canonical structured reason
 	// (e.g. "standard_rated", "reverse_charge", "not_collecting",
-	// "customer_exempt", "product_exempt", "zero_rated"). The dashboard
-	// renders a badge for non-trivial values, and the PDF appends an
-	// exemption legend when at least one line is customer- or
-	// product-exempt. Empty for non-Stripe providers.
+	// "customer_exempt", "product_exempt", "zero_rated"), or Velox's own
+	// TaxReasonPrepaidCreditPurchase on a prepaid-commit purchase line under
+	// the manual or Stripe Tax provider. The dashboard renders a badge for
+	// non-trivial values, and the PDF appends a legend when a line is
+	// customer- or product-exempt or a prepaid credit purchase. Otherwise
+	// empty for non-Stripe providers.
 	TaxabilityReason    string `json:"tax_reason,omitempty"`
 	TotalAmountCents    int64  `json:"total_amount_cents"`
 	Currency            string `json:"currency"`
@@ -553,6 +583,12 @@ type InvoiceLineItem struct {
 func (li InvoiceLineItem) IsCommitLine() bool {
 	return li.CommitGrantedCents != nil && *li.CommitGrantedCents > 0
 }
+
+// TaxReasonPrepaidCreditPurchase is the tax_reason on a prepaid-commit
+// purchase line. The purchase is an advance payment: the line is left out of
+// the tax request and carries no tax, and the usage the credit pays for is
+// taxed when it is invoiced (ADR-078 amendment 2026-10-19).
+const TaxReasonPrepaidCreditPurchase = "prepaid_credit_purchase"
 
 // EffectiveUnitAmountDecimal is the per-unit price in DECIMAL CENTS, derived
 // from the line's amount and quantity (amount_cents / quantity). It is the

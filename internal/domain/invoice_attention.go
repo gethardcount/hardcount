@@ -45,7 +45,7 @@ const (
 //	payment_action_required     — 3DS / SCA pending
 //	payment_method_required     — no PM on file
 //	dunning_exhausted           — shipped 2026-07-22 (payment-surfacing audit)
-//	dispute_lost                — Lago parity
+//	dispute_lost                — shipped 2026-10-19 (#979)
 type AttentionReason string
 
 const (
@@ -171,6 +171,15 @@ const (
 	// the default pause action collection must be resumed too. Chargebee/Stripe
 	// parity: the end-of-dunning terminal is an explicit, visible state.
 	AttentionReasonDunningExhausted AttentionReason = "dunning_exhausted"
+
+	// AttentionReasonDisputeLost: the customer disputed a payment on this
+	// invoice with their bank and the dispute closed as lost, so the bank
+	// took the money back (#979). Velox leaves the invoice paid and moves no
+	// money; the operator decides what the loss means for the invoice (a
+	// credit note for money returned outside Velox, or a write-off in their
+	// own books). Critical, and surfaced on paid invoices, which is where
+	// every dispute lands. Lago parity.
+	AttentionReasonDisputeLost AttentionReason = "dispute_lost"
 )
 
 // AttentionAction names the operator's recommended next step. Closed
@@ -235,8 +244,9 @@ const (
 	// AttentionActionMarkUncollectible opens the invoice's write-off
 	// confirmation. Offered only on a PARKED invoice (payment status unknown
 	// and no PaymentIntent to look up, ADR-107): there it is the one action
-	// the product allows, and before this code existed the notice could only
-	// name a menu item.
+	// the product allows while Stripe may still complete the charge, for a
+	// customer who paid another way. A secondary action: the dashboard never
+	// renders it as the primary button.
 	AttentionActionMarkUncollectible AttentionAction = "mark_uncollectible"
 )
 
@@ -465,6 +475,35 @@ type AttentionContext struct {
 	// finalized, unpaid invoices only.
 	PaymentPageOpen bool
 
+	// RefusedCardDeclineCode is set when the bank refused the customer's
+	// current default card for good on this invoice: Stripe's decline code
+	// (one IsHardDecline accepts), recorded on one of the invoice's charge
+	// attempts with that card. Dunning retries skip that card, so the
+	// payment-failure notice says the customer needs a different card and
+	// does not offer Retry. Empty once another card is the default — a card
+	// the customer saves now becomes the default by itself (ADR-126) — and
+	// the ordinary decline notice comes back. The invoice service reads it
+	// for failed invoices only.
+	RefusedCardDeclineCode string
+
+	// DunningRetrying is true when the invoice's dunning run is active and
+	// not paused, so a scheduled retry is still to come. Read only by the
+	// refused-card notice: "dunning keeps its schedule" is true only then.
+	// After the run exhausts, while it is paused, or with no run at all
+	// (dunning off), no retry runs whatever card becomes the default. The
+	// invoice service reads it for invoices with RefusedCardDeclineCode set.
+	// Zero value (false) gives the no-retry copy, which still sends the
+	// operator to get a new card rather than to wait on a retry.
+	DunningRetrying bool
+
+	// LostDispute is a dispute on one of this invoice's payments that closed
+	// as lost (#979), the newest one when there are several; nil when none
+	// did. The invoice service reads it for every non-draft invoice, from the
+	// invoice's dispute records. A read error leaves it nil: the notice is
+	// display-only, and the dispute stays visible on the invoice's timeline
+	// and in GET /v1/invoices/{id}/disputes.
+	LostDispute *InvoiceDispute
+
 	// LastFailedChargeAt is the simulated instant of the invoice's latest
 	// failed charge, for a clock-pinned invoice only (nil otherwise). The
 	// payment-failure banner dates "since" from it: attentionSince's issue
@@ -545,8 +584,21 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	// fires almost exclusively on invoices that are ALREADY paid or voided —
 	// exactly the rows the early-return hides. The operator must see it to
 	// refund it.
+	//
+	// A lost dispute on the same invoice changes what the anomaly asks for:
+	// the bank already gave one payment back, so "refund the extra charge"
+	// could return the customer's money twice (#1287 review).
 	if inv.PaymentAnomalyKind != "" {
-		return classifyPaymentAnomaly(inv)
+		att := classifyPaymentAnomaly(inv)
+		if atc.LostDispute != nil {
+			att = withLostDispute(att, *atc.LostDispute)
+		}
+		return att
+	}
+	// A lost dispute pierces it too: disputes land on paid invoices, so the
+	// early return would hide every one of them.
+	if atc.LostDispute != nil {
+		return classifyDisputeLost(inv, *atc.LostDispute, atc)
 	}
 	// A BAD-DEBT RECOVERY charge in flight pierces the early-return, for the
 	// same reason the anomaly does: the state lives only on a row the return
@@ -674,6 +726,9 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 		return att
 	}
 	// Paid: the cash arrived, which is the whole point — nothing to report.
+	// (Unless a dispute took it back: classifyDisputeLost reports the
+	// spendable credit on a paid invoice itself, with commit relief as the
+	// action, since void is refused there.)
 	// Voided: the operator already took the one recovery action there is, and
 	// the void tx retired the unspent balance. Draft: a grant is funded at
 	// finalize, so a draft cannot have one; if it somehow does, that is a
@@ -719,7 +774,7 @@ func withCommitExposure(att *Attention, inv Invoice, atc AttentionContext) *Atte
 	// the recovery banner (pre-ADR-113 in-flight rows only)
 	// immediately above a Void button that cannot run.
 	var voidAction []AttentionActionItem
-	if drawable > 0 && !inv.PaymentStatus.IsInFlight() {
+	if drawable > 0 && !inv.PaymentInFlight() {
 		voidAction = []AttentionActionItem{{Code: AttentionActionVoidInvoice, Label: "Void invoice"}}
 	}
 
@@ -962,6 +1017,9 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	if atc.LastFailedChargeAt != nil {
 		since = *atc.LastFailedChargeAt
 	}
+	if atc.RefusedCardDeclineCode != "" {
+		return classifyRefusedCard(inv, atc.RefusedCardDeclineCode, atc.DunningRetrying, since)
+	}
 	// Update Payment Method is the primary action: the card on file
 	// is broken, retrying with the same card will decline again.
 	// Retry Payment is offered as secondary for transient declines
@@ -988,6 +1046,47 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	}
 }
 
+// classifyRefusedCard is the payment-failure notice when the bank refused the
+// customer's default card for good (#966): lost, stolen, revoked and the rest
+// of IsHardDecline. Dunning retries skip that card until another card is the
+// default, so the notice asks for a different card and drops Retry payment —
+// a manual retry would charge the card the bank just refused, and the card
+// networks charge merchants for retrying these declines.
+//
+// What the notice says about retries follows the dunning run: only an active,
+// unpaused run has a retry to come. A card the customer saves now replaces
+// the refused default by itself (ADR-126); a card saved before the refusal
+// stays beside it, so the operator is told to make that one the default.
+func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since time.Time) *Attention {
+	const (
+		final     = "Stripe's decline code is %s, which Stripe and the card networks treat as final. "
+		newCard   = "A card the customer saves now, through a setup link or the hosted invoice page, becomes the default by itself; a card saved before the refusal needs Set as default on the customer page. "
+		hostedPay = "The customer can also pay on the hosted invoice page."
+	)
+	message := "The customer's bank refused this card for good, so automatic retries won't charge it; the customer needs a different card."
+	detail := fmt.Sprintf(final, declineCode) +
+		"Dunning keeps its schedule and counts each retry; the next retry charges a different card once it is the customer's default. " +
+		newCard + hostedPay
+	if !retrying {
+		message = "The customer's bank refused this card for good, and no automatic retry is scheduled; the customer needs a different card."
+		detail = fmt.Sprintf(final, declineCode) + newCard +
+			"Once another card is the default, Retry payment charges it. " + hostedPay
+	}
+	return &Attention{
+		Severity: AttentionSeverityCritical,
+		Reason:   AttentionReasonPaymentFailed,
+		Code:     "payment.card_refused",
+		Message:  message,
+		Detail:   detail,
+		DocURL:   docURL("payment-failed"),
+		Actions: []AttentionActionItem{
+			{Code: AttentionActionUpdatePaymentMethod, Label: "Update payment method"},
+		},
+		ProviderResponse: inv.LastPaymentError,
+		Since:            &since,
+	}
+}
+
 func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 	since := attentionSince(inv)
 	// No operator action: the reconciler re-queries the provider on the next
@@ -996,34 +1095,28 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 	// "Check provider" button was non-functional (no endpoint); an on-demand
 	// re-check is deferred until real stuck-payment pressure (ADR-049), so the
 	// dead button is removed rather than shipped greyed-out.
-	// PARKED (ADR-107) — a genuinely different situation, and the copy below
-	// asserts the opposite of it. With no PaymentIntent id there is nothing for
-	// the reconciler to re-query: it early-returns, the invoice is excluded from
-	// every charge path, and it will NEVER resolve on its own. Rendering the
-	// muted "we've got this" banner at Info severity, forever, with no actions,
-	// is the system telling an operator to wait for something that cannot
-	// happen (found by the honesty sweep, 2026-07-31).
-	if inv.StripePaymentIntentID == "" {
+	// PARKED (ADR-107): Stripe's answer was unclear and named no payment, so
+	// there is no PaymentIntent for the reconciler to re-query. Since REC-5
+	// (ADR-127 amendment 2026-10-20) the stale-hold sweep finishes it from
+	// Stripe's list of the customer's payments: a payment that appears is
+	// recorded, and with none 24 hours after the attempt the invoice goes back
+	// to being charged as usual. So the banner says that, as a Warning, in the
+	// words approved on 2026-10-19. Write-off stays as a secondary action for
+	// a customer who paid another way; the dashboard renders it as a secondary
+	// button, because waiting is the usual next step.
+	if inv.Parked() {
 		return &Attention{
-			Severity: AttentionSeverityCritical,
+			Severity: AttentionSeverityWarning,
 			Reason:   AttentionReasonPaymentUnconfirmed,
 			Code:     "payment.unidentifiable",
-			// Bounded, not absolute (ADR-108): Velox now searches the provider
-			// for the attempt, so SOME parked invoices resolve without a human
-			// — but only a found PaymentIntent may resolve one, so "if it
-			// cannot be found" keeps the old sentence's truth. The severity
-			// stays Critical: until the search finds something, this invoice
-			// still needs a human's eventual decision, and demoting it on the
-			// hope of a future find would hide exactly the rows that never get
-			// found.
-			Message: "Velox can't tell if this charge went through, so it won't charge again; check Stripe, and if nothing was taken, mark it uncollectible.",
-			Detail: "Velox keeps searching Stripe for the charge and records it here if found. If it cannot be found, this will not resolve on its own. " +
-				"No new charge is made, so the customer is never charged twice. Search Stripe by customer and amount.",
+			Message: "Stripe didn't confirm this charge and may still complete it.\n" +
+				"Velox checks Stripe every hour and records the payment if it appears.\n" +
+				"If none appears within 24 hours, the invoice is charged again as usual.",
+			Detail: "No new charge is made before then. " +
+				"If the customer paid another way, mark the invoice uncollectible so it is not charged again. " +
+				"To find the attempt in Stripe, search by customer and amount.",
 			DocURL: docURL("payment-unconfirmed"),
 			Since:  &since,
-			// The way out sits in the notice, not only in the ⋯ menu: an
-			// operator told "mark it uncollectible" should not have to go
-			// looking for the control.
 			Actions: []AttentionActionItem{
 				{Code: AttentionActionMarkUncollectible, Label: "Mark uncollectible"},
 			},
@@ -1375,6 +1468,87 @@ func classifyPaymentAnomaly(inv Invoice) *Attention {
 	if pi != "" {
 		att.Actions = []AttentionActionItem{{Code: AttentionActionReconcilePayment, Label: "Open in Stripe"}}
 	}
+	return att
+}
+
+// classifyDisputeLost reports a payment the customer's bank took back after a
+// lost dispute (#979). Velox records the loss and changes nothing else, so the
+// invoice still reads paid and its books overstate what was collected until
+// the operator acts. No action button: the decision is the operator's (a
+// credit note, or a write-off in their own books), and none of the existing
+// actions makes it. The Stripe dispute id goes in Detail, where the Stripe
+// dashboard search needs it.
+//
+// A paid invoice that bought prepaid credit is different in two ways: the
+// credit stays spendable after the bank took the money back, and an ordinary
+// credit note is refused there (ADR-078 D4). Commit relief is the one action
+// that retires the credit (ADR-080), so the notice names it, with the
+// spendable amount up front. The service reads the grant for exactly this
+// case (decorateInvoice). Relief is for paid invoices only, so the branch is
+// too; on any other status withCommitExposure already reports the credit.
+func classifyDisputeLost(inv Invoice, d InvoiceDispute, atc AttentionContext) *Attention {
+	since := inv.UpdatedAt
+	if d.ClosedAt != nil {
+		since = *d.ClosedAt
+	}
+	taken := FormatMoneyMinor(d.AmountCents, d.Currency)
+	detail := "Stripe dispute " + d.StripeDisputeID + " closed as lost"
+	if d.Reason != "" {
+		detail += "; the customer's reason was " + d.Reason
+	}
+	detail += ". Velox leaves the invoice paid and moves no money."
+	message := "The customer's bank took back " + taken +
+		" after a lost dispute, so record it with a credit note or write it off in your books."
+
+	drawable, spent := atc.CommitGrantDrawableCents, atc.CommitGrantConsumedCents
+	switch {
+	case inv.Status == InvoicePaid && drawable > 0:
+		message = "The customer's bank took back " + taken + " after a lost dispute, and the customer can still spend " +
+			FormatMoneyMinor(drawable, inv.Currency) + " of this invoice's prepaid credit." +
+			"\nRetire that credit with commit relief, recorded as money returned outside Velox."
+		detail += " The prepaid credit stays spendable until you retire it. An ordinary credit note is refused on an invoice that bought prepaid credit: " +
+			"use POST /v1/credit-notes with commit_relief {\"retire_all\": true} and the relief amount as out_of_band_amount_cents, never as a card refund, because the bank already returned the money. " +
+			"If the amount you send differs, the answer names the right one. " +
+			"Relief returns at most the price paid for the unspent credit; record any rest of the loss in your own books."
+	case inv.Status == InvoicePaid && spent > 0:
+		message = "The customer's bank took back " + taken +
+			" after a lost dispute, so bill the customer again or write it off in your books."
+		detail += " The customer already spent all the credit this invoice bought, so there is none to retire, and an ordinary credit note is refused on an invoice that bought prepaid credit."
+	default:
+		detail += " To record the loss, issue a credit note with the amount as money returned outside Velox, not as a card refund: the bank already returned it."
+	}
+	return &Attention{
+		Severity: AttentionSeverityCritical,
+		Reason:   AttentionReasonDisputeLost,
+		Code:     "payment.dispute_lost",
+		Message:  message,
+		Detail:   detail,
+		DocURL:   docURL("dispute-lost"),
+		Since:    &since,
+	}
+}
+
+// withLostDispute rewrites a payment-anomaly notice for an invoice that also
+// lost a dispute (#1287 review). The anomaly's own instruction (refund the
+// extra charge, refund the payment on a voided invoice) assumes Stripe still
+// holds the money, and after a chargeback it may not: refund the extra charge
+// of a duplicate whose original the bank took back, and the customer has both
+// payments back. Stripe refuses a refund of the charged-back payment itself
+// (error charge_disputed), so the risk is the other one. The anomaly keeps
+// its reason, code and "Open in Stripe" button; the message stops asking for
+// a refund, and Detail puts the dispute and its payment before the anomaly's
+// own facts, so the operator can see which payment the bank took back.
+func withLostDispute(att *Attention, d InvoiceDispute) *Attention {
+	if att == nil {
+		return nil
+	}
+	att.Message = "The customer's bank took back " + FormatMoneyMinor(d.AmountCents, d.Currency) +
+		" after a lost dispute, so check what Stripe still holds before you refund anything."
+	att.Detail = joinDetail(
+		"Stripe dispute "+d.StripeDisputeID+" on payment "+d.StripePaymentIntentID+
+			" closed as lost: the customer already has that money back, and Stripe refuses a refund of it. "+
+			"A refund of another payment on this invoice can return the same money twice.",
+		"Velox also flagged a payment on this invoice. "+att.Detail)
 	return att
 }
 

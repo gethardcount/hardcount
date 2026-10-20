@@ -20,7 +20,14 @@ clean.
 - `cp .env.example .env`, then `make up` (Postgres, Redis, Mailpit), `make bootstrap` (prints the sign-in and the test keys), `make dev` (API on :8080) and `cd web-v2 && npm run dev` (dashboard on :5173).
 - The `.env.example` defaults send email to Mailpit and point email links at the dashboard on :5173. Read mail at http://localhost:8025.
 - Settings → Payments: paste the Stripe test keys. Run `stripe listen --forward-to localhost:8080/v1/webhooks/stripe/<vlx_spc_id>` and paste its `whsec_…` back.
-- Test cards: `4242 4242 4242 4242` succeeds; `4000 0000 0000 0341` saves but declines on charge; `4000 0027 6000 3184` asks for 3-D Secure.
+- Stripe test cards:
+
+  | Card | Result |
+  |---|---|
+  | `4242 4242 4242 4242` | Succeeds |
+  | `4000 0000 0000 0341` | Saves, then declines on charge |
+  | `4000 0027 6000 3184` | Asks for 3-D Secure |
+
 - In Checkout, choose "Pay without Link" if offered, and give a ZIP for a US address, or Save does nothing.
 - [Stripe end-to-end test](stripe-end-to-end-test.md) has the step-by-step commands for the Stripe checks.
 
@@ -32,6 +39,11 @@ clean.
 - [ ] Hosted invoice page: Pay with `4242` → "Paid" banner within seconds, and the card appears on the customer.
 - [ ] 3-D Secure: Pay with `4000 0027 6000 3184`, fail the challenge → the invoice stays unpaid; pass it → paid.
 - [ ] Refund: a credit note with "Refund to card" → `refund_status=succeeded`, and the refund shows in the Stripe dashboard.
+- [ ] Key in use: start two `stripe payment_intents create -d amount=2000 -d currency=usd -d payment_method=pm_card_visa -d "payment_method_types[]=card" -d confirm=true -i <key>` at once with one new key. Repeat with a fresh key until one answers HTTP 409 with code `idempotency_key_in_use` (identical replies are a replay) → write its error `type` in the comment on `stripe409KeyInUse` in `internal/payment/stripe_409_test.go`. Velox treats every 409 as unclear, whatever the type ([#976](https://github.com/getvelox/velox/issues/976)).
+- [ ] List after create: create a PaymentIntent for a test customer with metadata `velox_invoice_id=inv_x`, then at once `stripe payment_intents list --customer <cus> -d "expand[]=data.latest_charge"` → it is listed, with `latest_charge.refunded`. The stale-hold sweep reads "not listed" as "Stripe never got the charge" ([ADR-127](../adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
+- [ ] List for a customer this account does not have: `stripe payment_intents list --customer cus_doesnotexist` → write down whether Stripe answers an empty list or a `resource_missing` error. On an error the sweep keeps the hold and logs "can't confirm an earlier charge with Stripe"; on an empty list it clears it.
+- [ ] Interrupted charge: hold Stripe's response in a TCP proxy, start **Collect payment** on a test invoice, and SIGKILL Velox once Stripe has the request. After restart the invoice refuses **Collect payment** with "being confirmed with Stripe"; the first reconciler run after the hold is 10 minutes old marks it paid, with one PaymentIntent in the Stripe dashboard.
+- [ ] India: on a test account registered in India, the same list call works (Search is not offered there).
 - [ ] Stripe Tax: with a US state registration in the Stripe test account, tax provider "Stripe Tax", customer with a full US address → the invoice has a tax line that matches Stripe's calculation.
 
 ## Money walk across a renewal

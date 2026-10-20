@@ -2,7 +2,7 @@
 // (ADR-125).
 //
 // Migration 180 is a Go migration: on an empty database it runs the
-// v0.8.1 baseline, and on a v0.8.0 or v0.8.1 database it takes the
+// v0.8.1 baseline, and on a v0.8.0, v0.8.1 or v0.8.2 database it takes the
 // golang-migrate record over without changing a table (baseline.go). Files
 // after it live in sql/ as NNNNN_name.sql. A read-only state check runs
 // before every command (state.go).

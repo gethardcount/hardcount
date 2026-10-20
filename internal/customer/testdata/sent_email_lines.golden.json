@@ -1,0 +1,810 @@
+[
+  {
+    "case": "type/credit_note",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.credit_note",
+      "title": "Credit note email delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Credit note email delivered",
+      "meta: VLX-000123 · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "type/dunning_escalation",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.dunning_escalation",
+      "title": "Final notice delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Final notice delivered",
+      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "type/dunning_warning",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.dunning_warning",
+      "title": "Payment reminder email delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Payment reminder email delivered",
+      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "type/invoice",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.invoice",
+      "title": "Invoice email delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Invoice email delivered",
+      "meta: VLX-000123 · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "type/payment_failed",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.payment_failed",
+      "title": "Failed payment notice delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Failed payment notice delivered",
+      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "type/payment_receipt",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.payment_receipt",
+      "title": "Receipt email delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Receipt email delivered",
+      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "type/payment_setup_request",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.payment_setup_request",
+      "title": "Payment setup email delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Payment setup email delivered",
+      "meta: VLX-000123 · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "skipped because/gone",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.dunning_warning",
+      "title": "Payment reminder email not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice no longer exists"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Payment reminder email not sent",
+      "meta: The invoice no longer exists · VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "skipped because/paid",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.dunning_warning",
+      "title": "Payment reminder email not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already paid"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Payment reminder email not sent",
+      "meta: The invoice was already paid · VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "skipped because/uncollectible",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.dunning_warning",
+      "title": "Payment reminder email not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already marked uncollectible"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Payment reminder email not sent",
+      "meta: The invoice was already marked uncollectible · VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "skipped because/voided",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.dunning_warning",
+      "title": "Payment reminder email not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already voided"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Payment reminder email not sent",
+      "meta: The invoice was already voided · VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "skipped because/(not recorded)",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.dunning_warning",
+      "title": "Payment reminder email not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already closed"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Payment reminder email not sent",
+      "meta: The invoice was already closed · VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "couldn't be sent/smtp_not_configured",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.invoice",
+      "title": "Invoice email couldn't be sent",
+      "problem": "Email sending is not set up on this server.",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Invoice email couldn't be sent",
+      "problem: Email sending is not set up on this server.",
+      "meta: VLX-000123 · To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "couldn't be sent/recipient_suppressed",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.invoice",
+      "title": "Invoice email couldn't be sent",
+      "problem": "This address bounced or marked an earlier email as spam, so Velox no longer emails it.",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Invoice email couldn't be sent",
+      "problem: This address bounced or marked an earlier email as spam, so Velox no longer emails it.",
+      "meta: VLX-000123 · To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "couldn't be sent/invalid_recipient",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.invoice",
+      "title": "Invoice email couldn't be sent",
+      "problem": "The customer's email address is not valid.",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Invoice email couldn't be sent",
+      "problem: The customer's email address is not valid.",
+      "meta: VLX-000123 · To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "couldn't be sent/(no plain-words name)",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.invoice",
+      "title": "Invoice email couldn't be sent",
+      "problem": "The customer did not get this email.",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Invoice email couldn't be sent",
+      "problem: The customer did not get this email.",
+      "meta: VLX-000123 · To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "setup email/finalize_no_pm",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.payment_setup_request",
+      "title": "Payment setup email delivered",
+      "detail": [
+        [
+          {
+            "text": "No payment method when the invoice was finalized"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Payment setup email delivered",
+      "meta: No payment method when the invoice was finalized · VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "setup email/auto_charge_retry_no_pm",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.payment_setup_request",
+      "title": "Payment setup email delivered",
+      "detail": [
+        [
+          {
+            "text": "A charge found no payment method"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Payment setup email delivered",
+      "meta: A charge found no payment method · VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "setup email/operator_resend",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.payment_setup_request",
+      "title": "Payment setup email delivered",
+      "detail": [
+        [
+          {
+            "text": "Resent"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Payment setup email delivered",
+      "meta: Resent · VLX-000123 · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "credit note email/note exists",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.credit_note",
+      "title": "Credit note email delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "credit_note",
+              "id": "vlx_cn_1",
+              "label": "CN-000012"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Credit note email delivered",
+      "meta: VLX-000123 · CN-000012 · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "credit note email/note gone",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.credit_note",
+      "title": "Credit note email delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "CN-000012"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Credit note email delivered",
+      "meta: VLX-000123 · CN-000012 · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "invoice not linked without its id",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.invoice",
+      "title": "Invoice email delivered",
+      "detail": [
+        [
+          {
+            "text": "VLX-000123"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Invoice email delivered",
+      "meta: VLX-000123 · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "test clock",
+    "line": {
+      "id": "email:vlx_emob_1",
+      "kind": "email.payment_receipt",
+      "title": "Receipt email delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "vlx_inv_1",
+              "label": "VLX-000123"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z",
+      "recorded_at": "2026-10-19T10:02:00Z"
+    },
+    "text": [
+      "Receipt email delivered",
+      "meta: VLX-000123 · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  }
+]

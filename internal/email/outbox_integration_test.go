@@ -436,7 +436,7 @@ func (f *fakeDeliverer) SendPaymentReceipt(_ context.Context, tenantID, to strin
 	f.lastPublicToken = publicToken
 	return nil
 }
-func (f *fakeDeliverer) SendDunningWarning(_ context.Context, tenantID, to string, cc []string, name, inv string, n, max int, next, failureReason, publicToken string) error {
+func (f *fakeDeliverer) SendDunningWarning(_ context.Context, tenantID, to string, cc []string, name, inv string, n, max int, next, failureReason, publicToken string, _ bool) error {
 	f.calls++
 	f.lastCc = cc
 	f.lastType, f.lastTenant, f.lastTo, f.lastName, f.lastInvoice = email.TypeDunningWarning, tenantID, to, name, inv
@@ -519,12 +519,13 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 		// hand-maintained twin of the production payload, so a field added
 		// there and not here decodes to zero and the assertion silently
 		// passes against nothing.
-		EscalationOutcome domain.DunningEscalationOutcome `json:"escalation_outcome"`
-		FailureReason     string                          `json:"failure_reason"`
-		UpdateURL         string                          `json:"update_url"`
-		InvoiceWrittenOff bool                            `json:"invoice_written_off"`
-		PublicToken       string                          `json:"public_token"`
-		PDF               []byte                          `json:"pdf"`
+		EscalationOutcome  domain.DunningEscalationOutcome `json:"escalation_outcome"`
+		FailureReason      string                          `json:"failure_reason"`
+		CardNeedsReplacing bool                            `json:"card_needs_replacing"`
+		UpdateURL          string                          `json:"update_url"`
+		InvoiceWrittenOff  bool                            `json:"invoice_written_off"`
+		PublicToken        string                          `json:"public_token"`
+		PDF                []byte                          `json:"pdf"`
 	}
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return err
@@ -535,7 +536,7 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 	case email.TypePaymentReceipt:
 		return d.SendPaymentReceipt(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.PublicToken)
 	case email.TypeDunningWarning:
-		return d.SendDunningWarning(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AttemptNumber, m.MaxAttempts, m.NextRetryDate, m.FailureReason, m.PublicToken)
+		return d.SendDunningWarning(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AttemptNumber, m.MaxAttempts, m.NextRetryDate, m.FailureReason, m.PublicToken, m.CardNeedsReplacing)
 	case email.TypeDunningEscalation:
 		return d.SendDunningEscalation(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.EscalationOutcome, m.PublicToken)
 	case email.TypePaymentFailed:

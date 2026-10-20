@@ -12,6 +12,7 @@ import type { CustomerPriceOverrideMode } from './customerPriceOverrideMode';
 
 export interface CustomerPriceOverride {
   id: string;
+  tenant_id?: string;
   /** The rating rule this override replaces the price of, across all its versions. */
   rule_key: string;
   customer_id: string;

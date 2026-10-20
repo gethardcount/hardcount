@@ -30,7 +30,7 @@ func TestChargeInvoice_SimBoundCtx_AnchorsPaidAtAndPIMetadata(t *testing.T) {
 	invoices.invoices["inv_1"] = finalizedPendingInvoice()
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 
-	if _, err := s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test"); err != nil {
+	if _, err := s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err != nil {
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func TestChargeInvoice_WallCtx_NoAnchor(t *testing.T) {
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 
 	before := time.Now().UTC()
-	if _, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], "cus_stripe_abc", "pm_test"); err != nil {
+	if _, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err != nil {
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
 	if _, present := client.lastParams.Metadata["velox_anchor_at"]; present {

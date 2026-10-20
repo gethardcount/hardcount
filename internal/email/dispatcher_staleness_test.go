@@ -20,7 +20,7 @@ func (r *recordingDeliverer) SendPaymentReceipt(_ context.Context, _, _ string, 
 	r.sent = append(r.sent, TypePaymentReceipt)
 	return nil
 }
-func (r *recordingDeliverer) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, _, _ string) error {
+func (r *recordingDeliverer) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, _, _ string, _ bool) error {
 	r.sent = append(r.sent, TypeDunningWarning)
 	return nil
 }
@@ -203,4 +203,29 @@ func TestDispatcherStalenessGate(t *testing.T) {
 			t.Error("nil checker must send as before")
 		}
 	})
+}
+
+// TestSkipReasonOf: the skip mark stores the state an obsolete row's
+// invoice reached, and stores nothing for a state the CHECK does not list,
+// so the mark itself can never be refused and leave the row re-claimed
+// forever.
+func TestSkipReasonOf(t *testing.T) {
+	for _, r := range SkipReasons() {
+		if got := skipReasonOf(&ObsoleteError{InvoiceNumber: "NIM-1", State: r}); got != r {
+			t.Errorf("state %q: stored %v", r, got)
+		}
+	}
+	if got := skipReasonOf(&ObsoleteError{State: "archived"}); got != nil {
+		t.Errorf("a state outside the CHECK: stored %v, want NULL", got)
+	}
+	if got := skipReasonOf(ErrEmailObsolete); got != nil {
+		t.Errorf("a bare ErrEmailObsolete: stored %v, want NULL", got)
+	}
+	err := error(&ObsoleteError{InvoiceNumber: "NIM-1", State: SkipReasonVoided})
+	if !errors.Is(err, ErrEmailObsolete) {
+		t.Error("an ObsoleteError is not ErrEmailObsolete")
+	}
+	if got, want := err.Error(), "email outbox: obsolete — invoice settled before delivery: invoice NIM-1 reached voided before delivery"; got != want {
+		t.Errorf("error text %q, want the text rows were written with before, %q", got, want)
+	}
 }

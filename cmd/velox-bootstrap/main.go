@@ -120,7 +120,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("  Need a second tenant for cross-tenant tests? Re-run with a")
 	fmt.Println("  different email:")
-	fmt.Println(`    make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@local \`)
+	fmt.Println(`    make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@velox.local \`)
 	fmt.Println(`      VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \`)
 	fmt.Println(`      VELOX_BOOTSTRAP_TENANT='Tenant B'`)
 	fmt.Println("========================================")
@@ -130,11 +130,11 @@ func main() {
 // differ from the one that just collided, so the printed remedy is always
 // runnable as-is.
 func suggestFreeEmail(taken string) string {
-	const preferred = "tenant-b@local"
+	const preferred = "tenant-b@velox.local"
 	if !strings.EqualFold(strings.TrimSpace(taken), preferred) {
 		return preferred
 	}
-	return "tenant-c@local"
+	return "tenant-c@velox.local"
 }
 
 // printEmailExistsGuidance keeps the CLI's actionable re-run options on

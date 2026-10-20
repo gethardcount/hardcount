@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -50,7 +53,13 @@ type Handler struct {
 	dashboardBaseURL string      // canonical dashboard origin for reset links; never from request headers. empty => reset emails disabled
 	smtpConfigured   bool        // SMTP wired at boot (email.Sender.IsConfigured); drives the email_delivery hint
 	auditLogger      AuditRecorder
+	throttle         *LoginThrottle // nil only in unit tests that build a bare handler
 }
+
+// SetLoginThrottle wires the sign-in throttle (throttle.go). Production always
+// wires it in internal/api; the e2e tests there prove it. A handler without
+// one checks every password, as before the throttle.
+func (h *Handler) SetLoginThrottle(t *LoginThrottle) { h.throttle = t }
 
 // AuditRecorder is the narrow audit surface the auth handler needs — kept here
 // (not an import of *audit.Logger) so internal/user stays decoupled. Production
@@ -77,20 +86,20 @@ func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 // Best-effort: a write failure is logged, never surfaced — auth must not fail
 // because the audit row didn't land.
 //
-// livemode stamps the row's RLS mode partition. These endpoints run OUTSIDE session
-// middleware, so the ctx carries no livemode and the audit writer's TxTenant would
-// refuse to open (every auth audit row silently failed this way until 2026-07-06).
+// It also sets the row's RLS mode partition on the ctx. These endpoints run OUTSIDE
+// session middleware, so the ctx carries no livemode and the audit writer's TxTenant
+// would refuse to open (every auth audit row silently failed this way until 2026-07-06).
 //
 // Auth events are ACCOUNT-PLANE — a login is a login, not a "test-mode login" — so
-// they are ALL filed in the canonical (test) partition. They used to inherit the
-// session's mode, which meant the same event landed in a different partition
-// depending on which way the operator's Test/Live toggle happened to be pointing,
-// and "when did they last sign in?" had no reliable answer.
+// they are ALL filed in the canonical (test) partition, whatever the session's mode.
+// They used to inherit the session's mode, which meant the same event landed in a
+// different partition depending on which way the operator's Test/Live toggle
+// happened to be pointing, and "when did they last sign in?" had no reliable answer.
 //
 // Accepted loss, stated rather than glossed: an operator viewing the audit log in
 // LIVE mode does not see these rows. See the note in tenant/settings.go for why the
 // obvious fix (an OR arm on livemode) is the one thing we must not do.
-func (h *Handler) auditAuthEvent(ctx context.Context, r *http.Request, livemode bool, actorUserID, tenantID, action, resourceID, label string, meta map[string]any) {
+func (h *Handler) auditAuthEvent(ctx context.Context, r *http.Request, actorUserID, tenantID, action, resourceID, label string, meta map[string]any) {
 	if h.auditLogger == nil || tenantID == "" {
 		return
 	}
@@ -181,10 +190,34 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The address TrustedRealIP resolved. The failed-login log, the session
-	// row and the audit row all record this one value; none of them reads a
-	// forwarding header the client could have written.
+	// The address TrustedRealIP resolved. The failed-login log, the throttle,
+	// the session row and the audit row all use this one value; none of them
+	// reads a forwarding header the client could have written.
 	ip := audit.ExtractClientIP(r)
+
+	// The sign-in throttle counts this attempt before the password check, so
+	// a refused attempt costs no account lookup and no bcrypt. It is keyed on
+	// the typed email, so an email with no account is refused the same way.
+	var verdict ThrottleVerdict
+	if h.throttle != nil {
+		var err error
+		verdict, err = h.throttle.Reserve(r, req.Email)
+		if err != nil {
+			// Fail closed: sign-in needs the database anyway.
+			slog.ErrorContext(r.Context(), "auth: sign-in throttle failed; sign-in refused", "ip", ip, "error", err)
+			recordLogin("error")
+			respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "authentication_unavailable",
+				"Sign-in is unavailable right now. Try again in a minute.")
+			return
+		}
+		if !verdict.Allowed {
+			slog.WarnContext(r.Context(), "auth: sign-in throttled",
+				"account", verdict.Account, "ip", ip, "retry_after_s", retryAfterSeconds(verdict.RetryAfter))
+			recordLogin("throttled")
+			writeLoginThrottled(w, r, verdict.RetryAfter)
+			return
+		}
+	}
 
 	u, tenants, err := h.users.Authenticate(r.Context(), req.Email, req.Password)
 	if err != nil {
@@ -193,14 +226,35 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 			// stuffing). They can't go to the per-tenant audit_log — there's no
 			// resolved tenant pre-auth, and recording email-existence there would
 			// be an enumeration oracle — so they land in the structured security
-			// log (the right home for pre-auth events).
+			// log (the right home for pre-auth events). The line names the
+			// email's throttle subject and, when the email has an account, its
+			// user id: never the typed email, which would sit in the log sink
+			// with no way to erase it.
 			slog.WarnContext(r.Context(), "auth: failed login attempt",
-				"email", req.Email, "ip", ip, "reason", "bad_credentials")
+				"account", verdict.Account, "user_id", wrongPasswordUserID(err), "ip", ip, "reason", "bad_credentials")
+			recordLogin("bad_credentials")
 			respond.Unauthorized(w, r, "invalid email or password")
 			return
 		}
-		respond.FromError(w, r, err, "user")
+		// A store failure is a server error. A refusal is not: the right
+		// password for a user with no tenant (a removed member) gets a 409.
+		rec := &statusRecorder{ResponseWriter: w}
+		respond.FromError(rec, r, err, "user")
+		if rec.status >= http.StatusInternalServerError {
+			recordLogin("error")
+		} else {
+			recordLogin("refused")
+		}
 		return
+	}
+
+	if h.throttle != nil {
+		// The right password marks this browser and clears the counts this
+		// attempt was held by (LoginThrottle.SignedIn). A failure here does
+		// not undo the sign-in; the counts fade within a day.
+		if err := h.throttle.SignedIn(w, r, req.Email, verdict); err != nil {
+			slog.ErrorContext(r.Context(), "auth: sign-in throttle not cleared after a sign-in", "user_id", u.ID, "error", err)
+		}
 	}
 
 	// V1: each user belongs to exactly one tenant. The Authenticate
@@ -216,15 +270,17 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Error("session: issue failed", "err", err, "user_id", u.ID)
+		recordLogin("error")
 		respond.InternalError(w, r)
 		return
 	}
 
-	h.cookie.SetCookie(w, r, rawID, sess.ExpiresAt)
+	recordLogin("ok")
+	h.cookie.SetCookie(w, rawID, sess.ExpiresAt)
 	// No email in the label: resource_id IS the user id, and the reader resolves the
 	// address from the (erasable) users row. audit_log is append-only — an email
 	// written here could never be deleted.
-	h.auditAuthEvent(r.Context(), r, sess.Livemode, u.ID, tenant.TenantID, "login", u.ID, "",
+	h.auditAuthEvent(r.Context(), r, u.ID, tenant.TenantID, "login", u.ID, "",
 		map[string]any{"livemode": sess.Livemode})
 	respond.JSON(w, r, http.StatusOK, loginResp{
 		UserID:    u.ID,
@@ -275,9 +331,9 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stamped with the NEW mode — the row lands in the partition the
-	// operator just switched into, alongside the actions that follow.
-	h.auditAuthEvent(r.Context(), r, req.Livemode, sess.UserID, sess.TenantID, "mode_changed", sess.UserID, "",
+	// Like every auth event, the row lands in the test partition whichever
+	// way the operator switched; the new mode is recorded in its metadata.
+	h.auditAuthEvent(r.Context(), r, sess.UserID, sess.TenantID, "mode_changed", sess.UserID, "",
 		map[string]any{"livemode": req.Livemode})
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{
@@ -344,10 +400,10 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		audit.MarkSkip(r.Context())
 	} else {
 		// The row is written only now, on the far side of a revoke that WORKED.
-		h.auditAuthEvent(r.Context(), r, sess.Livemode, sess.UserID, sess.TenantID, "logout", sess.UserID, "", nil)
+		h.auditAuthEvent(r.Context(), r, sess.UserID, sess.TenantID, "logout", sess.UserID, "", nil)
 	}
 
-	h.cookie.ClearCookie(w, r)
+	h.cookie.ClearCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -426,7 +482,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 		// STORE its address — neither in the label nor in metadata, where it used
 		// to sit twice. audit_log is append-only, so an email written here could
 		// never be erased; the reader resolves it from the users row, which can.
-		h.auditAuthEvent(r.Context(), r, false, "", tenantID, "password_reset_requested", targetUserID, "", nil)
+		h.auditAuthEvent(r.Context(), r, "", tenantID, "password_reset_requested", targetUserID, "", nil)
 	} else {
 		// No account matched (or issuance failed): no token exists, nothing was
 		// mutated, and deliberately nothing is written — a row here would turn
@@ -519,17 +575,64 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 			"user_id", u.ID, "err", revokeErr)
 	}
 
+	// The reset link proved the inbox. It marks this browser, so a person
+	// held out by guesses from many addresses gets back in: reset from this
+	// browser, then sign in from it. It leaves the email's count running for
+	// other browsers (LoginThrottle.InboxProved). Logged, not surfaced: the
+	// password is already changed.
+	if h.throttle != nil {
+		if err := h.throttle.InboxProved(w, r, u.Email); err != nil {
+			slog.ErrorContext(r.Context(), "auth: sign-in throttle did not mark the browser after a password reset", "user_id", u.ID, "error", err)
+		}
+	}
+
 	// Audit the completed reset — a password change + all-session revocation is
 	// a high-value account-takeover signal. Actor is the account owner (they
 	// held the token); tenant resolved separately since domain.User carries none.
 	if tenantID, terr := h.users.TenantForUser(r.Context(), u.ID); terr == nil {
 		// resource_id = the user id; the reader resolves the address. Not stored.
-		h.auditAuthEvent(r.Context(), r, false, u.ID, tenantID, "password_reset_completed", u.ID, "", nil)
+		h.auditAuthEvent(r.Context(), r, u.ID, tenantID, "password_reset_completed", u.ID, "", nil)
 	}
 
 	respond.JSON(w, r, http.StatusOK, map[string]string{
 		"message": "password updated — sign in with your new password",
 	})
+}
+
+// writeLoginThrottled answers an attempt the sign-in throttle refused: 429,
+// Retry-After in seconds, and the wait in whole minutes. Real and unknown
+// emails get the same answer.
+func writeLoginThrottled(w http.ResponseWriter, r *http.Request, wait time.Duration) {
+	secs := retryAfterSeconds(wait)
+	minutes := (secs + 59) / 60
+	unit := "minutes"
+	if minutes == 1 {
+		unit = "minute"
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	respond.Error(w, r, http.StatusTooManyRequests, "rate_limit_error", "login_throttled",
+		fmt.Sprintf("Too many sign-in attempts. Try again in %d %s.", minutes, unit))
+}
+
+// statusRecorder keeps the status a response was written with, so the
+// sign-in metric can tell a refusal from a server error.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// retryAfterSeconds rounds a wait up to whole seconds, at least 1.
+func retryAfterSeconds(wait time.Duration) int {
+	secs := int((wait + time.Second - 1) / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	return secs
 }
 
 // buildResetLink constructs the operator-facing URL for the reset

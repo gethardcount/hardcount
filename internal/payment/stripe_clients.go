@@ -15,12 +15,12 @@ import (
 	"github.com/sagarsuperuser/velox/internal/tenantstripe"
 )
 
-// stripeHTTPClient bounds every Stripe API call. stripe-go's default backend
-// uses an http.Client with no Timeout (0 = unbounded), so a stalled Stripe or
-// network call would hang the caller indefinitely — and the background workers
-// (payment reconciler, tax retrier) run on the long-lived process context with
-// no request deadline to bail them out, holding the scheduler's leader lease
-// and a DB connection. One shared, bounded client fixes that everywhere.
+// stripeHTTPClient bounds every Stripe API call at 30s. stripe-go's default
+// http.Client allows 80s per request (defaultHTTPTimeout), and the background
+// workers (payment reconciler, tax retrier) run on the long-lived process
+// context with no request deadline of their own, so each stalled Stripe or
+// network call would hold the scheduler's leader lease and a DB connection
+// for up to 80s. One shared client with a shorter bound covers every caller.
 var stripeHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 // StripeCredentials resolves decrypted Stripe secrets for a (tenant, mode).
@@ -39,6 +39,7 @@ type StripeCredentials interface {
 // not configured for this tenant+mode" and surface ErrStripeNotConfigured.
 type StripeClients struct {
 	fetcher StripeCredentials
+	http    *http.Client // nil: stripeHTTPClient
 }
 
 // NewStripeClients wires the per-tenant resolver. fetcher=nil returns nil so
@@ -49,6 +50,18 @@ func NewStripeClients(fetcher StripeCredentials) *StripeClients {
 		return nil
 	}
 	return &StripeClients{fetcher: fetcher}
+}
+
+// NewStripeClientsWithHTTPClient is NewStripeClients sending every Stripe
+// request through hc instead of the shared 30-second client. Tests outside
+// this package use it to answer as Stripe would, so the real client decodes
+// and classifies the reply.
+func NewStripeClientsWithHTTPClient(fetcher StripeCredentials, hc *http.Client) *StripeClients {
+	c := NewStripeClients(fetcher)
+	if c != nil {
+		c.http = hc
+	}
+	return c
 }
 
 // ForCtx derives tenantID from auth ctx and livemode from postgres ctx,
@@ -96,7 +109,11 @@ func (c *StripeClients) Resolve(ctx context.Context, tenantID string, livemode b
 	if creds.SecretKey == "" {
 		return nil, nil
 	}
-	return stripe.NewClient(creds.SecretKey, stripe.WithBackends(stripe.NewBackends(stripeHTTPClient))), nil
+	hc := stripeHTTPClient
+	if c.http != nil {
+		hc = c.http
+	}
+	return stripe.NewClient(creds.SecretKey, stripe.WithBackends(stripe.NewBackends(hc))), nil
 }
 
 // ResolveCtx is Resolve for the tenant and mode on ctx.

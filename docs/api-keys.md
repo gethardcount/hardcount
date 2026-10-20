@@ -45,8 +45,8 @@ curl -s "$VELOX/v1/whoami" -H "Authorization: Bearer $VELOX_KEY"
 **You see:** JSON with your `tenant_id` (your account's ID), `"livemode":
 false` for a test key, and `"key_type": "secret"`.
 
-A call with no key gets `401` and the message `missing credentials — use
-Authorization: Bearer vlx_secret_...`.
+A call with no key gets `401` and the message `missing credentials — sign
+in at /login or send Authorization: Bearer vlx_secret_...`.
 
 ## Test mode and live mode
 

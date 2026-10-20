@@ -195,14 +195,10 @@ const App = () => (
               {/* Stripe Checkout setup-session return URL.
                   Public, unauthenticated — customers arrive here via
                   the email link → Stripe Checkout → here, with no
-                  portal session. Renders success/cancel copy based
-                  on ?status=success|cancel query. */}
+                  sign-in. Renders success/cancel copy based on
+                  ?status=success|cancel query. */}
               <Route path="/payment-method-added" element={<PaymentMethodAddedPage />} />
               <Route path="/invoice/:token" element={<HostedInvoicePage />} />
-              {/* Customer-facing self-service portal — magic-link auth, no
-                  operator dashboard chrome. /portal/login + /portal/magic
-                  are unauthenticated; /portal reads the session token from
-                  localStorage and redirects to /portal/login on miss. */}
               {/* Any other address: a mistyped or old link. Signed-out
                   visitors sign in first, then see this page. */}
               <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />

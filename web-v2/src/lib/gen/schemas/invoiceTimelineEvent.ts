@@ -7,7 +7,9 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ActivityLine } from './activityLine';
 import type { InvoiceTimelineEventSource } from './invoiceTimelineEventSource';
+import type { InvoiceTimelineEventStatus } from './invoiceTimelineEventStatus';
 
 export interface InvoiceTimelineEvent {
   /** Stable key for the row. */
@@ -15,11 +17,13 @@ export interface InvoiceTimelineEvent {
   timestamp: string;
   source: InvoiceTimelineEventSource;
   event_type: string;
-  /** Display status, for example succeeded, failed, resolved, escalated or info. */
-  status: string;
+  /** The line's tone in older words, read by the dashboard's dot. */
+  status: InvoiceTimelineEventStatus;
+  /** The line's title. */
   description: string;
-  /** Extra line shown under the description, for example the card used. */
+  /** The line's meta line as text, its actor last, for example "Visa •••• 4242 · After 2 retries". */
   detail?: string;
+  /** The line's problem. */
   error?: string;
   amount_cents?: number;
   currency?: string;
@@ -29,4 +33,5 @@ export interface InvoiceTimelineEvent {
   is_simulated?: boolean;
   /** Real-world time of a row whose `timestamp` is test-clock time. */
   recorded_at?: string;
+  line: ActivityLine;
 }

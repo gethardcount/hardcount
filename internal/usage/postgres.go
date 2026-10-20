@@ -440,9 +440,9 @@ func (s *PostgresStore) AggregateForBillingPeriodByAgg(ctx context.Context, tena
 
 	// One query per DISTINCT aggregation function (at most four) rather
 	// than one per meter. A subscription spanning M meters cost M round
-	// trips per billing period — and billOnePeriod calls this up to four
-	// times (base, pre-cap re-derive, per-interval), so the fan-out was
-	// multiplicative in M.
+	// trips per call — and a period close calls this once per distinct
+	// usage window (the whole period, and each mid-period segment), so the
+	// fan-out was multiplicative in M.
 	byAgg := make(map[string][]string, 4)
 	for meterID, agg := range meters {
 		byAgg[agg] = append(byAgg[agg], meterID)
@@ -513,10 +513,12 @@ func (s *PostgresStore) AggregateForBillingPeriodByAgg(ctx context.Context, tena
 				if err := rows.Scan(&meterID, &val); err != nil {
 					return err
 				}
-				// Only a positive aggregate is a billable line. A meter
-				// with no events in the period produces no row at all,
-				// which lands in the same place: absent from the map.
-				if val.IsPositive() {
+				// A zero aggregate is absent from the map, the same as a
+				// meter with no events in the period (no row at all).
+				// A total below zero (corrections larger than the usage)
+				// is returned as it is: the billing engine bills it 0
+				// and records it (#1193). Dropping it here hid it.
+				if !val.IsZero() {
 					result[meterID] = val
 				}
 			}

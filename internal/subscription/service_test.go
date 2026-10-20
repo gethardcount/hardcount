@@ -589,6 +589,18 @@ func (m *memStore) ListItems(ctx context.Context, tenantID, subscriptionID strin
 	return m.hydrateItems(subscriptionID), nil
 }
 
+// LockForItemChangeTx: the in-memory store has no locks or transactions, so
+// it returns the subscription as Get does. The lock is proven against real
+// Postgres in item_change_race_integration_test.go.
+func (m *memStore) LockForItemChangeTx(ctx context.Context, _ *sql.Tx, tenantID, subscriptionID string) (domain.Subscription, error) {
+	return m.Get(ctx, tenantID, subscriptionID)
+}
+
+// WithTenantTx: no transactions in memory; the *Tx methods ignore the tx.
+func (m *memStore) WithTenantTx(_ context.Context, _ string, fn func(tx *sql.Tx) error) error {
+	return fn(nil)
+}
+
 func (m *memStore) GetItem(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {
 	it, ok := m.items[itemID]
 	if !ok || it.TenantID != tenantID {
@@ -680,6 +692,10 @@ func (m *memStore) SetItemPendingPlan(ctx context.Context, tenantID, itemID, pen
 	it.UpdatedAt = clock.Now(ctx)
 	m.items[itemID] = it
 	return it, nil
+}
+
+func (m *memStore) SetItemPendingPlanTx(ctx context.Context, _ *sql.Tx, tenantID, itemID, pendingPlanID string, effectiveAt time.Time) (domain.SubscriptionItem, error) {
+	return m.SetItemPendingPlan(ctx, tenantID, itemID, pendingPlanID, effectiveAt)
 }
 
 func (m *memStore) ClearItemPendingPlan(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error) {
@@ -1211,6 +1227,15 @@ type fakeBiller struct {
 	// afterCommitCalls counts runs of BillFinalOnImmediateCancelTx's
 	// afterCommit (the unpriced-usage count, #981): post-commit only.
 	afterCommitCalls int
+	// postCommit is the order of the post-commit legs: "relief" per
+	// FinishRelief, "finalize:<invoice id>" per FinalizeOnCreateInvoice.
+	postCommit []string
+	// onAfterCommit runs inside BillFinalOnImmediateCancelTx's afterCommit,
+	// right after the cancel commits; a test ends the caller's context here.
+	onAfterCommit func()
+	// postCommitCtxErr is ctx.Err() as each post-commit leg saw it, in
+	// postCommit's order.
+	postCommitCtxErr []error
 }
 
 func (f *fakeBiller) BillOnCreate(_ context.Context, _ domain.Subscription) (domain.Invoice, error) {
@@ -1225,7 +1250,12 @@ func (f *fakeBiller) BillFinalOnImmediateCancel(_ context.Context, _ domain.Subs
 
 func (f *fakeBiller) BillFinalOnImmediateCancelTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Invoice, func(), error) {
 	f.finalCalls++
-	return f.finalCancelInv, func() { f.afterCommitCalls++ }, f.finalCancelErr
+	return f.finalCancelInv, func() {
+		f.afterCommitCalls++
+		if f.onAfterCommit != nil {
+			f.onAfterCommit()
+		}
+	}, f.finalCancelErr
 }
 
 func (f *fakeBiller) BillOnCancelDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Relief, error) {
@@ -1245,9 +1275,11 @@ func (f *fakeBiller) BillOnPlanSwapDraftsTx(_ context.Context, _ *sql.Tx, _ doma
 	return domain.Relief{DraftIDs: f.swapDraftIDs}, nil
 }
 
-func (f *fakeBiller) FinishRelief(_ context.Context, _ domain.Subscription, r domain.Relief) {
+func (f *fakeBiller) FinishRelief(ctx context.Context, _ domain.Subscription, r domain.Relief) {
 	f.finishCalls++
 	f.finishedDrafts = append(f.finishedDrafts, r.DraftIDs...)
+	f.postCommit = append(f.postCommit, "relief")
+	f.postCommitCtxErr = append(f.postCommitCtxErr, ctx.Err())
 }
 
 func (f *fakeBiller) BillOnCreateTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, _ time.Time) (domain.Invoice, bool, error) {
@@ -1259,8 +1291,10 @@ func (f *fakeBiller) ThresholdBilledThroughTx(_ context.Context, _ *sql.Tx, _ do
 	return f.thresholdBilledThrough, f.thresholdBilledThroughErr
 }
 
-func (f *fakeBiller) FinalizeOnCreateInvoice(_ context.Context, _ domain.Subscription, _ domain.Invoice) {
+func (f *fakeBiller) FinalizeOnCreateInvoice(ctx context.Context, _ domain.Subscription, inv domain.Invoice) {
 	f.finalizeCalls++
+	f.postCommit = append(f.postCommit, "finalize:"+inv.ID)
+	f.postCommitCtxErr = append(f.postCommitCtxErr, ctx.Err())
 }
 
 // fakeDispatcher captures outbound-webhook Dispatch calls so tests

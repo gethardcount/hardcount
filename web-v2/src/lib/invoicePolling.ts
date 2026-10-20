@@ -1,28 +1,15 @@
-// Refetch cadence for the invoice detail page.
-//
-// Lives in its own module rather than in api.ts so it can be TESTED: api.ts
-// pulls in the whole client dependency graph, which the node test runner
-// cannot resolve, so anything defined there is effectively unpinnable. The
-// rule this encodes was silently wrong for the entire bad-debt-recovery arc
-// (a written-off invoice with a live charge stopped refreshing, freezing the
-// page at the exact moment money was moving) and nothing could have caught it.
-// Same reasoning as invoiceTerminal.ts.
+// Refetch cadence for the invoice detail page, pinned by
+// tests/pollInterval.test.ts. The rule was silently wrong for the whole
+// bad-debt-recovery arc: a written-off invoice with a live charge stopped
+// refreshing, freezing the page at the exact moment money was moving.
+import { paymentIsUnresolved } from './status.ts'
 
-// Self-contained on purpose: the node test runner cannot resolve this
-// package's aliased/extensionless imports, so a module that imports anything
-// relative is a module that cannot be tested. Both dependencies are tiny —
-// the invoice shape is structural, and the in-flight rule is one comparison —
-// and the rule is mirrored from status.ts's paymentIsUnresolved, which is
-// pinned by its own callers in the pages.
+// Structural, so the page passes its Invoice and the test a plain object.
 type PollableInvoice = {
   status: string
   payment_status: string
   paid_at?: string | null
   tax_status?: string
-}
-
-function paymentIsUnresolved(paymentStatus: string): boolean {
-  return paymentStatus === 'processing' || paymentStatus === 'unknown'
 }
 
 // pollIntervalForInvoice picks a refetch cadence based on the invoice's

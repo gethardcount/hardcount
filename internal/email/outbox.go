@@ -10,15 +10,20 @@ import (
 	"log/slog"
 	"time"
 
+	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// OutboxRow is a single queued outbound-email intent. Today every
-// production site produces it POST-COMMIT via EnqueueStandalone (its own
-// transaction after the business transaction commits); Enqueue(ctx, tx) is
-// the in-tx primitive the money emails move onto (ADR-040 amendment
-// 2026-08-30). Drained by the dispatcher.
+// OutboxRow is a single queued outbound-email intent, produced one of two
+// ways. The money emails that follow a state change (payment receipt and
+// payment failed on settlement, dunning warning and escalation) are written
+// IN the business transaction via Enqueue(ctx, tx), through OutboxSender's
+// *Tx methods (ADR-040 amendment 2026-08-30), so the email row commits only
+// with the state change (the caller wraps the insert in a savepoint, so an
+// email failure never vetoes the state). Every other email is written
+// POST-COMMIT via EnqueueStandalone, its own transaction after the business
+// one. Drained by the dispatcher.
 type OutboxRow struct {
 	ID            string
 	TenantID      string
@@ -42,6 +47,17 @@ type OutboxRow struct {
 	// calendars coincide. CreatedAt stays the real-world dispatch record.
 	SimEffectiveAt *time.Time
 	TestClockID    string
+	// SkipReason is why a 'skipped' row was not sent: the final state its
+	// invoice reached while it waited (one of the SkipReason constants).
+	// Empty on every other row, and on rows skipped before migration 00187
+	// recorded it. Populated by ListByInvoice and ListByCustomer.
+	SkipReason string
+	// InvoiceID and CreditNoteID are the invoice and credit note the row's
+	// payload names, resolved by ListByCustomer's joins so the Sent emails
+	// card can link them; empty when the row names none or the credit note
+	// no longer exists.
+	InvoiceID    string
+	CreditNoteID string
 }
 
 // outbox row statuses.
@@ -116,7 +132,7 @@ func IsPermanentSendError(err error) bool {
 	if errors.Is(err, ErrUnknownEmailType) {
 		return false
 	}
-	if errors.Is(err, ErrRecipientSuppressed) || errors.Is(err, ErrPayloadDecode) {
+	if errors.Is(err, ErrRecipientSuppressed) || errors.Is(err, ErrInvalidRecipient) || errors.Is(err, ErrPayloadDecode) {
 		return true
 	}
 	permanent, _ := isPermanentSMTPBounce(err)
@@ -142,6 +158,60 @@ var ErrUnknownEmailType = errors.New("email outbox: unknown email_type")
 // was torn down) while the row sat queued. ProcessBatch marks it 'skipped'
 // — deliberately not sent; nothing failed, nothing was delivered.
 var ErrEmailObsolete = errors.New("email outbox: obsolete — invoice settled before delivery")
+
+// Why a queued email was skipped: the final state its invoice reached while
+// the row waited. ProcessBatch stores it in email_outbox.skip_reason, whose
+// CHECK lists exactly these values (migration 00187), and the activity line
+// names it ("The invoice was already paid").
+const (
+	SkipReasonPaid          = "paid"
+	SkipReasonVoided        = "voided"
+	SkipReasonUncollectible = "uncollectible"
+	// SkipReasonGone: the invoice row is gone (a test clock's teardown
+	// deletes its invoices).
+	SkipReasonGone = "gone"
+)
+
+// SkipReasons lists every skip reason, for the tests that keep the CHECK
+// constraint and the activity words in step with it.
+func SkipReasons() []string {
+	return []string{SkipReasonPaid, SkipReasonVoided, SkipReasonUncollectible, SkipReasonGone}
+}
+
+// ObsoleteError is ErrEmailObsolete with the state that made the email
+// obsolete. errors.Is(err, ErrEmailObsolete) holds for it.
+type ObsoleteError struct {
+	InvoiceNumber string
+	// State is the invoice's final state, as InvoiceSettledChecker reports
+	// it: one of the SkipReason constants.
+	State string
+}
+
+func (e *ObsoleteError) Error() string {
+	return fmt.Sprintf("%v: invoice %s reached %s before delivery", ErrEmailObsolete, e.InvoiceNumber, e.State)
+}
+
+func (e *ObsoleteError) Unwrap() error { return ErrEmailObsolete }
+
+// skipReasonOf is the skip_reason a skip mark stores: the state an
+// ObsoleteError names, or NULL. A state outside the CHECK's list is stored
+// as NULL rather than written: the CHECK would refuse the whole skip mark,
+// and a row whose skip mark always fails is re-claimed after every lease
+// and never ends, neither sent nor skipped.
+func skipReasonOf(err error) any {
+	var oe *ObsoleteError
+	if !errors.As(err, &oe) {
+		return nil
+	}
+	for _, r := range SkipReasons() {
+		if oe.State == r {
+			return r
+		}
+	}
+	slog.Warn("email outbox: obsolete row names a state with no skip reason; recording none",
+		"state", oe.State, "invoice_number", oe.InvoiceNumber)
+	return nil
+}
 
 // outboxBackoff returns the delay before the next attempt given the current
 // attempt count (1 = after the first failure). Ramp: 1s, 5s, 30s, 2m, 5m,
@@ -184,9 +254,11 @@ func NewOutboxStore(db *postgres.DB) *OutboxStore {
 // a business-op store method so the email is persisted atomically with the
 // state change — if the tx rolls back, no email is sent; if it commits, the
 // dispatcher will eventually deliver.
-// Sole production caller today is EnqueueStandalone (post-commit); the
-// rollback/commit semantics are pinned by outbox_integration_test.go. The
-// money emails move onto this in-tx path per ADR-040's 2026-08-30 amendment.
+// Production callers: OutboxSender.enqueueTx, which the settlement
+// (receipt, payment failed) and dunning (warning, escalation) paths call on
+// their own transaction per ADR-040's 2026-08-30 amendment, and
+// EnqueueStandalone for every other email. The rollback/commit semantics are
+// pinned by outbox_integration_test.go.
 func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailType string, payload map[string]any) (string, error) {
 	if tenantID == "" {
 		return "", fmt.Errorf("email outbox: tenant_id required")
@@ -418,10 +490,10 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	if errors.Is(hErr, ErrEmailObsolete) {
 		s.markCAS(markCtx, row.ID, `
 			UPDATE email_outbox
-			SET status = 'skipped', last_error = `+"$2"+`,
+			SET status = 'skipped', last_error = `+"$2"+`, skip_reason = `+"$3"+`,
 			    payload = `+scrubbedPayloadSQL+`
 			WHERE id = $1 AND status = 'pending'
-		`, truncateError(hErr.Error()))
+		`, truncateError(hErr.Error()), skipReasonOf(hErr))
 		slog.Info("email outbox: row skipped as obsolete",
 			"outbox_id", row.ID,
 			"tenant_id", row.TenantID,
@@ -434,18 +506,28 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	// row.Attempts is the CLAIM-persisted count (the single increment
 	// site) — DLQ once the budget is spent, or immediately for errors
 	// that can never succeed.
-	if row.Attempts >= MaxOutboxAttempts || IsPermanentSendError(hErr) {
-		s.markCAS(markCtx, row.ID, `
+	permanent := IsPermanentSendError(hErr)
+	if row.Attempts >= MaxOutboxAttempts || permanent {
+		// Counted and logged only when this mark moved the row: a mark
+		// that matched nothing moved nothing (markCAS logs the drop).
+		if !s.markCAS(markCtx, row.ID, `
 			UPDATE email_outbox
 			SET status = 'failed', last_error = `+"$2"+`
 			WHERE id = $1 AND status = 'pending'
-		`, errMsg)
+		`, errMsg) {
+			return
+		}
+		cause := mw.DeadLetterMaxAttempts
+		if permanent {
+			cause = mw.DeadLetterPermanent
+		}
+		mw.RecordEmailOutboxDeadLettered(cause, row.Livemode)
 		slog.Error("email outbox: row moved to DLQ",
 			"outbox_id", row.ID,
 			"tenant_id", row.TenantID,
 			"email_type", row.EmailType,
 			"attempts", row.Attempts,
-			"permanent", IsPermanentSendError(hErr),
+			"permanent", permanent,
 			"error", errMsg,
 		)
 		return
@@ -459,34 +541,37 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	`, nextAt, errMsg)
 }
 
-// markCAS executes a per-row mark in its own short tx. The WHERE
-// status='pending' guard means a stale mark (lease expired, another
-// worker already resolved the row) matches zero rows and is dropped —
-// logged, never silently absorbed into a terminal-state regression.
-func (s *OutboxStore) markCAS(ctx context.Context, rowID, query string, args ...any) {
+// markCAS executes a per-row mark in its own short tx and reports whether
+// it applied (one row moved, committed). The WHERE status='pending' guard
+// means a stale mark (lease expired, another worker already resolved the
+// row) matches zero rows and is dropped — logged, never silently absorbed
+// into a terminal-state regression.
+func (s *OutboxStore) markCAS(ctx context.Context, rowID, query string, args ...any) bool {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		slog.Error("email outbox: begin mark tx", "outbox_id", rowID, "error", err)
-		return
+		return false
 	}
 	defer postgres.Rollback(tx)
 	res, err := tx.ExecContext(ctx, query, append([]any{rowID}, args...)...)
 	if err != nil {
 		slog.Error("email outbox: mark failed", "outbox_id", rowID, "error", err)
-		return
+		return false
 	}
 	n, raErr := res.RowsAffected()
 	if raErr != nil {
 		slog.Error("email outbox: mark rows-affected", "outbox_id", rowID, "error", raErr)
-		return
+		return false
 	}
 	if n == 0 {
 		slog.Warn("email outbox: stale mark dropped (row no longer pending)", "outbox_id", rowID)
-		return
+		return false
 	}
 	if err := tx.Commit(); err != nil {
 		slog.Error("email outbox: commit mark", "outbox_id", rowID, "error", err)
+		return false
 	}
+	return true
 }
 
 // GetByID fetches one outbox row by id under a BYPASS-RLS read: the
@@ -600,7 +685,8 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, livemode, email_type, payload, status, attempts,
 		       next_attempt_at, COALESCE(last_error,''), created_at, dispatched_at,
-		       delivery_state, sim_effective_at, COALESCE(test_clock_id,'')
+		       delivery_state, sim_effective_at, COALESCE(test_clock_id,''),
+		       COALESCE(skip_reason,'')
 		FROM email_outbox
 		WHERE email_type IN ('invoice', 'payment_receipt', 'payment_failed',
 		                     'payment_setup_request', 'dunning_warning',
@@ -620,7 +706,7 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 		var dispatchedAt, simAt sql.NullTime
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.Livemode, &r.EmailType, &payload, &r.Status,
 			&r.Attempts, &r.NextAttemptAt, &r.LastError, &r.CreatedAt, &dispatchedAt,
-			&r.DeliveryState, &simAt, &r.TestClockID); err != nil {
+			&r.DeliveryState, &simAt, &r.TestClockID, &r.SkipReason); err != nil {
 			return nil, err
 		}
 		if simAt.Valid {
@@ -646,6 +732,9 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 // (excludes platform-internal mail like password_reset that isn't
 // customer-scoped). Powers the "Sent emails" section on the customer
 // detail page (Stripe shape — docs.stripe.com/invoicing/send-email).
+// Each row also carries the ids of the invoice and credit note its payload
+// names (RLS keeps the joins to the row's own tenant and mode), so the
+// card's activity line can link them.
 //
 // 30-day window is a deliberate operator-UX choice matching Stripe's
 // retention. Older audit history stays in the email_outbox table for
@@ -660,11 +749,17 @@ func (s *OutboxStore) ListByCustomer(ctx context.Context, tenantID, customerID s
 	rows, err := tx.QueryContext(ctx, `
 		SELECT eo.id, eo.tenant_id, eo.livemode, eo.email_type, eo.payload, eo.status,
 		       eo.attempts, eo.next_attempt_at, COALESCE(eo.last_error,''),
-		       eo.created_at, eo.dispatched_at, eo.delivery_state
+		       eo.created_at, eo.dispatched_at, eo.delivery_state,
+		       eo.sim_effective_at, COALESCE(eo.test_clock_id,''), COALESCE(eo.skip_reason,''),
+		       i.id, COALESCE(cn.id,'')
 		FROM email_outbox eo
 		JOIN invoices i
 		  ON i.tenant_id = eo.tenant_id
 		 AND i.invoice_number = eo.payload->>'invoice_number'
+		LEFT JOIN credit_notes cn
+		  ON cn.tenant_id = eo.tenant_id
+		 AND cn.livemode = eo.livemode
+		 AND cn.credit_note_number = eo.payload->>'credit_note_number'
 		WHERE eo.email_type IN ('invoice', 'payment_receipt', 'payment_failed',
 		                        'payment_setup_request', 'dunning_warning',
 		                        'dunning_escalation', 'credit_note')
@@ -681,11 +776,16 @@ func (s *OutboxStore) ListByCustomer(ctx context.Context, tenantID, customerID s
 	for rows.Next() {
 		var r OutboxRow
 		var payload []byte
-		var dispatchedAt sql.NullTime
+		var dispatchedAt, simAt sql.NullTime
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.Livemode, &r.EmailType, &payload, &r.Status,
 			&r.Attempts, &r.NextAttemptAt, &r.LastError, &r.CreatedAt, &dispatchedAt,
-			&r.DeliveryState); err != nil {
+			&r.DeliveryState, &simAt, &r.TestClockID, &r.SkipReason,
+			&r.InvoiceID, &r.CreditNoteID); err != nil {
 			return nil, err
+		}
+		if simAt.Valid {
+			t := simAt.Time
+			r.SimEffectiveAt = &t
 		}
 		if err := json.Unmarshal(payload, &r.Payload); err != nil {
 			return nil, fmt.Errorf("decode payload for %s: %w", r.ID, err)

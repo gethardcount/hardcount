@@ -17,4 +17,5 @@ export const InvoicePaymentTimelineDegradedItem = {
   emails: 'emails',
   dunning: 'dunning',
   charge_attempts: 'charge_attempts',
+  disputes: 'disputes',
 } as const;

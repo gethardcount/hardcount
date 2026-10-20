@@ -204,8 +204,9 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		{"usage_events", &resp.UsageEvents,
 			`SELECT COUNT(*) FROM usage_events WHERE tenant_id = $1 AND timestamp >= $2 AND timestamp < $3` + notSimViaCustomer,
 			[]any{tenantID, period.Start, period.End}},
-		// Issued credit notes whose Stripe refund leg is failed/pending — i.e.
-		// a customer is owed money that hasn't been pushed back yet. The refund
+		// Issued credit notes whose Stripe refund leg is failed, unknown or
+		// stuck pending — i.e. a customer may be owed money that hasn't been
+		// pushed back yet. The refund
 		// is operator-retried (no auto-sweep), so surfacing the count is what
 		// turns "an operator will notice" into "an operator is told". Real
 		// refunds only (test-clock sims aren't an operator obligation).
@@ -401,10 +402,17 @@ func defaultCurrencyFor(ctx context.Context, tx *sql.Tx) (string, error) {
 	return cur, nil
 }
 
+// sumPaidRevenue is what paid the invoices paid in [start, end): the payment
+// (card or offline) plus the customer credit applied, not the invoice total. A
+// credit note on an unpaid invoice lowers its amount due and leaves its total
+// as it was, so a total counted the waived part as revenue; an invoice waived
+// in full is paid with nothing paid for it (ADR-061 amendment 2026-10-19). For
+// an invoice paid in full with no such note the two are equal. A note on an
+// invoice already paid changes neither: Revenue is before refunds.
 func sumPaidRevenue(ctx context.Context, tx *sql.Tx, start, end any, currency string) (int64, error) {
 	var v int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(total_amount_cents), 0)
+		SELECT COALESCE(SUM(amount_paid_cents + credits_applied_cents), 0)
 		FROM invoices
 		WHERE status = 'paid' AND paid_at >= $1 AND paid_at < $2 AND currency = $3 AND is_simulated = false
 	`, start, end, currency).Scan(&v)

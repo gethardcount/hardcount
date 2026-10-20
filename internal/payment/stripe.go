@@ -19,13 +19,9 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/payment/breaker"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// Stripe is the payment adapter. It creates PaymentIntents for finalized invoices
-// and processes webhook events to update invoice payment status.
-//
-// This is NOT an abstract "payment provider" interface. Velox is Stripe-native.
-// If we ever support another provider, we'll refactor — not speculate now.
 // DunningStarter starts dunning for failed payments.
 type DunningStarter interface {
 	StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
@@ -93,6 +89,11 @@ type EmailPaymentFailed interface {
 	SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
 }
 
+// Stripe is the payment adapter. It creates PaymentIntents for finalized invoices
+// and processes webhook events to update invoice payment status.
+//
+// This is NOT an abstract "payment provider" interface. Velox is Stripe-native.
+// If we ever support another provider, we'll refactor — not speculate now.
 type Stripe struct {
 	client             StripeClient
 	invoices           InvoiceUpdater
@@ -109,12 +110,27 @@ type Stripe struct {
 	pmAttacher         PaymentMethodAttacher
 	customerResolver   CustomerByStripeIDResolver // optional; resolves SetupIntent.customer → velox id
 	refundUpdater      RefundStatusUpdater        // optional; applies async refund-webhook status to a CN
+	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	resolver           clock.Resolver             // optional; binds effective-now from invoice
 	anomalies          PaymentAnomalyRecorder     // optional; durable marker for the attention banner (ADR-068)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
 	audit              AuditEmitter               // optional; ADR-090 in-tx emission for the checkout-completed PM flip
+	keyHealth          StripeKeyHealth            // optional; marks a refused key on the Settings → Payments card
 }
+
+// StripeKeyHealth records that Stripe refused a tenant's key for one mode, so
+// Settings → Payments shows it, and clears that notice once a charge goes
+// through with the key. Implemented by *tenantstripe.Service; wired via
+// SetKeyHealth in router.go.
+type StripeKeyHealth interface {
+	MarkKeyRejected(ctx context.Context, tenantID string, livemode bool, stripeMessage string) error
+	ClearKeyRejected(ctx context.Context, tenantID string, livemode bool) error
+}
+
+// SetKeyHealth wires the Settings mark for a refused key. Optional: nil
+// leaves only the metric and the log line.
+func (s *Stripe) SetKeyHealth(k StripeKeyHealth) { s.keyHealth = k }
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090).
 type AuditEmitter interface {
@@ -170,24 +186,18 @@ func (s *Stripe) bindForInvoice(ctx context.Context, tenantID, invoiceID string)
 
 // StripeClient is the interface for Stripe API calls.
 // In production this wraps stripe-go; in tests it's a mock.
-// ErrSearchNotOffered marks a provider refusal of the Search API itself —
-// a request-shape error (invalid_request) on ADR-108's fixed-form metadata
-// query, not a transient fault. Stripe documents Search as unavailable to
-// businesses in India; account-tier and permission refusals surface the same
-// way. The reconciler disables the search sweep for that account+mode on
-// first sight (one CRITICAL, then silence) rather than re-asking forever.
-var ErrSearchNotOffered = errors.New("payment provider does not offer search on this account")
-
 type StripeClient interface {
 	CreatePaymentIntent(ctx context.Context, params PaymentIntentParams) (PaymentIntentResult, error)
 	CancelPaymentIntent(ctx context.Context, paymentIntentID string) error
 	GetPaymentIntent(ctx context.Context, paymentIntentID string) (PaymentIntentResult, error)
-	// SearchPaymentIntentsByInvoiceID finds PaymentIntents carrying
-	// metadata velox_invoice_id = invoiceID — the pull-shaped twin of the
-	// webhook naming a PI (ADR-108). Read-only at Stripe; eventual
-	// consistency means an EMPTY result proves nothing and callers must
-	// never write a money outcome from absence.
-	SearchPaymentIntentsByInvoiceID(ctx context.Context, invoiceID string) ([]PaymentIntentResult, error)
+	// ListPaymentIntentsForCustomer is the stale-hold sweep's read
+	// (ADR-127): every PaymentIntent of the Stripe customer created at or
+	// after createdGTE, through List — the read-after-write API, offered in
+	// every country — never Search. A failure on any page fails the whole
+	// read; a partial list is never returned. Errors: ErrStripeNotConfigured,
+	// ErrStripeAuthFailed or ErrStripeCustomerMissing for a read that will not
+	// succeed on retry, anything else for one that may.
+	ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error)
 }
 
 type PaymentIntentParams struct {
@@ -209,8 +219,9 @@ type PaymentIntentResult struct {
 	Status       string
 	ClientSecret string
 	// CreatedAt is the PI's Stripe-side creation instant (unix seconds).
-	// Populated by the search path so ADR-108's "newest" precedence is
-	// decided on provider truth, not result order. Zero when unset.
+	// Populated by the List read, so the stale-hold sweep orders the payments
+	// it finds (oldest succeeded first, newest processing adopted) on
+	// provider truth, not result order. Zero when unset.
 	CreatedAt int64
 	// Purpose is the velox_purpose PI metadata (e.g. "dunning_retry",
 	// "hosted_invoice_pay"). Populated by GetPaymentIntent so the reconciler
@@ -237,6 +248,21 @@ type PaymentIntentResult struct {
 	// paid_at differed by however far the clock had moved, purely on whether
 	// the webhook landed. Zero for wall-clock charges, which carry no anchor.
 	AnchorAt time.Time
+	// DeclineCode and PaymentMethodID are the PaymentIntent's
+	// last_payment_error decline code (declineCodeOf) and payment_method.id,
+	// populated by GetPaymentIntent. The reconciler passes them on when it records a
+	// failure, as the webhook does, so a hard decline it is the first to
+	// learn of still stops dunning from charging that card (#966).
+	DeclineCode     string
+	PaymentMethodID string
+	// InvoiceID is the velox_invoice_id metadata every Velox PaymentIntent
+	// carries (the off-session charge and the hosted page alike). The
+	// stale-hold sweep matches on it. Populated by the read paths.
+	InvoiceID string
+	// FullyRefunded is set when the PaymentIntent's latest charge was
+	// refunded in full (list with expand[]=data.latest_charge). The
+	// stale-hold sweep does not count such a payment as paying the invoice.
+	FullyRefunded bool
 }
 
 // InvoiceUpdater updates invoice payment status.
@@ -276,17 +302,23 @@ type InvoiceUpdater interface {
 	// to the webhook row when the attempt row is absent, so a lost
 	// write degrades display, never money.
 	RecordChargeAttempt(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt) error
-	// ReleaseAutoChargeClaim frees the per-invoice charge lease. The
-	// chokepoint calls it on DEFINITIVE outcomes only (Stripe answered:
-	// declined, or settled) — the round-trip is complete, so no charge
-	// is in flight and holding the lease adds no protection. Ambiguous
-	// outcomes (unknown / timeout / still-processing) never release —
-	// the call may have reached Stripe and the lease window is exactly
-	// what prevents a blind concurrent re-charge. Found by the D1
-	// walk: a declined dunning retry held the lease 5 wall-minutes,
-	// starving every later same-advance retry in test-clock catchup
-	// ("dunning catchup loop made no progress").
-	ReleaseAutoChargeClaim(ctx context.Context, tenantID, id string) error
+	// ReleaseChargeHold frees the charge hold the caller's claim took,
+	// comparing its token (ADR-127). The chokepoint calls it on DEFINITIVE
+	// outcomes (Stripe answered: declined, or settled) — the round-trip is
+	// complete, so no charge is in flight and holding it adds no protection
+	// — and when nothing was sent: its re-check refused, the breaker was
+	// open, or the credentials could not be read. Unclear outcomes (unknown
+	// / timeout / still-processing / 429) never release: the call may have
+	// reached Stripe, and the stale-hold sweep asks Stripe before anything
+	// charges the invoice again. Found by the D1 walk: a declined dunning
+	// retry held the hold 5 wall-minutes, starving every later same-advance
+	// retry in test-clock catchup ("dunning catchup loop made no progress").
+	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
+	// ConfirmChargeHold is the re-check right before a charge is sent: the
+	// caller's hold is still its own with domain.ChargeSendMargin left, the
+	// charge counter is unchanged, and the invoice is still finalized and
+	// unpaid (ADR-127).
+	ConfirmChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold, attemptSeq int64) (bool, error)
 }
 
 // WebhookStore persists and queries Stripe webhook events.
@@ -351,9 +383,9 @@ func (s *Stripe) SetEventDispatcher(events domain.EventDispatcher) {
 
 // SetBreaker wires a global circuit breaker around Stripe calls. When
 // set, ChargeInvoice short-circuits with breaker.ErrOpen if the breaker
-// is rejecting — the Stripe call is not made and the invoice state is
-// left untouched so dunning treats it as "try later" without ticking
-// attempt_count.
+// is rejecting — the Stripe call is not made, the charge hold is released,
+// and the invoice state is left untouched so dunning treats it as "try
+// later" without ticking attempt_count.
 func (s *Stripe) SetBreaker(b *breaker.Breaker) {
 	s.breaker = b
 }
@@ -415,6 +447,21 @@ func (s *Stripe) SetRefundStatusUpdater(u RefundStatusUpdater) {
 	s.refundUpdater = u
 }
 
+// DisputeRecorder records a card dispute snapshot against the invoice whose
+// payment was disputed (#979), queuing payment.dispute_opened / .closed in
+// the same transaction. Returns errs.ErrNotFound when no Velox invoice holds
+// the disputed PaymentIntent (a charge the tenant made outside Velox).
+// payment imports nothing from invoice; *invoice.PostgresStore satisfies it.
+type DisputeRecorder interface {
+	RecordStripeDispute(ctx context.Context, tenantID string, snap domain.DisputeSnapshot) (domain.DisputeRecordResult, error)
+}
+
+// SetDisputeRecorder wires the charge.dispute.* handler's store. Optional:
+// nil logs and acknowledges dispute events (test default).
+func (s *Stripe) SetDisputeRecorder(r DisputeRecorder) {
+	s.disputes = r
+}
+
 // IsUnknownPaymentFailure classifies an error returned from ChargeInvoice
 // as a Stripe-side unknown outcome (5xx, timeout, network) — the failure
 // category that should feed the circuit breaker. Explicit card declines
@@ -458,8 +505,11 @@ func (s *Stripe) fireEvent(ctx context.Context, tenantID, eventType string, payl
 
 // ChargeInvoice creates a Stripe PaymentIntent for a finalized invoice.
 // The invoice must have a customer with a Stripe customer ID already set up.
-func (s *Stripe) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error) {
-	return s.chargeInvoice(ctx, tenantID, inv, stripeCustomerID, stripePaymentMethodID, "")
+// hold is the charge hold the caller's claim returned (ADR-127): the charge
+// re-checks it right before sending and sends nothing when it no longer
+// holds.
+func (s *Stripe) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error) {
+	return s.chargeInvoice(ctx, tenantID, inv, hold, stripeCustomerID, stripePaymentMethodID, "")
 }
 
 // ChargeInvoiceForDunningRetry charges an invoice as part of a dunning
@@ -475,8 +525,8 @@ func (s *Stripe) ChargeInvoice(ctx context.Context, tenantID string, inv domain.
 // and the cross-domain import that a shared options type would force
 // (billing → payment) is avoided per the per-domain-isolation rule
 // in CLAUDE.md.
-func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID string, inv domain.Invoice, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error) {
-	return s.chargeInvoice(ctx, tenantID, inv, stripeCustomerID, stripePaymentMethodID, piPurposeDunningRetry)
+func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error) {
+	return s.chargeInvoice(ctx, tenantID, inv, hold, stripeCustomerID, stripePaymentMethodID, piPurposeDunningRetry)
 }
 
 // ChargeIdempotencyKey is the SINGLE SOURCE for an invoice charge's Stripe
@@ -486,17 +536,23 @@ func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID stri
 // docs/dev/manual-test-strategy.md exists to catch.
 //
 // The key answers exactly one question: is this call the SAME charge attempt as
-// before, or a new one? Two requirements pull against each other:
+// before, or a new one? It must move exactly when an attempt's outcome is
+// recorded:
 //
-//   - a crash between the Stripe call and the outcome write must REUSE the key,
-//     so Stripe returns the in-flight PaymentIntent rather than creating a
-//     second one (no double charge);
 //   - a RECORDED decline must get a FRESH key, so a retry after the customer
-//     fixes their card isn't handed the declined PI forever (no liveness sink).
+//     fixes their card isn't handed the declined PI forever (no liveness sink);
+//   - a charge whose result was lost (a crash, a shutdown) does NOT
+//     rely on the key to avoid a second charge. The key only dedupes the same
+//     initiator, same card and same amount within Stripe's 24 hours; another
+//     charge kind, a changed card, a pruned key or the hosted page all go
+//     around it (#976). Its hold stays set instead, every claim refuses it, and
+//     the stale-hold sweep asks Stripe what the lost charge did (ADR-127).
+//     When Stripe has nothing, the sweep moves the seq, so the next charge gets
+//     a fresh key and is never handed a 500 Stripe saved under the old one.
 //
-// So the seed must move exactly when an attempt outcome was recorded.
-// charge_attempt_seq is that signal directly: it is bumped by the three writes
-// that stamp stripe_payment_intent_id and by nothing else (migration 0165,
+// charge_attempt_seq is that signal directly: it is bumped by the writes that
+// stamp stripe_payment_intent_id and by the stale-hold sweep's "nothing at
+// Stripe" clear, and by nothing else (migration 0165, ADR-105 amendment,
 // CI-enforced by TestChargeAttemptSeqBumpedByEveryPIStamp).
 //
 // It replaced inv.UpdatedAt, which was a PROXY for the same question and
@@ -517,7 +573,7 @@ func ChargeIdempotencyKey(invoiceID string, chargeAttemptSeq int64, purpose stri
 	return key
 }
 
-func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, stripeCustomerID, stripePaymentMethodID, purpose string) (domain.Invoice, error) {
+func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID, purpose string) (domain.Invoice, error) {
 	// finalized ONLY (ADR-113: nothing initiates money against a written-off
 	// invoice). This belt gate is not redundant with the claims: every claim
 	// reads BEFORE the handler re-reads the invoice, so a MarkUncollectible
@@ -606,33 +662,90 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		Metadata:        metadata,
 	}
 
+	// The re-check right before sending (ADR-127): the hold is still this
+	// charger's own with at least ChargeSendMargin left, the counter its key
+	// was built from is unchanged, and the invoice is still finalized and
+	// unpaid. A charger that stalled past its hold may find the stale-hold
+	// sweep cleared it and another owner charging; one whose invoice a
+	// webhook settled meanwhile would charge a stale snapshot. Either way it
+	// sends nothing. A failed read is the same answer: nothing has been sent,
+	// so the hold is released and the next tick retries.
+	ok, cerr := s.invoices.ConfirmChargeHold(ctx, tenantID, inv.ID, hold, inv.ChargeAttemptSeq)
+	if cerr != nil || !ok {
+		s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "re-check refused")
+		slog.InfoContext(ctx, "charge not sent: this charger no longer holds the invoice, or the invoice changed since it was read",
+			"invoice_id", inv.ID, "charge_attempt_seq", inv.ChargeAttemptSeq, "error", cerr)
+		return domain.Invoice{}, ErrPaymentTransient
+	}
+	// The send budget: the Stripe call (stripe-go's request and its resends)
+	// ends within ChargeSendBudget, which is at most the margin the re-check
+	// required. So no request for this attempt can start after its hold ends,
+	// and the stale-hold sweep can read "Stripe has nothing" as final. The
+	// callers' own deadlines are shorter and still win: dunning 15 s,
+	// auto-charge 30 s, and Collect payment 30 s (the /v1 routes' request
+	// timeout, router.go).
+	sendCtx, cancelSend := context.WithTimeout(ctx, domain.ChargeSendBudget)
+	defer cancelSend()
+
 	var result PaymentIntentResult
 	var err error
 	if s.breaker != nil {
 		var out any
-		out, err = s.breaker.Execute(ctx, func(ctx context.Context) (any, error) {
+		out, err = s.breaker.Execute(sendCtx, func(ctx context.Context) (any, error) {
 			return s.client.CreatePaymentIntent(ctx, params)
 		})
 		if errors.Is(err, breaker.ErrOpen) {
-			// Breaker short-circuit: the call to Stripe was not made. Do NOT
-			// mutate invoice state — leaving payment_status as-is lets the
-			// scheduler try again on the next tick once cooldown elapses.
-			// Returning a distinct sentinel lets dunning treat this as a
-			// transient skip rather than ticking attempt_count.
+			// Breaker short-circuit: the breaker refused before calling the
+			// function, so no request was made. Do NOT mutate invoice state —
+			// leaving payment_status as-is lets the scheduler try again on the
+			// next tick once cooldown elapses. Returning a distinct sentinel
+			// lets dunning treat this as a transient skip rather than ticking
+			// attempt_count. The hold is released: it speaks for no charge,
+			// and the breaker is shared by every tenant, so one open window
+			// would otherwise block every invoice charged in it until the
+			// stale-hold sweep asked Stripe about each (ADR-127).
+			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "breaker open")
 			return domain.Invoice{}, ErrPaymentTransient
 		}
 		if out != nil {
 			result = out.(PaymentIntentResult)
 		}
 	} else {
-		result, err = s.client.CreatePaymentIntent(ctx, params)
+		result, err = s.client.CreatePaymentIntent(sendCtx, params)
 	}
 	if errors.Is(err, ErrPaymentTransient) {
-		// Nothing reached Stripe (the credentials could not be read): same as
-		// the breaker short-circuit above — no state write, the next tick
-		// retries. Classified below it would be an UNKNOWN outcome, parking
-		// the invoice for a reconciler that has no PaymentIntent to find.
+		// This request charged nothing (the credentials could not be read,
+		// Stripe answered 429, or Stripe refused the key): no state write, the
+		// next tick retries.
+		// Classified below it would be an UNKNOWN outcome, parking the invoice
+		// for a reconciler that has no PaymentIntent to find.
+		//
+		// Unreadable credentials mean no request left, so the hold is
+		// released, as for the breaker. A 429 keeps it: stripe-go resends
+		// after a network error, and a 429 to the resend can hide a first
+		// request Stripe is still running, which the stale-hold sweep finds.
+		if errors.Is(err, ErrStripeCredentialsUnavailable) {
+			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "stripe credentials unreadable")
+		}
+		// Stripe refused the key, or none is connected: the charge is paused,
+		// not failed, until a person fixes the key. The hold is released,
+		// unlike a 429's. A 401 hides an earlier request only if the key was
+		// revoked in the seconds between stripe-go's send and its resend, and
+		// that request's webhook settles the invoice without the key. Kept,
+		// the hold would block Collect for about an hour after the fix, while
+		// the stale-hold sweep, which cannot ask Stripe without a key, logs
+		// cannot_ask. The error goes back as it is so Collect can say what to
+		// fix; errors.Is still finds ErrPaymentTransient.
+		var ke *StripeKeyError
+		if errors.As(err, &ke) {
+			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "stripe key unusable")
+			s.reportUnusableKey(ctx, tenantID, inv.ID, ke)
+			return domain.Invoice{}, err
+		}
 		return domain.Invoice{}, ErrPaymentTransient
+	}
+	if err == nil {
+		s.clearRejectedKey(ctx, tenantID)
 	}
 	if err != nil {
 		// Categorise the error so ambiguous (5xx/timeout/network) outcomes are
@@ -664,20 +777,18 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				"error", pe.Message,
 			)
 		}
-		// Idempotency conflict: the key was already used with different
-		// parameters, so a PaymentIntent for this attempt EXISTS at Stripe but
-		// this response carries no id for it. The GetPaymentIntent sweeps cannot
-		// query what they cannot name, so the invoice PARKS at 'unknown'
-		// (ADR-107) and no charge path will touch it again — though this shape
-		// is exactly ADR-108's best case: a PI provably EXISTS, so the search
-		// sweep will usually find and adopt it. A prior version of this comment
-		// said the no-PI branch "will settle this failed and a later retry may
-		// open a second PI", which was true pre-#681 and is exactly the write
-		// that ADR deleted. Name the key at ERROR — Stripe's dashboard is
-		// searchable by idempotency key, so this line is the operator's route
-		// to the actual PaymentIntent behind a parked invoice.
+		// Idempotency conflict: another request with this key is still running
+		// at Stripe, or the key was used with other parameters, so a request
+		// for this attempt reached Stripe but this response names no
+		// PaymentIntent. The GetPaymentIntent sweeps cannot query what they
+		// cannot name, so the invoice PARKS at 'unknown' (ADR-107) and no
+		// charge path takes it. The stale-hold sweep finishes it from the
+		// customer's PaymentIntents at Stripe: a running or finished payment
+		// shows up there within minutes (REC-5). Name the key at ERROR:
+		// Stripe's dashboard is searchable by idempotency key, so this line is
+		// the operator's route to the request behind the conflict.
 		if isIdempotencyConflict(err) && pe.PaymentIntentID == "" {
-			slog.Error("CRITICAL: idempotency conflict with no PaymentIntent id — an attempt EXISTS at Stripe but cannot be reconciled automatically; look this key up in the Stripe dashboard before retrying",
+			slog.Error("idempotency conflict with no PaymentIntent id: a request with this key reached Stripe; the invoice is parked until Stripe's list of the customer's payments shows what it did",
 				"invoice_id", inv.ID,
 				"tenant_id", tenantID,
 				"idempotency_key", idempotencyKey,
@@ -685,18 +796,40 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				"error", pe.Message,
 			)
 		}
+		// Where an unclear outcome is saved: on a context detached from the
+		// caller, unless the caller was cancelled. Stripe's own unclear
+		// answers (a 500, a 409) and a call the caller's deadline ended
+		// (dunning 15 s, auto-charge 30 s, Collect payment 30 s: Stripe was
+		// slow, which is what an incident looks like) are saved as the park
+		// they are, and wait Stripe's 24 hours (domain.ParkedNothingWait).
+		// Detached because the deadline can also pass while the answer is
+		// being saved: a 500 that arrives just before it would otherwise be
+		// lost and charged again about 75 minutes later, while Stripe may
+		// still complete it. A cancelled context (a shutdown, a lost lease, a
+		// closed tab) is Velox interrupting itself: nothing is saved, the hold
+		// stays, and the stale-hold sweep decides about an hour after the
+		// claim (ADR-127; Sagar's "by cause" rule, 2026-10-19).
+		saveCtx := ctx
+		if pe.Unknown && !errors.Is(ctx.Err(), context.Canceled) {
+			var cancelSave context.CancelFunc
+			saveCtx, cancelSave = context.WithTimeout(context.WithoutCancel(ctx), chargeOutcomeSaveTimeout)
+			defer cancelSave()
+		}
+
 		// ADR-102: the attempt is a billing fact regardless of what follows.
 		// Written BEFORE the outcome: a decline's report below upserts this
 		// row inside its transaction, and an upsert that finds no row inserts
 		// it as an 'external' attempt with no sim anchor, which nothing later
 		// corrects. Covers the empty-PI shape too — a PI-create network
 		// failure is an attempt with no webhook twin, and this row is its
-		// only record.
+		// only record. A park's row also says who made it, which decides
+		// where the invoice goes when the park ends (UnparkAfterNoPayment).
 		attemptOutcome := domain.ChargeAttemptFailed
 		if pe.Unknown {
 			attemptOutcome = domain.ChargeAttemptUnknown
 		}
-		recordChargeAttempt(ctx, s.invoices, tenantID, inv, pe.PaymentIntentID, purpose, attemptOutcome, pe.Message)
+		recordChargeAttempt(saveCtx, s.invoices, tenantID, inv, pe.PaymentIntentID, purpose, attemptOutcome, pe.Message,
+			chargedCard{paymentMethodID: stripePaymentMethodID, declineCode: pe.DeclineCode})
 
 		if !pe.Unknown && pe.PaymentIntentID != "" {
 			// A decline that names its PaymentIntent is reported through the
@@ -724,6 +857,12 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				Message:         pe.Message,
 				Purpose:         purpose,
 				ChargedAtSeq:    &seq,
+				// The card is the one this call charged; the code is the
+				// bank's, from Stripe's error. A hard decline lands on the
+				// attempt row with the failure, so the next dunning retry
+				// skips this card (#966).
+				DeclineCode:     pe.DeclineCode,
+				PaymentMethodID: stripePaymentMethodID,
 			})
 			switch {
 			case serr != nil:
@@ -740,7 +879,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				logRefusedChargeOutcome(ctx, current, domain.PaymentFailed, pe.PaymentIntentID, idempotencyKey)
 			}
 		} else {
-			s.stampUnreportableOutcome(withChargeAnchor(ctx), tenantID, inv, pe, status, idempotencyKey)
+			s.stampUnreportableOutcome(withChargeAnchor(saveCtx), tenantID, inv, pe, status, idempotencyKey)
 		}
 		// Count unknown outcomes as failed for the success-rate alert — a
 		// Stripe outage genuinely impairs customer charging and should page,
@@ -752,10 +891,11 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		// initiator for the 5-minute window (under test-clock catchup,
 		// back-to-back due retries are seconds apart in wall time and a
 		// held lease stalls the whole cascade). Unknown outcomes fall
-		// through and keep the lease — the reconciler owns them.
+		// through and keep the lease — the stale-hold sweep owns them, a
+		// park included.
 		if !pe.Unknown {
-			if rerr := s.invoices.ReleaseAutoChargeClaim(ctx, tenantID, inv.ID); rerr != nil {
-				slog.Warn("release charge lease after definite decline failed — next initiator waits out the lease window",
+			if rerr := s.invoices.ReleaseChargeHold(ctx, tenantID, inv.ID, hold); rerr != nil {
+				slog.Warn("release charge hold after definite decline failed — the stale-hold sweep clears it",
 					"invoice_id", inv.ID, "error", rerr)
 			}
 		}
@@ -779,7 +919,8 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// ADR-102: insert the attempt at PI-create time so trigger_source
 	// and the sim anchor are recorded by the writer that knows them;
 	// the settle paths only flip the outcome.
-	recordChargeAttempt(ctx, s.invoices, tenantID, inv, result.ID, purpose, domain.ChargeAttemptPending, "")
+	recordChargeAttempt(ctx, s.invoices, tenantID, inv, result.ID, purpose, domain.ChargeAttemptPending, "",
+		chargedCard{paymentMethodID: stripePaymentMethodID})
 
 	// Honor the synchronous confirmation outcome (ADR-049 Phase 3,
 	// discover-then-settle). With Confirm:true + OffSession:true, Stripe
@@ -803,8 +944,8 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		// Definitive outcome — the settle's status flips already make the
 		// claim predicates refuse this invoice, but keep the lease column
 		// truthful rather than letting it decay to expiry.
-		if rerr := s.invoices.ReleaseAutoChargeClaim(ctx, tenantID, inv.ID); rerr != nil {
-			slog.Warn("release charge lease after inline settle failed", "invoice_id", inv.ID, "error", rerr)
+		if rerr := s.invoices.ReleaseChargeHold(ctx, tenantID, inv.ID, hold); rerr != nil {
+			slog.Warn("release charge hold after inline settle failed — the stale-hold sweep clears it", "invoice_id", inv.ID, "error", rerr)
 		}
 		// Return the freshly-settled row so callers (dunning retrier, portal,
 		// operator charge-now) observe the paid state immediately. On a re-read
@@ -834,6 +975,66 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	return current, nil
 }
 
+// releaseUnsentHold frees the hold of a charge that provably sent nothing to
+// Stripe (the re-check refused, the breaker was open, the credentials could
+// not be read, the key was refused), so the invoice does not wait for the stale-hold sweep. The
+// store runs the release even after the caller's context has ended. A failed
+// release leaves a stale hold the sweep clears after asking Stripe.
+func (s *Stripe) releaseUnsentHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold, why string) {
+	if err := s.invoices.ReleaseChargeHold(ctx, tenantID, invoiceID, hold); err != nil {
+		slog.WarnContext(ctx, "release charge hold of a charge that sent nothing failed — the invoice waits for the stale-hold sweep",
+			"invoice_id", invoiceID, "reason", why, "error", err)
+	}
+}
+
+// reportUnusableKey tells the operator that charges for this tenant and mode
+// are paused until the Stripe key is fixed: a metric, an ERROR line, and, for
+// a key Stripe refused, the Settings → Payments notice (the same row a failed
+// Connect check writes; reconnecting, or a charge that goes through, clears
+// it). A key that is not connected
+// has no row to mark. A lost mark is written again by the next charge.
+func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID, invoiceID string, ke *StripeKeyError) {
+	livemode := postgres.Livemode(ctx)
+	mw.RecordStripeKeyUnusable(ke.Reason)
+	slog.ErrorContext(ctx, "charge not sent: Stripe refused this tenant's API key, or none is connected for this mode. Charges for this tenant and mode are paused (not failed) until the key is fixed under Settings → Payments",
+		"tenant_id", tenantID, "livemode", livemode, "invoice_id", invoiceID,
+		"reason", ke.Reason, "stripe_message", ke.Message)
+	if ke.Reason != StripeKeyRejected || s.keyHealth == nil {
+		return
+	}
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	msg := ke.Message
+	if msg == "" {
+		msg = "Stripe refused this API key."
+	}
+	if err := s.keyHealth.MarkKeyRejected(markCtx, tenantID, livemode, msg); err != nil {
+		slog.WarnContext(ctx, "could not show the refused Stripe key in Settings; the next charge tries again",
+			"tenant_id", tenantID, "livemode", livemode, "error", err)
+	}
+}
+
+// clearRejectedKey removes the Settings → Payments refused-key notice after
+// Stripe created a PaymentIntent with the stored key, which proves the key
+// works. Without it the notice outlived the fix when the key itself did not
+// change (a restricted key granted the permission in Stripe), or when a
+// charge still running on a rolled key got its 401 after the new key was
+// connected. Only a "rejected" mark is cleared; a row without one matches
+// nothing. A failed clear is logged; the next charge that goes through
+// clears it.
+func (s *Stripe) clearRejectedKey(ctx context.Context, tenantID string) {
+	if s.keyHealth == nil {
+		return
+	}
+	livemode := postgres.Livemode(ctx)
+	clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.keyHealth.ClearKeyRejected(clearCtx, tenantID, livemode); err != nil {
+		slog.WarnContext(ctx, "could not clear the refused Stripe key notice in Settings; the next charge that goes through tries again",
+			"tenant_id", tenantID, "livemode", livemode, "error", err)
+	}
+}
+
 // logRefusedChargeOutcome names a charge whose outcome stamp was refused
 // because another outcome was recorded while it was in flight (P13). If the
 // row now records this attempt's own PaymentIntent, its webhook simply got
@@ -859,6 +1060,11 @@ func logRefusedChargeOutcome(ctx context.Context, current domain.Invoice, attemp
 		"idempotency_key", idempotencyKey,
 	)
 }
+
+// chargeOutcomeSaveTimeout bounds saving an unclear outcome on the context
+// detached from the caller (chargeInvoice): the attempt row and the park,
+// with the park's three tries.
+const chargeOutcomeSaveTimeout = 10 * time.Second
 
 // piPurposeDunningRetry tags a PaymentIntent created by the dunning
 // retrier so a report of its failure skips the generic payment-failed
@@ -947,34 +1153,45 @@ func (s *Stripe) stampUnreportableOutcome(ctx context.Context, tenantID string, 
 		if !applied {
 			logRefusedChargeOutcome(ctx, current, status, pe.PaymentIntentID, idempotencyKey)
 		}
-		if applied && current.PaymentStatus == domain.PaymentUnknown && current.StripePaymentIntentID == "" {
+		if applied && current.Parked() {
 			// PARKED (ADR-107). With no PaymentIntent id the GetPaymentIntent
-			// sweeps cannot query anything, so the invoice is deliberately
-			// excluded from every charge path rather than risk a second
-			// charge. Since ADR-108 it is not strictly terminal: the
-			// search-and-adopt sweep looks the attempt up by metadata and
-			// adopts it if the provider can find it — but only a FOUND
-			// PaymentIntent may resolve this, so the operator advice below
-			// stays. This is the ONE place the park is announced — the
-			// sweeps do not re-announce it, precisely so this does not
-			// become an identical CRITICAL every tick forever, which is
-			// how real alerts get buried. Announced only once the park is
-			// on disk: an outcome recorded during the call leaves nothing
-			// parked.
-			slog.ErrorContext(ctx, "CRITICAL: a charge attempt could not be identified at the provider — this invoice is parked; Velox will keep searching the provider and adopts the attempt if it can be found, but if it cannot be found this will not resolve on its own. If it is still parked tomorrow: find the attempt in the Stripe dashboard (search by customer and amount); if no charge succeeded, mark the invoice uncollectible to close it out",
+			// sweeps cannot query anything, so the invoice is excluded from
+			// every charge path rather than risk a second charge. It keeps its
+			// hold, so the stale-hold sweep finishes it from Stripe's list of
+			// the customer's payments: a payment that appears is recorded or
+			// followed, and with none 24 hours after the attempt the invoice
+			// is charged again as usual (REC-5). This is the ONE place the
+			// park is announced: the sweep does not re-announce it every
+			// tick, which is how real alerts get buried. Announced only once
+			// the park is on disk: an outcome recorded during the call leaves
+			// nothing parked.
+			slog.ErrorContext(ctx, "a charge got an unclear answer from Stripe that named no payment; this invoice is parked. Velox checks the customer's payments at Stripe every billing tick, records the payment if it appears, and charges again only if none appears within 24 hours of the attempt",
 				"invoice_id", inv.ID, "tenant_id", tenantID,
 				"customer_id", inv.CustomerID, "invoice_number", inv.InvoiceNumber,
-				"amount_due_cents", inv.AmountDueCents, "error", pe.Message)
+				"amount_due_cents", inv.AmountDueCents,
+				// After any 409 an attempt under this key reached Stripe (the
+				// fact isIdempotencyConflict names the key for), so the park
+				// line names it too.
+				"idempotency_key", idempotencyKey,
+				"error", pe.Message)
 		}
+	} else if pe.Unknown {
+		// An unclear outcome whose write failed: a cancelled caller (the
+		// write ran on a dead context), or a database fault. The invoice
+		// keeps its charge hold (unclear outcomes never release it), every
+		// claim refuses it, and the stale-hold sweep asks Stripe what this
+		// charge did within about an hour (ADR-127). So this is not orphaned
+		// money: WARN, with the PaymentIntent id when there is one.
+		slog.Warn("could not save an unclear charge outcome; the charge hold stays set and the stale-charge check resolves this within about an hour",
+			"invoice_id", inv.ID,
+			"payment_status", string(status),
+			"stripe_payment_intent_id", pe.PaymentIntentID,
+			"idempotency_key", idempotencyKey,
+			"error", perr,
+		)
 	} else {
-		// LOAD-BEARING, especially on the Unknown path: this is the SOLE
-		// write that sets payment_status='unknown' — enrolling the invoice
-		// into the reconciler's unknown-payment sweep (ListUnknownPayments)
-		// — and persists the PaymentIntent id. Losing it strands a
-		// possibly-SUCCEEDED PI: the reconciler never resolves it → silent
-		// under-collection. Fail LOUD with the PI id so an operator can
-		// reconcile manually. The charge-error return is unchanged — the
-		// caller still classifies the outcome and defers unknowns.
+		// A definite failure with no PaymentIntent whose write failed:
+		// nothing was charged, but the failure is not on the invoice.
 		slog.Error("CRITICAL: could not persist post-charge payment state — invoice may be orphaned from the reconciler sweep",
 			"invoice_id", inv.ID,
 			"payment_status", string(status),
@@ -1063,13 +1280,14 @@ func (s *Stripe) settleDeclineWithRetry(ctx context.Context, tenantID string, in
 // refused retry whose row holds exactly this outcome at seq+1 is that first
 // attempt, and counts as applied.
 //
-// It runs on the caller's ctx on purpose. When the caller's own deadline or
-// cancellation is what made the outcome Unknown, the write fails and the
-// invoice stays claimable at the same seq, so the idempotency key is not
-// rotated: a retry by the same initiator for the same amount, inside Stripe's
-// 24-hour key window, gets that request's result back instead of a second
-// charge. Landing the write would park the invoice for good on a charge that
-// may never have been sent.
+// It writes on the ctx it is handed. For an unclear outcome chargeInvoice
+// hands it a context detached from the caller, unless the caller was
+// cancelled: a 500, a 409 or a timed-out call is saved as the park it is,
+// even when the caller's deadline passes during the save, and gets Stripe's
+// 24 hours. When the caller was cancelled (a shutdown, a lost lease) the
+// write fails and nothing is saved; the hold the claim wrote stays, and the
+// stale-hold sweep asks Stripe about that charge about an hour after the
+// claim (ADR-127).
 func persistChargeOutcomeWithRetry(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, status domain.InvoicePaymentStatus, piID, message string) (domain.Invoice, bool, error) {
 	delays := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond}
 	var lastErr error
@@ -1102,7 +1320,14 @@ func persistChargeOutcomeWithRetry(ctx context.Context, invoices InvoiceUpdater,
 // timeline's precedence chain (dunning row → attempt row → webhook row)
 // falls back to the webhook row when this write is lost, so failure
 // degrades display, never money.
-func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, piID, purpose string, outcome domain.ChargeAttemptOutcome, reason string) {
+// chargedCard is what the charge call knows about the card on an attempt: the
+// card it charged and, for a decline, the bank's decline code (#966).
+type chargedCard struct {
+	paymentMethodID string
+	declineCode     string
+}
+
+func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, piID, purpose string, outcome domain.ChargeAttemptOutcome, reason string, card chargedCard) {
 	trigger := domain.ChargeTriggerAutoCharge
 	if purpose == piPurposeDunningRetry {
 		trigger = domain.ChargeTriggerDunningRetry
@@ -1118,6 +1343,8 @@ func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID 
 		Trigger:               trigger,
 		Outcome:               outcome,
 		ProviderReason:        reason,
+		DeclineCode:           card.declineCode,
+		StripePaymentMethodID: card.paymentMethodID,
 		AmountCents:           inv.AmountDueCents,
 		OccurredAt:            time.Now().UTC(),
 		SimEffectiveAt:        simAt,
@@ -1214,6 +1441,11 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 		// One status-driven handler for all three: each carries a Refund object;
 		// the source event is irrelevant once we read Refund.status.
 		return s.handleRefundUpdated(ctx, tenantID, event)
+	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
+		// One status-driven handler for all three, like refunds: each event
+		// carries the whole Dispute object as it stood when the event was
+		// created.
+		return s.handleDispute(ctx, tenantID, event)
 	default:
 		slog.Debug("unhandled webhook event type", "type", event.EventType)
 		return nil
@@ -1342,6 +1574,13 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 // while keeping a genuinely-foreign refund from looping for days.
 const refundWebhookRaceWindow = 15 * time.Minute
 
+// disputeWebhookRaceWindow bounds redelivery for a dispute webhook that
+// arrives before Velox has recorded the payment it disputes (handleDispute).
+// Same reasoning and value as refundWebhookRaceWindow: longer than Stripe's
+// first redelivery backoff, short enough that a dispute on a payment made
+// outside Velox does not loop for days.
+const disputeWebhookRaceWindow = refundWebhookRaceWindow
+
 // handleRefundUpdated reconciles the ASYNC outcome of a refund. A refund can
 // return pending at create then later flip to succeeded or FAILED (bank reject /
 // insufficient platform balance → money back to the platform, customer
@@ -1405,6 +1644,121 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 	}
 	slog.Info("refund status reconciled from webhook",
 		"refund_id", rf.ID, "stripe_status", rf.Status, "velox_status", status, "type", event.EventType)
+	return nil
+}
+
+// handleDispute records a charge.dispute.* event against the Velox invoice
+// whose payment was disputed (#979). It records and reports; it never changes
+// the invoice's payment status and never moves money. Re-parses the raw
+// payload: data.object is a Dispute (https://docs.stripe.com/api/disputes/object),
+// whose own metadata is empty, so the event arrives without velox_tenant_id
+// and the handler admits it on the endpoint's tenant (endpointAuthoritativeEvent).
+//
+// Outcomes:
+//   - recorded, or already recorded (a redelivery, or an older event arriving
+//     after a newer one): nil, and HandleWebhook writes the dedup row;
+//   - no Velox invoice holds the disputed PaymentIntent, and the dispute is
+//     older than disputeWebhookRaceWindow: an ErrNotFound error, which
+//     HandleWebhook acknowledges with its audit row. The tenant can charge
+//     cards outside Velox on the same Stripe account;
+//   - the same, but the dispute is younger (Velox may not have recorded its
+//     own payment yet): an error, so Stripe redelivers it;
+//   - a status Velox does not know (Stripe added one) or a body it cannot
+//     read: an error, so the delivery fails and Stripe redelivers it, which
+//     shows on Stripe's webhook page, instead of the dispute being dropped;
+//   - a store error: an error, so Stripe redelivers.
+func (s *Stripe) handleDispute(ctx context.Context, tenantID string, event domain.StripeWebhookEvent) error {
+	if s.disputes == nil {
+		slog.Debug("dispute webhook: no DisputeRecorder wired, skipping", "type", event.EventType)
+		return nil
+	}
+	raw, ok := event.Payload["raw"].(string)
+	if !ok {
+		return fmt.Errorf("%s: missing raw payload", event.EventType)
+	}
+	var parsed struct {
+		Data struct {
+			Object struct {
+				ID              string          `json:"id"`
+				Object          string          `json:"object"`
+				Amount          int64           `json:"amount"`
+				Currency        string          `json:"currency"`
+				Charge          json.RawMessage `json:"charge"`
+				PaymentIntent   json.RawMessage `json:"payment_intent"`
+				Reason          string          `json:"reason"`
+				Status          string          `json:"status"`
+				Created         int64           `json:"created"`
+				EvidenceDetails *struct {
+					DueBy *int64 `json:"due_by"`
+				} `json:"evidence_details"`
+			} `json:"object"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return fmt.Errorf("%s: parse payload: %w", event.EventType, err)
+	}
+	dp := parsed.Data.Object
+	if dp.ID == "" || dp.Object != "dispute" {
+		return fmt.Errorf("%s: data.object is not a dispute (object %q, id %q)", event.EventType, dp.Object, dp.ID)
+	}
+	status := domain.DisputeStatus(dp.Status)
+	if !status.Valid() {
+		slog.ErrorContext(ctx, "dispute webhook carries a status Velox does not know — failing the delivery so Stripe redelivers it; add the status to domain.DisputeStatus and the invoice_disputes CHECK",
+			"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID, "status", dp.Status)
+		return fmt.Errorf("%s: dispute %s has unknown status %q", event.EventType, dp.ID, dp.Status)
+	}
+	if dp.Currency == "" || dp.Amount < 0 {
+		return fmt.Errorf("%s: dispute %s has no currency or a negative amount", event.EventType, dp.ID)
+	}
+	pi := stripeObjectID(dp.PaymentIntent)
+	if pi == "" {
+		// Velox charges only through PaymentIntents (ADR-001), so a dispute
+		// on a charge without one is not on a Velox payment.
+		return fmt.Errorf("%s: dispute %s names no payment intent: %w", event.EventType, dp.ID, errs.ErrNotFound)
+	}
+	snap := domain.DisputeSnapshot{
+		StripeEventID:         event.StripeEventID,
+		EventAt:               event.OccurredAt,
+		StripeDisputeID:       dp.ID,
+		StripeChargeID:        stripeObjectID(dp.Charge),
+		StripePaymentIntentID: pi,
+		Status:                status,
+		Reason:                dp.Reason,
+		AmountCents:           dp.Amount,
+		Currency:              dp.Currency,
+		OpenedAt:              time.Unix(dp.Created, 0).UTC(),
+	}
+	if dp.EvidenceDetails != nil && dp.EvidenceDetails.DueBy != nil && *dp.EvidenceDetails.DueBy > 0 {
+		due := time.Unix(*dp.EvidenceDetails.DueBy, 0).UTC()
+		snap.EvidenceDueBy = &due
+	}
+
+	res, err := s.disputes.RecordStripeDispute(ctx, tenantID, snap)
+	if errors.Is(err, errs.ErrNotFound) {
+		// No invoice holds the payment yet. It can be a Velox payment whose
+		// record has not committed: a hosted-page payment before its settle,
+		// an off-session charge before its attempt row (written after Stripe
+		// answers). Stripe's test dispute cards open the dispute right after
+		// the charge. So a dispute younger than the race window, or of unknown
+		// age, fails the delivery and Stripe sends it again, as a young refund
+		// does (handleRefundUpdated); an older one is acknowledged as not
+		// Velox's, with its audit row.
+		// Wall clock against Stripe's clock: the dispute's age is real time.
+		if dp.Created == 0 || time.Now().Unix()-dp.Created < int64(disputeWebhookRaceWindow.Seconds()) {
+			return fmt.Errorf("%s: dispute %s: no invoice holds payment %s yet (recent dispute — retry)", event.EventType, dp.ID, pi)
+		}
+		slog.WarnContext(ctx, "dispute webhook names a payment no Velox invoice holds — acknowledged; if it is a Velox charge, find the invoice by this payment intent",
+			"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID,
+			"stripe_payment_intent_id", pi, "status", dp.Status)
+		return fmt.Errorf("%s: dispute %s: %w", event.EventType, dp.ID, err)
+	}
+	if err != nil {
+		return fmt.Errorf("%s: record dispute %s: %w", event.EventType, dp.ID, err)
+	}
+	slog.InfoContext(ctx, "dispute recorded from webhook",
+		"stripe_event_id", event.StripeEventID, "stripe_dispute_id", dp.ID,
+		"invoice_id", res.Dispute.InvoiceID, "status", res.Dispute.Status,
+		"applied", res.Applied, "opened", res.Opened, "closed", res.Closed)
 	return nil
 }
 
@@ -1480,11 +1834,68 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	if err != nil {
 		return fmt.Errorf("decode payment_intent.payment_failed metadata: %w", err)
 	}
+	declineCode, declinedCard := declineFromEventPayload(event.Payload)
 	return s.SettleFailed(ctx, tenantID, inv, PaymentFailure{
 		PaymentIntentID: event.PaymentIntentID,
 		Message:         event.FailureMessage,
 		Purpose:         md["velox_purpose"],
+		DeclineCode:     declineCode,
+		PaymentMethodID: declinedCard,
 	}, SourceWebhook)
+}
+
+// declineFromEventPayload reads the bank's decline code and the declined card
+// from data.object.last_payment_error of a payment_intent.payment_failed body
+// (decline_code, payment_method.id — Stripe's PaymentIntent object; the code
+// and type too, for a hard decline Stripe sends as the error code, see
+// declineCodeOf). They
+// matter only to a later dunning retry (#966), so anything unreadable yields
+// empty values rather than an error: a decline the webhook could not label
+// is retried on schedule, as every decline was before, and the settlement
+// itself must not wait on it. payment_method is an object in the PaymentIntent
+// API; a bare id string is accepted too.
+func declineFromEventPayload(payload map[string]any) (declineCode, paymentMethodID string) {
+	rawStr, ok := payload["raw"].(string)
+	if !ok {
+		return "", ""
+	}
+	var parsed struct {
+		Data struct {
+			Object struct {
+				LastPaymentError *struct {
+					Type          string          `json:"type"`
+					Code          string          `json:"code"`
+					DeclineCode   string          `json:"decline_code"`
+					PaymentMethod json.RawMessage `json:"payment_method"`
+				} `json:"last_payment_error"`
+			} `json:"object"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(rawStr), &parsed); err != nil || parsed.Data.Object.LastPaymentError == nil {
+		return "", ""
+	}
+	lpe := parsed.Data.Object.LastPaymentError
+	return declineCodeOf(lpe.Type, lpe.Code, lpe.DeclineCode), stripeObjectID(lpe.PaymentMethod)
+}
+
+// stripeObjectID returns the id of a Stripe field that is either an expanded
+// object ({"id": "pm_…", …}) or a bare id string, and "" for null or anything
+// else.
+func stripeObjectID(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var id string
+	if json.Unmarshal(raw, &id) == nil {
+		return id
+	}
+	var obj struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.ID
+	}
+	return ""
 }
 
 // piMetadata parses data.object.metadata out of the event body in
@@ -1689,6 +2100,15 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 		if errors.Is(err, errs.ErrNotFound) {
 			slog.WarnContext(ctx, "checkout.session.completed: customer not found for payment-setup mapping — acking event",
 				"customer_id", customerID, "stripe_customer_id", stripeCustomerID)
+			return nil
+		}
+		// The customer is already linked to a different Stripe customer, and
+		// that link is never replaced (customer.SetStripeCustomerID, ADR-127).
+		// A retry cannot change it, so ACK, loudly: a card saved on this other
+		// Stripe customer will not be charged by Velox.
+		if errors.Is(err, errs.ErrInvalidState) {
+			slog.ErrorContext(ctx, "checkout.session.completed: the customer is already linked to a different Stripe customer; this session's Stripe customer was not recorded — acking event",
+				"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "error", err)
 			return nil
 		}
 		return fmt.Errorf("update payment setup: %w", err)

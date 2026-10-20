@@ -38,7 +38,7 @@ type DispatcherConfig struct {
 type EmailDeliverer interface {
 	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string) error
 	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
-	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string) error
+	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
 	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents int64, currency string, pdfBytes []byte) error
@@ -70,8 +70,10 @@ func NewDispatcher(outbox *OutboxStore, sender EmailDeliverer, cfg DispatcherCon
 	if cfg.BatchSize <= 0 {
 		// 5 rows/tick: with PerRowBudget=60s the invariant chain
 		// BatchSize×PerRowBudget ≤ BatchTimeout < ClaimLease holds as
-		// 300s ≤ 300s < 360s (P5 panel lease arithmetic). Throughput 5
-		// per 5s tick = 60/min — ample at current scale.
+		// 300s ≤ 300s < 360s (P5 panel lease arithmetic). Throughput is
+		// about 20-30/min on one replica, not 5 per 5s: a tick is due one
+		// interval after the last one ENDED, so a 5s poll leads every
+		// second poll, or every third when the sends take over 5s.
 		cfg.BatchSize = 5
 	}
 	if cfg.BatchTimeout <= 0 {
@@ -126,12 +128,6 @@ type InvoiceSettledChecker interface {
 // SetSettledChecker wires the staleness gate (see handle).
 func (d *Dispatcher) SetSettledChecker(c InvoiceSettledChecker) { d.settled = c }
 
-// actionRequiredTypes are the email types whose ENTIRE purpose collapses
-// once the invoice settles: "update your payment method", "payment
-// failed", "we'll retry on <date>", "action taken — balance due". The
-// informational types (invoice document, receipt, credit note) stay
-// deliverable regardless — a paid invoice's document is still the
-// customer's record.
 // escalationAnnounces reports the one case where a terminal invoice must
 // NOT mute its email: a dunning escalation whose final action is
 // mark_uncollectible marks the invoice uncollectible in the same breath
@@ -166,6 +162,12 @@ func setupLinkServesRecovery(emailType, terminalState string) bool {
 	return emailType == TypePaymentSetupRequest && terminalState == "uncollectible"
 }
 
+// actionRequiredTypes are the email types whose ENTIRE purpose collapses
+// once the invoice settles: "update your payment method", "payment
+// failed", "we'll retry on <date>", "action taken — balance due". The
+// informational types (invoice document, receipt, credit note) stay
+// deliverable regardless — a paid invoice's document is still the
+// customer's record.
 var actionRequiredTypes = map[string]bool{
 	TypePaymentSetupRequest: true,
 	TypePaymentFailed:       true,
@@ -176,7 +178,8 @@ var actionRequiredTypes = map[string]bool{
 // handle is the per-row handler. It demarshals the payload based on
 // email_type and dispatches to the matching Send* method. Returning nil
 // marks the row 'dispatched'; returning an error schedules a retry (or DLQ
-// after MaxOutboxAttempts); returning ErrEmailObsolete marks it 'skipped';
+// after MaxOutboxAttempts); returning ErrEmailObsolete marks it 'skipped'
+// (an *ObsoleteError also records which state the invoice reached);
 // returning ErrUnknownEmailType (a type this binary has no case for)
 // schedules a retry so a newer replica can claim the row.
 func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
@@ -202,7 +205,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 				"outbox_id", row.ID, "email_type", row.EmailType,
 				"invoice_number", msg.InvoiceNumber, "error", cerr)
 		} else if state != "" && !escalationAnnounces(row.EmailType, state) && !setupLinkServesRecovery(row.EmailType, state) {
-			return fmt.Errorf("%w: invoice %s reached %s before delivery", ErrEmailObsolete, msg.InvoiceNumber, state)
+			return &ObsoleteError{InvoiceNumber: msg.InvoiceNumber, State: state}
 		}
 	}
 
@@ -227,7 +230,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 			msg.AmountCents, msg.Currency, msg.PublicToken)
 	case TypeDunningWarning:
 		return d.sender.SendDunningWarning(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
-			msg.AttemptNumber, msg.MaxAttempts, msg.NextRetryDate, msg.FailureReason, msg.PublicToken)
+			msg.AttemptNumber, msg.MaxAttempts, msg.NextRetryDate, msg.FailureReason, msg.PublicToken, msg.CardNeedsReplacing)
 	case TypeDunningEscalation:
 		return d.sender.SendDunningEscalation(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.EscalationOutcome, msg.PublicToken)

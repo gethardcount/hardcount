@@ -2,6 +2,7 @@ package invoice
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -27,37 +28,61 @@ import (
 // The reverse direction is checked too: a bump without a PI stamp means some
 // unrelated write is re-seeding the key, which is the exact drift this column
 // was introduced to end (#677 → #678).
+//
+// Two writes move the seq with no PaymentIntent, both the stale-hold sweep's
+// "Stripe holds nothing" (ADR-127; ADR-105 amendments 2026-10-19 and
+// 2026-10-20): ClearStaleChargeHold for a lost charge, and
+// UnparkAfterNoPayment for a parked one 24 hours after the attempt. "No
+// payment was created" is that attempt's recorded outcome, and the next charge
+// needs a fresh key: Stripe may have saved a 500 under the old one. Each is a
+// statement that also clears the charge hold (auto_charge_claimed_until =
+// NULL); the scanner admits them and requires exactly two.
+//
+// The scan covers every non-test .go file of this package, not one file: a
+// writer added in a new file would otherwise escape it.
 func TestChargeAttemptSeqBumpedByEveryPIStamp(t *testing.T) {
 	const (
-		piStamp  = "stripe_payment_intent_id ="
-		seqBump  = "charge_attempt_seq = charge_attempt_seq + 1"
-		fileName = "postgres.go"
+		piStamp    = "stripe_payment_intent_id ="
+		seqBump    = "charge_attempt_seq = charge_attempt_seq + 1"
+		holdClears = "auto_charge_claimed_until = NULL"
 	)
 
-	src, err := os.ReadFile(fileName)
+	files, err := filepath.Glob("*.go")
 	if err != nil {
-		t.Fatalf("read %s: %v", fileName, err)
+		t.Fatal(err)
+	}
+	var src strings.Builder
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		src.Write(b)
 	}
 
 	// Each UPDATE ... on the invoices table, up to its terminating clause.
 	updateStmt := regexp.MustCompile(`(?s)UPDATE invoices.*?(?:WHERE|RETURNING)`)
-	stmts := updateStmt.FindAllString(string(src), -1)
+	stmts := updateStmt.FindAllString(src.String(), -1)
 	if len(stmts) == 0 {
 		t.Fatal("found no UPDATE invoices statements — the scanner is broken, not the code")
 	}
 
-	var stamps, bumps int
+	var stamps, bumps, clears int
 	for _, stmt := range stmts {
 		// A predicate reference (WHERE stripe_payment_intent_id = $1) is a read,
 		// not a stamp; the regex stops before WHERE, so anything left is a SET.
 		hasStamp := strings.Contains(stmt, piStamp)
 		hasBump := strings.Contains(stmt, seqBump)
+		isStaleClear := hasBump && !hasStamp && strings.Contains(stmt, holdClears)
 		switch {
 		case hasStamp && !hasBump:
 			t.Errorf("an UPDATE stamps stripe_payment_intent_id without bumping charge_attempt_seq — "+
 				"a recorded decline would reuse its idempotency key and Stripe would return the DECLINED "+
 				"PaymentIntent forever, so the invoice could never be paid:\n%s", stmt)
-		case hasBump && !hasStamp:
+		case hasBump && !hasStamp && !isStaleClear:
 			t.Errorf("an UPDATE bumps charge_attempt_seq without stamping stripe_payment_intent_id — "+
 				"only a recorded attempt outcome may re-seed the charge idempotency key; re-seeding it "+
 				"from an unrelated write is the drift #678 removed:\n%s", stmt)
@@ -68,6 +93,9 @@ func TestChargeAttemptSeqBumpedByEveryPIStamp(t *testing.T) {
 		if hasBump {
 			bumps++
 		}
+		if isStaleClear {
+			clears++
+		}
 	}
 
 	// Guard against the scanner silently matching nothing after a refactor:
@@ -76,7 +104,11 @@ func TestChargeAttemptSeqBumpedByEveryPIStamp(t *testing.T) {
 		t.Errorf("expected at least 3 PI-stamping UPDATEs (StampChargeOutcome, MarkPaymentFailedReportingTransition, "+
 			"markPaidReportingTransition), found %d — did the scanner stop matching?", stamps)
 	}
-	if bumps != stamps {
-		t.Errorf("PI stamps (%d) and seq bumps (%d) disagree", stamps, bumps)
+	if clears != 2 {
+		t.Errorf("found %d stale-hold clears that move the seq (an UPDATE that bumps it and clears the charge hold), want exactly 2: "+
+			"ClearStaleChargeHold and UnparkAfterNoPayment are the writes ADR-105's amendments let move the seq without a PaymentIntent", clears)
+	}
+	if bumps != stamps+clears {
+		t.Errorf("seq bumps (%d) are not PI stamps (%d) plus the stale-hold clear (%d)", bumps, stamps, clears)
 	}
 }

@@ -123,7 +123,7 @@ func (e *V08Error) Error() string {
 	switch e.kind {
 	case v08NotClean:
 		return fmt.Sprintf("This database's v0.8 migration record (schema_migrations) says %s. "+
-			"This release takes over only a clean v0.8.0 or v0.8.1 database at version 180. "+
+			"This release takes over only a clean v0.8.0, v0.8.1 or v0.8.2 database at version 180. "+
 			"Run `velox migrate` with Velox v0.8.1 first; if it reports the database dirty, follow the runbook it links. "+
 			"A version above 180 came from a development build: use an empty database. Nothing was changed.",
 			e.record.describe())

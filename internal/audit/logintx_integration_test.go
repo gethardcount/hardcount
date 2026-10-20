@@ -51,7 +51,7 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 		"member.invited", "member.joined", "member.invite_revoked", "member.removed",
 		"subscription.item_updated", "subscription.pending_change_applied",
 		"subscription.proration_failed", "subscription.threshold_crossed",
-		"subscription.threshold_deferred",
+		"subscription.threshold_deferred", "subscription.net_negative_usage",
 		"login", "logout", "mode_changed",
 		"password_reset_requested", "password_reset_completed",
 	}

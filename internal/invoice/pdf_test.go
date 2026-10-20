@@ -526,6 +526,19 @@ func TestExemptionLegend_Both(t *testing.T) {
 	}
 }
 
+// TestExemptionLegend_PrepaidCreditPurchase: a prepaid-commit purchase line
+// is untaxed on purpose (ADR-078, issue #1271). The PDF says why, so the
+// missing tax does not read as a mistake.
+func TestExemptionLegend_PrepaidCreditPurchase(t *testing.T) {
+	got := exemptionLegend([]domain.InvoiceLineItem{
+		{TaxabilityReason: "prepaid_credit_purchase"},
+	})
+	want := "Prepaid credit is not taxed when bought; any tax is charged on the usage it pays for."
+	if got != want {
+		t.Errorf("exemptionLegend = %q, want %q", got, want)
+	}
+}
+
 // TestExemptionLegend_None covers the no-op path: trivial reasons (empty,
 // standard_rated, reverse_charge, not_collecting) must not trigger the
 // exemption legend. reverse_charge has its own dedicated legend driven by
@@ -638,6 +651,9 @@ func TestCNChannelDescription_RefundStateAnnotated(t *testing.T) {
 		{"succeeded is bare", string(domain.RefundSucceeded), "$10.00 to card |", false},
 		{"failed is annotated", string(domain.RefundFailed), "$10.00 to card (refund failed)", true},
 		{"pending is annotated", string(domain.RefundPending), "$10.00 to card (refund pending)", true},
+		// The customer's document never says "unknown" (#965): the refund is
+		// either made or still to be made by Retry refund.
+		{"unknown reads as pending to the customer", string(domain.RefundUnknown), "$10.00 to card (refund pending)", true},
 		{"legacy empty status reads as pending, never settled", "", "$10.00 to card (refund pending)", true},
 	}
 	for _, tc := range cases {

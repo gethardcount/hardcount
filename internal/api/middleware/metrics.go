@@ -47,15 +47,18 @@ var (
 	)
 
 	// idempotencyCacheErrors counts idempotency-layer DB failures by stage.
-	// Non-zero means the idempotency guarantee lapsed: a "reserve" failure
-	// fell open (the handler ran without a claim, so a concurrent/retried
-	// request could re-execute the side effect), and a "finalize" failure
-	// means the response wasn't cached (a retry under the same key re-runs the
-	// handler). Operators should alert on any sustained rate here.
+	// None of them runs a handler twice:
+	//   - reserve: the key could not be claimed, so the request was refused
+	//     with a retryable 503 and the handler did not run.
+	//   - finalize: the handler ran but its response was not stored; the key
+	//     stays pending and retries with it get 409.
+	//   - release: a 409/422 (or an ingest 5xx) could not free the key; it
+	//     stays pending and retries with it get 409 instead of running again.
+	// A sustained rate means clients are being refused or stuck on 409s.
 	idempotencyCacheErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_idempotency_cache_errors_total",
-			Help: "Idempotency cache DB errors by stage (reserve|finalize).",
+			Help: "Idempotency-key DB errors by stage: reserve (request refused with 503), finalize (response not stored; retries get 409), release (key not freed; retries get 409).",
 		},
 		[]string{"stage"},
 	)
@@ -98,6 +101,14 @@ var (
 			Help: "Total payment charges by result.",
 		},
 		[]string{"result"},
+	)
+
+	stripeKeyUnusable = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_stripe_key_unusable_total",
+			Help: "Charges not sent because Stripe refused the tenant's API key (reason=rejected) or no key is connected for the mode (reason=not_configured). Charges are paused, not failed, until the key is fixed.",
+		},
+		[]string{"reason"},
 	)
 
 	webhookDeliveries = promauto.NewCounterVec(
@@ -147,18 +158,12 @@ var (
 		},
 	)
 
-	// parkedInvoices is the alerting surface for ADR-107. A parked invoice is
-	// money we may or may not have taken, that no charge path will touch and
-	// that no sweep will resolve — it needs a person. Until now "stuck and
-	// loud" was log-only, which is not loud: nothing counted them, so nothing
-	// could alert on them and an operator had no way to find them. Alert on
-	// this being non-zero, and on it growing.
-	parkedSearchErrors = promauto.NewCounterVec(
+	staleChargeHoldResolutions = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "velox_parked_search_errors_total",
-			Help: "ADR-108 parked-invoice search failures by mode and class (not_offered = provider refuses Search for this account; transient = retried after cool-off).",
+			Name: "velox_stale_charge_hold_resolutions_total",
+			Help: "Stale charge holds checked with Stripe (ADR-127), by result: settled, adopted, canceled, waiting, released, cleared, failed, cannot_ask, lost_race.",
 		},
-		[]string{"mode", "class"},
+		[]string{"result"},
 	)
 
 	scheduledCleanupRows = promauto.NewCounterVec(
@@ -172,7 +177,7 @@ var (
 	leaderLeaseLost = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_leader_lease_lost_total",
-			Help: "Led ticks that ended without completing (ADR-114), by role and reason. heartbeat_timeout = the holder could not renew within the abandon window and cancelled its own work; takeover = a renew found another holder; released = a renew found the row released; paused = an operator paused the role mid-tick (expected — exclude from paging); panicked = the tick's work panicked and the lease was released as not completed (stack in the 'scheduler panic recovered' log; it repeats every cooldown until the input is fixed, except a panic while billing one subscription, which repeats only when that subscription's retry wait ends). For lost leases correctness held via fence + row CAS; the cause (frozen process, DB stall, pooler) is what to look at.",
+			Help: "Led ticks that ended without completing (ADR-114), by role and reason. heartbeat_timeout = the holder could not renew within the abandon window and cancelled its own work; takeover = a renew found another holder; released = a renew found the row released; paused = an operator paused the role mid-tick (expected — exclude from paging); panicked = the tick's work panicked and the lease was released as not completed; in billing and dunning only that step or row stopped and the rest of the tick ran (stack on the first 'step panicked; running the rest' line; for the other roles on 'scheduler panic recovered'). It repeats one interval later until the input is fixed, except a panic while billing one subscription, which repeats only when that subscription's retry wait ends; for a dunning run that panics, pause that run (runbook background-job-stuck). For lost leases correctness held via fence + row CAS; the cause (frozen process, DB stall, pooler) is what to look at.",
 		},
 		[]string{"role", "reason"},
 	)
@@ -190,7 +195,59 @@ var (
 		},
 		[]string{"meter_id", "mode"},
 	)
+
+	// The outbox dead-letter counters count a row once, when the mark that
+	// moved it to 'failed' applied. Every series starts at 0 (init below):
+	// a series born at 1 has no earlier sample, so increase() would miss the
+	// first dead letter.
+	emailOutboxDeadLettered = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_email_outbox_dead_lettered_total",
+			Help: "Emails given up on (email_outbox status='failed'), by cause and mode. permanent = the send can never succeed: the address bounced, is suppressed or is not a valid address, or the row cannot be read; max_attempts = 15 tries over about 72 hours failed, often a relay that refuses the sender or credentials. The email is not sent unless an operator requeues it.",
+		},
+		[]string{"cause", "mode"},
+	)
+	webhookOutboxDeadLettered = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_webhook_outbox_dead_lettered_total",
+			Help: "Webhook outbox rows given up on (webhook_outbox status='failed') after 15 tries over about 72 hours, by mode: the event and its deliveries were never written, so no endpoint gets it. Endpoint failures are velox_webhook_deliveries_total{status=\"failed\"}.",
+		},
+		[]string{"cause", "mode"},
+	)
 )
+
+// Dead-letter causes.
+const (
+	DeadLetterPermanent   = "permanent"
+	DeadLetterMaxAttempts = "max_attempts"
+)
+
+func init() {
+	for _, mode := range []string{"live", "test"} {
+		emailOutboxDeadLettered.WithLabelValues(DeadLetterPermanent, mode)
+		emailOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, mode)
+		webhookOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, mode)
+	}
+}
+
+func modeLabel(live bool) string {
+	if live {
+		return "live"
+	}
+	return "test"
+}
+
+// RecordEmailOutboxDeadLettered counts one email moved to 'failed'. Call it
+// only when the mark applied.
+func RecordEmailOutboxDeadLettered(cause string, live bool) {
+	emailOutboxDeadLettered.WithLabelValues(cause, modeLabel(live)).Inc()
+}
+
+// RecordWebhookOutboxDeadLettered counts one webhook outbox row moved to
+// 'failed' after its last attempt. Call it only when the mark applied.
+func RecordWebhookOutboxDeadLettered(live bool) {
+	webhookOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, modeLabel(live)).Inc()
+}
 
 // RecordUsageUnpriced adds the quantity of one meter's usage that an invoice
 // was built without because no price matched it. live is the mode the
@@ -199,16 +256,25 @@ func RecordUsageUnpriced(meterID string, live bool, quantity float64) {
 	if quantity <= 0 {
 		return
 	}
-	mode := "test"
-	if live {
-		mode = "live"
-	}
-	usageUnpricedQuantity.WithLabelValues(meterID, mode).Add(quantity)
+	usageUnpricedQuantity.WithLabelValues(meterID, modeLabel(live)).Add(quantity)
 }
 
 // RecordLeaderLeaseLost counts a lost lease (leader.LostFunc adapter).
 func RecordLeaderLeaseLost(role, reason string) {
 	leaderLeaseLost.WithLabelValues(role, reason).Inc()
+}
+
+// InitLeaderLeaseLost exports velox_leader_lease_lost_total{role,
+// reason="panicked"} at 0 for each role, at boot. The page row is
+// increase(...[1h]) > 0, and a series first exported at 1 has no earlier
+// sample, so the first panicked tick after a start never paged. Prometheus:
+// export a default value such as 0 for any time series you know may exist.
+// Only "panicked" is created: a heartbeat_timeout series created now would
+// page on one timeout, which waits for the heartbeat fix (RL-F2).
+func InitLeaderLeaseLost(roles ...string) {
+	for _, role := range roles {
+		leaderLeaseLost.WithLabelValues(role, "panicked")
+	}
 }
 
 // LeaderStatusRow is one role's row from the leader_status view, as the
@@ -294,14 +360,13 @@ func RecordStripeBreakerState(state string) {
 	stripeBreakerState.Set(v)
 }
 
-// RecordParkedSearchError counts ADR-108 search-and-adopt failures by class.
-// "not_offered" is the provider refusing the Search API for an account (those
-// tenants' parked invoices cannot self-resolve — the one CRITICAL log names
-// it); "transient" is rate limits / 5xx / network, which retry after the
-// cool-off. Distinct from the parked gauge so "search never works here" pages
-// differently from "nothing is parked".
-func RecordParkedSearchError(mode, class string) {
-	parkedSearchErrors.WithLabelValues(mode, class).Inc()
+// RecordStaleChargeHoldResolution counts one stale-hold check (ADR-127).
+// "cannot_ask" is a hold Stripe will not answer about (disconnected, key
+// rejected, customer missing): those invoices stay blocked from charging
+// until someone writes them off or fixes the connection, so alert on it
+// being non-zero. A steady "failed" is Stripe unreachable.
+func RecordStaleChargeHoldResolution(result string) {
+	staleChargeHoldResolutions.WithLabelValues(result).Inc()
 }
 
 // Metrics returns middleware that records HTTP request metrics.
@@ -360,6 +425,12 @@ func RecordBillingCycleError() {
 // RecordPaymentCharge records a payment charge result ("succeeded" or "failed").
 func RecordPaymentCharge(result string) {
 	paymentCharges.WithLabelValues(result).Inc()
+}
+
+// RecordStripeKeyUnusable counts a charge not sent because the tenant's
+// Stripe key was refused ("rejected") or is not connected ("not_configured").
+func RecordStripeKeyUnusable(reason string) {
+	stripeKeyUnusable.WithLabelValues(reason).Inc()
 }
 
 // RecordWebhookDelivery records a webhook delivery status ("succeeded", "failed", or "pending").
@@ -544,15 +615,26 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	// Parked invoices (ADR-107) — a cluster fact, so it is computed from the
 	// database on every replica's scrape. Until sweep-2026-08-30 S4 it was a
 	// per-process Set() gauge stamped only by whichever replica led the
-	// billing tick; followers exported a stale copy and the runbook's
-	// "needs a human" alert fired from replicas whose number had resolved.
-	parkedHelp := "Invoices whose charge attempt could not be identified with the provider (ADR-107), by disposition. open = still awaiting an operator decision; written_off = already decided, retained only because the ADR-108 search may still name the PaymentIntent. Alert on `open` growing — summing both hides a decision that was already made. -1 = metric query failed."
+	// billing tick; followers exported a stale copy and the runbook's alert
+	// fired from replicas whose number had resolved.
+	//
+	// Since REC-5 the stale-hold sweep ends a park at the first hourly tick
+	// 24 hours after its charge's hold (domain.ParkedNothingWait), so the
+	// gauge counts only the parks it has not ended on schedule: a hold more
+	// than 26 hours old (one tick plus an hour for a late one), or no hold,
+	// which nothing checks. A count of every park would stay above 0 for as
+	// long as parks kept arriving, so a Stripe incident that parked invoices
+	// over a few hours would page on parks that were on schedule. This
+	// package imports no domain package; the hand copy of the 24 hours is
+	// pinned by TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay.
+	parkedHelp := "Invoices whose last charge got an unclear answer from Stripe that named no payment (ADR-107) and that Velox has not ended on schedule: still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Velox records a payment that appears at Stripe and, with none 24 hours after the hold, ends the park at the next hourly tick (an open invoice is charged again); parks inside that are not counted. Alert on open > 0: Stripe cannot be asked or read about it, or nothing is checking it. -1 = metric query failed."
 	for _, m := range []struct {
 		label string
 		live  bool
 	}{{"live", true}, {"test", false}} {
 		for _, d := range []struct{ label, status string }{{"open", "finalized"}, {"written_off", "uncollectible"}} {
-			q := fmt.Sprintf(`SELECT COUNT(*) FROM invoices WHERE status = '%s' AND payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '' AND livemode = %t`, d.status, m.live)
+			q := fmt.Sprintf(`SELECT COUNT(*) FROM invoices WHERE status = '%s' AND payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '' AND livemode = %t
+				AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now() - interval '26 hours')`, d.status, m.live)
 			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: "velox_parked_invoices", Help: parkedHelp, ConstLabels: prometheus.Labels{"mode": m.label, "disposition": d.label}}, func() float64 {
 				n, err := count(q)
 				if err != nil {
@@ -674,6 +756,42 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	gauge("velox_webhook_outbox_pending",
 		"Outbound webhook events waiting for the outbox dispatcher (status='pending'). -1 = metric query failed.",
 		`SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'`)
+	// Outbox stall and relay signals, by mode (page on live). A pending count
+	// never pages a small install, and one oldest-pending age would page for
+	// three days over one email on the backoff ramp, so the email stall is
+	// measured from when a row came due. The livemode literal is explicit
+	// because the scrape's bypass transaction sets no app.livemode.
+	for _, m := range []struct {
+		label string
+		live  bool
+	}{{"live", true}, {"test", false}} {
+		for _, g := range []struct{ name, help, query string }{
+			{"velox_email_outbox_oldest_due_age_seconds",
+				"Seconds the longest-waiting due email has been due (next_attempt_at passed) without a dispatcher taking it; 0 when none is due. Emails waiting out a retry are not due. Grows when the email_outbox role is stalled, or when more emails come due than it sends (about 20-30 a minute on one replica). -1 = metric query failed.",
+				`SELECT COALESCE(EXTRACT(EPOCH FROM now() - MIN(next_attempt_at)), 0) FROM email_outbox
+					WHERE status = 'pending' AND next_attempt_at <= now() AND livemode = %t`},
+			{"velox_email_outbox_failing_emails",
+				"Emails still pending after 3 or more tries and queued more than 30 minutes ago: their sends keep failing and they are retrying. Usually the SMTP relay refuses the sender or the credentials, or SMTP_HOST is unset. Left alone they are dead-lettered after about 72 hours. -1 = metric query failed.",
+				`SELECT COUNT(*) FROM email_outbox
+					WHERE status = 'pending' AND attempts >= 3 AND created_at < now() - interval '30 minutes' AND livemode = %t`},
+			// Its rows are marked dispatched in the transaction that writes the
+			// event and its deliveries, before any POST, so a failing endpoint
+			// never keeps a row pending here.
+			{"velox_webhook_outbox_oldest_pending_age_seconds",
+				"Seconds since the oldest pending webhook outbox row was queued; 0 when none is pending. A row stays pending until its event and deliveries are written, so this grows when the webhook_outbox role is stalled or those writes keep failing. A failing endpoint does not show here. -1 = metric query failed.",
+				`SELECT COALESCE(EXTRACT(EPOCH FROM now() - MIN(created_at)), 0) FROM webhook_outbox
+					WHERE status = 'pending' AND livemode = %t`},
+		} {
+			q := fmt.Sprintf(g.query, m.live)
+			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: g.name, Help: g.help, ConstLabels: prometheus.Labels{"mode": m.label}}, func() float64 {
+				n, err := count(q)
+				if err != nil {
+					return -1
+				}
+				return n
+			})
+		}
+	}
 	gauge("velox_dunning_active_runs",
 		"Dunning runs currently active. -1 = metric query failed.",
 		`SELECT COUNT(*) FROM invoice_dunning_runs WHERE state = 'active'`)

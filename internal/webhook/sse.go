@@ -29,15 +29,19 @@ import (
 // caller's tenant tx (RLS), and the EventBus subscriber is keyed by
 // tenant_id so cross-tenant frames never reach this connection.
 //
-// We do NOT poll the DB on a tick — the EventBus is in-memory and
-// source-of-truth-adjacent (the Service publishes synchronously from
-// Dispatch). That means a single replica can serve the stream; the
-// outbox dispatcher's success path doesn't currently publish frames
-// (it ends up calling Service.Dispatch which does), so multi-replica
-// SSE works as long as the tenant's HTTP traffic and dispatcher land
-// on the same replica. v1 sizing is single-replica per CLAUDE.md, so
-// this is correct for now; a v2 multi-replica deployment would route
-// SSE through Postgres LISTEN/NOTIFY (one-line swap inside EventBus).
+// We do NOT poll the DB on a tick. The EventBus is in-memory and
+// per-process: the Service publishes to it synchronously from Dispatch
+// (on whichever replica served the request or ran the outbox drain) and
+// from each delivery attempt (the first on the dispatching replica, a
+// retry on whichever replica won that tick).
+// With two or more replicas, a stream sees only the frames published on
+// its own replica, so the live tail can miss events and status flips.
+// The connect-time snapshot reads Postgres, so a reconnect or page
+// refresh shows the truth. Sticky sessions do not fix this, because
+// retry ticks move between replicas. Cross-replica fan-out (for example
+// Postgres LISTEN/NOTIFY inside EventBus) is deferred: item 8 of
+// docs/records/ha-readiness-2026-07-06.md. It affects only the
+// dashboard's live view, never delivery.
 const (
 	sseHeartbeatInterval = 15 * time.Second
 	sseSnapshotLimit     = 50

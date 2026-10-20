@@ -683,13 +683,18 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 	// including the commit's own just-granted credits — must never pay the
 	// invoice that funds a grant ("credits buy credits": revenue booked on
 	// zero cash).
+	//
+	// The same read takes billing_reason and issued_at: a period or threshold
+	// invoice tests grant expiry at its issued_at (see liveAt below).
 	var (
 		invStatus       string
 		invAmountDue    int64
+		billingReason   sql.NullString
+		issuedAt        sql.NullTime
 		isCommitFunding bool
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT i.status, i.amount_due_cents,
+		SELECT i.status, i.amount_due_cents, i.billing_reason, i.issued_at,
 			EXISTS (
 				SELECT 1 FROM invoice_line_items li
 				WHERE li.invoice_id = i.id AND li.tenant_id = i.tenant_id
@@ -698,7 +703,7 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 		FROM invoices i
 		WHERE i.id = $1 AND i.tenant_id = $2
 		FOR UPDATE OF i
-	`, invoiceID, tenantID).Scan(&invStatus, &invAmountDue, &isCommitFunding)
+	`, invoiceID, tenantID).Scan(&invStatus, &invAmountDue, &billingReason, &issuedAt, &isCommitFunding)
 	if err == sql.ErrNoRows {
 		return 0, fmt.Errorf("apply credits: invoice %s: %w", invoiceID, errs.ErrNotFound)
 	}
@@ -768,6 +773,18 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 	if now.IsZero() {
 		now = clock.Now(ctx)
 	}
+	// liveAt is the instant a grant must not yet have expired at to pay this
+	// invoice (ADR-071 §2). A period or threshold invoice uses its issued_at,
+	// the end of the stretch it bills, however late it is collected: a close
+	// that failed and waited on the retry ladder, a draft finalized after its
+	// tax was computed, a crash before the inline collection. The expiry sweep
+	// holds such a grant until then (domain.CreditDrawOwedSQL). Only the
+	// expiry test moves: the usage entry and the invoice stay stamped at now,
+	// the collection instant.
+	liveAt := now
+	if issuedAt.Valid && domain.DrawsCreditAsOfIssue(domain.InvoiceBillingReason(billingReason.String)) {
+		liveAt = issuedAt.Time
+	}
 
 	// FIFO-drain active positive blocks (Orb's credit-block model).
 	// drainPositiveBlocks returns the actual drained amount (≤
@@ -790,7 +807,7 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 	// invoiceAmountCents (ADR-078: the pre-read may predate a concurrent
 	// settle or credit note).
 	drainTarget := min(invAmountDue, currentBalance)
-	deduct, drainable, drainedFrom, err := s.drainPositiveBlocks(ctx, tx, tenantID, customerID, drainTarget, now)
+	deduct, drainable, drainedFrom, err := s.drainPositiveBlocks(ctx, tx, tenantID, customerID, drainTarget, liveAt)
 	if err != nil {
 		return 0, fmt.Errorf("drain credits for invoice: %w", err)
 	}
@@ -1312,10 +1329,11 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 // a clock-pinned customer's grants based on wall-clock time, not the
 // simulated time the customer's other consequences run on.
 //
-// grace is the invoice grace (ADR-120; see Service.SetExpiryGrace): a grant
-// is listed once grace has passed after its expires_at, so the period close
-// that may still draw on it runs first.
-func (s *PostgresStore) ListExpiredGrants(ctx context.Context, grace time.Duration) ([]domain.CreditLedgerEntry, error) {
+// A grant a period close or a period invoice still draws on is not listed
+// (domain.CreditDrawOwedSQL, ADR-071 §2): a close that fails and waits on the
+// retry ladder, or a draft whose tax is computed later, still pays its period
+// with the credit that was live when the period ended.
+func (s *PostgresStore) ListExpiredGrants(ctx context.Context) ([]domain.CreditLedgerEntry, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -1336,7 +1354,7 @@ func (s *PostgresStore) ListExpiredGrants(ctx context.Context, grace time.Durati
 		FROM customer_credit_ledger g
 		WHERE g.entry_type = 'grant'
 		  AND g.expires_at IS NOT NULL
-		  AND g.expires_at < NOW() - ($2::bigint * interval '1 microsecond')
+		  AND g.expires_at < NOW()
 		  AND g.livemode = $1
 		  AND g.consumed_cents < g.amount_cents
 		  AND NOT EXISTS (
@@ -1344,7 +1362,8 @@ func (s *PostgresStore) ListExpiredGrants(ctx context.Context, grace time.Durati
 		    WHERE c.id = g.customer_id
 		      AND c.test_clock_id IS NOT NULL
 		  )
-	`, postgres.Livemode(ctx), grace.Microseconds())
+		  AND NOT `+domain.CreditDrawOwedSQL("g")+`
+	`, postgres.Livemode(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -1375,7 +1394,9 @@ func (s *PostgresStore) ListExpiredGrantsForClock(ctx context.Context, tenantID,
 
 	// Candidate discovery only (see ListExpiredGrants rationale):
 	// ExpireGrantAtomic re-reads under the row lock; `consumed_cents <
-	// amount_cents` is the single retirement exclusion.
+	// amount_cents` is the single retirement exclusion. The catch-up runs
+	// its expiry phase even after a failed close phase, so the same hold
+	// applies here.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT g.id, g.tenant_id, g.customer_id, g.amount_cents, g.consumed_cents, g.expires_at
 		FROM customer_credit_ledger g
@@ -1386,6 +1407,7 @@ func (s *PostgresStore) ListExpiredGrantsForClock(ctx context.Context, tenantID,
 		  AND g.tenant_id = $1
 		  AND c.test_clock_id = $2
 		  AND g.consumed_cents < g.amount_cents
+		  AND NOT `+domain.CreditDrawOwedSQL("g")+`
 	`, tenantID, clockID, frozenTime)
 	if err != nil {
 		return nil, err
@@ -1494,10 +1516,6 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 	return entries, rows.Err()
 }
 
-// CountEntries is ListEntries' total-row twin: same filter arms, no
-// limit/offset/sort. Powers honest pagination + the complete-CSV export
-// on the credits page (pre-fix the UI paginated, filtered, and exported
-// a silently-capped 50-row slice as if it were the whole ledger).
 func (s *PostgresStore) SumCreditNoteGrantsForInvoice(ctx context.Context, tenantID, customerID, invoiceID string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1514,6 +1532,10 @@ func (s *PostgresStore) SumCreditNoteGrantsForInvoice(ctx context.Context, tenan
 	return sum, err
 }
 
+// CountEntries is ListEntries' total-row twin: same filter arms, no
+// limit/offset/sort. Powers honest pagination + the complete-CSV export
+// on the credits page (pre-fix the UI paginated, filtered, and exported
+// a silently-capped 50-row slice as if it were the whole ledger).
 func (s *PostgresStore) CountEntries(ctx context.Context, filter ListFilter) (int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {

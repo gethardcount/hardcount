@@ -20,4 +20,18 @@ meter_id?: string;
  * `model=gpt-4o,token_type=input`.
  */
 dimensions?: string;
+/**
+ * Only events at or after this time (RFC 3339). A value that does not parse is ignored.
+ */
+from?: string;
+/**
+ * Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored.
+ */
+to?: string;
+limit?: number;
+offset?: number;
+/**
+ * Opaque cursor from `next_cursor`. Takes precedence over `offset`.
+ */
+after?: string;
 };
