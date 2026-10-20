@@ -1290,105 +1290,8 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 		))
 	}
 
-	now := clock.Now(ctx)
-	var inv domain.Invoice
-	// amount_paid_cents records the CURRENT amount_due (what the PaymentIntent was
-	// created for), NOT Stripe's actual captured amount. Holds because the PI is
-	// created for exactly amount_due and capture is synchronous + full on the
-	// card-on-file path. KNOWN EDGE class: on an ASYNC / SCA charge
-	// (payment_status='processing'), a credit note that reduces amount_due AFTER
-	// PI-create but BEFORE this settle would record amount_paid BELOW the captured
-	// amount, under-reporting the refund cap (creditnote refund is capped at
-	// amount_paid).
-	// PART A + PART B are now CLOSED (ADR-059, 2026-06-22), so amount_due-at-settle
-	// == the captured amount for both the operator and the automated path:
-	//   PART A — creditnote.Service.Create rejects an amount_due-reducing CN while
-	//     the payment is in flight (operator 409).
-	//   PART B — the AUTOMATED clawback (CreateAndIssueAdjustment, ADR-050
-	//     unpaid-source) no longer reduces amount_due on an in-flight source: it
-	//     creates the clawback as a draft and Issue() DEFERS until the source
-	//     settles, so amount_due stays full through this settle.
-	// PART C remains, but is NOT reachable today: recording amount_paid from the
-	// PI's amount_received (vs re-reading amount_due) is only load-bearing under
-	// PARTIAL capture, and Velox is PaymentIntent-only full-capture (no
-	// partial/manual-capture flow). Revisit if partial capture is added.
-	// (2026-06-15 proration audit; Parts A/B shipped #295 + ADR-059.)
-	err = tx.QueryRowContext(ctx, `
-		UPDATE invoices SET
-			status = 'paid',
-			payment_status = 'succeeded',
-			stripe_payment_intent_id = $1,
-			charge_attempt_seq = charge_attempt_seq + 1,
-			paid_at = $2,
-			amount_paid_cents = amount_due_cents,
-			amount_due_cents = 0,
-			auto_charge_pending = FALSE,
-			updated_at = $3
-		WHERE id = $4
-		RETURNING `+invCols,
-		postgres.NullableString(stripePaymentIntentID), paidAt, now, id,
-	).Scan(s.scanInvDest(&inv)...)
-
-	if err == sql.ErrNoRows {
-		return domain.Invoice{}, false, errs.ErrNotFound
-	}
+	inv, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, cardSettlement)
 	if err != nil {
-		return domain.Invoice{}, false, err
-	}
-	// Close open checkout claims IN THIS TX (ADR-068): every MarkPaid variant
-	// converges here, so the DB-side close is a single choke point instead of
-	// 9+ hand-stitched post-commit hooks — and it atomically kills the "POST
-	// /checkout returns a stored open session for a just-settled invoice"
-	// race. The Stripe-side expire is the caller's post-commit best-effort;
-	// the session's own ExpiresAt is the backstop.
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE checkout_sessions SET status = 'invoice_settled', updated_at = now()
-		WHERE invoice_id = $1 AND status = 'open'
-	`, id); err != nil {
-		return domain.Invoice{}, false, fmt.Errorf("close checkout claims on settle: %w", err)
-	}
-	// invoice.paid — enqueued in the SAME tx as the finalized/uncollectible →
-	// paid transition. The already-paid branch above returns before reaching
-	// here, so this fires EXACTLY ONCE, and it covers every settlement path
-	// (card via SettleSucceeded, credits-cover, offline record-payment, dunning
-	// recovery, and the reconciler's bare-MarkPaid fallback) without each
-	// needing its own dispatch. ADR-040 transactional outbox: if the tx rolls
-	// back, no event; if it commits, the dispatcher delivers.
-	if s.outbox != nil {
-		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventInvoicePaid, map[string]any{
-			"invoice_id":        inv.ID,
-			"invoice_number":    inv.InvoiceNumber,
-			"customer_id":       inv.CustomerID,
-			"subscription_id":   inv.SubscriptionID,
-			"amount_paid_cents": inv.AmountPaidCents,
-			"currency":          inv.Currency,
-			"paid_at":           paidAt.UTC(),
-		}); err != nil {
-			return domain.Invoice{}, false, fmt.Errorf("enqueue invoice.paid: %w", err)
-		}
-	}
-	// payment.succeeded — CARD settlement path only. Enqueued in the SAME tx as
-	// the paid-flip so the only event carrying the Stripe payment_intent_id is
-	// crash-safe rather than fire-and-forget post-commit (a post-commit window
-	// is as wide as whatever runs before the enqueue — see the durability-
-	// tiering block in payment/settlement.go). Reaches here only on the
-	// finalized/uncollectible→paid transition (the already-paid branch returned
-	// above), so it fires exactly once, same as invoice.paid.
-	if cardSettlement && s.outbox != nil {
-		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventPaymentSucceeded, map[string]any{
-			"invoice_id":        inv.ID,
-			"customer_id":       inv.CustomerID,
-			"payment_intent_id": stripePaymentIntentID,
-			"amount_cents":      inv.TotalAmountCents,
-			"currency":          inv.Currency,
-		}); err != nil {
-			return domain.Invoice{}, false, fmt.Errorf("enqueue payment.succeeded: %w", err)
-		}
-	}
-	// ADR-103: same-tx outcome resolution (see upsertChargeAttemptTx).
-	// amount_paid_cents is what this PaymentIntent actually settled.
-	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, stripePaymentIntentID,
-		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", ""); err != nil {
 		return domain.Invoice{}, false, err
 	}
 	// The money email rides THIS transaction (ADR-040 amendment): enqueued
@@ -1414,6 +1317,119 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 		return domain.Invoice{}, false, err
 	}
 	return inv, true, nil
+}
+
+// markPaidLockedTx writes the finalized/uncollectible → paid transition on tx
+// and the effects that ride it: the open checkout claims close, invoice.paid
+// is enqueued, and so is payment.succeeded for a card settlement. The caller
+// holds the invoice row lock on tx and has decided the invoice may be paid.
+// Every paid flip goes through here (ADR-068 choke point), so the effects
+// cannot differ between settle paths.
+func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, cardSettlement bool) (domain.Invoice, error) {
+	now := clock.Now(ctx)
+	var inv domain.Invoice
+	// amount_paid_cents records the CURRENT amount_due (what the PaymentIntent was
+	// created for), NOT Stripe's actual captured amount. Holds because the PI is
+	// created for exactly amount_due and capture is synchronous + full on the
+	// card-on-file path. KNOWN EDGE class: on an ASYNC / SCA charge
+	// (payment_status='processing'), a credit note that reduces amount_due AFTER
+	// PI-create but BEFORE this settle would record amount_paid BELOW the captured
+	// amount, under-reporting the refund cap (creditnote refund is capped at
+	// amount_paid).
+	// PART A + PART B are now CLOSED (ADR-059, 2026-06-22), so amount_due-at-settle
+	// == the captured amount for both the operator and the automated path:
+	//   PART A — creditnote.Service.Create rejects an amount_due-reducing CN while
+	//     the payment is in flight (operator 409).
+	//   PART B — the AUTOMATED clawback (CreateAndIssueAdjustment, ADR-050
+	//     unpaid-source) no longer reduces amount_due on an in-flight source: it
+	//     creates the clawback as a draft and Issue() DEFERS until the source
+	//     settles, so amount_due stays full through this settle.
+	// PART C remains, but is NOT reachable today: recording amount_paid from the
+	// PI's amount_received (vs re-reading amount_due) is only load-bearing under
+	// PARTIAL capture, and Velox is PaymentIntent-only full-capture (no
+	// partial/manual-capture flow). Revisit if partial capture is added.
+	// (2026-06-15 proration audit; Parts A/B shipped #295 + ADR-059.)
+	err := tx.QueryRowContext(ctx, `
+		UPDATE invoices SET
+			status = 'paid',
+			payment_status = 'succeeded',
+			stripe_payment_intent_id = $1,
+			charge_attempt_seq = charge_attempt_seq + 1,
+			paid_at = $2,
+			amount_paid_cents = amount_due_cents,
+			amount_due_cents = 0,
+			auto_charge_pending = FALSE,
+			updated_at = $3
+		WHERE id = $4
+		RETURNING `+invCols,
+		postgres.NullableString(stripePaymentIntentID), paidAt, now, id,
+	).Scan(s.scanInvDest(&inv)...)
+
+	if err == sql.ErrNoRows {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	// Close open checkout claims IN THIS TX (ADR-068): every MarkPaid variant
+	// converges here, so the DB-side close is a single choke point instead of
+	// 9+ hand-stitched post-commit hooks — and it atomically kills the "POST
+	// /checkout returns a stored open session for a just-settled invoice"
+	// race. The Stripe-side expire is the caller's post-commit best-effort;
+	// the session's own ExpiresAt is the backstop.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE checkout_sessions SET status = 'invoice_settled', updated_at = now()
+		WHERE invoice_id = $1 AND status = 'open'
+	`, id); err != nil {
+		return domain.Invoice{}, fmt.Errorf("close checkout claims on settle: %w", err)
+	}
+	// invoice.paid — enqueued in the SAME tx as the finalized/uncollectible →
+	// paid transition. Callers reach here only for an invoice that is not paid
+	// yet (markPaidReportingTransition's already-paid branch returns first;
+	// SettleZeroDueTx admits only an open invoice), so this fires EXACTLY ONCE,
+	// and it covers every settlement path (card via SettleSucceeded,
+	// credits-cover, offline record-payment, dunning recovery, the reconciler's
+	// bare-MarkPaid fallback, and a credit note that leaves nothing due)
+	// without each needing its own dispatch. ADR-040 transactional outbox: if the tx rolls
+	// back, no event; if it commits, the dispatcher delivers.
+	if s.outbox != nil {
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventInvoicePaid, map[string]any{
+			"invoice_id":        inv.ID,
+			"invoice_number":    inv.InvoiceNumber,
+			"customer_id":       inv.CustomerID,
+			"subscription_id":   inv.SubscriptionID,
+			"amount_paid_cents": inv.AmountPaidCents,
+			"currency":          inv.Currency,
+			"paid_at":           paidAt.UTC(),
+		}); err != nil {
+			return domain.Invoice{}, fmt.Errorf("enqueue invoice.paid: %w", err)
+		}
+	}
+	// payment.succeeded — CARD settlement path only. Enqueued in the SAME tx as
+	// the paid-flip so the only event carrying the Stripe payment_intent_id is
+	// crash-safe rather than fire-and-forget post-commit (a post-commit window
+	// is as wide as whatever runs before the enqueue — see the durability-
+	// tiering block in payment/settlement.go). Reaches here only on the
+	// finalized/uncollectible→paid transition, so it fires exactly once, same
+	// as invoice.paid.
+	if cardSettlement && s.outbox != nil {
+		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventPaymentSucceeded, map[string]any{
+			"invoice_id":        inv.ID,
+			"customer_id":       inv.CustomerID,
+			"payment_intent_id": stripePaymentIntentID,
+			"amount_cents":      inv.TotalAmountCents,
+			"currency":          inv.Currency,
+		}); err != nil {
+			return domain.Invoice{}, fmt.Errorf("enqueue payment.succeeded: %w", err)
+		}
+	}
+	// ADR-103: same-tx outcome resolution (see upsertChargeAttemptTx).
+	// amount_paid_cents is what this PaymentIntent actually settled.
+	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, stripePaymentIntentID,
+		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", ""); err != nil {
+		return domain.Invoice{}, err
+	}
+	return inv, nil
 }
 
 // SetPaymentCard stamps the card brand + last4 used to settle an
@@ -1562,6 +1578,78 @@ func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenan
 		return domain.Invoice{}, fmt.Errorf("supersede checkout claims on credit apply: %w", err)
 	}
 	return inv, nil
+}
+
+// SettleZeroDueTx marks an open invoice with nothing left due as paid, on the
+// caller's transaction: the ADR-066 zero-due terminal, with invoice.paid in
+// the same transaction. Stripe does the same for a credit note: one that
+// "reduces the balance of an open invoice to 0" makes the invoice paid. The
+// caller holds the invoice row lock on tx.
+//
+// It settles only a finalized invoice whose payment is pending or failed, with
+// nothing due, tax ok, and no charge hold. Any hold refuses, its own owner's
+// included: dunning's final action issues the cancel's relief note under its
+// hold, and an invoice paid in the middle of that would turn the write-off
+// into a failed final action and the cancel into "payment recovered". A stale
+// hold refuses too (ADR-127): its charge may have taken the money.
+//
+// Not settling is an answer, not an error: it returns the row and false, so
+// the caller's transaction (a credit note's issue) still commits. paid
+// reports whether this call settled the invoice.
+func (s *PostgresStore) SettleZeroDueTx(ctx context.Context, tx *sql.Tx, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error) {
+	var inv domain.Invoice
+	if err := tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, id).
+		Scan(s.scanInvDest(&inv)...); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Invoice{}, false, errs.ErrNotFound
+		}
+		return domain.Invoice{}, false, fmt.Errorf("read invoice for the zero-due settle: %w", err)
+	}
+	if inv.Status != domain.InvoiceFinalized || inv.AmountDueCents != 0 || inv.TaxStatus != domain.InvoiceTaxOK ||
+		(inv.PaymentStatus != domain.PaymentPending && inv.PaymentStatus != domain.PaymentFailed) {
+		return inv, false, nil
+	}
+	// The row lock the caller holds is the one every claim takes before it
+	// writes the hold, so this answer holds until tx commits. Read before
+	// the UPDATE below, which takes no stronger lock than the caller's.
+	hold, _, err := s.ChargeHeldTx(ctx, tx, id)
+	if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	if hold != domain.ChargeHoldNone {
+		return inv, false, nil
+	}
+	paid, err := s.markPaidLockedTx(ctx, tx, tenantID, id, "", paidAt, false)
+	if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	return paid, true, nil
+}
+
+// SettleZeroDue is SettleZeroDueTx in a transaction of its own, which locks
+// the invoice row first. A dunning retry that finds nothing due calls it.
+func (s *PostgresStore) SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	defer postgres.Rollback(tx)
+
+	var one int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id).Scan(&one); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Invoice{}, false, errs.ErrNotFound
+		}
+		return domain.Invoice{}, false, fmt.Errorf("lock invoice for the zero-due settle: %w", err)
+	}
+	inv, paid, err := s.SettleZeroDueTx(ctx, tx, tenantID, id, paidAt)
+	if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Invoice{}, false, err
+	}
+	return inv, paid, nil
 }
 
 // ApplyCredits and UpdateTotals were DELETED (2026-07-21 derived-data
@@ -2490,10 +2578,15 @@ func (s *PostgresStore) ClaimChargeForManualCollect(ctx context.Context, tenantI
 // lost). It closes two races: canceling a customer whose lost charge
 // succeeded, and the auto-charge sweep charging a no-card invoice whose card
 // was just attached while dunning cancels its subscription. No amount
-// condition: a credit note may have reduced the invoice to zero without
-// settling it, and the final action must still be held off any charge.
+// condition: an open $0 invoice must still be held off any charge. A credit
+// note that leaves nothing due marks the invoice paid unless a hold is set
+// (SettleZeroDueTx), so this claim meets an open $0 invoice only when a note
+// was issued under a hold, or when credits covered a retry whose mark-paid
+// failed.
 // The cancel runs under domain.WithChargeHoldOwner so it can still void this
-// invoice when it is a wholly unused prebill.
+// invoice when it is a wholly unused prebill. Its relief credit note, issued
+// under this hold, leaves the invoice open even when nothing is left due:
+// the write-off that follows needs it open.
 func (s *PostgresStore) ClaimChargeHoldForFinalAction(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
 	return s.claimChargeHold(ctx, tenantID, id, `payment_status IN ('pending', 'failed')
 		  AND status = 'finalized'`)

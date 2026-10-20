@@ -127,7 +127,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [085](085-recipe-idempotent-apply.md) | 2026-07-08 | Accepted (amended) | Pricing & usage | Applying a recipe only adds: a first apply creates a new plan; repeats create nothing |
 | [086](086-simulated-data-lifecycle.md) | 2026-07-09 | Accepted (amended) | Test clocks & simulated time | Money sweeps skip simulated invoices; deleting a clock deletes its data except the audit log |
 | [087](087-collect-after-finalize-pipeline.md) | 2026-07-11 | Superseded by ADR-116 | Payments | One method collects payment after every engine finalize; each site keeps its own checks |
-| [088](088-credit-balance-applies-to-all-invoices.md) | 2026-07-11 | Accepted (amended) | Credits | The credit balance applies to every invoice at finalize; the card is charged the remainder |
+| [088](088-credit-balance-applies-to-all-invoices.md) | 2026-07-11 | Accepted (amended) | Credits | The credit balance applies to every invoice when it is collected, and again on each later attempt; the card is charged the remainder |
 | [089](089-retire-audit-fail-closed-response-swap.md) | 2026-07-13 | Accepted | Audit | A failed audit write never changes the API response; it is logged and counted |
 | [090](090-audit-in-tx-emission.md) | 2026-07-13 | Accepted | Audit | Audit rows should commit in the business transaction; most writers still write after commit |
 | [091](091-org-timezone-change-seam-absorb.md) | 2026-07-14 | Accepted | Timezones | Changing the org timezone never bills a full fee for the short period it creates |

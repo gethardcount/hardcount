@@ -683,6 +683,77 @@
     ]
   },
   {
+    "case": "paid/by credit note, after 3 failed retries",
+    "line": {
+      "id": "paid/by credit note, after 3 failed retries",
+      "kind": "invoice.paid",
+      "title": "Invoice paid",
+      "detail": [
+        [
+          {
+            "text": "Nothing left due after credit note "
+          },
+          {
+            "link": {
+              "kind": "credit_note",
+              "id": "vlx_cn_1",
+              "label": "CN-0001"
+            }
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "api_key",
+        "name": "billing-sync"
+      },
+      "tone": "success",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Invoice paid",
+      "meta: Nothing left due after credit note CN-0001 · by API key billing-sync",
+      "tone: success"
+    ]
+  },
+  {
+    "case": "paid/by credit note, credits paid part",
+    "line": {
+      "id": "paid/by credit note, credits paid part",
+      "kind": "invoice.paid",
+      "title": "Invoice paid",
+      "detail": [
+        [
+          {
+            "text": "Nothing left due after credit note "
+          },
+          {
+            "link": {
+              "kind": "credit_note",
+              "id": "vlx_cn_1",
+              "label": "CN-0001"
+            }
+          }
+        ],
+        [
+          {
+            "text": "Paid with credits"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "person",
+        "name": "alice@example.com"
+      },
+      "tone": "success",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Invoice paid",
+      "meta: Nothing left due after credit note CN-0001 · Paid with credits · by alice@example.com",
+      "tone: success"
+    ]
+  },
+  {
     "case": "attempt/failed/auto_charge",
     "line": {
       "id": "attempt/failed/auto_charge",

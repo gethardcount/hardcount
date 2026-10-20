@@ -1461,16 +1461,21 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// reason as the audit row above: pre-fix the handler fired it, so the
 	// tax-retry auto-finalize chain (RetryTax → Finalize) silently never
 	// notified integrators that a tax-deferred invoice finalized.
+	// Same fields as the engine's sender (billing.DispatchInvoiceFinalized).
+	// The collector applies credit after this (ADR-116), so amount_due_cents
+	// is before that credit; credits_applied_cents is what the row already
+	// carries, so the two add up as they do on the invoice (#1281).
 	if s.events != nil {
 		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, map[string]any{
-			"invoice_id":         finalized.ID,
-			"invoice_number":     finalized.InvoiceNumber,
-			"customer_id":        finalized.CustomerID,
-			"status":             string(finalized.Status),
-			"payment_status":     string(finalized.PaymentStatus),
-			"total_amount_cents": finalized.TotalAmountCents,
-			"amount_due_cents":   finalized.AmountDueCents,
-			"currency":           finalized.Currency,
+			"invoice_id":            finalized.ID,
+			"invoice_number":        finalized.InvoiceNumber,
+			"customer_id":           finalized.CustomerID,
+			"status":                string(finalized.Status),
+			"payment_status":        string(finalized.PaymentStatus),
+			"total_amount_cents":    finalized.TotalAmountCents,
+			"amount_due_cents":      finalized.AmountDueCents,
+			"credits_applied_cents": finalized.CreditsAppliedCents,
+			"currency":              finalized.Currency,
 		})
 	}
 	return finalized, nil

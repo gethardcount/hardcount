@@ -2068,7 +2068,30 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		addLifecycle("uncollectible", "invoice.marked_uncollectible", *inv.UncollectibleAt, rankLifecycleTerminal,
 			uncollectibleLine(inv, writtenOff, writtenOffByRecovery, lifecycleActor("invoice.marked_uncollectible")))
 	}
+	// Each issued credit note's audit trail, read once: the paid row and the
+	// credit-note rows both use it.
+	cnAudit := map[string][]domain.AuditEntry{}
+	for _, cn := range cns {
+		if cn.Status == domain.CreditNoteIssued && cn.IssuedAt != nil {
+			cnAudit[cn.ID] = auditRows("credit_note", cn.ID)
+		}
+	}
 	if inv.PaidAt != nil {
+		// A credit note that left nothing due marked the invoice paid when
+		// its issue row says so (ADR-061 amendment 2026-10-19): the paid row
+		// names it, and whoever issued it, instead of the failed retries.
+		var byNote *activity.Part
+		var byNoteActor *activity.Actor
+		for _, cn := range cns {
+			for _, e := range cnAudit[cn.ID] {
+				if e.Action == "credit_note.issued" && e.Metadata["marked_invoice_paid"] == true {
+					link := activity.L(activity.LinkCreditNote, cn.ID, cn.CreditNoteNumber)
+					byNote = &link
+					ec := e
+					byNoteActor = actorFrom(&ec)
+				}
+			}
+		}
 		// "After N retries" when payment recovery was running — NOT on a
 		// bad-debt recovery. A written-off invoice's retries all FAILED —
 		// that is why it was written off — so crediting a later payment to
@@ -2077,15 +2100,19 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		// invoices whose collection was abandoned, and it survives the
 		// recovery.
 		retries := 0
-		if inv.UncollectibleAt == nil {
+		if inv.UncollectibleAt == nil && byNote == nil {
 			retries = maxAttemptCount
 		}
 		var note string
 		if e, ok := lifecycle["invoice.paid"]; ok {
 			note, _ = e.Metadata["note"].(string)
 		}
+		actor := lifecycleActor("invoice.paid")
+		if actor == nil {
+			actor = byNoteActor
+		}
 		i := addLifecycle("paid", "invoice.paid", *inv.PaidAt, rankLifecycleTerminal,
-			paidLine(inv, retries, note, lifecycleActor("invoice.paid")))
+			paidLine(inv, retries, note, actor, byNote))
 		events[i].AttemptCount = retries
 	}
 
@@ -2108,7 +2135,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		// refund's provider reason is on its refund_status_changed row.
 		var issuedBy *activity.Actor
 		var refundFailure string
-		for _, e := range auditRows("credit_note", cn.ID) {
+		for _, e := range cnAudit[cn.ID] {
 			switch {
 			case e.Action == "credit_note.issued" && issuedBy == nil:
 				ec := e

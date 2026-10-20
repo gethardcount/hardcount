@@ -43,6 +43,9 @@ func (h *Handler) revenueChart(w http.ResponseWriter, r *http.Request) {
 		dateFmt = "YYYY-MM"
 	}
 
+	// A bucket's revenue is what paid its invoices, as the overview's
+	// Revenue counts it (sumPaidRevenue): not a waived part.
+	//
 	// Buckets are UTC days/months (handler.go promises UTC). `AT TIME ZONE
 	// 'UTC'` turns the timestamptz into a UTC wall-clock timestamp first, so
 	// neither date_trunc nor to_char reads the session TimeZone. Without
@@ -50,7 +53,7 @@ func (h *Handler) revenueChart(w http.ResponseWriter, r *http.Request) {
 	// day's bucket.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT to_char(date_trunc($1, paid_at AT TIME ZONE 'UTC'), $2) AS date,
-		       COALESCE(SUM(total_amount_cents), 0) AS revenue_cents,
+		       COALESCE(SUM(amount_paid_cents + credits_applied_cents), 0) AS revenue_cents,
 		       COUNT(*) AS invoice_count
 		FROM invoices
 		WHERE status = 'paid' AND currency = $5 AND paid_at >= $3 AND paid_at < $4 AND is_simulated = false

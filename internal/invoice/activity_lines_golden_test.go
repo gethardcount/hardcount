@@ -339,19 +339,26 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	add("uncollectible/recovered later, no amount on record", uncollectibleLine(inv, nil, false, nil))
 	paid := inv
 	paid.AmountPaidCents, paid.StripePaymentIntentID, paid.PaymentCardBrand, paid.PaymentCardLast4 = 4900, "pi_1", "visa", "4242"
-	add("paid/card", paidLine(paid, 0, "", nil))
-	add("paid/card after 1 retry", paidLine(paid, 1, "", nil))
-	add("paid/card after 3 retries", paidLine(paid, 3, "", nil))
+	add("paid/card", paidLine(paid, 0, "", nil, nil))
+	add("paid/card after 1 retry", paidLine(paid, 1, "", nil, nil))
+	add("paid/card after 3 retries", paidLine(paid, 3, "", nil, nil))
 	credits := inv
 	credits.AmountPaidCents, credits.CreditsAppliedCents = 0, 4900
-	add("paid/with credits", paidLine(credits, 0, "", auto))
+	add("paid/with credits", paidLine(credits, 0, "", auto, nil))
 	offline := inv
 	offline.AmountPaidCents, offline.StripePaymentIntentID = 3900, "out_of_band:abc"
-	add("paid/offline with reference", paidLine(offline, 0, "Wire 1042", person))
-	add("paid/offline without reference", paidLine(offline, 0, "", key))
+	add("paid/offline with reference", paidLine(offline, 0, "Wire 1042", person, nil))
+	add("paid/offline without reference", paidLine(offline, 0, "", key, nil))
 	cad := paid
 	cad.Currency, cad.AmountPaidCents = "CAD", 123456789
-	add("paid/CAD money format", paidLine(cad, 0, "", nil))
+	add("paid/CAD money format", paidLine(cad, 0, "", nil, nil))
+	waived := inv
+	waived.AmountPaidCents = 0
+	note := activity.L(activity.LinkCreditNote, "vlx_cn_1", "CN-0001")
+	add("paid/by credit note, after 3 failed retries", paidLine(waived, 3, "", key, &note))
+	partly := credits
+	partly.CreditsAppliedCents = 2000
+	add("paid/by credit note, credits paid part", paidLine(partly, 0, "", person, &note))
 
 	// I-7: every attempt outcome × trigger, every mapped decline code, one
 	// unmapped code, and a wrapped provider text.
