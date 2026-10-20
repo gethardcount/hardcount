@@ -66,7 +66,7 @@ func TestRequestEdge_ClientIP(t *testing.T) {
 			want:       "198.51.100.7",
 		},
 		{
-			name:       "trusted proxy: XFF split over two header lines reads the last line",
+			name:       "trusted proxy: XFF split over two header lines merges every line",
 			trustProxy: "10.0.0.0/8",
 			remoteAddr: "10.0.0.2:443",
 			xff:        []string{"203.0.113.66", "198.51.100.7"},
@@ -170,30 +170,46 @@ func TestRequestEdge_SpanCarriesRouteAndTrustedIP_NotToken(t *testing.T) {
 // A request answered before routing (a CORS preflight) has no route
 // pattern; its span must still not carry the token.
 func TestRequestEdge_UnroutedSpanHasNoToken(t *testing.T) {
-	h, rec, _ := edgeRouter(t, "")
-	req := httptest.NewRequest(http.MethodOptions, "/v1/public/invoices/"+edgeTestToken+"/pdf", nil)
-	req.RemoteAddr = "203.0.113.9:5555"
-	req.Header.Set("X-Forwarded-For", "198.51.100.7")
-	h.ServeHTTP(httptest.NewRecorder(), req)
+	// Every route that carries a capability token in the path. A CORS
+	// preflight is answered before routing, so its span has no route
+	// pattern and relies on loggablePath's prefix redaction.
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/v1/public/invoices/" + edgeTestToken + "/pdf", "/v1/public/invoices/[redacted]/pdf"},
+		{"/v1/public/payment-updates/" + edgeTestToken, "/v1/public/payment-updates/[redacted]"},
+		{"/v1/public/cost-dashboard/" + edgeTestToken, "/v1/public/cost-dashboard/[redacted]"},
+		{"/v1/auth/invite/" + edgeTestToken, "/v1/auth/invite/[redacted]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			h, rec, _ := edgeRouter(t, "")
+			req := httptest.NewRequest(http.MethodOptions, tc.path, nil)
+			req.RemoteAddr = "203.0.113.9:5555"
+			req.Header.Set("X-Forwarded-For", "198.51.100.7")
+			h.ServeHTTP(httptest.NewRecorder(), req)
 
-	spans := rec.Ended()
-	if len(spans) != 1 {
-		t.Fatalf("got %d spans, want 1", len(spans))
-	}
-	s := spans[0]
-	if strings.Contains(s.Name(), edgeTestToken) {
-		t.Errorf("span name carries the path token: %q", s.Name())
-	}
-	attrs := spanAttrs(s)
-	if got, want := attrs["url.path"], "/v1/public/invoices/[redacted]/pdf"; got != want {
-		t.Errorf("url.path = %q, want %q", got, want)
-	}
-	if got, want := attrs["client.address"], "203.0.113.9"; got != want {
-		t.Errorf("client.address = %q, want %q (the TCP peer; no proxy is trusted)", got, want)
-	}
-	for k, v := range attrs {
-		if strings.Contains(v, edgeTestToken) {
-			t.Errorf("attribute %s carries the path token: %q", k, v)
-		}
+			spans := rec.Ended()
+			if len(spans) != 1 {
+				t.Fatalf("got %d spans, want 1", len(spans))
+			}
+			s := spans[0]
+			if strings.Contains(s.Name(), edgeTestToken) {
+				t.Errorf("span name carries the path token: %q", s.Name())
+			}
+			attrs := spanAttrs(s)
+			if got := attrs["url.path"]; got != tc.want {
+				t.Errorf("url.path = %q, want %q", got, tc.want)
+			}
+			if got, want := attrs["client.address"], "203.0.113.9"; got != want {
+				t.Errorf("client.address = %q, want %q (the TCP peer; no proxy is trusted)", got, want)
+			}
+			for k, v := range attrs {
+				if strings.Contains(v, edgeTestToken) {
+					t.Errorf("attribute %s carries the path token: %q", k, v)
+				}
+			}
+		})
 	}
 }

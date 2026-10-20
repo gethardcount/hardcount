@@ -2015,14 +2015,15 @@ func useRequestEdge(r chi.Router, trustProxy string) {
 }
 
 // loggablePath returns the request path with capability tokens removed.
-// The public surfaces carry bearer-equivalent secrets IN the path
-// (/v1/public/invoices/{256-bit token}, /v1/public/payment-updates/
-// {single-use token}) — logging the raw path writes live payment
-// credentials into every log sink. Prefer chi's matched route pattern
-// ("/v1/public/invoices/{token}"); when no pattern matched (404s),
-// redact the segment after any known public token prefix instead —
-// unmatched probes against those prefixes still contain candidate
-// secrets.
+// Four routes carry a bearer-equivalent secret IN the path: hosted
+// invoices, payment updates, the public cost dashboard and the team
+// invite preview — logging the raw path writes live credentials into
+// every log sink. Prefer chi's matched route pattern
+// ("/v1/public/invoices/{token}"); when no pattern matched (a 404, or a
+// CORS preflight answered before routing), redact the segment after any
+// known token prefix instead. Unmatched requests on those prefixes
+// still contain candidate secrets. A new {token} route adds its prefix
+// here.
 func loggablePath(r *http.Request) string {
 	if rctx := chi.RouteContext(r.Context()); rctx != nil {
 		if pat := rctx.RoutePattern(); pat != "" {
@@ -2030,7 +2031,12 @@ func loggablePath(r *http.Request) string {
 		}
 	}
 	path := r.URL.Path
-	for _, prefix := range []string{"/v1/public/invoices/", "/v1/public/payment-updates/"} {
+	for _, prefix := range []string{
+		"/v1/public/invoices/",
+		"/v1/public/payment-updates/",
+		"/v1/public/cost-dashboard/",
+		"/v1/auth/invite/",
+	} {
 		if rest, ok := strings.CutPrefix(path, prefix); ok && rest != "" {
 			// Keep any sub-path (e.g. /pdf, /checkout) after the token.
 			if i := strings.IndexByte(rest, '/'); i >= 0 {

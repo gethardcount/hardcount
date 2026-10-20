@@ -513,7 +513,8 @@ func routeLabel(r *http.Request) string {
 func methodLabel(m string) string {
 	switch m {
 	case http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead,
-		http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace:
+		http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace,
+		"QUERY":
 		return m
 	}
 	return "other"
