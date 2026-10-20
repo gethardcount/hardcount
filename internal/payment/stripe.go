@@ -19,6 +19,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/payment/breaker"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // DunningStarter starts dunning for failed payments.
@@ -115,7 +116,21 @@ type Stripe struct {
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
 	audit              AuditEmitter               // optional; ADR-090 in-tx emission for the checkout-completed PM flip
+	keyHealth          StripeKeyHealth            // optional; marks a refused key on the Settings → Payments card
 }
+
+// StripeKeyHealth records that Stripe refused a tenant's key for one mode, so
+// Settings → Payments shows it, and clears that notice once a charge goes
+// through with the key. Implemented by *tenantstripe.Service; wired via
+// SetKeyHealth in router.go.
+type StripeKeyHealth interface {
+	MarkKeyRejected(ctx context.Context, tenantID string, livemode bool, stripeMessage string) error
+	ClearKeyRejected(ctx context.Context, tenantID string, livemode bool) error
+}
+
+// SetKeyHealth wires the Settings mark for a refused key. Optional: nil
+// leaves only the metric and the log line.
+func (s *Stripe) SetKeyHealth(k StripeKeyHealth) { s.keyHealth = k }
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090).
 type AuditEmitter interface {
@@ -699,8 +714,9 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		result, err = s.client.CreatePaymentIntent(sendCtx, params)
 	}
 	if errors.Is(err, ErrPaymentTransient) {
-		// This request charged nothing (the credentials could not be read, or
-		// Stripe answered 429): no state write, the next tick retries.
+		// This request charged nothing (the credentials could not be read,
+		// Stripe answered 429, or Stripe refused the key): no state write, the
+		// next tick retries.
 		// Classified below it would be an UNKNOWN outcome, parking the invoice
 		// for a reconciler that has no PaymentIntent to find.
 		//
@@ -711,7 +727,25 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		if errors.Is(err, ErrStripeCredentialsUnavailable) {
 			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "stripe credentials unreadable")
 		}
+		// Stripe refused the key, or none is connected: the charge is paused,
+		// not failed, until a person fixes the key. The hold is released,
+		// unlike a 429's. A 401 hides an earlier request only if the key was
+		// revoked in the seconds between stripe-go's send and its resend, and
+		// that request's webhook settles the invoice without the key. Kept,
+		// the hold would block Collect for about an hour after the fix, while
+		// the stale-hold sweep, which cannot ask Stripe without a key, logs
+		// cannot_ask. The error goes back as it is so Collect can say what to
+		// fix; errors.Is still finds ErrPaymentTransient.
+		var ke *StripeKeyError
+		if errors.As(err, &ke) {
+			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "stripe key unusable")
+			s.reportUnusableKey(ctx, tenantID, inv.ID, ke)
+			return domain.Invoice{}, err
+		}
 		return domain.Invoice{}, ErrPaymentTransient
+	}
+	if err == nil {
+		s.clearRejectedKey(ctx, tenantID)
 	}
 	if err != nil {
 		// Categorise the error so ambiguous (5xx/timeout/network) outcomes are
@@ -943,13 +977,61 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 
 // releaseUnsentHold frees the hold of a charge that provably sent nothing to
 // Stripe (the re-check refused, the breaker was open, the credentials could
-// not be read), so the invoice does not wait for the stale-hold sweep. The
+// not be read, the key was refused), so the invoice does not wait for the stale-hold sweep. The
 // store runs the release even after the caller's context has ended. A failed
 // release leaves a stale hold the sweep clears after asking Stripe.
 func (s *Stripe) releaseUnsentHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold, why string) {
 	if err := s.invoices.ReleaseChargeHold(ctx, tenantID, invoiceID, hold); err != nil {
 		slog.WarnContext(ctx, "release charge hold of a charge that sent nothing failed — the invoice waits for the stale-hold sweep",
 			"invoice_id", invoiceID, "reason", why, "error", err)
+	}
+}
+
+// reportUnusableKey tells the operator that charges for this tenant and mode
+// are paused until the Stripe key is fixed: a metric, an ERROR line, and, for
+// a key Stripe refused, the Settings → Payments notice (the same row a failed
+// Connect check writes; reconnecting, or a charge that goes through, clears
+// it). A key that is not connected
+// has no row to mark. A lost mark is written again by the next charge.
+func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID, invoiceID string, ke *StripeKeyError) {
+	livemode := postgres.Livemode(ctx)
+	mw.RecordStripeKeyUnusable(ke.Reason)
+	slog.ErrorContext(ctx, "charge not sent: Stripe refused this tenant's API key, or none is connected for this mode. Charges for this tenant and mode are paused (not failed) until the key is fixed under Settings → Payments",
+		"tenant_id", tenantID, "livemode", livemode, "invoice_id", invoiceID,
+		"reason", ke.Reason, "stripe_message", ke.Message)
+	if ke.Reason != StripeKeyRejected || s.keyHealth == nil {
+		return
+	}
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	msg := ke.Message
+	if msg == "" {
+		msg = "Stripe refused this API key."
+	}
+	if err := s.keyHealth.MarkKeyRejected(markCtx, tenantID, livemode, msg); err != nil {
+		slog.WarnContext(ctx, "could not show the refused Stripe key in Settings; the next charge tries again",
+			"tenant_id", tenantID, "livemode", livemode, "error", err)
+	}
+}
+
+// clearRejectedKey removes the Settings → Payments refused-key notice after
+// Stripe created a PaymentIntent with the stored key, which proves the key
+// works. Without it the notice outlived the fix when the key itself did not
+// change (a restricted key granted the permission in Stripe), or when a
+// charge still running on a rolled key got its 401 after the new key was
+// connected. Only a "rejected" mark is cleared; a row without one matches
+// nothing. A failed clear is logged; the next charge that goes through
+// clears it.
+func (s *Stripe) clearRejectedKey(ctx context.Context, tenantID string) {
+	if s.keyHealth == nil {
+		return
+	}
+	livemode := postgres.Livemode(ctx)
+	clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.keyHealth.ClearKeyRejected(clearCtx, tenantID, livemode); err != nil {
+		slog.WarnContext(ctx, "could not clear the refused Stripe key notice in Settings; the next charge that goes through tries again",
+			"tenant_id", tenantID, "livemode", livemode, "error", err)
 	}
 }
 

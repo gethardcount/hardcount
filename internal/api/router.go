@@ -469,6 +469,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// background-settle paths already resolve via the engine; this closes the
 	// card-success symmetry — #317 follow-up). dunningSvc implements ResolveByInvoice.
 	stripeAdapter.SetDunningResolver(dunningSvc)
+	// A charge Stripe refuses for the key (401/403) shows on the Settings →
+	// Payments card, as a failed Connect check does.
+	stripeAdapter.SetKeyHealth(tenantStripeSvc)
 	// A credit note that leaves a dunned invoice with nothing due marks it
 	// paid; this closes its dunning run too, escalated runs included.
 	creditNoteSvc.SetDunningResolver(dunningSvc)
