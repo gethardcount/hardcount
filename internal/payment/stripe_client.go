@@ -343,6 +343,9 @@ func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
 
 func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params PaymentIntentParams) (PaymentIntentResult, error) {
 	sc, err := c.client(ctx)
+	if errors.Is(err, ErrStripeNotConfigured) {
+		return PaymentIntentResult{}, &StripeKeyError{Reason: StripeKeyNotConfigured}
+	}
 	if err != nil {
 		return PaymentIntentResult{}, err
 	}
@@ -387,6 +390,16 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 			// as an error it would park the invoice at 'unknown' (an
 			// unrecognised type) for a person to resolve.
 			return PaymentIntentResult{}, fmt.Errorf("%w: stripe rate limit: %v", ErrPaymentTransient, errs.Scrub(err.Error()))
+		}
+		// Stripe refused the key itself, before looking at the charge: 401 for
+		// an invalid or rolled key, 403 for a restricted key without
+		// PaymentIntent write access. Both come as invalid_request_error, so
+		// read by type they were a definite failure: the invoice marked
+		// failed, a dunning attempt used, Stripe's sentence in the customer's
+		// email. Keyed on the HTTP status, which is what says "the key".
+		var se *stripe.Error
+		if errors.As(err, &se) && (se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden) {
+			return PaymentIntentResult{}, &StripeKeyError{Reason: StripeKeyRejected, Message: errs.Scrub(se.Msg)}
 		}
 		return PaymentIntentResult{}, classifyStripeError(err)
 	}

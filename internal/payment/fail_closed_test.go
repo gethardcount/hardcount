@@ -32,8 +32,11 @@ func TestStripeClient_CredentialReadErrorIsTransient(t *testing.T) {
 		t.Fatalf("read error: err = %v, want ErrPaymentTransient", err)
 	}
 	c = NewLiveStripeClient(NewStripeClients(credsFetcher{err: errs.ErrNotFound}))
-	if _, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{}); !errors.Is(err, ErrStripeNotConfigured) {
-		t.Fatalf("no credentials: err = %v, want ErrStripeNotConfigured", err)
+	// No credentials is a charge not attempted (G2): a StripeKeyError, not
+	// the ErrStripeNotConfigured PaymentError that counted as a decline.
+	var ke *StripeKeyError
+	if _, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{}); !errors.As(err, &ke) || ke.Reason != StripeKeyNotConfigured {
+		t.Fatalf("no credentials: err = %v, want a not_configured StripeKeyError", err)
 	}
 }
 

@@ -103,6 +103,14 @@ var (
 		[]string{"result"},
 	)
 
+	stripeKeyUnusable = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "velox_stripe_key_unusable_total",
+			Help: "Charges not sent because Stripe refused the tenant's API key (reason=rejected) or no key is connected for the mode (reason=not_configured). Charges are paused, not failed, until the key is fixed.",
+		},
+		[]string{"reason"},
+	)
+
 	webhookDeliveries = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_webhook_deliveries_total",
@@ -417,6 +425,12 @@ func RecordBillingCycleError() {
 // RecordPaymentCharge records a payment charge result ("succeeded" or "failed").
 func RecordPaymentCharge(result string) {
 	paymentCharges.WithLabelValues(result).Inc()
+}
+
+// RecordStripeKeyUnusable counts a charge not sent because the tenant's
+// Stripe key was refused ("rejected") or is not connected ("not_configured").
+func RecordStripeKeyUnusable(reason string) {
+	stripeKeyUnusable.WithLabelValues(reason).Inc()
 }
 
 // RecordWebhookDelivery records a webhook delivery status ("succeeded", "failed", or "pending").
