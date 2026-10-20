@@ -169,7 +169,8 @@ func (s *Store) MarkVerified(ctx context.Context, tenantID string, livemode bool
 // own sentence and the kind of failure (VerifyErrorRejected or
 // VerifyErrorUnavailable). The row remains present — the operator may have a
 // transient Stripe outage, and we don't want to drop credentials they'll
-// still need.
+// still need. A row already holding this error and kind is left alone: a
+// refused key is marked by every charge that meets it, until it is fixed.
 func (s *Store) MarkVerifyFailed(ctx context.Context, tenantID string, livemode bool, errMsg, kind string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -183,9 +184,36 @@ func (s *Store) MarkVerifyFailed(ctx context.Context, tenantID string, livemode 
 		    last_verified_error_kind = $4,
 		    updated_at               = NOW()
 		WHERE tenant_id = $1 AND livemode = $2
+		  AND (last_verified_error, last_verified_error_kind) IS DISTINCT FROM ($3::text, $4::text)
 	`, tenantID, livemode, errMsg, kind)
 	if err != nil {
 		return fmt.Errorf("mark verify failed: %w", err)
+	}
+	return tx.Commit()
+}
+
+// ClearKeyRejected removes a "rejected" mark once a charge has gone through
+// with the stored key: the key works, whatever marked it (a 401 from a charge
+// still running on the old key after a rotation, or a 403 the operator fixed
+// by granting the permission in Stripe, where the key itself is unchanged).
+// Other marks are left alone. A row without the mark matches nothing.
+func (s *Store) ClearKeyRejected(ctx context.Context, tenantID string, livemode bool) error {
+	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE stripe_provider_credentials
+		SET last_verified_error      = NULL,
+		    last_verified_error_kind = NULL,
+		    updated_at               = NOW()
+		WHERE tenant_id = $1 AND livemode = $2
+		  AND last_verified_error_kind = $3
+	`, tenantID, livemode, VerifyErrorRejected)
+	if err != nil {
+		return fmt.Errorf("clear key rejected: %w", err)
 	}
 	return tx.Commit()
 }
