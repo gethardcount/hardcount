@@ -12,6 +12,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
@@ -1112,9 +1113,9 @@ func veloxAttemptStandingTx(ctx context.Context, tx *sql.Tx, invoiceID, pi strin
 		SELECT
 			EXISTS (SELECT 1 FROM invoice_charge_attempts
 				WHERE invoice_id = $1 AND stripe_payment_intent_id = $2
-				  AND trigger_source IN ('auto_charge', 'dunning_retry')),
+				  AND trigger_source IN ('auto_charge', 'charge_now', 'dunning_retry')),
 			(SELECT stripe_payment_intent_id FROM invoice_charge_attempts
-				WHERE invoice_id = $1 AND trigger_source IN ('auto_charge', 'dunning_retry')
+				WHERE invoice_id = $1 AND trigger_source IN ('auto_charge', 'charge_now', 'dunning_retry')
 				ORDER BY created_at DESC, id DESC LIMIT 1)`,
 		invoiceID, pi,
 	).Scan(&mine, &newest)
@@ -4263,10 +4264,12 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 // never disagree, which is what lets the timeline render payments from
 // ONE owner and drop the Stripe-webhook fallback tier.
 //
-// Insert-time identity (trigger_source, sim_effective_at) is preserved by
-// the ON CONFLICT — the chokepoint knows those; a settle does not. A
-// settle for a PaymentIntent Velox never minted (hosted checkout) INSERTS
-// here, and that row is the only record of the attempt.
+// Insert-time identity (trigger_source, sim_effective_at, the actor) is
+// preserved by the ON CONFLICT — the chokepoint knows those; a settle does
+// not. A settle for a PaymentIntent Velox never minted (hosted checkout)
+// INSERTS here, and that row is the only record of the attempt. It records
+// no actor: the report does not know who paid, and its ctx (a webhook, the
+// reconciler) would name the system, which did not.
 //
 // declineCode and paymentMethodID are what the report knows about a decline
 // (#966); an empty value keeps what an earlier writer recorded, so a source
@@ -4315,7 +4318,13 @@ func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID,
 // an 'external' left by a report that arrived first: the charge call made
 // the attempt, so its trigger is the truth. Empty-PI attempts (the PI create
 // itself failed) insert-only; there is no twin to dedup against.
+//
+// The actor (ADR-128 §4) is who asked for the charge, resolved from ctx as
+// the audit log resolves it: the operator or API key behind Charge now, the
+// system for the engine and dunning. It follows trigger_source: kept once
+// written, and filled in on a row a report inserted first, which has none.
 func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt) error {
+	actorType, actorID := audit.ResolveActor(ctx)
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
@@ -4336,19 +4345,19 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 			INSERT INTO invoice_charge_attempts
 				(tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
 				 outcome, provider_reason, amount_cents, occurred_at, sim_effective_at,
-				 decline_code, stripe_payment_method_id)
-			VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8, $9, $10)`,
+				 decline_code, stripe_payment_method_id, actor_type, actor_id)
+			VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 			tenantID, a.InvoiceID, a.Trigger, a.Outcome, a.ProviderReason,
 			a.AmountCents, a.OccurredAt, postgres.NullableTime(a.SimEffectiveAt),
-			a.DeclineCode, a.StripePaymentMethodID,
+			a.DeclineCode, a.StripePaymentMethodID, actorType, actorID,
 		)
 	} else {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO invoice_charge_attempts
 				(tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
 				 outcome, provider_reason, amount_cents, occurred_at, sim_effective_at,
-				 decline_code, stripe_payment_method_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+				 decline_code, stripe_payment_method_id, actor_type, actor_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			ON CONFLICT (tenant_id, stripe_payment_intent_id)
 				WHERE stripe_payment_intent_id <> ''
 			DO UPDATE SET
@@ -4371,10 +4380,16 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 				-- attempt order (veloxAttemptStandingTx) both read it.
 				trigger_source = CASE WHEN invoice_charge_attempts.trigger_source = 'external'
 					THEN EXCLUDED.trigger_source ELSE invoice_charge_attempts.trigger_source END,
+				-- The actor goes with the trigger: a report's row has none.
+				-- Every SET reads the row as it was, so the two CASEs agree.
+				actor_type = CASE WHEN invoice_charge_attempts.trigger_source = 'external'
+					THEN EXCLUDED.actor_type ELSE invoice_charge_attempts.actor_type END,
+				actor_id = CASE WHEN invoice_charge_attempts.trigger_source = 'external'
+					THEN EXCLUDED.actor_id ELSE invoice_charge_attempts.actor_id END,
 				updated_at = now()`,
 			tenantID, a.InvoiceID, a.StripePaymentIntentID, a.Trigger, a.Outcome,
 			a.ProviderReason, a.AmountCents, a.OccurredAt, postgres.NullableTime(a.SimEffectiveAt),
-			a.DeclineCode, a.StripePaymentMethodID,
+			a.DeclineCode, a.StripePaymentMethodID, actorType, actorID,
 		)
 	}
 	if err != nil {
