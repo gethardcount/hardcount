@@ -28,8 +28,11 @@ import (
 //     relief note;
 //   - restore the remainder error in subscription.resolveClawbackPieces →
 //     the item removal answers 500;
-//   - drop the per-invoice cap (netCaps = totalUnused) → the cancel arm
-//     credits more than the invoice total.
+//   - drop the per-invoice cap (netCaps = totalUnused) AND the net→gross
+//     clamp to grossCaps → the cancel arm credits more than the invoice
+//     total. Dropping the cap alone survives here: with one funding invoice
+//     the clamp still holds the credit to its room
+//     (TestSettleUnusedAcrossFunding_HeadroomSpill catches that one).
 
 var reliefCancelAt = lagP0.AddDate(0, 0, 15) // Apr 16: 15 of 30 days unused
 

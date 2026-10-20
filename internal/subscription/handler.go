@@ -2093,6 +2093,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		netCap   int64
 	}
 	caps := make([]fundingCap, 0, len(funding))
+	hasUnpaid := false
 	for _, f := range funding {
 		var grossCap int64
 		// An IN-FLIGHT funding invoice is capped like a PAID one, not like an
@@ -2112,6 +2113,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 			// Unpaid: what is still due plus the customer credits applied to
 			// it — the note returns the credits it displaces (ADR-061).
 			grossCap = f.UnpaidRelievableCents()
+			hasUnpaid = true
 		}
 		if grossCap <= 0 {
 			continue // no room left on this invoice
@@ -2160,15 +2162,22 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		nets, remainder = money.AllocateByWeightCapped(netCredit, weights, netCaps)
 	}
 	if remainder > 0 {
-		// Earlier credit notes left less room than the change owes. Place what
-		// fits and log the rest: on a paid invoice the caps keep its credit
-		// within its total, and what an unpaid one can't relieve was never
-		// paid for. Loud, because it can also mean drift.
+		// Less room left than the change owes. Place what fits and log the
+		// rest, at the same levels as allocateUnusedAcrossFunding. With an
+		// unpaid invoice in the set, the residual is value it can't relieve
+		// beyond what is due plus its applied credits: nothing else was paid
+		// for it, so WARN. All paid: earlier credit notes used the room, and
+		// the caps keep each invoice's credit within its total. ERROR,
+		// because it can also mean drift.
 		ids := make([]string, len(caps))
 		for i := range caps {
 			ids[i] = caps[i].inv.ID
 		}
-		slog.ErrorContext(ctx, "downgrade clawback: funding invoices' remaining room is smaller than the credit; placed what fits",
+		level := slog.LevelError
+		if hasUnpaid {
+			level = slog.LevelWarn
+		}
+		slog.Log(ctx, level, "downgrade clawback: funding invoices' remaining room is smaller than the credit; placed what fits",
 			"subscription_id", sub.ID,
 			"net_cents", netCredit,
 			"residual_cents", remainder,

@@ -72,7 +72,7 @@ One case is not an error: an all-paid funding set with less room left than
 the unused part. Amended 2026-10-20: the allocator places what fits and logs
 the residual at ERROR, and the change proceeds. Before, it returned
 `errHeadroomExhausted` and the change proceeded with no relief at all. A set
-already fully credited still gets none (ADR-061, amendment 2026-10-19).
+already fully credited still gets none (ADR-061, decision 2026-10-20).
 
 The result is a `domain.Relief` (draft ids, voided invoices, and the balance
 credit for the timeline). After commit, `FinishRelief` issues the drafts and
