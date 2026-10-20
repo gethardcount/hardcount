@@ -409,8 +409,12 @@ func TestStaleHold_CrashAfterStripeCharged_NoSecondPayment(t *testing.T) {
 }
 
 // 2. The caller's deadline ends while Stripe is still working (a dunning
-// retry's 15 s, auto-charge's 30 s, a Collect request whose browser went
-// away). The invoice is neither failed nor parked; the hold stays, nothing
+// retry's 15 s, auto-charge's 30 s), or the caller is cancelled (a Collect
+// request whose browser went away). A deadline is a call that timed out:
+// Stripe was slow, as in an incident, so the attempt is saved as parked even
+// though the caller's context is over, and gets Stripe's 24 hours when Stripe
+// shows nothing (ADR-127 amendment 2026-10-20). A cancellation is Velox
+// interrupting itself: nothing is saved. Either way the hold stays, nothing
 // charges again, and the sweep records the payment.
 func TestStaleHold_CallerDeadlineEndsDuringTheCall(t *testing.T) {
 	for _, tc := range []struct {
@@ -442,9 +446,19 @@ func TestStaleHold_CallerDeadlineEndsDuringTheCall(t *testing.T) {
 			}
 
 			got := r.get(inv.ID)
-			if got.PaymentStatus != domain.PaymentPending || got.StripePaymentIntentID != "" || got.ChargeAttemptSeq != inv.ChargeAttemptSeq {
-				t.Errorf("after the timeout: %s with PI %q seq %d, want pending, none, %d: no stamp and no park",
-					got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, inv.ChargeAttemptSeq)
+			if tc.cancel {
+				if got.PaymentStatus != domain.PaymentPending || got.StripePaymentIntentID != "" || got.ChargeAttemptSeq != inv.ChargeAttemptSeq {
+					t.Errorf("after the cancellation: %s with PI %q seq %d, want pending, none, %d: nothing saved",
+						got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, inv.ChargeAttemptSeq)
+				}
+			} else {
+				if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "" || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 {
+					t.Errorf("after the timeout: %s with PI %q seq %d, want parked: unknown, none, %d (saved after the caller's deadline)",
+						got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, inv.ChargeAttemptSeq+1)
+				}
+				if n := r.attempts(inv.ID, domain.ChargeAttemptUnknown); n != 1 {
+					t.Errorf("attempt rows with an unknown outcome = %d, want 1", n)
+				}
 			}
 			if r.hold(inv.ID) == nil {
 				t.Fatal("the unclear charge released its hold")
@@ -1284,29 +1298,4 @@ func TestStaleHold_ProcessingTheInvoiceDoesNotFollow_KeptUntilItEnds(t *testing.
 			t.Error("hold kept although the invoice follows its processing payment (the processing sweep and the webhook do)")
 		}
 	})
-}
-
-// 20. A parked invoice (an unclear answer that named no PaymentIntent) with a
-// stale hold whose check cannot run, here because the Stripe customer is gone,
-// is still searched by ADR-108 in the same run. The stale check stamped
-// provider_synced_at, the parked search's rotation key, on every tick, so the
-// search never saw the invoice, though Search by velox_invoice_id finds the
-// payment without the customer.
-func TestStaleHold_ParkedInvoice_FailedCheckDoesNotHideItFromTheSearch(t *testing.T) {
-	r := newSHRig(t, "SH Parked Search")
-	inv := r.seed("INV-SH-PARKED")
-	charged := r.crashAfterCharge(inv, autoCharge, "")
-	r.exec(`UPDATE invoices SET payment_status = 'unknown', updated_at = now() - interval '2 hours' WHERE id = $1`, inv.ID)
-	r.fake.setCustomer(stripeCustomerOf(inv), "missing")
-	r.ageHold(inv.ID, staleSweepAge)
-
-	_ = r.run()
-	if n := r.fake.searchCount(); n != 1 {
-		t.Errorf("parked searches = %d, want 1", n)
-	}
-	got := r.get(inv.ID)
-	if got.Status != domain.InvoicePaid || got.StripePaymentIntentID != charged.id {
-		t.Fatalf("after one run: %s/%s with PI %q, want paid with %q (found by the parked search)",
-			got.Status, got.PaymentStatus, got.StripePaymentIntentID, charged.id)
-	}
 }

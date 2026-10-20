@@ -7,8 +7,8 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// TestReconcile_PanickingRow_RotatesAndTheRestGoesOn: the unknown, processing
-// and parked sweeps list the least recently checked rows first, and stamp a
+// TestReconcile_PanickingRow_RotatesAndTheRestGoesOn: the unknown and
+// processing sweeps list the least recently checked rows first, and stamp a
 // row only once its Stripe read is handled. A row whose check panicked (the
 // real trigger: a nil dereference on one unusual row, as in flexprice #1615)
 // was never stamped, so it came back first on every tick, and the panic ended
@@ -25,9 +25,9 @@ import (
 //   - E:  'unknown'; Stripe has no such PaymentIntent, a read error.
 //   - U2: 'unknown'; its PaymentIntent succeeded.
 //   - P:  'processing'; its PaymentIntent succeeded and no webhook came.
-//   - Q1: parked (no PaymentIntent id), the oldest, so first; its search
-//     panics.
-//   - Q2: parked; the search finds a PaymentIntent that succeeded.
+//
+// A parked invoice (no PaymentIntent id) is checked by the stale-hold sweep,
+// whose panicking row is pinned by TestStaleHold_PanickingCheck_RestOfTheRunGoesOn.
 func TestReconcile_PanickingRow_RotatesAndTheRestGoesOn(t *testing.T) {
 	r := newSHRig(t, "Reconcile Panicking Row")
 	logs := captureLogs(t)
@@ -56,14 +56,6 @@ func TestReconcile_PanickingRow_RotatesAndTheRestGoesOn(t *testing.T) {
 	pPI := succeededPI(p)
 	set(p, "processing", pPI, "2 hours")
 
-	q1 := r.seed("INV-RP-Q1")
-	set(q1, "unknown", "", "3 hours")
-	r.fake.panicOnRead(q1.ID)
-
-	q2 := r.seed("INV-RP-Q2")
-	q2PI := succeededPI(q2)
-	set(q2, "unknown", "", "2 hours")
-
 	recovered := func() (p any) {
 		defer func() { p = recover() }()
 		_ = r.run()
@@ -78,16 +70,13 @@ func TestReconcile_PanickingRow_RotatesAndTheRestGoesOn(t *testing.T) {
 	}{
 		{"U2 (unknown, after the panicking row)", u2.ID, u2PI},
 		{"P (processing, a later sweep)", p.ID, pPI},
-		{"Q2 (parked, after the panicking row)", q2.ID, q2PI},
 	} {
 		if got := r.get(c.id); got.Status != domain.InvoicePaid || got.StripePaymentIntentID != c.pi {
 			t.Errorf("%s: %s/%s with PI %q, want paid with %q", c.name, got.Status, got.PaymentStatus, got.StripePaymentIntentID, c.pi)
 		}
 	}
-	for _, c := range []struct{ name, id string }{{"U1", u1.ID}, {"Q1", q1.ID}} {
-		if got := r.get(c.id); got.ProviderSyncedAt == nil {
-			t.Errorf("%s: the row whose check panicked was not stamped, so it stays first in the list on every tick", c.name)
-		}
+	if got := r.get(u1.ID); got.ProviderSyncedAt == nil {
+		t.Error("U1: the row whose check panicked was not stamped, so it stays first in the list on every tick")
 	}
 
 	logged := false

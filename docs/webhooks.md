@@ -274,7 +274,7 @@ caused them, so a crash cannot drop them (rule 3).
 | Event | Sent when |
 |---|---|
 | `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized. `amount_due_cents` is before credit ([more](#invoicefinalized-shows-the-amount-before-credit)) |
-| `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment *(always sent)* |
+| `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment, or a credit note left nothing due. `amount_paid_cents` is what was paid at that moment, 0 when credit or a credit note covered the rest *(always sent)* |
 | `invoice.payment_recorded` | Someone recorded a payment made outside Velox, such as a bank transfer or cheque |
 | `invoice.marked_uncollectible` | An invoice was written off as bad debt |
 | `invoice.voided` | An invoice was voided |

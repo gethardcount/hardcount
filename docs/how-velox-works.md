@@ -92,7 +92,9 @@ flowchart LR
 A test clock is a pretend clock for test customers. Move it forward a
 month, and steps 4 to 6 happen in seconds. The [quick start](quick-start.md)
 does this for a demo customer, up to the invoice: it connects no Stripe
-account, so nothing is charged.
+account, so nothing is charged. To rehearse a dunning policy that pauses
+or cancels, move the clock in two steps instead, as the
+[glossary's catch-up entry](glossary.md#testing-with-simulated-time) says.
 
 ## Related
 

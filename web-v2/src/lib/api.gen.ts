@@ -4005,7 +4005,9 @@ export interface paths {
         /**
          * Issue a draft credit note
          * @description Moves a `draft` credit note to `issued` and applies it.
-         *     - Unpaid invoice: the invoice's amount due goes down.
+         *     - Unpaid invoice: the invoice's amount due goes down. If nothing is
+         *       left due, the invoice is marked `paid` and `invoice.paid` is sent,
+         *       unless a charge is running on it.
          *     - Paid invoice: the refund part is sent to Stripe, and the credit
          *       part is added to the customer's credit balance.
          *
@@ -5569,7 +5571,12 @@ export interface paths {
          *     leaves `advancing`. Concurrent advances 409 while catchup runs.
          *     Catchup failures park the clock in `internal_failure` — resume
          *     it with `POST /v1/test-clocks/{id}/retry-advance` (deletion is
-         *     not required). ADR-018.
+         *     not required). ADR-018. Catchup bills every skipped period
+         *     before it runs payment retries and dunning, so when a dunning
+         *     policy cancels or pauses a subscription, advance to the time of
+         *     the invoice's last retry first, then to the next billing date.
+         *     The cancel or pause is dated at the advance target, and one
+         *     longer advance bills a period a real clock would not (#1276).
          */
         post: {
             parameters: {
@@ -5614,7 +5621,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description New frozen_time is not strictly after the current */
+                /** @description New frozen_time is not strictly after the current frozen_time, or is more than one year after it */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -7108,8 +7115,13 @@ export interface components {
         /**
          * @description Payment-attempt status. `unknown` marks a Stripe charge attempt that
          *     returned an ambiguous error (5xx, timeout, connection reset) where
-         *     we cannot tell whether Stripe processed the charge — a reconciler
-         *     resolves these by querying Stripe after a cool-off window.
+         *     we cannot tell whether Stripe processed the charge. With a payment
+         *     intent recorded, Velox asks Stripe for it after a short wait. With
+         *     none (a parked invoice), Velox lists the customer's payments at
+         *     Stripe every billing tick: it records a payment for the invoice that
+         *     appears, and if none has appeared 24 hours after the attempt the
+         *     invoice goes back to `pending` (`failed` after a dunning retry) and
+         *     is charged again as usual.
          * @enum {string}
          */
         InvoicePaymentStatus: "pending" | "processing" | "succeeded" | "failed" | "unknown";
@@ -7171,8 +7183,9 @@ export interface components {
          *     refusing to record it would only make the books wrong too.
          *
          *     A written-off invoice is settled by RECORDING writers only — an
-         *     offline payment, or the provider-search reconciler adopting a charge
-         *     that turns out to have succeeded (ADR-108). Nothing initiates a card
+         *     offline payment, or Velox recording a card charge that Stripe shows
+         *     succeeded (its webhook, or the check of an unresolved charge).
+         *     Nothing initiates a card
          *     charge against one (ADR-113): recovery of a returned customer runs on
          *     normal rails via a fresh recovery invoice.
          *
@@ -7199,9 +7212,11 @@ export interface components {
          *     and audit logs key off the code. `reconcile_payment` opens the
          *     payment in Stripe; it is offered on `payment_anomaly`, where the
          *     refund or correction is made there. `mark_uncollectible` opens
-         *     the write-off and is offered only when a payment's outcome can
-         *     never be identified (payment status unknown with no payment
-         *     intent recorded). `void_invoice` is offered only
+         *     the write-off and is offered only on a parked invoice (payment
+         *     status unknown with no payment intent recorded), for a customer
+         *     who paid another way: Velox records a payment that Stripe shows,
+         *     and charges the invoice again if none appears within 24 hours.
+         *     Dashboards render it as a secondary action. `void_invoice` is offered only
          *     on prepaid-commit exposure, and only while some of the granted
          *     credit is still unspent: voiding retires the unspent balance
          *     (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -7484,7 +7499,10 @@ export interface components {
             /**
              * @description Stripe's PaymentIntent status the last time Velox checked it,
              *     word for word. For information only: `payment_status` is the
-             *     invoice's payment state. Absent until Velox has checked.
+             *     invoice's payment state. Absent until Velox has checked. An
+             *     invoice checked by the Stripe Search sweep of releases before
+             *     this one may still show `search_not_found`,
+             *     `search_terminal_only` or `search_error`.
              */
             provider_payment_status?: string;
             /**
@@ -8322,7 +8340,7 @@ export interface components {
             date: string;
             /**
              * Format: int64
-             * @description Sum of invoice totals paid in the bucket.
+             * @description What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
              */
             revenue_cents: number;
             invoice_count: number;
@@ -8375,12 +8393,12 @@ export interface components {
             arr_prev: number;
             /**
              * Format: int64
-             * @description Total of invoices paid in the window.
+             * @description What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
              */
             revenue: number;
             /**
              * Format: int64
-             * @description Total of invoices paid in the previous window.
+             * @description `revenue` for the previous window.
              */
             revenue_prev: number;
             /**
@@ -13594,8 +13612,8 @@ export interface operations {
              * @description The invoice cannot be voided in its current state. Codes:
              *     `invalid_state` (already paid or already voided),
              *     `payment_in_flight` (a charge is still running), or
-             *     `payment_unidentifiable` (a charge's outcome could not be
-             *     identified; write the invoice off instead).
+             *     `payment_unidentifiable` (Stripe's answer to a charge was unclear
+             *     and named no payment; Velox finds out from Stripe within a day).
              */
             409: {
                 headers: {
@@ -13878,8 +13896,10 @@ export interface operations {
              * @description An earlier charge must be resolved first. Code
              *     `payment_in_flight`: a charge on the invoice is running, or its
              *     result was lost and Velox is confirming it with Stripe (within
-             *     about an hour). Code `payment_unidentifiable`: the earlier
-             *     charge's outcome is unknown and could not be identified.
+             *     about an hour). Code `payment_unidentifiable`: Stripe's answer
+             *     to the earlier charge was unclear and named no payment; Velox
+             *     records a payment that appears, and the invoice is charged again
+             *     as usual if none has appeared 24 hours after that charge.
              */
             409: {
                 headers: {

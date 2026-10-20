@@ -69,6 +69,33 @@ const (
 	StaleChargeHoldWait = 10 * time.Minute
 )
 
+// ParkedNothingWait is how long after its hold a parked charge (Invoice.Parked:
+// Stripe's answer was unclear and named no PaymentIntent) must be before
+// "Stripe shows nothing" puts the invoice back where a charge picks it up. A
+// payment Stripe shows is acted on at the first check; only absence waits.
+//
+// A park's answer is a 500, a 409, a network error or a timed-out call: in
+// each, Stripe received the request or may have. Stripe's advanced error
+// handling page (docs.stripe.com/error-low-level, fetched 2026-10-19): "During
+// incident recovery, Stripe attempts to reconcile failed operations and send
+// webhook events for any objects created during reconciliation", and "Limit
+// retries of an unresolved operation to the first 24 hours after the original
+// request, using the same key and parameters. If the outcome is still unknown
+// after that window, don't retry with either the old key or a new one.
+// Retrieve the relevant object, inspect the request in the Dashboard and use
+// webhook events to reconcile the outcome. If you can't establish what
+// happened, contact Stripe support before repeating the operation." Velox
+// retrieves: the stale-hold sweep lists the customer's PaymentIntents. When
+// that list still shows none for the invoice 24 hours after the attempt, the
+// invoice is charged again under a new key: a deliberate departure from the
+// last sentence (Sagar, 2026-10-19), whose cost is a payment Stripe creates
+// even later being flagged as payment.duplicate_charge (ADR-127, R10).
+//
+// The hold is at most ChargeHoldTTL after the attempt began, and the attempt
+// ends before the hold does (ChargeSendBudget), so "hold older than this" means
+// at least 24 hours after the attempt.
+const ParkedNothingWait = 24 * time.Hour
+
 // StaleChargeHold is one row the stale-hold sweep checks: the invoice, the
 // hold value and charge counter it read (the sweep's clear compares both), and
 // the customer's Stripe customer id (empty when the customer has none, which
@@ -77,6 +104,10 @@ type StaleChargeHold struct {
 	Invoice          Invoice
 	Hold             time.Time
 	StripeCustomerID string
+	// PastParkedWait: the hold ended more than ParkedNothingWait ago, read on
+	// the database clock the hold was written with. It decides only what
+	// "Stripe shows nothing" does to a parked invoice.
+	PastParkedWait bool
 }
 
 type chargeHoldOwnerKey struct{}

@@ -18,14 +18,16 @@ then issues it. This page is for drafts that pile up. Back to the
 
 ## Check
 
-Does this gauge move together with `velox_parked_invoices`? If so, the
-drafts are waiting on parked invoices.
+Is `velox_parked_invoices{disposition="open"}` above zero? It counts the
+parked invoices Velox has not ended on schedule, and their drafts wait on
+them.
 
 ## Fix
 
-Only if the two gauges move together: resolve those parked invoices by
-writing them off (see [Parked invoices](parked-invoices.md)). Otherwise the
-drafts are waiting on source payments still in flight, and need no action.
+If it is above zero, follow [Parked invoices](parked-invoices.md); each
+draft is released when its park ends. Otherwise the drafts are waiting on
+source payments still in flight, including parks inside their 24 hours,
+and need no action.
 
 ## Verify
 

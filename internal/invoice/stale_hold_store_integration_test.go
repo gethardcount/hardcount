@@ -68,3 +68,47 @@ func TestListStaleChargeHolds_OpenInvoicesFirst(t *testing.T) {
 		t.Fatalf("first stale hold = %+v, want the open invoice %s ahead of the paid one's older hold", first, open.ID)
 	}
 }
+
+// The stale-hold sweep's stamp covers a parked invoice ('unknown' with no
+// PaymentIntent, REC-5). The sweep is the only one that checks a park now
+// (the Search sweep that used the column as its cool-off is gone), and a
+// park it could not stamp came back first on every tick, ahead of every
+// other stale hold. An 'unknown' invoice that names its PaymentIntent is
+// still the unknown sweep's to stamp: the column is that sweep's rotation key.
+func TestMarkStaleHoldChecked_StampsAParkNotAnUnknownThatNamesItsPayment(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Stale Hold Stamp Park")
+	store := invoice.NewPostgresStore(db)
+	parked := seedClaimableInvoice(t, db, ctx, tenantID, "INV-STAMP-PARKED")
+	named := seedClaimableInvoice(t, db, ctx, tenantID, "INV-STAMP-NAMED")
+	execBypassStamp(t, db, `UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = NULL WHERE id = $1`, parked.ID)
+	execBypassStamp(t, db, `UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = 'pi_named' WHERE id = $1`, named.ID)
+
+	for _, id := range []string{parked.ID, named.ID} {
+		if err := store.MarkStaleHoldChecked(ctx, tenantID, id); err != nil {
+			t.Fatalf("stamp %s: %v", id, err)
+		}
+	}
+	if got, err := store.Get(ctx, tenantID, parked.ID); err != nil || got.ProviderSyncedAt == nil {
+		t.Errorf("parked invoice: provider_synced_at %v (err %v), want stamped so it rotates", got.ProviderSyncedAt, err)
+	}
+	if got, err := store.Get(ctx, tenantID, named.ID); err != nil || got.ProviderSyncedAt != nil {
+		t.Errorf("unknown invoice with a PaymentIntent: provider_synced_at %v (err %v), want untouched (the unknown sweep's key)", got.ProviderSyncedAt, err)
+	}
+}
+
+func execBypassStamp(t *testing.T, db *postgres.DB, q string, args ...any) {
+	t.Helper()
+	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.Exec(q, args...); err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}

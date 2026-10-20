@@ -714,11 +714,11 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The setup-link email tells the CUSTOMER "add a payment method and we'll
-	// collect it automatically". No charge path will ever collect an invoice
-	// whose payment is in flight — and for a parked one (ADR-107) that is
-	// permanent. Sending it would be an outbound promise the engine cannot
-	// keep, triggerable by an operator button (found by the honesty sweep,
-	// 2026-07-31).
+	// collect it automatically". No charge path collects an invoice whose
+	// payment is in flight — for a parked one (ADR-107), not until Stripe has
+	// shown no payment for a day. Sending it would be an outbound promise the
+	// engine cannot keep yet, triggerable by an operator button (found by the
+	// honesty sweep, 2026-07-31).
 	if b := domain.PaymentBlocksAction(inv, domain.ActionResendSetupLink); b.Blocked {
 		respond.ConflictCoded(w, r, "", b.Code, b.Message)
 		return
@@ -1060,7 +1060,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// and its three refusal gates existed only because the charged object
 	// carried stale state. Recovery of a returned customer runs on NORMAL
 	// rails — a fresh recovery invoice — and a written-off invoice is settled
-	// by RECORDING writers only (offline payment, ADR-108 adoption).
+	// by RECORDING writers only (offline payment, the stale-hold sweep's settle).
 	if inv.Status != domain.InvoiceFinalized {
 		respond.Validation(w, r, "can only collect payment on a finalized invoice — for a written-off debt, issue a recovery invoice or record an offline payment")
 		return
@@ -2039,7 +2039,30 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		addLifecycle("uncollectible", "invoice.marked_uncollectible", *inv.UncollectibleAt, rankLifecycleTerminal,
 			uncollectibleLine(inv, writtenOff, writtenOffByRecovery, lifecycleActor("invoice.marked_uncollectible")))
 	}
+	// Each issued credit note's audit trail, read once: the paid row and the
+	// credit-note rows both use it.
+	cnAudit := map[string][]domain.AuditEntry{}
+	for _, cn := range cns {
+		if cn.Status == domain.CreditNoteIssued && cn.IssuedAt != nil {
+			cnAudit[cn.ID] = auditRows("credit_note", cn.ID)
+		}
+	}
 	if inv.PaidAt != nil {
+		// A credit note that left nothing due marked the invoice paid when
+		// its issue row says so (ADR-061 amendment 2026-10-19): the paid row
+		// names it, and whoever issued it, instead of the failed retries.
+		var byNote *activity.Part
+		var byNoteActor *activity.Actor
+		for _, cn := range cns {
+			for _, e := range cnAudit[cn.ID] {
+				if e.Action == "credit_note.issued" && e.Metadata["marked_invoice_paid"] == true {
+					link := activity.L(activity.LinkCreditNote, cn.ID, cn.CreditNoteNumber)
+					byNote = &link
+					ec := e
+					byNoteActor = actorFrom(&ec)
+				}
+			}
+		}
 		// "After N retries" when payment recovery was running — NOT on a
 		// bad-debt recovery. A written-off invoice's retries all FAILED —
 		// that is why it was written off — so crediting a later payment to
@@ -2048,15 +2071,19 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		// invoices whose collection was abandoned, and it survives the
 		// recovery.
 		retries := 0
-		if inv.UncollectibleAt == nil {
+		if inv.UncollectibleAt == nil && byNote == nil {
 			retries = maxAttemptCount
 		}
 		var note string
 		if e, ok := lifecycle["invoice.paid"]; ok {
 			note, _ = e.Metadata["note"].(string)
 		}
+		actor := lifecycleActor("invoice.paid")
+		if actor == nil {
+			actor = byNoteActor
+		}
 		i := addLifecycle("paid", "invoice.paid", *inv.PaidAt, rankLifecycleTerminal,
-			paidLine(inv, retries, note, lifecycleActor("invoice.paid")))
+			paidLine(inv, retries, note, actor, byNote))
 		events[i].AttemptCount = retries
 	}
 
@@ -2079,7 +2106,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		// refund's provider reason is on its refund_status_changed row.
 		var issuedBy *activity.Actor
 		var refundFailure string
-		for _, e := range auditRows("credit_note", cn.ID) {
+		for _, e := range cnAudit[cn.ID] {
 			switch {
 			case e.Action == "credit_note.issued" && issuedBy == nil:
 				ec := e

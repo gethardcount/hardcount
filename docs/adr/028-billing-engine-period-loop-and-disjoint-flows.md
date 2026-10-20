@@ -232,7 +232,7 @@ deliverable, not punt them to follow-up work.
   (post-ADR-028 single call) and verifies the sub catches up past the
   target frozen_time.
 
-## Amendment 2026-05-04 — per-advance window cap (Stripe parity)
+## Amendment 2026-05-04 — per-advance window cap ("Stripe parity" corrected 2026-10-20)
 
 A single `Advance` call may shift `frozen_time` by **at most 1 year**.
 Larger ranges are chunked into successive operator clicks. Enforced in
@@ -240,7 +240,8 @@ Larger ranges are chunked into successive operator clicks. Enforced in
 Advance dialog gates the submit button on the same window so the
 operator sees the constraint before round-tripping.
 
-**Why a cap (Stripe parity):**
+**Why a cap (Stripe parity):** (corrected 2026-10-20: not Stripe
+parity; see the correction below)
 - Predictable per-click resource use — a single advance can't trigger a
   multi-decade catchup that overruns the 10-min worker timeout and
   leaves the clock in `internal_failure` for the operator to clean up.
@@ -255,15 +256,30 @@ operator sees the constraint before round-tripping.
   advance to be useful — a sub-monthly cap would force an annual sub
   through 12 advances just to hit one renewal.
 - Stripe's documented test-clock cap is also "≤ 1 year per advance".
+  (Corrected 2026-10-20: Stripe never says this; see the correction
+  below.)
 
 **Failure mode is a typed error**:
-`errs.Invalid("frozen_time", "advance cannot exceed 1 year per call — chunk longer ranges into successive advances (Stripe parity)")`.
+`errs.Invalid("frozen_time", "advance cannot exceed 1 year per call — chunk longer ranges into successive advances (Stripe parity)")`
+(since 2026-10-20 without "(Stripe parity)").
 The dialog renders the same guidance inline and points at the maximum
 allowed target so the operator can fix the picker without guessing.
 
 `time.AddDate(1, 0, 0)` is leap-year correct (`Feb 29 → Feb 28/29` per
 year alignment) — using a fixed nanosecond duration would drift on
 leap years.
+
+**Correction (2026-10-20):** the cap is not Stripe parity. Stripe's
+test-clock guide says: "Advance time in intervals of up to two. The
+length of the interval is based on the shortest service period
+associated with the subscription … if you have a monthly subscription,
+you can only advance up to two months at a time. If you haven't set any
+subscriptions or subscription schedules, you can advance up to two years
+from the initial frozen time"
+([API and advanced usage](https://docs.stripe.com/billing/testing/test-clocks/api-advanced-usage),
+read 2026-10-20). The 1-year cap stays as Velox's own, for the three
+reasons under "Why a cap". The error no longer ends with
+"(Stripe parity)", and the code comments say Velox's own cap.
 
 ## Compatibility
 

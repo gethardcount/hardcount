@@ -217,6 +217,18 @@ variable into the JSON for you.
 
    **You see:** `ready`
 
+   **Testing failed payments later?** When the clock moves, Velox bills
+   every skipped period first, and only then retries failed payments.
+   (Retrying an unpaid invoice on a schedule is called dunning.) If your
+   dunning policy cancels or pauses the subscription when the retries run
+   out, move the clock in two steps. First move it to the time of the
+   invoice's last retry. That is the time the payment failed, plus the
+   policy's grace days and the gaps between its retries. Then move it to
+   the next billing date. Velox dates the cancel or pause at the time you
+   move the clock to, so a move past the last retry dates it late. One
+   longer move also bills a period a real clock would not
+   ([#1276](https://github.com/getvelox/velox/issues/1276)).
+
 7. **Read the invoice.**
 
    ```bash
