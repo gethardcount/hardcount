@@ -187,16 +187,19 @@ func TestChargeNowAttempt_CountsAsVeloxsOwn(t *testing.T) {
 		t.Run(string(trigger), func(t *testing.T) {
 			r.t = t
 			inv := r.invoice()
-			r.record(operator, inv, "pi_old", trigger, domain.ChargeAttemptPending)
-			r.record(operator, inv, "pi_new", trigger, domain.ChargeAttemptPending)
+			// A PaymentIntent id is unique per tenant, so each subtest's are
+			// its own.
+			oldPI, newPI := "pi_old_"+string(trigger), "pi_new_"+string(trigger)
+			r.record(operator, inv, oldPI, trigger, domain.ChargeAttemptPending)
+			r.record(operator, inv, newPI, trigger, domain.ChargeAttemptPending)
 			_, res, err := r.store.MarkPaymentFailedReportingTransition(r.ctx, r.tenantID, inv, domain.PaymentFailureReport{
-				PaymentIntentID: "pi_old", Message: "Your card was declined.",
+				PaymentIntentID: oldPI, Message: "Your card was declined.",
 			}, nil)
 			if err != nil {
 				t.Fatalf("report: %v", err)
 			}
 			if res.Recorded {
-				t.Errorf("a late decline for pi_old moved the invoice; the newer %s attempt pi_new supersedes it", trigger)
+				t.Errorf("a late decline for %s moved the invoice; the newer %s attempt %s supersedes it", oldPI, trigger, newPI)
 			}
 		})
 	}
