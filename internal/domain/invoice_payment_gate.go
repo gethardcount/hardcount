@@ -62,10 +62,11 @@ type PaymentBlock struct {
 //   - NOT in flight — nothing here blocks; the caller's own status rules
 //     (paid/voided/draft) still apply and are deliberately NOT folded in, since
 //     those genuinely differ per action.
-//   - PARKED (ADR-107: 'unknown' with no PaymentIntent id) — the attempt could
-//     not be identified with the provider and never will be. Mark-uncollectible
-//     is ALLOWED here and is the only exit; everything else is refused and told
-//     to use it.
+//   - PARKED (ADR-107: 'unknown' with no PaymentIntent id) — Stripe's answer
+//     was unclear and named no payment. Velox finds out from Stripe's list of
+//     the customer's payments within a day (ADR-127 amendment 2026-10-20).
+//     Mark-uncollectible is ALLOWED here, for a customer who paid another way;
+//     everything else is refused and says what Velox does next.
 //   - IN FLIGHT with a known PaymentIntent — genuinely resolving, so waiting is
 //     the correct advice.
 //
@@ -113,13 +114,15 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 		return PaymentBlock{}
 	}
 
-	// Parked: the outcome is unknowable, not merely unknown-yet.
-	if inv.PaymentStatus == PaymentUnknown && inv.StripePaymentIntentID == "" {
+	// Parked: Stripe's answer was unclear and named no payment. Velox finds
+	// out from Stripe's list of the customer's payments, within a day.
+	if inv.Parked() {
 		if action == ActionMarkUncollectible {
-			// The deliberate carve-out. Writing it off moves no money, and if
-			// the charge did succeed the provider webhook still settles the
-			// invoice as paid through the ordinary recovery path. Without this
-			// the invoice can reach no terminal state at all.
+			// The deliberate carve-out, for a customer who paid another way.
+			// Writing it off moves no money, and a payment Stripe completes
+			// later still settles the invoice as paid. It is also the exit
+			// when Stripe cannot be asked at all (the key revoked, the
+			// customer deleted there).
 			return PaymentBlock{}
 		}
 		return PaymentBlock{
@@ -150,7 +153,8 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 //
 // A STALE hold refuses too (ADR-127): its charge may have been sent and its
 // result lost, so Stripe may hold a payment Velox has not recorded. It stays
-// set until the stale-hold sweep has asked Stripe, within about an hour.
+// set until the stale-hold sweep has asked Stripe, within about an hour (a
+// parked invoice's within a day, but 'unknown' is decided above).
 // Write-off is the one action a stale hold allows: it moves no money, a
 // payment the sweep finds later still settles the invoice (uncollectible →
 // paid), and it is the exit when Stripe can never answer (disconnected, the
@@ -158,8 +162,8 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 //
 // Only 'pending' and 'failed' consult the hold. 'processing' and 'unknown' are
 // decided above, and an unknown outcome keeps its hold, so applying the hold
-// to 'unknown' would refuse the write-off of a parked invoice — its only exit
-// (ADR-107).
+// to 'unknown' would refuse the write-off of a parked invoice — the exit for a
+// customer who paid another way (ADR-107).
 //
 // The card settlement path must never call this: the charge holding the hold
 // has to be able to record its own success.
@@ -190,38 +194,31 @@ func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldS
 // stale-hold sweep to confirm it with Stripe (ADR-127).
 const ChargeHoldRefusalMessage = "A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is confirmed within about an hour."
 
-// parkedMessage always ends by naming mark-uncollectible, because it is the one
-// action that works on a parked invoice and an operator who is not told that
-// has no way out.
-// alreadyWrittenOff swaps the tail advice. Every arm below steers the operator
-// to "mark the invoice uncollectible" as the exit — which is impossible advice
-// on an invoice that already IS uncollectible, and that is a reachable state:
-// writing off a parked invoice is the carve-out immediately above, and since
-// 2026-08-05 such a row stays visible to the ADR-108 search and can be the
-// subject of an ADR-108 adoption settle (recording, never a charge — ADR-113).
+// parkedMessage says why the action is refused while Stripe may still
+// complete the charge, what Velox does next on its own (ADR-127 amendment
+// 2026-10-20: records a payment that appears, and charges again as usual when
+// none has appeared 24 hours after the attempt), and ends by naming
+// mark-uncollectible: the one action allowed meanwhile, for a customer who paid
+// another way. alreadyWrittenOff swaps the tail: that advice is impossible on
+// an invoice that already is uncollectible, and writing off a parked invoice
+// is the carve-out above.
 func parkedMessage(action InvoiceAction, alreadyWrittenOff bool) string {
-	// Bounded since ADR-108: the search sweep can adopt a found PaymentIntent,
-	// so "will not resolve on its own" is conditional now — but every refusal
-	// below still holds while the invoice IS parked, and the write-off remains
-	// the only operator exit.
-	const why = "this invoice's charge attempt could not be identified with the payment provider, so we cannot tell whether the customer was charged, and unless the attempt can be found by Velox's provider search it will not resolve on its own"
+	const why = "Stripe didn't confirm this invoice's last charge and may still complete it"
 	if alreadyWrittenOff {
-		// It is already written off, so there is no status left to advise. What
-		// is still true is the reason: nobody knows whether that card was
-		// charged, and only the provider can answer it.
-		return why + " — it is already written off, so nothing further will be attempted automatically. Resolve the attempt in Stripe; if money was taken it will settle here when the provider reports it"
+		return why + ". The invoice is already written off, so Velox will not charge it again. If Stripe completes the charge, the payment is recorded here"
 	}
+	const next = ". Velox checks Stripe every hour and records the payment if it appears; if none appears within 24 hours, the invoice is charged again as usual. If the customer paid another way, mark the invoice uncollectible instead"
 	switch action {
 	case ActionVoid:
-		return why + " — voiding it could annul an invoice that was in fact paid. Check the attempt in Stripe; if nothing was charged, mark the invoice uncollectible instead"
+		return why + ", and voiding it could annul an invoice that is in fact paid" + next
 	case ActionRecordOfflinePayment:
-		return why + " — recording an offline payment would label a card charge as out-of-band. Check the attempt in Stripe; if nothing was charged, mark the invoice uncollectible instead"
+		return why + ", and recording an offline payment would label a card charge as out-of-band" + next
 	case ActionIssueCreditNote:
-		return why + " — crediting it could refund money that was never collected. Check the attempt in Stripe; if nothing was charged, mark the invoice uncollectible instead"
+		return why + ", and crediting it could refund money that was never collected" + next
 	case ActionCollectPayment:
-		return why + " — charging again risks a second charge. Check the attempt in Stripe; if nothing was charged, mark the invoice uncollectible instead"
+		return why + ", and charging again now risks a second charge" + next
 	case ActionResendSetupLink:
-		return why + " — that email tells the customer we will collect automatically, which will not happen. Resolve the attempt in Stripe first, or mark the invoice uncollectible"
+		return why + ", and that email tells the customer we will collect automatically while this charge is unresolved" + next
 	case ActionEmailInvoice:
 		// Split from resend-setup-link after a walk read this refusal back:
 		// the invoice email's call to action is "View & pay invoice", not a
@@ -229,9 +226,9 @@ func parkedMessage(action InvoiceAction, alreadyWrittenOff bool) string {
 		// email. What makes sending it wrong is that it asks for money we may
 		// already have taken, and lands the customer on a page with no Pay
 		// button.
-		return why + " — that email asks the customer to pay an invoice we may already have charged them for, and the hosted page will not offer them a Pay button when they arrive. Check the attempt in Stripe; if nothing was charged, mark the invoice uncollectible instead"
+		return why + ", and that email asks the customer to pay an invoice we may already have charged them for, and the hosted page will not offer them a Pay button when they arrive" + next
 	default:
-		return why + " — resolve the attempt in Stripe, or mark the invoice uncollectible"
+		return why + next
 	}
 }
 

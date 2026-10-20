@@ -14,9 +14,11 @@
  * and audit logs key off the code. `reconcile_payment` opens the
  * payment in Stripe; it is offered on `payment_anomaly`, where the
  * refund or correction is made there. `mark_uncollectible` opens
- * the write-off and is offered only when a payment's outcome can
- * never be identified (payment status unknown with no payment
- * intent recorded). `void_invoice` is offered only
+ * the write-off and is offered only on a parked invoice (payment
+ * status unknown with no payment intent recorded), for a customer
+ * who paid another way: Velox records a payment that Stripe shows,
+ * and charges the invoice again if none appears within 24 hours.
+ * Dashboards render it as a secondary action. `void_invoice` is offered only
  * on prepaid-commit exposure, and only while some of the granted
  * credit is still unspent: voiding retires the unspent balance
  * (ADR-078) and is the sole recovery for an unpaid invoice whose

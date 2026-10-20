@@ -65,7 +65,8 @@ export function paymentStatusLabel(status: string): string {
     case 'processing': return 'Payment processing'
     case 'succeeded': return 'Paid'
     case 'failed': return 'Payment failed'
-    // Velox can't tell whether the charge went through (a parked invoice).
+    // Stripe has not confirmed whether the charge went through (a parked
+    // invoice, or a payment still being confirmed).
     case 'unknown': return 'Payment status unknown'
     default: return `Payment ${status.replace(/_/g, ' ')}`
   }

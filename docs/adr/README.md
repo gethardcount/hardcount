@@ -111,7 +111,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [068](068-checkout-session-dedup.md) | 2026-07-02 | Accepted (amended) | Payments | One open checkout session per invoice; hosted payment and Velox charges exclude each other |
 | [069](069-trial-cancel-semantics.md) | 2026-07-02 | Accepted | Subscriptions | Cancelling a trial is free at trial end; SQL guards enforce it at every activation |
 | [070](070-price-change-semantics.md) | 2026-07-02 | Accepted (amended) | Pricing & usage | Customer price overrides follow the rule across versions; a period keeps its opening price |
-| [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry |
+| [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted (amended) | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry, once no period invoice still owed can draw on it |
 | [072](072-transport-lease-model.md) | 2026-07-03 | Accepted (amended) | Platform & ops | Outbox workers claim rows with a time-limited lease; budgets and lease lengths are derived |
 | [073](073-selfhost-boot-and-bootstrap-contract.md) | 2026-07-03 | Accepted (amended) | Platform & ops | One bootstrap path creates a tenant in one transaction; migrations run one at a time |
 | [074](074-subscription-billing-timezone-snapshot.md) | 2026-07-04 | Superseded by ADR-077 | Timezones | Each subscription snapshots its billing timezone at creation |
@@ -146,8 +146,8 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [104](104-one-activity-lane-entity-calendar.md) | 2026-07-29 | Accepted (amended) | Test clocks & simulated time | One invoice timeline ordered by the entity's own clock; the real time shows beneath |
 | [105](105-charge-idempotency-key-seed.md) | 2026-07-30 | Accepted (amended) | Payments | Seed the Stripe idempotency key from a per-invoice attempt counter, not `updated_at` |
 | [106](106-charge-intent-ledger.md) | 2026-07-30 | Superseded by 127 | Payments | Record each charge before calling Stripe, so an unnamed charge can be replayed safely |
-| [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted (amended) | Payments | An unclear charge parks the invoice; a webhook, Stripe search or a human resolves it |
-| [108](108-parked-invoices-search-and-adopt.md) | 2026-08-02 | Accepted | Payments | Resolve unknown charges by searching Stripe, and act only on a payment actually found |
+| [107](107-unknown-is-terminal-until-a-human.md) | 2026-07-31 | Accepted (amended) | Payments | An unclear charge parks the invoice; Stripe's list of the customer's payments resolves it within a day |
+| [108](108-parked-invoices-search-and-adopt.md) | 2026-08-02 | Superseded by 127 | Payments | Resolve unknown charges by searching Stripe, and act only on a payment actually found |
 | [109](109-issued-document-snapshot.md) | 2026-08-05 | Accepted (amended) | Invoices | Issued documents print bill-to and supplier details from a copy taken at issue |
 | [110](110-written-off-invoices-close-self-service-payment.md) | 2026-08-05 | Accepted (partly superseded) | Invoices | Customers cannot pay a written-off invoice online; its public pages point to support |
 | [111](111-a-write-off-has-no-tax-leg.md) | 2026-08-05 | Accepted | Tax | Writing off an invoice does not reverse its tax; voids and credit notes still do |
@@ -159,14 +159,14 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [117](117-one-payment-intent-per-invoice-deferred.md) | 2026-10-11 | Proposed | Payments | One PaymentIntent per invoice considered and deferred; Velox keeps one per charge attempt |
 | [118](118-cancel-and-swap-relief-in-the-change-transaction.md) | 2026-10-12 | Accepted (amended) | Credits | Credit for unused time on cancel or plan swap is written in the same transaction |
 | [119](119-billing-failure-record-keyed-to-the-due-instant.md) | 2026-10-12 | Accepted | Billing | Billing failures are saved on the subscription; retries back off and park after eight |
-| [120](120-invoice-grace-period-for-late-usage.md) | 2026-10-14 | Accepted | Billing | Invoices are built after a grace period (default 1h); later usage is not billed automatically |
+| [120](120-invoice-grace-period-for-late-usage.md) | 2026-10-14 | Accepted (amended) | Billing | Invoices are built after a grace period (default 1h); later usage is not billed automatically |
 | [121](121-customer-usage-cards-open-on-the-billing-period.md) | 2026-10-16 | Accepted | Pricing & usage | The customer page's Activity and Margin cards open on the current billing period |
 | [122](122-hold-and-release-usage-for-unknown-customers.md) | 2026-10-17 | Accepted | Pricing & usage | LiteLLM usage for an unknown customer or meter is held until an operator releases it |
 | [123](123-new-accounts-start-with-a-default-dunning-policy.md) | 2026-10-17 | Accepted | Dunning | New accounts start with a default dunning policy that retries three times and changes nothing |
 | [124](124-plain-golang-migrate-each-file-sets-its-lock-limit.md) | 2026-10-17 | Superseded by ADR-125 | Platform & ops | Run migrations with plain golang-migrate and a 5-second lock limit per file; never built |
 | [125](125-goose-migrations-from-one-v081-baseline.md) | 2026-10-18 | Accepted | Platform & ops | From v0.9.0, run migrations with goose from one baseline; v0.8 databases need no change |
 | [126](126-a-card-refused-for-good-is-not-retried.md) | 2026-10-18 | Accepted | Dunning | After a hard decline, dunning charges that card no more for that invoice until another card is the default |
-| [127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) | 2026-10-19 | Accepted | Payments | A charge whose result was lost blocks every new charge and irreversible action until a sweep has asked Stripe |
+| [127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) | 2026-10-19 | Accepted (amended) | Payments | A charge whose result was lost or unclear blocks every new charge and irreversible action until a sweep has asked Stripe |
 | [128](128-activity-line-standard.md) | 2026-10-19 | Accepted | Test clocks & simulated time | Every activity line has one wording, names who acted and follows one clock rule; the backend builds the words |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified

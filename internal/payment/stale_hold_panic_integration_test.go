@@ -24,10 +24,9 @@ import (
 //   - H1: open, never checked, the oldest hold, so first in the list; its
 //     check panics.
 //   - H2: open; Stripe has nothing for it.
-//   - H3: 'unknown' with a stale hold; its check panics. The store does not
-//     stamp an 'unknown' invoice's check (the unknown sweep's rotation key),
-//     so a re-raise at the end of the stale-hold sweep would stop the later
-//     sweeps on every tick.
+//   - H3: parked ('unknown' with no PaymentIntent) with a stale hold; its
+//     check panics. It is stamped like H1, so it rotates too: the stale-hold
+//     sweep is the only one that looks at a parked invoice (REC-5).
 //   - U: 'unknown' with a PaymentIntent that succeeded; the unknown sweep
 //     settles it.
 func TestStaleHold_PanickingCheck_RestOfTheRunGoesOn(t *testing.T) {
@@ -57,8 +56,10 @@ func TestStaleHold_PanickingCheck_RestOfTheRunGoesOn(t *testing.T) {
 	if got := r.get(h2); r.hold(h2) != nil || got.ChargeAttemptSeq != h2Seq+1 {
 		t.Errorf("H2: hold %v, charge_attempt_seq %d, want the hold cleared and the counter moved to %d", r.hold(h2), got.ChargeAttemptSeq, h2Seq+1)
 	}
-	if got := r.get(h1); got.ProviderSyncedAt == nil {
-		t.Error("H1: the panicking check was not stamped, so it stays first in the list on every tick")
+	for name, id := range map[string]string{"H1": h1, "H3 (parked)": h3} {
+		if got := r.get(id); got.ProviderSyncedAt == nil {
+			t.Errorf("%s: the panicking check was not stamped, so it stays first in the list on every tick", name)
+		}
 	}
 	if got := r.get(u.ID); got.Status != domain.InvoicePaid || got.StripePaymentIntentID != paid.id {
 		t.Errorf("U: %s/%s with PI %q, want paid with %q by the unknown sweep after the panicking checks",

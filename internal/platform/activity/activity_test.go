@@ -134,26 +134,52 @@ func TestMetaText(t *testing.T) {
 
 func TestEmailOutcomeWords(t *testing.T) {
 	for _, tc := range []struct {
-		status, delivery, failure string
-		word                      string
-		tone                      Tone
+		status, delivery, failure, skip string
+		word                            string
+		tone                            Tone
+		reason                          string
 	}{
-		{"pending", "unknown", "", "queued", ToneNeutral},
-		{"dispatched", "unknown", "", "sent", ToneNeutral},
-		{"dispatched", "delivered", "", "delivered", ToneNeutral},
-		{"dispatched", "bounced", "", "bounced", ToneFailure},
-		{"dispatched", "complained", "", "marked as spam", ToneFailure},
-		{"failed", "unknown", SendFailureSMTPNotConfigured, "couldn't be sent", ToneFailure},
-		{"skipped", "unknown", "", "not sent", ToneNeutral},
+		{"pending", "unknown", "", "", "queued", ToneNeutral, ""},
+		{"dispatched", "unknown", "", "", "sent", ToneNeutral, ""},
+		{"dispatched", "delivered", "", "", "delivered", ToneNeutral, ""},
+		{"dispatched", "bounced", "", "", "bounced", ToneFailure, ""},
+		{"dispatched", "complained", "", "", "marked as spam", ToneFailure, ""},
+		{"failed", "unknown", SendFailureSMTPNotConfigured, "", "couldn't be sent", ToneFailure, ""},
+		// The skip reason, when the row recorded it; a row skipped before
+		// that says only what it can know.
+		{"skipped", "unknown", "", "paid", "not sent", ToneNeutral, "The invoice was already paid"},
+		{"skipped", "unknown", "", "voided", "not sent", ToneNeutral, "The invoice was already voided"},
+		{"skipped", "unknown", "", "uncollectible", "not sent", ToneNeutral, "The invoice was already marked uncollectible"},
+		{"skipped", "unknown", "", "gone", "not sent", ToneNeutral, "The invoice no longer exists"},
+		{"skipped", "unknown", "", "", "not sent", ToneNeutral, "The invoice was already closed"},
 	} {
-		out := Outcome(tc.status, tc.delivery, tc.failure)
-		if out.Word != tc.word || out.Tone != tc.tone {
-			t.Errorf("%s/%s: %q %s, want %q %s", tc.status, tc.delivery, out.Word, out.Tone, tc.word, tc.tone)
+		out := Outcome(Email{Status: tc.status, DeliveryState: tc.delivery, SendFailure: tc.failure, SkipReason: tc.skip})
+		if out.Word != tc.word || out.Tone != tc.tone || out.Reason != tc.reason {
+			t.Errorf("%s/%s/%s: %q %s %q, want %q %s %q", tc.status, tc.delivery, tc.skip, out.Word, out.Tone, out.Reason, tc.word, tc.tone, tc.reason)
 		}
 	}
 	// "Failed payment notice failed" read as two events; the name is a noun
 	// and the outcome never repeats "failed".
-	if got := EmailClause("payment_failed", "failed", "", ""); got != "Failed payment notice couldn't be sent" {
+	if got := EmailClause(Email{Type: "payment_failed", Status: "failed"}); got != "Failed payment notice couldn't be sent" {
 		t.Errorf("clause %q", got)
+	}
+}
+
+func TestEmailInstant(t *testing.T) {
+	created := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	dispatched := created.Add(time.Minute)
+	sim := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
+
+	// Real clock: the real send time, else the queue time; not pinned.
+	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created}); !occ.Equal(created) || !rec.IsZero() || pinned {
+		t.Errorf("queued: %v %v %v", occ, rec, pinned)
+	}
+	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created, DispatchedAt: &dispatched}); !occ.Equal(dispatched) || !rec.IsZero() || pinned {
+		t.Errorf("sent: %v %v %v", occ, rec, pinned)
+	}
+	// Test clock: the instant that caused it, with the real send time as
+	// its Recorded time.
+	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created, DispatchedAt: &dispatched, SimEffectiveAt: &sim}); !occ.Equal(sim) || !rec.Equal(dispatched) || !pinned {
+		t.Errorf("test clock: %v %v %v", occ, rec, pinned)
 	}
 }

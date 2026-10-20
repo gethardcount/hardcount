@@ -33,11 +33,15 @@ func (noBillingRunner) ScanThresholdsForClock(context.Context, string, string, i
 // card, credit, dunning and test-clock stores. Only Stripe is scripted.
 //
 // The real trigger: an operator gives a customer in dunning a goodwill credit
-// that expires in a week, then advances the clock a month. Each retry draws
-// credit at its own instant (drainPositiveBlocks takes only blocks with
-// expires_at after it), so the retry on day 3 must settle the invoice from
-// the credit. Expiry used to run before the retries: it retired the grant at
-// the advance target first, and the day-3 retry charged the card in full.
+// that expires in a week, then advances the clock a month. The retry on day 3
+// must settle the invoice from the credit. Expiry used to run before the
+// retries: it retired the grant at the advance target first, and the day-3
+// retry charged the card in full.
+//
+// Which instant a retry tests a grant's expiry at (ADR-071 §2, amended
+// 2026-10-20): the invoice here is a period invoice, so a retry judges the
+// grant by the invoice's issued_at, the end of the period it bills, as the
+// first collection does. The draw itself is still stamped at the retry.
 func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 	t0 := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC) // the failed charge; dunning starts
 	frozen := t0.AddDate(0, 0, 30)                    // the advance target
@@ -45,14 +49,19 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 
 	cases := []struct {
 		name         string
+		grantedAt    time.Time
 		expiresAt    time.Time
 		creditPaysIt bool
 	}{
 		// Live at the first retry: that retry draws it and the invoice is paid.
-		{"grant live at the first retry pays the invoice", t0.AddDate(0, 0, 7), true},
-		// Control: expired before the first retry, so no retry may draw it,
+		{"grant live at the first retry pays the invoice", t0, t0.AddDate(0, 0, 7), true},
+		// Live when the period ended (issued_at), expired before the first
+		// retry: the retry judges it by the period and draws it. Fails if a
+		// retry tests expiry at its own instant, or if expiry runs first.
+		{"grant live at the period end but expired before the first retry pays the invoice", t0, t0.AddDate(0, 0, 2), true},
+		// Control: expired before the period ended, so no retry may draw it,
 		// whatever the phase order. Running expiry last relies on this filter.
-		{"grant expired before the first retry is not drawn", t0.AddDate(0, 0, 2), false},
+		{"grant expired before the period ended is not drawn", t0.AddDate(0, 0, -5), t0.AddDate(0, 0, -1), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,10 +104,8 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 			}
 
 			// The card was declined at t0. A period invoice, as almost every
-			// invoice in dunning is: a credit draw keyed on billing_reason
-			// (one that tests expiry at issued_at, say) applies here too, so
-			// the control case fails if a retry can draw a grant that expired
-			// before it.
+			// invoice in dunning is, so its retries test grant expiry at its
+			// issued_at (t0).
 			inv, err := r.invoices.Create(r.ctx, r.tenantID, domain.Invoice{
 				CustomerID: cust.ID, InvoiceNumber: "INV-TC-GOODWILL",
 				Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, BillingReason: domain.BillingReasonSubscriptionCycle,
@@ -113,8 +120,8 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 			retrier := &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: r.retrier.paymentSetups, credits: credits}
 			dunningSvc := dunning.NewService(dstore, retrier, nil)
 
-			// Before the advance the clock reads t0: dunning starts there, and
-			// the operator grants the goodwill credit there.
+			// Before the advance the clock reads t0: dunning starts there. The
+			// operator grants the goodwill credit at grantedAt.
 			atT0 := clock.WithSim(r.ctx, clock.Sim{At: t0, TestClockID: clockID})
 			run, err := dunningSvc.StartDunning(atT0, r.tenantID, inv.ID, cust.ID, t0, domain.DunningCausePaymentFailed)
 			if err != nil {
@@ -124,7 +131,8 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 				t.Fatalf("first retry = %v, want %v", run.NextActionAt, firstRetry)
 			}
 			expiresAt := tc.expiresAt
-			grant, err := credits.Grant(atT0, r.tenantID, credit.GrantInput{
+			atGrant := clock.WithSim(r.ctx, clock.Sim{At: tc.grantedAt, TestClockID: clockID})
+			grant, err := credits.Grant(atGrant, r.tenantID, credit.GrantInput{
 				CustomerID: cust.ID, AmountCents: 5000, Description: "goodwill", ExpiresAt: &expiresAt,
 			})
 			if err != nil {
@@ -168,8 +176,8 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 
 			if tc.creditPaysIt {
 				if n := len(r.charges.charged); n != 0 {
-					t.Fatalf("Stripe received %d charges %v; the grant was live at the %v retry and must pay the invoice",
-						n, r.charges.amounts, firstRetry)
+					t.Fatalf("Stripe received %d charges %v; the grant was live at the invoice's issued_at %v and must pay it at the %v retry",
+						n, r.charges.amounts, t0, firstRetry)
 				}
 				if got.Status != domain.InvoicePaid {
 					t.Errorf("invoice %s, want paid", got.Status)
@@ -188,11 +196,11 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 			}
 
 			if len(r.charges.amounts) == 0 || r.charges.amounts[0] != 5000 {
-				t.Fatalf("Stripe charges %v, want the %v retry to charge the full 5000: the grant had expired", r.charges.amounts, firstRetry)
+				t.Fatalf("Stripe charges %v, want the %v retry to charge the full 5000: the grant expired before the period ended", r.charges.amounts, firstRetry)
 			}
 			for _, a := range r.charges.amounts {
 				if a != 5000 {
-					t.Errorf("Stripe charges %v, want every retry at 5000: an expired grant was drawn", r.charges.amounts)
+					t.Errorf("Stripe charges %v, want every retry at 5000: a grant expired before the period ended was drawn", r.charges.amounts)
 					break
 				}
 			}
@@ -200,7 +208,7 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 				t.Error("invoice paid; every charge was declined and the grant had expired")
 			}
 			if len(usage) != 0 {
-				t.Errorf("usage entries %+v, want none: the grant expired before the first retry", usage)
+				t.Errorf("usage entries %+v, want none: the grant expired before the period ended", usage)
 			}
 			if len(expiry) != 1 || expiry[0].AmountCents != -5000 || expiry[0].Description != "Expired grant "+grant.ID {
 				t.Errorf("expiry entries %+v, want one of -5000 for grant %s", expiry, grant.ID)

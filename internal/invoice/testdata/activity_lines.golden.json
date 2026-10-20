@@ -683,6 +683,77 @@
     ]
   },
   {
+    "case": "paid/by credit note, after 3 failed retries",
+    "line": {
+      "id": "paid/by credit note, after 3 failed retries",
+      "kind": "invoice.paid",
+      "title": "Invoice paid",
+      "detail": [
+        [
+          {
+            "text": "Nothing left due after credit note "
+          },
+          {
+            "link": {
+              "kind": "credit_note",
+              "id": "vlx_cn_1",
+              "label": "CN-0001"
+            }
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "api_key",
+        "name": "billing-sync"
+      },
+      "tone": "success",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Invoice paid",
+      "meta: Nothing left due after credit note CN-0001 · by API key billing-sync",
+      "tone: success"
+    ]
+  },
+  {
+    "case": "paid/by credit note, credits paid part",
+    "line": {
+      "id": "paid/by credit note, credits paid part",
+      "kind": "invoice.paid",
+      "title": "Invoice paid",
+      "detail": [
+        [
+          {
+            "text": "Nothing left due after credit note "
+          },
+          {
+            "link": {
+              "kind": "credit_note",
+              "id": "vlx_cn_1",
+              "label": "CN-0001"
+            }
+          }
+        ],
+        [
+          {
+            "text": "Paid with credits"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "person",
+        "name": "alice@example.com"
+      },
+      "tone": "success",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Invoice paid",
+      "meta: Nothing left due after credit note CN-0001 · Paid with credits · by alice@example.com",
+      "tone: success"
+    ]
+  },
+  {
     "case": "attempt/failed/auto_charge",
     "line": {
       "id": "attempt/failed/auto_charge",
@@ -7070,6 +7141,156 @@
     ]
   },
   {
+    "case": "email/skipped because/gone",
+    "line": {
+      "id": "email/skipped because/gone",
+      "kind": "email.payment_failed",
+      "title": "Failed payment notice not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice no longer exists"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Failed payment notice not sent",
+      "meta: The invoice no longer exists · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/skipped because/paid",
+    "line": {
+      "id": "email/skipped because/paid",
+      "kind": "email.payment_failed",
+      "title": "Failed payment notice not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already paid"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Failed payment notice not sent",
+      "meta: The invoice was already paid · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/skipped because/uncollectible",
+    "line": {
+      "id": "email/skipped because/uncollectible",
+      "kind": "email.payment_failed",
+      "title": "Failed payment notice not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already marked uncollectible"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Failed payment notice not sent",
+      "meta: The invoice was already marked uncollectible · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/skipped because/voided",
+    "line": {
+      "id": "email/skipped because/voided",
+      "kind": "email.payment_failed",
+      "title": "Failed payment notice not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already voided"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Failed payment notice not sent",
+      "meta: The invoice was already voided · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/skipped because/(not recorded)",
+    "line": {
+      "id": "email/skipped because/(not recorded)",
+      "kind": "email.payment_failed",
+      "title": "Failed payment notice not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already closed"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Failed payment notice not sent",
+      "meta: The invoice was already closed · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "dunning/type/dunning_started",
     "line": {
       "id": "dunning/type/dunning_started",
@@ -7428,6 +7649,25 @@
       "problem: The invoice is not marked paid yet.",
       "meta: Automatic",
       "tone: warning"
+    ]
+  },
+  {
+    "case": "dunning/retry/succeeded/invoice paid (Dunning page)",
+    "line": {
+      "id": "dunning/retry/succeeded/invoice paid (Dunning page)",
+      "kind": "payment_recovery.retry_succeeded",
+      "title": "Payment retry 2 succeeded",
+      "detail": [],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "success",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment retry 2 succeeded",
+      "meta: Automatic",
+      "tone: success"
     ]
   },
   {

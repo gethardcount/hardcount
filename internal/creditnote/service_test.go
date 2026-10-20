@@ -475,6 +475,22 @@ func (m *memInvoiceReader) ApplyCreditNoteTx(_ context.Context, _ *sql.Tx, tenan
 	return inv, nil
 }
 
+// SettleZeroDueTx mirrors the store's predicate. It cannot model the charge
+// hold or the rollback; the real-Postgres tests cover both.
+func (m *memInvoiceReader) SettleZeroDueTx(_ context.Context, _ *sql.Tx, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error) {
+	inv, ok := m.invoices[id]
+	if !ok || inv.TenantID != tenantID {
+		return domain.Invoice{}, false, errs.ErrNotFound
+	}
+	if inv.Status != domain.InvoiceFinalized || inv.AmountDueCents != 0 || inv.TaxStatus != domain.InvoiceTaxOK ||
+		(inv.PaymentStatus != domain.PaymentPending && inv.PaymentStatus != domain.PaymentFailed) {
+		return inv, false, nil
+	}
+	inv.Status, inv.PaymentStatus, inv.PaidAt = domain.InvoicePaid, domain.PaymentSucceeded, &paidAt
+	m.invoices[id] = inv
+	return inv, true, nil
+}
+
 // TestCreate_IsSimulated locks the per-CN time-domain flag (migration 0117):
 // it is true exactly when the source invoice is simulated, whether the engine
 // or an operator issues the note. The wall-clock recovery sweeps skip notes

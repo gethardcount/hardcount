@@ -29,13 +29,14 @@ import (
 // unrelated write is re-seeding the key, which is the exact drift this column
 // was introduced to end (#677 → #678).
 //
-// One write moves the seq with no PaymentIntent: the stale-hold sweep's clear
-// when Stripe holds nothing for a lost charge (ADR-127; ADR-105 amendment
-// 2026-10-19). "No payment was created" is that attempt's recorded outcome,
-// and the next charge needs a fresh key: Stripe may have saved a 500 under the
-// old one. That clear is the statement that also clears the charge hold
-// (auto_charge_claimed_until = NULL); the scanner admits it and requires
-// exactly one.
+// Two writes move the seq with no PaymentIntent, both the stale-hold sweep's
+// "Stripe holds nothing" (ADR-127; ADR-105 amendments 2026-10-19 and
+// 2026-10-20): ClearStaleChargeHold for a lost charge, and
+// UnparkAfterNoPayment for a parked one 24 hours after the attempt. "No
+// payment was created" is that attempt's recorded outcome, and the next charge
+// needs a fresh key: Stripe may have saved a 500 under the old one. Each is a
+// statement that also clears the charge hold (auto_charge_claimed_until =
+// NULL); the scanner admits them and requires exactly two.
 //
 // The scan covers every non-test .go file of this package, not one file: a
 // writer added in a new file would otherwise escape it.
@@ -103,9 +104,9 @@ func TestChargeAttemptSeqBumpedByEveryPIStamp(t *testing.T) {
 		t.Errorf("expected at least 3 PI-stamping UPDATEs (StampChargeOutcome, MarkPaymentFailedReportingTransition, "+
 			"markPaidReportingTransition), found %d — did the scanner stop matching?", stamps)
 	}
-	if clears != 1 {
-		t.Errorf("found %d stale-hold clears that move the seq (an UPDATE that bumps it and clears the charge hold), want exactly 1: "+
-			"ClearStaleChargeHold is the one write ADR-105's amendment lets move the seq without a PaymentIntent", clears)
+	if clears != 2 {
+		t.Errorf("found %d stale-hold clears that move the seq (an UPDATE that bumps it and clears the charge hold), want exactly 2: "+
+			"ClearStaleChargeHold and UnparkAfterNoPayment are the writes ADR-105's amendments let move the seq without a PaymentIntent", clears)
 	}
 	if bumps != stamps+clears {
 		t.Errorf("seq bumps (%d) are not PI stamps (%d) plus the stale-hold clear (%d)", bumps, stamps, clears)

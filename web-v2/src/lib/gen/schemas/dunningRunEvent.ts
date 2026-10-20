@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ActivityLine } from './activityLine';
 import type { DunningRunEventEventType } from './dunningRunEventEventType';
 import type { DunningRunEventMetadata } from './dunningRunEventMetadata';
 import type { DunningRunEventState } from './dunningRunEventState';
@@ -23,4 +24,11 @@ export interface DunningRunEvent {
   metadata?: DunningRunEventMetadata;
   created_at: string;
   recorded_at?: string;
+  /**
+     * The event in the words of the activity line standard (ADR-128):
+     * the line the invoice's payment timeline shows for the same
+     * event, without that timeline's folds. Absent when the run's
+     * invoice could not be read (`degraded` names `invoice`).
+     */
+  line?: ActivityLine;
 }

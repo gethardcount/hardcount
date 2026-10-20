@@ -306,6 +306,8 @@ The orchestration sequence above ran dunning (its Phase 4) before credit expiry 
 
 Expiry last gives nothing up. A draw after a grant's expiry still cannot take it, because of the same filter, and ADR-071's "retirement wins" holds. A panic in Phase 5 now skips expiry for that advance; Retry advance runs it. Test: `TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore`.
 
+Later the same day (#1305, ADR-071 §2): a period or threshold invoice tests expiry at its `issued_at`, at every collection including a dunning retry. So a retry of such an invoice draws a grant that expired after the period ended and before the retry; only a grant that expired before the period ended is out of reach. Expiry last is what lets the retry find that grant on a test clock. The wall-clock sweep does not yet hold it for an invoice in dunning (ADR-071 §2, "Not covered").
+
 ## Test strategy
 
 For each of the six phases, two new tests:

@@ -743,6 +743,33 @@ func (e DunningRunState) Valid() bool {
 	}
 }
 
+// Defines values for DunningRunDetailDegraded.
+const (
+	DunningRunDetailDegradedAudit          DunningRunDetailDegraded = "audit"
+	DunningRunDetailDegradedChargeAttempts DunningRunDetailDegraded = "charge_attempts"
+	DunningRunDetailDegradedEmails         DunningRunDetailDegraded = "emails"
+	DunningRunDetailDegradedEvents         DunningRunDetailDegraded = "events"
+	DunningRunDetailDegradedInvoice        DunningRunDetailDegraded = "invoice"
+)
+
+// Valid indicates whether the value is a known member of the DunningRunDetailDegraded enum.
+func (e DunningRunDetailDegraded) Valid() bool {
+	switch e {
+	case DunningRunDetailDegradedAudit:
+		return true
+	case DunningRunDetailDegradedChargeAttempts:
+		return true
+	case DunningRunDetailDegradedEmails:
+		return true
+	case DunningRunDetailDegradedEvents:
+		return true
+	case DunningRunDetailDegradedInvoice:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DunningRunEventEventType.
 const (
 	DunningRunEventEventTypeDunningStarted DunningRunEventEventType = "dunning_started"
@@ -1720,13 +1747,13 @@ func (e SubscriptionPauseCollectionBehavior) Valid() bool {
 
 // Defines values for SubscriptionTimelineEventSource.
 const (
-	SubscriptionTimelineEventSourceAudit SubscriptionTimelineEventSource = "audit"
+	Audit SubscriptionTimelineEventSource = "audit"
 )
 
 // Valid indicates whether the value is a known member of the SubscriptionTimelineEventSource enum.
 func (e SubscriptionTimelineEventSource) Valid() bool {
 	switch e {
-	case SubscriptionTimelineEventSourceAudit:
+	case Audit:
 		return true
 	default:
 		return false
@@ -3114,7 +3141,10 @@ type ActivityLine struct {
 	Detail [][]ActivityPart `json:"detail"`
 
 	// Id The row's stable key: the event's `id` on an invoice timeline
-	// row, the audit entry's id on a subscription timeline row.
+	// row, the audit entry's id on a subscription timeline row,
+	// `dunning:` and the event's id on a dunning run event (the same
+	// key the invoice timeline gives that event), and `email:` and
+	// the email's id on a sent email (likewise).
 	Id string `json:"id"`
 
 	// Kind Machine name of the event.
@@ -3272,13 +3302,13 @@ type AnalyticsOverview struct {
 	// hour after issue.
 	RefundsNeedingAttention int `json:"refunds_needing_attention"`
 
-	// Revenue Total of invoices paid in the window.
+	// Revenue What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
 	Revenue int64 `json:"revenue"`
 
 	// RevenueChurnRate Churned MRR divided by `mrr_prev`. 0 when `mrr_prev` is 0.
 	RevenueChurnRate float64 `json:"revenue_churn_rate"`
 
-	// RevenuePrev Total of invoices paid in the previous window.
+	// RevenuePrev `revenue` for the previous window.
 	RevenuePrev int64 `json:"revenue_prev"`
 
 	// TrialingSubscriptions Subscriptions with status `trialing`.
@@ -3297,7 +3327,7 @@ type AnalyticsRevenuePoint struct {
 	Date         string `json:"date"`
 	InvoiceCount int    `json:"invoice_count"`
 
-	// RevenueCents Sum of invoice totals paid in the bucket.
+	// RevenueCents What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
 	RevenueCents int64 `json:"revenue_cents"`
 }
 
@@ -3432,9 +3462,11 @@ type Attention struct {
 // and audit logs key off the code. `reconcile_payment` opens the
 // payment in Stripe; it is offered on `payment_anomaly`, where the
 // refund or correction is made there. `mark_uncollectible` opens
-// the write-off and is offered only when a payment's outcome can
-// never be identified (payment status unknown with no payment
-// intent recorded). `void_invoice` is offered only
+// the write-off and is offered only on a parked invoice (payment
+// status unknown with no payment intent recorded), for a customer
+// who paid another way: Velox records a payment that Stripe shows,
+// and charges the invoice again if none appears within 24 hours.
+// Dashboards render it as a secondary action. `void_invoice` is offered only
 // on prepaid-commit exposure, and only while some of the granted
 // credit is still unspent: voiding retires the unspent balance
 // (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -3449,9 +3481,11 @@ type AttentionActionItem struct {
 	// and audit logs key off the code. `reconcile_payment` opens the
 	// payment in Stripe; it is offered on `payment_anomaly`, where the
 	// refund or correction is made there. `mark_uncollectible` opens
-	// the write-off and is offered only when a payment's outcome can
-	// never be identified (payment status unknown with no payment
-	// intent recorded). `void_invoice` is offered only
+	// the write-off and is offered only on a parked invoice (payment
+	// status unknown with no payment intent recorded), for a customer
+	// who paid another way: Velox records a payment that Stripe shows,
+	// and charges the invoice again if none appears within 24 hours.
+	// Dashboards render it as a secondary action. `void_invoice` is offered only
 	// on prepaid-commit exposure, and only while some of the granted
 	// credit is still unspent: voiding retires the unspent balance
 	// (ADR-078) and is the sole recovery for an unpaid invoice whose
@@ -4326,9 +4360,19 @@ type DunningRunState string
 
 // DunningRunDetail defines model for DunningRunDetail.
 type DunningRunDetail struct {
-	Events []DunningRunEvent `json:"events"`
-	Run    DunningRun        `json:"run"`
+	// Degraded Sources that could not be read. `events`: the event history, so
+	// `events` is empty. `invoice`: the run's invoice, so no event has
+	// a `line`. The others leave the lines without what they would
+	// add: `emails` the reminder and final-notice clauses,
+	// `charge_attempts` the decline reason and amount, `audit` who
+	// resolved the run.
+	Degraded []DunningRunDetailDegraded `json:"degraded"`
+	Events   []DunningRunEvent          `json:"events"`
+	Run      DunningRun                 `json:"run"`
 }
+
+// DunningRunDetailDegraded defines model for DunningRunDetail.Degraded.
+type DunningRunDetailDegraded string
 
 // DunningRunEvent defines model for DunningRunEvent.
 type DunningRunEvent struct {
@@ -4337,12 +4381,18 @@ type DunningRunEvent struct {
 	EventType    DunningRunEventEventType `json:"event_type"`
 	Id           string                   `json:"id"`
 	InvoiceId    string                   `json:"invoice_id"`
-	Metadata     map[string]interface{}   `json:"metadata,omitempty"`
-	Reason       string                   `json:"reason,omitempty"`
-	RecordedAt   time.Time                `json:"recorded_at,omitempty"`
-	RunId        string                   `json:"run_id"`
-	State        DunningRunEventState     `json:"state"`
-	TenantId     string                   `json:"tenant_id,omitempty"`
+
+	// Line The event in the words of the activity line standard (ADR-128):
+	// the line the invoice's payment timeline shows for the same
+	// event, without that timeline's folds. Absent when the run's
+	// invoice could not be read (`degraded` names `invoice`).
+	Line       ActivityLine           `json:"line,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Reason     string                 `json:"reason,omitempty"`
+	RecordedAt time.Time              `json:"recorded_at,omitempty"`
+	RunId      string                 `json:"run_id"`
+	State      DunningRunEventState   `json:"state"`
+	TenantId   string                 `json:"tenant_id,omitempty"`
 }
 
 // DunningRunEventEventType defines model for DunningRunEvent.EventType.
@@ -4506,8 +4556,13 @@ type HostedInvoice struct {
 
 		// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 		// returned an ambiguous error (5xx, timeout, connection reset) where
-		// we cannot tell whether Stripe processed the charge — a reconciler
-		// resolves these by querying Stripe after a cool-off window.
+		// we cannot tell whether Stripe processed the charge. With a payment
+		// intent recorded, Velox asks Stripe for it after a short wait. With
+		// none (a parked invoice), Velox lists the customer's payments at
+		// Stripe every billing tick: it records a payment for the invoice that
+		// appears, and if none has appeared 24 hours after the attempt the
+		// invoice goes back to `pending` (`failed` after a dunning retry) and
+		// is charged again as usual.
 		PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
 		// Status Lifecycle state of the invoice. `uncollectible` marks an invoice
@@ -4647,13 +4702,21 @@ type Invoice struct {
 
 	// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 	// returned an ambiguous error (5xx, timeout, connection reset) where
-	// we cannot tell whether Stripe processed the charge — a reconciler
-	// resolves these by querying Stripe after a cool-off window.
+	// we cannot tell whether Stripe processed the charge. With a payment
+	// intent recorded, Velox asks Stripe for it after a short wait. With
+	// none (a parked invoice), Velox lists the customer's payments at
+	// Stripe every billing tick: it records a payment for the invoice that
+	// appears, and if none has appeared 24 hours after the attempt the
+	// invoice goes back to `pending` (`failed` after a dunning retry) and
+	// is charged again as usual.
 	PaymentStatus InvoicePaymentStatus `json:"payment_status"`
 
 	// ProviderPaymentStatus Stripe's PaymentIntent status the last time Velox checked it,
 	// word for word. For information only: `payment_status` is the
-	// invoice's payment state. Absent until Velox has checked.
+	// invoice's payment state. Absent until Velox has checked. An
+	// invoice checked by the Stripe Search sweep of releases before
+	// this one may still show `search_not_found`,
+	// `search_terminal_only` or `search_error`.
 	ProviderPaymentStatus string `json:"provider_payment_status,omitempty"`
 
 	// ProviderSyncedAt When Velox last asked Stripe about this invoice's payment, whether
@@ -4924,8 +4987,13 @@ type InvoiceLineType string
 
 // InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 // returned an ambiguous error (5xx, timeout, connection reset) where
-// we cannot tell whether Stripe processed the charge — a reconciler
-// resolves these by querying Stripe after a cool-off window.
+// we cannot tell whether Stripe processed the charge. With a payment
+// intent recorded, Velox asks Stripe for it after a short wait. With
+// none (a parked invoice), Velox lists the customer's payments at
+// Stripe every billing tick: it records a payment for the invoice that
+// appears, and if none has appeared 24 hours after the attempt the
+// invoice goes back to `pending` (`failed` after a dunning retry) and
+// is charged again as usual.
 type InvoicePaymentStatus string
 
 // InvoicePaymentTimeline defines model for InvoicePaymentTimeline.
@@ -5613,8 +5681,9 @@ type RecipeWebhook struct {
 // refusing to record it would only make the books wrong too.
 //
 // A written-off invoice is settled by RECORDING writers only — an
-// offline payment, or the provider-search reconciler adopting a charge
-// that turns out to have succeeded (ADR-108). Nothing initiates a card
+// offline payment, or Velox recording a card charge that Stripe shows
+// succeeded (its webhook, or the check of an unresolved charge).
+// Nothing initiates a card
 // charge against one (ADR-113): recovery of a returned customer runs on
 // normal rails via a fresh recovery invoice.
 //
@@ -5649,7 +5718,16 @@ type SentEmail struct {
 	Id            string                 `json:"id"`
 	InvoiceNumber string                 `json:"invoice_number,omitempty"`
 	LastError     string                 `json:"last_error,omitempty"`
-	Recipient     string                 `json:"recipient"`
+
+	// Line The email in the words of the activity line standard (ADR-128),
+	// the same as on the invoice's payment timeline: its name and
+	// what happened to it ("Receipt email delivered"), why it was not
+	// sent, the invoice it was about, and who it went to. Dated at the
+	// time on the customer's test clock that caused it, with the real
+	// send time as `recorded_at`. Present for every email type this
+	// list returns.
+	Line      ActivityLine `json:"line,omitempty"`
+	Recipient string       `json:"recipient"`
 
 	// Status Velox's send state. `dispatched` means the mail server accepted it.
 	Status SentEmailStatus `json:"status"`

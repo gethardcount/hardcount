@@ -1,11 +1,11 @@
 # ADR-071: Credit expiry retires the block — atomically, and retirement wins
 
 **Date:** 2026-07-03
-**Status:** Accepted (shipped in P14; designed by the P14 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.4)
+**Status:** Accepted (shipped in P14; designed by the P14 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.4; amended 2026-10-19, §2)
 
 ## Summary
 
-When a credit grant expires, one transaction writes the expiry entry for the unused amount and marks the grant fully used (`consumed_cents = amount_cents`), so expired credit can never be spent again. The step, `ExpireGrantAtomic`, re-reads the unused amount under the same row lock that spending credit takes, so a concurrent spend cannot make it expire more than is left. Once expiry commits, a backdated apply draws nothing from that grant; there is no un-expire. A clawback (taking credit back) that unexpired credit cannot cover now fails instead of driving the ledger negative, and positive adjustments carry the same $1M cap as grants. Status: active.
+When a credit grant expires, one transaction writes the expiry entry for the unused amount and marks the grant fully used (`consumed_cents = amount_cents`), so expired credit can never be spent again. The step, `ExpireGrantAtomic`, re-reads the unused amount under the same row lock that spending credit takes, so a concurrent spend cannot make it expire more than is left. Once expiry commits, a backdated apply draws nothing from that grant; there is no un-expire. So the sweep does not retire a grant while a period close or a period invoice that can still draw on it is owed (§2, amended 2026-10-19). A clawback (taking credit back) that unexpired credit cannot cover now fails instead of driving the ledger negative, and positive adjustments carry the same $1M cap as grants. Status: active.
 
 ## Context
 
@@ -57,6 +57,95 @@ idempotency key, evaluated check-then-act across transactions.
    cross-advance apply that *would* have drained the grant pre-expiry
    instead pays from other blocks or cash — is accepted and bounded to
    partial-failure replays that interleave with the sweep.
+
+   **Amended 2026-10-19: the sweep waits for the draws a grant is owed
+   to.** Because retirement wins, retiring a grant that a period invoice
+   still has to draw on charges the card for usage the grant should have
+   paid. The real trigger is a close that fails on billing day and waits
+   on the ADR-119 retry ladder (15m, 1h, 4h, up to about 3.7 days) while
+   the grant passes `expires_at`. Lago reports the same failure shape
+   (lago-api #4240: "On billing day there are sometimes invoices stuck in
+   `generating` status."). A tax-deferred draft finalized hours later
+   (#653) gives the same late collection. Velox follows the `expires_at`
+   condition of Stripe's eligibility list: a grant applies to an invoice
+   when "the invoice's `period_end` occurs before the credit grant's
+   `expires_at` time, if set." The same list also requires that "the
+   invoice's `period_end` is on or after the credit grant's
+   `effective_at` time." Velox does not test that one:
+   `drainPositiveBlocks` filters on `expires_at` only, so a period
+   invoice collected late also draws a grant created after its period
+   ended. This amendment does not change that.
+
+   - **The hold.** Both candidate queries (`ListExpiredGrants`,
+     `ListExpiredGrantsForClock`) skip a grant while
+     `domain.CreditDrawOwedSQL` finds a draw still owed. (i) An `active`
+     or `trialing` subscription of the customer is due before
+     `expires_at` (`domain.SubscriptionDueInstantSQL`): its close draws on
+     the grant. (ii) A `subscription_cycle` or `threshold` invoice of the
+     customer, issued before `expires_at`, is a draft or is queued for
+     collection (`auto_charge_pending`).
+   - **The draw.** A `subscription_cycle` or `threshold` invoice tests
+     grant expiry at its `issued_at` (the period end or the fire instant)
+     whenever it is collected: `ApplyToInvoiceAtomic` reads it on its
+     locked invoice read. Only the expiry test moves. The usage entry,
+     the invoice's `updated_at`, `paid_at` and the dunning start stay at
+     the collection instant (#1281). `issued_at`, not
+     `billing_period_end`: an in-advance cycle invoice stores the next
+     period's end.
+   - **A dunning retry draws the same way** (decided 2026-10-20). A retry
+     of a period or threshold invoice judges a grant by that invoice's
+     `issued_at`, the check its first collection made: a grant live at
+     the period end and expired before the retry pays it. The retry runs
+     `ApplyToInvoiceAtomic` like any collection, so no code differs; the
+     usage entry is stamped at the retry. Stripe ties eligibility to the
+     invoice's `period_end`, not to the payment attempt. Test:
+     `TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore`.
+   - **No gap in the hand-off, so discovery is enough.** The close moves
+     the due instant and inserts the invoice (queued, or a draft) in one
+     transaction (ADR-115). Finalize sets `auto_charge_pending` in the
+     write that finalizes. Settle and void clear it in the write that
+     ends collection. So at every committed instant (i) or (ii) holds
+     until the invoice has drawn on the grant or is voided, and the
+     sweep needs no lock and no re-check in `ExpireGrantAtomic`. A
+     queued invoice holds a grant only until its next collection draws
+     on it.
+   - **It replaces the invoice-grace wait** (ADR-120 Decision 5, first
+     version): retiring a grant only once `INVOICE_GRACE_PERIOD` had
+     passed after `expires_at`. That covered a close that ran inside the
+     grace, but not a close on the retry ladder or a late finalize.
+   - **A draft that nothing finalizes holds grants until someone does.**
+     While collection is paused (`keep_as_draft`, set by an operator or
+     by dunning's `pause` final action, ADR-112), every close writes a
+     draft. Resume and the tax retry leave it a draft. Arm (ii) then holds
+     every grant of that customer that expires after the draft's
+     `issued_at`, until the draft is finalized or voided: no time limit.
+     Until then the ledger balance, `credit.balance_low` and
+     `credit.balance_depleted` count the expired credit; the spendable
+     balance does not. A draft finalized later draws on it, by the
+     `expires_at` condition. Stripe's balance summary has the same split:
+     the available balance "is equal to the ledger balance less any
+     expired credits or unrecorded transactions." Holding only
+     tax-pending drafts would bound it, but would open a gap. `RetryTax`
+     commits the computed tax, then finalizes in a second write. A sweep
+     between the two, or a crash there, would retire a grant the
+     finalize still needs.
+   - **Not covered: a scheduled cancel's final invoice.** The `cancel_at`
+     arm of the due instant comes with the reused fragment. It holds a
+     grant until that invoice is built, at least the grace after
+     `cancel_at` (ADR-120). But the invoice (`subscription_cancel`) is
+     issued when it is built and tests expiry when it is collected, not
+     at `cancel_at`. So a grant that was live at `cancel_at` and expires
+     before the build is not drawn, as before this amendment. Covering it
+     means testing that invoice's draw at its `billing_period_end` (the
+     `canceled_at`) and adding it to arm (ii). That is a separate
+     decision.
+   - **Not covered: the wall-clock sweep during dunning.** An invoice in
+     dunning is finalized with `auto_charge_pending` cleared, so the hold
+     does not cover it, and the hourly sweep retires a grant at its
+     `expires_at` even when a later retry of a period invoice issued
+     before then would draw it. A test-clock advance runs expiry after
+     the retries (ADR-029, amended 2026-10-20), so there the retry draws
+     it. Holding grants for invoices in dunning is a separate decision.
 3. **`consumed_cents` is the single structural exclusion.** Migration
    0127 retro-retires every grant the pre-fix sweep expired (exact-match
    join on the legacy `'Expired grant <id>'` description, used one last
@@ -106,3 +195,17 @@ SUM ≥ 0, conservation, full retirement),
 migration file). Mutations killed: no-op flip; pre-fix snapshot-append
 shape; tx split (flip committed, entry crashed); disabled clawback
 check.
+
+The 2026-10-19 amendment (§2): `TestExpireCredits_HoldsAGrantWhileAFailedCloseIsOwed`,
+`TestExpireCredits_HoldsAGrantWhileAPeriodInvoiceIsUncollected`,
+`TestExpireCreditsForClock_HoldsAGrantAFailedCloseNeeds`,
+`TestExpireCredits_NoGrace_HoldIsTheOwedClose` (credit), and
+`TestFailedClose_ThenSuccess_DrawsTheGrantLiveAtThePeriodEnd`,
+`TestSweepCollect_CycleInvoiceDrawsCreditLiveAtIssuedAt`,
+`TestTaxDeferredClose_RetryTaxLater_DrawsTheGrant`,
+`TestExpiryVsCloseCollect_NoGapInTheHandoff` (billing). Each failed
+before the fix, on the commit that added them alone (#1305, CI run
+39298980811). Each test's comment names the part it pins: a clause of
+the hold, the clock query's hold, the `status = 'draft'` or
+`auto_charge_pending` arm, or the draw at `issued_at`. Those mutations
+were checked by reading the tests, not run.

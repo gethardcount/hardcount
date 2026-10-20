@@ -11,8 +11,13 @@
 /**
  * Payment-attempt status. `unknown` marks a Stripe charge attempt that
  * returned an ambiguous error (5xx, timeout, connection reset) where
- * we cannot tell whether Stripe processed the charge — a reconciler
- * resolves these by querying Stripe after a cool-off window.
+ * we cannot tell whether Stripe processed the charge. With a payment
+ * intent recorded, Velox asks Stripe for it after a short wait. With
+ * none (a parked invoice), Velox lists the customer's payments at
+ * Stripe every billing tick: it records a payment for the invoice that
+ * appears, and if none has appeared 24 hours after the attempt the
+ * invoice goes back to `pending` (`failed` after a dunning retry) and
+ * is charged again as usual.
  */
 export type InvoicePaymentStatus = typeof InvoicePaymentStatus[keyof typeof InvoicePaymentStatus];
 

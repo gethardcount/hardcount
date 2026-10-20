@@ -70,6 +70,28 @@ type wireCase struct {
 // fetchWire seeds the case and returns the timeline's events as JSON maps.
 func fetchWire(t *testing.T, c wireCase) []map[string]any {
 	t.Helper()
+	h, invoiceID := wireHandler(t, c)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", invoiceID)
+	ctx := auth.WithTenantID(req.Context(), "t1")
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	rr := httptest.NewRecorder()
+	h.paymentTimeline(rr, req.WithContext(ctx))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp timelineResp
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp.Events
+}
+
+// wireHandler seeds the case and returns a handler over it and the seeded
+// invoice's id.
+func wireHandler(t *testing.T, c wireCase) (*Handler, string) {
+	t.Helper()
 	mem := newMemStore()
 	inv := c.inv
 	if inv.CustomerID == "" {
@@ -110,22 +132,7 @@ func fetchWire(t *testing.T, c wireCase) []map[string]any {
 		audit[strings.ReplaceAll(k, "{inv}", created.ID)] = v
 	}
 	h.auditStamps = &auditRowsFake{rows: audit}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", created.ID)
-	ctx := auth.WithTenantID(req.Context(), "t1")
-	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
-	rr := httptest.NewRecorder()
-	h.paymentTimeline(rr, req.WithContext(ctx))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
-	}
-	var resp timelineResp
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	return resp.Events
+	return h, created.ID
 }
 
 // wireRow is the part of one row the cases assert on.

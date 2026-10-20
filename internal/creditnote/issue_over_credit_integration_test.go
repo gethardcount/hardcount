@@ -185,6 +185,11 @@ func TestIssue_NotePartlyAboveAmountDue_ReturnsOnlyTheDifference(t *testing.T) {
 
 // Voiding the invoice afterwards hands back only the credits still applied to
 // it: the ones a credit note already returned must not come back twice.
+//
+// Both notes leave nothing due, which marks the invoice paid, and a paid
+// invoice cannot be voided. An invoice the note left open at $0 is one it
+// issued against while a charge held the invoice; the hold then clears (the
+// stale-hold sweep found nothing at Stripe) and the operator voids it.
 func TestVoid_AfterCreditNoteReturnedCredits_HandsBackOnlyTheRest(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -198,8 +203,13 @@ func TestVoid_AfterCreditNoteReturnedCredits_HandsBackOnlyTheRest(t *testing.T) 
 			r := newOverCreditRig(t, "CN Void Netting")
 			draft := r.draft(t, tc.noteCents)
 			r.applyCredits(t, 6000)
+			setChargeHold(t, r.ctx, r.db, r.inv.ID, false)
 			if _, err := r.notes.Issue(r.ctx, r.tenantID, draft.ID); err != nil {
 				t.Fatalf("Issue: %v", err)
+			}
+			clearChargeHold(t, r.ctx, r.db, r.inv.ID)
+			if inv := r.invoiceNow(t); inv.Status != domain.InvoiceFinalized || inv.AmountDueCents != 0 {
+				t.Fatalf("invoice %s with %d due, want open at 0 to void", inv.Status, inv.AmountDueCents)
 			}
 			if _, err := r.invSvc.Void(r.ctx, r.tenantID, r.inv.ID); err != nil {
 				t.Fatalf("Void: %v", err)
@@ -212,7 +222,12 @@ func TestVoid_AfterCreditNoteReturnedCredits_HandsBackOnlyTheRest(t *testing.T) 
 }
 
 // Two drafts that each fit the amount due when created: the second finds
-// nothing left due and is returned to the balance whole.
+// nothing left due and is returned to the balance whole. The first left
+// nothing due, so it marked the invoice paid (G3), and the second takes the
+// paid-invoice path: its whole amount is credited to the balance and the
+// credits applied stay as they paid the invoice. Before G3 the second took the
+// credits back off the open invoice instead; the customer gets 4000 back
+// either way.
 func TestIssue_SecondDraftFindsNothingDue_ReturnsItsWholeAmount(t *testing.T) {
 	r := newOverCreditRig(t, "CN Two Drafts")
 	r.applyCredits(t, 6000) // due 4000
@@ -224,13 +239,21 @@ func TestIssue_SecondDraftFindsNothingDue_ReturnsItsWholeAmount(t *testing.T) {
 		}
 	}
 	inv := r.invoiceNow(t)
-	if inv.AmountDueCents != 0 || inv.CreditsAppliedCents != 2000 {
-		t.Fatalf("invoice due %d / credits applied %d, want 0 / 2000", inv.AmountDueCents, inv.CreditsAppliedCents)
+	if inv.Status != domain.InvoicePaid || inv.AmountDueCents != 0 || inv.AmountPaidCents != 0 || inv.CreditsAppliedCents != 6000 {
+		t.Fatalf("invoice %s, due %d / paid %d / credits applied %d; want paid by the first note at 0 / 0 / 6000",
+			inv.Status, inv.AmountDueCents, inv.AmountPaidCents, inv.CreditsAppliedCents)
+	}
+	if got, err := r.notes.Get(r.ctx, r.tenantID, second.ID); err != nil || got.CreditAmountCents != 4000 {
+		t.Fatalf("second note credit %d (err %v), want 4000 to the balance", got.CreditAmountCents, err)
 	}
 	if got := r.balance(t); got != 4000 {
 		t.Fatalf("customer balance = %d, want 4000", got)
 	}
-	r.conserved(t)
+	// The doctor's invoice_due_conservation identity: the first note reduced
+	// the invoice by 4000; the second reduced nothing (all of it is credit).
+	if want := inv.TotalAmountCents - inv.AmountPaidCents - inv.CreditsAppliedCents - 4000; inv.AmountDueCents != want {
+		t.Fatalf("amount due %d, want %d", inv.AmountDueCents, want)
+	}
 }
 
 // With no credit ledger wired, a note that must return credits fails and stays

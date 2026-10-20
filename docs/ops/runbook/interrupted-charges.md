@@ -1,11 +1,14 @@
 # Interrupted charges
 
 A charge is interrupted when Velox sent it to Stripe but did not save the
-answer: the process stopped, a time limit ended the call, or Stripe answered
-429 to a resent request. Velox then keeps the charge's claim on the invoice
-(the charge hold) and asks Stripe what happened before anything charges the
-invoice again ([ADR-127](../../adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
-This page is for when that check cannot finish. Back to the
+answer: the process stopped (a crash, a shutdown), a closed **Collect
+payment** ended the call, or Stripe answered 429 to a resent request. Velox
+then keeps the charge's claim on the invoice (the charge hold) and asks
+Stripe what happened before anything charges the invoice again
+([ADR-127](../../adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
+A charge whose answer was unclear and named no payment, a request past the
+caller's time limit included, is a [parked invoice](parked-invoices.md)
+instead. This page is for when the check cannot finish. Back to the
 [runbook index](index.md).
 
 ## Symptom

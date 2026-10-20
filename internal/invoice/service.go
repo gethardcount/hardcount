@@ -1846,15 +1846,15 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Block until terminal. Stripe enforces the same ("can't mark uncollectible
 	// with open payments"). Guard sits BEFORE reverseInvoiceTax.
 	// A PARKED invoice is the exception (ADR-107): payment_status='unknown' with
-	// no PaymentIntent id means the attempt could not be identified at the
-	// provider and never will be. It is excluded from every charge path, so it
-	// can otherwise reach no terminal state at all — which violates the
-	// every-invoice-terminates rule and left the operator with literally no
-	// action (found by the honesty sweep, 2026-07-31).
+	// no PaymentIntent id means Stripe's answer was unclear and named no
+	// payment. The stale-hold sweep finishes it within a day (REC-5), and
+	// writing it off is the action for a customer who paid another way, or
+	// for a park Stripe cannot be asked about (found by the honesty sweep,
+	// 2026-07-31, when it had no exit at all).
 	//
 	// Writing it off is safe in a way voiding is not: it moves no money, and if
-	// the charge did succeed the payment webhook still marks the invoice paid
-	// through the ordinary recovery path, which audits recovered_from. Void
+	// the charge did succeed the payment webhook or the stale-hold sweep still
+	// marks the invoice paid, which audits recovered_from. Void
 	// stays refused because a voided-then-succeeded invoice is a contradiction,
 	// and RecordOfflinePayment stays refused because it would label a card
 	// charge as out-of-band.
@@ -1892,7 +1892,7 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Reversing here shipped a machine-driven under-remit with no human in it:
 	// an ambiguous charge parks an invoice (ADR-107), write-off is its only
 	// legal exit and the attention banner advises it, the reversal fires, then
-	// the ADR-108 provider search finds the charge succeeded and
+	// the stale-hold sweep finds the charge succeeded at Stripe and
 	// markPaidReportingTransition settles uncollectible -> paid — leaving a
 	// PAID invoice whose tax is un-reported and nothing to re-report it. The
 	// in-flight guard above catches only the payment already moving at

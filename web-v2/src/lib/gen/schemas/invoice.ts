@@ -162,7 +162,10 @@ export interface Invoice {
   /**
      * Stripe's PaymentIntent status the last time Velox checked it,
      * word for word. For information only: `payment_status` is the
-     * invoice's payment state. Absent until Velox has checked.
+     * invoice's payment state. Absent until Velox has checked. An
+     * invoice checked by the Stripe Search sweep of releases before
+     * this one may still show `search_not_found`,
+     * `search_terminal_only` or `search_error`.
      */
   provider_payment_status?: string;
   /**
