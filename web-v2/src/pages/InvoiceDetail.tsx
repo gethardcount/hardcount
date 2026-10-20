@@ -523,7 +523,10 @@ export default function InvoiceDetailPage() {
         })
       }
     },
-    onError: err => showApiError(err, 'Failed to retry tax'),
+    // A failed retry can still have saved the tax: the finalize after it is
+    // what failed. Reload so the page shows the draft and its Finalize button
+    // instead of the old "tax pending" notice.
+    onError: err => { invalidateAll(); showApiError(err, 'Failed to retry tax') },
   })
 
   const acting = finalizeMutation.isPending || voidMutation.isPending || collectMutation.isPending || rotatePublicTokenMutation.isPending

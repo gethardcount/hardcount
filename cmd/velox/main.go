@@ -397,10 +397,14 @@ func serve() {
 
 	// Stage 3 (≤ 30s): scheduler + dispatchers. Their ticks run on ctx
 	// (cancelled above) and abort atomically at their next DB call; this
-	// wait exists for the WithoutCancel completions — a Stripe charge
-	// bounded by the 30s client timeout, an outbox row's detached mark —
-	// so a mid-tick run lands its result instead of leaving a claimed row
-	// for the lease to expire. Bounded so a hung worker cannot prevent exit.
+	// wait exists for the WithoutCancel completions — a Stripe charge, a
+	// tax retry's finalize and its CommitTax, an outbox row's detached
+	// mark — so a mid-tick run lands its result instead of leaving a
+	// claimed row for the lease to expire. Each Stripe attempt is bounded
+	// by the 30s client timeout, but stripe-go retries a timeout up to
+	// twice, so this stage's own bound caps the wait; the tax_commit sweep
+	// re-commits a CommitTax it cuts. Bounded so a hung worker cannot
+	// prevent exit.
 	done := make(chan struct{})
 	go func() {
 		workers.Wait()

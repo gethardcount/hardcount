@@ -4173,6 +4173,12 @@ export interface paths {
          *     `attention`) on success or post-retry failure. A retry that
          *     is still failing is **not** an HTTP error — the caller
          *     renders the new attention.
+         *
+         *     When the tax resolves on an invoice the billing engine made,
+         *     the call also finalizes it, unless collection is paused on its
+         *     subscription. If that finalize fails, the call returns 500 or
+         *     409 and the invoice stays a draft with its tax saved: finalize
+         *     it.
          */
         post: {
             parameters: {
@@ -4212,7 +4218,9 @@ export interface paths {
                 };
                 /**
                  * @description Invoice is not in a retryable state (status != draft, or
-                 *     tax_status not in pending/failed).
+                 *     tax_status not in pending/failed). Also returned when the
+                 *     tax was saved but the invoice's state then stopped the
+                 *     finalize.
                  */
                 409: {
                     headers: {
