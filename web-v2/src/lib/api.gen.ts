@@ -4005,7 +4005,9 @@ export interface paths {
         /**
          * Issue a draft credit note
          * @description Moves a `draft` credit note to `issued` and applies it.
-         *     - Unpaid invoice: the invoice's amount due goes down.
+         *     - Unpaid invoice: the invoice's amount due goes down. If nothing is
+         *       left due, the invoice is marked `paid` and `invoice.paid` is sent,
+         *       unless a charge is running on it.
          *     - Paid invoice: the refund part is sent to Stripe, and the credit
          *       part is added to the customer's credit balance.
          *
@@ -8317,7 +8319,7 @@ export interface components {
             date: string;
             /**
              * Format: int64
-             * @description Sum of invoice totals paid in the bucket.
+             * @description What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
              */
             revenue_cents: number;
             invoice_count: number;
@@ -8370,12 +8372,12 @@ export interface components {
             arr_prev: number;
             /**
              * Format: int64
-             * @description Total of invoices paid in the window.
+             * @description What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
              */
             revenue: number;
             /**
              * Format: int64
-             * @description Total of invoices paid in the previous window.
+             * @description `revenue` for the previous window.
              */
             revenue_prev: number;
             /**

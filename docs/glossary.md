@@ -145,7 +145,8 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   first. A commit's own purchase invoice can never be paid with credit.
   [More](design/prepaid-commits.md#d7-drawdown-order-null-safe)
 - **credit note (CN)**: A document that lowers what a customer owes on an
-  invoice. On an unpaid invoice it lowers the amount due. On a paid one,
+  invoice. On an unpaid invoice it lowers the amount due; if nothing is left
+  due, the invoice is marked paid. On a paid one,
   its total is split between a refund to the card, credit to the
   customer's balance, and money returned outside Velox (out of band). Its
   status is draft, issued or voided.

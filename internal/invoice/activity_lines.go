@@ -130,8 +130,11 @@ func retriesText(n int) string {
 
 // paidLine is I-5 and I-6. retries is the payment-recovery attempt count when
 // recovery was running (0 otherwise). note is the reference an operator typed
-// with an offline payment.
-func paidLine(inv domain.Invoice, retries int, note string, actor *activity.Actor) activity.Line {
+// with an offline payment. byNote links the credit note that left nothing due
+// and so marked the invoice paid (ADR-061 amendment 2026-10-19), nil when a
+// payment or credit did: the row names the note, never the retries, which all
+// failed.
+func paidLine(inv domain.Invoice, retries int, note string, actor *activity.Actor, byNote *activity.Part) activity.Line {
 	amount := activity.Amount(inv.AmountPaidCents, inv.Currency)
 	if strings.HasPrefix(inv.StripePaymentIntentID, "out_of_band:") {
 		// "Recorded" is only the timestamp word (ADR-104 Invariant C), and the
@@ -143,6 +146,10 @@ func paidLine(inv domain.Invoice, retries int, note string, actor *activity.Acto
 		return l
 	}
 	l := activity.Line{Kind: "invoice.paid", Title: "Invoice paid", Tone: activity.ToneSuccess, Amount: amount, Actor: actor}
+	if byNote != nil {
+		l.Detail = append(l.Detail, activity.Segment{activity.T("Nothing left due after credit note "), *byNote})
+		retries = 0
+	}
 	if c := cardText(inv.PaymentCardBrand, inv.PaymentCardLast4); c != "" {
 		l.Detail = append(l.Detail, activity.Text(c))
 	}

@@ -2462,7 +2462,7 @@ components:
         revenue_cents:
           type: integer
           format: int64
-          description: Sum of invoice totals paid in the bucket.
+          description: What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
         invoice_count:
           type: integer
 
@@ -2559,11 +2559,11 @@ components:
         revenue:
           type: integer
           format: int64
-          description: Total of invoices paid in the window.
+          description: What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
         revenue_prev:
           type: integer
           format: int64
-          description: Total of invoices paid in the previous window.
+          description: "`revenue` for the previous window."
         outstanding_ar:
           type: integer
           format: int64
@@ -10432,7 +10432,9 @@ paths:
       operationId: issueCreditNote
       description: |
         Moves a `draft` credit note to `issued` and applies it.
-        - Unpaid invoice: the invoice's amount due goes down.
+        - Unpaid invoice: the invoice's amount due goes down. If nothing is
+          left due, the invoice is marked `paid` and `invoice.paid` is sent,
+          unless a charge is running on it.
         - Paid invoice: the refund part is sent to Stripe, and the credit
           part is added to the customer's credit balance.
 

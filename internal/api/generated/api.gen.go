@@ -3272,13 +3272,13 @@ type AnalyticsOverview struct {
 	// hour after issue.
 	RefundsNeedingAttention int `json:"refunds_needing_attention"`
 
-	// Revenue Total of invoices paid in the window.
+	// Revenue What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
 	Revenue int64 `json:"revenue"`
 
 	// RevenueChurnRate Churned MRR divided by `mrr_prev`. 0 when `mrr_prev` is 0.
 	RevenueChurnRate float64 `json:"revenue_churn_rate"`
 
-	// RevenuePrev Total of invoices paid in the previous window.
+	// RevenuePrev `revenue` for the previous window.
 	RevenuePrev int64 `json:"revenue_prev"`
 
 	// TrialingSubscriptions Subscriptions with status `trialing`.
@@ -3297,7 +3297,7 @@ type AnalyticsRevenuePoint struct {
 	Date         string `json:"date"`
 	InvoiceCount int    `json:"invoice_count"`
 
-	// RevenueCents Sum of invoice totals paid in the bucket.
+	// RevenueCents What paid the invoices paid in the bucket (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
 	RevenueCents int64 `json:"revenue_cents"`
 }
 

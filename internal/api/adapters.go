@@ -321,6 +321,7 @@ type retryInvoiceStore interface {
 	ClaimChargeForDunningRetry(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
+	SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error)
 	HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
 }
 
@@ -370,7 +371,23 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		return fmt.Errorf("get invoice: %w", err)
 	}
 	if inv.AmountDueCents <= 0 {
-		return nil // Nothing to charge
+		// Nothing to charge. The run closes as recovered only if the invoice
+		// is paid, so settle it first: a credit balance applied by an earlier
+		// pass whose mark-paid failed leaves it open at $0. Before, this
+		// returned nil and the run closed with the invoice still unpaid.
+		inv, _, err = a.invoiceStore.SettleZeroDue(ctx, tenantID, invoiceID, clock.Now(ctx))
+		if err != nil {
+			return fmt.Errorf("settle invoice with nothing due: %w", err)
+		}
+		if inv.Status != domain.InvoicePaid {
+			// A charge hold is set (a charge running, or one whose result was
+			// lost), or the invoice is no longer open. The next pass looks
+			// again; the paid pre-check closes a voided or written-off one.
+			slog.InfoContext(ctx, "dunning retry: invoice has nothing due but was not marked paid; skipping this attempt",
+				"invoice_id", invoiceID, "status", inv.Status, "payment_status", inv.PaymentStatus)
+			return dunning.ErrTransientSkip
+		}
+		return nil
 	}
 
 	// Per-invoice charge lease, shared with the auto-charge sweep (HA
