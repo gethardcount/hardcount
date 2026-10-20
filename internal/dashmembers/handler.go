@@ -247,7 +247,7 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The audit row and the session row record the same address: the one
-	// TrustedRealIP resolved, never a forwarding header the client wrote.
+	// TrustedClientIP resolved, never a forwarding header the client wrote.
 	ip := audit.ExtractClientIP(r)
 
 	// Accept happens pre-auth, so stamp the accepting user as the actor

@@ -1466,29 +1466,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentMethodsH.SetCooldown(setupLinkCooldown)
 
 	r := chi.NewRouter()
-	r.Use(mw.Tracing())
-	// NOT chi's middleware.RequestID — it honours an inbound X-Request-Id header
-	// verbatim, which would let a caller choose the request_id recorded on their
-	// own audit_log rows. mw.RequestID always mints server-side. See its doc
-	// comment and ADR-090 §7 (read egress).
-	r.Use(mw.RequestID)
-	// Only honor X-Forwarded-For / X-Real-IP from configured trusted proxies.
-	// chi's middleware.RealIP trusted them unconditionally, letting any client
-	// forge a forwarding header to rotate its per-IP rate-limit bucket
-	// (enumeration bypass) or pin a victim's IP. TRUST_PROXY is a comma-list of
-	// CIDRs / IPs (e.g. "10.0.0.0/8,127.0.0.1"); unset → trust nothing and key
-	// rate limits on the raw TCP peer.
-	trustProxy := os.Getenv("TRUST_PROXY")
-	trustedProxies := mw.ParseTrustedProxies(trustProxy)
-	switch {
-	case strings.EqualFold(strings.TrimSpace(trustProxy), "none"):
-		slog.Info("TRUST_PROXY=none — no proxy in front; rate limiting keys on the direct TCP peer")
-	case len(trustedProxies) == 0:
-		// Production refuses to boot in this state (config.validateFatal);
-		// local/staging get the warning.
-		slog.Warn("TRUST_PROXY not set — X-Forwarded-For/X-Real-IP ignored; rate limiting keys on the direct TCP peer. Behind a balancer that is ONE bucket for everyone: set TRUST_PROXY to the balancer's CIDR, or TRUST_PROXY=none if there is no proxy.")
-	}
-	r.Use(mw.TrustedRealIP(trustedProxies))
+	useRequestEdge(r, os.Getenv("TRUST_PROXY"))
 	corsEnv := os.Getenv("CORS_ALLOWED_ORIGINS")
 	if corsEnv == "" {
 		corsEnv = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
@@ -1524,7 +1502,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Mounted at the ROOT, not on /v1: the catch-all it replaces only ever saw
 	// the /v1 block, so /v1/auth, /v1/tenants, /v1/public/*, /v1/webhooks and
 	// /v1/bootstrap were invisible to it (ADR-090 RC1). It also sits AFTER
-	// RequestID + TrustedRealIP so the ctx it seeds for every downstream audit
+	// RequestID + TrustedClientIP so the ctx it seeds for every downstream audit
 	// emission carries the request id and the real client IP.
 	r.Use(mw.AuditCoverage(auditRouteExempt))
 
@@ -2007,15 +1985,45 @@ func requestLogger(next http.Handler) http.Handler {
 	})
 }
 
+// useRequestEdge mounts the first middlewares every request passes: the
+// trace span, the server-minted request id, the trusted client IP and the
+// span correction. Everything after it can answer without routing (CORS
+// preflight), so the span correction must sit here.
+func useRequestEdge(r chi.Router, trustProxy string) {
+	r.Use(mw.Tracing())
+	// NOT chi's middleware.RequestID — it honours an inbound X-Request-Id header
+	// verbatim, which would let a caller choose the request_id recorded on their
+	// own audit_log rows. mw.RequestID always mints server-side. See its doc
+	// comment and ADR-090 §7 (read egress).
+	r.Use(mw.RequestID)
+	// The client IP comes from chi's ClientIPFrom* middleware: X-Forwarded-For
+	// is read only when the TCP peer is inside TRUST_PROXY (a comma-list of
+	// CIDRs / IPs, e.g. "10.0.0.0/8,127.0.0.1"); otherwise, and when
+	// TRUST_PROXY is unset or "none", it is the TCP peer. Rate limits, audit
+	// and session rows, logs and spans all read it via audit.ExtractClientIP.
+	trustedProxies := mw.ParseTrustedProxies(trustProxy)
+	switch {
+	case strings.EqualFold(strings.TrimSpace(trustProxy), "none"):
+		slog.Info("TRUST_PROXY=none — no proxy in front; rate limiting keys on the direct TCP peer")
+	case len(trustedProxies) == 0:
+		// Production refuses to boot in this state (config.validateFatal);
+		// local/staging get the warning.
+		slog.Warn("TRUST_PROXY not set — X-Forwarded-For ignored; rate limiting keys on the direct TCP peer. Behind a balancer that is ONE bucket for everyone: set TRUST_PROXY to the balancer's CIDR, or TRUST_PROXY=none if there is no proxy.")
+	}
+	r.Use(mw.TrustedClientIP(trustedProxies))
+	r.Use(mw.TraceRequestAttrs(loggablePath))
+}
+
 // loggablePath returns the request path with capability tokens removed.
-// The public surfaces carry bearer-equivalent secrets IN the path
-// (/v1/public/invoices/{256-bit token}, /v1/public/payment-updates/
-// {single-use token}) — logging the raw path writes live payment
-// credentials into every log sink. Prefer chi's matched route pattern
-// ("/v1/public/invoices/{token}"); when no pattern matched (404s),
-// redact the segment after any known public token prefix instead —
-// unmatched probes against those prefixes still contain candidate
-// secrets.
+// Four routes carry a bearer-equivalent secret IN the path: hosted
+// invoices, payment updates, the public cost dashboard and the team
+// invite preview — logging the raw path writes live credentials into
+// every log sink. Prefer chi's matched route pattern
+// ("/v1/public/invoices/{token}"); when no pattern matched (a 404, or a
+// CORS preflight answered before routing), redact the segment after any
+// known token prefix instead. Unmatched requests on those prefixes
+// still contain candidate secrets. A new {token} route adds its prefix
+// here.
 func loggablePath(r *http.Request) string {
 	if rctx := chi.RouteContext(r.Context()); rctx != nil {
 		if pat := rctx.RoutePattern(); pat != "" {
@@ -2023,7 +2031,12 @@ func loggablePath(r *http.Request) string {
 		}
 	}
 	path := r.URL.Path
-	for _, prefix := range []string{"/v1/public/invoices/", "/v1/public/payment-updates/"} {
+	for _, prefix := range []string{
+		"/v1/public/invoices/",
+		"/v1/public/payment-updates/",
+		"/v1/public/cost-dashboard/",
+		"/v1/auth/invite/",
+	} {
 		if rest, ok := strings.CutPrefix(path, prefix); ok && rest != "" {
 			// Keep any sub-path (e.g. /pdf, /checkout) after the token.
 			if i := strings.IndexByte(rest, '/'); i >= 0 {

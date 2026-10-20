@@ -16,7 +16,7 @@ import (
 )
 
 // TestLogin_SessionIPIsTheTrustedClientIP: the session row a login writes
-// records the address TrustedRealIP resolved, the same one the audit row and
+// records the address TrustedClientIP resolved, the same one the audit row and
 // the rate limiter use. A client can put anything in X-Forwarded-For, so the
 // header only counts when a trusted proxy sent it, and then only the entry
 // that proxy added. Until 2026-10-18 the session row took the left-most entry
@@ -48,8 +48,8 @@ func TestLogin_SessionIPIsTheTrustedClientIP(t *testing.T) {
 				session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
 			rec := &recordingAuditRecorder{}
 			h.SetAuditLogger(rec)
-			// The router mounts TrustedRealIP globally, ahead of /v1/auth.
-			srv := mw.TrustedRealIP(mw.ParseTrustedProxies(c.trustProxy))(h.Routes())
+			// The router mounts TrustedClientIP globally, ahead of /v1/auth.
+			srv := mw.TrustedClientIP(mw.ParseTrustedProxies(c.trustProxy))(h.Routes())
 
 			body, _ := json.Marshal(loginReq{Email: "op@acme.com", Password: "a-good-password-123"})
 			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body)))

@@ -36,6 +36,8 @@ var routesNotInSpec = map[string]string{
 	"OPTIONS /metrics": metricsAnyMethod,
 	"CONNECT /metrics": metricsAnyMethod,
 	"TRACE /metrics":   metricsAnyMethod,
+	// chi v5.5.0 routes the QUERY method (RFC draft) too.
+	"QUERY /metrics": metricsAnyMethod,
 }
 
 // openAPIMethods are the operation keys an OpenAPI 3.0 path item can hold.

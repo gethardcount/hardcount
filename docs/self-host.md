@@ -186,7 +186,7 @@ Velox reads its settings from environment variables. The tables below list the m
 | `APP_DATABASE_URL` | Postgres connection URL for the limited user. Required in `staging` and `production`. |
 | `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data. 64 hex characters. Required in `production`. |
 | `REDIS_URL` | Redis, for rate limiting. Required in `production`. If Redis goes down later, sign-in stays rate-limited, but each copy counts on its own. |
-| `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward. Use `none` if there is no proxy. Required in `production`. Velox refuses to start if an entry is not an IP address or CIDR. |
+| `TRUST_PROXY` | The addresses of your proxy or load balancer, comma-separated. Velox then trusts the client address they forward in `X-Forwarded-For`; it does not read `X-Real-IP`. Use `none` if there is no proxy. Required in `production`. Velox refuses to start if an entry is not an IP address or CIDR. |
 
 Why `TRUST_PROXY` is required: without it, every request behind a load balancer appears to come from the load balancer, so all users would share one rate limit. The audit log and dashboard sign-in records would also show the load balancer's address. And the sign-in throttle would treat everyone as one address: 5 wrong passwords for an email, from anyone, would make every new browser wait to sign in with it.
 

@@ -34,6 +34,8 @@ func TestLoggablePath_NeverContainsTokens(t *testing.T) {
 		"/v1/public/invoices/" + token,
 		"/v1/public/invoices/" + token + "/pdf",
 		"/v1/public/payment-updates/" + token,
+		"/v1/public/cost-dashboard/" + token,
+		"/v1/auth/invite/" + token,
 	} {
 		req := httptest.NewRequest("GET", path, nil)
 		got := loggablePath(req)
