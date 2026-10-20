@@ -743,6 +743,33 @@ func (e DunningRunState) Valid() bool {
 	}
 }
 
+// Defines values for DunningRunDetailDegraded.
+const (
+	DunningRunDetailDegradedAudit          DunningRunDetailDegraded = "audit"
+	DunningRunDetailDegradedChargeAttempts DunningRunDetailDegraded = "charge_attempts"
+	DunningRunDetailDegradedEmails         DunningRunDetailDegraded = "emails"
+	DunningRunDetailDegradedEvents         DunningRunDetailDegraded = "events"
+	DunningRunDetailDegradedInvoice        DunningRunDetailDegraded = "invoice"
+)
+
+// Valid indicates whether the value is a known member of the DunningRunDetailDegraded enum.
+func (e DunningRunDetailDegraded) Valid() bool {
+	switch e {
+	case DunningRunDetailDegradedAudit:
+		return true
+	case DunningRunDetailDegradedChargeAttempts:
+		return true
+	case DunningRunDetailDegradedEmails:
+		return true
+	case DunningRunDetailDegradedEvents:
+		return true
+	case DunningRunDetailDegradedInvoice:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DunningRunEventEventType.
 const (
 	DunningRunEventEventTypeDunningStarted DunningRunEventEventType = "dunning_started"
@@ -1720,13 +1747,13 @@ func (e SubscriptionPauseCollectionBehavior) Valid() bool {
 
 // Defines values for SubscriptionTimelineEventSource.
 const (
-	SubscriptionTimelineEventSourceAudit SubscriptionTimelineEventSource = "audit"
+	Audit SubscriptionTimelineEventSource = "audit"
 )
 
 // Valid indicates whether the value is a known member of the SubscriptionTimelineEventSource enum.
 func (e SubscriptionTimelineEventSource) Valid() bool {
 	switch e {
-	case SubscriptionTimelineEventSourceAudit:
+	case Audit:
 		return true
 	default:
 		return false
@@ -3114,7 +3141,10 @@ type ActivityLine struct {
 	Detail [][]ActivityPart `json:"detail"`
 
 	// Id The row's stable key: the event's `id` on an invoice timeline
-	// row, the audit entry's id on a subscription timeline row.
+	// row, the audit entry's id on a subscription timeline row,
+	// `dunning:` and the event's id on a dunning run event (the same
+	// key the invoice timeline gives that event), and `email:` and
+	// the email's id on a sent email (likewise).
 	Id string `json:"id"`
 
 	// Kind Machine name of the event.
@@ -4330,9 +4360,19 @@ type DunningRunState string
 
 // DunningRunDetail defines model for DunningRunDetail.
 type DunningRunDetail struct {
-	Events []DunningRunEvent `json:"events"`
-	Run    DunningRun        `json:"run"`
+	// Degraded Sources that could not be read. `events`: the event history, so
+	// `events` is empty. `invoice`: the run's invoice, so no event has
+	// a `line`. The others leave the lines without what they would
+	// add: `emails` the reminder and final-notice clauses,
+	// `charge_attempts` the decline reason and amount, `audit` who
+	// resolved the run.
+	Degraded []DunningRunDetailDegraded `json:"degraded"`
+	Events   []DunningRunEvent          `json:"events"`
+	Run      DunningRun                 `json:"run"`
 }
+
+// DunningRunDetailDegraded defines model for DunningRunDetail.Degraded.
+type DunningRunDetailDegraded string
 
 // DunningRunEvent defines model for DunningRunEvent.
 type DunningRunEvent struct {
@@ -4341,12 +4381,18 @@ type DunningRunEvent struct {
 	EventType    DunningRunEventEventType `json:"event_type"`
 	Id           string                   `json:"id"`
 	InvoiceId    string                   `json:"invoice_id"`
-	Metadata     map[string]interface{}   `json:"metadata,omitempty"`
-	Reason       string                   `json:"reason,omitempty"`
-	RecordedAt   time.Time                `json:"recorded_at,omitempty"`
-	RunId        string                   `json:"run_id"`
-	State        DunningRunEventState     `json:"state"`
-	TenantId     string                   `json:"tenant_id,omitempty"`
+
+	// Line The event in the words of the activity line standard (ADR-128):
+	// the line the invoice's payment timeline shows for the same
+	// event, without that timeline's folds. Absent when the run's
+	// invoice could not be read (`degraded` names `invoice`).
+	Line       ActivityLine           `json:"line,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Reason     string                 `json:"reason,omitempty"`
+	RecordedAt time.Time              `json:"recorded_at,omitempty"`
+	RunId      string                 `json:"run_id"`
+	State      DunningRunEventState   `json:"state"`
+	TenantId   string                 `json:"tenant_id,omitempty"`
 }
 
 // DunningRunEventEventType defines model for DunningRunEvent.EventType.
@@ -5672,7 +5718,16 @@ type SentEmail struct {
 	Id            string                 `json:"id"`
 	InvoiceNumber string                 `json:"invoice_number,omitempty"`
 	LastError     string                 `json:"last_error,omitempty"`
-	Recipient     string                 `json:"recipient"`
+
+	// Line The email in the words of the activity line standard (ADR-128),
+	// the same as on the invoice's payment timeline: its name and
+	// what happened to it ("Receipt email delivered"), why it was not
+	// sent, the invoice it was about, and who it went to. Dated at the
+	// time on the customer's test clock that caused it, with the real
+	// send time as `recorded_at`. Present for every email type this
+	// list returns.
+	Line      ActivityLine `json:"line,omitempty"`
+	Recipient string       `json:"recipient"`
 
 	// Status Velox's send state. `dispatched` means the mail server accepted it.
 	Status SentEmailStatus `json:"status"`

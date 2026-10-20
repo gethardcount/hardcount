@@ -124,6 +124,7 @@ export * from './dunningPolicyInputFinalSubscriptionAction';
 export * from './dunningPolicyListItem';
 export * from './dunningRun';
 export * from './dunningRunDetail';
+export * from './dunningRunDetailDegradedItem';
 export * from './dunningRunEvent';
 export * from './dunningRunEventEventType';
 export * from './dunningRunEventMetadata';

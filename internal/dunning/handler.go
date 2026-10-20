@@ -16,6 +16,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -43,13 +44,28 @@ type InvoiceVoider interface {
 	RecordOfflinePayment(ctx context.Context, tenantID, id, note string) (domain.Invoice, error)
 }
 
+// EventLiner words a payment-recovery run's events as activity lines
+// (ADR-128): the lines the invoice's Activity card shows for the same
+// events, without that page's folds. lines is keyed by event id; degraded
+// names each side lane that could not be read. Satisfied by the invoice
+// handler, wired at the composition root: the words and the sources they
+// read (the invoice, its emails and charge attempts) live there.
+type EventLiner interface {
+	RecoveryRunLines(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, events []domain.InvoiceDunningEvent) (lines map[string]activity.Line, degraded []string, err error)
+}
+
 type Handler struct {
 	svc           *Service
 	invoiceVoider InvoiceVoider
 	paymentCancel PaymentCanceler
 	auditLogger   AuditWriter
 	resolver      clock.Resolver
+	eventLiner    EventLiner
 }
+
+// SetEventLiner wires the words of the recovery timeline (lazy: the invoice
+// handler is built after this one). Unwired, events carry no line.
+func (h *Handler) SetEventLiner(l EventLiner) { h.eventLiner = l }
 
 // AuditWriter is the narrow audit surface dunning handler uses.
 // Decoupled from internal/audit so the handler can be tested with
@@ -330,15 +346,48 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	events, _ := h.svc.store.ListEvents(r.Context(), tenantID, id)
-	if events == nil {
-		events = []domain.InvoiceDunningEvent{}
+	// A lane that cannot be read is named in `degraded`, never silently
+	// dropped: an empty recovery timeline must not read as "nothing
+	// happened".
+	degraded := []string{}
+	events, err := h.svc.store.ListEvents(r.Context(), tenantID, id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "get dunning run: list events", "run_id", id, "error", err)
+		degraded = append(degraded, "events")
+		events = nil
+	}
+
+	var lines map[string]activity.Line
+	if h.eventLiner != nil && len(events) > 0 {
+		l, d, lerr := h.eventLiner.RecoveryRunLines(r.Context(), tenantID, run, events)
+		if lerr != nil {
+			slog.ErrorContext(r.Context(), "get dunning run: activity lines", "run_id", id, "error", lerr)
+			degraded = append(degraded, "invoice")
+		}
+		lines = l
+		degraded = append(degraded, d...)
+	}
+	out := make([]runEvent, 0, len(events))
+	for _, evt := range events {
+		e := runEvent{InvoiceDunningEvent: evt}
+		if l, ok := lines[evt.ID]; ok {
+			e.Line = &l
+		}
+		out = append(out, e)
 	}
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{
-		"run":    run,
-		"events": events,
+		"run":      run,
+		"events":   out,
+		"degraded": degraded,
 	})
+}
+
+// runEvent is one event of a run on the wire: the event, and its activity
+// line (ADR-128), in the words the invoice's Activity card uses for it.
+type runEvent struct {
+	domain.InvoiceDunningEvent
+	Line *activity.Line `json:"line,omitempty"`
 }
 
 // Customer override handlers (GetCustomerOverride / UpsertCustomerOverride

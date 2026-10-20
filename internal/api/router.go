@@ -727,6 +727,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	invoiceH.SetAuditStamps(&invoiceAuditStampsAdapter{logger: auditLogger})
 	// ADR-128: invoice activity rows link the invoice's subscription by name.
 	invoiceH.SetSubscriptionLabeler(&invoiceSubscriptionLabelAdapter{store: subStore})
+	// ADR-128: the Dunning page's recovery timeline carries the lines the
+	// invoice's Activity card shows for the same events, built by the
+	// invoice handler from the same sources.
+	dunningH.SetEventLiner(invoiceH)
 	subH.SetAuditLogger(auditLogger)
 	// ADR-128: subscription activity rows link the invoices they name.
 	subH.SetInvoiceLabeler(&subscriptionInvoiceLabelAdapter{store: invoiceStore})

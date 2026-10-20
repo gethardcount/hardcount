@@ -187,6 +187,11 @@ type EmailEventRow struct {
 	// row did not fail or its error has no plain-words name. The raw error
 	// stays in LastError and never reaches the screen.
 	SendFailure string
+	// SkipReason is the state the invoice reached that made the dispatcher
+	// skip a queued email (email_outbox.skip_reason): paid, voided,
+	// uncollectible or gone. Empty for rows not skipped, and for rows
+	// skipped before the reason was recorded.
+	SkipReason string
 	// CreditNoteNumber is the credit note a credit-note email sent (payload
 	// credit_note_number); empty for other types.
 	CreditNoteNumber string
@@ -1561,6 +1566,9 @@ type timelineEvent struct {
 	// are filled from it (fillFromLine), so a client that reads only the
 	// older fields shows the same words.
 	Line activity.Line `json:"line"`
+	// dunningEventID is the payment-recovery event a row tells; empty on
+	// every other row. RecoveryRunLines keys the Dunning page's lines by it.
+	dunningEventID string
 }
 
 // fillFromLine stamps the line's id and times and copies its words into the
@@ -1604,14 +1612,7 @@ func piFromEventMetadata(meta map[string]any) string {
 // that), and a succeeded attempt on a NOT-paid invoice does render —
 // that shape is an anomaly worth seeing.
 func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceChargeAttempt, inv domain.Invoice) []timelineEvent {
-	dunningIdxByPI := map[string]int{}
-	for i, e := range events {
-		if e.Source == "dunning" && e.PaymentIntentID != "" {
-			if _, dup := dunningIdxByPI[e.PaymentIntentID]; !dup {
-				dunningIdxByPI[e.PaymentIntentID] = i
-			}
-		}
-	}
+	dunningIdxByPI := recoveryRowsByPI(events)
 	sawSucceeded := false
 	for _, a := range attempts {
 		if a.Outcome == domain.ChargeAttemptSucceeded {
@@ -1644,19 +1645,7 @@ func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceCharg
 		// The dunning row tells this charge better — hand it the
 		// provider facts and drop the attempt row.
 		if idx, ok := dunningIdxByPI[a.StripePaymentIntentID]; ok && a.StripePaymentIntentID != "" {
-			d := &events[idx]
-			// The attempt owns payment truth: its decline code, mapped to
-			// words about the cardholder, or else its verbatim provider
-			// reason, replaces the dunning event's internally-wrapped copy
-			// ("payment failed: Your card was declined.").
-			if d.Line.Tone == activity.ToneFailure {
-				if p := activity.DeclineReason(a.DeclineCode, a.ProviderReason); p != "" {
-					d.Line.Problem = p
-				}
-			}
-			if d.Line.Amount == nil {
-				d.Line.Amount = activity.Amount(a.AmountCents, inv.Currency)
-			}
+			liftAttempt(&events[idx], a, inv)
 			continue
 		}
 		events = append(events, chargeAttemptRow(a, inv))
@@ -1781,24 +1770,18 @@ func titleCaseSnake(s string) string {
 }
 
 // emailRowInstant resolves an email row's position on the timeline
-// (ADR-104). The PRIMARY instant is the billing instant that caused the
-// send — the outbox anchor stamped at enqueue from bound ctx; rankEmail
-// then places the row after the money event it announces, since a
+// (ADR-104), by the one rule every email surface uses
+// (activity.EmailInstant): the PRIMARY instant is the billing instant that
+// caused the send — the outbox anchor stamped at enqueue from bound ctx;
+// rankEmail then places the row after the money event it announces, since a
 // notification is only ever an effect. The real-world send instant
-// (dispatched_at once the relay took it, enqueue time until then)
-// survives as `recorded` — the operator contract's Invariant A: a row
-// whose two calendars differ shows both. Legacy rows without an anchor
-// keep their wall stamp — misplaced but honest; inferring an anchor at
-// read time is the heuristic the no-heuristic-proxies rule bans.
+// (dispatched_at once the relay took it, enqueue time until then) survives
+// as `recorded` — the operator contract's Invariant A: a row whose two
+// calendars differ shows both. Legacy rows without an anchor keep their wall
+// stamp — misplaced but honest; inferring an anchor at read time is the
+// heuristic the no-heuristic-proxies rule bans.
 func emailRowInstant(evt EmailEventRow) (ts time.Time, recorded time.Time, sim bool) {
-	wall := evt.CreatedAt
-	if evt.DispatchedAt != nil {
-		wall = *evt.DispatchedAt
-	}
-	if evt.SimEffectiveAt != nil {
-		return *evt.SimEffectiveAt, wall, true
-	}
-	return wall, time.Time{}, false
+	return activity.EmailInstant(evt.email())
 }
 
 // metaNumber reads a number an audit row's metadata carries (JSON decodes
@@ -1936,19 +1919,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		if list, err := h.emailEvents.ListByInvoice(ctx, tenantID, inv.InvoiceNumber); err != nil {
 			degrade("emails", err)
 		} else {
-			for _, evt := range list {
-				switch evt.EmailType {
-				case "dunning_warning":
-					if evt.AttemptNumber > 0 {
-						reminderByAttempt[evt.AttemptNumber] = evt
-					}
-				case "dunning_escalation":
-					e := evt
-					escalationEmail = &e
-				default:
-					emails = append(emails, evt)
-				}
-			}
+			emails, reminderByAttempt, escalationEmail = recoveryEmails(list)
 		}
 	}
 
@@ -2192,64 +2163,13 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Payment-recovery rows.
-	for _, re := range dunningRuns {
-		for _, evt := range re.events {
-			// "Payment recovery ended" folds into the lifecycle row that
-			// already says it (ADR-020): "Invoice paid", "Invoice marked
-			// uncollectible" or "Invoice voided". Gated on the invoice's own
-			// transition FIELDS — never the event's reason string, which
-			// each resolver spells differently. A run that closed while its
-			// invoice never transitioned (the legacy "Closed unpaid") sets
-			// none of the fields, so its row stays as the only record.
-			if evt.EventType == domain.DunningEventResolved &&
-				(inv.PaidAt != nil || inv.UncollectibleAt != nil || inv.VoidedAt != nil) {
-				continue
-			}
-			// The retry that recovered the invoice folds into "Invoice
-			// paid", which says "After N retries".
-			if evt.EventType == domain.DunningEventRetryAttempted && evt.Reason == "succeeded" && inv.PaidAt != nil {
-				continue
-			}
-			dc := dunningContext{run: re.run, writeOffShown: inv.UncollectibleAt != nil, sub: sub}
-			switch evt.EventType {
-			case domain.DunningEventRetryAttempted:
-				if em, ok := reminderByAttempt[evt.AttemptCount]; ok {
-					dc.email = &em
-				}
-			case domain.DunningEventEscalated:
-				dc.email = escalationEmail
-			case domain.DunningEventResolved:
-				for _, e := range auditRows("dunning_run", re.run.ID) {
-					if e.Action == domain.AuditActionUpdate && e.Metadata["action"] == "resolved" {
-						ec := e
-						dc.resolvedBy = actorFrom(&ec)
-						break
-					}
-				}
-			}
-			var dunRecorded time.Time
-			if isSimulated && evt.RecordedAt != nil {
-				dunRecorded = *evt.RecordedAt
-			}
-			events = append(events, timelineEvent{
-				ID:           "dunning:" + evt.ID,
-				Timestamp:    evt.CreatedAt.Format(time.RFC3339),
-				sortAt:       evt.CreatedAt,
-				tieRank:      dunningEventRank(evt.EventType),
-				Source:       "dunning",
-				EventType:    string(evt.EventType),
-				AttemptCount: evt.AttemptCount,
-				IsSimulated:  isSimulated,
-				RecordedAt:   rfc3339OrEmpty(dunRecorded),
-				recordedSort: dunRecorded,
-				// Exact-attribution key written by the dunning retry path
-				// (RetryError); empty on legacy rows.
-				PaymentIntentID: piFromEventMetadata(evt.Metadata),
-				Line:            dunningLine(evt, dc),
-			})
-		}
-	}
+	// Payment-recovery rows, with the invoice page's folds: a row the
+	// invoice's own lifecycle row already tells is left out.
+	events = append(events, recoveryRows(recoveryRowsInput{
+		inv: inv, runs: dunningRuns, reminders: reminderByAttempt, escalation: escalationEmail, sub: sub,
+		resolvedBy: func(runID string) *activity.Actor { return resolvedByIn(auditRows("dunning_run", runID)) },
+		fold:       true,
+	})...)
 
 	// Card disputes: an opened row at Stripe's creation time, and a closed
 	// row once Stripe closes it. Both are real-world Stripe instants, never
