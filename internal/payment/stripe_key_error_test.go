@@ -128,9 +128,19 @@ func TestCreatePaymentIntent_RefusedKeyControls(t *testing.T) {
 	})
 }
 
-// recordingKeyHealth records MarkKeyRejected calls.
+// recordingKeyHealth records MarkKeyRejected and ClearKeyRejected calls.
 type recordingKeyHealth struct {
-	marks []string
+	marks  []string
+	clears []string
+}
+
+func (r *recordingKeyHealth) ClearKeyRejected(_ context.Context, tenantID string, livemode bool) error {
+	mode := "test"
+	if livemode {
+		mode = "live"
+	}
+	r.clears = append(r.clears, tenantID+"|"+mode)
+	return nil
 }
 
 func (r *recordingKeyHealth) MarkKeyRejected(_ context.Context, tenantID string, livemode bool, msg string) error {
@@ -204,6 +214,32 @@ func TestChargeInvoice_RefusedKey_WritesNothingAndTellsTheOperator(t *testing.T)
 	}
 	if got := keyUnusableCount(t, StripeKeyRejected) - before; got != 1 {
 		t.Errorf("velox_stripe_key_unusable_total{reason=rejected} rose by %v, want 1", got)
+	}
+	if len(health.clears) != 0 {
+		t.Errorf("Settings clears = %v, want none: the key was refused", health.clears)
+	}
+}
+
+// A charge Stripe accepts proves the stored key works, so the refused-key
+// notice is cleared: a restricted key fixed by granting the permission in
+// Stripe is the same key, and no Connect runs to clear it.
+func TestChargeInvoice_AcceptedCharge_ClearsRefusedKeyNotice(t *testing.T) {
+	withCannedStripe(t, http.StatusOK, `{"id":"pi_ok","object":"payment_intent","status":"succeeded","amount":100,"currency":"usd"}`)
+	invoices := newMockInvoiceUpdater()
+	inv := pendingSnapshot()
+	invoices.invoices[inv.ID] = inv
+	health := &recordingKeyHealth{}
+	s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
+	s.SetKeyHealth(health)
+
+	if _, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test"); err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	if len(health.clears) != 1 || health.clears[0] != "t1|live" {
+		t.Errorf("Settings clears = %v, want one for t1 live", health.clears)
+	}
+	if len(health.marks) != 0 {
+		t.Errorf("Settings marks = %v, want none", health.marks)
 	}
 }
 

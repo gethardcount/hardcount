@@ -120,10 +120,12 @@ type Stripe struct {
 }
 
 // StripeKeyHealth records that Stripe refused a tenant's key for one mode, so
-// Settings → Payments shows it. Implemented by *tenantstripe.Service; wired
-// via SetKeyHealth in router.go.
+// Settings → Payments shows it, and clears that notice once a charge goes
+// through with the key. Implemented by *tenantstripe.Service; wired via
+// SetKeyHealth in router.go.
 type StripeKeyHealth interface {
 	MarkKeyRejected(ctx context.Context, tenantID string, livemode bool, stripeMessage string) error
+	ClearKeyRejected(ctx context.Context, tenantID string, livemode bool) error
 }
 
 // SetKeyHealth wires the Settings mark for a refused key. Optional: nil
@@ -742,6 +744,9 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		}
 		return domain.Invoice{}, ErrPaymentTransient
 	}
+	if err == nil {
+		s.clearRejectedKey(ctx, tenantID)
+	}
 	if err != nil {
 		// Categorise the error so ambiguous (5xx/timeout/network) outcomes are
 		// recorded as PaymentUnknown, not PaymentFailed. Retrying a failed-
@@ -985,7 +990,8 @@ func (s *Stripe) releaseUnsentHold(ctx context.Context, tenantID, invoiceID stri
 // reportUnusableKey tells the operator that charges for this tenant and mode
 // are paused until the Stripe key is fixed: a metric, an ERROR line, and, for
 // a key Stripe refused, the Settings → Payments notice (the same row a failed
-// Connect check writes; reconnecting clears it). A key that is not connected
+// Connect check writes; reconnecting, or a charge that goes through, clears
+// it). A key that is not connected
 // has no row to mark. A lost mark is written again by the next charge.
 func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID, invoiceID string, ke *StripeKeyError) {
 	livemode := postgres.Livemode(ctx)
@@ -1004,6 +1010,27 @@ func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID, invoiceID stri
 	}
 	if err := s.keyHealth.MarkKeyRejected(markCtx, tenantID, livemode, msg); err != nil {
 		slog.WarnContext(ctx, "could not show the refused Stripe key in Settings; the next charge tries again",
+			"tenant_id", tenantID, "livemode", livemode, "error", err)
+	}
+}
+
+// clearRejectedKey removes the Settings → Payments refused-key notice after
+// Stripe created a PaymentIntent with the stored key, which proves the key
+// works. Without it the notice outlived the fix when the key itself did not
+// change (a restricted key granted the permission in Stripe), or when a
+// charge still running on a rolled key got its 401 after the new key was
+// connected. Only a "rejected" mark is cleared; a row without one matches
+// nothing. A failed clear is logged; the next charge that goes through
+// clears it.
+func (s *Stripe) clearRejectedKey(ctx context.Context, tenantID string) {
+	if s.keyHealth == nil {
+		return
+	}
+	livemode := postgres.Livemode(ctx)
+	clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.keyHealth.ClearKeyRejected(clearCtx, tenantID, livemode); err != nil {
+		slog.WarnContext(ctx, "could not clear the refused Stripe key notice in Settings; the next charge that goes through tries again",
 			"tenant_id", tenantID, "livemode", livemode, "error", err)
 	}
 }

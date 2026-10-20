@@ -227,10 +227,17 @@ func (s *Service) GetPlaintext(ctx context.Context, tenantID string, livemode bo
 // MarkKeyRejected records that Stripe refused this tenant's key for the mode
 // when a charge used it (401, or 403 for a restricted key without
 // permission). Settings → Payments then shows the same notice a failed
-// Connect check does, and reconnecting clears it (MarkVerified). Implements
+// Connect check does. Reconnecting (MarkVerified) or the next charge that
+// goes through (ClearKeyRejected) clears it. Implements
 // payment.StripeKeyHealth.
 func (s *Service) MarkKeyRejected(ctx context.Context, tenantID string, livemode bool, stripeMessage string) error {
 	return s.store.MarkVerifyFailed(ctx, tenantID, livemode, stripeMessage, VerifyErrorRejected)
+}
+
+// ClearKeyRejected removes the refused-key notice once a charge has gone
+// through with the stored key. Implements payment.StripeKeyHealth.
+func (s *Service) ClearKeyRejected(ctx context.Context, tenantID string, livemode bool) error {
+	return s.store.ClearKeyRejected(ctx, tenantID, livemode)
 }
 
 // LookupEndpoint resolves an opaque webhook endpoint id to the owning tenant

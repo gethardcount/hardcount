@@ -64,6 +64,12 @@ func (s *keyStripeStub) count() int {
 	return s.calls
 }
 
+func (s *keyStripeStub) set(status int, body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status, s.body = status, body
+}
+
 // lazyDunningStarter starts dunning on the rig's dunning service, which is
 // built after the charger it retries through.
 type lazyDunningStarter struct{ d *dunningRetryRig }
@@ -312,4 +318,39 @@ func TestCollectPayment_RefusedKey_SaysWhatToFix(t *testing.T) {
 		t.Errorf("body %s carries Stripe's own text", body)
 	}
 	r.assertNothingWritten(inv)
+}
+
+// A restricted key is fixed in Stripe by granting rak_payment_intent_write to
+// the same key, so no Connect runs. The next charge Stripe accepts clears the
+// Settings notice the 403 left; before, it stayed red while charges worked.
+//
+// Mutation seam: drop the clearRejectedKey call in chargeInvoice → the mark
+// is still there after the paid charge.
+func TestChargeInvoice_AcceptedChargeClearsRefusedKeyNotice_RealPostgres(t *testing.T) {
+	r := newKeyRefusedRig(t, "Key Fixed In Stripe", true, http.StatusForbidden, keyStripe403)
+	custID := r.customerWithCard("keyfixed", "pm_keyfixed")
+	inv := r.finalizedInvoice(custID, "INV-KEY-FIXED")
+
+	hold, err := r.invoices.ClaimChargeForManualCollect(r.ctx, r.tenantID, inv.ID)
+	if err != nil || !hold.Held() {
+		t.Fatalf("claim: held=%v err=%v", hold.Held(), err)
+	}
+	if _, err := r.live.ChargeInvoice(r.ctx, r.tenantID, inv, hold, "cus_stripe_keyfixed", "pm_keyfixed"); err == nil {
+		t.Fatal("charge succeeded against a restricted key")
+	}
+	if found, _, kind := r.settingsMark(); !found || kind != "rejected" {
+		t.Fatalf("Settings mark found=%v kind %q after the 403, want rejected", found, kind)
+	}
+
+	r.stub.set(http.StatusOK, `{"id":"pi_key_fixed","object":"payment_intent","status":"succeeded","amount":5000,"currency":"usd"}`)
+	hold, err = r.invoices.ClaimChargeForManualCollect(r.ctx, r.tenantID, inv.ID)
+	if err != nil || !hold.Held() {
+		t.Fatalf("second claim: held=%v err=%v", hold.Held(), err)
+	}
+	if _, err := r.live.ChargeInvoice(r.ctx, r.tenantID, inv, hold, "cus_stripe_keyfixed", "pm_keyfixed"); err != nil {
+		t.Fatalf("charge after the permission was granted: %v", err)
+	}
+	if found, msg, kind := r.settingsMark(); !found || msg != "" || kind != "" {
+		t.Errorf("Settings mark found=%v kind %q msg %q after a charge went through, want cleared", found, kind, msg)
+	}
 }
