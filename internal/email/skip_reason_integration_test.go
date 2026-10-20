@@ -59,7 +59,7 @@ func TestDispatcher_SkippedEmailRecordsWhy(t *testing.T) {
 }
 
 // TestSkipReasons_MatchCheckConstraint keeps SkipReasons and migration
-// 00186's CHECK equal (the enum and CHECK sync rule): a reason the CHECK did
+// 00187's CHECK equal (the enum and CHECK sync rule): a reason the CHECK did
 // not list would fail the skip mark, and the row would never end.
 func TestSkipReasons_MatchCheckConstraint(t *testing.T) {
 	testutil.SetupTestDB(t)

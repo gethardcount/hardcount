@@ -49,7 +49,7 @@ type OutboxRow struct {
 	TestClockID    string
 	// SkipReason is why a 'skipped' row was not sent: the final state its
 	// invoice reached while it waited (one of the SkipReason constants).
-	// Empty on every other row, and on rows skipped before migration 00186
+	// Empty on every other row, and on rows skipped before migration 00187
 	// recorded it. Populated by ListByInvoice and ListByCustomer.
 	SkipReason string
 	// InvoiceID and CreditNoteID are the invoice and credit note the row's
@@ -161,7 +161,7 @@ var ErrEmailObsolete = errors.New("email outbox: obsolete — invoice settled be
 
 // Why a queued email was skipped: the final state its invoice reached while
 // the row waited. ProcessBatch stores it in email_outbox.skip_reason, whose
-// CHECK lists exactly these values (migration 00186), and the activity line
+// CHECK lists exactly these values (migration 00187), and the activity line
 // names it ("The invoice was already paid").
 const (
 	SkipReasonPaid          = "paid"
