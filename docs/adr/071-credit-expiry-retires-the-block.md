@@ -92,6 +92,14 @@ idempotency key, evaluated check-then-act across transactions.
      the collection instant (#1281). `issued_at`, not
      `billing_period_end`: an in-advance cycle invoice stores the next
      period's end.
+   - **A dunning retry draws the same way** (decided 2026-10-20). A retry
+     of a period or threshold invoice judges a grant by that invoice's
+     `issued_at`, the check its first collection made: a grant live at
+     the period end and expired before the retry pays it. The retry runs
+     `ApplyToInvoiceAtomic` like any collection, so no code differs; the
+     usage entry is stamped at the retry. Stripe ties eligibility to the
+     invoice's `period_end`, not to the payment attempt. Test:
+     `TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore`.
    - **No gap in the hand-off, so discovery is enough.** The close moves
      the due instant and inserts the invoice (queued, or a draft) in one
      transaction (ADR-115). Finalize sets `auto_charge_pending` in the
@@ -131,6 +139,13 @@ idempotency key, evaluated check-then-act across transactions.
      means testing that invoice's draw at its `billing_period_end` (the
      `canceled_at`) and adding it to arm (ii). That is a separate
      decision.
+   - **Not covered: the wall-clock sweep during dunning.** An invoice in
+     dunning is finalized with `auto_charge_pending` cleared, so the hold
+     does not cover it, and the hourly sweep retires a grant at its
+     `expires_at` even when a later retry of a period invoice issued
+     before then would draw it. A test-clock advance runs expiry after
+     the retries (ADR-029, amended 2026-10-20), so there the retry draws
+     it. Holding grants for invoices in dunning is a separate decision.
 3. **`consumed_cents` is the single structural exclusion.** Migration
    0127 retro-retires every grant the pre-fix sweep expired (exact-match
    join on the legacy `'Expired grant <id>'` description, used one last

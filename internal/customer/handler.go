@@ -18,6 +18,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 )
 
 type Handler struct {
@@ -49,6 +50,11 @@ type SentEmailRow struct {
 	LastError     string  `json:"last_error,omitempty"`
 	CreatedAt     string  `json:"created_at"`
 	DispatchedAt  *string `json:"dispatched_at,omitempty"`
+	// Line is the row as the activity line standard words it (ADR-128):
+	// the same email words the invoice's Activity card uses, dated on the
+	// customer's calendar with the real send time as its Recorded time on
+	// a test clock.
+	Line *activity.Line `json:"line,omitempty"`
 }
 
 // SentEmailsLister returns email_outbox rows for a customer (30-day
@@ -77,6 +83,23 @@ type SentEmailOutboxRow struct {
 	// invoice-scoped email types (which is everything the lister
 	// returns today, since ListByCustomer joins on invoice_number).
 	InvoiceNumber string
+	// InvoiceID is the invoice InvoiceNumber names, for the line's link.
+	InvoiceID string
+	// CreditNoteNumber is the credit note a credit-note email sent (payload
+	// credit_note_number), and CreditNoteID its id while it exists.
+	CreditNoteNumber string
+	CreditNoteID     string
+	// Trigger is why a payment setup email was sent (payload trigger).
+	Trigger string
+	// SendFailure is a failed row's error classified into one the line
+	// names in plain words (activity.SendFailure*), or empty.
+	SendFailure string
+	// SkipReason is the state the invoice reached that made Velox skip a
+	// queued email, or empty.
+	SkipReason string
+	// SimEffectiveAt is the instant on the customer's test clock that
+	// caused the email (ADR-104); nil when not caused on a test clock.
+	SimEffectiveAt *time.Time
 }
 
 func NewHandler(svc *Service) *Handler {
@@ -403,9 +426,52 @@ func (h *Handler) listSentEmails(w http.ResponseWriter, r *http.Request) {
 			d := row.DispatchedAt.Format(time.RFC3339)
 			view.DispatchedAt = &d
 		}
+		if l, ok := sentEmailLine(row); ok {
+			view.Line = &l
+		} else {
+			// The lister's allowlist and the email names are one list
+			// (TestSentEmailLines_NoFallback), so this needs a new email
+			// type listed without a name.
+			slog.WarnContext(r.Context(), "list sent emails: email type has no activity words", "email_type", row.EmailType, "outbox_id", row.ID)
+		}
 		out = append(out, view)
 	}
 	respond.JSON(w, r, http.StatusOK, map[string]any{"sent_emails": out})
+}
+
+// sentEmailLine is a Sent emails row's activity line (ADR-128): the email
+// words every surface uses (activity.EmailLine), naming the invoice the
+// email was about and, for a credit-note email, its credit note. ok is
+// false for an email type no surface shows.
+func sentEmailLine(row SentEmailOutboxRow) (activity.Line, bool) {
+	e := activity.Email{
+		Type: row.EmailType, Status: row.Status, DeliveryState: row.DeliveryState,
+		SendFailure: row.SendFailure, SkipReason: row.SkipReason, Trigger: row.Trigger, To: row.Recipient,
+		CreatedAt: row.CreatedAt, DispatchedAt: row.DispatchedAt, SimEffectiveAt: row.SimEffectiveAt,
+	}
+	var about []activity.Segment
+	if row.InvoiceNumber != "" {
+		about = append(about, activity.Segment{reference(activity.LinkInvoice, row.InvoiceID, row.InvoiceNumber)})
+	}
+	if row.EmailType == "credit_note" && row.CreditNoteNumber != "" {
+		about = append(about, activity.Segment{reference(activity.LinkCreditNote, row.CreditNoteID, row.CreditNoteNumber)})
+	}
+	l, ok := activity.EmailLine(e, about...)
+	if !ok {
+		return activity.Line{}, false
+	}
+	l.ID = "email:" + row.ID
+	occurred, recorded, pinned := activity.EmailInstant(e)
+	return activity.Stamp(l, occurred, recorded, pinned), true
+}
+
+// reference names an object: a link while its id is known, else its number
+// as plain text (rule 8: no link drawn from a guess).
+func reference(kind activity.LinkKind, id, label string) activity.Part {
+	if id == "" {
+		return activity.T(label)
+	}
+	return activity.L(kind, id, label)
 }
 
 // publicCostDashboard composes a sanitized cost-dashboard projection

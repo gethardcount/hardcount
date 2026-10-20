@@ -72,11 +72,11 @@ func TestFailureReport_MovesOnlyTheAttemptTheInvoiceWaitsOn(t *testing.T) {
 	park := func(t *testing.T, id string) {
 		stampOutcome(t, store, ctx, tenantID, id, domain.PaymentUnknown, "", "timeout")
 	}
+	// The stale-hold sweep's adopt: it puts a processing payment it found at
+	// Stripe on a parked invoice, through StampChargeOutcome.
 	adopt := func(pi string) step {
 		return func(t *testing.T, id string) {
-			if ok, err := store.AdoptPaymentIntentIfParked(ctx, tenantID, id, pid(pi)); err != nil || !ok {
-				t.Fatalf("adopt %s: ok=%v err=%v", pi, ok, err)
-			}
+			stampOutcome(t, store, ctx, tenantID, id, domain.PaymentProcessing, pid(pi), "")
 		}
 	}
 	markPaidWith := func(pi string) step {

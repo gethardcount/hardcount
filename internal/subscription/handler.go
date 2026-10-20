@@ -2066,10 +2066,17 @@ func (h *Handler) enrollAutoChargeTx(ctx context.Context, tx *sql.Tx, tenantID s
 //     in subtotal proportion.
 //
 // Read-only (it issues nothing) — called inside the atomic item-change tx, so a
-// returned error (headroom genuinely exhausted, or a lookup failure) rolls the
-// change back BEFORE it commits rather than leaving a post-commit "reconcile
-// manually" gap. The credit notes themselves are issued post-commit by
-// issueClawbackCreditNote.
+// returned error (a clawback larger than the headroom left, or a lookup
+// failure) rolls the change back BEFORE it commits rather than leaving a
+// post-commit "reconcile manually" gap. The credit notes themselves are issued
+// post-commit by issueClawbackCreditNote.
+//
+// No headroom left on any funding invoice returns no pieces and no error: the
+// period is already fully credited, so nothing more is owed and the change
+// proceeds. That is ADR-118's rule for a cancel or plan swap, and the real
+// trigger is an operator who waived the invoice with a credit note (which
+// marks it paid, ADR-061 amendment 2026-10-19) and then removes an item or
+// lowers a quantity in the same period. Before, that answered 500.
 func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, sub domain.Subscription, changeType domain.ItemChangeType, netCredit int64) ([]ClawbackPiece, error) {
 	if netCredit <= 0 || sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return nil, nil
@@ -2115,7 +2122,7 @@ func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, su
 		caps = append(caps, fundingCap{inv: f, grossCap: grossCap, netCap: netCap})
 	}
 	if len(caps) == 0 {
-		return nil, fmt.Errorf("no creditable funding invoice for period")
+		return nil, nil // already fully credited: nothing more is owed
 	}
 
 	netCaps := make([]int64, len(caps))
@@ -2823,6 +2830,18 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				// returned error rolls the change back BEFORE it commits — nothing
 				// half-applies. Cleaner than the old post-commit reconcile gap.
 				return nil, fmt.Errorf("downgrade clawback: %w", perr)
+			}
+			if len(pieces) == 0 {
+				// Every funding invoice is already fully credited (a waiver,
+				// or earlier notes), so nothing more is owed. Loud, as for a
+				// cancel or plan swap (ADR-118), because it can also mean drift.
+				slog.ErrorContext(ctx, "downgrade clawback: funding invoices already fully credited; no further credit",
+					"subscription_id", sub.ID,
+					"item_id", spec.itemID,
+					"change_type", spec.changeType,
+					"net_cents", creditAmount,
+				)
+				return nil, nil
 			}
 			var grossCredit int64
 			for _, p := range pieces {

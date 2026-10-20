@@ -127,7 +127,8 @@ const (
 //
 //   - a paid invoice → never;
 //   - the invoice already holds this PaymentIntent → yes, whoever created
-//     it (a parked invoice can adopt a hosted attempt, ADR-108);
+//     it (the stale-hold sweep can put a payment it found on a parked
+//     invoice, a hosted one included);
 //   - an External attempt otherwise → never: Velox does not wait on it;
 //   - the charge call reporting its own attempt → only if the seq is still
 //     the one it charged with (nothing recorded during the call, P13);

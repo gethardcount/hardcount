@@ -154,6 +154,7 @@ type writerTokens struct {
 	outboxStatuses    []string
 	deliveryStates    []string
 	emailTriggers     []string
+	skipReasons       []string // why the dispatcher skipped a queued email
 	cnReasons         []string // reason codes the engine and the refund form write
 }
 
@@ -225,6 +226,10 @@ func readWriterTokens(t *testing.T) writerTokens {
 		w.deliveryStates = append(w.deliveryStates, m[1])
 	}
 	sort.Strings(w.deliveryStates)
+	for _, m := range regexp.MustCompile(`SkipReason\w+\s*=\s*"(\w+)"`).FindAllStringSubmatch(src, -1) {
+		w.skipReasons = append(w.skipReasons, m[1])
+	}
+	sort.Strings(w.skipReasons)
 
 	triggers := map[string]bool{}
 	for _, v := range grepSource(t, filepath.Join(root, "internal"), regexp.MustCompile(`noPMTrigger\w+\s*=\s*"(\w+)"`)) {
@@ -259,7 +264,7 @@ func readWriterTokens(t *testing.T) writerTokens {
 	for name, list := range map[string][]string{
 		"dunning event types": w.dunningEventTypes, "resolutions": w.resolutions, "email types": w.emailTypes,
 		"outbox statuses": w.outboxStatuses, "delivery states": w.deliveryStates, "email triggers": w.emailTriggers,
-		"credit-note reasons": w.cnReasons,
+		"skip reasons": w.skipReasons, "credit-note reasons": w.cnReasons,
 	} {
 		if len(list) == 0 {
 			t.Fatalf("read no %s from the code; a scan pattern no longer matches its writer", name)
@@ -339,19 +344,26 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	add("uncollectible/recovered later, no amount on record", uncollectibleLine(inv, nil, false, nil))
 	paid := inv
 	paid.AmountPaidCents, paid.StripePaymentIntentID, paid.PaymentCardBrand, paid.PaymentCardLast4 = 4900, "pi_1", "visa", "4242"
-	add("paid/card", paidLine(paid, 0, "", nil))
-	add("paid/card after 1 retry", paidLine(paid, 1, "", nil))
-	add("paid/card after 3 retries", paidLine(paid, 3, "", nil))
+	add("paid/card", paidLine(paid, 0, "", nil, nil))
+	add("paid/card after 1 retry", paidLine(paid, 1, "", nil, nil))
+	add("paid/card after 3 retries", paidLine(paid, 3, "", nil, nil))
 	credits := inv
 	credits.AmountPaidCents, credits.CreditsAppliedCents = 0, 4900
-	add("paid/with credits", paidLine(credits, 0, "", auto))
+	add("paid/with credits", paidLine(credits, 0, "", auto, nil))
 	offline := inv
 	offline.AmountPaidCents, offline.StripePaymentIntentID = 3900, "out_of_band:abc"
-	add("paid/offline with reference", paidLine(offline, 0, "Wire 1042", person))
-	add("paid/offline without reference", paidLine(offline, 0, "", key))
+	add("paid/offline with reference", paidLine(offline, 0, "Wire 1042", person, nil))
+	add("paid/offline without reference", paidLine(offline, 0, "", key, nil))
 	cad := paid
 	cad.Currency, cad.AmountPaidCents = "CAD", 123456789
-	add("paid/CAD money format", paidLine(cad, 0, "", nil))
+	add("paid/CAD money format", paidLine(cad, 0, "", nil, nil))
+	waived := inv
+	waived.AmountPaidCents = 0
+	note := activity.L(activity.LinkCreditNote, "vlx_cn_1", "CN-0001")
+	add("paid/by credit note, after 3 failed retries", paidLine(waived, 3, "", key, &note))
+	partly := credits
+	partly.CreditsAppliedCents = 2000
+	add("paid/by credit note, credits paid part", paidLine(partly, 0, "", person, &note))
 
 	// I-7: every attempt outcome × trigger, every mapped decline code, one
 	// unmapped code, and a wrapped provider text.
@@ -435,6 +447,16 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	cnLink := activity.L(activity.LinkCreditNote, "vlx_cn_1", "CN-000012")
 	l, _ := emailLine(EmailEventRow{EmailType: "credit_note", Status: "dispatched", DeliveryState: "delivered", To: "billing@acme.test"}, &cnLink)
 	add("email/credit note email names its note", l)
+	// Every recorded skip reason, and a row skipped before the reason was
+	// recorded.
+	for _, r := range append(w.skipReasons, "") {
+		name := r
+		if name == "" {
+			name = "(not recorded)"
+		}
+		l, _ := emailLine(EmailEventRow{EmailType: "payment_failed", Status: "skipped", SkipReason: r, To: "billing@acme.test"}, nil)
+		add("email/skipped because/"+name, l)
+	}
 
 	// I-14 to I-17: every dunning event type (writer or not), every start
 	// cause, every retry reason, every escalation outcome on the invoice page
@@ -451,6 +473,11 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 		domain.ErrNoPaymentMethodOnRetry.Error(), domain.DunningRetryReasonCardRefused, "succeeded"} {
 		add("dunning/retry/"+reason, dunningLine(domain.InvoiceDunningEvent{EventType: domain.DunningEventRetryAttempted, AttemptCount: 2, Reason: reason}, dunningContext{email: &reminder}))
 	}
+	// The retry that recovered a paid invoice: folded into "Invoice paid" on
+	// the invoice page, its own row on the Dunning page.
+	add("dunning/retry/succeeded/invoice paid (Dunning page)", dunningLine(
+		domain.InvoiceDunningEvent{EventType: domain.DunningEventRetryAttempted, AttemptCount: 2, Reason: "succeeded"},
+		dunningContext{email: &reminder, invoicePaid: true}))
 	final := EmailEventRow{EmailType: "dunning_escalation", Status: "dispatched", DeliveryState: "bounced"}
 	for mask := 0; mask < 8; mask++ {
 		o := domain.DunningEscalationOutcome{SubscriptionPaused: mask&1 != 0, SubscriptionCanceled: mask&2 != 0, InvoiceWrittenOff: mask&4 != 0}
@@ -583,13 +610,18 @@ func TestActivityLines_NoFallback(t *testing.T) {
 	}
 	for _, st := range w.outboxStatuses {
 		for _, ds := range w.deliveryStates {
-			if out := activity.Outcome(st, ds, ""); out.Word == "" {
+			if out := activity.Outcome(activity.Email{Status: st, DeliveryState: ds}); out.Word == "" {
 				t.Errorf("outbox status %q / delivery %q has no outcome word", st, ds)
 			}
 		}
 	}
+	for _, r := range w.skipReasons {
+		if _, ok := activity.SkipReasonWords(r); !ok {
+			t.Errorf("the dispatcher records skip reason %q, which has no words; the line would fall back to \"closed\"", r)
+		}
+	}
 	for _, tr := range w.emailTriggers {
-		if emailCause(tr) == "" {
+		if activity.EmailCause(tr) == "" {
 			t.Errorf("setup emails are enqueued with trigger %q, which has no cause words", tr)
 		}
 	}
@@ -631,7 +663,7 @@ func TestActivityLines_NoFallback(t *testing.T) {
 	// one invoice must never read alike again.
 	seen := map[string]string{}
 	for _, tr := range w.emailTriggers {
-		c := emailCause(tr)
+		c := activity.EmailCause(tr)
 		if prev, dup := seen[c]; dup {
 			t.Errorf("triggers %q and %q read alike: %q", prev, tr, c)
 		}

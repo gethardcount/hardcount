@@ -321,6 +321,7 @@ type retryInvoiceStore interface {
 	ClaimChargeForDunningRetry(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
+	SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error)
 	HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
 }
 
@@ -370,7 +371,23 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		return fmt.Errorf("get invoice: %w", err)
 	}
 	if inv.AmountDueCents <= 0 {
-		return nil // Nothing to charge
+		// Nothing to charge. The run closes as recovered only if the invoice
+		// is paid, so settle it first: a credit balance applied by an earlier
+		// pass whose mark-paid failed leaves it open at $0. Before, this
+		// returned nil and the run closed with the invoice still unpaid.
+		inv, _, err = a.invoiceStore.SettleZeroDue(ctx, tenantID, invoiceID, clock.Now(ctx))
+		if err != nil {
+			return fmt.Errorf("settle invoice with nothing due: %w", err)
+		}
+		if inv.Status != domain.InvoicePaid {
+			// A charge hold is set (a charge running, or one whose result was
+			// lost), or the invoice is no longer open. The next pass looks
+			// again; the paid pre-check closes a voided or written-off one.
+			slog.InfoContext(ctx, "dunning retry: invoice has nothing due but was not marked paid; skipping this attempt",
+				"invoice_id", invoiceID, "status", inv.Status, "payment_status", inv.PaymentStatus)
+			return dunning.ErrTransientSkip
+		}
+		return nil
 	}
 
 	// Per-invoice charge lease, shared with the auto-charge sweep (HA
@@ -379,8 +396,8 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	// only double-charge guard between them. Claim-lose = the sweep (or
 	// a rival dunning leader) owns the invoice, or payment_status moved
 	// to a state that must not be re-charged ('unknown' waits for the
-	// reconciler) — map to ErrTransientSkip so the run does NOT burn an
-	// attempt on a charge that never reached Stripe.
+	// reconciler or the stale-hold sweep) — map to ErrTransientSkip so the run
+	// does NOT burn an attempt on a charge that never reached Stripe.
 	//
 	// A lost charge's hold refuses the claim too (ADR-127): the due-run scan
 	// already skips such a run, so this is the race where the hold appeared
@@ -771,6 +788,7 @@ func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID,
 			Trigger:          trigger,
 			SimEffectiveAt:   r.SimEffectiveAt,
 			SendFailure:      emailSendFailure(r.Status, r.LastError),
+			SkipReason:       r.SkipReason,
 			CreditNoteNumber: cnNumber,
 		})
 	}
@@ -808,8 +826,10 @@ type paymentSetupEmailSender interface {
 
 // customerSentEmailsAdapter bridges email.OutboxStore.ListByCustomer →
 // customer.SentEmailsLister. Pure shape conversion plus payload field
-// extraction (recipient, invoice_number) so the customer package
-// doesn't import the email package.
+// extraction (recipient, invoice and credit-note numbers, trigger) and the
+// send-failure classification the invoice timeline uses, so the customer
+// package doesn't import the email package and both cards word an email
+// from the same facts.
 type customerSentEmailsAdapter struct {
 	store *email.OutboxStore
 }
@@ -823,16 +843,25 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 	for _, r := range rows {
 		to, _ := r.Payload["to"].(string)
 		invNum, _ := r.Payload["invoice_number"].(string)
+		cnNumber, _ := r.Payload["credit_note_number"].(string)
+		trigger, _ := r.Payload["trigger"].(string)
 		out = append(out, customer.SentEmailOutboxRow{
-			ID:            r.ID,
-			EmailType:     r.EmailType,
-			Recipient:     to,
-			Status:        r.Status,
-			DeliveryState: r.DeliveryState,
-			LastError:     r.LastError,
-			CreatedAt:     r.CreatedAt,
-			DispatchedAt:  r.DispatchedAt,
-			InvoiceNumber: invNum,
+			ID:               r.ID,
+			EmailType:        r.EmailType,
+			Recipient:        to,
+			Status:           r.Status,
+			DeliveryState:    r.DeliveryState,
+			LastError:        r.LastError,
+			CreatedAt:        r.CreatedAt,
+			DispatchedAt:     r.DispatchedAt,
+			InvoiceNumber:    invNum,
+			InvoiceID:        r.InvoiceID,
+			CreditNoteNumber: cnNumber,
+			CreditNoteID:     r.CreditNoteID,
+			Trigger:          trigger,
+			SendFailure:      emailSendFailure(r.Status, r.LastError),
+			SkipReason:       r.SkipReason,
+			SimEffectiveAt:   r.SimEffectiveAt,
 		})
 	}
 	return out, nil

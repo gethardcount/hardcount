@@ -1,48 +1,72 @@
 # Parked invoices
 
-A parked invoice is one whose charge result is unclear, so Velox cannot
-tell whether the customer paid. Its charge attempt could not be identified
-with the payment provider. This page is for finding out what happened and
-closing it. Back to the [runbook index](index.md).
+A parked invoice is one whose last charge got an unclear answer from Stripe
+(a 5xx, a 409, a network error, or a request past the caller's time limit)
+that named no payment. So Velox cannot yet tell whether the customer paid.
+Velox finds out on its own within a day; this page is for the parks it
+cannot finish. Back to the [runbook index](index.md).
 
 ## Symptom
 
-`velox_parked_invoices{mode}` > 0, sustained.
+`velox_parked_invoices{disposition="open"}` above 0. The gauge counts only
+parks Velox has not ended on schedule: still parked 26 hours after the
+charge's hold, or with no hold. Parks inside their 24 hours are not counted.
 
 ## Why
 
-- A parked invoice cannot be charged, on purpose. No sweep, no dunning
-  retry and no operator "Collect payment" will touch it. That is what makes
-  a double charge impossible.
-- **It resolves on its own only when Stripe's answer reaches Velox.** That
-  is the charge's webhook, paid or declined, or Velox's hourly search in
-  Stripe, which adopts a payment that succeeded or is still running. The
-  search never records a decline. Otherwise it needs a human.
-- Alert on presence, not growth. With no customers affected the value is
-  zero, and each one is a real invoice a real customer cannot pay.
+- A parked invoice is not charged while the answer is unclear, on purpose:
+  no sweep, no dunning retry, no **Collect payment** and no hosted page.
+  That is what keeps the customer from paying twice.
+- Every billing tick (hourly), Velox lists the customer's payments in Stripe.
+  A payment for the invoice that succeeded marks it paid; one still
+  processing is followed until it ends. The charge's webhook can settle it
+  sooner.
+- If no payment has appeared 24 hours after the attempt, the invoice goes
+  back to `pending` (`failed` after a dunning retry) and is charged again as
+  usual. Stripe can still create a payment that long after a 5xx, while it
+  recovers from an incident, so Velox waits that long before charging again.
+- So a counted park is one the check could not finish. Either Velox cannot
+  ask Stripe about it: the Stripe connection is broken (key revoked or
+  rejected), or the customer is gone from the Stripe account. The log has an
+  ERROR on every check: `stale charge check: can't confirm an earlier charge
+  with Stripe`. Or Stripe could not be read on any check for a day. Or the
+  park has no hold, so nothing checks it: a replica of an older release
+  cleared it during a rolling upgrade.
 
 ## Check
 
-Find the attempt in Stripe by customer, amount and approximate time.
+1. Fix the Stripe connection if it is broken. The next tick finishes the
+   park on its own.
+2. Find the attempt in the Stripe dashboard by customer, amount and
+   approximate time.
+3. Check that the invoice has a hold:
+   `SELECT auto_charge_claimed_until FROM invoices WHERE id = '<invoice id>';`
+   With none, give it one dated a day back, and the next tick finishes the
+   park:
+
+   ```sql
+   BEGIN;
+   SET LOCAL app.bypass_rls = 'on';
+   UPDATE invoices SET auto_charge_claimed_until = now() - interval '25 hours'
+   WHERE id = '<invoice id>' AND payment_status = 'unknown'
+     AND auto_charge_claimed_until IS NULL;
+   COMMIT;
+   ```
 
 ## Fix
 
-1. If the charge succeeded, its webhook or the hourly search settles the
-   invoice. No action is needed.
-2. If the charge was declined, its `payment_intent.payment_failed` webhook
-   marks the invoice failed and dunning starts. If the invoice is still
-   parked, Velox did not apply that webhook. Fix the webhook endpoint if it
-   is failing, then send the event again from the Stripe dashboard. If the
-   invoice stays parked, Velox had already received that event. Mark the
-   invoice uncollectible and ask the customer to pay another way: the
-   write-off stops dunning
-   ([#976](https://github.com/getvelox/velox/issues/976) removes this case).
-3. If nothing was charged, mark the invoice uncollectible. This is the only
-   action the invoice page offers. It also releases the invoice's deferred
-   clawback draft and closes its dunning run.
-4. A write-off in step 2 or 3 closes the invoice's dunning run without the
-   policy's final action (cancel or pause the subscription). Check whether
-   that action was due:
+1. If the charge succeeded and the park does not end (the customer is
+   deleted in Stripe, so Velox cannot ask), send its
+   `payment_intent.succeeded` event again from the Stripe dashboard to the
+   Velox webhook endpoint. The webhook marks the invoice paid, a written-off
+   one too.
+2. If nothing was charged and the park does not end, or the customer paid
+   another way, mark the invoice uncollectible. It is the one action the
+   invoice page allows on a parked invoice. It also releases the invoice's
+   deferred clawback draft and closes its dunning run.
+3. A write-off closes the invoice's dunning run without the policy's final
+   action (cancel or pause the subscription). Check whether that action was
+   due:
    - Find the run with `GET /v1/dunning/runs?invoice_id=<invoice id>`, then
      the policy it runs on with `GET /v1/dunning/policies/<policy_id>`. A run
      keeps the policy it started on, even if the customer moved to another.
@@ -53,9 +77,14 @@ Find the attempt in Stripe by customer, amount and approximate time.
    - With no run, or with retries left, the final action was never due. The
      invoice was parked before dunning started or before its last retry.
 
+A customer who paid another way inside the 24 hours: mark the invoice
+uncollectible before the 24 hours end, or Velox charges the card again.
+
 ## Verify
 
-`velox_parked_invoices{mode}` falls back to zero.
+`velox_parked_invoices{disposition="open"}` falls back to zero.
 
-Related: [ADR-107](../../adr/107-unknown-is-terminal-until-a-human.md) and the
+Related: [card payment failure handling](../../payments.md),
+[ADR-127](../../adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md),
+[ADR-107](../../adr/107-unknown-is-terminal-until-a-human.md) and the
 [glossary](../../glossary.md).

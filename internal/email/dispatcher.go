@@ -178,7 +178,8 @@ var actionRequiredTypes = map[string]bool{
 // handle is the per-row handler. It demarshals the payload based on
 // email_type and dispatches to the matching Send* method. Returning nil
 // marks the row 'dispatched'; returning an error schedules a retry (or DLQ
-// after MaxOutboxAttempts); returning ErrEmailObsolete marks it 'skipped';
+// after MaxOutboxAttempts); returning ErrEmailObsolete marks it 'skipped'
+// (an *ObsoleteError also records which state the invoice reached);
 // returning ErrUnknownEmailType (a type this binary has no case for)
 // schedules a retry so a newer replica can claim the row.
 func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
@@ -204,7 +205,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 				"outbox_id", row.ID, "email_type", row.EmailType,
 				"invoice_number", msg.InvoiceNumber, "error", cerr)
 		} else if state != "" && !escalationAnnounces(row.EmailType, state) && !setupLinkServesRecovery(row.EmailType, state) {
-			return fmt.Errorf("%w: invoice %s reached %s before delivery", ErrEmailObsolete, msg.InvoiceNumber, state)
+			return &ObsoleteError{InvoiceNumber: msg.InvoiceNumber, State: state}
 		}
 	}
 

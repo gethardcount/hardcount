@@ -47,6 +47,16 @@ type InvoiceReader interface {
 	// draft→issued CAS (ADR-061). It refuses rather than clamps when either
 	// exceeds what the invoice holds.
 	ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string, reduceCents, creditsReturnedCents int64) (domain.Invoice, error)
+	// SettleZeroDueTx marks the invoice paid on Issue()'s coordinator tx when
+	// nothing is left due, unless a charge hold is set; paid reports whether
+	// it did. Not settling is not an error.
+	SettleZeroDueTx(ctx context.Context, tx *sql.Tx, tenantID, id string, paidAt time.Time) (inv domain.Invoice, paid bool, err error)
+}
+
+// DunningResolver closes the invoice's dunning run, active or escalated, after
+// a credit note has marked the invoice paid. dunning.Service implements it.
+type DunningResolver interface {
+	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
 
 // Refunder processes refunds via the payment provider.
@@ -202,6 +212,7 @@ type Service struct {
 	taxRev   TaxReverser
 	audit    AuditEmitter
 	resolver clock.Resolver
+	dunning  DunningResolver
 }
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090). Issue() emits the
@@ -250,6 +261,12 @@ func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string
 	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
 	return bound
 }
+
+// SetDunningResolver wires the dunning service, so a credit note that marks
+// a dunned invoice paid also closes its dunning run. Without it an escalated
+// run stays escalated, because the dunning ticks skip escalated runs. Optional:
+// nil leaves the run to its next due tick (unit-test fakes).
+func (s *Service) SetDunningResolver(r DunningResolver) { s.dunning = r }
 
 // SetNumberGenerator sets the sequential number generator (breaks circular dep).
 func (s *Service) SetNumberGenerator(ng NumberGenerator) {
@@ -1601,6 +1618,8 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 
 	// What the note did to an unpaid invoice, for the audit row below.
 	var dueReduced, creditsReturned int64
+	// Whether the note left nothing due and so marked the invoice paid.
+	var settled bool
 	if inv.PaymentStatus == domain.PaymentSucceeded {
 		// Re-derive the three-channel allocation from the CURRENT invoice
 		// state. The allocation persisted at Create is frozen against the
@@ -1654,7 +1673,8 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 		if creditsReturned > 0 && s.credits == nil {
 			return domain.CreditNote{}, fmt.Errorf("credit note %s returns %d credits to the balance but no credit granter is wired", cn.ID, creditsReturned)
 		}
-		if _, err := s.invoices.ApplyCreditNoteTx(ctx, tx, tenantID, cn.InvoiceID, dueReduced, creditsReturned); err != nil {
+		applied, err := s.invoices.ApplyCreditNoteTx(ctx, tx, tenantID, cn.InvoiceID, dueReduced, creditsReturned)
+		if err != nil {
 			return domain.CreditNote{}, fmt.Errorf("reduce invoice amount: %w", err)
 		}
 		if creditsReturned > 0 {
@@ -1665,6 +1685,18 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 				InvoiceID:   cn.InvoiceID,
 			}); err != nil {
 				return domain.CreditNote{}, fmt.Errorf("return credits to balance: %w", err)
+			}
+		}
+		// A note that leaves nothing due marks the invoice paid on this tx,
+		// with invoice.paid (ADR-061 amendment 2026-10-19; Stripe: a credit
+		// note that "reduces the balance of an open invoice to 0" makes it
+		// paid). Before, the invoice stayed open at $0: no charge path takes a
+		// $0 invoice, and dunning closed the run as recovered with the invoice
+		// still unpaid, or ran its final action on it. The store leaves the
+		// invoice open while a charge hold is set, the hold's owner included.
+		if applied.AmountDueCents == 0 {
+			if _, settled, err = s.invoices.SettleZeroDueTx(ctx, tx, tenantID, cn.InvoiceID, clock.Now(ctx)); err != nil {
+				return domain.CreditNote{}, fmt.Errorf("mark the invoice paid: %w", err)
 			}
 		}
 	}
@@ -1690,6 +1722,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 				"out_of_band_amount_cents": cn.OutOfBandAmountCents,
 				"amount_due_reduced_cents": dueReduced,
 				"credits_returned_cents":   creditsReturned,
+				"marked_invoice_paid":      settled, // the invoice's paid row names this note
 				"reason":                   cn.Reason,
 				"currency":                 cn.Currency,
 			},
@@ -1706,6 +1739,20 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 		}
 	}
 
+	// The invoice is paid: close its dunning run now. An active run would
+	// close at its next retry, days away; an escalated one never would, since
+	// the dunning ticks skip escalated runs. Best-effort, after the commit,
+	// like every other settle path's resolve.
+	if settled && s.dunning != nil {
+		if err := s.dunning.ResolveByInvoice(ctx, tenantID, cn.InvoiceID, domain.ResolutionPaymentRecovered); err != nil {
+			slog.WarnContext(ctx, "credit note marked the invoice paid but closing its dunning run failed; an active run closes at its next retry, an escalated one needs Resolve",
+				"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "error", err)
+		}
+	}
+
+	// inv is the invoice as locked, before this note: the refund leg reads
+	// its payment status, and a note that marked it paid must not look like a
+	// note on a paid invoice there.
 	return s.runPostIssueExternalLegs(ctx, tenantID, id, cn, inv)
 }
 

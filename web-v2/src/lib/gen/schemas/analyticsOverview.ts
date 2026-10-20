@@ -28,9 +28,9 @@ export interface AnalyticsOverview {
   arr: number;
   /** `mrr_prev` times 12. */
   arr_prev: number;
-  /** Total of invoices paid in the window. */
+  /** What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted. */
   revenue: number;
-  /** Total of invoices paid in the previous window. */
+  /** `revenue` for the previous window. */
   revenue_prev: number;
   /** Amount due on finalized invoices whose payment has not succeeded, in `currency` only. */
   outstanding_ar: number;

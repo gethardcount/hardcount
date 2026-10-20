@@ -16,8 +16,9 @@ import type { RecoveryWarningCode } from './recoveryWarningCode';
  * refusing to record it would only make the books wrong too.
  *
  * A written-off invoice is settled by RECORDING writers only — an
- * offline payment, or the provider-search reconciler adopting a charge
- * that turns out to have succeeded (ADR-108). Nothing initiates a card
+ * offline payment, or Velox recording a card charge that Stripe shows
+ * succeeded (its webhook, or the check of an unresolved charge).
+ * Nothing initiates a card
  * charge against one (ADR-113): recovery of a returned customer runs on
  * normal rails via a fresh recovery invoice.
  *

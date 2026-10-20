@@ -23,6 +23,7 @@ type StaleChargeHoldStore interface {
 	ClearStaleChargeHold(ctx context.Context, tenantID, id string, hold time.Time, attemptSeq int64, moveSeq bool) (bool, error)
 	MarkStaleHoldChecked(ctx context.Context, tenantID, id string) error
 	StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, paymentStatus domain.InvoicePaymentStatus, stripePaymentIntentID, lastPaymentError string) (domain.Invoice, bool, error)
+	UnparkAfterNoPayment(ctx context.Context, tenantID, id string, hold time.Time, attemptSeq int64) (domain.InvoicePaymentStatus, bool, error)
 }
 
 // staleHoldListWindow is how far before its hold the sweep lists a
@@ -59,8 +60,8 @@ const (
 	staleHoldSettled   = "settled"    // a succeeded payment was found and recorded
 	staleHoldAdopted   = "adopted"    // a processing payment was found and put on the invoice
 	staleHoldCanceled  = "canceled"   // an unfinished off-session payment was canceled at Stripe; hold kept
-	staleHoldWaiting   = "waiting"    // a payment the invoice does not follow is still processing at Stripe; hold kept until it ends
-	staleHoldReleased  = "released"   // Stripe had nothing; hold cleared and the counter moved
+	staleHoldWaiting   = "waiting"    // hold kept: a payment the invoice does not follow is still processing at Stripe, or a parked charge is inside Stripe's 24 hours
+	staleHoldReleased  = "released"   // Stripe had nothing; hold cleared and the counter moved (a parked invoice back to pending or failed)
 	staleHoldCleared   = "cleared"    // nothing to record on an invoice that is settled or in flight; hold cleared
 	staleHoldFailed    = "failed"     // Stripe could not be read this time; hold kept
 	staleHoldCannotAsk = "cannot_ask" // Stripe will not answer (not connected, key rejected, customer missing); hold kept
@@ -78,10 +79,11 @@ const (
 
 // sweepStaleChargeHolds is the one place a stale charge hold is resolved
 // (ADR-127). A stale hold means a charge may have been sent and its result
-// was not saved — a crash, a caller's deadline, a lost answer. Every claim,
-// the hosted page, void, offline payment and dunning's final action refuse
-// while it is set; this sweep asks Stripe what the lost charge did and then
-// records it, or clears the hold.
+// was not saved (a crash, a shutdown, a lost answer), or that its result was
+// unclear and named no payment: a parked invoice keeps its claim's hold
+// (REC-5). Every claim, the hosted page, void, offline payment and dunning's
+// final action refuse while it is set; this sweep asks Stripe what the charge
+// did and then records it, or clears the hold.
 //
 // It runs first in Run, so an invoice it clears is charged by the same tick's
 // auto-charge sweep. It calls the Stripe client directly, not through the
@@ -99,7 +101,10 @@ const (
 // request for the attempt can start after its hold ends (the charge's
 // re-check and send budget); the sweep waits StaleChargeHoldWait more; every
 // Velox PaymentIntent carries velox_invoice_id and the invoice's Stripe
-// customer; and that customer id is set once (customer store guard).
+// customer; and that customer id is set once (customer store guard). For a
+// parked invoice "nothing" is final only domain.ParkedNothingWait after the
+// attempt: its answer means Stripe received the request or may have, and
+// Stripe may still create the payment while it recovers from an incident.
 //
 // A check that panics (a nil dereference on one unusual row) counts as a
 // failed check: its row is stamped, so it rotates behind the other holds, and
@@ -169,8 +174,9 @@ func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int, panic
 
 // checkStaleHoldGuarded is checkStaleHold under panics' guard. A check that
 // panics is a failed check whose read says nothing about Stripe, and its row
-// is stamped so it rotates. The store does not stamp an 'unknown' invoice;
-// the sweeps after this one stamp it on their own checks.
+// is stamped so it rotates, a parked one included. The store does not stamp an
+// 'unknown' invoice that names its PaymentIntent; the unknown sweep after this
+// one stamps it on its own checks.
 func (r *Reconciler) checkStaleHoldGuarded(ctx context.Context, h domain.StaleChargeHold, panics *scheduler.Panics) (result string, read staleHoldRead, err error) {
 	if guardRow(panics, func() { result, read, err = r.checkStaleHold(ctx, h) },
 		"step", "stale_charge_check", "invoice_id", h.Invoice.ID, "tenant_id", h.Invoice.TenantID) {
@@ -191,7 +197,7 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 	// No Stripe customer: no charge can have been sent (a charge needs one,
 	// and the id is set once), so this is "Stripe has nothing" without a call.
 	if h.StripeCustomerID == "" {
-		result, err := r.clearStaleHold(ctx, h, inv)
+		result, err := r.nothingAtStripe(ctx, h)
 		return result, staleReadNone, err
 	}
 
@@ -256,7 +262,7 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 	case len(unfinished) > 0:
 		result, err = r.cancelUnfinished(ctx, h, unfinished)
 	default:
-		result, err = r.clearStaleHold(ctx, h, inv)
+		result, err = r.nothingAtStripe(ctx, h)
 	}
 	return result, staleReadAnswered, err
 }
@@ -359,16 +365,17 @@ func (r *Reconciler) settleStaleHold(ctx context.Context, h domain.StaleChargeHo
 }
 
 // adoptStaleHold handles the processing payments found for a lost charge. On
-// an open invoice it puts the newest on the invoice at the counter the sweep
-// read, so the invoice is processing: the webhook, the processing sweep and
-// every PaymentInFlight gate take over. The hold is then cleared only when the
-// invoice follows every processing payment found. Any other one (on an
-// invoice written off, voided or paid meanwhile, or a second one) keeps the
-// hold until it ends: nothing else would record it if its webhook were lost.
+// an open invoice, a parked one included, it puts the newest on the invoice at
+// the counter the sweep read, so the invoice is processing: the webhook, the
+// processing sweep and every PaymentInFlight gate take over. The hold is then
+// cleared only when the invoice follows every processing payment found. Any
+// other one (on an invoice written off, voided or paid meanwhile, or a second
+// one) keeps the hold until it ends: nothing else would record it if its
+// webhook were lost.
 func (r *Reconciler) adoptStaleHold(ctx context.Context, h domain.StaleChargeHold, processing []PaymentIntentResult) (string, error) {
 	inv := h.Invoice
 	current, adopted := inv, false
-	if openForCharge(inv) {
+	if openForCharge(inv) || inv.Status == domain.InvoiceFinalized && inv.Parked() {
 		pi := processing[len(processing)-1]
 		stamped, applied, err := r.invoices.StampChargeOutcome(ctx, inv.TenantID, inv.ID, inv.ChargeAttemptSeq, domain.PaymentProcessing, pi.ID, "")
 		if err != nil {
@@ -427,10 +434,41 @@ func (r *Reconciler) cancelUnfinished(ctx context.Context, h domain.StaleChargeH
 	return staleHoldCanceled, nil
 }
 
+// nothingAtStripe is "Stripe has nothing for this charge". A parked invoice
+// keeps its hold, stamped, until domain.ParkedNothingWait after the attempt:
+// Stripe received its request or may have, and may still create the payment
+// while it recovers from an incident. After that, UnparkAfterNoPayment puts it
+// back where a charge picks it up, with a fresh idempotency key: pending, or
+// failed for a dunning retry's park, whose run then retries at once. Any other
+// invoice goes to clearStaleHold at once.
+func (r *Reconciler) nothingAtStripe(ctx context.Context, h domain.StaleChargeHold) (string, error) {
+	inv := h.Invoice
+	if !inv.Parked() {
+		return r.clearStaleHold(ctx, h, inv)
+	}
+	if !h.PastParkedWait {
+		r.markChecked(ctx, inv)
+		return staleHoldWaiting, nil
+	}
+	status, unparked, err := r.invoices.UnparkAfterNoPayment(ctx, inv.TenantID, inv.ID, h.Hold, inv.ChargeAttemptSeq)
+	if err != nil {
+		r.markChecked(ctx, inv)
+		return staleHoldFailed, fmt.Errorf("finish parked invoice: %w", err)
+	}
+	if !unparked {
+		return staleHoldLostRace, nil
+	}
+	slog.InfoContext(ctx, "stale charge check: Stripe shows no payment for this parked invoice 24 hours after the attempt; it can be charged again",
+		"invoice_id", inv.ID, "tenant_id", inv.TenantID, "status", inv.Status, "payment_status", status,
+		"charge_attempt_seq", inv.ChargeAttemptSeq+1)
+	return staleHoldReleased, nil
+}
+
 // clearStaleHold is "Stripe has nothing for this charge" (or nothing left to
-// record). On an invoice still open for a charge it clears the hold and moves
-// the counter, so the next charge uses a fresh idempotency key (ADR-105
-// amendment). On any other status it only clears: nothing can charge it.
+// record) on an invoice that is not parked. On an invoice still open for a
+// charge it clears the hold and moves the counter, so the next charge uses a
+// fresh idempotency key (ADR-105 amendment). On any other status it only
+// clears: nothing can charge it.
 func (r *Reconciler) clearStaleHold(ctx context.Context, h domain.StaleChargeHold, inv domain.Invoice) (string, error) {
 	moveSeq := openForCharge(inv)
 	cleared, err := r.invoices.ClearStaleChargeHold(ctx, inv.TenantID, inv.ID, h.Hold, inv.ChargeAttemptSeq, moveSeq)
@@ -452,9 +490,9 @@ func (r *Reconciler) clearStaleHold(ctx context.Context, h domain.StaleChargeHol
 // staleHoldReadFailed handles a list that did not answer. A read that may
 // succeed later keeps the hold and rotates the row. One that will not
 // (Stripe disconnected, the key rejected, the customer gone from the
-// account) keeps the hold on an open invoice — charges stay blocked and
-// write-off is the exit — and clears it on a settled, voided or written-off
-// invoice, which nothing can charge.
+// account) keeps the hold on an open invoice, parked or not — charges stay
+// blocked and write-off is the exit — and clears it on a settled, voided or
+// written-off invoice, which nothing can charge.
 func (r *Reconciler) staleHoldReadFailed(ctx context.Context, h domain.StaleChargeHold, err error) (string, error) {
 	inv := h.Invoice
 	if !refusedForGood(err) {
@@ -486,8 +524,8 @@ func (r *Reconciler) staleHoldReadFailed(ctx context.Context, h domain.StaleChar
 
 // markChecked stamps a kept row so it rotates. Best-effort: a lost stamp only
 // means the row is asked about again sooner. The store leaves an 'unknown'
-// invoice unstamped: the unknown sweep and the parked search rotate on the
-// same column and stamp it on their own checks.
+// invoice that names its PaymentIntent unstamped: the unknown sweep rotates on
+// the same column and stamps it on its own checks.
 func (r *Reconciler) markChecked(ctx context.Context, inv domain.Invoice) {
 	if err := r.invoices.MarkStaleHoldChecked(ctx, inv.TenantID, inv.ID); err != nil {
 		slog.WarnContext(ctx, "stale charge check: could not stamp the check", "invoice_id", inv.ID, "error", err)
@@ -495,8 +533,8 @@ func (r *Reconciler) markChecked(ctx context.Context, inv domain.Invoice) {
 }
 
 // openForCharge is the state a charge claim admits: finalized and pending or
-// failed. Only there does a lost charge's "nothing at Stripe" move the counter
-// and a found processing payment get adopted.
+// failed. Only there, and on a finalized parked invoice, does "nothing at
+// Stripe" move the counter and a found processing payment get adopted.
 func openForCharge(inv domain.Invoice) bool {
 	return inv.Status == domain.InvoiceFinalized &&
 		(inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed)

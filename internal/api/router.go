@@ -469,6 +469,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// background-settle paths already resolve via the engine; this closes the
 	// card-success symmetry — #317 follow-up). dunningSvc implements ResolveByInvoice.
 	stripeAdapter.SetDunningResolver(dunningSvc)
+	// A credit note that leaves a dunned invoice with nothing due marks it
+	// paid; this closes its dunning run too, escalated runs included.
+	creditNoteSvc.SetDunningResolver(dunningSvc)
 
 	// Wire payment retrier now that stripeAdapter exists
 	dunningSvc.SetRetrier(&paymentRetrierAdapter{
@@ -724,6 +727,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	invoiceH.SetAuditStamps(&invoiceAuditStampsAdapter{logger: auditLogger})
 	// ADR-128: invoice activity rows link the invoice's subscription by name.
 	invoiceH.SetSubscriptionLabeler(&invoiceSubscriptionLabelAdapter{store: subStore})
+	// ADR-128: the Dunning page's recovery timeline carries the lines the
+	// invoice's Activity card shows for the same events, built by the
+	// invoice handler from the same sources.
+	dunningH.SetEventLiner(invoiceH)
 	subH.SetAuditLogger(auditLogger)
 	// ADR-128: subscription activity rows link the invoices they name.
 	subH.SetInvoiceLabeler(&subscriptionInvoiceLabelAdapter{store: invoiceStore})

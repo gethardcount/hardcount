@@ -368,8 +368,11 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 	if !newTime.After(current.FrozenTime) {
 		return domain.TestClock{}, errs.Invalid("frozen_time", "must be strictly after current frozen_time")
 	}
-	// Stripe-parity advance window cap (ADR-028 amendment): a single
-	// Advance call shifts frozen_time by ≤ 1 year. Larger ranges are
+	// Advance window cap (ADR-028 amendment): a single Advance call
+	// shifts frozen_time by ≤ 1 year. This is Velox's own cap; Stripe
+	// allows two intervals of the shortest subscription period, or, on a
+	// clock with no subscriptions, up to two years from the clock's
+	// initial frozen time. Larger ranges are
 	// chunked into successive advances by the operator. Reasons:
 	//   - Predictable per-click resource use (operator can't trigger
 	//     a multi-decade catchup that exceeds the 10-min worker
@@ -384,7 +387,7 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 	maxAllowed := current.FrozenTime.AddDate(1, 0, 0)
 	if newTime.After(maxAllowed) {
 		return domain.TestClock{}, errs.Invalid("frozen_time",
-			"advance cannot exceed 1 year per call — chunk longer ranges into successive advances (Stripe parity)")
+			"advance cannot exceed 1 year per call — chunk longer ranges into successive advances")
 	}
 
 	advancing, err := s.store.MarkAdvancing(ctx, tenantID, id, newTime)
@@ -672,15 +675,6 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 		// for the whole job, so we reuse it here rather than re-reading.
 		needFrozen := (s.creditExpirer != nil || s.dunning != nil) && !frozen.IsZero()
 
-		// Phase 4 (ADR-029): credit expiry for grants belonging to
-		// customers pinned to this clock. expires_at compared against
-		// simulated time, not wall-clock.
-		if s.creditExpirer != nil && needFrozen {
-			creditCount, creditErrs := s.creditExpirer.ExpireCreditsForClock(ctx, job.TenantID, job.ClockID, frozen)
-			sum.CreditsExpired = creditCount
-			runErrs = append(runErrs, creditErrs...)
-		}
-
 		// Phase 5 (ADR-029): dunning advance for clock-pinned invoices.
 		// Runs after the charge/credit-settle phases. A Phase 1/1.5/3
 		// credit-cover settle now resolves the invoice's dunning run in place —
@@ -693,6 +687,28 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 			dunningCount, dunningErrs := s.dunning.ProcessDueRunsForClock(ctx, job.TenantID, job.ClockID, frozen, 50)
 			sum.DunningAdvanced = dunningCount
 			runErrs = append(runErrs, dunningErrs...)
+		}
+
+		// Phase 4 (ADR-029): credit expiry for grants belonging to
+		// customers pinned to this clock. expires_at compared against
+		// simulated time, not wall-clock.
+		//
+		// It runs last, after Phase 5 (ADR-029 amendment 2026-10-20). Every
+		// credit draw judges expiry at its own instant: drainPositiveBlocks
+		// takes only blocks with expires_at after the draw, and a dunning
+		// retry draws at its scheduled instant, at or before frozen.
+		// Expiry retires every grant with expires_at before frozen, and a
+		// retired grant is never drawn again (ADR-071). Run first, it took a
+		// grant that was still live at an earlier retry's instant, and that
+		// retry charged the card in full. Run last, no draw can take an
+		// expired grant either: the same filter refuses it. A draw that
+		// tests expiry at an earlier instant than its own breaks this; the
+		// control case of TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore
+		// then fails.
+		if s.creditExpirer != nil && needFrozen {
+			creditCount, creditErrs := s.creditExpirer.ExpireCreditsForClock(ctx, job.TenantID, job.ClockID, frozen)
+			sum.CreditsExpired = creditCount
+			runErrs = append(runErrs, creditErrs...)
 		}
 
 		// Billing ran — capture the summary (counts are exact, from the phase

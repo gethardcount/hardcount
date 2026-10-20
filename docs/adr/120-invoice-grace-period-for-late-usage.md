@@ -183,7 +183,8 @@ pipeline lags longer raises it.
   invoice that can draw on it is owed.** That is the grace, and longer
   while a close is failing or a period invoice waits for tax or
   collection. Only a period or threshold invoice issued before the expiry
-  draws from it. Every other draw tests expiry at its own instant.
+  draws from it, at its first collection or a dunning retry (ADR-071 §2).
+  Every other draw tests expiry at its own instant.
 - **Late usage after the invoice is silent.** There is no alert and no list
   of the events that missed an invoice. `velox_usage_late_event_total`
   counts events more than 24 hours old on arrival, which is a different

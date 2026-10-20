@@ -23,7 +23,10 @@ import type { ActivityPart } from './activityPart';
 export interface ActivityLine {
   /**
      * The row's stable key: the event's `id` on an invoice timeline
-     * row, the audit entry's id on a subscription timeline row.
+     * row, the audit entry's id on a subscription timeline row,
+     * `dunning:` and the event's id on a dunning run event (the same
+     * key the invoice timeline gives that event), and `email:` and
+     * the email's id on a sent email (likewise).
      */
   id: string;
   /** Machine name of the event. */

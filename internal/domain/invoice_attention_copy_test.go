@@ -244,9 +244,9 @@ func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 			"Stripe hasn't confirmed this charge yet, and Velox re-checks automatically until it does.",
 			"3-D Secure", nil},
 		{"parked (no payment id)", func() Invoice { i := queued(false); i.PaymentStatus = PaymentUnknown; return i }(), withCard,
-			AttentionReasonPaymentUnconfirmed, AttentionSeverityCritical,
-			"Velox can't tell if this charge went through, so it won't charge again; check Stripe, and if nothing was taken, mark it uncollectible.",
-			"will not resolve on its own", []AttentionAction{AttentionActionMarkUncollectible}},
+			AttentionReasonPaymentUnconfirmed, AttentionSeverityWarning,
+			"Stripe didn't confirm this charge and may still complete it.\nVelox checks Stripe every hour and records the payment if it appears.\nIf none appears within 24 hours, the invoice is charged again as usual.",
+			"paid another way", []AttentionAction{AttentionActionMarkUncollectible}},
 		{"declined", func() Invoice {
 			i := queued(false)
 			i.PaymentStatus = PaymentFailed

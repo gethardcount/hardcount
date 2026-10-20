@@ -516,8 +516,8 @@ function AdvanceClockDialog({
     return fromZonedTime(`${datePart}T${timePart}:00`, tz).toISOString()
   }, [datePart, timePart, tz])
 
-  // Stripe-parity hard cap: a single advance call moves the clock by at
-  // most 1 year (ADR-028 amendment). Server enforces this too — UI
+  // Hard cap, Velox's own (ADR-028 amendment): a single advance call moves
+  // the clock by at most 1 year. Server enforces this too — UI
   // surfaces it early so the operator gets immediate feedback rather
   // than a 422 after submit. Year-arithmetic, not 365 days, so leap
   // years cross cleanly.
