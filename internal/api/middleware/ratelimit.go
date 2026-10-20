@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +12,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
+	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -218,9 +218,10 @@ func (rl *RateLimiter) bucketKey(key string) string {
 //     operations do NOT share quota — Stripe's pattern. Without the suffix,
 //     one operator's heavy test load could throttle another operator's
 //     legitimate live action.
-//  3. Remote IP for wholly-unauthenticated paths (bootstrap, login, public
-//     health probes that slipped past the skip-list) so an unauthenticated
-//     flood can't bypass the limiter entirely.
+//  3. The trusted client IP (audit.ExtractClientIP) for wholly
+//     unauthenticated paths (bootstrap, login, public health probes that
+//     slipped past the skip-list) so an unauthenticated flood can't bypass
+//     the limiter entirely.
 func rateLimitKey(r *http.Request) string {
 	if keyID := auth.KeyID(r.Context()); keyID != "" {
 		return "key:" + keyID
@@ -232,11 +233,7 @@ func rateLimitKey(r *http.Request) string {
 		}
 		return "tenant:" + tenantID + ":" + mode
 	}
-	ip := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		ip = host
-	}
-	return "ip:" + ip
+	return "ip:" + audit.ExtractClientIP(r)
 }
 
 // SplitRateLimit routes each request to one of two limiters: `special`

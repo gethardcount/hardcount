@@ -179,3 +179,12 @@ The in-process count is a token bucket from `golang.org/x/time/rate` with the Re
 - In production, the general and hosted-invoice limiters still answer 429 to every request while Redis is down, and the ingest limiter still lets every request through.
 - Production still refuses to start without a reachable Redis.
 - The `(IP × account)` throttle designed above keeps its count in Postgres when it is built, so it will not depend on Redis either.
+
+## Amendment 2026-10-20: the client address comes from chi
+
+`TrustedRealIP`, named in the Context and Decision above, is replaced by chi's `ClientIPFromXFF` (or `ClientIPFromRemoteAddr` when `TRUST_PROXY` is unset or `none`), wrapped as `middleware.TrustedClientIP`. chi is pinned at v5.5.0. Two things change:
+
+- `X-Forwarded-For` is read only when the TCP peer is a `TRUST_PROXY` address, across every header line, right to left past trusted hops. An entry that is not a bare IP stops the walk, and the address is then the proxy's.
+- `X-Real-IP` is not read.
+
+`r.RemoteAddr` stays the TCP peer. Every reader, including the rate-limit key, audit and session rows, the access log and trace spans, takes the address from `audit.ExtractClientIP`, which falls back to the TCP peer when chi resolved none.

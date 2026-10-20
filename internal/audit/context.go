@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"sync/atomic"
+
+	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
 type ctxKey int
@@ -118,16 +120,19 @@ func ClientIP(ctx context.Context) string {
 	return ""
 }
 
-// ExtractClientIP returns the source IP recorded on audit rows and on the
-// dashboard session rows that login and invite accept write: the host of
-// r.RemoteAddr, which the global TrustedRealIP middleware has already resolved
-// from X-Forwarded-For / X-Real-IP — but ONLY when the immediate peer is a
-// configured trusted proxy. It deliberately does NOT re-read those headers
-// itself: doing so trusted them unconditionally, so any client could forge
-// audit_log.ip_address (and the boot log even claims headers are ignored when
-// TRUST_PROXY is unset). Deferring to TrustedRealIP makes the audit IP match
-// the real-IP policy the rest of the stack (rate limiter, logs) already uses.
+// ExtractClientIP returns the client IP for this request: the one the global
+// mw.TrustedClientIP middleware resolved with chi's ClientIPFrom* (read with
+// chi's GetClientIP), which honours X-Forwarded-For only from a configured
+// trusted proxy. When nothing was resolved (no middleware mounted, or a
+// forwarding chain that does not parse) it is the TCP peer, so a caller never
+// gets an empty IP. It never reads a forwarding header itself.
+//
+// Every IP reader uses it: audit rows, session rows, the login throttle, the
+// access log, trace spans and the unauthenticated rate-limit key.
 func ExtractClientIP(r *http.Request) string {
+	if ip := chimw.GetClientIP(r.Context()); ip != "" {
+		return ip
+	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
 	}

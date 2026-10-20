@@ -26,7 +26,7 @@ func (r *ipAuditRecorder) Log(ctx context.Context, _, _, _, _, _ string, _ map[s
 
 // TestAcceptInvite_SessionIPIsTheTrustedClientIP: accepting an invite as a
 // new account signs the invitee in, and the session row records the address
-// TrustedRealIP resolved, the same one as the member.joined audit row. The
+// TrustedClientIP resolved, the same one as the member.joined audit row. The
 // client sends a forged X-Forwarded-For entry through a trusted proxy, which
 // appends the real address. Until 2026-10-18 the session row stored the
 // forged left-most entry, 6.6.6.6.
@@ -43,8 +43,8 @@ func TestAcceptInvite_SessionIPIsTheTrustedClientIP(t *testing.T) {
 	rec := &ipAuditRecorder{}
 	handler.SetAuditLogger(rec)
 	r := chi.NewRouter()
-	// The router mounts TrustedRealIP globally, ahead of /v1/auth.
-	r.Use(mw.TrustedRealIP(mw.ParseTrustedProxies("10.0.0.0/8")))
+	// The router mounts TrustedClientIP globally, ahead of /v1/auth.
+	r.Use(mw.TrustedClientIP(mw.ParseTrustedProxies("10.0.0.0/8")))
 	handler.RegisterPublicRoutes(r)
 
 	body, _ := json.Marshal(map[string]string{"token": token, "password": testPassword})

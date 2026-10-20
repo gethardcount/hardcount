@@ -80,7 +80,7 @@ func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 // auditAuthEvent writes one audit row for an authenticated auth event. It
 // stamps the actor (the operator's user id, since these endpoints run outside
 // session middleware so the ctx carries no identity) and the client IP (the
-// TrustedRealIP-corrected r.RemoteAddr) onto the ctx the recorder reads. When
+// one TrustedClientIP resolved, via audit.ExtractClientIP) onto the ctx the recorder reads. When
 // actorUserID is "" the actor stays unresolved → recorded as 'system' (used for
 // a password-reset REQUEST, which any unauthenticated party can trigger).
 // Best-effort: a write failure is logged, never surfaced — auth must not fail
@@ -190,7 +190,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The address TrustedRealIP resolved. The failed-login log, the throttle,
+	// The address TrustedClientIP resolved. The failed-login log, the throttle,
 	// the session row and the audit row all use this one value; none of them
 	// reads a forwarding header the client could have written.
 	ip := audit.ExtractClientIP(r)

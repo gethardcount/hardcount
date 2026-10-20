@@ -74,7 +74,7 @@ func TestMetrics_LabelSpaceIsBounded(t *testing.T) {
 }
 
 func TestMethodLabel(t *testing.T) {
-	for _, m := range []string{"GET", "POST", "DELETE", "OPTIONS"} {
+	for _, m := range []string{"GET", "POST", "DELETE", "OPTIONS", "QUERY"} {
 		if got := methodLabel(m); got != m {
 			t.Errorf("methodLabel(%s) = %s", m, got)
 		}
