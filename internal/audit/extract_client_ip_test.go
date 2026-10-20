@@ -2,15 +2,19 @@ package audit_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 )
 
-// TestExtractClientIP pins the security property: the audit IP comes from
-// r.RemoteAddr (which the global TrustedRealIP middleware has already resolved
-// under its proxy-trust policy) and NEVER from raw X-Forwarded-For / X-Real-IP
-// — otherwise any client could forge audit_log.ip_address.
+// TestExtractClientIP pins the security property: with no client IP resolved
+// on the context (the global TrustedClientIP middleware sets one under its
+// proxy-trust policy), the audit IP is the TCP peer in r.RemoteAddr and NEVER
+// a raw X-Forwarded-For / X-Real-IP value — otherwise any client could forge
+// audit_log.ip_address.
 func TestExtractClientIP(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -55,5 +59,22 @@ func TestExtractClientIP(t *testing.T) {
 				t.Errorf("ExtractClientIP = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestExtractClientIP_PrefersResolvedIP: when chi's ClientIPFrom* middleware
+// resolved an IP, that IP wins over the TCP peer (behind a trusted proxy the
+// peer is the proxy).
+func TestExtractClientIP_PrefersResolvedIP(t *testing.T) {
+	var got string
+	h := chimw.ClientIPFromXFF("10.0.0.0/8")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = audit.ExtractClientIP(r)
+	}))
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.2:443"
+	r.Header.Set("X-Forwarded-For", "198.51.100.7")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if got != "198.51.100.7" {
+		t.Fatalf("ExtractClientIP = %q, want 198.51.100.7", got)
 	}
 }

@@ -495,10 +495,10 @@ const unmatchedRoute = "unmatched"
 //
 // Why not the raw path: client_golang never evicts vec children, so every
 // distinct label value is ~2 KB of heap for the life of the process. The
-// previous sanitizePath heuristic (rewrite vlx_-prefixed or >20-char
-// segments) left every other client-chosen path — every 404 probe — as its
-// own series: attacker-controlled memory growth, measured at 900 probes →
-// 900 series.
+// previous path heuristic (rewrite vlx_-prefixed or >20-char segments)
+// left every other client-chosen path — every 404 probe — as its own
+// series: attacker-controlled memory growth, measured at 900 probes → 900
+// series.
 func routeLabel(r *http.Request) string {
 	if rctx := chi.RouteContext(r.Context()); rctx != nil {
 		if p := rctx.RoutePattern(); p != "" {
@@ -517,63 +517,6 @@ func methodLabel(m string) string {
 		return m
 	}
 	return "other"
-}
-
-// sanitizePath normalizes a raw URL path by replacing ID-shaped segments with
-// :id. It is used by tracing.go for span names — otelhttp names spans BEFORE
-// routing, so the route pattern is not available there. It is NOT used for
-// metric labels any more (see routeLabel).
-func sanitizePath(path string) string {
-	// Common patterns: /v1/customers/vlx_cus_abc123 → /v1/customers/:id
-	parts := splitPath(path)
-	for i, part := range parts {
-		if isID(part) {
-			parts[i] = ":id"
-		}
-	}
-	return joinPath(parts)
-}
-
-func splitPath(path string) []string {
-	var parts []string
-	current := ""
-	for _, c := range path {
-		if c == '/' {
-			if current != "" {
-				parts = append(parts, current)
-				current = ""
-			}
-		} else {
-			current += string(c)
-		}
-	}
-	if current != "" {
-		parts = append(parts, current)
-	}
-	return parts
-}
-
-func joinPath(parts []string) string {
-	result := ""
-	for _, p := range parts {
-		result += "/" + p
-	}
-	if result == "" {
-		return "/"
-	}
-	return result
-}
-
-func isID(s string) bool {
-	// Velox IDs start with vlx_ prefix
-	if len(s) > 4 && s[:4] == "vlx_" {
-		return true
-	}
-	// UUIDs and other long hex strings
-	if len(s) > 20 {
-		return true
-	}
-	return false
 }
 
 // schedulerLastRunTimestamp backs the runbook's "scheduler is alive" alert:

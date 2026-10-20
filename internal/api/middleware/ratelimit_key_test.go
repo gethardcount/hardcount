@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -54,16 +55,11 @@ func TestRateLimitKey_UnauthenticatedFallsBackToIP(t *testing.T) {
 	// Wholly-unauthenticated paths (login, bootstrap) still get a bucket,
 	// so a flood can't bypass the limiter by simply not authenticating.
 	//
-	// Both RemoteAddr shapes matter. Go's server sets host:port, but
-	// TrustedRealIP runs ahead of every limiter group and rewrites
-	// RemoteAddr to a BARE ip when the request came through a trusted
-	// proxy — the production shape. That takes SplitHostPort's error
-	// branch, and without the bare case a regression collapsing it (say
-	// to a constant) would leave every proxied client sharing one global
-	// bucket while this test still passed.
+	// With no client IP resolved on the context, the key falls back to the
+	// TCP peer in either RemoteAddr shape.
 	for _, tc := range []struct{ name, remoteAddr, want string }{
 		{"host:port from the Go server", "203.0.113.7:54321", "ip:203.0.113.7"},
-		{"bare ip rewritten by TrustedRealIP", "203.0.113.7", "ip:203.0.113.7"},
+		{"bare ip", "203.0.113.7", "ip:203.0.113.7"},
 		{"IPv6 host:port", "[2001:db8::1]:54321", "ip:2001:db8::1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,6 +69,29 @@ func TestRateLimitKey_UnauthenticatedFallsBackToIP(t *testing.T) {
 				t.Errorf("bucket = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// Behind a trusted proxy every request has the proxy as its TCP peer. The key
+// must be the client IP that TrustedClientIP resolved, or every proxied client
+// shares one bucket.
+func TestRateLimitKey_KeysOnResolvedClientIPBehindProxy(t *testing.T) {
+	key := func(xff string) string {
+		var got string
+		h := TrustedClientIP(ParseTrustedProxies("10.0.0.0/8"))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got = rateLimitKey(r)
+		}))
+		r := httptest.NewRequest("POST", "/v1/auth/login", nil)
+		r.RemoteAddr = "10.0.0.2:443"
+		r.Header.Set("X-Forwarded-For", xff)
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		return got
+	}
+	if got, want := key("198.51.100.7"), "ip:198.51.100.7"; got != want {
+		t.Fatalf("bucket = %q, want %q", got, want)
+	}
+	if key("198.51.100.7") == key("198.51.100.8") {
+		t.Fatal("two clients behind one proxy share a bucket")
 	}
 }
 

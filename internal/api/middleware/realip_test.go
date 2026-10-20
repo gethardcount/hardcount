@@ -5,20 +5,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/sagarsuperuser/velox/internal/audit"
 )
 
-// TestTrustedRealIP covers the pass-3 [security] audit finding: chi's RealIP
-// honored X-Forwarded-For/X-Real-IP unconditionally, so any client could forge
-// a forwarding header to rotate its per-IP rate-limit bucket or pin a victim's
-// IP. TrustedRealIP only rewrites RemoteAddr when the TCP peer is a trusted
-// proxy.
-func TestTrustedRealIP(t *testing.T) {
+// TestTrustedClientIP: the client IP comes from chi's ClientIPFrom*
+// middleware, read through audit.ExtractClientIP. X-Forwarded-For counts only
+// when the TCP peer is a trusted proxy, and r.RemoteAddr is left as the peer.
+func TestTrustedClientIP(t *testing.T) {
 	trusted := ParseTrustedProxies("10.0.0.0/8,127.0.0.1")
 
-	run := func(remoteAddr, xff, xrealip string, nets []*net.IPNet) string {
-		var seen string
-		h := TrustedRealIP(nets)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-			seen = r.RemoteAddr
+	run := func(remoteAddr, xff, xrealip string, nets []*net.IPNet) (ip, remote string) {
+		h := TrustedClientIP(nets)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			ip, remote = audit.ExtractClientIP(r), r.RemoteAddr
 		}))
 		req := httptest.NewRequest("GET", "/", nil)
 		req.RemoteAddr = remoteAddr
@@ -29,38 +28,33 @@ func TestTrustedRealIP(t *testing.T) {
 			req.Header.Set("X-Real-IP", xrealip)
 		}
 		h.ServeHTTP(httptest.NewRecorder(), req)
-		return seen
+		return ip, remote
 	}
 
-	t.Run("untrusted peer: forged XFF ignored", func(t *testing.T) {
-		if got := run("203.0.113.9:5555", "1.2.3.4", "", trusted); got != "203.0.113.9:5555" {
-			t.Errorf("got %q, want raw peer (forged XFF must not be trusted)", got)
-		}
-	})
-
-	t.Run("trusted peer: XFF honored", func(t *testing.T) {
-		if got := run("10.1.2.3:443", "198.51.100.7", "", trusted); got != "198.51.100.7" {
-			t.Errorf("got %q, want 198.51.100.7 (real client via trusted proxy)", got)
-		}
-	})
-
-	t.Run("trusted peer: picks first untrusted from the right", func(t *testing.T) {
-		if got := run("127.0.0.1:8080", "198.51.100.7, 10.0.0.5, 10.0.0.6", "", trusted); got != "198.51.100.7" {
-			t.Errorf("got %q, want 198.51.100.7 (skip trusted hops, take real client)", got)
-		}
-	})
-
-	t.Run("trusted peer: X-Real-IP fallback", func(t *testing.T) {
-		if got := run("10.0.0.9:80", "", "192.0.2.44", trusted); got != "192.0.2.44" {
-			t.Errorf("got %q, want 192.0.2.44 (X-Real-IP from trusted proxy)", got)
-		}
-	})
-
-	t.Run("no trusted proxies configured: always raw peer", func(t *testing.T) {
-		if got := run("10.1.2.3:443", "198.51.100.7", "", nil); got != "10.1.2.3:443" {
-			t.Errorf("got %q, want raw peer (no proxies trusted)", got)
-		}
-	})
+	cases := []struct {
+		name, remoteAddr, xff, xrealip string
+		nets                           []*net.IPNet
+		want                           string
+	}{
+		{"untrusted peer: forged XFF ignored", "203.0.113.9:5555", "1.2.3.4", "", trusted, "203.0.113.9"},
+		{"trusted peer: XFF honored", "10.1.2.3:443", "198.51.100.7", "", trusted, "198.51.100.7"},
+		{"trusted peer: first untrusted from the right", "127.0.0.1:8080", "198.51.100.7, 10.0.0.5, 10.0.0.6", "", trusted, "198.51.100.7"},
+		{"trusted peer: X-Real-IP not read", "10.0.0.9:80", "", "192.0.2.44", trusted, "10.0.0.9"},
+		{"trusted peer, every XFF hop trusted: the peer", "10.0.0.9:80", "10.0.0.5", "", trusted, "10.0.0.9"},
+		{"IPv4-mapped trusted peer still matches", "[::ffff:10.1.2.3]:443", "198.51.100.7", "", trusted, "198.51.100.7"},
+		{"no trusted proxies configured: the peer", "10.1.2.3:443", "198.51.100.7", "", nil, "10.1.2.3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ip, remote := run(tc.remoteAddr, tc.xff, tc.xrealip, tc.nets)
+			if ip != tc.want {
+				t.Errorf("client IP = %q, want %q", ip, tc.want)
+			}
+			if remote != tc.remoteAddr {
+				t.Errorf("r.RemoteAddr = %q, want it left as the peer %q", remote, tc.remoteAddr)
+			}
+		})
+	}
 }
 
 func TestParseTrustedProxies(t *testing.T) {

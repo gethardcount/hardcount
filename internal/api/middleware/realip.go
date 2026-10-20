@@ -3,7 +3,8 @@ package middleware
 import (
 	"net"
 	"net/http"
-	"strings"
+
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/sagarsuperuser/velox/internal/config"
 )
@@ -21,63 +22,25 @@ func ParseTrustedProxies(spec string) []*net.IPNet {
 	return nets
 }
 
-func ipInAny(ip net.IP, nets []*net.IPNet) bool {
-	for _, n := range nets {
-		if n.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
-// TrustedRealIP rewrites r.RemoteAddr to the real client IP from
-// X-Forwarded-For / X-Real-IP, but ONLY when the immediate TCP peer
-// (r.RemoteAddr at entry) is one of the configured trusted proxies. When the
-// peer is untrusted — or no proxies are configured — the raw peer address is
-// kept, so a client behind no proxy cannot forge a forwarding header to rotate
-// its per-IP rate-limit bucket (enumeration bypass) or pin a victim's IP (DoS).
+// TrustedClientIP resolves the client IP with chi's ClientIPFrom* middleware
+// and stores it on the request context; read it with audit.ExtractClientIP
+// (or chi's GetClientIP). r.RemoteAddr is left as the TCP peer.
 //
-// Replaces chi's middleware.RealIP, which trusted those headers unconditionally.
-func TrustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ip := trustedClientIP(r, trusted); ip != "" {
-				r.RemoteAddr = ip
-			}
-			next.ServeHTTP(w, r)
-		})
+//   - With trusted proxies, chi's ClientIPFromXFF reads X-Forwarded-For only
+//     when the TCP peer is inside one of them. It merges every header line,
+//     walks right to left past trusted hops and takes the first untrusted
+//     address. An entry that is not a bare IP ends the walk with no result.
+//   - With none, chi's ClientIPFromRemoteAddr uses the TCP peer.
+//
+// No other header (X-Real-IP, True-Client-IP) is read. When chi resolves
+// nothing, audit.ExtractClientIP falls back to the TCP peer.
+func TrustedClientIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
+	if len(trusted) == 0 {
+		return chimw.ClientIPFromRemoteAddr
 	}
-}
-
-// trustedClientIP returns the real client IP from forwarding headers when the
-// peer is a trusted proxy, or "" to signal "leave r.RemoteAddr unchanged".
-func trustedClientIP(r *http.Request, trusted []*net.IPNet) string {
-	peerHost, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		peerHost = r.RemoteAddr
+	prefixes := make([]string, len(trusted))
+	for i, n := range trusted {
+		prefixes[i] = n.String()
 	}
-	peerIP := net.ParseIP(strings.TrimSpace(peerHost))
-	if peerIP == nil || !ipInAny(peerIP, trusted) {
-		// Direct or untrusted peer — forwarding headers are attacker-controlled.
-		return ""
-	}
-	// Peer is a trusted proxy. Walk X-Forwarded-For from the right (closest
-	// hop), skipping trusted-proxy hops; the first untrusted address is the
-	// real client. This stops a client from injecting fake left-most entries.
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		for i := len(parts) - 1; i >= 0; i-- {
-			cand := net.ParseIP(strings.TrimSpace(parts[i]))
-			if cand == nil || ipInAny(cand, trusted) {
-				continue
-			}
-			return cand.String()
-		}
-	}
-	if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" {
-		if cand := net.ParseIP(xr); cand != nil {
-			return cand.String()
-		}
-	}
-	return ""
+	return chimw.ClientIPFromXFF(prefixes...)
 }

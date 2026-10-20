@@ -3,7 +3,7 @@ module github.com/sagarsuperuser/velox
 go 1.26.9
 
 require (
-	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-redis/redis_rate/v10 v10.0.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0

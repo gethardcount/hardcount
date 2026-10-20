@@ -112,8 +112,9 @@ services:
       VELOX_BOOTSTRAP_TOKEN: ${VELOX_BOOTSTRAP_TOKEN}
       # Rate limiting backend (in-stack; fail-closed in production without it)
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      # nginx fronts the API: trust its X-Forwarded-For/X-Real-IP so rate
-      # limits and audit logs key on the real client IP, not the proxy.
+      # nginx fronts the API: trust its X-Forwarded-For so rate limits and
+      # audit logs key on the real client IP, not the proxy. Velox does not
+      # read X-Real-IP.
       # Compose networks come from Docker's private pools; narrow this if
       # you pin a custom subnet.
       TRUST_PROXY: ${TRUST_PROXY:-172.16.0.0/12,192.168.0.0/16}
