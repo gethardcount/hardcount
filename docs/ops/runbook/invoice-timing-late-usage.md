@@ -38,9 +38,11 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
 - **During the grace the subscription still shows the ended period.** Spend
   thresholds and the live credit balance do not count the new period's
   usage until the invoice is built.
-- **A credit grant that expires during the grace** is retired only after
-  the grace, so it still pays the invoice of the period it was live in.
-  Until then it stays in the ledger balance; no later invoice draws from it.
+- **A credit grant that expires after a period ends** still pays that
+  period's invoice. It is retired once the period's close has run and its
+  invoice has drawn on it, and it stays in the ledger balance until then.
+  No later invoice draws from it
+  ([ADR-071 §2](../../adr/071-credit-expiry-retires-the-block.md)).
 
 ## Check
 

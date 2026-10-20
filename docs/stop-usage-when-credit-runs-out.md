@@ -144,9 +144,11 @@ Four cases are handled so that nothing is counted twice or wrongly:
   the time a plan that carries it was on the subscription, as the invoice
   bills it. Usage on the old plan's meter before the change still counts.
 - **A grant has passed its expiry date.** It is no longer counted, even if
-  the hourly run has not yet written the expiry to the ledger. During that
-  hour `balance_cents` here is lower than the balance
-  `GET /v1/credits/balance/{customer_id}` returns.
+  the hourly run has not yet written the expiry to the ledger. The run
+  waits while a close or a period invoice that ends before the expiry can
+  still draw on the grant. Until a close or an uncollected period invoice
+  that ends before the expiry is settled, `balance_cents` here is lower than
+  the balance `GET /v1/credits/balance/{customer_id}` returns.
 
 ## What the figure leaves out
 
@@ -166,9 +168,16 @@ has left, because these are not subtracted:
   until its expiry date. If the period's invoice is issued after that date,
   the invoice cannot draw on it.
 
-It can read lower than the truth in one case: a subscription with a usage
-cap that blocks overage. The invoice applies the cap and the estimate does
-not.
+It can read lower than the truth in two cases:
+
+- **A subscription with a usage cap that blocks overage.** The invoice
+  applies the cap and the estimate does not.
+- **A period has ended and its invoice is not built yet.** This lasts
+  through `INVOICE_GRACE_PERIOD`, or longer while a failed close waits for
+  its next attempt. The estimate subtracts that period's usage but no
+  longer counts credit that expired after the period ended. That period's
+  invoice still draws on that credit
+  ([ADR-071](adr/071-credit-expiry-retires-the-block.md)).
 
 If a customer is billed in more than one currency, the amounts are added
 together as plain cents.

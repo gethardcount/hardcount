@@ -111,7 +111,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [068](068-checkout-session-dedup.md) | 2026-07-02 | Accepted (amended) | Payments | One open checkout session per invoice; hosted payment and Velox charges exclude each other |
 | [069](069-trial-cancel-semantics.md) | 2026-07-02 | Accepted | Subscriptions | Cancelling a trial is free at trial end; SQL guards enforce it at every activation |
 | [070](070-price-change-semantics.md) | 2026-07-02 | Accepted (amended) | Pricing & usage | Customer price overrides follow the rule across versions; a period keeps its opening price |
-| [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry |
+| [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted (amended) | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry, once no period invoice still owed can draw on it |
 | [072](072-transport-lease-model.md) | 2026-07-03 | Accepted (amended) | Platform & ops | Outbox workers claim rows with a time-limited lease; budgets and lease lengths are derived |
 | [073](073-selfhost-boot-and-bootstrap-contract.md) | 2026-07-03 | Accepted (amended) | Platform & ops | One bootstrap path creates a tenant in one transaction; migrations run one at a time |
 | [074](074-subscription-billing-timezone-snapshot.md) | 2026-07-04 | Superseded by ADR-077 | Timezones | Each subscription snapshots its billing timezone at creation |
@@ -159,7 +159,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [117](117-one-payment-intent-per-invoice-deferred.md) | 2026-10-11 | Proposed | Payments | One PaymentIntent per invoice considered and deferred; Velox keeps one per charge attempt |
 | [118](118-cancel-and-swap-relief-in-the-change-transaction.md) | 2026-10-12 | Accepted (amended) | Credits | Credit for unused time on cancel or plan swap is written in the same transaction |
 | [119](119-billing-failure-record-keyed-to-the-due-instant.md) | 2026-10-12 | Accepted | Billing | Billing failures are saved on the subscription; retries back off and park after eight |
-| [120](120-invoice-grace-period-for-late-usage.md) | 2026-10-14 | Accepted | Billing | Invoices are built after a grace period (default 1h); later usage is not billed automatically |
+| [120](120-invoice-grace-period-for-late-usage.md) | 2026-10-14 | Accepted (amended) | Billing | Invoices are built after a grace period (default 1h); later usage is not billed automatically |
 | [121](121-customer-usage-cards-open-on-the-billing-period.md) | 2026-10-16 | Accepted | Pricing & usage | The customer page's Activity and Margin cards open on the current billing period |
 | [122](122-hold-and-release-usage-for-unknown-customers.md) | 2026-10-17 | Accepted | Pricing & usage | LiteLLM usage for an unknown customer or meter is held until an operator releases it |
 | [123](123-new-accounts-start-with-a-default-dunning-policy.md) | 2026-10-17 | Accepted | Dunning | New accounts start with a default dunning policy that retries three times and changes nothing |

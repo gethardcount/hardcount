@@ -149,7 +149,7 @@ func TestExpireGrantAtomic_RecomputesUnderLock(t *testing.T) {
 	grantID := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 10000, expiresAt)
 
 	// Candidate snapshot BEFORE the backdated apply — remaining $100.
-	candidates, err := store.ListExpiredGrants(ctx, 0)
+	candidates, err := store.ListExpiredGrants(ctx)
 	if err != nil {
 		t.Fatalf("list expired grants: %v", err)
 	}

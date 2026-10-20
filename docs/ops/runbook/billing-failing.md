@@ -26,8 +26,11 @@ the subscription and now waits before each new attempt.
 A parked subscription skips no period. When it is retried, it is billed for
 every period it missed, one invoice per period. Waiting still has a cost:
 
-- Prepaid credits that expire in the meantime do not apply to the late
-  invoice.
+- Prepaid credit that was live when a missed period ended stays in the
+  customer's ledger balance after its expiry date, until the subscription
+  is billed. That period's invoice still draws on it. For a parked
+  subscription, it stays until someone retries billing
+  ([ADR-071 §2](../../adr/071-credit-expiry-retires-the-block.md)).
 - Usage thresholds do not fire for a period that has already ended.
 - The subscription cannot be cancelled or changed until it is billed. An
   immediate cancel, a scheduled cancel or its removal, a collection pause

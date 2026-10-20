@@ -152,8 +152,9 @@ func WithRateLimits(rl config.RateLimits) ServerOption {
 }
 
 // WithInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). One value feeds the
-// three places that must agree on when a period is due: the billing runs'
-// due scans, the billing backlog gauges, and the credit-expiry sweep.
+// two places that must agree on when a period is due: the billing runs' due
+// scans and the billing backlog gauges. The credit-expiry sweep does not use
+// it: it holds a grant until the close that draws on it has run (ADR-071 §2).
 func WithInvoiceGrace(d time.Duration) ServerOption {
 	return func(o *serverOptions) { o.invoiceGrace = d }
 }
@@ -290,7 +291,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	creditStore := credit.NewPostgresStore(db)
 	creditSvc := credit.NewService(creditStore)
 	creditSvc.SetCustomerReader(customerStore)
-	creditSvc.SetExpiryGrace(o.invoiceGrace)
 	creditH := credit.NewHandler(creditSvc)
 	creditNoteStore := creditnote.NewPostgresStore(db)
 	// The credit-note issue stamp copies customer PII, so it needs the
