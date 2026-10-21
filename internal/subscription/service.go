@@ -2591,9 +2591,17 @@ type PauseCollectionInput struct {
 }
 
 // PauseCollection sets the Stripe-parity collection-pause state. Distinct
-// from Pause (hard freeze on status). The cycle keeps advancing; the engine
-// generates the invoice as draft and skips finalize/charge/dunning while
-// pause_collection is non-null.
+// from Pause (hard freeze on status). The cycle keeps advancing; while
+// pause_collection is non-null the engine generates each new invoice as a
+// draft, so it is not finalized, not charged and starts no dunning run.
+//
+// It does not stop collection on invoices finalized before the pause. A
+// dunning run already open on one keeps its retry schedule and charges the
+// customer's default card, as Stripe keeps retrying invoices created before a
+// pause unless they are voided. Only the charge sweeps (the queued auto-charge
+// and the charge when a card is added) skip a paused subscription. To stop an
+// open run, void the invoice or mark it uncollectible (ADR-036, amended
+// 2026-10-22).
 //
 // Idempotent: a second call with the same input replaces the row's
 // pause_collection_* columns with the same values. Switching from one

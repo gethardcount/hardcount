@@ -21,7 +21,6 @@ type Branding struct {
 	BrandColor  string // 7-char hex, e.g. #1f6feb. Empty = fall back to neutral.
 	SupportURL  string
 	FromName    string // Appears as "From: FromName <from@address>" when set.
-	FromAddress string // Defaults to SMTP_FROM at send time.
 }
 
 // fill fills in Velox defaults so every rendered email has something in

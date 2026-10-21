@@ -1421,6 +1421,9 @@ export interface TenantSettings {
   // ADR-078: arms the credit.balance_low webhook — a customer's balance
   // crossing below this many cents fires the event. null/absent = off.
   credit_balance_low_threshold_cents?: number | null
+  // The number the next invoice in the current mode gets, before the
+  // prefix. Returned by GET and PUT; not a setting, so sending it does nothing.
+  next_invoice_sequence: number
 }
 
 export interface StripeProviderCredentials {

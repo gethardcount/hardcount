@@ -7221,6 +7221,10 @@ export const getPauseSubscriptionCollectionUrl = (id: string,) => {
  * stays a draft. Velox does not finalize it, charge it or start
  * dunning (automatic payment retries).
  *
+ * Invoices finalized before the pause are not drafts. Payment retries
+ * already under way for them continue, as in Stripe. To stop them,
+ * void the invoice or mark it uncollectible.
+ *
  * Only `behavior: keep_as_draft` is supported. With `resumes_at`,
  * periods that end before that instant bill as drafts, and later
  * periods bill normally. Without it, the pause lasts until you call

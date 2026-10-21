@@ -965,6 +965,15 @@ func awaitsPaymentNoCard(inv domain.Invoice, ready bool) bool {
 	return !ready && inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentPending
 }
 
+// pauseCandidate reports whether a row's notice depends on the subscription's
+// collection pause: an unpaid finalized invoice that is queued for the
+// auto-charge, or that waits for a card. Its notice also depends on the
+// invoice's dunning run, which the pause does not stop.
+func pauseCandidate(inv domain.Invoice, ready bool) bool {
+	return (inv.AutoChargePending || !ready) && inv.Status == domain.InvoiceFinalized &&
+		inv.PaymentStatus == domain.PaymentPending
+}
+
 // readAttentionFacts reads one tenant's attention facts for a page of
 // invoices. Every read is display-only: a read error leaves its fact false
 // for the page, the same safe direction a per-row error took before.
@@ -1048,9 +1057,15 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 	// then says no retry is scheduled — the direction that still sends the
 	// operator to get a new card, rather than waiting on a retry that may
 	// never run.
+	//
+	// The paused-collection notices join it too (sweep A2): a collection
+	// pause does not stop a run already open on the invoice, so every row the
+	// pause state is read for (pauseCandidate) needs the run as well. No run,
+	// or a read error, leaves retrying false and the notice says nothing
+	// charges the invoice until collection resumes.
 	if s.dunningReader != nil {
 		ids := distinct(page, func(inv domain.Invoice) string {
-			if awaitsPaymentNoCard(inv, f.paymentReady[inv.CustomerID]) || f.refusedCard[inv.ID] != "" {
+			if pauseCandidate(inv, f.paymentReady[inv.CustomerID]) || f.refusedCard[inv.ID] != "" {
 				return inv.ID
 			}
 			return ""
@@ -1073,11 +1088,10 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 	// while collection is paused (the sweep that charges on attach skips
 	// paused subscriptions). Healthy, paid, draft and failed rows skip it.
 	// Display-only: a read error shows the not-paused banner (logged); the
-	// collector itself refuses to charge a paused subscription.
+	// charge sweeps themselves skip a paused subscription. Dunning retries do
+	// not, which is why these rows also read their dunning run above.
 	subIDs := distinct(page, func(inv domain.Invoice) string {
-		ready := f.paymentReady[inv.CustomerID]
-		if (inv.AutoChargePending || !ready) && inv.Status == domain.InvoiceFinalized &&
-			inv.PaymentStatus == domain.PaymentPending {
+		if pauseCandidate(inv, f.paymentReady[inv.CustomerID]) {
 			return inv.SubscriptionID
 		}
 		return ""
@@ -1166,8 +1180,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 		atc.CustomerHasEmail = f.hasEmail[inv.CustomerID]
 		atc.DunningEscalated = f.escalated[inv.ID]
 	}
-	if (inv.AutoChargePending || !atc.HasPaymentMethod) && inv.Status == domain.InvoiceFinalized &&
-		inv.PaymentStatus == domain.PaymentPending {
+	if pauseCandidate(inv, atc.HasPaymentMethod) {
 		atc.CollectionPaused = f.paused[inv.SubscriptionID]
 	}
 	atc.PaymentPageOpen = f.pageLive[inv.ID]

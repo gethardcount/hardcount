@@ -3425,8 +3425,10 @@ type Attention struct {
 	// without collecting (2026-07-22). `collection_paused` reports an
 	// invoice that is queued for auto-charge but whose subscription
 	// has `pause_collection` set, so the charge sweeps deliberately
-	// skip it — it will not be charged automatically until
-	// collection resumes (2026-07-28). `commit_exposure` reports an
+	// skip it (2026-07-28). A dunning run already open on the invoice
+	// keeps retrying it through the pause, and `message` then says so;
+	// with no open run it is not charged automatically until
+	// collection resumes. `commit_exposure` reports an
 	// unpaid invoice that funded a prepaid commit whose credit is
 	// already spendable (ADR-078 funds commits at issue, not at
 	// payment) — note this reason is only returned when no other
@@ -3510,8 +3512,10 @@ type AttentionActionItem struct {
 // without collecting (2026-07-22). `collection_paused` reports an
 // invoice that is queued for auto-charge but whose subscription
 // has `pause_collection` set, so the charge sweeps deliberately
-// skip it — it will not be charged automatically until
-// collection resumes (2026-07-28). `commit_exposure` reports an
+// skip it (2026-07-28). A dunning run already open on the invoice
+// keeps retrying it through the pause, and `message` then says so;
+// with no open run it is not charged automatically until
+// collection resumes. `commit_exposure` reports an
 // unpaid invoice that funded a prepaid commit whose credit is
 // already spendable (ADR-078 funds commits at issue, not at
 // payment) — note this reason is only returned when no other
@@ -5844,8 +5848,8 @@ type Subscription struct {
 	// OverageAction `block` or `charge` (the default).
 	OverageAction string `json:"overage_action,omitempty"`
 
-	// PauseCollection Present on a subscription while collection is paused. Invoices are
-	// still created, but stay drafts and are not charged.
+	// PauseCollection Present on a subscription while collection is paused. New invoices
+	// are still created, but stay drafts and are not charged.
 	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
 	StartedAt       time.Time                   `json:"started_at,omitempty"`
 	Status          SubscriptionStatus          `json:"status"`
@@ -5936,8 +5940,8 @@ type SubscriptionItemThreshold struct {
 	UsageGte string `json:"usage_gte"`
 }
 
-// SubscriptionPauseCollection Present on a subscription while collection is paused. Invoices are
-// still created, but stay drafts and are not charged.
+// SubscriptionPauseCollection Present on a subscription while collection is paused. New invoices
+// are still created, but stay drafts and are not charged.
 type SubscriptionPauseCollection struct {
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
@@ -6058,6 +6062,13 @@ type TenantSettings struct {
 
 	// NetPaymentTerms Days until an invoice is due. 0 means due on issue.
 	NetPaymentTerms int `json:"net_payment_terms"`
+
+	// NextInvoiceSequence The number the next invoice in this mode (test or live) gets,
+	// before the prefix: 43 means the next invoice is
+	// `<invoice_prefix>-000043`. Test and live count separately, and
+	// changing `invoice_prefix` keeps the count. Not a setting:
+	// sending it on `PUT` does nothing.
+	NextInvoiceSequence int `json:"next_invoice_sequence"`
 
 	// SupportUrl Must start with `http://` or `https://`. Printed in the invoice footer.
 	SupportUrl string `json:"support_url,omitempty"`
