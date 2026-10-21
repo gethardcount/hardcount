@@ -421,6 +421,16 @@ type ItemInterval struct {
 	EndsAt             *time.Time `json:"ends_at,omitempty"`
 }
 
+// MeterCoverageEnd is an instant at which a subscription stopped covering a
+// meter: one of its billing_intervals on a plan carrying the meter ended, or
+// a never-activated trial carrying it was canceled. The billing engine reads
+// another subscription's ends on the same customer and meter as the floor of
+// a usage window (ADR-012 amendment 2026-10-22).
+type MeterCoverageEnd struct {
+	MeterID string
+	EndsAt  time.Time
+}
+
 // SubscriptionItemChange is one row from the subscription_item_changes
 // audit table (migration 0029). Captures every plan/quantity mutation
 // on a subscription_item with both before- and after-state. Drives the

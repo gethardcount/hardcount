@@ -1116,13 +1116,78 @@ func mergeUsageIntervals(ivs []usageInterval) []usageInterval {
 	return out
 }
 
-// meterUsageIntervals builds, per meter, the windows a period close bills
-// usage over. Each item x segment contributes [seg.start, seg.end] to every
-// meter in its segment's plan, so a meter is billed only for the time a plan
+// usageFloors are the instants before which a subscription's usage window for
+// a meter may not start, beyond the window's own bounds (ADR-012 amendment
+// 2026-10-22). Periods start at midnight of the day they started (ADR-012),
+// and usage is aggregated per customer and meter with no subscription key, so
+// a window that opens at the period start can reach usage that is not this
+// subscription's:
+//
+//   - trialEnd: usage before the trial end is trial usage, which is free. The
+//     first paid period starts at midnight of the trial-end day.
+//   - coverageEnds: per meter, where another subscription of the customer
+//     stopped covering it (domain.MeterCoverageEnd). The guard against two
+//     live subscriptions on one meter (rejectMeterOverlap) means an end
+//     inside this window came before this subscription took the meter, and
+//     the usage up to it was that subscription's to bill.
+type usageFloors struct {
+	trialEnd     *time.Time
+	coverageEnds map[string][]time.Time
+}
+
+// start is where a usage window [s, e) for meter mid opens: at s, moved to
+// the trial end when that is later, then to the latest coverage end of
+// another subscription strictly inside the window. Strictly before e is what
+// keeps an earlier subscription's window whole: a later subscription's
+// coverage always ends after the earlier one's window does, so it never
+// moves it. The result can be at or past e, an empty window.
+func (f usageFloors) start(mid string, s, e time.Time) time.Time {
+	if f.trialEnd != nil && f.trialEnd.After(s) {
+		s = *f.trialEnd
+	}
+	for _, t := range f.coverageEnds[mid] {
+		if t.After(s) && t.Before(e) {
+			s = t
+		}
+	}
+	return s
+}
+
+// loadUsageFloors reads sub's usage floors for windows inside [from, to].
+// A read failure is returned: a window built without its floor bills usage
+// another subscription already billed, or trial usage.
+func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, from, to time.Time) (usageFloors, error) {
+	var f usageFloors
+	if sub.TrialEndAt != nil {
+		te := *sub.TrialEndAt
+		f.trialEnd = &te
+	}
+	ends, err := e.intervalSnap.ListCustomerMeterCoverageEnds(ctx, sub.TenantID, sub.CustomerID, sub.ID, from, to)
+	if err != nil {
+		return usageFloors{}, fmt.Errorf("usage window: other subscriptions' meter coverage: %w", err)
+	}
+	for _, end := range ends {
+		if f.coverageEnds == nil {
+			f.coverageEnds = make(map[string][]time.Time)
+		}
+		f.coverageEnds[end.MeterID] = append(f.coverageEnds[end.MeterID], end.EndsAt)
+	}
+	return f, nil
+}
+
+// meterUsageIntervals builds, per meter, the windows a closer bills usage
+// over. Each item x segment contributes [seg.start, seg.end] to every meter
+// in its segment's plan, so a meter is billed only for the time a plan
 // carrying it was on the subscription: a mid-period plan swap, item add or
 // item removal splits the period. segsByItem also holds items that left the
-// subscription during the window. The period close (buildLineItems) and the
-// live credit read (unbilledUsageCents) both call this.
+// subscription during the window. Every closer that bills a period's usage
+// by segment calls this: the period close (buildLineItems), the immediate
+// cancel and the cross-interval swap (buildCancelLineItems), the operator
+// preview (previewAsClose) and the live credit read (unbilledUsageCents).
+//
+// floors moves each window's start first (usageFloors.start), in both maps:
+// trial usage and another subscription's usage are nobody's here, whatever
+// the bucket.
 //
 // TWO maps (ADR-066 §4): clamped carries the watermark-CLAMPED windows that
 // additive (sum/count) buckets bill from; usage in
@@ -1133,10 +1198,11 @@ func mergeUsageIntervals(ivs []usageInterval) []usageInterval {
 // the residual window drops a pre-fire peak (partial-window mis-bill), and
 // splitting it double-bills. With no watermark full is empty and only
 // clamped is used. Intervals are not merged; callers run mergeUsageIntervals.
-func meterUsageIntervals(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, billedThrough *time.Time) (clamped, full map[string][]usageInterval) {
+func meterUsageIntervals(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, billedThrough *time.Time, floors usageFloors) (clamped, full map[string][]usageInterval) {
 	clamped = map[string][]usageInterval{}
 	full = map[string][]usageInterval{}
 	addMeterInterval := func(mid string, start, end time.Time) {
+		start = floors.start(mid, start, end)
 		if billedThrough != nil && end.After(start) {
 			full[mid] = append(full[mid], usageInterval{start, end})
 		}
@@ -2802,9 +2868,13 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// bills only for the time it was actually on the sub.
 
 	// The windows each meter is billed over, from item segments and
-	// removed-item segments (meterUsageIntervals; shared with the live
-	// credit read so the two cannot drift).
-	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, thresholdBilledThrough)
+	// removed-item segments (meterUsageIntervals; shared with every other
+	// closer and the live credit read so they cannot drift).
+	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, thresholdBilledThrough, floors)
 
 	// Usage is read once per window (one read covers every meter for a
 	// window; a pricing-rule meter reads its buckets per window).
@@ -2846,7 +2916,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 		// the threshold scan use — a single meter-linked rating rule can't
 		// express N rates, so the legacy single-rule branch below would skip
 		// the meter and emit a $0 invoice (the wedge breakage, ADR-044).
-		// previewMeter is the mirror of this loop: same path → preview ==
+		// rateMeterWindow is the mirror of this loop: same path → preview ==
 		// invoice. Meters with no pricing rules keep the single-rule path.
 		pricingRules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, sub.TenantID, meterID)
 		if err != nil {
@@ -3961,7 +4031,7 @@ func (e *Engine) BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, s
 // the period open, then patch the customer's override in force at the
 // same instant on top. One period, one price — cycle close, cancel
 // finalize, threshold fire, and preview all call this (preview via its
-// mirror in previewMeter), so they agree by construction and a
+// mirror in rateMeterWindow), so they agree by construction and a
 // mid-close publish or override edit can't mix prices inside one
 // invoice.
 //
@@ -4122,57 +4192,15 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	}
 
 	// Segment-aware usage billing over the partial period
-	// [periodStart, canceledAt]. Mirrors the billOnePeriod shape:
-	// each meter bills only for the time it was active on the sub —
-	// including the dual clamped/full interval maps for the threshold
-	// watermark protocol (ADR-066 §4; see billOnePeriod for the full
-	// rationale).
-	meterIntervals := map[string][]usageInterval{}
-	meterIntervalsFull := map[string][]usageInterval{}
-	addMeterInterval := func(mid string, start, end time.Time) {
-		if wm.exists() && end.After(start) {
-			meterIntervalsFull[mid] = append(meterIntervalsFull[mid], usageInterval{start, end})
-		}
-		if wm.billedThrough != nil && start.Before(*wm.billedThrough) {
-			start = *wm.billedThrough
-		}
-		if !end.After(start) {
-			return
-		}
-		meterIntervals[mid] = append(meterIntervals[mid], usageInterval{start, end})
+	// [periodStart, canceledAt]: the period close's own window builder
+	// (meterUsageIntervals), ended at the cancel instant, with the dual
+	// clamped/full maps of the threshold watermark protocol (ADR-066 §4) and
+	// the usage floors.
+	floors, err := e.loadUsageFloors(ctx, sub, periodStart, canceledAt)
+	if err != nil {
+		return nil, 0, err
 	}
-	for _, it := range sub.Items {
-		segments := segsByItem[it.ID]
-		if len(segments) == 0 {
-			for _, mid := range plans[it.PlanID].MeterIDs {
-				addMeterInterval(mid, periodStart, canceledAt)
-			}
-			continue
-		}
-		for _, seg := range segments {
-			segPlan, ok := plans[seg.planID]
-			if !ok {
-				continue
-			}
-			for _, mid := range segPlan.MeterIDs {
-				addMeterInterval(mid, seg.start, seg.end)
-			}
-		}
-	}
-	for itemID, segments := range segsByItem {
-		if _, stillPresent := itemsByID[itemID]; stillPresent {
-			continue
-		}
-		for _, seg := range segments {
-			segPlan, ok := plans[seg.planID]
-			if !ok {
-				continue
-			}
-			for _, mid := range segPlan.MeterIDs {
-				addMeterInterval(mid, seg.start, seg.end)
-			}
-		}
-	}
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, canceledAt, wm.billedThrough, floors)
 
 	// The lines read usage through reads, once per window.
 	reads := newWindowUsage(e, sub, meterAggs)
@@ -4405,8 +4433,10 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// of 'trialing' (activated_at never stamped) emits NO final invoice —
 	// trials are free. The reachable window is the post-trial LAG: the trial
 	// elapsed but the activation scan hadn't flipped the row yet, so
-	// canceled_at lands at or after trial_end = period_start and this
-	// function would otherwise bill prorated base + usage for a
+	// canceled_at lands at or after trial_end, which is after period_start
+	// (the first paid period starts at midnight of the trial-end day,
+	// firstPeriodAfterTrial), and this function would otherwise bill
+	// prorated base + usage for a
 	// never-activated sub. Decided: write off — matches the trial-end
 	// scheduled-cancel semantics ("you won't be charged") rather than
 	// billing on scan lag the customer can't see. Subs created active carry

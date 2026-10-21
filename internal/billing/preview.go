@@ -87,6 +87,10 @@ type PreviewResult struct {
 	// or it was below zero), for the threshold fire (not part of the API
 	// response).
 	leftOut []leftOutBucket
+	// floors are the usage floors the flat window's usage was rated under,
+	// for the threshold fire: it stamps each usage line with its meter's
+	// window start and counts item thresholds over the same windows.
+	floors usageFloors
 }
 
 // Preview generates a dry-run invoice for a subscription without persisting
@@ -233,20 +237,37 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	// cycle scan calls the same path, so a multi-dim tenant's preview
 	// matches what its actual invoice will be.
 	//
-	// A previewMeter ERROR aborts the whole preview (ADR-070,
+	// A rateMeterWindow ERROR aborts the whole preview (ADR-070,
 	// no-silent-fallbacks). Only a meter with no rule binding at all and a
 	// net-negative bucket (usage corrections) are soft cases, surfaced as
-	// warnings from INSIDE previewMeter. A missing pinned rule, a rating
+	// warnings from INSIDE rateMeterWindow. A missing pinned rule, a rating
 	// failure and store or resolution errors all reach this err, and a
 	// partial preview built from those is a lie — worse, the threshold
 	// scan PERSISTS these lines as a fire invoice, and a silently
 	// dropped meter's pre-fire usage would then be billed by nobody:
 	// the cycle close clamps every meter's window to the fire
 	// watermark, deferral only exists for non-additive buckets. The
-	// pre-ADR-070 warning-degradation here defeated previewMeter's own
+	// pre-ADR-070 warning-degradation here defeated rateMeterWindow's own
 	// fail-loud contract for exactly the money path it matters on.
+	//
+	// Each meter's window opens at its usage floor (trial end, another
+	// subscription's coverage end; usageFloors), the same start the closers
+	// use, while rules stay pinned at the period start (ADR-070). The window
+	// is flat, one start per meter: a meter that left this subscription,
+	// covered another one and came back opens after that other coverage, so
+	// the stretch before it left is not rated here (an accepted residual
+	// edge, ADR-012 amendment 2026-10-22).
+	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
+	if err != nil {
+		return PreviewResult{}, err
+	}
+	result.floors = floors
 	for _, meterID := range allMeterIDs {
-		meterLines, warnings, leftOut, err := e.previewMeter(ctx, sub.TenantID, sub.CustomerID, meterID, periodStart, periodEnd)
+		from := floors.start(meterID, periodStart, periodEnd)
+		if !from.Before(periodEnd) {
+			continue
+		}
+		meterLines, warnings, leftOut, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, from, periodEnd, periodStart, nil)
 		if err != nil {
 			return PreviewResult{}, fmt.Errorf("preview meter %q: %w", meterID, err)
 		}
@@ -372,8 +393,8 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	}
 
 	// Usage: each meter over the windows a plan carrying it was on the
-	// subscription, clamped to the threshold watermark — the close's
-	// meterUsageIntervals. Meters only a segment plan carries come after the
+	// subscription, from its usage floor, clamped to the threshold watermark
+	// — the close's meterUsageIntervals. Meters only a segment plan carries come after the
 	// current plans' meters.
 	order := append([]string(nil), meterOrder...)
 	seen := make(map[string]struct{}, len(order))
@@ -388,7 +409,11 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 			}
 		}
 	}
-	meterIntervals, _ := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough)
+	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
+	if err != nil {
+		return PreviewResult{}, err
+	}
+	meterIntervals, _ := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
 	// The tier ladder continues from a threshold fire, as in the close.
 	ladder := newUsageLadder(wm)
 	for _, meterID := range order {
@@ -482,28 +507,21 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, p
 	return result, true, nil
 }
 
-// previewMeter rates one meter's events for the customer over [from, to)
-// and emits one PreviewLine per rule bucket. Mirrors usage.rateMeter from
-// internal/usage/customer_usage.go — the cycle scan calls the same
-// AggregateByPricingRules + ComputeAmountCents path, so each line
-// produced here matches the invoice_line_item the cycle scan would
-// persist.
-func (e *Engine) previewMeter(ctx context.Context, tenantID, customerID, meterID string, from, to time.Time) ([]PreviewLine, []string, []leftOutBucket, error) {
-	return e.rateMeterWindow(ctx, tenantID, customerID, meterID, from, to, from, nil)
-}
-
 // bucketPricer prices qty units of one usage bucket under its resolved rule.
 // bucketKey is the closer's bucket identity (meter + pricing rule), the key
 // usageLadder.price continues tiers under.
 type bucketPricer func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error)
 
-// rateMeterWindow is previewMeter with the two things a window that does not
-// start at the period open needs (the live credit read after a threshold
-// fire, live_balance.go): pinAt, the instant rules and overrides are resolved
-// at (always the period start, ADR-070, even when the window opens later at
-// the fire's watermark), and price, which lets the caller continue a tier
-// ladder across the fire the way the period close does. A nil price rates the
-// bucket on its own, which is the preview and threshold-fire behavior.
+// rateMeterWindow rates one meter's events for the customer over [from, to)
+// and emits one PreviewLine per rule bucket, through the same
+// AggregateByPricingRules + pricing path the closers use, so each line
+// matches the invoice line a closer would persist. A window that does not
+// start at the period open (after a usage floor or a threshold watermark)
+// needs two more things: pinAt, the instant rules and overrides are resolved
+// at (always the period start, ADR-070, even when the window opens later),
+// and price, which lets the caller continue a tier ladder across a fire the
+// way the period close does. A nil price rates the bucket on its own, which
+// is the preview and threshold-fire behavior.
 // The buckets priced at nothing (unpriced, or below zero) come back both as
 // a warning (for people) and as data (for the threshold fire, which reports
 // them).
@@ -562,8 +580,8 @@ func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, mete
 
 		// Same resolution rule as the cycle scan and cancel finalize
 		// (resolveRatedRule; ADR-070 pin-at-period-start): version and
-		// override in force at the period open — pinAt, which IS `from`
-		// for the operator preview and the threshold scan (which persists
+		// override in force at the period open — pinAt, the period start
+		// for every caller, including the threshold scan (which persists
 		// these lines as a real invoice). This is
 		// what makes preview == invoice hold across a mid-period
 		// publish, and a threshold fire agree with the later close.
