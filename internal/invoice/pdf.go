@@ -37,6 +37,13 @@ type CompanyInfo struct {
 	// Rule 46 of the CGST Rules; widely expected on EU/AU invoices too.
 	// Empty = no header line rendered (legacy behaviour preserved).
 	TaxID string
+	// SupportURL is the tenant's support link, printed at the foot of the
+	// invoice. Branding: always the current setting (ADR-109).
+	SupportURL string
+	// Footer is the footer text the invoice prints under its totals: the
+	// copy taken when it was issued, or the current setting on a draft
+	// (BuildPDFContext).
+	Footer string
 	// TaxIDType is the canonical kind of TaxID: "gstin" / "in_gst" /
 	// "in_gstin" for India, "vat" / "eu_vat" for EU, "abn" / "au_abn" for
 	// Australia. Drives both the header label ("GSTIN: ..." vs "VAT: ...")
@@ -975,6 +982,30 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 				setFont(false, 9)
 				setColor(120, 120, 120)
 				textAt(margin, y, inv.Memo)
+			}
+
+			// The tenant's footer (payment details, legal text) and support
+			// link. Both may be long, so they wrap to the page width.
+			var footerText, supportURL string
+			if len(company) > 0 {
+				footerText = strings.TrimSpace(company[0].Footer)
+				supportURL = strings.TrimSpace(company[0].SupportURL)
+			}
+			setFont(false, 8)
+			setColor(120, 120, 120)
+			if footerText != "" {
+				y += 6
+				for _, line := range wrap(footerText, contentW) {
+					y += 11
+					textAt(margin, y, line)
+				}
+			}
+			if supportURL != "" {
+				y += 6
+				for _, line := range wrap("Need help? "+supportURL, contentW) {
+					y += 11
+					textAt(margin, y, line)
+				}
 			}
 
 			y += 24

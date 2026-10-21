@@ -1134,6 +1134,10 @@ components:
           type: string
         footer:
           type: string
+          description: |
+            The tenant's `invoice_footer` as it was when this invoice was
+            issued. Printed on the PDF and the hosted invoice page. Empty on
+            a draft.
         metadata:
           type: object
           additionalProperties: true
@@ -4013,6 +4017,7 @@ components:
           description: 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`.
         logo_url:
           type: string
+          description: Shown in emails and on the hosted invoice page. PDFs do not print it.
         brand_color:
           type: string
           pattern: "^#[0-9a-fA-F]{6}$"
@@ -4024,11 +4029,18 @@ components:
         support_url:
           type: string
           maxLength: 500
-          description: Must start with `http://` or `https://`. Printed in the invoice footer.
+          description: |
+            Must start with `http://` or `https://`. Linked in emails and on
+            the hosted invoice page, and printed at the foot of invoice and
+            credit-note PDFs.
         invoice_footer:
           type: string
           maxLength: 1000
-          description: Default footer for new invoices. An invoice's own footer takes precedence.
+          description: |
+            Printed under the totals on invoice PDFs and on the hosted
+            invoice page. Each invoice keeps the footer it was issued with,
+            so a change applies to invoices issued after it. A draft shows
+            the current text.
 
     TenantSettings:
       allOf:
@@ -4536,6 +4548,7 @@ components:
               type: string
             footer:
               type: string
+              description: The footer this invoice was issued with.
         line_items:
           type: array
           items:

@@ -20,8 +20,10 @@ import (
 // taken when it was issued (inv.BillToSnapshot / inv.SupplierSnapshot,
 // ADR-109), so a later profile or company edit does not change it. A draft,
 // or an invoice issued before migration 0177 (nil copy), renders from live
-// rows. Brand color and the period timezone are read live either way: they
-// are not part of the issued document's content.
+// rows. The footer is the invoice's own copy once issued and the current
+// setting on a draft. Brand color, the support URL and the period timezone
+// are read live either way: they are not part of the issued document's
+// content.
 //
 // Every dependency is optional (nil-tolerant) and every lookup is
 // best-effort: a missing profile or settings row degrades that block,
@@ -60,12 +62,21 @@ func BuildPDFContext(
 	if inv.SupplierSnapshot != nil {
 		ci = companyInfo(*inv.SupplierSnapshot)
 	}
+	// The footer is issued content: an issued invoice prints the copy taken
+	// at issue (inv.Footer, written by the issue stamp), which is empty for
+	// an invoice issued before footers were copied. A draft prints the
+	// current setting.
+	footer := inv.Footer
 	if settings != nil {
 		if ts, err := settings.Get(ctx, tenantID); err == nil {
 			if inv.SupplierSnapshot == nil {
 				ci = companyInfo(domain.NewDocumentSupplier(ts))
 			}
+			if inv.Status == domain.InvoiceDraft {
+				footer = ts.InvoiceFooter
+			}
 			ci.BrandColor = ts.BrandColor
+			ci.SupportURL = ts.SupportURL
 			// Inclusive-last-day period string (ADR-058): fetch paths that
 			// bypass the service read decorator (hosted GetByPublicToken)
 			// arrive without it — author it here from the same domain helper.
@@ -81,6 +92,8 @@ func BuildPDFContext(
 			}
 		}
 	}
+
+	ci.Footer = footer
 
 	var cnInfos []CreditNoteInfo
 	if creditNotes != nil {
