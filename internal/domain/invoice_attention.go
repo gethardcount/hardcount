@@ -490,10 +490,11 @@ type AttentionContext struct {
 	// for failed invoices only.
 	RefusedCardDeclineCode string
 
-	// DunningRetrying is true when the invoice's dunning run is active and
-	// not paused, so a scheduled retry is still to come. After the run
-	// exhausts, while it is paused, or with no run at all (dunning off), no
-	// retry runs whatever card becomes the default. Read by the refused-card
+	// DunningRetrying is true when the invoice's dunning run is active, not
+	// paused and not waiting on a failed final action, so a scheduled retry
+	// is still to come. After the run exhausts (including a final action that
+	// failed and is being re-attempted), while it is paused, or with no run at
+	// all (dunning off), no retry runs whatever card becomes the default. Read by the refused-card
 	// notice ("dunning keeps its schedule" is true only then) and by the two
 	// paused-collection notices: a collection pause does not stop an open
 	// run, whose next retry charges the customer's default card. The invoice

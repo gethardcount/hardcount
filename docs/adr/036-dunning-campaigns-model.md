@@ -230,7 +230,7 @@ but two independent choices. The behaviours described are unchanged.)*
 | Velox enum (2026-05-16 amendment; column split by ADR-112) | Behavior |
 |---|---|
 | `manual_review` | Run lands state=escalated. No sub/invoice mutation. Operator handles via dashboard. Maps to Stripe "Keep active." |
-| `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; new invoices are not charged and start no dunning until the operator resumes. Runs already open on earlier invoices keep retrying (see the 2026-10-22 amendment). Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
+| `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; invoices drafted during the pause are not charged and start no dunning, and they stay drafts after the operator resumes (only later cycles finalize). Runs already open on earlier invoices keep retrying (see the 2026-10-22 amendment). Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
 | `mark_uncollectible` | Calls `invoice.Service.MarkUncollectible` — flips the unpaid invoice to status='uncollectible' (new status, migration 0089). Stripe-standard semantics: receivable closed but invoice stays in financial reporting. Distinct from voided. |
 | `cancel_subscription` | Calls `subscription.Service.Cancel`. Stripe-default terminal action; supported by 3 of 4 reference platforms. Previously missing — operator workflow required a manual cancel step after escalation. |
 
@@ -381,6 +381,15 @@ Where it shows:
   run, they keep saying nothing charges the invoice until collection resumes.
 - The `PauseCollection` docstring and the pause-collection API description
   say the same.
+- The dunning escalation email after a `pause` final action says new invoices
+  for the subscription will not be charged automatically, not that collection
+  on the account stopped. The dunning policy outcome and the write-off
+  dialog's "Also pause collection" hint say new invoices stay drafts and
+  retries already running on other unpaid invoices continue.
+- "Retries continue" is said only for a run that can still charge: active,
+  not paused, and not waiting on a failed final action. A run whose final
+  action failed stays active with every attempt used, and its next tick
+  re-attempts only the action.
 
 When it happens: an operator pauses collection on a subscription that has an
 unpaid invoice in dunning. When dunning's own `pause` final action fires, the

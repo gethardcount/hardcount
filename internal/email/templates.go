@@ -287,14 +287,15 @@ func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome dom
 // changes whether THIS invoice can be paid online.
 func dunningEscalationCopy(o domain.DunningEscalationOutcome) (sentence string, stillPayable bool) {
 	// Subscription clause. Pause is collection-only (keep_as_draft):
-	// service continues and only automatic charging stops, so no "service
-	// is paused" / "resume service" claim is made.
+	// service continues and new invoices stay drafts, so no "service is
+	// paused" / "resume service" claim is made. Nor "collection stopped": a
+	// dunning run open on another unpaid invoice keeps retrying the card.
 	var subClause string
 	switch {
 	case o.SubscriptionCanceled:
 		subClause = "Your subscription has been canceled."
 	case o.SubscriptionPaused:
-		subClause = "Automatic payment collection on your account has been paused."
+		subClause = "New invoices for your subscription will not be charged automatically."
 	}
 
 	if o.InvoiceWrittenOff {

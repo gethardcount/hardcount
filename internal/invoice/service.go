@@ -1052,8 +1052,8 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 	// direction of drift.
 	//
 	// The refused-card notice (#966) joins the same read: it may say that
-	// retries keep their schedule only while the run is active and not
-	// paused. No run, or a read error, leaves retrying false, and the notice
+	// retries keep their schedule only while the run is active, not paused
+	// and not waiting on a failed final action. No run, or a read error, leaves retrying false, and the notice
 	// then says no retry is scheduled — the direction that still sends the
 	// operator to get a new card, rather than waiting on a retry that may
 	// never run.
@@ -1076,7 +1076,10 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 				f.retrying = make(map[string]bool, len(runs))
 				for _, run := range runs {
 					f.escalated[run.InvoiceID] = run.State == domain.DunningEscalated
-					f.retrying[run.InvoiceID] = run.State == domain.DunningActive && !run.Paused
+					// A run whose final action failed stays active with every attempt
+					// used; its next tick re-attempts only the action, never a charge.
+					f.retrying[run.InvoiceID] = run.State == domain.DunningActive && !run.Paused &&
+						run.Resolution != domain.ResolutionActionFailed
 				}
 			}
 		}
