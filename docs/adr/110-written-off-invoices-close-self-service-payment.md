@@ -1,6 +1,6 @@
 # ADR-110: A written-off invoice closes the customer's self-service payment route
 
-**Status:** Accepted (2026-08-05; its 2026-08-05 amendment was superseded by [ADR-113](113-nothing-charges-a-written-off-invoice.md) on 2026-08-06)
+**Status:** Accepted (amended 2026-10-22; its 2026-08-05 amendment was superseded by [ADR-113](113-nothing-charges-a-written-off-invoice.md) on 2026-08-06)
 **Relates to:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns),
 [ADR-112](112-dunning-exhaustion-settles-two-questions.md) (`mark_uncollectible`
 is the terminal INVOICE action, set independently of the subscription's),
@@ -16,7 +16,9 @@ payment-update page both say collection is closed and point to support. They
 keep the money figure but label it "Invoice amount" instead of "Amount Due".
 The payment-update page keeps its add-a-payment-method button, because a saved
 card still serves the next invoice. Both pages read one shared check in
-`web-v2/src/lib/invoiceTerminal.ts`. Nothing in Velox starts a charge against a
+`web-v2/src/lib/invoiceTerminal.ts`. Since 2026-10-22 every dashboard screen
+reads an invoice's payment status and amount due through it too, and a lint
+rule fails any other read. Nothing in Velox starts a charge against a
 written-off invoice (see ADR-113), so it is settled only by recording money
 that has already arrived: an offline payment the operator enters
 (`RecordOfflinePayment`), or a provider charge that the ADR-108 search finds
@@ -223,3 +225,34 @@ tax-registered tenant to hit `tax_reversed_unrecoverable`.
   fires.
 - The "Amount Due"/"Amount due" casing split on the hosted invoice page is
   gone; both labels come from the shared helper.
+
+## Amendment 2026-10-22 — the dashboard reads the same helpers
+
+The rule this ADR names, "a closed invoice must not read as owed", was kept on
+the two public pages and missed on the operator dashboard. A voided invoice
+showed "pending" and "$29.00 due" on six screens, among them Home and the
+Invoices and Dunning lists. Its own page said $0.00. Home counted it as a
+failed payment. The Dunning page counted it at risk, and counted a run closed
+by a void as recovered (product sweep 2026-10-21, A6/A7, E1–E3, E7). Each screen read
+`payment_status` and `amount_due_cents` itself, and most forgot the terminal
+states.
+
+What changes:
+
+- `invoiceTerminal.ts` holds every read of the two fields. `invoiceDueCents`
+  says what is owed: nothing on a void, `amount_due` otherwise (a write-off
+  stays on the books, as above). `invoiceRowAmount` names the figure ("$29.00
+  due", "$29.00 paid", or the bare amount on a draft, void or write-off). The
+  action gates (`invoiceCanCollect`, `invoiceAwaitingPayment`,
+  `invoicePaymentInFlight`) moved there from the invoice page.
+- The payment chip beside an invoice's badge is gone on a write-off too, not
+  only on a void: "Pending" or "Failed" beside "Uncollectible" read as a
+  payment still expected.
+- A `no-restricted-syntax` rule in `web-v2/eslint.config.js` fails a read of
+  `payment_status` or `amount_due_cents` outside `src/lib`. The frontend CI job
+  runs it.
+- The server counts the same way: Home's failed payments and the dunning
+  at-risk total cover open invoices only, and "Recovered" and the recovery rate
+  count only runs a payment closed (`resolution = payment_recovered`).
+  `GET /v1/dunning/stats` adds `recovered_count`; `resolved_count` keeps its
+  meaning (every resolved run).

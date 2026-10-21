@@ -65,7 +65,7 @@ export interface AnalyticsOverview {
   trialing_subscriptions: number;
   /** Invoices paid in the window. */
   paid_invoices: number;
-  /** Invoices created in the window whose payment failed. All currencies. */
+  /** Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies. */
   failed_payments: number;
   /** `failed_payments` for the previous window. */
   failed_payments_prev: number;
@@ -91,7 +91,7 @@ export interface AnalyticsOverview {
      * `mrr_prev` is 0.
      */
   nrr: number;
-  /** Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened. */
+  /** Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered`), divided by all runs opened in the window. A run closed by a void or a write-off is not recovered. 0 when none were opened. */
   dunning_recovery_rate: number;
   mrr_movement: AnalyticsMrrMovementTotals;
 }

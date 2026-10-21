@@ -1109,8 +1109,15 @@ func (s *PostgresStore) ListEvents(ctx context.Context, tenantID, runID string) 
 
 // GetStats computes the dashboard-card payload in one round trip:
 // COUNT(*) GROUP BY state for the three states we surface (active,
-// escalated, resolved) + SUM(amount_due_cents) on the invoices behind
-// active+escalated runs (the at-risk total).
+// escalated, resolved), the resolved runs a payment closed (recovered),
+// and SUM(amount_due_cents) on the OPEN invoices behind active+escalated
+// runs (the at-risk total).
+//
+// Both filters exist because a run outlives its invoice's collection. A void
+// keeps its amount_due, and a write-off final action leaves the run escalated,
+// so without i.status = 'finalized' a voided or written-off invoice stayed
+// "at risk"; and a run resolved by a void or a write-off is resolved, not
+// recovered (sweep A6/E7, 2026-10-21).
 //
 // Single tenant-scoped query (RLS handles tenant_id), no pagination,
 // no client-side derivation. Cards stay accurate regardless of how
@@ -1140,10 +1147,12 @@ func (s *PostgresStore) GetStats(ctx context.Context, tenantID string) (Stats, e
 		    COUNT(*) FILTER (WHERE r.state = 'active')                                AS active_count,
 		    COUNT(*) FILTER (WHERE r.state = 'escalated')                             AS escalated_count,
 		    COUNT(*) FILTER (WHERE r.state = 'resolved')                              AS resolved_count,
-		    COALESCE(SUM(i.amount_due_cents) FILTER (WHERE r.state IN ('active','escalated') AND i.currency = $1), 0) AS at_risk_cents
+		    COUNT(*) FILTER (WHERE r.state = 'resolved' AND r.resolution = $2)        AS recovered_count,
+		    COALESCE(SUM(i.amount_due_cents) FILTER (WHERE r.state IN ('active','escalated') AND i.status = $3 AND i.currency = $1), 0) AS at_risk_cents
 		FROM invoice_dunning_runs r
 		LEFT JOIN invoices i ON i.id = r.invoice_id
-	`, defaultCurrency).Scan(&stats.ActiveCount, &stats.EscalatedCount, &stats.ResolvedCount, &stats.AtRiskCents)
+	`, defaultCurrency, string(domain.ResolutionPaymentRecovered), string(domain.InvoiceFinalized)).Scan(
+		&stats.ActiveCount, &stats.EscalatedCount, &stats.ResolvedCount, &stats.RecoveredCount, &stats.AtRiskCents)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -1152,11 +1161,11 @@ func (s *PostgresStore) GetStats(ctx context.Context, tenantID string) (Stats, e
 		SELECT i.currency, SUM(i.amount_due_cents)
 		FROM invoice_dunning_runs r
 		JOIN invoices i ON i.id = r.invoice_id
-		WHERE r.state IN ('active','escalated')
+		WHERE r.state IN ('active','escalated') AND i.status = $2
 		GROUP BY i.currency
 		HAVING SUM(i.amount_due_cents) > 0
 		ORDER BY (i.currency = $1) DESC, SUM(i.amount_due_cents) DESC, i.currency
-	`, defaultCurrency)
+	`, defaultCurrency, string(domain.InvoiceFinalized))
 	if err != nil {
 		return Stats{}, err
 	}

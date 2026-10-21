@@ -9,13 +9,13 @@ import {
   amountInputToCents,
   amountsByCurrencyText,
   atRiskText,
-  dunningAmountDue,
   formatCents,
   formatCompactCents,
   outstandingText,
   prorationText,
   setActiveCurrency,
 } from '../src/lib/money.ts'
+import { dunningAmountDue } from '../src/lib/invoiceTerminal.ts'
 
 beforeEach(() => setActiveCurrency('USD'))
 

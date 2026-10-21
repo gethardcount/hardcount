@@ -13,8 +13,9 @@ import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
-import { paymentStatusLabel, statusBorderColor } from '@/lib/status'
-import { humanizeStatus, invoicePaymentChip, invoiceStatus } from '@/lib/statusLabels'
+import { paymentStatusLabel } from '@/lib/status'
+import { humanizeStatus, invoicePaymentChip, invoiceStatus, toneBorderColor } from '@/lib/statusLabels'
+import { invoiceDueCents } from '@/lib/invoiceTerminal'
 import { StatusBadge } from '@/components/StatusBadge'
 import { attentionReasonLabel } from '@/lib/attentionLabels'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -417,10 +418,11 @@ export default function InvoicesPage() {
                       customerMap[inv.customer_id]?.test_clock_id ||
                       ''
                     ])
+                    const badge = invoiceStatus(inv, now)
                     return (
                     <TableRow
                       key={inv.id}
-                      className={cn('cursor-pointer hover:bg-muted/50 transition-colors border-l-[3px]', statusBorderColor(inv.payment_status))}
+                      className={cn('cursor-pointer hover:bg-muted/50 transition-colors border-l-[3px]', toneBorderColor(badge.tone))}
                       onClick={(e) => {
                         const target = e.target as HTMLElement
                         if (target.closest('button, a, input, select')) return
@@ -458,7 +460,7 @@ export default function InvoicesPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={invoiceStatus(inv, now)} />
+                        <StatusBadge status={badge} />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -496,7 +498,8 @@ export default function InvoicesPage() {
                         {inv.billing_period_display || '\u2014'}
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-mono text-sm">
-                        {formatCents(inv.amount_due_cents, inv.currency)}
+                        {/* A void owes nothing; amount_due survives it. */}
+                        {formatCents(invoiceDueCents(inv), inv.currency)}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button

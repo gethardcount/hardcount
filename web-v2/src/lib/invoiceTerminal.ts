@@ -28,6 +28,9 @@
  * invoice even when this one is closed. Same predicate, different voice.
  */
 
+import { formatCents } from './money.ts'
+import { paymentIsUnresolved } from './status.ts'
+
 /**
  * Terminal = collection has ended, by any route. `uncollectible` belongs here
  * even though a write-off does NOT annul the debt (the invoice stays on the
@@ -55,4 +58,107 @@ export function isTerminalInvoiceStatus(status: string | undefined | null): bool
 export function invoiceAmountLabel(status: string | undefined | null): string {
   if (status === 'paid') return 'Amount due'
   return isTerminalInvoiceStatus(status) ? 'Invoice amount' : 'Amount due'
+}
+
+// ── Every screen's reads of an invoice's money and payment fields ──────────
+//
+// `payment_status` and `amount_due_cents` mean different things by status: a
+// void keeps both as they were, a settle zeroes amount_due, a write-off is no
+// longer collected. Read raw, a voided invoice showed "pending" and "$29.00
+// due" on the subscription page, Home, the command palette, the Invoices and
+// Dunning lists and the customer's "Last invoice", while its own page said
+// $0.00 (product sweep 2026-10-21, A7 / E1 / E2 / E3). Screens read these
+// fields only through the helpers below; the lint rule in eslint.config.js
+// fails a raw read anywhere outside src/lib.
+
+export interface InvoiceMoneyInput {
+  status?: string | null
+  payment_status?: string
+  amount_due_cents: number
+  amount_paid_cents?: number
+  currency: string
+}
+
+/**
+ * What is still owed, as the invoice's own page states it. A void annuls the
+ * debt, so nothing is owed even though amount_due survives. A write-off stays
+ * on the books (ADR-110: MarkPaid remains legal), so it still owes amount_due.
+ * A paid invoice's amount_due is already zero.
+ */
+export function invoiceDueCents(inv: InvoiceMoneyInput): number {
+  return inv.status === 'voided' ? 0 : inv.amount_due_cents
+}
+
+/**
+ * The amount a row shows beside the invoice's status badge, with the word that
+ * says what it is. Open: "$29.00 due". Paid: "$29.00 paid", from
+ * amount_paid_cents, because the settle zeroed amount_due. Draft, void and
+ * write-off: the invoice amount, bare; the badge beside it says which.
+ */
+export function invoiceRowAmount(inv: InvoiceMoneyInput): string {
+  if (inv.status === 'paid') return `${formatCents(inv.amount_paid_cents ?? 0, inv.currency)} paid`
+  const amount = formatCents(inv.amount_due_cents, inv.currency)
+  return inv.status === 'finalized' ? `${amount} due` : amount
+}
+
+/** The public pages' amount line: amount_due under the status-aware label. */
+export function invoiceAmountLine(inv: InvoiceMoneyInput): { label: string; cents: number } {
+  return { label: invoiceAmountLabel(inv.status), cents: inv.amount_due_cents }
+}
+
+/** The headline figure: a paid invoice leads with what was paid. */
+export function invoiceHeadline(inv: InvoiceMoneyInput): { label: string; cents: number } {
+  if (inv.status === 'paid') return { label: 'Amount paid', cents: inv.amount_paid_cents ?? 0 }
+  return invoiceAmountLine(inv)
+}
+
+export function invoicePaymentSucceeded(inv: InvoiceMoneyInput): boolean {
+  return inv.payment_status === 'succeeded'
+}
+
+/**
+ * Which unresolved payment the invoice carries: 'processing' (a charge still
+ * confirming) or 'unknown' (parked: Stripe's answer was unclear, ADR-107), or
+ * null. Same rule as paymentIsUnresolved in lib/status.
+ */
+export function invoicePaymentInFlight(inv: InvoiceMoneyInput): 'processing' | 'unknown' | null {
+  if (!inv.payment_status || !paymentIsUnresolved(inv.payment_status)) return null
+  return inv.payment_status === 'processing' ? 'processing' : 'unknown'
+}
+
+/** Open, something due, and no payment succeeded or unresolved: a charge can start. */
+export function invoiceCanCollect(inv: InvoiceMoneyInput): boolean {
+  return inv.status === 'finalized' &&
+    !invoicePaymentSucceeded(inv) &&
+    invoicePaymentInFlight(inv) === null &&
+    inv.amount_due_cents > 0
+}
+
+/**
+ * Open with no payment succeeded or processing. A parked charge ('unknown')
+ * still awaits payment: mark uncollectible is its way out (ADR-107).
+ */
+export function invoiceAwaitingPayment(inv: InvoiceMoneyInput): boolean {
+  return inv.status === 'finalized' &&
+    !invoicePaymentSucceeded(inv) &&
+    inv.payment_status !== 'processing'
+}
+
+/**
+ * The amount a dunning run is chasing, in its invoice's currency. The invoice
+ * loaded on the page decides, because it carries the status: a run on a
+ * voided invoice is chasing nothing, though the joined amount_due survived the
+ * void and read "$29.00" on the Dunning list (sweep A7 / E1). A run whose
+ * invoice did not load falls back to the server-side join.
+ */
+export function dunningAmountDue(
+  run: { invoice_amount_due_cents?: number; invoice_currency?: string },
+  inv?: InvoiceMoneyInput,
+): string | null {
+  if (inv) return formatCents(invoiceDueCents(inv), inv.currency)
+  // The join leaves the currency empty when it found no invoice.
+  if (run.invoice_currency && run.invoice_amount_due_cents !== undefined) {
+    return formatCents(run.invoice_amount_due_cents, run.invoice_currency)
+  }
+  return null
 }

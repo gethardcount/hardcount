@@ -94,12 +94,17 @@ type Store interface {
 
 // Stats is the dashboard-card payload — aggregate counts of dunning
 // runs by state + total at-risk amount (sum of amount_due_cents on
-// the invoices behind active+escalated runs). Computed server-side so
+// the open invoices behind active+escalated runs). Computed server-side so
 // the cards stay correct regardless of how many runs exist.
 type Stats struct {
-	ActiveCount    int   `json:"active_count"`
-	EscalatedCount int   `json:"escalated_count"`
-	ResolvedCount  int   `json:"resolved_count"`
+	ActiveCount    int `json:"active_count"`
+	EscalatedCount int `json:"escalated_count"`
+	// ResolvedCount is every resolved run, whatever closed it: a payment, a
+	// void or a write-off.
+	ResolvedCount int `json:"resolved_count"`
+	// RecoveredCount is the resolved runs a payment closed
+	// (resolution payment_recovered) — the Dashboard's "Recovered" card.
+	RecoveredCount int   `json:"recovered_count"`
 	AtRiskCents    int64 `json:"at_risk_cents"`
 	// Currency scopes AtRiskCents to the tenant's default currency — one
 	// coherent figure instead of a meaningless sum across mixed-currency

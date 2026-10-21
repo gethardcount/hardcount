@@ -3242,10 +3242,10 @@ type AnalyticsOverview struct {
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
 	DunningActive int `json:"dunning_active"`
 
-	// DunningRecoveryRate Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+	// DunningRecoveryRate Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered`), divided by all runs opened in the window. A run closed by a void or a write-off is not recovered. 0 when none were opened.
 	DunningRecoveryRate float64 `json:"dunning_recovery_rate"`
 
-	// FailedPayments Invoices created in the window whose payment failed. All currencies.
+	// FailedPayments Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies.
 	FailedPayments int `json:"failed_payments"`
 
 	// FailedPaymentsPrev `failed_payments` for the previous window.
@@ -4405,21 +4405,26 @@ type DunningRunEventState string
 type DunningStats struct {
 	ActiveCount int `json:"active_count"`
 
-	// AtRiskByCurrency Amount due on active and escalated runs, one entry per currency.
-	// `currency` comes first, then the largest amount. Empty when no run
-	// is at risk.
+	// AtRiskByCurrency Amount due on active and escalated runs whose invoice is still
+	// open, one entry per currency. `currency` comes first, then the
+	// largest amount. Empty when no run is at risk.
 	AtRiskByCurrency []struct {
 		AmountCents int64  `json:"amount_cents"`
 		Currency    string `json:"currency"`
 	} `json:"at_risk_by_currency"`
 
-	// AtRiskCents Amount due on active and escalated runs, in `currency` only.
+	// AtRiskCents Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
 	AtRiskCents int64 `json:"at_risk_cents"`
 
 	// Currency The tenant's default currency.
 	Currency       string `json:"currency"`
 	EscalatedCount int    `json:"escalated_count"`
-	ResolvedCount  int    `json:"resolved_count"`
+
+	// RecoveredCount Resolved runs that a payment closed (`resolution` is `payment_recovered`).
+	RecoveredCount int `json:"recovered_count"`
+
+	// ResolvedCount Resolved runs, whatever closed them (a payment, a void or a write-off).
+	ResolvedCount int `json:"resolved_count"`
 }
 
 // Error defines model for Error.

@@ -1570,7 +1570,10 @@ export interface DunningEvent {
 export interface DunningStats {
   active_count: number
   escalated_count: number
+  // Every resolved run, whatever closed it.
   resolved_count: number
+  // The resolved runs a payment closed.
+  recovered_count: number
   at_risk_cents: number
   // The currency at_risk_cents is in (the tenant default).
   currency?: string

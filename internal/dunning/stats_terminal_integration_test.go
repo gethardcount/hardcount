@@ -33,7 +33,7 @@ import (
 //
 // Mutation checks (each makes this test fail):
 //   - recovered_count counting state = 'resolved' alone → 3
-//   - the at-risk filter without i.status = 'finalized' → 1500 (both sums)
+//   - the at-risk filter without i.status = 'finalized' → 150000 cents in both sums
 func TestGetStats_RecoveredAndAtRiskLeaveOutClosedInvoices(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)

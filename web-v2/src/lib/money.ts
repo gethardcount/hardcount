@@ -37,6 +37,18 @@ export function formatCents(cents: number, currency?: string): string {
   return `${sign}${symbol}${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')}`
 }
 
+// formatCompactCents is the short form for a chart axis: $1.2K, $15K, $1.5M.
+// The symbol comes from the same table as formatCents, so a currency reads the
+// same on the axis as in the tooltip. It replaced a Home-only formatter that
+// divided by 100 * 100 instead of 100 * 1000 ($1,200 read "$12.0K") and always
+// printed "$" (sweep E4).
+export function formatCompactCents(cents: number, currency?: string): string {
+  const sign = cents < 0 ? '-' : ''
+  const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+    .format(Math.abs(cents) / 100)
+  return `${sign}${getCurrencySymbol(currency)}${compact}`
+}
+
 // amountInputToCents turns what an operator typed in an amount field into the
 // cents a form submits. A confirm step that restates the amount must use this
 // same conversion, so it never shows a figure different from the one sent.
@@ -100,17 +112,4 @@ export function prorationText(
   if (p.type === 'invoice') return `Proration invoice created for ${amount}`
   if (p.type === 'adjustment') return `Open invoice reduced by ${amount}`
   return `${amount} credited to customer balance`
-}
-
-// dunningAmountDue is the amount a dunning run is chasing, in its invoice's
-// currency. The run carries both from a server-side join; a run whose join came
-// back empty falls back to the invoice loaded on the page (the same invoice).
-export function dunningAmountDue(
-  run: { invoice_amount_due_cents?: number; invoice_currency?: string },
-  inv?: { amount_due_cents: number; currency: string },
-): string | null {
-  if (run.invoice_amount_due_cents !== undefined && run.invoice_amount_due_cents !== 0) {
-    return formatCents(run.invoice_amount_due_cents, run.invoice_currency || inv?.currency)
-  }
-  return inv ? formatCents(inv.amount_due_cents, inv.currency) : null
 }

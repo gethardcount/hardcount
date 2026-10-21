@@ -7,6 +7,8 @@
 // invoice state has one name and one colour. Other badges still use
 // lib/status; move them here when you touch them.
 
+import { isTerminalInvoiceStatus } from './invoiceTerminal.ts'
+
 export type StatusTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 export interface StatusDisplay { label: string; tone: StatusTone }
 
@@ -47,14 +49,31 @@ export function invoiceStatus(inv: InvoiceStatusInput, nowMs: number): StatusDis
   return { label: humanizeStatus(inv.status), tone: 'neutral' }
 }
 
+// toneBorderColor is a list row's left border in its badge's tone, so the
+// border and the badge never disagree (the invoice list coloured the border
+// from payment_status, and a void kept the amber of "pending").
+const TONE_BORDER: Record<StatusTone, string> = {
+  neutral: 'border-l-gray-300 dark:border-l-gray-600',
+  info: 'border-l-blue-500',
+  success: 'border-l-emerald-500',
+  warning: 'border-l-amber-500',
+  danger: 'border-l-red-500',
+}
+
+export function toneBorderColor(tone: StatusTone): string {
+  return TONE_BORDER[tone]
+}
+
 // invoicePaymentChip is the payment chip shown beside the invoice badge, or
-// null when it would only repeat the badge. Drafts have no payment yet; Paid
-// and Void say all there is to say; and when the badge already reads Paid,
-// Processing or Payment failed, a "Succeeded"/"Processing"/"Failed" chip next
-// to it is the same fact twice. What is left is the payment state the badge
-// does not show (for example Pending beside Open, or beside Uncollectible).
+// null when it would only repeat the badge. Drafts have no payment yet; Paid,
+// Void and Uncollectible say all there is to say (collection has ended, so
+// "Pending" or "Failed" beside a write-off read as a payment still expected);
+// and when the badge already reads Paid, Processing or Payment failed, a
+// "Succeeded"/"Processing"/"Failed" chip next to it is the same fact twice.
+// What is left is the payment state the badge does not show (Pending or
+// Unknown beside Open).
 export function invoicePaymentChip(inv: InvoiceStatusInput): StatusDisplay | null {
-  if (inv.status === 'draft' || inv.status === 'paid' || inv.status === 'voided') return null
+  if (inv.status === 'draft' || isTerminalInvoiceStatus(inv.status)) return null
   if (!inv.payment_status) return null
   if (inv.status === 'finalized' && PAYMENT_IN_BADGE.has(inv.payment_status)) return null
   return genericStatus(inv.payment_status)
@@ -80,6 +99,14 @@ export function subscriptionStatus(sub: SubscriptionStatusInput): StatusDisplay 
     case 'archived': return { label: 'Archived', tone: 'neutral' }
   }
   return { label: humanizeStatus(sub.status), tone: 'neutral' }
+}
+
+// trialBadgeEndsAt is the end the "Trial ends" badge counts down to, or null
+// when no trial badge belongs on the subscription. trial_end_at stays on the
+// record after the trial ends (or is ended now), so a badge read from it alone
+// showed a red "Expired" on active, paying subscriptions (sweep E5).
+export function trialBadgeEndsAt(sub: { status: string; trial_end_at?: string | null }): string | null {
+  return sub.status === 'trialing' && sub.trial_end_at ? sub.trial_end_at : null
 }
 
 // subscriptionFlags are the secondary chips shown beside the main badge, for

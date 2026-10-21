@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, formatCents } from '@/lib/api'
 import { fillRevenueBuckets } from '@/lib/revenueChart'
-import { outstandingText } from '@/lib/money'
+import { formatCompactCents, outstandingText } from '@/lib/money'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useEffectiveNowResolver, useTestClocks } from '@/hooks/useClockFrozenMap'
@@ -24,7 +24,8 @@ import { claimChecklistAutoOpen, openSetupChecklist, useOnboardingSteps } from '
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { invoiceStatus } from '@/lib/statusLabels'
+import { invoiceStatus, type StatusDisplay, type StatusTone } from '@/lib/statusLabels'
+import { invoiceRowAmount } from '@/lib/invoiceTerminal'
 import { StatusBadge } from '@/components/StatusBadge'
 import { TrendCard } from '@/components/analytics/TrendCard'
 import { TrendCardSkeleton, ChartCardSkeleton } from '@/components/analytics/CardSkeleton'
@@ -32,13 +33,6 @@ import { PeriodTabs } from '@/components/analytics/PeriodTabs'
 import { PERIOD_LABELS, type Period } from '@/components/analytics/period'
 import { tooltipStyle, useChartTheme } from '@/lib/chartTheme'
 import { revenueBucketLabel } from '@/lib/chartLabels'
-
-function formatCompactAmount(cents: number): string {
-  const abs = Math.abs(cents)
-  if (abs >= 100_000_00) return `$${Math.round(cents / 100_00)}K`
-  if (abs >= 1_000_00) return `$${(cents / 100_00).toFixed(1)}K`
-  return `$${Math.round(cents / 100)}`
-}
 
 export default function DashboardPage() {
   usePageTitle('Home')
@@ -115,7 +109,9 @@ export default function DashboardPage() {
       items.push({
         severity: 'danger',
         text: `${overview.failed_payments} failed ${overview.failed_payments === 1 ? 'payment' : 'payments'} in the last ${PERIOD_LABELS[period].toLowerCase()}`,
-        to: '/invoices?payment_status=failed',
+        // Open invoices only, the same set the count is over: a void or a
+        // write-off keeps its last payment_status.
+        to: '/invoices?status=finalized&payment_status=failed',
       })
     }
     if (overview.dunning_active > 0) {
@@ -296,14 +292,14 @@ export default function DashboardPage() {
                         tickLine={false}
                       />
                       <YAxis
-                        tickFormatter={formatCompactAmount}
+                        tickFormatter={(cents: number) => formatCompactCents(cents, overview?.currency)}
                         tick={{ fontSize: 11, fill: theme.tick }}
                         axisLine={false}
                         tickLine={false}
                         width={55}
                       />
                       <Tooltip
-                        formatter={(value) => [formatCents(Number(value)), 'Revenue']}
+                        formatter={(value) => [formatCents(Number(value), overview?.currency), 'Revenue']}
                         labelFormatter={(label) => revenueBucketLabel(String(label))}
                         contentStyle={tooltipStyle(theme)}
                         itemStyle={{ color: theme.tooltipText }}
@@ -352,7 +348,7 @@ export default function DashboardPage() {
                       className="flex items-center justify-between px-5 py-3 hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <PaymentStatusDot status={inv.payment_status} />
+                        <StatusDot status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]?.test_clock_id))} />
                         <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
                         <StatusBadge
                           status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]?.test_clock_id))}
@@ -365,7 +361,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex items-center gap-4 shrink-0">
                         <span className="text-sm tabular-nums text-foreground">
-                          {formatCents(inv.amount_due_cents, inv.currency)}
+                          {invoiceRowAmount(inv)}
                         </span>
                         <span className="text-xs text-muted-foreground w-16 text-right">
                           {/* Relative to the invoice's simulated clock when pinned
@@ -416,14 +412,18 @@ function AlertRow({ severity, text, to }: { severity: AlertSeverity; text: strin
   return to ? <Link to={to}>{content}</Link> : content
 }
 
-function PaymentStatusDot({ status }: { status: string }) {
-  const color =
-    status === 'succeeded' ? 'bg-emerald-500'
-    : status === 'failed' ? 'bg-destructive'
-    : status === 'processing' ? 'bg-blue-500'
-    : 'bg-amber-500'
-  return (
-    <span className={cn('w-2 h-2 rounded-full shrink-0', color)} aria-label={`Payment ${status}`} title={status} />
-  )
+// The dot takes the badge's tone, so the two never disagree: it read a raw
+// payment_status, and a voided invoice kept an amber "pending" dot beside its
+// Void badge.
+const DOT_TONE: Record<StatusTone, string> = {
+  neutral: 'bg-muted-foreground/50',
+  info: 'bg-blue-500',
+  success: 'bg-emerald-500',
+  warning: 'bg-amber-500',
+  danger: 'bg-destructive',
+}
+
+function StatusDot({ status }: { status: StatusDisplay }) {
+  return <span className={cn('w-2 h-2 rounded-full shrink-0', DOT_TONE[status.tone])} aria-hidden="true" />
 }
 
