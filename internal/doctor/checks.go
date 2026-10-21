@@ -176,23 +176,27 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		SQL: `SELECT i.id, i.tenant_id, i.subscription_id, i.billing_period_start, i.billing_period_end, i.status, i.total_amount_cents FROM invoices i WHERE i.subscription_id IS NOT NULL AND i.status <> 'voided' AND i.source_plan_changed_at IS NULL AND EXISTS (SELECT 1 FROM invoices d WHERE d.tenant_id = i.tenant_id AND d.subscription_id = i.subscription_id AND d.billing_period_start = i.billing_period_start AND d.billing_period_end = i.billing_period_end AND d.status <> 'voided' AND d.source_plan_changed_at IS NULL AND d.id <> i.id);`,
 	},
 	{
-		Name:   "usage_billed_once_per_subscription_meter_window",
+		Name:   "usage_billed_once_per_customer_meter_window",
 		Domain: "invoices",
-		Why:    "the same usage instant of one (subscription, meter, rating-rule bucket) must sit on at most one live invoice; a second is a double charge the header-exact check cannot see (threshold + cycle, or a rewound period re-billed)",
-		// Read-side twin of ADR-115's period CAS: the CAS makes two closers of
-		// one period unable to both commit; this looks for the money shape the
-		// CAS exists to prevent — two live invoices whose usage windows for
-		// the same meter overlap. Half-open compare, so a threshold window
-		// [P0,t1) beside its residual [t1,P1) is clean. Paired per rating-rule
-		// bucket, not per meter: under the ADR-066 §4 deferred-bucket
-		// protocol one meter can carry a sum rule (billed on the threshold
-		// invoice) and a max rule (deferred to the cycle invoice, full
-		// window), and the max bucket's window legitimately overlaps the sum
-		// bucket's. Lines on one invoice are excluded (i.id < j.id).
-		SQL: `SELECT a.invoice_id, a.tenant_id, i.subscription_id, a.meter_id, a.rating_rule_version_id, a.billing_period_start, a.billing_period_end, b.invoice_id AS other_invoice_id
+		Why:    "the same usage instant of one (customer, meter, rating-rule bucket) must sit on at most one live subscription invoice; a second is a double charge the header-exact check cannot see (threshold + cycle, a rewound period re-billed, or a subscription recreated the same day re-billing its predecessor's usage)",
+		// Read-side twin of ADR-115's period CAS and of the usage window's
+		// floors (ADR-012 amendment 2026-10-22): it looks for the money shape
+		// both exist to prevent, two live invoices whose usage windows for
+		// the same meter overlap. Scoped per CUSTOMER, not per subscription:
+		// usage is aggregated per customer and meter with no subscription
+		// key, so two subscriptions of one customer billing one window bill
+		// the same events. Half-open compare, so a threshold window [P0,t1)
+		// beside its residual [t1,P1), or a predecessor's [P0,t1) beside its
+		// successor's [t1,P1), is clean. Paired per rating-rule bucket, not
+		// per meter: under the ADR-066 §4 deferred-bucket protocol one meter
+		// can carry a sum rule (billed on the threshold invoice) and a max
+		// rule (deferred to the cycle invoice, full window), and the max
+		// bucket's window legitimately overlaps the sum bucket's. Lines on
+		// one invoice are excluded (i.id < j.id).
+		SQL: `SELECT a.invoice_id, a.tenant_id, i.subscription_id, a.meter_id, a.rating_rule_version_id, a.billing_period_start, a.billing_period_end, b.invoice_id AS other_invoice_id, j.subscription_id AS other_subscription_id
 		        FROM invoice_line_items a
 		        JOIN invoices i ON i.id = a.invoice_id
-		        JOIN invoices j ON j.subscription_id = i.subscription_id AND j.tenant_id = i.tenant_id AND j.id <> i.id
+		        JOIN invoices j ON j.customer_id = i.customer_id AND j.tenant_id = i.tenant_id AND j.id <> i.id AND j.subscription_id IS NOT NULL
 		        JOIN invoice_line_items b ON b.invoice_id = j.id AND b.meter_id = a.meter_id AND b.line_type = 'usage'
 		         AND b.rating_rule_version_id IS NOT DISTINCT FROM a.rating_rule_version_id
 		       WHERE a.line_type = 'usage' AND i.subscription_id IS NOT NULL

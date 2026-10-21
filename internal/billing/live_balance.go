@@ -166,7 +166,9 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 //   - Each meter is counted over the windows a plan carrying it was on the
 //     subscription (meterUsageIntervals, the close's own builder). After a
 //     mid-period plan swap the outgoing plan's meter still counts up to the
-//     swap and the incoming plan's meter counts only from it.
+//     swap and the incoming plan's meter counts only from it. A window starts
+//     no earlier than the trial end or another subscription's coverage end
+//     of the meter that day (usageFloors).
 //   - No threshold invoice this period: every bucket over those windows.
 //   - A reset=false threshold invoice exists: it billed usage up to its
 //     billing_period_end, and credit already paid for it. Additive buckets
@@ -177,8 +179,8 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 //     that predates the invoice.
 //
 // Usage is aggregated per customer and meter, with no subscription key, the
-// same as the close. Two subscriptions on one meter would each bill the same
-// events, which is why the subscription service refuses that setup
+// same as the close. Two live subscriptions on one meter would each bill the
+// same events, which is why the subscription service refuses that setup
 // (rejectMeterOverlap); if such rows exist the estimate counts the usage
 // once per subscription, as the closes will.
 //
@@ -229,7 +231,11 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 			}
 		}
 	}
-	clamped, full := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough)
+	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
+	if err != nil {
+		return 0, err
+	}
+	clamped, full := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
 	meterIDs := map[string]struct{}{}
 	for mid := range clamped {
 		meterIDs[mid] = struct{}{}
