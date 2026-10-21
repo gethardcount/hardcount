@@ -1,10 +1,10 @@
 import { Fragment } from 'react'
 import { Link } from 'react-router-dom'
-import { getTenantTimezone } from '@/lib/api'
+import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import type { ActivityLine } from '@/lib/gen/schemas/activityLine'
 import type { ActivityPart } from '@/lib/gen/schemas/activityPart'
 import {
-  TONES, actorText, groupByDay, linkRoute, money, partTime, recordedTime, timeOfDay, toneOf, zoneHeader,
+  TONES, actorText, groupByDay, lineTimes, linkRoute, money, partTime, recordedTime, timeOfDay, toneOf, zoneHeader,
 } from '@/lib/activityLine'
 import { cn } from '@/lib/utils'
 
@@ -18,22 +18,27 @@ import { cn } from '@/lib/utils'
 //   ● Title · amount                                  10:00 AM
 //     Problem line (failure and warning rows)
 //     Detail · Detail · Actor · Recorded Oct 18, 8:14 PM
+//
+// The zone is the account's (useTenantTimezone, which re-renders when
+// /v1/settings arrives on a cold deep link), never the browser's.
 
 export function ActivityZone({ lines }: { lines: readonly ActivityLine[] }) {
-  const text = zoneHeader(lines.map(l => l.occurred_at), getTenantTimezone() ?? undefined)
+  // Every time the card shows, not only the row times: a test clock months
+  // ahead puts the Recorded times on the other side of a summer-time change.
+  const text = zoneHeader(lineTimes(lines), useTenantTimezone())
   if (!text) return null
   return <span className="text-xs font-normal text-muted-foreground">{text}</span>
 }
 
 export function ActivityList({ lines }: { lines: readonly ActivityLine[] }) {
-  const tz = getTenantTimezone() ?? undefined
+  const tz = useTenantTimezone()
   const days = groupByDay(lines, tz)
   return (
     <ol className="space-y-4">
       {days.map((day, d) => (
         <li key={`${day.key}:${d}`}>
           <p data-activity-day className="mb-2 text-xs font-medium text-muted-foreground">
-            <time dateTime={day.at}>{day.label}</time>
+            <time dateTime={day.key}>{day.label}</time>
           </p>
           <ol>
             {day.lines.map((line, i) => (
@@ -46,7 +51,7 @@ export function ActivityList({ lines }: { lines: readonly ActivityLine[] }) {
   )
 }
 
-function ActivityRow({ line, tz, last }: { line: ActivityLine; tz: string | undefined; last: boolean }) {
+function ActivityRow({ line, tz, last }: { line: ActivityLine; tz: string; last: boolean }) {
   const tone = TONES[toneOf(line.tone)]
   const actor = actorText(line.actor)
   const segments = line.detail.filter(s => s.length > 0)
@@ -103,7 +108,7 @@ function ActivityRow({ line, tz, last }: { line: ActivityLine; tz: string | unde
   )
 }
 
-function PartView({ part, tz }: { part: ActivityPart; tz: string | undefined }) {
+function PartView({ part, tz }: { part: ActivityPart; tz: string }) {
   if (part.money) return <span className="tabular-nums">{money(part.money)}</span>
   if (part.time) return <time dateTime={part.time}>{partTime(part.time, tz)}</time>
   if (part.link) {

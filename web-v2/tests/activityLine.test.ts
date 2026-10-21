@@ -5,7 +5,7 @@
 import { test, beforeEach } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  TONES, actorText, dayKey, groupByDay, linkRoute, money, partTime, recordedTime, timeOfDay, toneOf, zoneHeader,
+  TONES, actorText, dayKey, groupByDay, lineTimes, linkRoute, money, partTime, recordedTime, timeOfDay, toneOf, zoneHeader,
 } from '../src/lib/activityLine.ts'
 import { setActiveCurrency } from '../src/lib/money.ts'
 import type { ActivityLine } from '../src/lib/gen/schemas/activityLine.ts'
@@ -113,4 +113,17 @@ test('the zone is named once, as the dashboard formatter names it', () => {
   // Rows on both sides of a summer-time change name both.
   assert.equal(zoneHeader(['2027-02-01T15:00:00Z', '2027-04-01T15:00:00Z'], NEW_YORK), 'Times in EST / EDT')
   assert.equal(zoneHeader([], KOLKATA), '')
+})
+
+test('the zone header counts the Recorded times and time parts, not only the row times', () => {
+  // A New York account on a test clock in Feb 2027, recorded in Oct 2026:
+  // the rows are in EST, the Recorded times in EDT. The header names both.
+  const onClock: ActivityLine = { ...line('a', '2027-02-01T15:00:00Z'), recorded_at: '2026-10-18T14:44:00Z' }
+  assert.equal(zoneHeader(lineTimes([onClock]), NEW_YORK), 'Times in EST / EDT')
+  // Negative control: the row times alone name one zone.
+  assert.equal(zoneHeader([onClock.occurred_at], NEW_YORK), 'Times in EST')
+  // A time part in the meta line counts too.
+  const withPart: ActivityLine = { ...line('b', '2027-02-01T15:00:00Z'), detail: [[{ text: 'Trial now ends ' }, { time: '2027-04-01T15:00:00Z' }]] }
+  assert.deepEqual(lineTimes([withPart]), ['2027-02-01T15:00:00Z', '2027-04-01T15:00:00Z'])
+  assert.equal(zoneHeader(lineTimes([withPart]), NEW_YORK), 'Times in EST / EDT')
 })

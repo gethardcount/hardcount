@@ -93,6 +93,8 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
   ([how to compare](../web-v2/e2e/README.md#activity-screenshots)). One
   test checks text parity: the same operator steps on an invoice give the
   same Activity rows on both clocks, apart from times and the Recorded part.
+  It also checks that the card's times follow the account's zone, not the
+  browser's.
 - **Data:** the tests make their data through the public API, with the
   test-mode secret key from `velox-bootstrap`. Each test uses its own unique
   names, so the suite can run many times against the same database. Use a

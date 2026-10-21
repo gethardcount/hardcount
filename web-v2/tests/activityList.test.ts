@@ -6,6 +6,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { test, beforeEach } from 'vitest'
 import assert from 'node:assert/strict'
 import type { ActivityLine } from '../src/lib/gen/schemas/activityLine.ts'
@@ -36,10 +37,13 @@ const failed: ActivityLine = {
 
 async function render(lines: ActivityLine[]): Promise<string> {
   const { ActivityList, ActivityZone } = await import('../src/components/ActivityList.tsx')
-  return renderToStaticMarkup(createElement(MemoryRouter, null,
-    createElement(ActivityZone, { lines }),
-    createElement(ActivityList, { lines }),
-  ))
+  // The list reads the zone through useTenantTimezone, a settings query.
+  // Server rendering runs no fetch, so it falls back to the zone set below.
+  return renderToStaticMarkup(createElement(QueryClientProvider, { client: new QueryClient() },
+    createElement(MemoryRouter, null,
+      createElement(ActivityZone, { lines }),
+      createElement(ActivityList, { lines }),
+    )))
 }
 
 function text(html: string): string {
@@ -64,7 +68,8 @@ test('a row reads title · amount, time, then meta parts, actor and Recorded, in
 
 test('every date and time is a <time> element carrying its instant', async () => {
   const html = await render([finalized])
-  assert.match(html, /<time dateTime="2027-02-01T04:30:00Z">Feb 1, 2027<\/time>/)
+  // The day header carries the day on the account calendar, not an instant.
+  assert.match(html, /<time dateTime="2027-02-01">Feb 1, 2027<\/time>/)
   assert.match(html, /<time dateTime="2027-02-01T04:30:00Z"[^>]*>10:00 AM<\/time>/)
   assert.match(html, /<time dateTime="2026-10-18T14:44:00Z">Oct 18, 8:14 PM<\/time>/)
   // With the <time> elements taken out, no date or clock time is left.
@@ -85,4 +90,18 @@ test('rows on two days get two day headers', async () => {
   const html = await render([finalized, failed])
   assert.equal((html.match(/data-activity-day/g) ?? []).length, 2)
   assert.match(text(html), /Feb 2, 2027/)
+})
+
+test('a day header carries the account-calendar day even when the UTC day is the one before', async () => {
+  // 20:00 UTC on Jan 31 is Feb 1 in Kolkata.
+  const html = await render([{ ...failed, occurred_at: '2027-01-31T20:00:00Z' }])
+  assert.match(html, /<time dateTime="2027-02-01">Feb 1, 2027<\/time>/)
+})
+
+test('the zone header names the zone of the Recorded times too', async () => {
+  const { setTenantTimezone } = await import('../src/lib/api.ts')
+  setTenantTimezone('America/New_York')
+  // Rows in Feb 2027 (EST), recorded in Oct 2026 (EDT).
+  const t = text(await render([{ ...finalized, occurred_at: '2027-02-01T15:00:00Z' }]))
+  assert.match(t, /Times in EST \/ EDT/)
 })

@@ -4,8 +4,8 @@
 // words live here. Plain data in, plain data out, so the unit tests can check
 // it without rendering.
 //
-// Times use the account's timezone, passed in. With none set, they use the
-// browser's zone, and the zone header names that zone instead.
+// Times use the account's timezone, passed in. <ActivityList> always passes
+// one (useTenantTimezone); with none, a helper uses the browser's zone.
 
 import type { ActivityActor } from './gen/schemas/activityActor'
 import type { ActivityLine } from './gen/schemas/activityLine'
@@ -58,6 +58,10 @@ export function actorText(actor: ActivityActor | undefined): string {
 // linkRoute is the dashboard route for a link part, or null when there is
 // none; the part then shows as plain text. Credit notes have no page of
 // their own, so the link opens the credit-note list filtered to that number.
+// Known limit: that list filters in the browser over the 100 newest notes
+// (the list API has no search parameter), so for an account with more than
+// 100 notes an older note's link shows "No credit notes match your search".
+// Adding search to the list API would lift it.
 export function linkRoute(link: ActivityLink): string | null {
   switch (link.kind) {
     case 'invoice':
@@ -140,11 +144,26 @@ export function zoneHeader(isos: readonly string[], tz: string | undefined): str
   return names.length > 0 ? `Times in ${names.join(' / ')}` : ''
 }
 
+// lineTimes is every instant the lines show: each row's time, its Recorded
+// time and every time part in its meta line. The zone header is built from
+// all of them, so it names every zone name the card's times are in.
+export function lineTimes(lines: readonly ActivityLine[]): string[] {
+  const out: string[] = []
+  for (const line of lines) {
+    out.push(line.occurred_at)
+    if (line.recorded_at) out.push(line.recorded_at)
+    for (const seg of line.detail) {
+      for (const part of seg) if (part.time) out.push(part.time)
+    }
+  }
+  return out
+}
+
 export interface ActivityDay {
+  // The day on the account calendar, yyyy-mm-dd. The header's <time>
+  // element carries it, not a row's instant (which can be the UTC day before).
   key: string
   label: string
-  // The instant the header's <time> element carries: the day's first row.
-  at: string
   lines: ActivityLine[]
 }
 
@@ -159,7 +178,7 @@ export function groupByDay(lines: readonly ActivityLine[], tz: string | undefine
     if (last && last.key === key) {
       last.lines.push(line)
     } else {
-      days.push({ key, label: dayLabel(line.occurred_at, tz), at: line.occurred_at, lines: [line] })
+      days.push({ key, label: dayLabel(line.occurred_at, tz), lines: [line] })
     }
   }
   return days

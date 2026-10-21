@@ -43,7 +43,9 @@ the screen, and that the main things an operator does work end to end.
   reads the shots. One test is a pass/fail check. The same operator steps on
   an invoice must give the same Activity rows on both clocks once times are
   taken out. Every test-clock row must have a Recorded part. No row may be
-  wider than the card at either width. The files go to `activity-shots/`,
+  wider than the card at either width. That test runs with the browser in
+  `Pacific/Pago_Pago`, not the account's zone, and checks that the card's
+  zone header and day headers follow the account's zone. The files go to `activity-shots/`,
   which CI uploads as the `activity-shots` artifact on every run (see
   [Activity screenshots](#activity-screenshots)).
 - `global.setup.ts` runs first. It seeds data through the API (code in
