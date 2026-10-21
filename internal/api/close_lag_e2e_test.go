@@ -78,6 +78,31 @@ func newLagRigWith(t *testing.T, timing string, withAddOn bool, opts ...ServerOp
 // them (ADR-088). 0 grants nothing.
 func newLagRigGranted(t *testing.T, timing string, withAddOn bool, grantCents int64, opts ...ServerOption) *lagRig {
 	t.Helper()
+	r := newLagRigBare(t, timing, grantCents, opts...)
+	items := []map[string]any{{"plan_id": r.planA, "quantity": 1}}
+	if withAddOn {
+		items = append(items, map[string]any{"plan_id": r.planC, "quantity": 1})
+	}
+	sub := r.must(http.MethodPost, "/v1/subscriptions", lagP0, map[string]any{
+		"code": "lag-sub", "display_name": "Lag Sub", "customer_id": r.custID, "items": items, "start_now": true,
+	}, http.StatusCreated)
+	r.subID = sub["id"].(string)
+	s := r.sub()
+	if !s.CurrentBillingPeriodStart.Equal(lagP0) || !s.CurrentBillingPeriodEnd.Equal(lagB) {
+		t.Fatalf("fixture period = [%v, %v), want [%v, %v)", s.CurrentBillingPeriodStart, s.CurrentBillingPeriodEnd, lagP0, lagB)
+	}
+	for _, it := range s.Items {
+		if it.PlanID == r.planA {
+			r.itemA = it.ID
+		}
+	}
+	return r
+}
+
+// newLagRigBare is the rig's meter, plans and customer, with no subscription
+// yet: r.subID is empty until the test creates one.
+func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...ServerOption) *lagRig {
+	t.Helper()
 	db := testutil.SetupTestDB(t)
 	clk := clock.NewFake(lagP0)
 	r := &lagRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil, opts...), timing: timing, custExt: "lag_cust"}
@@ -110,23 +135,6 @@ func newLagRigGranted(t *testing.T, timing string, withAddOn bool, grantCents in
 		r.must(http.MethodPost, "/v1/credits/grant", lagP0, map[string]any{
 			"customer_id": r.custID, "amount_cents": grantCents, "description": "lag rig fixture",
 		}, http.StatusCreated)
-	}
-	items := []map[string]any{{"plan_id": r.planA, "quantity": 1}}
-	if withAddOn {
-		items = append(items, map[string]any{"plan_id": r.planC, "quantity": 1})
-	}
-	sub := r.must(http.MethodPost, "/v1/subscriptions", lagP0, map[string]any{
-		"code": "lag-sub", "display_name": "Lag Sub", "customer_id": r.custID, "items": items, "start_now": true,
-	}, http.StatusCreated)
-	r.subID = sub["id"].(string)
-	s := r.sub()
-	if !s.CurrentBillingPeriodStart.Equal(lagP0) || !s.CurrentBillingPeriodEnd.Equal(lagB) {
-		t.Fatalf("fixture period = [%v, %v), want [%v, %v)", s.CurrentBillingPeriodStart, s.CurrentBillingPeriodEnd, lagP0, lagB)
-	}
-	for _, it := range s.Items {
-		if it.PlanID == r.planA {
-			r.itemA = it.ID
-		}
 	}
 	return r
 }
@@ -773,7 +781,7 @@ func TestCrossIntervalSwap_InAdvance_BillsOldPeriodUsageOnce(t *testing.T) {
 		t.Errorf("doctor check failed to run: %v", e)
 	}
 	for _, v := range res.Violations {
-		if v.Check.Name == "usage_billed_once_per_subscription_meter_window" && strings.Contains(v.Detail, r.subID) {
+		if v.Check.Name == "usage_billed_once_per_customer_meter_window" && strings.Contains(v.Detail, r.subID) {
 			t.Errorf("doctor: usage billed twice: %s %s", v.RowID, v.Detail)
 		}
 	}

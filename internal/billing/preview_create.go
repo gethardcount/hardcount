@@ -32,7 +32,7 @@ type SubscriptionLister interface {
 //
 // The hard work — dimension-match-aware aggregation in
 // usage.AggregateByPricingRules and per-rule pricing via
-// domain.ComputeAmountCents — already exists on Engine.previewMeter. This
+// domain.ComputeAmountCents — already exists on Engine.rateMeterWindow. This
 // service is a thin composition: customer existence → subscription
 // resolution → period resolution → defer to engine.previewWithWindow for
 // the actual line generation.

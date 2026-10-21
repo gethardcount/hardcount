@@ -1,7 +1,7 @@
 # ADR-012: Day-Grade Calendar Billing & Period Boundary Snapping
 
 **Date:** 2026-05-01
-**Status:** Accepted (amended 2026-07-26)
+**Status:** Accepted (amended 2026-07-26, 2026-10-22)
 
 ## Status
 Accepted
@@ -11,7 +11,7 @@ Accepted
 
 ## Summary
 
-Billing period boundaries snap to midnight in the tenant timezone, so a subscription started at any time of day is billed for that whole day. Proration counts whole days and rounds hour counts, so a daylight-saving shift cannot add or lose a day. Amended 2026-07-26: an item added on the period's first day (in that timezone) is billed for the full period. Mid-period change proration also uses a whole-day ratio ([ADR-042](042-tax-rate-decimal-precision.md)), and the timezone is the org billing timezone ([ADR-077](077-org-level-billing-timezone.md)). Status: active, amended.
+Billing period boundaries snap to midnight in the tenant timezone, so a subscription started at any time of day is billed for that whole day. Proration counts whole days and rounds hour counts, so a daylight-saving shift cannot add or lose a day. Amended 2026-07-26: an item added on the period's first day (in that timezone) is billed for the full period. Mid-period change proration also uses a whole-day ratio ([ADR-042](042-tax-rate-decimal-precision.md)), and the timezone is the org billing timezone ([ADR-077](077-org-level-billing-timezone.md)). Amended 2026-10-22: the snap applies to base fees; a usage window starts no earlier than the trial end or another subscription's end on the meter. Status: active, amended.
 
 ## Context
 
@@ -187,12 +187,116 @@ period-start-day add) so both cadences charge the full period.
 
 **Accepted edges** (documented, not coded around):
 
-- Same-day cancel→recreate on the same meter double-counts the
-  morning's usage (and ≤1 day of base when the cancel was post-noon):
-  the predecessor's final invoice billed through the cancel instant
-  and the successor's day-grade window re-covers the day. Bounded to
-  one day; revisit if the wedge makes same-day migration common.
+- Same-day cancel→recreate on the same meter bills up to one day of
+  base twice (when the cancel was post-noon): the predecessor's final
+  invoice billed through the cancel instant and the successor's
+  day-grade base re-covers the day. The morning's *usage* is no longer
+  billed twice (amendment 2026-10-22, below).
 - An org-TZ change between signup and first close can shift the
   calendar-day comparison so the clamp misses and that one sub still
   bills 30/31 (under-bill, ~1/31) — ADR-091 seam class, picked up by
   the deferred billing/display TZ decouple (ADR-092).
+
+## Amendment (2026-10-22): one usage window for every closer
+
+The snap is right for base fees and wrong for usage. Usage is
+aggregated per customer and meter, with no subscription key. A window
+that opens at midnight therefore reaches usage that is not this
+subscription's to bill:
+
+- **B2: trial hours.** The first paid period starts at midnight of the
+  trial-end day (`firstPeriodAfterTrial`). A trial that ends at 18:00
+  billed the usage from 00:00 to 18:00, which is trial usage. The same
+  happens after End trial (`trial_end_at` = the instant it ended) and
+  after Extend trial.
+- **B4: same-day cancel and recreate.** The predecessor's final invoice
+  billed the usage up to its cancel. The successor's period starts at
+  midnight of the same day, so its close billed that usage again. The
+  product tells operators to cancel and recreate in several places, so
+  this is a real trigger, not a rare edge.
+
+**Decision.** Every closer starts a meter's usage window at one floor,
+`usageFloors`. The closers that bill by segment build the window with
+one function, `meterUsageIntervals`. A window starts at the latest of:
+
+1. its segment start, which is the period start for an item there from
+   the start of the period (this ADR);
+2. the subscription's trial end;
+3. the latest instant, strictly inside the window, at which **another**
+   subscription of the customer stopped covering the meter. That is
+   where a billing interval on a plan carrying the meter ended (cancel,
+   scheduled cancel, item removal, plan swap away). For a trial that
+   never activated, it is the cancel (a trial writes no interval);
+4. the threshold watermark, which still clamps only the window that
+   additive buckets bill from (ADR-066 §4).
+
+It ends at the earliest of the period end and the cancel instant, as
+before. The closers that bill by segment are the cycle close, the
+immediate and scheduled cancel, the cross-interval swap (ADR-056), the
+operator preview and the live credit estimate. The threshold fire, its
+item-threshold count and create_preview with a custom window do not
+bill by segment. They rate one flat window per meter on the current
+items, `[floor, now)`, where the floor is the same `usageFloors` start
+taken over the whole period. The fire's usage lines are stamped with
+the floored start. Rules stay pinned at the period start (ADR-070).
+
+**Why "strictly inside" is enough.** `rejectMeterOverlap` keeps two
+live subscriptions of one customer off the same meter. So another
+subscription's coverage of the meter that ends inside this window
+ended before this subscription took the meter. The only overlap is
+the day-grade backdating, and the floor removes exactly that. The
+rule is asymmetric on purpose: a later subscription's coverage always
+ends after an earlier one's segment window ends, so it never moves the
+earlier window. The predecessor keeps its morning. In the segment
+closers, chains of removal, recreate and re-add partition the same way.
+The flat window of the threshold fire has one window per meter, so
+this holds there only while the subscription covered the meter in one
+stretch (see the residual edges below).
+
+**Unchanged.** Base fees and the `billing_intervals` writers keep the
+day-grade starts. The trial-end day's base stays whole, and up to one
+day of base on a same-day recreate stays accepted (above): this
+amendment changes usage only. The customer usage report
+(`internal/usage/customer_usage.go`) is a usage report, not an invoice,
+and is not changed.
+
+**Read-side alarm.** The doctor check that looks for one usage instant
+on two live invoices is now scoped per customer, not per subscription
+(`usage_billed_once_per_customer_meter_window`; it was
+`usage_billed_once_per_subscription_meter_window`, ADR-115). Scoped per
+subscription it could not see this double bill. Two lines of one
+subscription are still paired only within one rating-rule bucket (the
+ADR-066 §4 deferred max bucket overlaps the sum bucket by design). Two
+lines of different subscriptions are paired across buckets: each
+subscription pins its rules at its own period start, so a rule
+published between the two gives them different versions for the same
+events.
+
+**Residual edges, accepted.** Each needs several changes to one
+customer's subscriptions inside one period; revisit if one is seen.
+
+- **One instant, not a cut.** The floor is a single instant, not a cut
+  of every other subscription's interval. Say an older subscription
+  covered the meter only for a stretch that began after midnight (an
+  item added mid-period and removed the same day). A subscription
+  created later that day then starts at the end of that stretch, and
+  does not bill the start-day usage before the stretch. That needs an
+  add and a remove on another subscription and a recreate, all on one
+  day.
+- **The fire's flat window after a meter round trip.** Subscription A
+  removes meter M at 10:00 on day 5. B takes M at 11:00 and is
+  canceled at 12:00. A adds M back on day 6. A threshold fire on A on
+  day 20 opens M's window at 12:00 on day 5. A's own M usage before
+  10:00 on day 5 is then on no invoice, because the cycle close clamps
+  it away at the fire's watermark. Before this amendment the same chain billed
+  B's hour twice. It needs a meter to leave A, cover B and return to A
+  within one period, with a threshold fire after.
+- **Current plan meters.** The coverage read
+  (`ListCustomerMeterCoverageEnds`) takes each plan's meters as they
+  are now, as `FindMeterConflicts` and the closers do. A plan's meters
+  can change once no live subscription uses it. Say an operator
+  cancels a subscription, edits its plan's meters, and creates another
+  subscription for the customer the same day. The floor then uses the
+  edited list. A meter the plan dropped is not floored, so its usage
+  before the cancel is billed again. A meter it gained is floored at
+  the cancel, so its usage before the cancel is not billed.
