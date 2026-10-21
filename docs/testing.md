@@ -41,6 +41,12 @@ One source test in `internal/arch` checks dates: a calendar date must be
 formatted in an explicit time zone (`.In(loc)`), or carry a same-line
 `//tz:ok` comment that marks a real UTC case.
 
+A row dated at an instant the contract names (a trial end, a dunning retry,
+a cycle close) is tested on a test clock advanced two days past that
+instant. A row dated at the advance instead then reads two days late. The
+activity scenarios are in
+`internal/api/activity_parity_dates_integration_test.go`.
+
 ## Run each layer locally
 
 Start Postgres once: `docker compose up -d postgres`.

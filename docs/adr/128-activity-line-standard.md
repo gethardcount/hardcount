@@ -194,6 +194,14 @@ the same as any other act on a pinned invoice. The change touches the settle
 path, so it follows the
 [money-path playbook](../dev/money-path-robustness-playbook.md).
 
+Built in PR 7 of the series (facts: dates). The settle path dates a failed
+attempt at the invoice's clock and a paid one at its `paid_at`; the wall
+clock still writes no test-clock time. When the settle path's report reaches
+the database before the charge call records its own attempt (a dunning
+retry's failure webhook arriving first), the charge call's date wins over the
+report's. That is the rule `trigger_source` already follows: the writer that
+made the attempt owns its facts.
+
 ## Why this design
 
 - **The backend owns the words because the facts live there.** Folds,

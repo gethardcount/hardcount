@@ -995,6 +995,15 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	if now.IsZero() {
 		now = s.clock.Now(ctx)
 	}
+	// The final actions happen at the escalation's instant, not wherever the
+	// advance landed: rebind ctx's instant to it, keeping the clock, so the
+	// subscription's pause or cancel and the invoice's write-off below (each
+	// re-binds and inherits it) are dated with the escalated event. The
+	// inline path already arrives bound to its retry slot; exhaust-on-entry
+	// arrives at frozen_time. Wall-clock runs carry no Sim and are untouched.
+	if sim, ok := clock.SimOf(ctx); ok {
+		ctx = clock.WithSim(ctx, clock.Sim{At: now, TestClockID: sim.TestClockID})
+	}
 
 	// Late paid re-check — the terminal action (cancel in
 	// particular) is IRREVERSIBLE, and the tick-start paid-pre-check goes stale
