@@ -417,6 +417,9 @@ test.describe('the default dunning policy', () => {
       await create.getByRole('switch').click()
       await expect(create.getByRole('switch')).not.toBeChecked()
       await field(create, 'Grace (days)').getByRole('spinbutton').fill('2')
+      // The default, pause, keeps new invoices as drafts; runs already open on
+      // other unpaid invoices keep retrying, so it must not say charging stops.
+      await expect(create.getByText(/^Invoices created while collection is paused stay drafts, so nothing charges them\. Retries already running on other unpaid invoices continue\./)).toBeVisible()
       await field(create, 'Do this to the subscription').getByRole('combobox').click()
       await page.getByRole('option', { name: 'Leave it active' }).click()
       await expect(create.getByText(/^The subscription keeps billing as normal\. The unpaid invoice stays open and due\./)).toBeVisible()

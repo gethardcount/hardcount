@@ -27,6 +27,10 @@ func TestAttention_PausedCollectionReadsTheOpenRun(t *testing.T) {
 		{"card on file, active run", true, &domain.InvoiceDunningRun{State: domain.DunningActive}, true},
 		{"card on file, no run", true, nil, false},
 		{"no card, no run", false, nil, false},
+		// A final action that failed leaves the run active with every attempt
+		// used; the next tick re-attempts only the action, never a charge.
+		{"no card, final action failed", false, &domain.InvoiceDunningRun{State: domain.DunningActive, Resolution: domain.ResolutionActionFailed}, false},
+		{"card on file, final action failed", true, &domain.InvoiceDunningRun{State: domain.DunningActive, Resolution: domain.ResolutionActionFailed}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
