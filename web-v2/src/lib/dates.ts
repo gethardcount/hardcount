@@ -16,12 +16,36 @@ function tenantTZ(): string {
 }
 
 // endOfDayInTZ returns UTC ISO 8601 of "yyyy-mm-dd at 23:59:59.999
-// in tenant TZ". Used for civil-date expiry pickers ("expires
-// May 5") so the operator-intended last-second-of-the-day matches
-// regardless of who's viewing or where they are physically.
+// in tenant TZ". Used for the inclusive "to" end of date-range filters
+// and for API key expiry, so the operator-intended last moment of the
+// day matches regardless of who's viewing or where they are physically.
+// Credit expiry uses startOfNextDayInTZ instead (see there).
 export function endOfDayInTZ(yyyymmdd: string, timezone?: string): string {
   const tz = timezone || tenantTZ()
   return fromZonedTime(`${yyyymmdd} 23:59:59.999`, tz).toISOString()
+}
+
+// startOfNextDayInTZ returns UTC ISO 8601 of the midnight in tenant TZ that
+// starts the day after yyyy-mm-dd. A credit expiry picked as "valid through
+// Nov 30" is sent as Dec 1 00:00: the server treats a credit as live up to
+// and including its expires_at, and a November period ends (and its invoice
+// is issued) at that same instant, so the credit pays November's invoice.
+// endOfDayInTZ (23:59:59.999) fell 1 ms short of it. The day step runs on
+// UTC civil fields, never a browser-local Date, so the browser's own zone
+// can't move it.
+export function startOfNextDayInTZ(yyyymmdd: string, timezone?: string): string {
+  const tz = timezone || tenantTZ()
+  const [y, m, d] = yyyymmdd.split('-').map(Number)
+  const next = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
+  return fromZonedTime(`${next} 00:00:00.000`, tz).toISOString()
+}
+
+// lastValidInstant is the instant 1 ms before a credit's expires_at, for
+// display: formatDate of it names the last day the credit is valid. A grant
+// sent as Dec 1 00:00 then reads "Valid through Nov 30", and so does one
+// saved before startOfNextDayInTZ existed (Nov 30 23:59:59.999).
+export function lastValidInstant(expiresAtISO: string): string {
+  return new Date(Date.parse(expiresAtISO) - 1).toISOString()
 }
 
 // startOfDayInTZ returns UTC ISO 8601 of "yyyy-mm-dd at 00:00:00.000
@@ -132,7 +156,7 @@ export function formatYMDInTZ(iso: string, timezone?: string): string {
 // isAfterCivilToday reports whether a picked yyyy-mm-dd is a later civil day
 // than "today" in tenant TZ, where today is the civil date of `nowMs` (the
 // entity's effective now, so a test clock is honoured). Use it to validate a
-// date that endOfDayInTZ will resolve in the same zone. Taking today from
+// date that endOfDayInTZ or startOfNextDayInTZ will resolve in the same zone. Taking today from
 // toISOString() (the UTC date) instead made a New York evening count as
 // tomorrow, so tomorrow's date was refused as "not in the future".
 export function isAfterCivilToday(yyyymmdd: string, nowMs: number, timezone?: string): boolean {

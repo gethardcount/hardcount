@@ -3685,8 +3685,12 @@ type CreditGrantBlock struct {
 	EntryType string `json:"entry_type"`
 
 	// ExpiredCents The part that expired unused.
-	ExpiredCents int64     `json:"expired_cents"`
-	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	ExpiredCents int64 `json:"expired_cents"`
+
+	// ExpiresAt The credit can be drawn up to and including this instant; a
+	// period invoice draws it when its period ends at or before it.
+	// The dashboard sends the local midnight after the picked day.
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
 	// GrantKind Absent for unclassified credit.
 	GrantKind CreditGrantBlockGrantKind `json:"grant_kind,omitempty"`
@@ -3734,11 +3738,16 @@ type CreditLedgerEntry struct {
 	CustomerId    string                     `json:"customer_id"`
 	Description   string                     `json:"description"`
 	EntryType     CreditLedgerEntryEntryType `json:"entry_type"`
-	ExpiresAt     time.Time                  `json:"expires_at,omitempty"`
-	GrantKind     CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
-	Id            string                     `json:"id"`
-	InvoiceId     string                     `json:"invoice_id,omitempty"`
-	Metadata      map[string]interface{}     `json:"metadata,omitempty"`
+
+	// ExpiresAt On a grant, its expiry. The credit can be drawn up to and
+	// including this instant; a period invoice draws it when its
+	// period ends at or before it. The dashboard sends the local
+	// midnight after the picked day.
+	ExpiresAt time.Time                  `json:"expires_at,omitempty"`
+	GrantKind CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
+	Id        string                     `json:"id"`
+	InvoiceId string                     `json:"invoice_id,omitempty"`
+	Metadata  map[string]interface{}     `json:"metadata,omitempty"`
 
 	// SourceChangeType Classifies per-item proration artifacts so the dedup index can
 	// distinguish a plan-change and a quantity-change that happen to
@@ -4909,8 +4918,11 @@ type InvoiceLineItem struct {
 	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
 	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
 
-	// CommitExpiresAt Expiry of the granted commit block. Absent/null = the credits
-	// never expire (the default).
+	// CommitExpiresAt Expiry of the granted commit block. The credit can be drawn up
+	// to and including this instant; a period invoice draws it when
+	// its period ends at or before it. The dashboard sends the local
+	// midnight after the picked day. Absent/null = the credits never
+	// expire (the default).
 	CommitExpiresAt time.Time `json:"commit_expires_at,omitempty"`
 
 	// CommitGrantedCents Marks the line as a prepaid-commit purchase (ADR-078): when the
@@ -4963,7 +4975,10 @@ type InvoiceLineItem struct {
 
 // InvoiceLineItemInput A line to add to a draft invoice.
 type InvoiceLineItemInput struct {
-	// CommitExpiresAt When the granted credit expires. Must be in the future. Needs
+	// CommitExpiresAt When the granted credit expires. The credit can be drawn up to
+	// and including this instant; a period invoice draws it when its
+	// period ends at or before it. The dashboard sends the local
+	// midnight after the picked day. Must be in the future. Needs
 	// `commit_granted_cents`. Absent means it never expires.
 	CommitExpiresAt time.Time `json:"commit_expires_at,omitempty"`
 
@@ -6882,7 +6897,11 @@ type PostV1CreditsGrantJSONBody struct {
 	CustomerId  string `json:"customer_id"`
 	Description string `json:"description,omitempty"`
 
-	// ExpiresAt Optional expiry; must be in the future. Omitted = never expires.
+	// ExpiresAt Optional expiry; must be in the future. Omitted = never
+	// expires. The credit can be drawn up to and including this
+	// instant; a period invoice draws it when its period ends
+	// at or before it. The dashboard sends the local midnight
+	// after the picked day.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
 	// GrantKind Optional cost-basis class (ADR-078). `promotional` marks

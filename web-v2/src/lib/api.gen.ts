@@ -5219,7 +5219,11 @@ export interface paths {
                         description?: string;
                         /**
                          * Format: date-time
-                         * @description Optional expiry; must be in the future. Omitted = never expires.
+                         * @description Optional expiry; must be in the future. Omitted = never
+                         *     expires. The credit can be drawn up to and including this
+                         *     instant; a period invoice draws it when its period ends
+                         *     at or before it. The dashboard sends the local midnight
+                         *     after the picked day.
                          */
                         expires_at?: string;
                         /**
@@ -7625,8 +7629,11 @@ export interface components {
             commit_granted_cents?: number | null;
             /**
              * Format: date-time
-             * @description Expiry of the granted commit block. Absent/null = the credits
-             *     never expire (the default).
+             * @description Expiry of the granted commit block. The credit can be drawn up
+             *     to and including this instant; a period invoice draws it when
+             *     its period ends at or before it. The dashboard sends the local
+             *     midnight after the picked day. Absent/null = the credits never
+             *     expire (the default).
              */
             commit_expires_at?: string | null;
         };
@@ -8148,7 +8155,13 @@ export interface components {
             balance_after: number;
             description: string;
             invoice_id?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description On a grant, its expiry. The credit can be drawn up to and
+             *     including this instant; a period invoice draws it when its
+             *     period ends at or before it. The dashboard sends the local
+             *     midnight after the picked day.
+             */
             expires_at?: string;
             metadata?: {
                 [key: string]: unknown;
@@ -8519,7 +8532,10 @@ export interface components {
             commit_granted_cents?: number;
             /**
              * Format: date-time
-             * @description When the granted credit expires. Must be in the future. Needs
+             * @description When the granted credit expires. The credit can be drawn up to
+             *     and including this instant; a period invoice draws it when its
+             *     period ends at or before it. The dashboard sends the local
+             *     midnight after the picked day. Must be in the future. Needs
              *     `commit_granted_cents`. Absent means it never expires.
              */
             commit_expires_at?: string;
@@ -9850,7 +9866,12 @@ export interface components {
              * @description The part an operator removed with a negative adjustment.
              */
             deducted_cents: number;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The credit can be drawn up to and including this instant; a
+             *     period invoice draws it when its period ends at or before it.
+             *     The dashboard sends the local midnight after the picked day.
+             */
             expires_at?: string;
             /** @description For a `commit` block, the invoice that paid for it. */
             source_invoice_id?: string;

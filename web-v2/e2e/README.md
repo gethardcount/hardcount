@@ -12,7 +12,10 @@ the screen, and that the main things an operator does work end to end.
   signed out, and the emailed-link pages with no code.
 - `journeys.spec.ts` signs in, creates a customer, creates a subscription,
   advances a test clock to the renewal and opens the new invoice, opens the
-  public invoice page, and grants credits. It also checks that six wrong
+  public invoice page, and grants credits. It picks a credit expiry day on a
+  grant and on a commit line, and checks that the dashboard sends the next
+  midnight in the account's zone and shows "Valid through" the picked day;
+  those two screenshots go to `activity-shots/` too. It also checks that six wrong
   passwords in a row make the sign-in page say how long to wait. Each journey checks that the screen
   shows what the API returned. The arithmetic behind the numbers is tested in
   Go, not here.

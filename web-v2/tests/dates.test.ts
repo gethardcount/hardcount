@@ -5,7 +5,7 @@
 // `npm test` (Vitest).
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, startOfNextDayInTZ, lastValidInstant, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
   // 2026-05-05 00:00 IST (UTC+5:30) = the previous UTC evening.
@@ -134,4 +134,30 @@ test('addCalendarMonthInTZ keeps the tenant wall time across a DST change', () =
   // A UTC tenant has no DST: Feb 15 12:00Z → Mar 15 12:00Z. A Los Angeles browser
   // stepping its own fields crossed its Mar 8 DST change and landed on 11:00Z.
   assert.equal(plusMonth('2026-02-15T12:00:00Z', 'UTC'), '2026-03-15T12:00:00.000Z')
+})
+
+// A credit picked as "valid through Nov 30" is sent as the midnight that
+// starts Dec 1 in the tenant zone: the instant a November period ends and its
+// invoice is issued, so the credit pays that invoice (ADR-071 §2, amended
+// 2026-10-22).
+test('startOfNextDayInTZ = 00:00 of the next civil day in the given zone', () => {
+  assert.equal(startOfNextDayInTZ('2026-11-30', 'America/New_York'), '2026-12-01T05:00:00.000Z')
+  assert.equal(startOfNextDayInTZ('2026-11-30', 'Asia/Kolkata'), '2026-11-30T18:30:00.000Z')
+  assert.equal(startOfNextDayInTZ('2026-11-30', 'UTC'), '2026-12-01T00:00:00.000Z')
+  // Month, year and leap-day rollover.
+  assert.equal(startOfNextDayInTZ('2026-12-31', 'UTC'), '2027-01-01T00:00:00.000Z')
+  assert.equal(startOfNextDayInTZ('2028-02-28', 'UTC'), '2028-02-29T00:00:00.000Z')
+  // The day after the US spring-forward day starts at 00:00 EDT (UTC-4).
+  assert.equal(startOfNextDayInTZ('2026-03-08', 'America/New_York'), '2026-03-09T04:00:00.000Z')
+  // It is the same instant as the start of the next day.
+  assert.equal(startOfNextDayInTZ('2026-05-05', 'America/Los_Angeles'), startOfDayInTZ('2026-05-06', 'America/Los_Angeles'))
+})
+
+test('lastValidInstant names the picked day for both the new and the pre-fix stored shape', () => {
+  const ny = (iso: string) => formatInvoiceDate(lastValidInstant(iso), 'America/New_York')
+  // Sent by startOfNextDayInTZ('2026-11-30').
+  assert.equal(ny('2026-12-01T05:00:00.000Z'), 'Nov 30, 2026')
+  // Saved before the fix by endOfDayInTZ('2026-11-30').
+  assert.equal(ny('2026-12-01T04:59:59.999Z'), 'Nov 30, 2026')
+  assert.equal(lastValidInstant('2026-12-01T05:00:00.000Z'), '2026-12-01T04:59:59.999Z')
 })

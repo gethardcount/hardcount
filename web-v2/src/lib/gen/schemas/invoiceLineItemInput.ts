@@ -29,7 +29,10 @@ export interface InvoiceLineItemInput {
      */
   commit_granted_cents?: number;
   /**
-     * When the granted credit expires. Must be in the future. Needs
+     * When the granted credit expires. The credit can be drawn up to
+     * and including this instant; a period invoice draws it when its
+     * period ends at or before it. The dashboard sends the local
+     * midnight after the picked day. Must be in the future. Needs
      * `commit_granted_cents`. Absent means it never expires.
      */
   commit_expires_at?: string;
