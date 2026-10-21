@@ -281,5 +281,19 @@ func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, 
 			return ctx, true
 		}
 	}
+	// Bind at the boundary, inherit below it (ADR-029). On a test clock the
+	// resolver can only answer the clock's frozen_time, so a nested
+	// resolution of the SAME clock never knows more than the caller did. A
+	// caller that bound an earlier instant on that clock did it on purpose:
+	// a cycle close at its boundary, a dunning retry at its slot, a trial
+	// flip at trial_end_at, a pause resume at resumes_at. Replacing that
+	// instant with frozen_time dated every effect below the rebind (an audit
+	// row, a pause start, a write-off) at the advance's target instead of
+	// the contracted instant. An inherited instant AFTER frozen_time is not
+	// one any caller can contract, so the resolution replaces it, and a
+	// different clock always wins.
+	if inherited, ok := SimOf(ctx); ok && inherited.TestClockID == sim.TestClockID && !inherited.At.After(sim.At) {
+		return ctx, true
+	}
 	return WithSim(ctx, sim), true
 }

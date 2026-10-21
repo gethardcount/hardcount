@@ -2814,13 +2814,11 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 		"triggered_by": "schedule",
 		"canceled_at":  canceled.CanceledAt.UTC().Format(time.RFC3339),
 	}
-	// The trial-end instant is its OWN fact, under its own key. It is NOT the
-	// row's sim_effective_at: that column means "the simulated instant the
-	// clock stood at when this mutation was performed", and the audit writer
-	// owns it from the ctx binding (simColumns). A catchup performs this cancel
-	// at the advance's instant, which may be weeks of simulated time after the
-	// trial actually ended — two different facts that used to collide on one
-	// key, with the writer silently winning.
+	// The trial-end instant is its OWN fact, under its own key. The row's
+	// sim_effective_at is a separate column the audit writer owns from the
+	// ctx binding (simColumns); the two used to collide on one key, with the
+	// writer silently winning. The catchup binds ctx to trial_end_at before
+	// calling this (B12), so on a test clock both now carry the same instant.
 	if sub.TrialEndAt != nil {
 		meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
 	}
@@ -2867,7 +2865,14 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			continue
 		}
 		trialEndAt := *sub.TrialEndAt
-		bound := s.bindForSub(ctx, tenantID, sub.ID)
+		// The trial ends at trial_end_at, not wherever the advance landed
+		// (B12): override the INSTANT while keeping the CLOCK, as the pause
+		// resume below does. Every branch runs on this ctx: the flip's audit
+		// row, the day-1 invoice (issued at trial_end_at, see
+		// buildOnCreateInvoice), its finalize row and collection, and the
+		// free cancel's row. Nested binds of the same clock inherit it
+		// (clock.BindEffectiveNow).
+		bound := clock.WithSim(s.bindForSub(ctx, tenantID, sub.ID), clock.Sim{At: trialEndAt, TestClockID: clockID})
 		// ADR-069 routing: a due cancel schedule means CANCEL FREE, never
 		// activate-and-bill. The SQL guard on the activation UPDATE is the
 		// atomic backstop for a schedule landing after this snapshot.
@@ -2926,9 +2931,10 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 		// in webhooks and the Activity feed missed it (same asymmetry the
 		// scheduled-cancel + pause-auto-resume audits already fixed).
 		if s.audit != nil {
-			// trial_end_at is its own fact; the row's sim axis (test_clock_id +
-			// sim_effective_at) comes from the ctx binding on `bound`, which the
-			// audit writer owns. See cancelTrialAtEnd.
+			// trial_end_at is its own fact, on every trial-end writer; the
+			// row's sim axis (test_clock_id + sim_effective_at) comes from the
+			// ctx binding on `bound`, which the audit writer owns and which
+			// is trial_end_at here.
 			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
 				"action":       domain.SubAuditTrialEnded,
 				"customer_id":  activated.CustomerID,
@@ -3045,6 +3051,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 				"action":       domain.SubAuditTrialEnded,
 				"customer_id":  activated.CustomerID,
 				"triggered_by": "schedule",
+				"trial_end_at": trialEndAt.UTC().Format(time.RFC3339),
 			})
 		}
 

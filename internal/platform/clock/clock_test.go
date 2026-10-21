@@ -309,6 +309,56 @@ func TestBindEffectiveNow_NeverDowngradesAnInheritedBinding(t *testing.T) {
 	}
 }
 
+// TestBindEffectiveNow_KeepsAContractedInstantOnTheSameClock pins "bind at
+// the boundary, inherit below it" (ADR-029) for a deliberate rebind. A caller
+// that bound an earlier instant on a clock (a cycle close at its boundary, a
+// dunning retry at its slot, a trial flip at trial_end_at) must keep it
+// through a nested resolution of the same clock: that resolution can only
+// answer frozen_time, so taking it dated every effect below the rebind at the
+// advance's target (P-5 in the activity line standard).
+func TestBindEffectiveNow_KeepsAContractedInstantOnTheSameClock(t *testing.T) {
+	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	slot := frozen.Add(-9 * 24 * time.Hour)
+	resolvesTo := func(s Sim) *stubResolver {
+		return &stubResolver{invoiceFunc: func() (Sim, error) { return s, nil }}
+	}
+	pin := Pin{TenantID: "t1", InvoiceID: "inv_1"}
+
+	cases := []struct {
+		name     string
+		inherit  Sim
+		resolved Sim
+		want     Sim
+	}{
+		{"same clock, contracted instant before frozen: kept",
+			Sim{At: slot, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}, Sim{At: slot, TestClockID: "vlx_tclk_1"}},
+		{"same clock, same instant: kept",
+			Sim{At: frozen, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}},
+		{"same clock, inherited instant after frozen: replaced",
+			Sim{At: frozen.Add(time.Hour), TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_1"}},
+		{"different clock: the resolution wins",
+			Sim{At: slot, TestClockID: "vlx_tclk_1"}, Sim{At: frozen, TestClockID: "vlx_tclk_2"}, Sim{At: frozen, TestClockID: "vlx_tclk_2"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := BindEffectiveNow(WithSim(context.Background(), c.inherit), resolvesTo(c.resolved), pin)
+			if !ok {
+				t.Fatal("bind reported no effective-now")
+			}
+			sim, bound := SimOf(got)
+			if !bound || sim.TestClockID != c.want.TestClockID || !sim.At.Equal(c.want.At) {
+				t.Errorf("bound %+v (simulated=%v), want %+v", sim, bound, c.want)
+			}
+		})
+	}
+
+	// A bare instant (no clock) is not a contracted one: the resolution wins.
+	got, _ := BindEffectiveNow(WithEffectiveNow(context.Background(), slot), resolvesTo(Sim{At: frozen, TestClockID: "vlx_tclk_1"}), pin)
+	if sim, ok := SimOf(got); !ok || !sim.At.Equal(frozen) {
+		t.Errorf("under a bare WithEffectiveNow: bound %+v (simulated=%v), want the resolved clock at %v", sim, ok, frozen)
+	}
+}
+
 type stubResolver struct {
 	invoiceFunc func() (Sim, error)
 	subFunc     func() (Sim, error)
