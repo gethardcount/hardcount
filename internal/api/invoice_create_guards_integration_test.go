@@ -140,6 +140,26 @@ func TestInvoiceCreate_RefusesDiscountAndTaxLines(t *testing.T) {
 	}
 }
 
+// Each commit line passes the per-line rules; only the invoice-level rule
+// (one commit per invoice) refuses the pair, and it must do so before the
+// number is taken.
+func TestInvoiceCreate_TwoCommitLinesUseNoNumber(t *testing.T) {
+	e := newInvoiceGuardEnv(t, "Invoice Two Commits Co")
+	cust := e.customer(t, "two-commits")
+	first := e.addOnInvoice(t, cust)
+	commit := func(desc string) map[string]any {
+		return map[string]any{"description": desc, "quantity": 1, "unit_amount_cents": 10000, "commit_granted_cents": 10000}
+	}
+	r := e.call(t, "POST", "/v1/invoices", map[string]any{
+		"customer_id": cust, "line_items": []map[string]any{commit("Commit 1"), commit("Commit 2")},
+	})
+	wantInvalid(t, r, "commit_granted_cents", "create with two commit lines")
+	if n := e.invoiceCount(t, cust); n != 1 {
+		t.Errorf("customer has %d invoices, want only the first", n)
+	}
+	e.wantNextNumber(t, cust, first)
+}
+
 func TestAddLineItem_RefusesDiscountAndTaxLines(t *testing.T) {
 	e := newInvoiceGuardEnv(t, "Invoice Add Line Co")
 	cust := e.customer(t, "add-line")

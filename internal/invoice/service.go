@@ -687,6 +687,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// clock bound just above.
 	items := make([]domain.InvoiceLineItem, 0, len(input.LineItems))
 	var subtotal int64
+	commitLines := 0
 	for i, liInput := range input.LineItems {
 		li, err := buildLineItem(liInput, currency)
 		if err != nil {
@@ -697,8 +698,17 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1,
 				errs.Invalid("commit_expires_at", "must be in the future"))
 		}
+		if li.IsCommitLine() {
+			commitLines++
+		}
 		subtotal += li.AmountCents
 		items = append(items, li)
+	}
+	// One commit per invoice (ADR-078). The store enforces it too, under the
+	// row lock, for AddLineItem; checking here as well keeps a refused pair
+	// from using up a number.
+	if commitLines > 1 {
+		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "invoice already has a commit line — one commit per invoice; use a separate invoice")
 	}
 	// One-off invoices that omit a billing window default to "now → now" so
 	// the NOT NULL period columns get sane values. Cycle invoices always
