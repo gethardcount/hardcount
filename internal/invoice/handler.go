@@ -50,11 +50,13 @@ type CreditNoteLister interface {
 	List(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error)
 }
 
-// PaymentCharger creates a Stripe PaymentIntent for a finalized invoice.
+// PaymentCharger creates a Stripe PaymentIntent for a finalized invoice on
+// an operator's or API caller's request (Collect payment, "Charge now").
 type PaymentCharger interface {
+	// ChargeInvoiceNow records its attempt as charge_now, not auto_charge.
 	// hold is the charge hold the caller's claim returned (ADR-127): the
 	// charge re-checks it right before sending and sends nothing without it.
-	ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error)
+	ChargeInvoiceNow(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error)
 }
 
 // PaymentSetupGetter checks if a customer has a payment method ready.
@@ -1182,7 +1184,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// velox_anchor_at), which dates paid_at and a decline's first dunning
 	// retry. Unbound, a Collect on a later Advance dated the retry from the
 	// issue instant, in the past. A wall-clock invoice binds nothing.
-	charged, err := h.charger.ChargeInvoice(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	charged, err := h.charger.ChargeInvoiceNow(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a
 		// *payment.PaymentError which respond.FromError detects and

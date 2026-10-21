@@ -17,7 +17,7 @@ import (
 // ctxCapturingCharger records the ctx the charge ran under.
 type ctxCapturingCharger struct{ ctx context.Context }
 
-func (c *ctxCapturingCharger) ChargeInvoice(ctx context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+func (c *ctxCapturingCharger) ChargeInvoiceNow(ctx context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	c.ctx = ctx
 	return inv, nil
 }
