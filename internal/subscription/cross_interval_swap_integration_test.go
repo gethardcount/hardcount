@@ -28,32 +28,36 @@ func (r *swapPlanReader) GetPlan(_ context.Context, _, id string) (domain.Plan, 
 	return p, nil
 }
 
-// billOnCreateTxErrBiller implements subscription.Biller and fails the in-tx
-// new-period bill — the exact in-tx failure the atomic swap must roll back from.
-type billOnCreateTxErrBiller struct{ err error }
+// swapBillErrBiller implements subscription.Biller and fails the in-tx swap
+// invoice (BillOnPlanSwapTx) — the exact in-tx failure the atomic swap must
+// roll back from.
+type swapBillErrBiller struct{ err error }
 
-func (b *billOnCreateTxErrBiller) BillOnCreate(context.Context, domain.Subscription) (domain.Invoice, error) {
+func (b *swapBillErrBiller) BillOnCreate(context.Context, domain.Subscription) (domain.Invoice, error) {
 	return domain.Invoice{}, nil
 }
-func (b *billOnCreateTxErrBiller) BillFinalOnImmediateCancel(context.Context, domain.Subscription) (domain.Invoice, error) {
+func (b *swapBillErrBiller) BillFinalOnImmediateCancel(context.Context, domain.Subscription) (domain.Invoice, error) {
 	return domain.Invoice{}, nil
 }
-func (b *billOnCreateTxErrBiller) BillFinalOnImmediateCancelTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, func(), error) {
+func (b *swapBillErrBiller) BillFinalOnImmediateCancelTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, func(), error) {
 	return domain.Invoice{}, func() {}, nil
 }
-func (b *billOnCreateTxErrBiller) BillOnCancelDraftsTx(context.Context, *sql.Tx, domain.Subscription) (domain.Relief, error) {
+func (b *swapBillErrBiller) BillOnCancelDraftsTx(context.Context, *sql.Tx, domain.Subscription) (domain.Relief, error) {
 	return domain.Relief{}, nil
 }
-func (b *billOnCreateTxErrBiller) BillOnPlanSwapDraftsTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Relief, error) {
+func (b *swapBillErrBiller) BillOnPlanSwapDraftsTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Relief, error) {
 	return domain.Relief{}, nil
 }
-func (b *billOnCreateTxErrBiller) FinishRelief(context.Context, domain.Subscription, domain.Relief) {}
-func (b *billOnCreateTxErrBiller) BillOnCreateTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Invoice, bool, error) {
-	return domain.Invoice{}, false, b.err
+func (b *swapBillErrBiller) FinishRelief(context.Context, domain.Subscription, domain.Relief) {}
+func (b *swapBillErrBiller) BillOnCreateTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Invoice, bool, error) {
+	return domain.Invoice{}, false, nil
 }
-func (b *billOnCreateTxErrBiller) FinalizeOnCreateInvoice(context.Context, domain.Subscription, domain.Invoice) {
+func (b *swapBillErrBiller) BillOnPlanSwapTx(context.Context, *sql.Tx, domain.Subscription, domain.Subscription, time.Time) (domain.Invoice, bool, func(), error) {
+	return domain.Invoice{}, false, func() {}, b.err
 }
-func (b *billOnCreateTxErrBiller) ThresholdBilledThroughTx(context.Context, *sql.Tx, domain.Subscription) (*time.Time, error) {
+func (b *swapBillErrBiller) FinalizeOnCreateInvoice(context.Context, domain.Subscription, domain.Invoice) {
+}
+func (b *swapBillErrBiller) ThresholdBilledThroughTx(context.Context, *sql.Tx, domain.Subscription) (*time.Time, error) {
 	return nil, nil
 }
 
@@ -121,7 +125,7 @@ func TestUpdateItemTx_CrossIntervalSwap_RealTxRollsBackOnBillFailure(t *testing.
 
 	svc := subscription.NewService(store, nil)
 	svc.SetPlanReader(&swapPlanReader{plans: map[string]domain.Plan{oldPlan.ID: oldPlan, newPlan.ID: newPlan}})
-	svc.SetBiller(&billOnCreateTxErrBiller{err: errors.New("simulated new-period bill failure")}) // BillOnCreateTx fails in-tx
+	svc.SetBiller(&swapBillErrBiller{err: errors.New("simulated swap bill failure")}) // BillOnPlanSwapTx fails in-tx
 
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
