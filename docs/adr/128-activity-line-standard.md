@@ -82,7 +82,12 @@ verified to make (day headers), it says so.
 6. **One clock rule.** A line is dated on the entity's calendar. An automatic
    event is dated at the instant the contract names (renewal, trial end,
    retry slot), never at the instant a clock was moved. On a test clock the
-   meta line ends with `Recorded <real date and time>`.
+   meta line ends with `Recorded <real date and time>`. One bound: a
+   subscription's pause or cancel is never dated before its current period
+   began. An advance bills a renewal before the dunning work due earlier, so
+   a run that escalates before that renewal pauses or cancels at the renewal.
+   Dated earlier, the cancel would bill no final invoice and leave the
+   renewal's unused invoice in place.
 7. **Four tones, one meaning each.** Neutral (things that happened), success
    (money arrived or was returned), warning (needs a look, or money will not
    be collected), failure (an attempt failed). A failure or warning row says
