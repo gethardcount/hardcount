@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/doctor"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -690,5 +691,89 @@ func TestCloseLag_CrossIntervalSwap_InGap(t *testing.T) {
 				t.Errorf("April base billed = %dc, want 3000c: April ran to its end on plan A", aprBase)
 			}
 		})
+	}
+}
+
+// TestCrossIntervalSwap_InAdvance_BillsOldPeriodUsageOnce: mid-April the
+// operator swaps the monthly in_advance plan for the yearly one, immediately.
+// The swap moves the period to [swap, swap + 1 year), so the usage of
+// [Apr 1, swap) has no other closer: the swap's invoice bills it, beside the
+// new year's base, stamped with the old window. The yearly close then bills
+// only what came after the swap.
+//
+// Mutation seams: drop the carried usage lines (the swap invoice bills 0c of
+// usage and April's 100c is never billed); end the old window at the new
+// period end (the 7c after the swap is billed twice); start it at the swap
+// (April's 100c is never billed).
+func TestCrossIntervalSwap_InAdvance_BillsOldPeriodUsageOnce(t *testing.T) {
+	skipShort(t)
+	r := newLagRig(t, "in_advance", false)
+	r.ingest(time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC), 100)
+	swapAt := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
+	r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, swapAt,
+		map[string]any{"new_plan_id": r.planY, "immediate": true}, http.StatusOK)
+	s := r.sub()
+	if s.CurrentBillingPeriodStart == nil || !s.CurrentBillingPeriodStart.Equal(swapAt) || s.CurrentBillingPeriodEnd == nil {
+		t.Fatalf("after the swap: period [%v, %v), want it to start at the swap %v", s.CurrentBillingPeriodStart, s.CurrentBillingPeriodEnd, swapAt)
+	}
+	newPE := *s.CurrentBillingPeriodEnd
+	r.ingest(time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC), 7)
+	r.run(newPE.Add(time.Hour))
+
+	invs := r.invoices()
+	r.logInvoices(invs)
+
+	var swapInv []lagInvoice
+	for _, i := range invs {
+		if i.reason == string(domain.BillingReasonSubscriptionCreate) && i.start.Equal(swapAt) {
+			swapInv = append(swapInv, i)
+		}
+	}
+	if len(swapInv) != 1 {
+		t.Fatalf("%d swap invoices headed at %v, want 1", len(swapInv), swapAt)
+	}
+	sw := swapInv[0]
+	if sw.sum("base_fee") != 30000 {
+		t.Errorf("swap invoice base = %dc, want the new year's 30000c", sw.sum("base_fee"))
+	}
+	if sw.sum("usage") != 100 {
+		t.Errorf("swap invoice usage = %dc, want 100c: the usage of [Apr 1, swap) under the old plan", sw.sum("usage"))
+	}
+	for _, l := range sw.lines {
+		if l.typ == "usage" && (l.start == nil || !l.start.Equal(lagP0)) {
+			t.Errorf("swap invoice usage line starts %v, want the old period start %v", l.start, lagP0)
+		}
+	}
+
+	yearly := r.cycleInvoice(invs, newPE)
+	if yearly.sum("usage") != 7 {
+		t.Errorf("yearly close usage = %dc, want 7c: only the usage after the swap", yearly.sum("usage"))
+	}
+	for _, l := range yearly.lines {
+		if l.start != nil && l.start.Equal(lagP0) {
+			t.Errorf("yearly close carries a %s line starting Apr 1 (%dc): the old window was billed again", l.typ, l.amount)
+		}
+	}
+
+	var oldWindowUsage int64
+	for _, i := range invs {
+		for _, l := range i.lines {
+			if l.typ == "usage" && l.start != nil && !l.start.Before(lagP0) && l.start.Before(swapAt) {
+				oldWindowUsage += l.amount
+			}
+		}
+	}
+	if oldWindowUsage != 100 {
+		t.Errorf("usage stamped in [Apr 1, swap) over all live invoices = %dc, want exactly 100c", oldWindowUsage)
+	}
+
+	res := doctor.Run(context.Background(), testutil.AdminPool(t), doctor.Checks)
+	for _, e := range res.Errors {
+		t.Errorf("doctor check failed to run: %v", e)
+	}
+	for _, v := range res.Violations {
+		if v.Check.Name == "usage_billed_once_per_subscription_meter_window" && strings.Contains(v.Detail, r.subID) {
+			t.Errorf("doctor: usage billed twice: %s %s", v.RowID, v.Detail)
+		}
 	}
 }

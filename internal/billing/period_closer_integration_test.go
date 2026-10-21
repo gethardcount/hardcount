@@ -570,6 +570,46 @@ func (s *swapRig) swap(t *testing.T, r *s1Rig, at time.Time) error {
 	return nil
 }
 
+// newInAdvanceSwapRig re-plans the fixture sub onto an in_advance monthly
+// plan (base 1000c) and returns a swapRig whose target is an in_advance yearly
+// plan (base 10000c): same cadence both sides, cross interval. The returned
+// plan is the monthly one the sub now runs on.
+func newInAdvanceSwapRig(t *testing.T, r *s1Rig) (*swapRig, domain.Plan) {
+	t.Helper()
+	advMonthly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+		Code: "pln_adv_m", Name: "Adv Monthly", Currency: "USD", BillingInterval: domain.BillingMonthly,
+		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+	})
+	if err != nil {
+		t.Fatalf("create in_advance monthly: %v", err)
+	}
+	advYearly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+		Code: "pln_adv_y", Name: "Adv Yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
+		BaseAmountCents: 10000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+	})
+	if err != nil {
+		t.Fatalf("create in_advance yearly: %v", err)
+	}
+	tx, err := r.f.db.BeginTx(r.base, postgres.TxTenant, r.f.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.ExecContext(r.base, `UPDATE subscription_items SET plan_id = $1 WHERE id = $2`, advMonthly.ID, r.f.itemID); err != nil {
+		t.Fatalf("re-plan item: %v", err)
+	}
+	if _, err := tx.ExecContext(r.base, `UPDATE billing_intervals SET plan_id = $1 WHERE subscription_item_id = $2`, advMonthly.ID, r.f.itemID); err != nil {
+		t.Fatalf("re-plan interval: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit re-plan: %v", err)
+	}
+	plans := &hookedPlanReader{plans: map[string]domain.Plan{advMonthly.ID: advMonthly, advYearly.ID: advYearly}}
+	svc := subscription.NewService(r.f.subStore, nil)
+	svc.SetPlanReader(plans)
+	svc.SetBiller(r.closer.engine)
+	return &swapRig{svc: svc, plans: plans, newPlan: advYearly, itemID: r.f.itemID}, advMonthly
+}
+
 func assertPeriodMoved409(t *testing.T, err error, wantMsg string) {
 	t.Helper()
 	var de *errs.DomainError
@@ -634,40 +674,7 @@ func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 
 	t.Run("in_advance: operator close wins, stale swap 409", func(t *testing.T) {
 		r := newS1Rig(t, "S1 swap-after-close in_advance", 200, false)
-		// Re-plan the fixture sub onto an in_advance monthly plan (swap target:
-		// in_advance yearly) — same cadence both sides, cross interval.
-		advMonthly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
-			Code: "pln_adv_m", Name: "Adv Monthly", Currency: "USD", BillingInterval: domain.BillingMonthly,
-			BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
-		})
-		if err != nil {
-			t.Fatalf("create in_advance monthly: %v", err)
-		}
-		advYearly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
-			Code: "pln_adv_y", Name: "Adv Yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
-			BaseAmountCents: 10000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
-		})
-		if err != nil {
-			t.Fatalf("create in_advance yearly: %v", err)
-		}
-		tx, err := r.f.db.BeginTx(r.base, postgres.TxTenant, r.f.tenantID)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		if _, err := tx.ExecContext(r.base, `UPDATE subscription_items SET plan_id = $1 WHERE id = $2`, advMonthly.ID, r.f.itemID); err != nil {
-			t.Fatalf("re-plan item: %v", err)
-		}
-		if _, err := tx.ExecContext(r.base, `UPDATE billing_intervals SET plan_id = $1 WHERE subscription_item_id = $2`, advMonthly.ID, r.f.itemID); err != nil {
-			t.Fatalf("re-plan interval: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit re-plan: %v", err)
-		}
-		plans := &hookedPlanReader{plans: map[string]domain.Plan{advMonthly.ID: advMonthly, advYearly.ID: advYearly}}
-		svc := subscription.NewService(r.f.subStore, nil)
-		svc.SetPlanReader(plans)
-		svc.SetBiller(r.closer.engine)
-		sw := &swapRig{svc: svc, plans: plans, newPlan: advYearly, itemID: r.f.itemID}
+		sw, advMonthly := newInAdvanceSwapRig(t, r)
 
 		sw.plans.onSecond = func() {
 			if gen := r.runClose(t); gen != 1 {
@@ -753,6 +760,136 @@ func TestPlanSwap_StaleSnapshot_RejectedAfterClose(t *testing.T) {
 		}
 		r.assertPeriod(t, r.f.cycleStart, &r.f.cycleEnd) // [P0, P1): untouched
 	})
+}
+
+// TestPlanSwap_InAdvance_AfterResetFalseFire_BillsResidualOnce: a reset=false
+// fire at t1 billed [P0, t1) (300c) and kept the period. An immediate
+// in_advance cross-interval swap later moves the period to the swap instant,
+// so it is the old window's closer: its invoice bills the usage from the
+// fire's watermark to the swap, and nothing before it. Two orders: the fire
+// commits before the swap reads the sub, and the fire commits between the
+// swap's read and its period CAS (which it passes: a reset=false fire does
+// not move the period).
+//
+// Mutation-verify: give buildCancelLineItems a zero watermark in
+// BillOnPlanSwapTx → the swap invoice bills [P0, t1) again (1000c, not 700c)
+// and the doctor sees the overlap with the fire invoice.
+func TestPlanSwap_InAdvance_AfterResetFalseFire_BillsResidualOnce(t *testing.T) {
+	cases := []struct {
+		name       string
+		concurrent bool
+		extra      int64 // usage ingested after the fire, before the swap
+	}{
+		{"fire, more usage, then swap", false, 5},
+		{"fire commits between the swap's read and its CAS", true, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newS1Rig(t, "S1 fire-then-swap in_advance "+c.name, 200, false)
+			sw, _ := newInAdvanceSwapRig(t, r)
+			swapAt := r.f.cycleStart.Add(3 * time.Hour)
+			if c.concurrent {
+				sw.plans.onSecond = func() {
+					if fired := r.runFire(t); fired != 1 {
+						t.Fatalf("fire reported %d, want 1", fired)
+					}
+				}
+			} else {
+				if fired := r.runFire(t); fired != 1 {
+					t.Fatalf("fire reported %d, want 1", fired)
+				}
+				ingestAt(t, r, r.f.cycleStart.Add(2*time.Hour), int(c.extra), 1)
+			}
+			if err := sw.swap(t, r, swapAt); err != nil {
+				t.Fatalf("swap: %v", err)
+			}
+			r.assertPeriod(t, swapAt, nil)
+
+			_, threshold, other := r.liveInvoices(t)
+			if len(threshold) != 1 || len(other) != 1 {
+				t.Fatalf("invoices: threshold=%d other=%d, want the fire's invoice and the swap's invoice", len(threshold), len(other))
+			}
+			fire := threshold[0]
+			if fire.SubtotalCents != 300 || !fire.BillingPeriodStart.Equal(r.f.cycleStart) || !fire.BillingPeriodEnd.Equal(r.t1) {
+				t.Fatalf("fire invoice = [%v, %v) %dc, want [P0, t1) 300c, untouched", fire.BillingPeriodStart, fire.BillingPeriodEnd, fire.SubtotalCents)
+			}
+			swapInv := other[0]
+			if !swapInv.BillingPeriodStart.Equal(swapAt) {
+				t.Fatalf("swap invoice header starts %v, want the swap instant %v", swapInv.BillingPeriodStart, swapAt)
+			}
+			var usageCents int64
+			for _, li := range r.usageLines(t, swapInv.ID) {
+				if li.BillingPeriodStart == nil || !li.BillingPeriodStart.Equal(r.t1) || li.BillingPeriodEnd == nil || !li.BillingPeriodEnd.Equal(swapAt) {
+					t.Errorf("swap usage line [%v, %v), want [t1, swap)", li.BillingPeriodStart, li.BillingPeriodEnd)
+				}
+				usageCents += li.AmountCents
+			}
+			if want := 700 + c.extra; usageCents != want {
+				t.Fatalf("swap invoice usage = %dc, want %dc: only the usage after the fire's watermark", usageCents, want)
+			}
+			assertUsageBilledOnce(t, r.base)
+		})
+	}
+}
+
+// failingTaxResolver refuses to resolve a tax provider while fail is set, and
+// otherwise serves the tenant's real one. The swap reaches tax after it has
+// built every line, so this fails it at its last step before the writes.
+type failingTaxResolver struct {
+	fail  bool
+	inner *tax.Resolver
+}
+
+func (f *failingTaxResolver) Resolve(ctx context.Context, ts domain.TenantSettings) (tax.Provider, error) {
+	if f.fail {
+		return nil, errors.New("injected: tax provider unavailable")
+	}
+	return f.inner.Resolve(ctx, ts)
+}
+
+// TestPlanSwap_InAdvance_TaxFailureRollsBack_RetryBillsUsageOnce: the swap
+// builds the old window's usage lines and the new year's base, then tax
+// fails. The whole swap rolls back: the plan, the period, no invoice, no
+// invoice number taken. The retry bills the old window's usage once.
+func TestPlanSwap_InAdvance_TaxFailureRollsBack_RetryBillsUsageOnce(t *testing.T) {
+	r := newS1Rig(t, "S1 swap tax failure in_advance", 1_000_000, false)
+	sw, advMonthly := newInAdvanceSwapRig(t, r)
+	taxes := &failingTaxResolver{fail: true, inner: tax.NewResolver(nil)}
+	r.closer.engine.SetTaxProviderResolver(taxes)
+	seqBefore := nextInvoiceSeq(t, r)
+	swapAt := r.f.cycleStart.Add(3 * time.Hour)
+
+	if err := sw.swap(t, r, swapAt); err == nil || !strings.Contains(err.Error(), "injected") {
+		t.Fatalf("swap with tax failing: err = %v, want the injected tax error", err)
+	}
+	if got := r.itemPlan(t); got != advMonthly.ID {
+		t.Fatalf("item plan = %s after a rolled-back swap, want unchanged %s", got, advMonthly.ID)
+	}
+	r.assertPeriod(t, r.f.cycleStart, &r.f.cycleEnd)
+	if cycle, threshold, other := r.liveInvoices(t); len(cycle)+len(threshold)+len(other) != 0 {
+		t.Fatalf("an invoice survived the rolled-back swap: cycle=%d threshold=%d other=%d", len(cycle), len(threshold), len(other))
+	}
+	if got := nextInvoiceSeq(t, r); got != seqBefore {
+		t.Fatalf("invoice sequence moved %d → %d on a rolled-back swap", seqBefore, got)
+	}
+
+	taxes.fail = false
+	if err := sw.swap(t, r, swapAt); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	r.assertPeriod(t, swapAt, nil)
+	_, _, other := r.liveInvoices(t)
+	if len(other) != 1 {
+		t.Fatalf("invoices after the retry: %d, want the swap's one", len(other))
+	}
+	var usageCents int64
+	for _, li := range r.usageLines(t, other[0].ID) {
+		usageCents += li.AmountCents
+	}
+	if usageCents != 1000 {
+		t.Fatalf("swap invoice usage = %dc, want 1000c: the old window's usage, once", usageCents)
+	}
+	assertUsageBilledOnce(t, r.base)
 }
 
 // ---------------------------------------------------------------------------
@@ -976,11 +1113,15 @@ func TestThresholdFire_vs_Close_FireFirst_ResetTrue_CalendarStartOnly(t *testing
 // start predicate tells the stale close (snapshot {Jan 1 2025, Jan 1 2026})
 // that its period is gone. It misses, re-reads [Dec 10, Jan 1) on the
 // monthly plan and closes it: the cycle invoice prepays [Jan 1, Feb 1) at
-// the monthly rate and the sub opens [Jan 1, Feb 1).
+// the monthly rate and the sub opens [Jan 1, Feb 1). Usage is billed once:
+// the swap's invoice bills the old year's [Jan 1 2025, Dec 10), the close
+// only [Dec 10, Jan 1).
 //
 // Mutation-verify: drop ONLY `current_billing_period_start … $8` → the stale
 // close passes the CAS, overwrites the swap's re-anchor with the OLD yearly
 // plan's [Jan 1 2026, Jan 1 2027) and prepays a year the customer just left.
+// Drop the swap invoice's carried usage lines → the old year's 100c is never
+// billed.
 func TestPlanSwap_vs_Close_SwapFirst_InAdvanceCalendar_StartOnly(t *testing.T) {
 	r := newS1Rig(t, "S1 calendar start-only swap", 200, false)
 	p0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1017,6 +1158,8 @@ func TestPlanSwap_vs_Close_SwapFirst_InAdvanceCalendar_StartOnly(t *testing.T) {
 		t.Fatalf("commit re-plan: %v", err)
 	}
 	calendarize(t, r, p0, p1)
+	ingestAt(t, r, time.Date(2025, 11, 3, 9, 0, 0, 0, time.UTC), 10, 10) // 100c in the old year, before the swap
+	ingestAt(t, r, time.Date(2025, 12, 20, 9, 0, 0, 0, time.UTC), 5, 10) // 50c after the swap
 
 	plans := &hookedPlanReader{plans: map[string]domain.Plan{yearly.ID: yearly, monthly.ID: monthly}}
 	svc := subscription.NewService(r.f.subStore, nil)
@@ -1059,4 +1202,24 @@ func TestPlanSwap_vs_Close_SwapFirst_InAdvanceCalendar_StartOnly(t *testing.T) {
 		t.Fatalf("close generated %d, want 1", gen)
 	}
 	r.assertPeriod(t, p1, &feb1) // [Jan 1, Feb 1): the monthly cadence stands
+
+	// Usage: the swap's invoice closes the old year's window, the close only
+	// the stub after the swap.
+	sumUsage := func(invID string, from, to time.Time) int64 {
+		var n int64
+		for _, li := range r.usageLines(t, invID) {
+			if li.BillingPeriodStart == nil || li.BillingPeriodEnd == nil || !li.BillingPeriodStart.Equal(from) || !li.BillingPeriodEnd.Equal(to) {
+				t.Errorf("invoice %s usage line [%v, %v), want [%v, %v)", invID, li.BillingPeriodStart, li.BillingPeriodEnd, from, to)
+			}
+			n += li.AmountCents
+		}
+		return n
+	}
+	if got := sumUsage(other[0].ID, p0, swapAt); got != 100 {
+		t.Errorf("swap invoice usage = %dc, want 100c: the old year's usage before Dec 10", got)
+	}
+	if got := sumUsage(cycle[0].ID, swapAt, p1); got != 50 {
+		t.Errorf("Jan 1 close usage = %dc, want 50c: only [Dec 10, Jan 1)", got)
+	}
+	assertUsageBilledOnce(t, r.base)
 }
