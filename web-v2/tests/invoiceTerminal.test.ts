@@ -99,6 +99,20 @@ test('invoiceRowAmount says what the figure is, and a closed invoice is never "d
   assert.equal(invoiceRowAmount({ ...base, currency: 'EUR', status: 'finalized' }), '€29.00 due')
 })
 
+test('invoiceRowAmount: customer credit that settled a paid invoice counts as paid', () => {
+  // Credit lowers amount_due and leaves amount_paid alone, so an invoice a
+  // prepaid commit paid in full settles with amount_paid 0 and read "$0.00
+  // paid" (review of #1328). The invoice page lists the credit as paying it.
+  const paid = { ...base, status: 'paid', amount_due_cents: 0 }
+  assert.equal(invoiceRowAmount({ ...paid, amount_paid_cents: 0, credits_applied_cents: 2900 }), '$29.00 paid')
+  // Part credit, part card.
+  assert.equal(invoiceRowAmount({ ...paid, amount_paid_cents: 1900, credits_applied_cents: 1000 }), '$29.00 paid')
+  // Negative control: a credit note that left nothing due paid nothing.
+  assert.equal(invoiceRowAmount({ ...paid, amount_paid_cents: 0, credits_applied_cents: 0 }), '$0.00 paid')
+  // Applied credit on an open invoice is not money due or paid on the row.
+  assert.equal(invoiceRowAmount({ ...base, status: 'finalized', amount_due_cents: 1900, credits_applied_cents: 1000 }), '$19.00 due')
+})
+
 test('invoiceAmountLine and invoiceHeadline keep the public pages’ figures', () => {
   // The amount line: amount_due under the status-aware label.
   assert.deepEqual(invoiceAmountLine({ ...base, status: 'voided' }), { label: 'Invoice amount', cents: 2900 })

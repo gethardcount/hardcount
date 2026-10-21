@@ -346,6 +346,24 @@ test('closing an unpaid invoice: void gives back the credit it used, write-off c
   await expect(page.getByRole('button', { name: /^Pay/ })).toHaveCount(0)
 })
 
+test('a voided invoice in euros owes €0.00 on its page', async ({ page }) => {
+  // The page's void branch printed a literal "$0.00" whatever the currency,
+  // while the Invoices list read "€0.00" (review of #1328).
+  const customer = await createCustomer()
+  const draft = await api<Invoice>('POST', '/invoices', {
+    customer_id: customer.id,
+    currency: 'EUR',
+    line_items: [{ description: 'E2E setup fee', line_type: 'add_on', quantity: 1, unit_amount_cents: 4900 }],
+  })
+  await api('POST', `/invoices/${draft.id}/finalize`)
+  await api('POST', `/invoices/${draft.id}/void`)
+  expect((await getInvoice(draft.id)).invoice.status).toBe('voided')
+
+  await page.goto(`/invoices/${draft.id}`)
+  await expect(statusPill(page, 'Void')).toBeVisible()
+  await expect(figure(page, 'Amount due')).toContainText('€0.00')
+})
+
 test('the credit notes page issues a note against an invoice, and issues or voids a draft', async ({ page }) => {
   const { invoice } = await billedCustomer()
   await page.goto('/credit-notes')
