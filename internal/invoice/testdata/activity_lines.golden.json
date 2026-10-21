@@ -775,6 +775,27 @@
     ]
   },
   {
+    "case": "attempt/failed/charge_now",
+    "line": {
+      "id": "attempt/failed/charge_now",
+      "kind": "payment.failed",
+      "title": "Payment failed",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "Card declined by the bank",
+      "detail": [],
+      "tone": "failure",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment failed · $49.00",
+      "problem: Card declined by the bank",
+      "tone: failure"
+    ]
+  },
+  {
     "case": "attempt/failed/dunning_retry",
     "line": {
       "id": "attempt/failed/dunning_retry",
@@ -824,6 +845,25 @@
     "case": "attempt/pending/auto_charge",
     "line": {
       "id": "attempt/pending/auto_charge",
+      "kind": "payment.pending",
+      "title": "Payment in progress",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment in progress · $49.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "attempt/pending/charge_now",
+    "line": {
+      "id": "attempt/pending/charge_now",
       "kind": "payment.pending",
       "title": "Payment in progress",
       "amount": {
@@ -903,6 +943,27 @@
     ]
   },
   {
+    "case": "attempt/succeeded/charge_now",
+    "line": {
+      "id": "attempt/succeeded/charge_now",
+      "kind": "payment.succeeded",
+      "title": "Payment succeeded",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The invoice is not marked paid yet.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment succeeded · $49.00",
+      "problem: The invoice is not marked paid yet.",
+      "tone: warning"
+    ]
+  },
+  {
     "case": "attempt/succeeded/dunning_retry",
     "line": {
       "id": "attempt/succeeded/dunning_retry",
@@ -952,6 +1013,27 @@
     "case": "attempt/unknown/auto_charge",
     "line": {
       "id": "attempt/unknown/auto_charge",
+      "kind": "payment.result_unknown",
+      "title": "Payment result unknown",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The payment provider has not confirmed whether this charge went through.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment result unknown · $49.00",
+      "problem: The payment provider has not confirmed whether this charge went through.",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "attempt/unknown/charge_now",
+    "line": {
+      "id": "attempt/unknown/charge_now",
       "kind": "payment.result_unknown",
       "title": "Payment result unknown",
       "amount": {

@@ -21,7 +21,7 @@ type fakeCharger struct {
 	err    error
 }
 
-func (f *fakeCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+func (f *fakeCharger) ChargeInvoiceNow(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
 	f.called = true
 	if f.err != nil {
 		return domain.Invoice{}, f.err
