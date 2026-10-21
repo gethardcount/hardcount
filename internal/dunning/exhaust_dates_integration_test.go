@@ -85,6 +85,15 @@ func (d *declinedRetry) RetryPayment(ctx context.Context, tenantID, invoiceID, _
 // exhaust-on-entry after an interrupted exhaustion (next_action_at is the
 // lease, stamp = last_attempt_at); a lowered max_retry (stamp = the run's due
 // slot); and cancel instead of pause.
+//
+// The renewed arms bound it: the advance's cycle phase already moved the
+// subscription into a period that began after the slot (the catchup bills
+// before it duns). The pause or cancel then lands at that period's start,
+// never before it; the write-off and the escalated event keep the slot. A
+// cancel dated before current_period_start bills no final invoice and gives
+// the period's prebill no relief (internal/api
+// TestDunningFinalAction_TestClock_NeverBeforeTheCurrentPeriod covers that
+// with the engine wired).
 func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 	slot := time.Date(2027, 4, 10, 6, 0, 0, 0, time.UTC) // the run's due instant
 	frozen := slot.Add(48 * time.Hour)                   // the advance target
@@ -98,14 +107,17 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 		nextAction   time.Time
 		wantStamp    time.Time
 		wantRetries  int
+		renewed      bool // the current period began a day after the slot
 	}{
-		{"inline after the final retry, pause", domain.SubActionPause, 1, last, slot, slot, 1},
-		{"inline after the final retry, cancel", domain.SubActionCancel, 1, last, slot, slot, 1},
+		{"inline after the final retry, pause", domain.SubActionPause, 1, last, slot, slot, 1, false},
+		{"inline after the final retry, cancel", domain.SubActionCancel, 1, last, slot, slot, 1, false},
 		// The final retry ran at slot and wrote the lease; the process died
 		// before the final actions. The next advance re-drives them.
-		{"exhaust on entry after an interrupted exhaustion", domain.SubActionPause, 2, slot, slot.Add(15 * time.Minute), slot, 0},
+		{"exhaust on entry after an interrupted exhaustion", domain.SubActionPause, 2, slot, slot.Add(15 * time.Minute), slot, 0, false},
 		// The policy's max_retry was lowered under a run already at it.
-		{"exhaust on entry after max_retry was lowered", domain.SubActionPause, 2, last, slot, slot, 0},
+		{"exhaust on entry after max_retry was lowered", domain.SubActionPause, 2, last, slot, slot, 0, false},
+		{"inline after the final retry, renewed since, pause", domain.SubActionPause, 1, last, slot, slot, 1, true},
+		{"inline after the final retry, renewed since, cancel", domain.SubActionCancel, 1, last, slot, slot, 1, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,9 +148,23 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 				t.Fatalf("create plan: %v", err)
 			}
 			// The current period runs past the advance, so the cancel finds
-			// no ended period to bill first.
+			// no ended period to bill first. The invoice in dunning bills it,
+			// or, renewed, the period before it.
 			periodStart := slot.Add(-10 * 24 * time.Hour)
+			if tc.renewed {
+				periodStart = slot.Add(24 * time.Hour)
+			}
 			periodEnd := periodStart.AddDate(0, 1, 0)
+			invStart, invEnd := periodStart, periodEnd
+			if tc.renewed {
+				invStart, invEnd = periodStart.AddDate(0, -1, 0), periodStart
+			}
+			// The subscription's action: at the escalation, but never before
+			// the current period.
+			wantSub := tc.wantStamp
+			if tc.renewed {
+				wantSub = periodStart
+			}
 			subStore := subscription.NewPostgresStore(db)
 			sub, err := subStore.Create(ctx, tenantID, domain.Subscription{
 				Code: "sub-exhaust-dates", DisplayName: "Exhaust Dates", CustomerID: cust.ID, TestClockID: clockID,
@@ -156,7 +182,7 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 				CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: "INV-EXHAUST-DATES",
 				Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 				SubtotalCents: 4900, TotalAmountCents: 4900, AmountDueCents: 4900, IsSimulated: true,
-				BillingPeriodStart: periodStart, BillingPeriodEnd: periodEnd, IssuedAt: &periodStart,
+				BillingPeriodStart: invStart, BillingPeriodEnd: invEnd, IssuedAt: &invStart,
 			})
 			if err != nil {
 				t.Fatalf("create invoice: %v", err)
@@ -187,7 +213,7 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 				INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
 					attempt_count, last_attempt_at, next_action_at, paused, created_at, updated_at, livemode)
 				VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', $6, $7, $8, false, $9, $9, false)`,
-				runID, tenantID, inv.ID, cust.ID, policy.ID, tc.attemptsUsed, tc.lastAttempt, tc.nextAction, periodStart); err != nil {
+				runID, tenantID, inv.ID, cust.ID, policy.ID, tc.attemptsUsed, tc.lastAttempt, tc.nextAction, invStart); err != nil {
 				postgres.Rollback(tx)
 				t.Fatalf("insert run: %v", err)
 			}
@@ -256,9 +282,9 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 				if s.CanceledAt == nil {
 					t.Fatalf("subscription is %s with no canceled_at, want canceled", s.Status)
 				}
-				wantInstant(t, "subscription canceled_at", *s.CanceledAt, tc.wantStamp)
+				wantInstant(t, "subscription canceled_at", *s.CanceledAt, wantSub)
 			}
-			wantInstant(t, "subscription "+string(auditAction)+" audit row sim_effective_at", subAuditSimAt(t, admin, sub.ID, auditAction, action), tc.wantStamp)
+			wantInstant(t, "subscription "+string(auditAction)+" audit row sim_effective_at", subAuditSimAt(t, admin, sub.ID, auditAction, action), wantSub)
 		})
 	}
 }
@@ -298,6 +324,6 @@ func subAuditSimAt(t *testing.T, admin *sql.DB, subID, action, metaAction string
 func wantInstant(t *testing.T, what string, got, want time.Time) {
 	t.Helper()
 	if !got.Equal(want) {
-		t.Errorf("%s = %v, want the escalation's %v (off by %v)", what, got.UTC(), want, got.Sub(want))
+		t.Errorf("%s = %v, want %v (off by %v)", what, got.UTC(), want, got.Sub(want))
 	}
 }

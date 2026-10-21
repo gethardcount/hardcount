@@ -25,11 +25,13 @@ import (
 // datesRig is the real router on a real database, one tenant and a monthly
 // in_advance plan.
 type datesRig struct {
-	t      *testing.T
-	srv    *Server
-	ts     *httptest.Server
-	call   func(method, path string, req flowReq) flowResp
-	planID string
+	t        *testing.T
+	db       *postgres.DB
+	tenantID string
+	srv      *Server
+	ts       *httptest.Server
+	call     func(method, path string, req flowReq) flowResp
+	planID   string
 }
 
 func newDatesRig(t *testing.T, name string) *datesRig {
@@ -40,7 +42,7 @@ func newDatesRig(t *testing.T, name string) *datesRig {
 	t.Cleanup(ts.Close)
 	tenantID := testutil.CreateTestTenant(t, db, name)
 	key := createAPIKeyWithMode(t, db, tenantID, false)
-	r := &datesRig{t: t, srv: srv, ts: ts}
+	r := &datesRig{t: t, db: db, tenantID: tenantID, srv: srv, ts: ts}
 	r.call = func(method, path string, req flowReq) flowResp {
 		t.Helper()
 		req.bearer = key
