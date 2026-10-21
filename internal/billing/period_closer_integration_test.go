@@ -825,7 +825,7 @@ func TestPlanSwap_InAdvance_AfterResetFalseFire_BillsResidualOnce(t *testing.T) 
 				usageCents += li.AmountCents
 			}
 			if want := 700 + c.extra; usageCents != want {
-				t.Fatalf("swap invoice usage = %dc, want %dc: only the usage after the fire's watermark", usageCents, want)
+				t.Errorf("swap invoice usage = %dc, want %dc: only the usage after the fire's watermark", usageCents, want)
 			}
 			assertUsageBilledOnce(t, r.base)
 		})

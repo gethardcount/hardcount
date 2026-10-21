@@ -703,8 +703,9 @@ func TestCloseLag_CrossIntervalSwap_InGap(t *testing.T) {
 //
 // Mutation seams: drop the carried usage lines (the swap invoice bills 0c of
 // usage and April's 100c is never billed); end the old window at the new
-// period end (the 7c after the swap is billed twice); start it at the swap
-// (April's 100c is never billed).
+// period end (its line then overlaps the yearly close's [swap, new end) line,
+// and the doctor flags it); start it at the swap (April's 100c is never
+// billed).
 func TestCrossIntervalSwap_InAdvance_BillsOldPeriodUsageOnce(t *testing.T) {
 	skipShort(t)
 	r := newLagRig(t, "in_advance", false)

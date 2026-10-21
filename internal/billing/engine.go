@@ -3466,7 +3466,7 @@ func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (dom
 	)
 	defer span.End()
 
-	inv, lineItems, ok, err := e.buildOnCreateInvoice(ctx, sub, e.effectiveNow(ctx, sub))
+	inv, lineItems, ok, err := e.buildOnCreateInvoice(ctx, sub, e.effectiveNow(ctx, sub), nil)
 	if err != nil {
 		return domain.Invoice{}, err
 	}
@@ -3523,15 +3523,15 @@ func (e *Engine) nextInvoiceNumber(ctx context.Context, tx *sql.Tx, tenantID str
 // inserts the day-1 in_advance invoice on the caller's tx but does NOT finalize
 // (audit / tax-commit / auto-charge are external and must run after the tx
 // commits). The caller commits, then calls FinalizeOnCreateInvoice post-commit.
-// Used by the atomic cross-interval plan-swap so the new-period invoice commits
-// atomically with the plan write + watermark advance — a failed bill rolls the
-// whole swap back rather than silently dropping the new in_advance period.
+// Used by create, activate and the trial flip, so the day-1 invoice commits
+// atomically with the subscription write. (The cross-interval plan swap uses
+// BillOnPlanSwapTx, which also bills the old period's usage.)
 // Returns ok=false (nil error) for the no-op cases (no in_advance items / zero
 // subtotal) and for an idempotent-skip on the period-uniqueness constraint.
 //
 // startAt is the instant the billed period began for this subscription: the
-// trial end on a trial flip, the request's now on create, activate, early
-// trial end and plan swap. The pause is read as it stood then, because a trial
+// trial end on a trial flip, the request's now on create, activate and early
+// trial end (and the swap instant for BillOnPlanSwapTx). The pause is read as it stood then, because a trial
 // flip can run after resumes_at for a period that began while still paused.
 func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, startAt time.Time) (domain.Invoice, bool, error) {
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillOnCreateTx",
@@ -3542,7 +3542,7 @@ func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subs
 	)
 	defer span.End()
 
-	inv, lineItems, ok, err := e.buildOnCreateInvoice(ctx, sub, startAt)
+	inv, lineItems, ok, err := e.buildOnCreateInvoice(ctx, sub, startAt, nil)
 	if err != nil {
 		return domain.Invoice{}, false, err
 	}
@@ -3578,6 +3578,109 @@ func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subs
 	return created, true, nil
 }
 
+// BillOnPlanSwapTx writes, on the swap's tx, the invoice of an immediate
+// in_advance cross-interval plan swap (ADR-056). The swap moves the period
+// from [old start, old end) to [at, new end), so it is the closer of the old
+// window [old start, at): nothing else bills that window's usage later. The
+// invoice has the renewal shape (ADR-031): the new period's base, plus the old
+// window's usage priced as an immediate cancel prices its partial window
+// (buildCancelLineItems: from the threshold watermark, segment-aware, in_advance
+// base skipped). One invoice, one charge.
+//
+// before is the pre-swap snapshot the caller proved under the subscription
+// row lock (the period CAS and the item check); after is the prospective
+// subscription on the new plan and period. The threshold watermark is read on
+// tx, after that lock, so a reset=false fire that committed before the lock is
+// seen and its window is not billed again; a later fire fails its own CAS.
+//
+// ok=false (nil error) when there is nothing to bill. afterCommit is never
+// nil; the caller runs it once tx commits (it counts the usage left unpriced,
+// which a rolled-back, retried swap must not count twice).
+func (e *Engine) BillOnPlanSwapTx(ctx context.Context, tx *sql.Tx, before, after domain.Subscription, at time.Time) (domain.Invoice, bool, func(), error) {
+	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillOnPlanSwapTx",
+		trace.WithAttributes(
+			attribute.String("subscription_id", before.ID),
+			attribute.String("tenant_id", before.TenantID),
+		),
+	)
+	defer span.End()
+
+	unpriced := unpricedUsage{}
+	afterCommit := func() { unpriced.record(ctx, before) }
+	if before.CurrentBillingPeriodStart == nil || before.CurrentBillingPeriodEnd == nil {
+		return domain.Invoice{}, false, afterCommit, fmt.Errorf("subscription has no billing period set")
+	}
+	ps, pe := *before.CurrentBillingPeriodStart, *before.CurrentBillingPeriodEnd
+
+	belowZero := netNegativeUsage{}
+	var carry []domain.InvoiceLineItem
+	if at.After(ps) {
+		wm, err := e.loadThresholdWatermarkTx(ctx, tx, before.TenantID, before.ID, ps, pe)
+		if err != nil {
+			return domain.Invoice{}, false, afterCommit, err
+		}
+		plans := make(map[string]domain.Plan, len(before.Items))
+		for _, it := range before.Items {
+			if _, ok := plans[it.PlanID]; ok {
+				continue
+			}
+			pl, err := e.pricing.GetPlan(ctx, before.TenantID, it.PlanID)
+			if err != nil {
+				return domain.Invoice{}, false, afterCommit, fmt.Errorf("get plan %s: %w", it.PlanID, err)
+			}
+			plans[it.PlanID] = pl
+		}
+		if len(before.Items) > 0 {
+			// Same currency order as the cancel; the swap refuses a currency
+			// change (ADR-100), so it is the new invoice's currency too.
+			cur, err := e.invoiceCurrency(ctx, before, plans[before.Items[0].PlanID].Currency)
+			if err != nil {
+				return domain.Invoice{}, false, afterCommit, err
+			}
+			loc, err := e.tenantLocation(ctx, before.TenantID)
+			if err != nil {
+				return domain.Invoice{}, false, afterCommit, err
+			}
+			carry, _, err = e.buildCancelLineItems(ctx, before, wm, plans, cur, ps, at, loc, unpriced, belowZero, swapUsageSuffix)
+			if err != nil {
+				return domain.Invoice{}, false, afterCommit, fmt.Errorf("plan swap: old period usage: %w", err)
+			}
+		}
+	}
+	noteBelowZero := func(inv domain.Invoice) error {
+		return e.noteNetNegativeTx(ctx, tx, before, belowZero, domain.BillingReasonSubscriptionCreate, ps, at, inv)
+	}
+
+	inv, lineItems, ok, err := e.buildOnCreateInvoice(ctx, after, at, carry)
+	if err != nil {
+		return domain.Invoice{}, false, afterCommit, err
+	}
+	if !ok {
+		if err := noteBelowZero(domain.Invoice{}); err != nil {
+			return domain.Invoice{}, false, afterCommit, fmt.Errorf("usage below zero row (swap tx): %w", err)
+		}
+		return domain.Invoice{}, false, afterCommit, nil
+	}
+	invoiceNumber, err := e.nextInvoiceNumber(ctx, tx, after.TenantID)
+	if err != nil {
+		return domain.Invoice{}, false, afterCommit, fmt.Errorf("mint invoice number: %w", err)
+	}
+	inv.InvoiceNumber = invoiceNumber
+	// No idempotent skip: a unique violation poisons the caller's tx (see
+	// BillOnCreateTx), so it fails the swap loud.
+	created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, after.TenantID, inv, lineItems)
+	if err != nil {
+		return domain.Invoice{}, false, afterCommit, fmt.Errorf("create plan-swap invoice (tx): %w", err)
+	}
+	if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
+		return domain.Invoice{}, false, afterCommit, fmt.Errorf("finalize audit (swap tx): %w", err)
+	}
+	if err := noteBelowZero(created); err != nil {
+		return domain.Invoice{}, false, afterCommit, fmt.Errorf("usage below zero row (swap tx): %w", err)
+	}
+	return created, true, afterCommit, nil
+}
+
 // buildOnCreateInvoice computes the day-1 in_advance invoice for sub: resolves
 // plans, filters to in_advance items, builds prorated base-fee lines, and
 // applies tax. It performs NO DB writes and mints NO invoice number — the
@@ -3586,7 +3689,12 @@ func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subs
 // cases: inactive sub, no in_advance items, or zero subtotal. The returned
 // invoice has no InvoiceNumber and carries CreatedAt == effective-now.
 // startAt is the instant the pause is read at (see BillOnCreateTx).
-func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscription, startAt time.Time) (domain.Invoice, []domain.InvoiceLineItem, bool, error) {
+//
+// carry is lines another window owes that this invoice bills beside the base:
+// the old period's usage on a plan swap (BillOnPlanSwapTx). They count toward
+// the zero-subtotal check and are taxed with the base. nil for a plain day-1
+// invoice.
+func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscription, startAt time.Time, carry []domain.InvoiceLineItem) (domain.Invoice, []domain.InvoiceLineItem, bool, error) {
 	if sub.Status != domain.SubscriptionActive {
 		return domain.Invoice{}, nil, false, nil
 	}
@@ -3647,11 +3755,15 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 		return domain.Invoice{}, nil, false, err
 	}
 	baseLines := onCreateBaseLines(sub, plans, advanceItems, periodStart, periodEnd, invoiceCurrency, billingLoc)
-	lineItems := make([]domain.InvoiceLineItem, 0, len(baseLines))
+	lineItems := make([]domain.InvoiceLineItem, 0, len(baseLines)+len(carry))
 	subtotal := int64(0)
 	for _, bl := range baseLines {
 		lineItems = append(lineItems, bl.line)
 		subtotal += bl.line.AmountCents
+	}
+	for _, li := range carry {
+		lineItems = append(lineItems, li)
+		subtotal += li.AmountCents
 	}
 
 	if subtotal <= 0 {
@@ -3885,6 +3997,13 @@ func (e *Engine) resolveRatedRule(ctx context.Context, tenantID, customerID, pin
 	return domain.RatingRuleVersion{}, fmt.Errorf("resolve override for rule %q: %w", rule.RuleKey, err)
 }
 
+// The usage-line suffixes of a partial window: an immediate cancel ended it,
+// or a cross-interval plan swap did (BillOnPlanSwapTx).
+const (
+	cancelUsageSuffix = " - canceled mid-period"
+	swapUsageSuffix   = " - before plan change"
+)
+
 // buildCancelLineItems computes the final invoice's line items and
 // subtotal for an immediate mid-period cancel: segment-aware in_arrears
 // base fees over the partial period [periodStart, canceledAt] (skipped
@@ -3895,8 +4014,10 @@ func (e *Engine) resolveRatedRule(ctx context.Context, tenantID, customerID, pin
 // pricing computation from the cancel-invoice orchestration; it is the
 // cancel-path analog of buildLineItems and shares its segment model.
 // Usage left unpriced is added to unpriced, and usage below zero to
-// belowZero, as in buildLineItems.
-func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscription, wm thresholdWatermark, plans map[string]domain.Plan, invoiceCurrency string, periodStart, canceledAt time.Time, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, error) {
+// belowZero, as in buildLineItems. usageSuffix ends each usage line's
+// description and says why the window ended early: cancelUsageSuffix or
+// swapUsageSuffix.
+func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscription, wm thresholdWatermark, plans map[string]domain.Plan, invoiceCurrency string, periodStart, canceledAt time.Time, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage, usageSuffix string) ([]domain.InvoiceLineItem, int64, error) {
 	// Build base lines: segment-aware in_arrears billing over the
 	// partial period [periodStart, canceledAt]. in_advance items are
 	// explicitly skipped — their base for the just-canceled period
@@ -4179,7 +4300,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 						LineType:                 domain.LineTypeUsage,
 						MeterID:                  meterID,
 						MeterUnit:                meter.Unit,
-						Description:              usageLineDescription(meter, rulesByID[agg.RuleID]) + " - canceled mid-period",
+						Description:              usageLineDescription(meter, rulesByID[agg.RuleID]) + usageSuffix,
 						Quantity:                 qty.IntPart(),
 						QuantityDecimal:          qty,
 						UnitAmountCents:          unitAmount,
@@ -4250,7 +4371,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 				LineType:                 domain.LineTypeUsage,
 				MeterID:                  meterID,
 				MeterUnit:                meter.Unit,
-				Description:              fmt.Sprintf("%s (%s) - canceled mid-period", meter.Name, meter.Unit),
+				Description:              fmt.Sprintf("%s (%s)", meter.Name, meter.Unit) + usageSuffix,
 				Quantity:                 quantity.IntPart(),
 				QuantityDecimal:          quantity,
 				UnitAmountCents:          unitAmount,
@@ -4391,7 +4512,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// tx, the caller's transaction can still roll back, so it is left in
 	// unpriced for the caller to count after its commit.
 	belowZero := netNegativeUsage{}
-	lineItems, subtotal, err := e.buildCancelLineItems(ctx, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc, unpriced, belowZero)
+	lineItems, subtotal, err := e.buildCancelLineItems(ctx, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc, unpriced, belowZero, cancelUsageSuffix)
 	if err != nil {
 		return domain.Invoice{}, err
 	}
