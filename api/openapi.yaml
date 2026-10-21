@@ -413,13 +413,6 @@ components:
         billing_anchor_day:
           type: integer
           description: Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions.
-        usage_cap_units:
-          type: integer
-          format: int64
-          description: Most usage units per billing period. Absent means no cap.
-        overage_action:
-          type: string
-          description: "`block` or `charge` (the default)."
         test_clock_id:
           type: string
         billing_failure:
@@ -11592,8 +11585,7 @@ paths:
         A top-up shows on the next read.
 
         Not included, so the figure can read high: tax, base fees billed at
-        period end, and amounts due on unpaid invoices. A subscription with a
-        blocking usage cap can read low. Requires a secret key.
+        period end, and amounts due on unpaid invoices. Requires a secret key.
       parameters:
         - name: customer_id
           in: path

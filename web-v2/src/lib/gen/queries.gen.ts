@@ -12947,8 +12947,7 @@ export const getGetV1CreditsBalanceCustomerIdLiveUrl = (customerId: string,) => 
  * A top-up shows on the next read.
  *
  * Not included, so the figure can read high: tax, base fees billed at
- * period end, and amounts due on unpaid invoices. A subscription with a
- * blocking usage cap can read low. Requires a secret key.
+ * period end, and amounts due on unpaid invoices. Requires a secret key.
  * @summary Get customer live credit balance
  */
 export const getV1CreditsBalanceCustomerIdLive = async (customerId: string, options?: RequestInit): Promise<CreditLiveBalance> => {

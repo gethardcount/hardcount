@@ -5358,8 +5358,7 @@ export interface paths {
          *     A top-up shows on the next read.
          *
          *     Not included, so the figure can read high: tax, base fees billed at
-         *     period end, and amounts due on unpaid invoices. A subscription with a
-         *     blocking usage cap can read low. Requires a secret key.
+         *     period end, and amounts due on unpaid invoices. Requires a secret key.
          */
         get: {
             parameters: {
@@ -7030,13 +7029,6 @@ export interface components {
             next_billing_at?: string;
             /** @description Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
             billing_anchor_day?: number;
-            /**
-             * Format: int64
-             * @description Most usage units per billing period. Absent means no cap.
-             */
-            usage_cap_units?: number;
-            /** @description `block` or `charge` (the default). */
-            overage_action?: string;
             test_clock_id?: string;
             billing_failure?: components["schemas"]["BillingFailure"];
             /** Format: date-time */

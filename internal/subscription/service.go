@@ -642,15 +642,13 @@ type CreateItemInput struct {
 const maxTrialDays = 730
 
 type CreateInput struct {
-	Code          string                         `json:"code"`
-	DisplayName   string                         `json:"display_name"`
-	CustomerID    string                         `json:"customer_id"`
-	Items         []CreateItemInput              `json:"items"`
-	BillingTime   domain.SubscriptionBillingTime `json:"billing_time"`
-	TrialDays     int                            `json:"trial_days,omitempty"`
-	StartNow      bool                           `json:"start_now,omitempty"`
-	UsageCapUnits *int64                         `json:"usage_cap_units,omitempty"`
-	OverageAction string                         `json:"overage_action,omitempty"`
+	Code        string                         `json:"code"`
+	DisplayName string                         `json:"display_name"`
+	CustomerID  string                         `json:"customer_id"`
+	Items       []CreateItemInput              `json:"items"`
+	BillingTime domain.SubscriptionBillingTime `json:"billing_time"`
+	TrialDays   int                            `json:"trial_days,omitempty"`
+	StartNow    bool                           `json:"start_now,omitempty"`
 }
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
@@ -854,11 +852,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		billingAnchorDay = anchorDay
 	}
 
-	overageAction := input.OverageAction
-	if overageAction == "" {
-		overageAction = "charge"
-	}
-
 	// ADR-031: in_advance plans get a day-1 invoice covering the upcoming
 	// period's base fee. Build it IN THE SAME tx as the subscription insert
 	// (ADR-056 coordinator) so a billing failure rolls the whole create back
@@ -884,8 +877,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		CurrentBillingPeriodEnd:   periodEnd,
 		NextBillingAt:             nextBilling,
 		BillingAnchorDay:          billingAnchorDay,
-		UsageCapUnits:             input.UsageCapUnits,
-		OverageAction:             overageAction,
 		TestClockID:               inheritedClockID,
 		Items:                     items,
 	}, func(tx *sql.Tx, created domain.Subscription) error {

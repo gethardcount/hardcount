@@ -528,26 +528,6 @@ func TestCreatePreview_ExplicitSubscriptionWrongCustomer(t *testing.T) {
 	}
 }
 
-// setUsageCap turns on a blocking per-period usage cap on an existing sub.
-// usage_cap_units lives on the subscription (not the item), so this UPDATE
-// doesn't fire the subscription_items change trigger.
-func (f *previewFixture) setUsageCap(t *testing.T, ctx context.Context, subID string, capUnits int64) {
-	t.Helper()
-	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
-	if err != nil {
-		t.Fatalf("begin cap tx: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE subscriptions SET usage_cap_units = $2, overage_action = 'block' WHERE id = $1`,
-		subID, capUnits); err != nil {
-		t.Fatalf("set usage cap: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit cap: %v", err)
-	}
-}
-
 // seedItemChange records a mid-period plan change in subscription_item_changes,
 // the row ListItemChangesInPeriod reads to trigger segment-aware billing.
 // livemode=false matches the WithLivemode(false) test ctx and the sub's row
@@ -631,25 +611,12 @@ func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
 		return res
 	}
 
-	t.Run("clean sub (no cap, no change) has no scope warnings", func(t *testing.T) {
+	t.Run("clean sub (no change) has no scope warnings", func(t *testing.T) {
 		custID, _, _ := f.seedSubscription(t, ctx, "cus_clean", "pln_clean", meter.ID, cycleStart, cycleEnd)
 		ingest(custID, 100)
 		res := preview(custID)
 		if len(res.Warnings) != 0 {
 			t.Errorf("clean sub must have no scope warnings, got %v", res.Warnings)
-		}
-	})
-
-	t.Run("blocking usage cap surfaces the cap warning", func(t *testing.T) {
-		custID, _, subID := f.seedSubscription(t, ctx, "cus_cap", "pln_cap", meter.ID, cycleStart, cycleEnd)
-		f.setUsageCap(t, ctx, subID, 500) // 100×10 = 1000 units > 500 cap
-		ingest(custID, 100)
-		res := preview(custID)
-		if !warns(res.Warnings, "usage cap") {
-			t.Errorf("capped sub must warn the estimate excludes the cap, got %v", res.Warnings)
-		}
-		if warns(res.Warnings, "mid-period") {
-			t.Errorf("capped sub with no change must NOT emit the segment warning, got %v", res.Warnings)
 		}
 	})
 
@@ -669,9 +636,6 @@ func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
 		}
 		if !warns(res.Warnings, "mid-period proration") {
 			t.Errorf("mid-period-changed sub must warn about segment proration, got %v", res.Warnings)
-		}
-		if warns(res.Warnings, "usage cap") {
-			t.Errorf("uncapped sub must NOT emit the cap warning, got %v", res.Warnings)
 		}
 	})
 }

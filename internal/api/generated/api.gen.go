@@ -5841,9 +5841,6 @@ type Subscription struct {
 	Items         []SubscriptionItem `json:"items,omitempty"`
 	NextBillingAt time.Time          `json:"next_billing_at,omitempty"`
 
-	// OverageAction `block` or `charge` (the default).
-	OverageAction string `json:"overage_action,omitempty"`
-
 	// PauseCollection Present on a subscription while collection is paused. Invoices are
 	// still created, but stay drafts and are not charged.
 	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
@@ -5854,9 +5851,6 @@ type Subscription struct {
 	TrialEndAt      time.Time                   `json:"trial_end_at,omitempty"`
 	TrialStartAt    time.Time                   `json:"trial_start_at,omitempty"`
 	UpdatedAt       time.Time                   `json:"updated_at"`
-
-	// UsageCapUnits Most usage units per billing period. Absent means no cap.
-	UsageCapUnits int64 `json:"usage_cap_units,omitempty"`
 }
 
 // SubscriptionBillingTime defines model for Subscription.BillingTime.
