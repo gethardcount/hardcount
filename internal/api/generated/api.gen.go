@@ -7557,7 +7557,7 @@ type UpsertMeterPricingRuleJSONBodyAggregationMode string
 
 // PostV1PlansJSONBody defines parameters for PostV1Plans.
 type PostV1PlansJSONBody struct {
-	BaseAmountCents int `json:"base_amount_cents,omitempty"`
+	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
 	// BaseBillTiming Optional. Defaults to in_arrears. See Plan.base_bill_timing
 	// for semantics (ADR-031).
@@ -7565,8 +7565,14 @@ type PostV1PlansJSONBody struct {
 	BillingInterval PostV1PlansJSONBodyBillingInterval `json:"billing_interval"`
 	Code            string                             `json:"code"`
 	Currency        string                             `json:"currency"`
+	Description     string                             `json:"description,omitempty"`
 	MeterIds        []string                           `json:"meter_ids,omitempty"`
 	Name            string                             `json:"name"`
+
+	// TaxCode Stripe product tax code for the base fee, such as
+	// `txcd_10103001`. Empty or omitted means the tenant's
+	// `default_product_tax_code`.
+	TaxCode string `json:"tax_code,omitempty"`
 }
 
 // PostV1PlansParams defines parameters for PostV1Plans.
@@ -7600,7 +7606,7 @@ type UpdatePlanJSONBody struct {
 	BaseAmountCents int64                            `json:"base_amount_cents,omitempty"`
 	BaseBillTiming  UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
 
-	// Description Omitting it clears the stored description.
+	// Description Whitespace is trimmed. Omit to keep the current description; an empty string clears it.
 	Description string `json:"description,omitempty"`
 
 	// MeterIds Replaces the plan's meters. Omit to keep them.
@@ -7610,7 +7616,7 @@ type UpdatePlanJSONBody struct {
 	Name   string                   `json:"name,omitempty"`
 	Status UpdatePlanJSONBodyStatus `json:"status,omitempty"`
 
-	// TaxCode Stripe product tax code. Omitting it clears the stored code.
+	// TaxCode Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`.
 	TaxCode string `json:"tax_code,omitempty"`
 }
 

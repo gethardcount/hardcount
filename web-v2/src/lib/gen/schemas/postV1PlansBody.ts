@@ -13,6 +13,7 @@ import type { PostV1PlansBodyBillingInterval } from './postV1PlansBodyBillingInt
 export type PostV1PlansBody = {
   code: string;
   name: string;
+  description?: string;
   currency: string;
   billing_interval: PostV1PlansBodyBillingInterval;
   base_amount_cents?: number;
@@ -22,4 +23,10 @@ export type PostV1PlansBody = {
      */
   base_bill_timing?: PostV1PlansBodyBaseBillTiming;
   meter_ids?: string[];
+  /**
+     * Stripe product tax code for the base fee, such as
+     * `txcd_10103001`. Empty or omitted means the tenant's
+     * `default_product_tax_code`.
+     */
+  tax_code?: string;
 };
