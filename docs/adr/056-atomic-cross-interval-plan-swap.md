@@ -1,7 +1,7 @@
 # ADR-056: Cross-interval plan swap restructures the cycle atomically
 
 **Date:** 2026-06-19
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-22: the swap invoice also bills the old period's usage)
 
 ## Summary
 
@@ -63,3 +63,18 @@ both via `FinalizeCrossIntervalSwap` after `tx.Commit()`. (The tax *calculation*
 - Cross-interval immediate swaps take the atomic path **unconditionally** — including at the period boundary (`remainingDays == 0`), where the handler forces it rather than falling to the non-atomic fallback (`applyCrossIntervalPlanSwapTx` derives the new period from `now`, not from `remainingDays`). The non-atomic `applyCrossIntervalPlanSwap` remains only for the handler-tx-unwired (test) path and now fails loud on a bill failure.
 - A uniform-interval guard is enforced on the atomic path too: a multi-item swap that would leave items on mixed intervals is rejected (mirrors the non-atomic path) before any restructure, so unchanged items are never billed over the wrong period.
 - Related: ADR-030 (atomic proration), ADR-031 (in_advance bill timing), ADR-055 (anniversary anchor — reused for the swap's re-anchor).
+
+## Amendment 2026-10-22: the swap invoice bills the old period's usage
+
+**What was wrong.** An in_advance swap moves the period from [old start, old end) to [swap, new end). Its invoice carried only the new period's base. Usage is billed by whoever closes its window, and nothing closed [old start, swap): the next cycle close bills [swap, new end) only. So a monthly in_advance customer who moved to yearly on day 16 was never billed for days 1 to 16 of usage.
+
+**Decision.** The swap closes the old window, so its invoice bills it. The invoice takes the renewal shape of [ADR-031](031-per-plan-base-bill-timing.md): the new period's base, plus usage lines stamped with the old window. One invoice and one charge, written on the swap transaction (`BillOnPlanSwapTx`, which replaces `BillOnCreateTx` on this path).
+
+- The usage is priced the way an immediate cancel prices its partial window (`buildCancelLineItems`): old plan, segment-aware, the usage cap applied, in_advance base skipped.
+- Usage starts at the threshold watermark ([ADR-066](066-threshold-money-semantics.md) §4). A `reset_billing_cycle=false` threshold invoice that billed [old start, t1) leaves [t1, swap) to the swap. The swap still refuses a fire that billed past its instant (ADR-115). The watermark is read on the swap transaction after the period CAS took the row lock, so a fire that committed before the lock is seen. A fire after it fails its own CAS.
+- Late usage follows [ADR-120](120-invoice-grace-period-for-late-usage.md), as for an immediate cancel: an operator action bills now, and an event stamped before the swap that arrives after it is not billed.
+- Usage below zero writes its `subscription.net_negative_usage` row on the swap transaction. The unpriced-usage count runs after commit.
+- The in_arrears branch is unchanged: it shortens the period to [old start, swap), and the cycle close bills it.
+
+**Rejected:** shortening the in_advance period to [old start, swap) as the in_arrears branch does, and letting the cycle close bill it. It deletes code, but costs more: collection moves to the next billing run and the swap response loses its invoice. It also undoes the synchronous new-period invoice above, and re-enters the period-denominator bug class (FLOW B21).
+

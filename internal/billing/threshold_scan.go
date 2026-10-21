@@ -369,7 +369,21 @@ type thresholdWatermark struct {
 // ErrNotFound = no fire = zero watermark, nil error. Any other failure is
 // loud: closing blind risks a double charge (feedback_no_silent_fallbacks).
 func (e *Engine) loadThresholdWatermark(ctx context.Context, tenantID, subID string, periodStart, periodEnd time.Time) (thresholdWatermark, error) {
-	wmInv, err := e.invoices.GetLatestThresholdInvoiceForCycle(ctx, tenantID, subID, periodStart, periodEnd)
+	return e.loadThresholdWatermarkTx(ctx, nil, tenantID, subID, periodStart, periodEnd)
+}
+
+// loadThresholdWatermarkTx is loadThresholdWatermark with the fire invoice read
+// on tx (nil: its own connection). A closer that holds the subscription row
+// lock reads on its tx, after the lock: a fire commits under the same lock, so
+// every fire committed before it is seen (BillOnPlanSwapTx).
+func (e *Engine) loadThresholdWatermarkTx(ctx context.Context, tx *sql.Tx, tenantID, subID string, periodStart, periodEnd time.Time) (thresholdWatermark, error) {
+	var wmInv domain.Invoice
+	var err error
+	if tx != nil {
+		wmInv, err = e.invoices.GetLatestThresholdInvoiceForCycleTx(ctx, tx, tenantID, subID, periodStart, periodEnd)
+	} else {
+		wmInv, err = e.invoices.GetLatestThresholdInvoiceForCycle(ctx, tenantID, subID, periodStart, periodEnd)
+	}
 	if errors.Is(err, errs.ErrNotFound) {
 		return thresholdWatermark{}, nil
 	}
