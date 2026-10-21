@@ -215,9 +215,9 @@ subscription's to bill:
   product tells operators to cancel and recreate in several places, so
   this is a real trigger, not a rare edge.
 
-**Decision.** Every closer builds a meter's usage window with one
-function, `meterUsageIntervals`, and one floor, `usageFloors`. A window
-starts at the latest of:
+**Decision.** Every closer starts a meter's usage window at one floor,
+`usageFloors`. The closers that bill by segment build the window with
+one function, `meterUsageIntervals`. A window starts at the latest of:
 
 1. its segment start, which is the period start for an item there from
    the start of the period (this ADR);
@@ -231,11 +231,14 @@ starts at the latest of:
    additive buckets bill from (ADR-066 §4).
 
 It ends at the earliest of the period end and the cancel instant, as
-before. The closers are the cycle close, the immediate and scheduled
-cancel, the cross-interval swap (ADR-056), the threshold fire and its
-item-threshold count, the operator preview and the live credit
-estimate. The fire's usage lines are stamped with the floored start.
-Rules stay pinned at the period start (ADR-070).
+before. The closers that bill by segment are the cycle close, the
+immediate and scheduled cancel, the cross-interval swap (ADR-056), the
+operator preview and the live credit estimate. The threshold fire, its
+item-threshold count and create_preview with a custom window do not
+bill by segment. They rate one flat window per meter on the current
+items, `[floor, now)`, where the floor is the same `usageFloors` start
+taken over the whole period. The fire's usage lines are stamped with
+the floored start. Rules stay pinned at the period start (ADR-070).
 
 **Why "strictly inside" is enough.** `rejectMeterOverlap` keeps two
 live subscriptions of one customer off the same meter. So another
@@ -243,9 +246,12 @@ subscription's coverage of the meter that ends inside this window
 ended before this subscription took the meter. The only overlap is
 the day-grade backdating, and the floor removes exactly that. The
 rule is asymmetric on purpose: a later subscription's coverage always
-ends after an earlier one's window ends, so it never moves the earlier
-window. The predecessor keeps its morning. Chains of removal,
-recreate and re-add partition the same way.
+ends after an earlier one's segment window ends, so it never moves the
+earlier window. The predecessor keeps its morning. In the segment
+closers, chains of removal, recreate and re-add partition the same way.
+The flat window of the threshold fire has one window per meter, so
+this holds there only while the subscription covered the meter in one
+stretch (see the residual edges below).
 
 **Unchanged.** Base fees and the `billing_intervals` writers keep the
 day-grade starts. The trial-end day's base stays whole, and up to one
@@ -266,11 +272,31 @@ subscription pins its rules at its own period start, so a rule
 published between the two gives them different versions for the same
 events.
 
-**Residual edge, accepted.** The floor is a single instant, not a cut
-of every other subscription's interval. Say an older subscription
-covered the meter only for a stretch that began after midnight (an
-item added mid-period and removed the same day). A subscription
-created later that day then starts at the end of that stretch, and
-does not bill the start-day usage before the stretch. That needs an add and
-a remove on another subscription and a recreate, all on one day;
-revisit if it is seen.
+**Residual edges, accepted.** Each needs several changes to one
+customer's subscriptions inside one period; revisit if one is seen.
+
+- **One instant, not a cut.** The floor is a single instant, not a cut
+  of every other subscription's interval. Say an older subscription
+  covered the meter only for a stretch that began after midnight (an
+  item added mid-period and removed the same day). A subscription
+  created later that day then starts at the end of that stretch, and
+  does not bill the start-day usage before the stretch. That needs an
+  add and a remove on another subscription and a recreate, all on one
+  day.
+- **The fire's flat window after a meter round trip.** Subscription A
+  removes meter M at 10:00 on day 5. B takes M at 11:00 and is
+  canceled at 12:00. A adds M back on day 6. A threshold fire on A on
+  day 20 opens M's window at 12:00 on day 5. A's own M usage before
+  10:00 on day 5 is then on no invoice, because the cycle close clamps
+  it away at the fire's watermark. Before this amendment the same chain billed
+  B's hour twice. It needs a meter to leave A, cover B and return to A
+  within one period, with a threshold fire after.
+- **Current plan meters.** The coverage read
+  (`ListCustomerMeterCoverageEnds`) takes each plan's meters as they
+  are now, as `FindMeterConflicts` and the closers do. A plan's meters
+  can change once no live subscription uses it. Say an operator
+  cancels a subscription, edits its plan's meters, and creates another
+  subscription for the customer the same day. The floor then uses the
+  edited list. A meter the plan dropped is not floored, so its usage
+  before the cancel is billed again. A meter it gained is floored at
+  the cancel, so its usage before the cancel is not billed.

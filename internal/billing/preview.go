@@ -252,7 +252,11 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	//
 	// Each meter's window opens at its usage floor (trial end, another
 	// subscription's coverage end; usageFloors), the same start the closers
-	// use, while rules stay pinned at the period start (ADR-070).
+	// use, while rules stay pinned at the period start (ADR-070). The window
+	// is flat, one start per meter: a meter that left this subscription,
+	// covered another one and came back opens after that other coverage, so
+	// the stretch before it left is not rated here (an accepted residual
+	// edge, ADR-012 amendment 2026-10-22).
 	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
 	if err != nil {
 		return PreviewResult{}, err
