@@ -11,6 +11,7 @@ import (
 	"time"
 
 	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
+	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
@@ -287,10 +288,20 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 		simAt = sim.At.UTC()
 		clockID = sim.TestClockID
 	}
+	// Who caused this email (ADR-128 §4), resolved exactly as the audit log
+	// resolves it: whoever's request led to the write. That is the operator
+	// or API key behind a resend, the customer on a public page, and also
+	// the operator or API key whose finalize led to a charge that sends a
+	// receipt or a failure email. Only work no request started (the cycle
+	// scheduler, dunning, a webhook, the reconciler) records the system.
+	// Stamped here for the same reason as the sim anchor: this is the one
+	// insert, and the only moment the request identity is in hand.
+	actorType, actorID := audit.ResolveActor(ctx)
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO email_outbox (id, tenant_id, email_type, payload, status, attempts, next_attempt_at, sim_effective_at, test_clock_id)
-		VALUES ($1, $2, $3, $4, 'pending', 0, now(), $5, $6)
-	`, id, tenantID, emailType, payloadJSON, simAt, clockID)
+		INSERT INTO email_outbox (id, tenant_id, email_type, payload, status, attempts, next_attempt_at,
+			sim_effective_at, test_clock_id, actor_type, actor_id)
+		VALUES ($1, $2, $3, $4, 'pending', 0, now(), $5, $6, $7, $8)
+	`, id, tenantID, emailType, payloadJSON, simAt, clockID, actorType, actorID)
 	if err != nil {
 		return "", fmt.Errorf("email outbox: insert: %w", err)
 	}

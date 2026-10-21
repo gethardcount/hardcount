@@ -454,6 +454,10 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 //   - api_key  — an SDK / curl caller on a Bearer vlx_… key (auth.WithKeyID)
 //   - system   — background workers / cron with no request identity
 //
+// A new kind must also be added to every actor_type CHECK (audit_log,
+// email_outbox, invoice_charge_attempts) and to the contexts in
+// TestResolveActorKinds_MatchEveryActorCheck.
+//
 // Every audit write path calls this, so the actor resolves identically on all of
 // them: the post-hoc Logger.Log and the in-tx LogInTx. (There used to be a third
 // — the catch-all AuditLog middleware — which ADR-090 deleted.) Before this, both read only auth.KeyID — and
