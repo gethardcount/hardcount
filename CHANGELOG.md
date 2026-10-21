@@ -125,6 +125,7 @@ original text.
 
 ### Security
 
+- **Go 1.26.10 (2026-10-21).** Clears GO-2026-6809 in `crypto/x509`, which `govulncheck` reaches from Velox code; CI lint failed on every branch until this lands. No application code change.
 - **The client address comes from chi's trusted-proxy middleware (2026-10-20).** `X-Forwarded-For` counts only from a `TRUST_PROXY` address, every header line is read, and an entry that is not a bare IP stops at the proxy. Rate limits, audit and session rows, logs and traces all use it ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md#amendment-2026-10-20-the-client-address-comes-from-chi), [#1315](https://github.com/getvelox/velox/pull/1315)).
 - **Traces no longer carry a link's token (2026-10-20).** A request span is renamed to `{method} {route}` once routed, such as `GET /v1/public/invoices/{token}` (before, `:id` replaced ID-like parts). Its `url.path` holds the route or a redacted path, and `client.address` the trusted client address. Redaction covers hosted invoice, payment-update, cost-dashboard and invite links, in traces and the access log ([#1315](https://github.com/getvelox/velox/pull/1315)).
 - **`CORS_ALLOWED_ORIGINS=*` now allows any site without the sign-in cookie (2026-10-18).** The API answers `*` with no credentials, so another site's page can call it with an API key only. Listed addresses still may send the cookie. CORS now runs on `github.com/rs/cors` ([docs/self-host.md](docs/self-host.md), [#1262](https://github.com/getvelox/velox/pull/1262)).
