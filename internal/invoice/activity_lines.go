@@ -163,9 +163,12 @@ func paidLine(inv domain.Invoice, retries int, note string, actor *activity.Acto
 }
 
 // attemptActor names who made a charge attempt, from the attempt's trigger:
-// a dunning retry is always Velox's own. The other triggers cannot yet tell
-// an operator's "Charge now" from an automatic charge, or say where the
-// customer paid, so they name no one until the attempt records its actor.
+// a dunning retry is always Velox's own. Since migration 00189 the attempt
+// row records its actor and Charge now has its own trigger (charge_now), but
+// this line does not read them yet: rows written before then have no actor,
+// and naming one changes what the dashboard shows, which waits for the
+// invoice page's own PR (ADR-128 §5). Until then the other triggers name no
+// one.
 func attemptActor(a domain.InvoiceChargeAttempt) *activity.Actor {
 	if a.Trigger == domain.ChargeTriggerDunningRetry {
 		return activity.Automatic()

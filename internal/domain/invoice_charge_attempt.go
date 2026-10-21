@@ -19,15 +19,29 @@ const (
 type ChargeAttemptTrigger string
 
 const (
-	// ChargeTriggerAutoCharge: the saved-PM chokepoint — cycle close,
-	// auto-charge sweep, operator collect.
+	// ChargeTriggerAutoCharge: the saved-PM chokepoint charging on its own
+	// — cycle close, finalize, the auto-charge sweep. "On its own" means no
+	// one pressed Charge now; the actor can still be a person or an API key
+	// when their finalize request led to the charge.
 	ChargeTriggerAutoCharge ChargeAttemptTrigger = "auto_charge"
+	// ChargeTriggerChargeNow: the same chokepoint, because someone asked for
+	// it: "Charge now" in the dashboard, or POST /v1/invoices/{id}/collect.
+	// It answers "why was this charged?" apart from the automatic charges;
+	// the attempt's actor columns say who asked.
+	ChargeTriggerChargeNow ChargeAttemptTrigger = "charge_now"
 	// ChargeTriggerDunningRetry: same chokepoint, dunning-retry purpose.
 	ChargeTriggerDunningRetry ChargeAttemptTrigger = "dunning_retry"
 	// ChargeTriggerExternal: a settle path recorded a PI Velox didn't
 	// mint inline (hosted-checkout attempts).
 	ChargeTriggerExternal ChargeAttemptTrigger = "external"
 )
+
+// ChargeAttemptTriggers lists every trigger, so a test can hold the list and
+// invoice_charge_attempts' CHECK constraint equal: a trigger the CHECK does
+// not list fails the attempt's insert.
+func ChargeAttemptTriggers() []ChargeAttemptTrigger {
+	return []ChargeAttemptTrigger{ChargeTriggerAutoCharge, ChargeTriggerChargeNow, ChargeTriggerDunningRetry, ChargeTriggerExternal}
+}
 
 // InvoiceChargeAttempt is one charge attempt on an invoice — a
 // first-class billing fact (ADR-102). Written at PaymentIntent-create
@@ -103,7 +117,7 @@ type PaymentFailureResult struct {
 
 // AttemptStanding is where a reported PaymentIntent sits in the invoice's
 // own attempt history (invoice_charge_attempts), among the attempts Velox
-// made itself (auto_charge, dunning_retry). Velox writes that row when its
+// made itself (auto_charge, charge_now, dunning_retry). Velox writes that row when its
 // charge call returns, before it reports the outcome, and its charges are
 // serialized by the charge lease, so the row order is the attempt order.
 type AttemptStanding int
