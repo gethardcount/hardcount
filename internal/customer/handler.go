@@ -289,9 +289,11 @@ func (h *Handler) upsertBillingProfile(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
 
+	// Strict: a dropped `tax_exempt` would leave tax_status at its default
+	// and tax an exempt customer. Read-only fields from a GET are declared on
+	// the type, so a GET body sent back is still accepted.
 	var bp domain.CustomerBillingProfile
-	if err := json.NewDecoder(r.Body).Decode(&bp); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &bp) {
 		return
 	}
 	bp.CustomerID = customerID

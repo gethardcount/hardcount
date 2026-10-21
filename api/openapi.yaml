@@ -5329,7 +5329,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: A field failed validation (`param` names it).
+          description: |
+            A field failed validation, or the body has a key the profile does
+            not have, such as `tax_exempt` (set `tax_status` instead). `param`
+            names the field. A body read back from GET is accepted.
           content:
             application/json:
               schema:
@@ -7846,6 +7849,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RatingRule"
+        "400":
+          description: The body is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            A field failed validation, or the body has an unknown field at
+            any depth (`param` names it; the body must use only the fields
+            listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Pricing]
       summary: List rating rules
@@ -10370,8 +10388,10 @@ paths:
         "422":
           description: |
             Validation error: missing or unknown `reason`, a negative
-            amount, an amount above what is left to refund, or refunds are
-            not configured.
+            amount, an amount above what is left to refund, refunds are
+            not configured, or an unknown field (`param` names it; the body
+            must use only the fields listed here). A misspelled amount such
+            as `amount` is refused rather than read as a full refund.
           content:
             application/json:
               schema:
@@ -12926,9 +12946,10 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `validation_error`: a missing field, an unknown rating rule, or a
+            `validation_error`: a missing field, an unknown rating rule, a
             price shape that cannot be billed (negative rate, bad tier table,
-            package size of 0).
+            package size of 0), or an unknown field at any depth (`param`
+            names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:

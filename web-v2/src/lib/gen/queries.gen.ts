@@ -6257,7 +6257,7 @@ export const postV1RatingRules = async (postV1RatingRulesBody: PostV1RatingRules
 
 
 
-export const getPostV1RatingRulesMutationOptions = <TError = unknown,
+export const getPostV1RatingRulesMutationOptions = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1RatingRules>>, TError,{data: PostV1RatingRulesBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1RatingRules>>, TError,{data: PostV1RatingRulesBody}, TContext> => {
 
@@ -6286,12 +6286,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1RatingRulesMutationResult = NonNullable<Awaited<ReturnType<typeof postV1RatingRules>>>
     export type PostV1RatingRulesMutationBody = PostV1RatingRulesBody
-    export type PostV1RatingRulesMutationError = unknown
+    export type PostV1RatingRulesMutationError = Error
 
     /**
  * @summary Create rating rule
  */
-export const usePostV1RatingRules = <TError = unknown,
+export const usePostV1RatingRules = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1RatingRules>>, TError,{data: PostV1RatingRulesBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1RatingRules>>,

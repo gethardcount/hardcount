@@ -106,9 +106,9 @@ func (h *Handler) MeterPricingRuleRoutes(requireRead, requireWrite func(http.Han
 func (h *Handler) createOverride(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
+	// Strict: 0 is a valid free rate, so a dropped rate key would be a $0 price.
 	var input CreateOverrideInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -152,9 +152,9 @@ func (h *Handler) listOverrides(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createRatingRule(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
+	// Strict: 0 is a valid free rate, so a dropped rate key would be a $0 price.
 	var input CreateRatingRuleInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 

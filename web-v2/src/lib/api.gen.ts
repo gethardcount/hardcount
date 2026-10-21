@@ -2196,6 +2196,28 @@ export interface paths {
                         "application/json": components["schemas"]["RatingRule"];
                     };
                 };
+                /** @description The body is not valid JSON. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description A field failed validation, or the body has an unknown field at
+                 *     any depth (`param` names it; the body must use only the fields
+                 *     listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -10360,7 +10382,11 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A field failed validation (`param` names it). */
+            /**
+             * @description A field failed validation, or the body has a key the profile does
+             *     not have, such as `tax_exempt` (set `tax_status` instead). `param`
+             *     names the field. A body read back from GET is accepted.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14101,8 +14127,10 @@ export interface operations {
             };
             /**
              * @description Validation error: missing or unknown `reason`, a negative
-             *     amount, an amount above what is left to refund, or refunds are
-             *     not configured.
+             *     amount, an amount above what is left to refund, refunds are
+             *     not configured, or an unknown field (`param` names it; the body
+             *     must use only the fields listed here). A misspelled amount such
+             *     as `amount` is refused rather than read as a full refund.
              */
             422: {
                 headers: {
@@ -15722,9 +15750,10 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: a missing field, an unknown rating rule, or a
+             * @description `validation_error`: a missing field, an unknown rating rule, a
              *     price shape that cannot be billed (negative rate, bad tier table,
-             *     package size of 0).
+             *     package size of 0), or an unknown field at any depth (`param`
+             *     names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {

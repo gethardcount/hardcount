@@ -1253,8 +1253,9 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 		Reason      string `json:"reason"`
 		Description string `json:"description"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	// Strict: amount_cents=0 means "refund everything still refundable", so a
+	// dropped `amount` key would be a full card refund.
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
 
