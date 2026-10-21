@@ -99,3 +99,68 @@ func TestCustomerCreateAndStatus_Validated(t *testing.T) {
 		t.Fatalf("status after refused PATCHes: %q, want active", got.Status)
 	}
 }
+
+// TestBillingProfileUpsert_RefusesUnknownField: PUT
+// /v1/customers/{id}/billing-profile dropped Stripe's `tax_exempt:"exempt"`,
+// so tax_status kept its default and an exempt customer was taxed. The
+// unknown key is now a 422 naming it and the profile is unchanged. Control: a
+// body read back from GET (read-only fields included) is still accepted.
+func TestBillingProfileUpsert_RefusesUnknownField(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Billing Profile Strict")
+
+	svc := customer.NewService(customer.NewPostgresStore(db))
+	srv := customer.NewHandler(svc).Routes()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req.WithContext(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID)))
+		return rr
+	}
+
+	cust, err := svc.Create(ctx, tenantID, customer.CreateInput{ExternalID: "cus_bp", DisplayName: "Profile"})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	path := "/" + cust.ID + "/billing-profile"
+
+	rr := do(http.MethodPut, path, `{"legal_name":"Exempt Co","country":"US","tax_exempt":"exempt"}`)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("tax_exempt: status %d, want 422; body %s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Error struct {
+			Param string `json:"param"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &env)
+	if env.Error.Param != "tax_exempt" {
+		t.Errorf("param: got %q, want tax_exempt", env.Error.Param)
+	}
+	if rr = do(http.MethodGet, path, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("refused upsert wrote a profile: GET status %d; body %s", rr.Code, rr.Body.String())
+	}
+
+	// Control: a known body saves, and the GET body sent back as-is saves too.
+	rr = do(http.MethodPut, path, `{"legal_name":"Exempt Co","country":"US","tax_status":"exempt","tax_exempt_reason":"501(c)(3)"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("known body: status %d, want 200; body %s", rr.Code, rr.Body.String())
+	}
+	rr = do(http.MethodGet, path, "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET profile: status %d; body %s", rr.Code, rr.Body.String())
+	}
+	rr = do(http.MethodPut, path, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET body sent back: status %d, want 200; body %s", rr.Code, rr.Body.String())
+	}
+	var bp domain.CustomerBillingProfile
+	if err := json.Unmarshal(rr.Body.Bytes(), &bp); err != nil {
+		t.Fatalf("decode profile: %v", err)
+	}
+	if bp.TaxStatus != domain.TaxStatusExempt {
+		t.Fatalf("tax_status after round-trip: %q, want exempt", bp.TaxStatus)
+	}
+}
