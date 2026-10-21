@@ -382,7 +382,8 @@ func TestLiveBalance_PricesAtThePeriodOpenAfterAFire(t *testing.T) {
 // that period at the beginning of the day the trial ends, and the usage window
 // starts at the trial end itself (ADR-012 amendment 2026-10-22): usage sent on
 // that last day before the trial ended is trial usage, so neither the estimate
-// nor the close counts it, and neither counts the usage before the period. The
+// nor the close counts it, and neither counts the usage before the period;
+// usage after the trial end is counted and billed. The
 // subscription is built by the real Create (a trialing row has no
 // billing_intervals until it converts), then moved back in time so the trial
 // ends two seconds from now.
@@ -435,11 +436,15 @@ func TestLiveBalance_Trial_CountsOnlyTheFirstPaidPeriod(t *testing.T) {
 	if got := lf.estimated(t); got != 10000 {
 		t.Errorf("estimated remaining after the trial converted = %d, want 10000 (no jump at the flip)", got)
 	}
+	lf.insertUsage(t, lf.meterID, 500, time.Now()) // $5.00 after the trial end: billed
+	if got := lf.estimated(t); got != 9500 {
+		t.Errorf("estimated remaining with usage after the trial end = %d, want 9500", got)
+	}
 	if n := lf.closeEveryPeriod(t); n != 1 {
 		t.Fatalf("cycle close produced %d invoices, want 1", n)
 	}
-	if got := lf.balance(t); got != 10000 {
-		t.Errorf("settled balance after the close = %d, want 10000 (what the estimate said; the trial's usage is free)", got)
+	if got := lf.balance(t); got != 9500 {
+		t.Errorf("settled balance after the close = %d, want 9500 (what the estimate said; only the usage after the trial end is billed)", got)
 	}
 }
 
