@@ -164,6 +164,11 @@ func (e *Engine) dispatchEvent(ctx context.Context, tenantID, eventType string, 
 // The operator HTTP path and the tax-retry auto-finalize get their row from
 // invoice.Service.Finalize; engine invoices never pass through Finalize — they
 // are born finalized — so without this they leave no audit trace at all.
+//
+// born_finalized marks the row as one of those: the invoice was finalized in
+// the statement that created it, never a draft someone finalized. The
+// activity line reads it to say why the invoice exists (P-1, ADR-128); the
+// rows invoice.Service.Finalize writes never carry it.
 func finalizeAuditEntry(inv domain.Invoice) (audit.Entry, bool) {
 	if inv.Status != domain.InvoiceFinalized {
 		return audit.Entry{}, false
@@ -179,6 +184,7 @@ func finalizeAuditEntry(inv domain.Invoice) (audit.Entry, bool) {
 			"total_amount_cents": inv.TotalAmountCents,
 			"currency":           inv.Currency,
 			"triggered_by":       string(inv.BillingReason),
+			"born_finalized":     true,
 		},
 	}, true
 }
@@ -2649,6 +2655,9 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 					"customer_id":  sub.CustomerID,
 					"triggered_by": "schedule",
 				}
+				if sub.TrialEndAt != nil {
+					meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
+				}
 				_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 			}
 			// ADR-031 trial-end in_advance coverage now rides the
@@ -3584,8 +3593,9 @@ func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subs
 // caller persists (BillOnCreate via the store's own tx, BillOnCreateTx on a
 // coordinator tx) and finalizes. Returns ok=false (nil error) for the no-op
 // cases: inactive sub, no in_advance items, or zero subtotal. The returned
-// invoice has no InvoiceNumber and carries CreatedAt == effective-now.
-// startAt is the instant the pause is read at (see BillOnCreateTx).
+// invoice has no InvoiceNumber and carries IssuedAt == CreatedAt == startAt,
+// the instant the billed period began (see BillOnCreateTx); the pause is read
+// as it stood then, and DueAt counts the net terms from it.
 func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscription, startAt time.Time) (domain.Invoice, []domain.InvoiceLineItem, bool, error) {
 	if sub.Status != domain.SubscriptionActive {
 		return domain.Invoice{}, nil, false, nil
@@ -3594,7 +3604,13 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 		return domain.Invoice{}, nil, false, fmt.Errorf("subscription has no billing period set")
 	}
 
-	now := e.effectiveNow(ctx, sub)
+	// The invoice is issued when its period began. Every caller passes that
+	// instant: effective-now for create, activate, early trial end and the
+	// plan swap; trial_end_at for the trial-expiry scans; the cycle close for
+	// the engine's own trial flip. Reading the clock here instead dated a
+	// day-1 invoice swept by a long advance at the advance's target, after
+	// the cycle invoices it preceded (B12, P-3).
+	now := startAt
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
 

@@ -51,7 +51,8 @@ Writers (all best-effort — see Consequences):
 
 > Reversed 2026-10-19 by [ADR-128](128-activity-line-standard.md): see
 > [Amendment 2026-10-19](#amendment-2026-10-19-hosted-page-attempts-follow-the-invoices-clock).
-> Until that change ships, this paragraph describes the code.
+> Built 2026-10-21: the settle path now dates these rows on the invoice's
+> test clock.
 
 Upsert semantics (enforced in SQL): `succeeded` is terminal; every
 other outcome may advance — including `failed → succeeded` (a 3DS PI
@@ -132,10 +133,13 @@ after this record was written (the 2026-07-29 credit-note fix that
 time, a failed payment on the hosted page sorts by its real time among the
 invoice's simulated rows.
 
-**Status.** Decided, not yet built. The change touches the settle path, so it
-follows the [money-path playbook](../dev/money-path-robustness-playbook.md).
-The dates PR of the ADR-128 series makes it; until it ships, the settle path
-inserts these attempts with no test-clock time.
+**Status.** Built 2026-10-21 in the dates PR of the ADR-128 series, following
+the [money-path playbook](../dev/money-path-robustness-playbook.md). On a
+test clock the settle path dates a failed attempt at the invoice's clock and
+a paid one at its `paid_at`; on the wall clock it writes no test-clock time.
+Insert-time identity changes in one case: when a settle's report reaches the
+database before the charge call records its own attempt, the charge call's
+`sim_effective_at` replaces the report's, as its `trigger_source` already did.
 
 ## Amendment 2026-10-20: Charge now is its own trigger, and attempts record their actor
 
