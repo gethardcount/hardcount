@@ -87,14 +87,21 @@ type Biller interface {
 	// BillOnCreateTx is the in-tx variant of BillOnCreate: it inserts the day-1
 	// in_advance invoice on the caller's tx (no finalize). ok=false means there
 	// was nothing to bill (no in_advance items / zero subtotal) or an idempotent
-	// skip. Used by the atomic cross-interval swap so the new-period invoice
-	// commits atomically with the plan write + watermark advance. startAt is
-	// the instant the billed period began (the trial end on a trial flip,
-	// the request's now otherwise); the pause is read as it stood then.
+	// skip. Used by create, activate and the trial flip. startAt is the
+	// instant the billed period began (the trial end on a trial flip, the
+	// request's now otherwise); the pause is read as it stood then.
 	BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, startAt time.Time) (domain.Invoice, bool, error)
+	// BillOnPlanSwapTx inserts, on the caller's tx, the invoice of an
+	// immediate in_advance cross-interval swap at `at`: after's new-period
+	// base plus the usage of before's period over [its start, at), which the
+	// swap closes (ADR-056, ADR-031 renewal shape). before is the pre-swap
+	// snapshot the swap proved under the row lock. ok=false means nothing to
+	// bill. afterCommit is never nil; the caller runs it only once the tx
+	// commits (it counts usage the invoice left unpriced).
+	BillOnPlanSwapTx(ctx context.Context, tx *sql.Tx, before, after domain.Subscription, at time.Time) (inv domain.Invoice, ok bool, afterCommit func(), err error)
 	// FinalizeOnCreateInvoice runs the post-commit external steps (audit, tax
-	// commit, auto-charge) for an invoice inserted via BillOnCreateTx. Called
-	// AFTER the tx commits — never inside it.
+	// commit, auto-charge) for an invoice inserted via BillOnCreateTx or
+	// BillOnPlanSwapTx. Called AFTER the tx commits — never inside it.
 	FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscription, inv domain.Invoice)
 }
 
@@ -1032,7 +1039,8 @@ type ItemChangeResult struct {
 	// firing handleItemProration on top would emit a second credit
 	// against the same OLD period and over-credit the customer.
 	OrchestratedCrossAxis bool `json:"-"`
-	// crossAxisNewInvoice carries the new-period in_advance invoice created
+	// crossAxisNewInvoice carries the swap invoice (the new in_advance
+	// period's base plus the old period's usage up to the swap) created
 	// in-tx by the atomic cross-interval swap (applyCrossIntervalPlanSwapTx),
 	// so the handler can run FinalizeOnCreateInvoice (tax commit + auto-charge)
 	// POST-commit. nil when the swap was in_arrears (no day-1 invoice).
@@ -1042,6 +1050,10 @@ type ItemChangeResult struct {
 	// BillOnPlanSwapDraftsTx; FinalizeCrossIntervalSwap runs its post-commit
 	// legs.
 	swapRelief domain.Relief
+	// swapAfterCommit is BillOnPlanSwapTx's afterCommit, which
+	// FinalizeCrossIntervalSwap runs once the swap tx committed. nil when the
+	// swap billed nothing in-tx (in_arrears).
+	swapAfterCommit func()
 	// pricedFrom is the state the change replaced: the subscription and the
 	// item as UpdateItemTx or RemoveItemTx found them under the subscription
 	// row lock (#1270); for AddItemTx, the subscription only. The handler
@@ -1681,8 +1693,10 @@ func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, item
 		//   in_advance: refund the unused portion of the OLD prepaid
 		//   period (BillOnPlanSwapDraftsTx), jump current_period
 		//   to (now, NextBillingPeriodEnd for NEW interval), and
-		//   synchronously bill the NEW in_advance period (with stub
-		//   proration if calendar snap shortens it).
+		//   synchronously bill one invoice (BillOnPlanSwapTx): the NEW
+		//   in_advance period's base (with stub proration if calendar
+		//   snap shortens it) plus the OLD plan's usage over
+		//   (oldPS, now), which the jump closes.
 		//
 		//   in_arrears: truncate current_period to (oldPS, now). The
 		//   scheduler / catchup picks up next_billing_at=now, closes
@@ -1739,8 +1753,9 @@ func mapPeriodMoved(err error) error {
 // plan swap — the only restructure-the-cycle plan change Velox supports —
 // run on the handler's tx. It runs the
 // cycle-restructuring DB writes — the period CAS (first statement, ADR-115),
-// the refund drafts, the plan swap, and (for in_advance) the new-period invoice
-// insert via BillOnCreateTx — on the caller's single tx, so any failure rolls
+// the refund drafts, the plan swap, and (for in_advance) the swap invoice
+// insert via BillOnPlanSwapTx (the new period's base plus the old period's
+// usage up to now) — on the caller's single tx, so any failure rolls
 // ALL of them back. This is the fix for the
 // silent revenue drop: the watermark can no longer advance past a new in_advance
 // period whose day-1 invoice failed to commit. The OLD-period refund and the new
@@ -1876,10 +1891,14 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 		}
 		prospective.Items = items
 
-		inv, ok, err := s.biller.BillOnCreateTx(ctx, tx, prospective, now)
+		// The jump to [now, newPE) closes [oldPS, now): the swap invoice bills
+		// that window's usage beside the new base. sub is the pre-swap
+		// snapshot the CAS and the item check above proved.
+		inv, ok, afterCommit, err := s.biller.BillOnPlanSwapTx(ctx, tx, sub, prospective, now)
 		if err != nil {
 			return ItemChangeResult{}, fmt.Errorf("plan-swap new in_advance bill: %w", err)
 		}
+		res.swapAfterCommit = afterCommit
 		if ok {
 			invCopy := inv
 			res.crossAxisNewInvoice = &invCopy
@@ -1896,9 +1915,13 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 //     BillOnPlanSwapDraftsTx (ADR-118); here only its post-commit legs run
 //     (draft Issue; a void's tax reversal and webhook), each recovered by its
 //     own sweep if this fails.
-//   - FinalizeOnCreateInvoice (tax commit + auto-charge) for the new in_advance
-//     day-1 invoice committed inside the swap tx, if one was created.
+//   - FinalizeOnCreateInvoice (tax commit + auto-charge) for the swap invoice
+//     committed inside the swap tx, if one was created.
+//   - The swap invoice's afterCommit (counts usage it left unpriced).
 func (s *Service) FinalizeCrossIntervalSwap(ctx context.Context, tenantID string, subBefore domain.Subscription, result ItemChangeResult) {
+	if result.swapAfterCommit != nil {
+		result.swapAfterCommit()
+	}
 	var inv domain.Invoice
 	if result.crossAxisNewInvoice != nil {
 		inv = *result.crossAxisNewInvoice
