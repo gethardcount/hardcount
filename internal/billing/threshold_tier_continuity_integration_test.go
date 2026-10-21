@@ -243,3 +243,42 @@ func TestThresholdCycle_MultiDimBucketContinuesAcrossFire_RealStore(t *testing.T
 		}
 	}
 }
+
+// #973: a block usage cap turned the ladder off and re-priced the close. The
+// fire is uncapped (700 units, $70); the close counted all 1,300 units
+// against a 1,000-unit cap, scaled its 600 down to 461.5 and priced them
+// from tier 0: $46.15 more, so fire + close billed $116.15 for usage that
+// costs F(1300) = $106.00. The cap is cut; fire + close bill F(total).
+func TestThresholdCycle_UsageCapNoLongerRepricesClose_973(t *testing.T) {
+	p := p21FireAt700(t, "973 Cap Reprice", func(p *p21Fire) {
+		tx, err := p.f.db.BeginTx(p.ctx, postgres.TxTenant, p.f.tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		if _, err := tx.ExecContext(p.ctx, `UPDATE subscriptions SET usage_cap_units = 1000, overage_action = 'block' WHERE id = $1`, p.f.subID); err != nil {
+			t.Fatalf("set cap: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit cap: %v", err)
+		}
+	})
+	newEnd := p.fireUpper.Add(2 * time.Second).Truncate(time.Microsecond)
+	p.seedAfterFire(t, 600, &newEnd)
+	if wait := time.Until(newEnd.Add(500 * time.Millisecond)); wait > 0 {
+		time.Sleep(wait)
+	}
+	generated, failures := p.f.engine.RunCycleForTenant(p.ctx, p.f.tenantID, 50)
+	if len(failures) > 0 || generated != 1 {
+		t.Fatalf("cycle: generated=%d failures=%v, want 1", generated, failures)
+	}
+	var closeTotal int64 = -1
+	for _, inv := range p.f.listInvoices(t, p.ctx) {
+		if inv.ID != p.fireID {
+			closeTotal, _ = usageLineTotal(t, p.f, p.ctx, inv.ID)
+		}
+	}
+	if p.fireTotal+closeTotal != 10600 {
+		t.Errorf("fire + close = %d + %d = %d, want 10600 = F(1300) at the continued ladder price", p.fireTotal, closeTotal, p.fireTotal+closeTotal)
+	}
+}
