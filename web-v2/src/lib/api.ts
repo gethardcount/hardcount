@@ -11,6 +11,7 @@ import type { ListRecipes200 } from './gen/schemas/listRecipes200'
 import type { RecipeDetail } from './gen/schemas/recipeDetail'
 import type { RecipePreviewResult } from './gen/schemas/recipePreviewResult'
 import type { RecipeInstance } from './gen/schemas/recipeInstance'
+import type { ActivityLine } from './gen/schemas/activityLine'
 
 const API_BASE = '/v1'
 
@@ -1078,6 +1079,9 @@ export interface TimelineEvent {
   // any row whose two calendars differ shows both). Absent when the
   // calendars coincide.
   recorded_at?: string
+  // The row in the words of the activity line standard (ADR-128). The
+  // invoice timeline always sends it; <ActivityList> renders it.
+  line?: ActivityLine
 }
 
 export interface CreditBalance {
