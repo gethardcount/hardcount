@@ -386,10 +386,17 @@ Where it shows:
   on the account stopped. The dunning policy outcome and the write-off
   dialog's "Also pause collection" hint say new invoices stay drafts and
   retries already running on other unpaid invoices continue.
-- "Retries continue" is said only for a run that can still charge: active,
-  not paused, and not waiting on a failed final action. A run whose final
-  action failed stays active with every attempt used, and its next tick
-  re-attempts only the action.
+- The pause dialog on the subscription page says the same: retries already
+  running on unpaid invoices continue, and voiding the invoice or marking it
+  uncollectible stops them.
+- "Retries continue" is said for a run that is active, not paused, and not
+  waiting on a failed final action. A run whose final action failed stays
+  active with every attempt used, and its next tick re-attempts only the
+  action. One case still reads as retrying when no retry is due: an open run
+  whose attempt count is at or above a `max_retry_attempts` lowered after the
+  run started. Its next tick runs only the final action
+  (`processRun` exhausts on entry). The refused-card notice reads the same
+  flag and has the same gap.
 
 When it happens: an operator pauses collection on a subscription that has an
 unpaid invoice in dunning. When dunning's own `pause` final action fires, the

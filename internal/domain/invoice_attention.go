@@ -492,7 +492,8 @@ type AttentionContext struct {
 
 	// DunningRetrying is true when the invoice's dunning run is active, not
 	// paused and not waiting on a failed final action, so a scheduled retry
-	// is still to come. After the run exhausts (including a final action that
+	// is still to come (except a run at or above a max_retry_attempts lowered
+	// after it started, whose next tick only runs the final action). After the run exhausts (including a final action that
 	// failed and is being re-attempted), while it is paused, or with no run at
 	// all (dunning off), no retry runs whatever card becomes the default. Read by the refused-card
 	// notice ("dunning keeps its schedule" is true only then) and by the two
