@@ -124,11 +124,13 @@ func TestObservedCost_ZeroIsARealAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
-	in := costOf(t, evs, TokenTypeInput)
-	if in == nil {
+	// One switch, so the dereference sits on the branch where in is known
+	// non-nil: staticcheck's SA5011 does not always count t.Fatal as an
+	// exit and failed CI on the two-if form.
+	switch in := costOf(t, evs, TokenTypeInput); {
+	case in == nil:
 		t.Fatal("input half: got nil, want an explicit 0 — zero cost is a fact, not an absence")
-	}
-	if *in != 0 {
+	case *in != 0:
 		t.Errorf("input half: got %d, want 0", *in)
 	}
 }

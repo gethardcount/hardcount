@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1463,50 +1462,17 @@ func lifecycleAuditRows(entries []domain.AuditEntry) map[string]domain.AuditEntr
 	return out
 }
 
-// sortInvoiceTimeline orders events by their full-precision source
-// instant, breaking true same-instant ties by causal rank, and residual
-// ties by insertion order (SliceStable; callers append sources oldest-
-// first). Sorting the serialized second-truncated Timestamp string was
-// the 2026-07-19 inversion class: same-second pairs kept whatever
-// orientation their source query happened to use.
+// sortInvoiceTimeline orders the invoice's rows by timeline.Order, the one
+// ordering rule for activity surfaces (ADR-128): the full-precision instant
+// on the invoice's calendar, then the real sequence inside a same-instant
+// group whose every row has a recorded stamp (ADR-104 ordering amendment,
+// 2026-07-29), then the causal rank, then insertion order (callers append
+// sources oldest-first).
 func sortInvoiceTimeline(events []timelineEvent) {
-	timeline.SortStable(events,
+	timeline.Order(events,
 		func(e timelineEvent) time.Time { return e.sortAt },
+		func(e timelineEvent) time.Time { return e.recordedSort },
 		func(a, b timelineEvent) bool { return a.tieRank < b.tieRank })
-
-	// Reality pass (ADR-104 ordering amendment, 2026-07-29): within one
-	// story-instant group, order by the REAL sequence — the recorded
-	// stamps — so a frozen-clock invoice reads exactly like a wall-clock
-	// one whose displayed dates happen to coincide. Gated on GROUP
-	// COMPLETENESS: only when every row in the group carries a recorded
-	// stamp. A partially-stamped group is legacy data (pre-0162/0163/0164
-	// rows, or an engine path with no audit row), and placing bare rows
-	// against stamped ones would FABRICATE a sequence — those groups keep
-	// the causal ladder above, which is correct-but-canonical, never
-	// wrong. Equal recorded stamps (same-tx rows share Postgres's
-	// tx-stable now()) fall back to the ladder inside the group; the
-	// pre-pass ordering makes SliceStable's preserved order exactly
-	// ladder-then-insertion.
-	for lo := 0; lo < len(events); {
-		hi := lo + 1
-		for hi < len(events) && events[hi].sortAt.Equal(events[lo].sortAt) {
-			hi++
-		}
-		complete := true
-		for i := lo; i < hi; i++ {
-			if events[i].recordedSort.IsZero() {
-				complete = false
-				break
-			}
-		}
-		if complete && hi-lo > 1 {
-			group := events[lo:hi]
-			sort.SliceStable(group, func(a, b int) bool {
-				return group[a].recordedSort.Before(group[b].recordedSort)
-			})
-		}
-		lo = hi
-	}
 }
 
 type timelineEvent struct {

@@ -89,8 +89,12 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
 - **Activity screenshots:** `activity.spec.ts` screenshots the invoice and
   subscription Activity cards, a Dunning run and Sent emails, each on the
   real clock and on a test clock. They are for comparing a PR with main by
-  eye, not a pass/fail check. CI uploads them as the `activity-shots`
-  artifact on every run ([how to compare](../web-v2/e2e/README.md#activity-screenshots)).
+  eye. CI uploads them as the `activity-shots` artifact on every run
+  ([how to compare](../web-v2/e2e/README.md#activity-screenshots)). One
+  test checks text parity: the same operator steps on an invoice give the
+  same Activity rows on both clocks, apart from times and the Recorded part.
+  It also checks that the card's times follow the account's zone, not the
+  browser's.
 - **Data:** the tests make their data through the public API, with the
   test-mode secret key from `velox-bootstrap`. Each test uses its own unique
   names, so the suite can run many times against the same database. Use a

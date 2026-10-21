@@ -60,3 +60,73 @@ func TestSortStable(t *testing.T) {
 		}
 	})
 }
+
+type stamped struct {
+	name     string
+	at       time.Time
+	recorded time.Time
+	rank     int
+}
+
+func stampedNames(rows []stamped) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.name
+	}
+	return out
+}
+
+func TestOrder(t *testing.T) {
+	story := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
+	wall := func(h int) time.Time { return time.Date(2026, 10, 21, h, 0, 0, 0, time.UTC) }
+	order := func(rows []stamped) []string {
+		Order(rows,
+			func(r stamped) time.Time { return r.at },
+			func(r stamped) time.Time { return r.recorded },
+			func(a, b stamped) bool { return a.rank < b.rank })
+		return stampedNames(rows)
+	}
+	check := func(t *testing.T, got []string, want ...string) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("got %v, want %v", got, want)
+			}
+		}
+	}
+
+	t.Run("a fully stamped same-instant group reads in the real order, against the rank", func(t *testing.T) {
+		check(t, order([]stamped{
+			// The rank alone would read finalize, email, void.
+			{"finalize", story, wall(15), 10},
+			{"email", story, wall(10), 50},
+			{"void", story, wall(9), 90},
+		}), "void", "email", "finalize")
+	})
+
+	t.Run("one bare row sends the group back to the rank", func(t *testing.T) {
+		check(t, order([]stamped{
+			{"email", story, wall(8), 50},
+			{"credit note", story, time.Time{}, 40},
+			{"finalize", story, wall(9), 10},
+		}), "finalize", "credit note", "email")
+	})
+
+	t.Run("equal recorded stamps keep the rank, then insertion", func(t *testing.T) {
+		check(t, order([]stamped{
+			{"email b", story, wall(9), 50},
+			{"start", story, wall(9), 20},
+			{"email a", story, wall(9), 50},
+		}), "start", "email b", "email a")
+	})
+
+	t.Run("the entity instant always comes first", func(t *testing.T) {
+		check(t, order([]stamped{
+			{"later story, recorded first", story.Add(time.Hour), wall(8), 0},
+			{"earlier story, recorded last", story, wall(18), 99},
+		}), "earlier story, recorded last", "later story, recorded first")
+	})
+}
