@@ -5048,6 +5048,15 @@ paths:
                 $ref: "#/components/schemas/Customer"
         "409":
           description: Customer already exists
+        "422":
+          description: |
+            A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+            `dunning_policy_id` is not a create field: assign a policy with
+            `PATCH /v1/customers/{id}`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Customers]
       summary: List customers
@@ -6695,7 +6704,7 @@ paths:
         "409":
           description: State gate (unpaid commit → void; fully-consumed commit; in-flight charge)
         "422":
-          description: Validation (over-retire with live remaining; allocation mismatch; zero-cash slice)
+          description: Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here)
 
     get:
       tags: [CreditNotes]
@@ -6849,7 +6858,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Validation failed (see description).
+          description: Validation failed (see description), or an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -7592,6 +7601,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Plan"
+        "422":
+          description: |
+            A field failed validation, `status` is set to anything but
+            `active` (a plan is created active; archive it with PATCH), or
+            the body has an unknown field (`param` names it; the body must use only the fields listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Pricing]
       summary: List plans
@@ -7897,6 +7915,8 @@ paths:
                   default: calendar
                 trial_days:
                   type: integer
+                  minimum: 0
+                  maximum: 730
                 start_now:
                   type: boolean
       responses:
@@ -7906,6 +7926,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "422":
+          description: |
+            A field failed validation (`param` names it), for example
+            `trial_days` outside 0 to 730, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Subscriptions]
       summary: List subscriptions
@@ -9668,8 +9696,9 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            Validation error: missing `customer_id`, unsupported currency, or
-            an invalid line item (the message names the line number).
+            Validation error: missing `customer_id`, unsupported currency,
+            an invalid line item (the message names the line number), or
+            an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -9911,8 +9940,9 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            Validation error: the invoice is not a draft, or a line field is
-            invalid (for example a quantity of 0, or a second commit line).
+            Validation error: the invoice is not a draft, a line field is
+            invalid (for example a quantity of 0, or a second commit line), or
+            the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -11519,6 +11549,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditLedgerEntry"
+        "422":
+          description: |
+            A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/credits/balance/{customer_id}:
     get:

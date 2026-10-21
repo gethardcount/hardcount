@@ -114,8 +114,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 

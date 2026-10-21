@@ -185,6 +185,19 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /**
+                 * @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 *     `dunning_policy_id` is not a create field: assign a policy with
+                 *     `PATCH /v1/customers/{id}`.
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -1254,7 +1267,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice) */
+                /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -2014,6 +2027,19 @@ export interface paths {
                         "application/json": components["schemas"]["Plan"];
                     };
                 };
+                /**
+                 * @description A field failed validation, `status` is set to anything but
+                 *     `active` (a plan is created active; archive it with PATCH), or
+                 *     the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -2264,6 +2290,18 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Subscription"];
+                    };
+                };
+                /**
+                 * @description A field failed validation (`param` names it), for example
+                 *     `trial_days` outside 0 to 730, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -5242,6 +5280,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["CreditLedgerEntry"];
+                    };
+                };
+                /** @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -11457,7 +11504,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Validation failed (see description). */
+            /** @description Validation failed (see description), or an unknown field (`param` names it; the body must use only the fields listed here). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -13457,8 +13504,9 @@ export interface operations {
                 };
             };
             /**
-             * @description Validation error: missing `customer_id`, unsupported currency, or
-             *     an invalid line item (the message names the line number).
+             * @description Validation error: missing `customer_id`, unsupported currency,
+             *     an invalid line item (the message names the line number), or
+             *     an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -13565,8 +13613,9 @@ export interface operations {
                 };
             };
             /**
-             * @description Validation error: the invoice is not a draft, or a line field is
-             *     invalid (for example a quantity of 0, or a second commit line).
+             * @description Validation error: the invoice is not a draft, a line field is
+             *     invalid (for example a quantity of 0, or a second commit line), or
+             *     the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {

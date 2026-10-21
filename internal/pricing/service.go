@@ -524,6 +524,11 @@ func (s *Service) CreatePlan(ctx context.Context, tenantID string, input CreateP
 	if input.BaseAmountCents < 0 {
 		return domain.Plan{}, errs.Invalid("base_amount_cents", "base fee must be 0 or more")
 	}
+	// Create always makes the plan active. A caller sending another status
+	// used to get a 201 that ignored it.
+	if input.Status != "" && domain.PlanStatus(input.Status) != domain.PlanActive {
+		return domain.Plan{}, errs.Invalid("status", "a plan is created active; archive it with PATCH")
+	}
 
 	baseBillTiming := input.BaseBillTiming
 	if baseBillTiming == "" {
@@ -650,7 +655,14 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Cre
 		existing.MeterIDs = input.MeterIDs
 	}
 	if input.Status != "" {
-		existing.Status = domain.PlanStatus(input.Status)
+		// Checked here, not left to plans_status_check: the constraint's
+		// error is a 500, which the idempotency middleware caches.
+		switch st := domain.PlanStatus(input.Status); st {
+		case domain.PlanDraft, domain.PlanActive, domain.PlanArchived:
+			existing.Status = st
+		default:
+			return domain.Plan{}, errs.Invalid("status", "must be draft, active or archived")
+		}
 	}
 	taxCode := strings.TrimSpace(input.TaxCode)
 	if err := domain.ValidateStripeTaxCode("tax_code", taxCode); err != nil {

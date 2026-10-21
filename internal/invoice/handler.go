@@ -386,8 +386,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var input CreateInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -444,8 +443,7 @@ func (h *Handler) addLineItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input AddLineItemInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 

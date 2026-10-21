@@ -612,7 +612,7 @@ export const postV1Customers = async (postV1CustomersBody: PostV1CustomersBody, 
 
 
 
-export const getPostV1CustomersMutationOptions = <TError = void,
+export const getPostV1CustomersMutationOptions = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Customers>>, TError,{data: PostV1CustomersBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1Customers>>, TError,{data: PostV1CustomersBody}, TContext> => {
 
@@ -641,12 +641,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1CustomersMutationResult = NonNullable<Awaited<ReturnType<typeof postV1Customers>>>
     export type PostV1CustomersMutationBody = PostV1CustomersBody
-    export type PostV1CustomersMutationError = void
+    export type PostV1CustomersMutationError = void | Error
 
     /**
  * @summary Create customer
  */
-export const usePostV1Customers = <TError = void,
+export const usePostV1Customers = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Customers>>, TError,{data: PostV1CustomersBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1Customers>>,
@@ -5901,7 +5901,7 @@ export const postV1Plans = async (postV1PlansBody: PostV1PlansBody, options?: Re
 
 
 
-export const getPostV1PlansMutationOptions = <TError = unknown,
+export const getPostV1PlansMutationOptions = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Plans>>, TError,{data: PostV1PlansBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1Plans>>, TError,{data: PostV1PlansBody}, TContext> => {
 
@@ -5930,12 +5930,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1PlansMutationResult = NonNullable<Awaited<ReturnType<typeof postV1Plans>>>
     export type PostV1PlansMutationBody = PostV1PlansBody
-    export type PostV1PlansMutationError = unknown
+    export type PostV1PlansMutationError = Error
 
     /**
  * @summary Create plan
  */
-export const usePostV1Plans = <TError = unknown,
+export const usePostV1Plans = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Plans>>, TError,{data: PostV1PlansBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1Plans>>,
@@ -6538,7 +6538,7 @@ export const postV1Subscriptions = async (postV1SubscriptionsBody: PostV1Subscri
 
 
 
-export const getPostV1SubscriptionsMutationOptions = <TError = unknown,
+export const getPostV1SubscriptionsMutationOptions = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Subscriptions>>, TError,{data: PostV1SubscriptionsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1Subscriptions>>, TError,{data: PostV1SubscriptionsBody}, TContext> => {
 
@@ -6567,12 +6567,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1SubscriptionsMutationResult = NonNullable<Awaited<ReturnType<typeof postV1Subscriptions>>>
     export type PostV1SubscriptionsMutationBody = PostV1SubscriptionsBody
-    export type PostV1SubscriptionsMutationError = unknown
+    export type PostV1SubscriptionsMutationError = Error
 
     /**
  * @summary Create subscription
  */
-export const usePostV1Subscriptions = <TError = unknown,
+export const usePostV1Subscriptions = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Subscriptions>>, TError,{data: PostV1SubscriptionsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1Subscriptions>>,
@@ -12780,7 +12780,7 @@ export const postV1CreditsGrant = async (postV1CreditsGrantBody: PostV1CreditsGr
 
 
 
-export const getPostV1CreditsGrantMutationOptions = <TError = unknown,
+export const getPostV1CreditsGrantMutationOptions = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1CreditsGrant>>, TError,{data: PostV1CreditsGrantBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1CreditsGrant>>, TError,{data: PostV1CreditsGrantBody}, TContext> => {
 
@@ -12809,12 +12809,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1CreditsGrantMutationResult = NonNullable<Awaited<ReturnType<typeof postV1CreditsGrant>>>
     export type PostV1CreditsGrantMutationBody = PostV1CreditsGrantBody
-    export type PostV1CreditsGrantMutationError = unknown
+    export type PostV1CreditsGrantMutationError = Error
 
     /**
  * @summary Grant credits to customer
  */
-export const usePostV1CreditsGrant = <TError = unknown,
+export const usePostV1CreditsGrant = <TError = Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1CreditsGrant>>, TError,{data: PostV1CreditsGrantBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1CreditsGrant>>,
