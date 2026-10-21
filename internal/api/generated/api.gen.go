@@ -3242,7 +3242,7 @@ type AnalyticsOverview struct {
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
 	DunningActive int `json:"dunning_active"`
 
-	// DunningRecoveryRate Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered`), divided by all runs opened in the window. A run closed by a void or a write-off is not recovered. 0 when none were opened.
+	// DunningRecoveryRate Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
 	DunningRecoveryRate float64 `json:"dunning_recovery_rate"`
 
 	// FailedPayments Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies.
@@ -4420,7 +4420,7 @@ type DunningStats struct {
 	Currency       string `json:"currency"`
 	EscalatedCount int    `json:"escalated_count"`
 
-	// RecoveredCount Resolved runs that a payment closed (`resolution` is `payment_recovered`).
+	// RecoveredCount Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered.
 	RecoveredCount int `json:"recovered_count"`
 
 	// ResolvedCount Resolved runs, whatever closed them (a payment, a void or a write-off).
@@ -7277,7 +7277,7 @@ type GetV1InvoicesParams struct {
 	// Ids Comma-separated invoice IDs to fetch exactly.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default).
+	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a voided invoice as 0, since it owes nothing.
 	Sort   string                 `form:"sort,omitempty" json:"sort,omitempty"`
 	Dir    GetV1InvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 	Limit  int                    `form:"limit,omitempty" json:"limit,omitempty"`

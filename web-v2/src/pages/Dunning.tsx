@@ -240,8 +240,9 @@ function RunsTab() {
   const statCards = [
     { label: 'Active', value: stats?.active_count ?? 0, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-500/10', ring: 'ring-blue-200 dark:ring-blue-500/20' },
     { label: 'Escalated', value: stats?.escalated_count ?? 0, color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-500/10', ring: 'ring-violet-200 dark:ring-violet-500/20' },
-    // Recovered = closed by a payment. A run closed by a void or a write-off
-    // is resolved but recovered nothing (sweep A6/E7).
+    // Recovered = closed by a payment. A run closed by a void, a write-off or
+    // a credit that left nothing due is resolved but recovered nothing (sweep
+    // A6/E7; the server decides).
     { label: 'Recovered', value: stats?.recovered_count ?? 0, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-500/10', ring: 'ring-emerald-200 dark:ring-emerald-500/20' },
     // One figure per currency (mixed currencies cannot be added). A
     // default-only figure read "At risk (CAD) CA$0.00" while USD runs were

@@ -1,6 +1,6 @@
 # ADR-110: A written-off invoice closes the customer's self-service payment route
 
-**Status:** Accepted (amended 2026-10-22; its 2026-08-05 amendment was superseded by [ADR-113](113-nothing-charges-a-written-off-invoice.md) on 2026-08-06)
+**Status:** Accepted (2026-08-05; amended 2026-10-22; its 2026-08-05 amendment was superseded by [ADR-113](113-nothing-charges-a-written-off-invoice.md) on 2026-08-06)
 **Relates to:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns),
 [ADR-112](112-dunning-exhaustion-settles-two-questions.md) (`mark_uncollectible`
 is the terminal INVOICE action, set independently of the subscription's),
@@ -239,7 +239,8 @@ states.
 
 What changes:
 
-- `invoiceTerminal.ts` holds every read of the two fields. `invoiceDueCents`
+- The helpers in `src/lib` hold every read of the two fields, most of them
+  in `invoiceTerminal.ts`. `invoiceDueCents`
   says what is owed: nothing on a void, `amount_due` otherwise (a write-off
   stays on the books, as above). `invoiceRowAmount` names the figure ("$29.00
   due", "$29.00 paid", or the bare amount on a draft, void or write-off). The
@@ -247,12 +248,21 @@ What changes:
   `invoicePaymentInFlight`) moved there from the invoice page.
 - The payment chip beside an invoice's badge is gone on a write-off too, not
   only on a void: "Pending" or "Failed" beside "Uncollectible" read as a
-  payment still expected.
+  payment still expected. "Unknown" stays: a parked charge can be written off
+  and is marked paid later if it succeeded.
+- A void shows $0.00 where a figure is headed "Amount due": the Invoices
+  list, which also sorts it as 0, and the Dunning list. A row that names its own figure
+  (Home, the command palette, "Last invoice") shows the invoice amount beside
+  the "Void" badge.
 - A `no-restricted-syntax` rule in `web-v2/eslint.config.js` fails a read of
   `payment_status` or `amount_due_cents` outside `src/lib`. The frontend CI job
   runs it.
-- The server counts the same way: Home's failed payments and the dunning
-  at-risk total cover open invoices only, and "Recovered" and the recovery rate
-  count only runs a payment closed (`resolution = payment_recovered`).
+- The server counts the same way. Home's failed payments and the dunning
+  at-risk total cover open invoices only. "Recovered" and the recovery rate
+  count only runs a payment closed: `resolution = payment_recovered` with
+  `amount_paid_cents > 0`. A credit note or customer credit that leaves
+  nothing due also closes the run as `payment_recovered` (ADR-061, amendment
+  2026-10-19). That invoice is paid with nothing paid for it, so its run
+  counts as resolved, not recovered.
   `GET /v1/dunning/stats` adds `recovered_count`; `resolved_count` keeps its
   meaning (every resolved run).

@@ -3282,7 +3282,7 @@ export interface paths {
                     overdue?: boolean;
                     /** @description Comma-separated invoice IDs to fetch exactly. */
                     ids?: string;
-                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). */
+                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a voided invoice as 0, since it owes nothing. */
                     sort?: string;
                     dir?: "asc" | "desc";
                     limit?: number;
@@ -8493,7 +8493,7 @@ export interface components {
             nrr: number;
             /**
              * Format: double
-             * @description Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered`), divided by all runs opened in the window. A run closed by a void or a write-off is not recovered. 0 when none were opened.
+             * @description Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
              */
             dunning_recovery_rate: number;
             mrr_movement: components["schemas"]["AnalyticsMrrMovementTotals"];
@@ -8927,7 +8927,7 @@ export interface components {
             escalated_count: number;
             /** @description Resolved runs, whatever closed them (a payment, a void or a write-off). */
             resolved_count: number;
-            /** @description Resolved runs that a payment closed (`resolution` is `payment_recovered`). */
+            /** @description Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered. */
             recovered_count: number;
             /**
              * Format: int64

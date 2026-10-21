@@ -1119,6 +1119,12 @@ func (s *PostgresStore) ListEvents(ctx context.Context, tenantID, runID string) 
 // "at risk"; and a run resolved by a void or a write-off is resolved, not
 // recovered (sweep A6/E7, 2026-10-21).
 //
+// Recovered also needs money paid on the invoice (amount_paid_cents > 0). A
+// credit note or customer credit that leaves nothing due marks the invoice
+// paid with amount_paid 0 and closes its run as payment_recovered too
+// (ADR-061, 2026-10-19), from the note, the dunning retry or the paid check;
+// the resolution alone cannot tell a waiver from a payment (review of #1328).
+//
 // Single tenant-scoped query (RLS handles tenant_id), no pagination,
 // no client-side derivation. Cards stay accurate regardless of how
 // many runs exist.
@@ -1147,7 +1153,7 @@ func (s *PostgresStore) GetStats(ctx context.Context, tenantID string) (Stats, e
 		    COUNT(*) FILTER (WHERE r.state = 'active')                                AS active_count,
 		    COUNT(*) FILTER (WHERE r.state = 'escalated')                             AS escalated_count,
 		    COUNT(*) FILTER (WHERE r.state = 'resolved')                              AS resolved_count,
-		    COUNT(*) FILTER (WHERE r.state = 'resolved' AND r.resolution = $2)        AS recovered_count,
+		    COUNT(*) FILTER (WHERE r.state = 'resolved' AND r.resolution = $2 AND i.amount_paid_cents > 0) AS recovered_count,
 		    COALESCE(SUM(i.amount_due_cents) FILTER (WHERE r.state IN ('active','escalated') AND i.status = $3 AND i.currency = $1), 0) AS at_risk_cents
 		FROM invoice_dunning_runs r
 		LEFT JOIN invoices i ON i.id = r.invoice_id

@@ -40,7 +40,7 @@ overdue?: boolean;
  */
 ids?: string;
 /**
- * One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default).
+ * One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a voided invoice as 0, since it owes nothing.
  */
 sort?: string;
 dir?: GetV1InvoicesDir;

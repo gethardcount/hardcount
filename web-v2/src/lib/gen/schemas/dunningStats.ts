@@ -14,7 +14,7 @@ export interface DunningStats {
   escalated_count: number;
   /** Resolved runs, whatever closed them (a payment, a void or a write-off). */
   resolved_count: number;
-  /** Resolved runs that a payment closed (`resolution` is `payment_recovered`). */
+  /** Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered. */
   recovered_count: number;
   /** Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk. */
   at_risk_cents: number;

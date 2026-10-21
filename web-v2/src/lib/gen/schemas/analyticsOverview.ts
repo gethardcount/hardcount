@@ -91,7 +91,7 @@ export interface AnalyticsOverview {
      * `mrr_prev` is 0.
      */
   nrr: number;
-  /** Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered`), divided by all runs opened in the window. A run closed by a void or a write-off is not recovered. 0 when none were opened. */
+  /** Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened. */
   dunning_recovery_rate: number;
   mrr_movement: AnalyticsMrrMovementTotals;
 }

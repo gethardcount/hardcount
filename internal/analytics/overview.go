@@ -535,9 +535,12 @@ func churnRate(ctx context.Context, tx *sql.Tx, start, end any, _ bool) float64 
 }
 
 // dunningRecoveryRate = recovered / opened, over the runs opened in the
-// period. A run is recovered when a payment closed it (resolution
-// payment_recovered). A run resolved by a void or a write-off is resolved
-// but not recovered, and used to raise the rate (sweep E7b, 2026-10-21).
+// period. A run is recovered when a payment closed it: resolution
+// payment_recovered, with money paid on the invoice (amount_paid_cents > 0).
+// A run resolved by a void or a write-off is resolved but not recovered, and
+// used to raise the rate (sweep E7b, 2026-10-21); so is a run closed by a
+// credit note or customer credit that left nothing due, which is
+// payment_recovered with nothing paid (review of #1328).
 func dunningRecoveryRate(ctx context.Context, tx *sql.Tx, start, end any) float64 {
 	var opened, recovered int
 	if err := tx.QueryRowContext(ctx, `
@@ -548,7 +551,7 @@ func dunningRecoveryRate(ctx context.Context, tx *sql.Tx, start, end any) float6
 	}
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM invoice_dunning_runs
-		WHERE created_at >= $1 AND created_at < $2 AND state = 'resolved' AND resolution = $3 AND invoice_id IN (SELECT id FROM invoices WHERE is_simulated = false)
+		WHERE created_at >= $1 AND created_at < $2 AND state = 'resolved' AND resolution = $3 AND invoice_id IN (SELECT id FROM invoices WHERE is_simulated = false AND amount_paid_cents > 0)
 	`, start, end, string(domain.ResolutionPaymentRecovered)).Scan(&recovered); err != nil {
 		return 0
 	}
