@@ -76,6 +76,7 @@ export interface InvoiceMoneyInput {
   payment_status?: string
   amount_due_cents: number
   amount_paid_cents?: number
+  credits_applied_cents?: number
   currency: string
 }
 
