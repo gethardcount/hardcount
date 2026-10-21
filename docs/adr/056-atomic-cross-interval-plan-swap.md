@@ -70,7 +70,7 @@ both via `FinalizeCrossIntervalSwap` after `tx.Commit()`. (The tax *calculation*
 
 **Decision.** The swap closes the old window, so its invoice bills it. The invoice takes the renewal shape of [ADR-031](031-per-plan-base-bill-timing.md): the new period's base, plus usage lines stamped with the old window. One invoice and one charge, written on the swap transaction (`BillOnPlanSwapTx`, which replaces `BillOnCreateTx` on this path).
 
-- The usage is priced the way an immediate cancel prices its partial window (`buildCancelLineItems`): old plan, segment-aware, the usage cap applied, in_advance base skipped.
+- The usage is priced the way an immediate cancel prices its partial window (`buildCancelLineItems`): old plan, segment-aware, in_advance base skipped.
 - Usage starts at the threshold watermark ([ADR-066](066-threshold-money-semantics.md) §4). A `reset_billing_cycle=false` threshold invoice that billed [old start, t1) leaves [t1, swap) to the swap. The swap still refuses a fire that billed past its instant (ADR-115). The watermark is read on the swap transaction after the period CAS took the row lock, so a fire that committed before the lock is seen. A fire after it fails its own CAS.
 - Late usage follows [ADR-120](120-invoice-grace-period-for-late-usage.md), as for an immediate cancel: an operator action bills now, and an event stamped before the swap that arrives after it is not billed.
 - Usage below zero writes its `subscription.net_negative_usage` row on the swap transaction. The unpriced-usage count runs after commit.

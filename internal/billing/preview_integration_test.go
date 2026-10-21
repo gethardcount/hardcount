@@ -552,8 +552,8 @@ func (f *previewFixture) seedItemChange(t *testing.T, ctx context.Context, subID
 }
 
 // TestCreatePreview_EstimateScopeWarnings pins the Tier-1 honesty warnings:
-// create_preview is a full-period estimate that doesn't replicate usage-cap
-// scaling or mid-period segment proration (ADR-045), so it must SAY SO on the
+// create_preview is a full-period estimate that doesn't replicate mid-period
+// segment proration (ADR-045), so it must SAY SO on the
 // warnings channel rather than silently hand back a number the cycle won't
 // match. Clean subs (the common/wedge case) stay warning-free.
 func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {

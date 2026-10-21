@@ -9190,9 +9190,7 @@ export const getPostV1InvoicesCreatePreviewUrl = () => {
  * trial-end invoice when a plan bills in advance, otherwise the close
  * of the first paid period, prorated the same way. With an
  * explicit `period`, it is a flat estimate over that window and warns
- * when a mid-period change makes the invoice differ. Neither applies
- * usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
- * says the invoice can be lower. Composes across customer / subscription / pricing;
+ * when a mid-period change makes the invoice differ. Composes across customer / subscription / pricing;
  * registered as a sibling of `/v1/invoices` (chi picks the more
  * specific pattern, otherwise `/{id}` would capture
  * `create_preview` as an invoice ID). See

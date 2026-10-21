@@ -2222,6 +2222,24 @@ func (e ListCreditNotesParamsDir) Valid() bool {
 	}
 }
 
+// Defines values for PostV1CreditNotesJSONBodyRefundType.
+const (
+	PostV1CreditNotesJSONBodyRefundTypeCredit PostV1CreditNotesJSONBodyRefundType = "credit"
+	PostV1CreditNotesJSONBodyRefundTypeRefund PostV1CreditNotesJSONBodyRefundType = "refund"
+)
+
+// Valid indicates whether the value is a known member of the PostV1CreditNotesJSONBodyRefundType enum.
+func (e PostV1CreditNotesJSONBodyRefundType) Valid() bool {
+	switch e {
+	case PostV1CreditNotesJSONBodyRefundTypeCredit:
+		return true
+	case PostV1CreditNotesJSONBodyRefundTypeRefund:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostV1CreditNotesIdSend200JSONResponseBodyStatus.
 const (
 	PostV1CreditNotesIdSend200JSONResponseBodyStatusSent PostV1CreditNotesIdSend200JSONResponseBodyStatus = "sent"
@@ -2254,22 +2272,22 @@ func (e PostV1CreditsGrantJSONBodyGrantKind) Valid() bool {
 
 // Defines values for ListCreditLedgerEntriesParamsEntryType.
 const (
-	ListCreditLedgerEntriesParamsEntryTypeAdjustment ListCreditLedgerEntriesParamsEntryType = "adjustment"
-	ListCreditLedgerEntriesParamsEntryTypeExpiry     ListCreditLedgerEntriesParamsEntryType = "expiry"
-	ListCreditLedgerEntriesParamsEntryTypeGrant      ListCreditLedgerEntriesParamsEntryType = "grant"
-	ListCreditLedgerEntriesParamsEntryTypeUsage      ListCreditLedgerEntriesParamsEntryType = "usage"
+	Adjustment ListCreditLedgerEntriesParamsEntryType = "adjustment"
+	Expiry     ListCreditLedgerEntriesParamsEntryType = "expiry"
+	Grant      ListCreditLedgerEntriesParamsEntryType = "grant"
+	Usage      ListCreditLedgerEntriesParamsEntryType = "usage"
 )
 
 // Valid indicates whether the value is a known member of the ListCreditLedgerEntriesParamsEntryType enum.
 func (e ListCreditLedgerEntriesParamsEntryType) Valid() bool {
 	switch e {
-	case ListCreditLedgerEntriesParamsEntryTypeAdjustment:
+	case Adjustment:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeExpiry:
+	case Expiry:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeGrant:
+	case Grant:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeUsage:
+	case Usage:
 		return true
 	default:
 		return false
@@ -2588,6 +2606,21 @@ func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
 	}
 }
 
+// Defines values for PostV1PlansJSONBodyStatus.
+const (
+	PostV1PlansJSONBodyStatusActive PostV1PlansJSONBodyStatus = "active"
+)
+
+// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyStatus enum.
+func (e PostV1PlansJSONBodyStatus) Valid() bool {
+	switch e {
+	case PostV1PlansJSONBodyStatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetPlan200JSONResponseBodyBaseBillTiming.
 const (
 	GetPlan200JSONResponseBodyBaseBillTimingInAdvance GetPlan200JSONResponseBodyBaseBillTiming = "in_advance"
@@ -2740,19 +2773,19 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 
 // Defines values for GetV1RatingRulesParamsLifecycleState.
 const (
-	GetV1RatingRulesParamsLifecycleStateActive   GetV1RatingRulesParamsLifecycleState = "active"
-	GetV1RatingRulesParamsLifecycleStateArchived GetV1RatingRulesParamsLifecycleState = "archived"
-	GetV1RatingRulesParamsLifecycleStateDraft    GetV1RatingRulesParamsLifecycleState = "draft"
+	Active   GetV1RatingRulesParamsLifecycleState = "active"
+	Archived GetV1RatingRulesParamsLifecycleState = "archived"
+	Draft    GetV1RatingRulesParamsLifecycleState = "draft"
 )
 
 // Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
 func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
 	switch e {
-	case GetV1RatingRulesParamsLifecycleStateActive:
+	case Active:
 		return true
-	case GetV1RatingRulesParamsLifecycleStateArchived:
+	case Archived:
 		return true
-	case GetV1RatingRulesParamsLifecycleStateDraft:
+	case Draft:
 		return true
 	default:
 		return false
@@ -6768,9 +6801,18 @@ type ListCreditNotesParamsDir string
 type PostV1CreditNotesJSONBody struct {
 	AutoIssue bool `json:"auto_issue,omitempty"`
 
-	// CommitRelief Mutually exclusive with lines/credit_amount_cents.
+	// CommitRelief Mutually exclusive with lines and credit_amount_cents. The
+	// relief's split goes in here, not at the top level: a top-level
+	// `refund_amount_cents`, `out_of_band_amount_cents` or
+	// `refund_type` is a 422. Example after a lost dispute:
+	// `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
 	CommitRelief struct {
-		OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
+		// InvoiceId Optional. Defaults to the top-level invoice_id.
+		InvoiceId            string `json:"invoice_id,omitempty"`
+		OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
+
+		// Reason Optional. Defaults to the top-level reason.
+		Reason string `json:"reason,omitempty"`
 
 		// RefundAmountCents Optional allocation; must sum with out_of_band to the derived cash.
 		RefundAmountCents int `json:"refund_amount_cents,omitempty"`
@@ -6784,13 +6826,25 @@ type PostV1CreditNotesJSONBody struct {
 	CreditAmountCents int    `json:"credit_amount_cents,omitempty"`
 	InvoiceId         string `json:"invoice_id"`
 	Lines             []struct {
-		Description     string `json:"description,omitempty"`
-		Quantity        int    `json:"quantity,omitempty"`
-		UnitAmountCents int    `json:"unit_amount_cents,omitempty"`
+		Description string `json:"description,omitempty"`
+
+		// InvoiceLineItemId Optional. The invoice line this credit line reverses.
+		InvoiceLineItemId string `json:"invoice_line_item_id,omitempty"`
+		Quantity          int    `json:"quantity,omitempty"`
+		UnitAmountCents   int    `json:"unit_amount_cents,omitempty"`
 	} `json:"lines,omitempty"`
+
+	// OutOfBandAmountCents Not with commit_relief; put the relief's split inside commit_relief.
 	OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
 	Reason               string `json:"reason,omitempty"`
-	RefundAmountCents    int    `json:"refund_amount_cents,omitempty"`
+
+	// RefundAmountCents Not with commit_relief; put the relief's split inside commit_relief.
+	RefundAmountCents int `json:"refund_amount_cents,omitempty"`
+
+	// RefundType Older single-channel form. On a paid invoice whose three
+	// `*_amount_cents` fields are all 0, `refund` or `credit`
+	// puts the whole note in that channel. Not with commit_relief.
+	RefundType PostV1CreditNotesJSONBodyRefundType `json:"refund_type,omitempty"`
 }
 
 // PostV1CreditNotesParams defines parameters for PostV1CreditNotes.
@@ -6802,6 +6856,9 @@ type PostV1CreditNotesParams struct {
 	// error cases are in docs/api-surface.md.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
+
+// PostV1CreditNotesJSONBodyRefundType defines parameters for PostV1CreditNotes.
+type PostV1CreditNotesJSONBodyRefundType string
 
 // IssueCreditNoteParams defines parameters for IssueCreditNote.
 type IssueCreditNoteParams struct {
@@ -6958,6 +7015,9 @@ type PostV1CustomersJSONBody struct {
 	DisplayName      string   `json:"display_name"`
 	Email            string   `json:"email,omitempty"`
 	ExternalId       string   `json:"external_id"`
+
+	// TestClockId Test mode only. Attaches the customer to a test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
 }
 
 // PostV1CustomersParams defines parameters for PostV1Customers.
@@ -7559,8 +7619,15 @@ type PostV1PlansJSONBody struct {
 	BillingInterval PostV1PlansJSONBodyBillingInterval `json:"billing_interval"`
 	Code            string                             `json:"code"`
 	Currency        string                             `json:"currency"`
+	Description     string                             `json:"description,omitempty"`
 	MeterIds        []string                           `json:"meter_ids,omitempty"`
 	Name            string                             `json:"name"`
+
+	// Status Optional. A plan is created active; archive it with PATCH.
+	Status PostV1PlansJSONBodyStatus `json:"status,omitempty"`
+
+	// TaxCode Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
+	TaxCode string `json:"tax_code,omitempty"`
 }
 
 // PostV1PlansParams defines parameters for PostV1Plans.
@@ -7578,6 +7645,9 @@ type PostV1PlansJSONBodyBaseBillTiming string
 
 // PostV1PlansJSONBodyBillingInterval defines parameters for PostV1Plans.
 type PostV1PlansJSONBodyBillingInterval string
+
+// PostV1PlansJSONBodyStatus defines parameters for PostV1Plans.
+type PostV1PlansJSONBodyStatus string
 
 // GetPlan200JSONResponseBodyBaseBillTiming defines parameters for GetPlan.
 type GetPlan200JSONResponseBodyBaseBillTiming string
@@ -7972,7 +8042,7 @@ type EndSubscriptionTrialParams struct {
 
 // ExtendSubscriptionTrialJSONBody defines parameters for ExtendSubscriptionTrial.
 type ExtendSubscriptionTrialJSONBody struct {
-	// TrialEnd The new trial end. Must be in the future and after the current `trial_end_at`.
+	// TrialEnd The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
 	TrialEnd time.Time `json:"trial_end"`
 }
 

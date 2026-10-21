@@ -644,8 +644,8 @@ type CreateItemInput struct {
 	Quantity int64  `json:"quantity,omitempty"`
 }
 
-// maxTrialDays is the longest trial a create accepts: two years, Stripe's
-// limit for trial_end.
+// maxTrialDays is the longest trial create and extend-trial accept: two
+// years, Stripe's limit for trial_end.
 const maxTrialDays = 730
 
 type CreateInput struct {
@@ -3269,6 +3269,11 @@ func (s *Service) ExtendTrial(ctx context.Context, tenantID, id string, newTrial
 		return domain.Subscription{}, err
 	}
 	newEnd := newTrialEnd.UTC()
+	// The create bound holds here too: a trial ends at most maxTrialDays
+	// after it started, counted the way create counts trial_days.
+	if current.TrialStartAt != nil && newEnd.After(domain.AddDaysIn(*current.TrialStartAt, maxTrialDays, loc)) {
+		return domain.Subscription{}, errs.Invalid("trial_end", fmt.Sprintf("A trial can last at most %d days from its start. Pick an earlier date.", maxTrialDays))
+	}
 	interval := s.firstPlanInterval(ctx, tenantID, current.Items)
 	ps, pe, anchorDay := firstPeriodAfterTrial(newEnd, current.BillingTime, interval, loc)
 	return s.store.ExtendTrial(ctx, tenantID, id, newEnd, ps, pe, pe, anchorDay)

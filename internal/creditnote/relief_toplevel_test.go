@@ -25,7 +25,7 @@ func TestCreateCommitRelief_TopLevelSplitRefused(t *testing.T) {
 		{"refund_type", `"refund"`},
 	} {
 		t.Run(c.field, func(t *testing.T) {
-			body := `{"invoice_id":"inv_1","reason":"fraudulent","commit_relief":{"retire_all":true},"` + c.field + `":` + c.value + `}`
+			body := `{"invoice_id":"inv_1","reason":"Lost card dispute","commit_relief":{"retire_all":true},"` + c.field + `":` + c.value + `}`
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 			req = req.WithContext(context.WithValue(req.Context(), auth.TestTenantIDKey(), "t1"))
 			rr := httptest.NewRecorder()

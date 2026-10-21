@@ -165,6 +165,8 @@ export interface paths {
                         display_name: string;
                         email?: string;
                         additional_emails?: string[];
+                        /** @description Test mode only. Attaches the customer to a test clock. */
+                        test_clock_id?: string;
                     };
                 };
             };
@@ -1229,16 +1231,37 @@ export interface paths {
                         invoice_id: string;
                         reason?: string;
                         lines?: {
+                            /** @description Optional. The invoice line this credit line reverses. */
+                            invoice_line_item_id?: string;
                             description?: string;
                             quantity?: number;
                             unit_amount_cents?: number;
                         }[];
+                        /** @description Not with commit_relief; put the relief's split inside commit_relief. */
                         refund_amount_cents?: number;
                         credit_amount_cents?: number;
+                        /** @description Not with commit_relief; put the relief's split inside commit_relief. */
                         out_of_band_amount_cents?: number;
+                        /**
+                         * @description Older single-channel form. On a paid invoice whose three
+                         *     `*_amount_cents` fields are all 0, `refund` or `credit`
+                         *     puts the whole note in that channel. Not with commit_relief.
+                         * @enum {string}
+                         */
+                        refund_type?: "refund" | "credit";
                         auto_issue?: boolean;
-                        /** @description Mutually exclusive with lines/credit_amount_cents. */
+                        /**
+                         * @description Mutually exclusive with lines and credit_amount_cents. The
+                         *     relief's split goes in here, not at the top level: a top-level
+                         *     `refund_amount_cents`, `out_of_band_amount_cents` or
+                         *     `refund_type` is a 422. Example after a lost dispute:
+                         *     `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+                         */
                         commit_relief?: {
+                            /** @description Optional. Defaults to the top-level invoice_id. */
+                            invoice_id?: string;
+                            /** @description Optional. Defaults to the top-level reason. */
+                            reason?: string;
                             /** @description Commit credits to retire (1..remaining). */
                             retire_cents?: number;
                             /** @description Retire the LIVE remaining (absorbs racing drawdowns). */
@@ -2003,6 +2026,7 @@ export interface paths {
                     "application/json": {
                         code: string;
                         name: string;
+                        description?: string;
                         currency: string;
                         /** @enum {string} */
                         billing_interval: "monthly" | "yearly";
@@ -2014,6 +2038,13 @@ export interface paths {
                          */
                         base_bill_timing?: "in_advance" | "in_arrears";
                         meter_ids?: string[];
+                        /**
+                         * @description Optional. A plan is created active; archive it with PATCH.
+                         * @enum {string}
+                         */
+                        status?: "active";
+                        /** @description Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
+                        tax_code?: string;
                     };
                 };
             };
@@ -3399,9 +3430,7 @@ export interface paths {
          *     trial-end invoice when a plan bills in advance, otherwise the close
          *     of the first paid period, prorated the same way. With an
          *     explicit `period`, it is a flat estimate over that window and warns
-         *     when a mid-period change makes the invoice differ. Neither applies
-         *     usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
-         *     says the invoice can be lower. Composes across customer / subscription / pricing;
+         *     when a mid-period change makes the invoice differ. Composes across customer / subscription / pricing;
          *     registered as a sibling of `/v1/invoices` (chi picks the more
          *     specific pattern, otherwise `/{id}` would capture
          *     `create_preview` as an invoice ID). See
@@ -12342,6 +12371,7 @@ export interface operations {
              * @description Code `validation_error`: neither or both of `at_period_end` and
              *     `cancel_at` are set, or `cancel_at` is in the past or breaks the
              *     date rules above.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12472,6 +12502,7 @@ export interface operations {
             /**
              * @description Code `validation_error`: `behavior` is missing or not
              *     `keep_as_draft`, or `resumes_at` is not in the future.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12601,7 +12632,7 @@ export interface operations {
                 "application/json": {
                     /**
                      * Format: date-time
-                     * @description The new trial end. Must be in the future and after the current `trial_end_at`.
+                     * @description The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
                      */
                     trial_end: string;
                 };
@@ -12649,8 +12680,8 @@ export interface operations {
                 };
             };
             /**
-             * @description `trial_end` is missing, in the past, or not after the current
-             *     `trial_end_at`.
+             * @description `trial_end` is missing, in the past, not after the current
+             *     `trial_end_at`, or more than 730 days after `trial_start_at`.
              */
             422: {
                 headers: {
@@ -12747,6 +12778,7 @@ export interface operations {
              *     not on this subscription; a `usage_gte` is not a number or is
              *     negative; or the subscription's plans use more than one
              *     currency.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12870,6 +12902,7 @@ export interface operations {
              * @description Code `validation_error`: `plan_id` is missing or not found,
              *     `quantity` is less than 1, or the plan's billing interval
              *     differs from the other items'.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -13016,6 +13049,7 @@ export interface operations {
              *     `new_plan_id` are set; the value equals the current one;
              *     `quantity` is less than 1; the new plan is not found; or the new
              *     plan's billing timing or interval does not fit the subscription.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {

@@ -256,7 +256,7 @@ func validatePricingShape(mode domain.PricingMode, flat decimal.Decimal, tiers [
 			lastUpper = tier.UpTo
 		}
 		if tiers[len(tiers)-1].UpTo != 0 {
-			return errs.Invalid("graduated_tiers", "the final tier must be a catch-all (up_to=0): a bounded last tier makes any usage beyond it unpriceable and blocks invoice generation at cycle close — use usage caps to limit consumption instead")
+			return errs.Invalid("graduated_tiers", "the final tier must be a catch-all (up_to=0): a bounded last tier makes any usage beyond it unpriceable and blocks invoice generation at cycle close — to invoice early when usage runs high, set a spend threshold on the subscription")
 		}
 	case domain.PricingPackage:
 		if pkgSize <= 0 {

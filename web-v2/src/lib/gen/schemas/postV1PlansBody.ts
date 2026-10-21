@@ -9,10 +9,12 @@
  */
 import type { PostV1PlansBodyBaseBillTiming } from './postV1PlansBodyBaseBillTiming';
 import type { PostV1PlansBodyBillingInterval } from './postV1PlansBodyBillingInterval';
+import type { PostV1PlansBodyStatus } from './postV1PlansBodyStatus';
 
 export type PostV1PlansBody = {
   code: string;
   name: string;
+  description?: string;
   currency: string;
   billing_interval: PostV1PlansBodyBillingInterval;
   base_amount_cents?: number;
@@ -22,4 +24,8 @@ export type PostV1PlansBody = {
      */
   base_bill_timing?: PostV1PlansBodyBaseBillTiming;
   meter_ids?: string[];
+  /** Optional. A plan is created active; archive it with PATCH. */
+  status?: PostV1PlansBodyStatus;
+  /** Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
+  tax_code?: string;
 };

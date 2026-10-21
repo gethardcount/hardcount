@@ -389,4 +389,4 @@ progress and for a crash on the final retry. Pinned by
 
 ## Amendment 2026-10-22 — money-path create routes refuse unknown fields
 
-Money-path create routes refuse unknown fields (422, `param` = key); policy routes keep the by-name refusal.
+Money-path create routes and the subscription change routes refuse unknown fields (422, `param` = key); policy routes keep the by-name refusal.
