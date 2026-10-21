@@ -17,17 +17,21 @@ import (
 // and E7b. A void or write-off keeps the invoice's last payment_status, so
 // Home's "N failed payments" alert counted invoices nobody is collecting any
 // more; and the dunning recovery rate counted every resolved run as
-// recovered, so a run closed by a void raised it.
+// recovered, so a run closed by a void raised it. Review of #1328: a credit
+// note that leaves nothing due closes the run as payment_recovered on an
+// invoice paid with nothing paid for it, and raised it too.
 //
 // Seeded world, all in the 30-day window:
 //
 //	invoices with payment_status failed: open (counts), voided, written off
 //	dunning runs opened 5 days ago:      resolved by a payment, resolved by
-//	                                     a void, still active
+//	                                     a void, resolved by a waiver (paid,
+//	                                     amount_paid 0), still active
 //
 // Mutation checks (each makes this test fail):
 //   - failed_payments without status = 'finalized' → 3
-//   - the recovery numerator back to state = 'resolved' alone → 2/3
+//   - the recovery numerator back to state = 'resolved' alone → 3/4
+//   - the numerator without amount_paid_cents > 0 → 2/4
 func TestOverview_ClosedInvoicesLeaveFailedPaymentsAndRecovery(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -53,6 +57,8 @@ func TestOverview_ClosedInvoicesLeaveFailedPaymentsAndRecovery(t *testing.T) {
 	voided := failed(10_02, domain.InvoiceVoided)
 	_ = failed(10_03, domain.InvoiceUncollectible)
 	recovered := makePaidInvoice(t, ctx, invStore, tenantID, c.ID, "USD", 10_04).ID
+	waived := makePaidInvoice(t, ctx, invStore, tenantID, c.ID, "USD", 10_05).ID
+	execBypass(t, db, `UPDATE invoices SET amount_paid_cents = 0 WHERE id = $1`, waived)
 
 	policyID := postgres.NewID("vlx_dpol")
 	// A tenant tx, so the set_livemode trigger stamps the test mode the
@@ -66,6 +72,7 @@ func TestOverview_ClosedInvoicesLeaveFailedPaymentsAndRecovery(t *testing.T) {
 	}
 	run(recovered, "resolved", "payment_recovered")
 	run(voided, "resolved", "invoice_voided")
+	run(waived, "resolved", "payment_recovered")
 	run(open, "active", "")
 
 	resp := getOverview(t, db, tenantID)
@@ -73,7 +80,7 @@ func TestOverview_ClosedInvoicesLeaveFailedPaymentsAndRecovery(t *testing.T) {
 	if resp.FailedPayments != 1 {
 		t.Errorf("failed_payments: got %d, want 1 (the open invoice; a void or write-off is no longer collected)", resp.FailedPayments)
 	}
-	if want := 1.0 / 3.0; math.Abs(resp.DunningRecoveryRate-want) > 1e-9 {
-		t.Errorf("dunning_recovery_rate: got %v, want 1/3 (only the run a payment closed is a recovery)", resp.DunningRecoveryRate)
+	if want := 1.0 / 4.0; math.Abs(resp.DunningRecoveryRate-want) > 1e-9 {
+		t.Errorf("dunning_recovery_rate: got %v, want 1/4 (only the run a payment closed is a recovery; a void or a waiver is not)", resp.DunningRecoveryRate)
 	}
 }

@@ -51,6 +51,9 @@ test('invoicePaymentChip never repeats what the invoice badge already says', () 
   assert.equal(invoicePaymentChip({ status: 'voided', payment_status: 'pending' }), null)
   assert.equal(invoicePaymentChip({ status: 'uncollectible', payment_status: 'failed' }), null)
   assert.equal(invoicePaymentChip({ status: 'uncollectible', payment_status: 'pending' }), null)
+  // A parked charge can be written off and is marked paid later if it
+  // succeeded (docs/payments.md), so money may still arrive: keep "Unknown".
+  assert.deepEqual(invoicePaymentChip({ status: 'uncollectible', payment_status: 'unknown' }), { label: 'Unknown', tone: 'neutral' })
   // A payment state the badge does not carry still shows.
   assert.deepEqual(invoicePaymentChip({ status: 'finalized', payment_status: 'pending' }), { label: 'Pending', tone: 'warning' })
   assert.deepEqual(invoicePaymentChip({ status: 'finalized', payment_status: 'unknown' }), { label: 'Unknown', tone: 'neutral' })
