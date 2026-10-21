@@ -704,9 +704,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		subtotal += li.AmountCents
 		items = append(items, li)
 	}
-	// One commit per invoice (ADR-078). The store enforces it too, under the
-	// row lock, for AddLineItem; checking here as well keeps a refused pair
-	// from using up a number.
+	// One commit per invoice (ADR-078). The store enforces it too, on both
+	// create (createWithLineItemsInTx) and AddLineItem (under the row lock);
+	// checking here as well keeps a refused pair from using up a number,
+	// which the store's check runs too late to prevent.
 	if commitLines > 1 {
 		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "invoice already has a commit line — one commit per invoice; use a separate invoice")
 	}
