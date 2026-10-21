@@ -59,7 +59,7 @@ function ActivityRow({ line, tz, last }: { line: ActivityLine; tz: string | unde
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
           <p className="min-w-0 text-sm text-foreground [overflow-wrap:anywhere]">
-            {line.title}
+            <span>{line.title}</span>
             {line.amount && (
               <>
                 {' · '}

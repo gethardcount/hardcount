@@ -332,7 +332,9 @@ test('closing an unpaid invoice: void gives back the credit it used, write-off c
   await expect.soft(page.getByText('Collection on the subscription is paused.')).toBeVisible()
 
   // The subscription, opened from the invoice, offers to resume collection.
-  await page.getByRole('link', { name: subscription.display_name, exact: true }).click()
+  // The invoice names it twice: in its details and on the Activity card's
+  // rows; the first is the details link.
+  await page.getByRole('link', { name: subscription.display_name, exact: true }).first().click()
   await expect(page.getByRole('heading', { name: subscription.display_name })).toBeVisible()
   await expect.soft(page.getByText('New invoices are saved as drafts and not charged.')).toBeVisible()
   await expect.soft(page.getByRole('button', { name: 'Resume collection' })).toBeVisible()

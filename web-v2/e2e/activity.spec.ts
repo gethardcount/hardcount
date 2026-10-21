@@ -297,7 +297,11 @@ test('activity text parity: one operator story on an invoice reads the same on t
       line_items: [{ description: 'E2E onboarding', line_type: 'add_on', quantity: 1, unit_amount_cents: 4900 }],
     })
     await asPerson(page, 'POST', `/invoices/${draft.id}/finalize`)
+    // Each email is waited for before the next step. An email row is dated
+    // when the mail server took it, so two emails queued together would
+    // land in whichever order the worker sent them, on either clock.
     await asPerson(page, 'POST', `/invoices/${draft.id}/send`, { email: customer.email })
+    await waitForEmailsSent(customer.id)
     const note = await asPerson<{ id: string }>(page, 'POST', '/credit-notes', {
       invoice_id: draft.id,
       reason: 'Billing error',
