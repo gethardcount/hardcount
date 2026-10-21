@@ -345,9 +345,11 @@ export default function DashboardPage() {
                     <Link
                       key={inv.id}
                       to={`/invoices/${inv.id}`}
-                      className="flex items-center justify-between px-5 py-3 hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-muted/50 transition-colors"
                     >
-                      <div className="flex items-center gap-3 min-w-0">
+                      {/* Wraps on a phone: at 390px the badges ran under the
+                          amount ("$99.00 due" over "Simulated"). */}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                         <StatusDot status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]?.test_clock_id))} />
                         <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
                         <StatusBadge
