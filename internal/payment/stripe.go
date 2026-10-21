@@ -509,7 +509,17 @@ func (s *Stripe) fireEvent(ctx context.Context, tenantID, eventType string, payl
 // re-checks it right before sending and sends nothing when it no longer
 // holds.
 func (s *Stripe) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error) {
-	return s.chargeInvoice(ctx, tenantID, inv, hold, stripeCustomerID, stripePaymentMethodID, "")
+	return s.chargeInvoice(ctx, tenantID, inv, hold, stripeCustomerID, stripePaymentMethodID, "", domain.ChargeTriggerAutoCharge)
+}
+
+// ChargeInvoiceNow is the charge someone asked for: "Charge now" in the
+// dashboard, or POST /v1/invoices/{id}/collect. It charges exactly as
+// ChargeInvoice does: the same PaymentIntent metadata and the same
+// idempotency key, so Stripe sees no difference. Only the attempt row's
+// trigger differs (charge_now, ADR-128 PR 6): it answers "why was this
+// charged?", and the row's actor says who asked.
+func (s *Stripe) ChargeInvoiceNow(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error) {
+	return s.chargeInvoice(ctx, tenantID, inv, hold, stripeCustomerID, stripePaymentMethodID, "", domain.ChargeTriggerChargeNow)
 }
 
 // ChargeInvoiceForDunningRetry charges an invoice as part of a dunning
@@ -526,7 +536,7 @@ func (s *Stripe) ChargeInvoice(ctx context.Context, tenantID string, inv domain.
 // (billing → payment) is avoided per the per-domain-isolation rule
 // in CLAUDE.md.
 func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error) {
-	return s.chargeInvoice(ctx, tenantID, inv, hold, stripeCustomerID, stripePaymentMethodID, piPurposeDunningRetry)
+	return s.chargeInvoice(ctx, tenantID, inv, hold, stripeCustomerID, stripePaymentMethodID, piPurposeDunningRetry, domain.ChargeTriggerDunningRetry)
 }
 
 // ChargeIdempotencyKey is the SINGLE SOURCE for an invoice charge's Stripe
@@ -573,7 +583,10 @@ func ChargeIdempotencyKey(invoiceID string, chargeAttemptSeq int64, purpose stri
 	return key
 }
 
-func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID, purpose string) (domain.Invoice, error) {
+// chargeInvoice is the one charge path. purpose is the PaymentIntent's
+// velox_purpose metadata, which Stripe sees and the idempotency key carries;
+// trigger is the attempt row's trigger_source, which only Velox sees.
+func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID, purpose string, trigger domain.ChargeAttemptTrigger) (domain.Invoice, error) {
 	// finalized ONLY (ADR-113: nothing initiates money against a written-off
 	// invoice). This belt gate is not redundant with the claims: every claim
 	// reads BEFORE the handler re-reads the invoice, so a MarkUncollectible
@@ -828,7 +841,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		if pe.Unknown {
 			attemptOutcome = domain.ChargeAttemptUnknown
 		}
-		recordChargeAttempt(saveCtx, s.invoices, tenantID, inv, pe.PaymentIntentID, purpose, attemptOutcome, pe.Message,
+		recordChargeAttempt(saveCtx, s.invoices, tenantID, inv, pe.PaymentIntentID, trigger, attemptOutcome, pe.Message,
 			chargedCard{paymentMethodID: stripePaymentMethodID, declineCode: pe.DeclineCode})
 
 		if !pe.Unknown && pe.PaymentIntentID != "" {
@@ -919,7 +932,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// ADR-102: insert the attempt at PI-create time so trigger_source
 	// and the sim anchor are recorded by the writer that knows them;
 	// the settle paths only flip the outcome.
-	recordChargeAttempt(ctx, s.invoices, tenantID, inv, result.ID, purpose, domain.ChargeAttemptPending, "",
+	recordChargeAttempt(ctx, s.invoices, tenantID, inv, result.ID, trigger, domain.ChargeAttemptPending, "",
 		chargedCard{paymentMethodID: stripePaymentMethodID})
 
 	// Honor the synchronous confirmation outcome (ADR-049 Phase 3,
@@ -1327,11 +1340,7 @@ type chargedCard struct {
 	declineCode     string
 }
 
-func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, piID, purpose string, outcome domain.ChargeAttemptOutcome, reason string, card chargedCard) {
-	trigger := domain.ChargeTriggerAutoCharge
-	if purpose == piPurposeDunningRetry {
-		trigger = domain.ChargeTriggerDunningRetry
-	}
+func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, piID string, trigger domain.ChargeAttemptTrigger, outcome domain.ChargeAttemptOutcome, reason string, card chargedCard) {
 	var simAt *time.Time
 	if sim, ok := clock.SimOf(ctx); ok {
 		t := sim.At

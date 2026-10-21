@@ -612,10 +612,14 @@ func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantI
 	// The two states in which BOTH movers refuse: cancelSpec() allows only
 	// draft/trialing/active, and SetPauseCollection rejects canceled and
 	// archived outright.
-	return dunning.SubscriptionTerminalState{
+	st := dunning.SubscriptionTerminalState{
 		Terminated: sub.Status == domain.SubscriptionCanceled ||
 			sub.Status == domain.SubscriptionArchived,
-	}, nil
+	}
+	if sub.CurrentBillingPeriodStart != nil {
+		st.PeriodStart = *sub.CurrentBillingPeriodStart
+	}
+	return st, nil
 }
 
 // invoiceUncollectibleAdapter bridges invoice.Service →

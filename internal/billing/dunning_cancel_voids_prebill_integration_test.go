@@ -211,9 +211,13 @@ func (m finalActionMovers) GetTerminalState(ctx context.Context, tenantID, id st
 	if err != nil {
 		return dunning.SubscriptionTerminalState{}, err
 	}
-	return dunning.SubscriptionTerminalState{
+	st := dunning.SubscriptionTerminalState{
 		Terminated: sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived,
-	}, nil
+	}
+	if sub.CurrentBillingPeriodStart != nil {
+		st.PeriodStart = *sub.CurrentBillingPeriodStart
+	}
+	return st, nil
 }
 
 type finalActionWriteOff struct{ svc *invoice.Service }
