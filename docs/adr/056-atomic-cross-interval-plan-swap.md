@@ -36,7 +36,7 @@ handler.atomicUpdateItemWithProration owns the tx
   └─ svc.UpdateItemTx → applyCrossIntervalPlanSwapTx(tx, …)
        ├─ ApplyItemPlanImmediatelyTx   (plan write)
        ├─ UpdateBillingCycleTx          (watermark advance)
-       └─ BillOnCreateTx                (new in_advance day-1 invoice)   ← in_advance only
+       └─ BillOnPlanSwapTx              (new base + old window's usage)  ← in_advance only
 ```
 
 The watermark can no longer advance unless the new-period invoice commits in the **same** tx. A failed in-tx bill aborts the commit and rolls back the plan write + watermark — **the silent drop is structurally impossible.**
@@ -60,7 +60,7 @@ both via `FinalizeCrossIntervalSwap` after `tx.Commit()`. (The tax *calculation*
 
 - No migration. New `*Tx` store/engine methods + interface additions (`InvoiceWriter.CreateInvoiceWithLineItemsTx`, `Biller.BillOnCreateTx` / `FinalizeOnCreateInvoice`); `*billing.Engine` already satisfies them.
 - A rolled-back swap may leave a harmless invoice-number gap (`NextInvoiceNumber` is monotonic; gaps are acceptable, as on the cycle path). A duplicate-period retry inside the tx surfaces as a loud error + rollback (no false "idempotent skip").
-- Cross-interval immediate swaps take the atomic path **unconditionally** — including at the period boundary (`remainingDays == 0`), where the handler forces it rather than falling to the non-atomic fallback (`applyCrossIntervalPlanSwapTx` derives the new period from `now`, not from `remainingDays`). The non-atomic `applyCrossIntervalPlanSwap` remains only for the handler-tx-unwired (test) path and now fails loud on a bill failure.
+- Cross-interval immediate swaps take the atomic path **unconditionally** — including at the period boundary (`remainingDays == 0`), where the handler forces it rather than falling to the non-atomic fallback (`applyCrossIntervalPlanSwapTx` derives the new period from `now`, not from `remainingDays`). The non-atomic variant is gone: off the atomic path the service refuses the swap with `swap_requires_atomic_path` (ADR-118).
 - A uniform-interval guard is enforced on the atomic path too: a multi-item swap that would leave items on mixed intervals is rejected (mirrors the non-atomic path) before any restructure, so unchanged items are never billed over the wrong period.
 - Related: ADR-030 (atomic proration), ADR-031 (in_advance bill timing), ADR-055 (anniversary anchor — reused for the swap's re-anchor).
 
