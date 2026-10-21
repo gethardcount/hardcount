@@ -47,18 +47,24 @@ func TestDunningFinalAction_TestClock_NeverBeforeTheCurrentPeriod(t *testing.T) 
 			r := newDatesRig(t, "Dunning Final Action Period "+tc.name)
 			ctx := postgres.WithLivemode(context.Background(), false)
 			start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-			renewal := start.AddDate(0, 1, 0)
-			frozen := renewal.Add(48 * time.Hour)
-			escalation := renewal.Add(-10 * 24 * time.Hour) // the final retry, in an earlier advance
-
 			clockID := r.newClock("final action "+tc.name, start)
 			subID, _ := r.subWithItem("final-"+tc.name, clockID, r.planID)
 			dayOneID := flowStr(r.dayOne(subID), "id")
-			r.advance(clockID, frozen)
 
 			subs := subscription.NewPostgresStore(r.db)
 			sub, err := subs.Get(ctx, r.tenantID, subID)
 			if err != nil {
+				t.Fatalf("read subscription: %v", err)
+			}
+			if sub.CurrentBillingPeriodEnd == nil {
+				t.Fatal("subscription has no current period")
+			}
+			renewal := sub.CurrentBillingPeriodEnd.UTC()
+			frozen := renewal.Add(48 * time.Hour)
+			escalation := renewal.Add(-10 * 24 * time.Hour) // the final retry, in an earlier advance
+			r.advance(clockID, frozen)
+
+			if sub, err = subs.Get(ctx, r.tenantID, subID); err != nil {
 				t.Fatalf("read subscription: %v", err)
 			}
 			if sub.CurrentBillingPeriodStart == nil || !sub.CurrentBillingPeriodStart.Equal(renewal) {
