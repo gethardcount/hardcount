@@ -285,6 +285,7 @@ func TestNewHandler(t *testing.T) {
 	h := NewHandler(nil)
 	if h == nil {
 		t.Fatal("NewHandler returned nil")
+		return // staticcheck SA5011 does not treat t.Fatal as terminating here
 	}
 	if h.db != nil {
 		t.Error("db should be nil when passed nil")

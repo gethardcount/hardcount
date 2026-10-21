@@ -79,6 +79,7 @@ func TestIdempotency_StoreWriteErrorsAreCountedAndLogged(t *testing.T) {
 			}
 			if logged == nil {
 				t.Fatalf("no ERROR log for a failed %s; the stuck key leaves no trace", tc.stage)
+				return // staticcheck SA5011 does not treat t.Fatal as terminating here
 			}
 			// The message must say what a retry actually gets. The handler
 			// never re-runs: the pending row answers 409.

@@ -2207,6 +2207,7 @@ func TestRunCycle_UnitAmountRoundsBankers(t *testing.T) {
 	}
 	if usageLine == nil {
 		t.Fatal("api usage line not found in invoice")
+		return // staticcheck SA5011 does not treat t.Fatal as terminating here
 	}
 
 	if usageLine.AmountCents != 200 {
