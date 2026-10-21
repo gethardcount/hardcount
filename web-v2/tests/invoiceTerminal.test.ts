@@ -9,6 +9,14 @@ import {
   TERMINAL_INVOICE_STATUSES,
   isTerminalInvoiceStatus,
   invoiceAmountLabel,
+  invoiceAmountLine,
+  invoiceAwaitingPayment,
+  invoiceCanCollect,
+  invoiceDueCents,
+  invoiceHeadline,
+  invoicePaymentInFlight,
+  invoicePaymentSucceeded,
+  invoiceRowAmount,
 } from '../src/lib/invoiceTerminal.ts'
 
 test('uncollectible is terminal — the miss this module exists for', () => {
@@ -55,4 +63,77 @@ test('the exported list and the predicate cannot drift apart', () => {
     assert.equal(isTerminalInvoiceStatus(s), true, `${s} is listed but not detected`)
   }
   assert.equal(TERMINAL_INVOICE_STATUSES.length, 3)
+})
+
+// ── The dashboard's reads of an invoice's money and payment fields ──────────
+//
+// The operator screens used to read payment_status and amount_due_cents raw: a
+// voided invoice read "pending" and "$29.00 due" on the subscription page,
+// Home, the command palette, the Invoices and Dunning lists and the customer's
+// "Last invoice", while its own page said $0.00 (product sweep 2026-10-21, A7 /
+// E1 / E2 / E3). These helpers are the one place that reads them; the lint rule
+// in eslint.config.js keeps every screen outside src/lib on them.
+
+const base = { currency: 'USD', amount_due_cents: 2900, amount_paid_cents: 0 }
+
+test('invoiceDueCents: a void owes nothing; everything else owes amount_due', () => {
+  assert.equal(invoiceDueCents({ ...base, status: 'voided' }), 0)
+  // A write-off stays on the books (ADR-110): its own page still says due.
+  assert.equal(invoiceDueCents({ ...base, status: 'uncollectible' }), 2900)
+  // Negative controls: open and draft invoices owe their amount.
+  assert.equal(invoiceDueCents({ ...base, status: 'finalized' }), 2900)
+  assert.equal(invoiceDueCents({ ...base, status: 'draft' }), 2900)
+  // Paid: the settle zeroed amount_due.
+  assert.equal(invoiceDueCents({ ...base, status: 'paid', amount_due_cents: 0, amount_paid_cents: 2900 }), 0)
+})
+
+test('invoiceRowAmount says what the figure is, and a closed invoice is never "due"', () => {
+  assert.equal(invoiceRowAmount({ ...base, status: 'finalized' }), '$29.00 due')
+  // Paid shows what was paid, not the zeroed amount_due ("succeeded $0.00").
+  assert.equal(invoiceRowAmount({ ...base, status: 'paid', amount_due_cents: 0, amount_paid_cents: 2900 }), '$29.00 paid')
+  // Void, write-off and draft: the invoice amount, bare; the badge beside it says which.
+  for (const status of ['voided', 'uncollectible', 'draft']) {
+    assert.equal(invoiceRowAmount({ ...base, status }), '$29.00', status)
+  }
+  // In the invoice's own currency.
+  assert.equal(invoiceRowAmount({ ...base, currency: 'EUR', status: 'finalized' }), '€29.00 due')
+})
+
+test('invoiceAmountLine and invoiceHeadline keep the public pages’ figures', () => {
+  // The amount line: amount_due under the status-aware label.
+  assert.deepEqual(invoiceAmountLine({ ...base, status: 'voided' }), { label: 'Invoice amount', cents: 2900 })
+  assert.deepEqual(invoiceAmountLine({ ...base, status: 'finalized' }), { label: 'Amount due', cents: 2900 })
+  // The headline of a paid invoice is what was paid.
+  assert.deepEqual(
+    invoiceHeadline({ ...base, status: 'paid', amount_due_cents: 0, amount_paid_cents: 2900 }),
+    { label: 'Amount paid', cents: 2900 },
+  )
+  assert.deepEqual(invoiceHeadline({ ...base, status: 'uncollectible' }), { label: 'Invoice amount', cents: 2900 })
+})
+
+test('payment predicates: collect, awaiting payment, in flight', () => {
+  const open = { ...base, status: 'finalized', payment_status: 'failed' }
+  assert.equal(invoiceCanCollect(open), true)
+  assert.equal(invoiceCanCollect({ ...open, amount_due_cents: 0 }), false)
+  assert.equal(invoiceCanCollect({ ...open, payment_status: 'succeeded' }), false)
+  assert.equal(invoiceCanCollect({ ...open, payment_status: 'processing' }), false)
+  // A parked charge (unknown) is not collectible: it may already have been taken.
+  assert.equal(invoiceCanCollect({ ...open, payment_status: 'unknown' }), false)
+  for (const status of ['voided', 'uncollectible', 'paid', 'draft']) {
+    assert.equal(invoiceCanCollect({ ...open, status }), false, status)
+  }
+
+  // Awaiting payment: open, nothing succeeded or processing. A parked charge
+  // still awaits (mark uncollectible is its way out, ADR-107).
+  assert.equal(invoiceAwaitingPayment(open), true)
+  assert.equal(invoiceAwaitingPayment({ ...open, payment_status: 'unknown' }), true)
+  assert.equal(invoiceAwaitingPayment({ ...open, payment_status: 'processing' }), false)
+  assert.equal(invoiceAwaitingPayment({ ...open, payment_status: 'succeeded' }), false)
+  assert.equal(invoiceAwaitingPayment({ ...open, status: 'voided' }), false)
+
+  assert.equal(invoicePaymentInFlight({ ...open, payment_status: 'processing' }), 'processing')
+  assert.equal(invoicePaymentInFlight({ ...open, payment_status: 'unknown' }), 'unknown')
+  assert.equal(invoicePaymentInFlight(open), null)
+  assert.equal(invoicePaymentSucceeded({ ...open, payment_status: 'succeeded' }), true)
+  assert.equal(invoicePaymentSucceeded(open), false)
 })

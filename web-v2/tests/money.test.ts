@@ -11,6 +11,7 @@ import {
   atRiskText,
   dunningAmountDue,
   formatCents,
+  formatCompactCents,
   outstandingText,
   prorationText,
   setActiveCurrency,
@@ -52,6 +53,33 @@ test('dunning amount falls back to the loaded invoice, in its currency', () => {
     '£9.90',
   )
   assert.equal(dunningAmountDue({}), null)
+})
+
+test('a run on a voided invoice is chasing nothing, whatever the join says', () => {
+  // amount_due survives a void, so the joined figure still read "$29.00"
+  // under Amount Due on the Dunning list (sweep A7 / E1).
+  assert.equal(
+    dunningAmountDue({ invoice_amount_due_cents: 2900, invoice_currency: 'USD' }, { status: 'voided', amount_due_cents: 2900, currency: 'USD' }),
+    '$0.00',
+  )
+  // Negative control: an open invoice still shows what is due.
+  assert.equal(
+    dunningAmountDue({ invoice_amount_due_cents: 2900, invoice_currency: 'USD' }, { status: 'finalized', amount_due_cents: 2900, currency: 'USD' }),
+    '$29.00',
+  )
+})
+
+test('formatCompactCents: the chart axis reads $1.2K for $1,200, in the given currency', () => {
+  // The Home revenue axis divided by 100 * 100 instead of 100 * 1000, so
+  // $1,200 read "$12.0K" (sweep E4).
+  assert.equal(formatCompactCents(120000, 'USD'), '$1.2K')
+  assert.equal(formatCompactCents(1500000, 'USD'), '$15K')
+  assert.equal(formatCompactCents(25000000, 'USD'), '$250K')
+  assert.equal(formatCompactCents(9900, 'USD'), '$99')
+  assert.equal(formatCompactCents(0, 'USD'), '$0')
+  // The tenant's currency, never a hard-coded "$".
+  assert.equal(formatCompactCents(120000, 'EUR'), '€1.2K')
+  assert.equal(formatCompactCents(120000, 'XYZ'), 'XYZ 1.2K')
 })
 
 test('outstanding names every currency it sums', () => {
