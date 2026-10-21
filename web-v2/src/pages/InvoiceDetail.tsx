@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { invoiceLineRate } from '@/lib/priceDisplay'
-import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type DunningRun, type TimelineEvent, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
+import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type DunningRun, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
 import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD } from '@/lib/dates'
 import { creditNoteCeilings, hasCardPayment } from '@/lib/creditNoteCeilings'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
@@ -17,6 +17,7 @@ import { collectOutcome, writeOffOutcome } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { TestClockBanner } from '@/components/TestClockBanner'
+import { ActivityList, ActivityZone } from '@/components/ActivityList'
 import { Callout } from '@/components/Callout'
 import { pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
 import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
@@ -128,12 +129,15 @@ const emailSchema = z.object({
 type EmailFormData = z.infer<typeof emailSchema>
 
 // Operator-readable names for the timeline's degraded-lane codes.
+// One entry per lane the server can name (degrade() in
+// internal/invoice/handler.go).
 const LANE_LABELS: Record<string, string> = {
+  audit: 'action history',
   credit_notes: 'credit notes',
   emails: 'customer notifications',
-  stripe: 'payment events',
   dunning: 'payment recovery',
-  audit: 'action history',
+  disputes: 'disputes',
+  charge_attempts: 'payment attempts',
 }
 const laneLabel = (lane: string): string => LANE_LABELS[lane] ?? lane
 
@@ -291,6 +295,9 @@ export default function InvoiceDetailPage() {
   // rest). Rows whose two calendars differ carry recorded_at and render
   // a "Recorded <wall>" subline (operator contract, Invariant A).
   const timeline = timelineData?.events ?? []
+  // Each row as the activity line standard words it (ADR-128), in the
+  // server's order (timeline.Order).
+  const timelineLines = timeline.flatMap(e => (e.line ? [e.line] : []))
   // Lane-degradation disclosure: the server names any side-source
   // (credit notes, emails, payment events, payment recovery) whose
   // fetch failed — without the banner, a timeline missing its dunning
@@ -1449,15 +1456,14 @@ export default function InvoiceDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Payment details — the supporting facts (tax retries, payment
-          attempts, the Stripe payment id, the recovery schedule), collapsed
+      {/* Payment details — the supporting facts (tax retries, the Stripe
+          payment id, the recovery schedule), collapsed
           BELOW the invoice so nothing stacks above it. Facts the notice
           already states are left out. Hidden on terminal states. */}
       {showOperatorContext && (
         <OperatorContextCard
           invoice={invoice}
           dunningRun={activeDunningRun}
-          timeline={timeline}
         />
       )}
 
@@ -1476,8 +1482,9 @@ export default function InvoiceDetailPage() {
           alongside Stripe + dunning events. */}
       {(timeline.length > 0 || timelineDegraded.length > 0) && invoice.status !== 'draft' && (
         <Card className={cn('mt-6', invoice.status === 'voided' && 'opacity-60')}>
-          <CardHeader>
+          <CardHeader className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <CardTitle className="text-sm">Activity</CardTitle>
+            <ActivityZone lines={timelineLines} />
           </CardHeader>
           <CardContent>
             {timelineDegraded.length > 0 && (
@@ -1491,57 +1498,7 @@ export default function InvoiceDetailPage() {
                 Showing the most recent credit notes only — earlier ones aren&apos;t displayed.
               </p>
             )}
-            <div className="relative">
-              {timeline.map((event, i) => {
-                return (
-                <div key={event.id ?? `${event.source}:${event.event_type}:${event.timestamp}:${event.payment_intent_id ?? ''}`} className="flex gap-4 pb-2 last:pb-0">
-                  <div className="flex flex-col items-center">
-                    {/* The status is the line's tone (ADR-128): neutral grey,
-                        success green, warning amber, failure red. */}
-                    <div className={cn(
-                      'w-2.5 h-2.5 rounded-full mt-1.5',
-                      event.status === 'neutral' ? 'bg-muted-foreground' :
-                      event.status === 'succeeded' || event.status === 'resolved' ? 'bg-emerald-500' :
-                      event.status === 'failed' || event.status === 'canceled' ? 'bg-destructive' :
-                      event.status === 'processing' || event.status === 'scheduled' ? 'bg-blue-500' :
-                      event.status === 'escalated' ? 'bg-violet-500' :
-                      'bg-amber-500'
-                    )} />
-                    {i < timeline.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-foreground min-w-0">{event.description}</p>
-                      <span className="text-xs text-muted-foreground ml-4 whitespace-nowrap">{formatDateTime(event.timestamp)}</span>
-                    </div>
-                    {/* The problem line: what went wrong on a failure row,
-                        what it means on a warning row. */}
-                    {event.error && (event.status === 'failed' || event.status === 'warning') && (
-                      <p className={cn('text-xs mt-0.5', event.status === 'failed' ? 'text-destructive' : 'text-warning-foreground')}>{event.error}</p>
-                    )}
-                    {event.amount_cents != null && event.amount_cents > 0 && (
-                      <p className="text-xs text-muted-foreground mt-0.5">{formatCents(event.amount_cents, invoice.currency)}</p>
-                    )}
-                    {/* Meta line: the row's details and who did it, worded
-                        by the backend ("Visa •••• 4242 · After 2 retries"). */}
-                    {event.detail && (
-                      <p className="text-xs text-muted-foreground mt-0.5">{event.detail}</p>
-                    )}
-                    {/* Operator contract, Invariant A: a row whose primary
-                        timestamp is on the invoice's simulated calendar but
-                        which also touched the real world (emails, charges)
-                        shows the real instant too. One word product-wide —
-                        "Recorded" — matching the subscription timeline. */}
-                    {event.recorded_at && (
-                      <p className="text-xs text-muted-foreground/70 mt-0.5">
-                        Recorded {formatDateTime(event.recorded_at)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                )
-              })}
-            </div>
+            <ActivityList lines={timelineLines} />
           </CardContent>
         </Card>
       )}
@@ -1743,7 +1700,7 @@ export default function InvoiceDetailPage() {
 }
 
 // OperatorContextCard is the collapsed "Payment details" section below the
-// invoice: tax retries, payment attempts, the Stripe payment id and the
+// invoice: tax retries, the Stripe payment id and the
 // recovery schedule. The notice above the invoice says what is wrong and
 // what to do; this section holds the supporting facts and never repeats the
 // notice (the old "Diagnostic detail" box sat above the invoice and restated
@@ -1752,20 +1709,10 @@ export default function InvoiceDetailPage() {
 function OperatorContextCard({
   invoice,
   dunningRun,
-  timeline,
 }: {
   invoice: Invoice
   dunningRun?: DunningRun
-  timeline: TimelineEvent[]
 }) {
-  // attempt_count for this invoice is sourced from the active dunning run
-  // when one exists (Velox keeps retry counters there, not on the invoice).
-  // The payment timeline gives a payment-attempt count even before dunning
-  // takes over.
-  const paymentAttempts = timeline.filter(
-    t => t.source === 'stripe' && (t.event_type === 'payment_intent.succeeded' || t.event_type === 'payment_intent.payment_failed')
-  ).length
-
   const taxState = invoice.tax_status === 'failed' ? 'Failed' : invoice.tax_status === 'pending' ? 'Retrying' : null
 
   // Nothing to show → no section. A freshly finalized invoice awaiting its
@@ -1774,7 +1721,6 @@ function OperatorContextCard({
     !!taxState ||
     (invoice.tax_retry_count ?? 0) > 0 ||
     !!invoice.tax_deferred_at ||
-    paymentAttempts > 0 ||
     !!invoice.stripe_payment_intent_id ||
     !!dunningRun
   if (!hasAny) return null
@@ -1806,13 +1752,6 @@ function OperatorContextCard({
               <>
                 <dt className="text-xs text-muted-foreground">Tax first failed</dt>
                 <dd className="text-foreground">{formatDateTime(invoice.tax_deferred_at)}</dd>
-              </>
-            )}
-
-            {paymentAttempts > 0 && (
-              <>
-                <dt className="text-xs text-muted-foreground">Payment attempts</dt>
-                <dd className="text-foreground">{paymentAttempts}</dd>
               </>
             )}
 

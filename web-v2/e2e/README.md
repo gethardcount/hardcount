@@ -39,10 +39,13 @@ the screen, and that the main things an operator does work end to end.
   customer's Sent emails, at 1440px and 390px wide. It runs each story for a
   customer on the real clock and for one on a test clock frozen at
   2027-02-01 04:30 UTC. The steps that need days to pass, such as payment
-  retries and a trial running out, happen only on the test clock. Of the
-  screen it checks only that each card shows: a person reads the shots. The
-  files go to `activity-shots/`, which CI uploads as the `activity-shots`
-  artifact on every run (see [Activity screenshots](#activity-screenshots)).
+  retries and a trial running out, happen only on the test clock. A person
+  reads the shots. One test is a pass/fail check. The same operator steps on
+  an invoice must give the same Activity rows on both clocks once times are
+  taken out. Every test-clock row must have a Recorded part. No row may be
+  wider than the card at either width. The files go to `activity-shots/`,
+  which CI uploads as the `activity-shots` artifact on every run (see
+  [Activity screenshots](#activity-screenshots)).
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.

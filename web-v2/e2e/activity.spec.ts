@@ -241,3 +241,103 @@ for (const clock of ['real', 'test'] as const) {
     await shootCard(page, card(page, 'Activity'), `subscription-${clock}`)
   })
 }
+
+// One activity row as text, for the parity check: the row's lines joined
+// by " | ", with every <time> element and the Recorded part taken out, each
+// link replaced by its kind, and each email address and document number
+// replaced by a placeholder (they differ between the two customers).
+interface RowText { text: string; recorded: boolean }
+
+async function activityRowTexts(target: Locator): Promise<RowText[]> {
+  const rows = target.locator('[data-activity-row]')
+  await expect(rows.first()).toBeVisible()
+  return rows.evaluateAll(els => els.map(el => {
+    const row = el.cloneNode(true) as HTMLElement
+    const recorded = row.querySelector('[data-activity-recorded]') !== null
+    row.querySelectorAll('[data-activity-recorded], time').forEach(n => n.remove())
+    row.querySelectorAll('[data-activity-link]').forEach(n => { n.textContent = `<${n.getAttribute('data-activity-link')}>` })
+    const text = Array.from(row.querySelectorAll('p'))
+      .map(p => (p.textContent ?? '')
+        .replace(/[^\s@·]+@[^\s@·]+/g, '<email>')
+        .replace(/\b[A-Z][A-Z0-9]*-\d{3,}\b/g, '<number>')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*·\s*$/, '')
+        .trim())
+      .filter(Boolean)
+      .join(' | ')
+    return { text, recorded }
+  }))
+}
+
+// The card fits the narrow width: no row is wider than the card.
+async function expectNoOverflow(page: Page, target: Locator) {
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: 900 })
+    const over = await target.evaluate(el => {
+      const wide = [el, ...Array.from(el.querySelectorAll('[data-activity-row]'))]
+        .filter(n => n.scrollWidth > n.clientWidth + 1)
+      return wide.map(n => (n.textContent ?? '').slice(0, 60))
+    })
+    expect(over, `nothing in the Activity card is wider than the card at ${width}px`).toEqual([])
+  }
+}
+
+// ADR-128: a test-clock line equals the real-clock line plus one Recorded
+// part. The same operator story runs for a real-clock customer and for one
+// on a frozen test clock; the Activity cards must read the same once times
+// are taken out, every test-clock row must carry a Recorded part, and no
+// real-clock row may.
+test('activity text parity: one operator story on an invoice reads the same on the real clock and a test clock', async ({ page }) => {
+  const read: Partial<Record<Clock, { paid: RowText[]; voided: RowText[] }>> = {}
+  for (const clock of ['real', 'test'] as const) {
+    const { customer } = await customerOn(clock)
+    const draft = await asPerson<Invoice>(page, 'POST', '/invoices', {
+      customer_id: customer.id,
+      currency: 'USD',
+      line_items: [{ description: 'E2E onboarding', line_type: 'add_on', quantity: 1, unit_amount_cents: 4900 }],
+    })
+    await asPerson(page, 'POST', `/invoices/${draft.id}/finalize`)
+    await asPerson(page, 'POST', `/invoices/${draft.id}/send`, { email: customer.email })
+    const note = await asPerson<{ id: string }>(page, 'POST', '/credit-notes', {
+      invoice_id: draft.id,
+      reason: 'Billing error',
+      auto_issue: true,
+      lines: [{ description: 'Billing error', quantity: 1, unit_amount_cents: 1000 }],
+    })
+    await asPerson(page, 'POST', `/credit-notes/${note.id}/send`, { email: customer.email })
+    await waitForEmailsSent(customer.id)
+    await asPerson(page, 'POST', `/invoices/${draft.id}/record-payment`, { note: 'Wire 1042' })
+    await waitForEmailsSent(customer.id)
+
+    const other = await asPerson<Invoice>(page, 'POST', '/invoices', {
+      customer_id: customer.id,
+      currency: 'USD',
+      line_items: [{ description: 'E2E setup', line_type: 'add_on', quantity: 1, unit_amount_cents: 2500 }],
+    })
+    await asPerson(page, 'POST', `/invoices/${other.id}/finalize`)
+    await waitForEmailsSent(customer.id)
+    await asPerson(page, 'POST', `/invoices/${other.id}/void`)
+    await waitForEmailsSent(customer.id)
+
+    await page.goto(`/invoices/${draft.id}`)
+    const paidCard = card(page, 'Activity')
+    await expect(paidCard.getByText(/^Times in /)).toBeVisible()
+    const paid = await activityRowTexts(paidCard)
+    await expectNoOverflow(page, paidCard)
+    await shootCard(page, paidCard, `invoice-operator-${clock}`)
+
+    await page.goto(`/invoices/${other.id}`)
+    const voidedCard = card(page, 'Activity')
+    const voided = await activityRowTexts(voidedCard)
+    await expectNoOverflow(page, voidedCard)
+    read[clock] = { paid, voided }
+  }
+
+  const real = read.real!
+  const sim = read.test!
+  for (const key of ['paid', 'voided'] as const) {
+    expect(sim[key].map(r => r.text), `${key} invoice: the test-clock rows read as the real-clock rows`).toEqual(real[key].map(r => r.text))
+    expect(real[key].filter(r => r.recorded).map(r => r.text), `${key} invoice: no real-clock row has a Recorded part`).toEqual([])
+    expect(sim[key].filter(r => !r.recorded).map(r => r.text), `${key} invoice: every test-clock row has a Recorded part`).toEqual([])
+  }
+})

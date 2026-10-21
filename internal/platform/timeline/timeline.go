@@ -19,6 +19,11 @@
 // SortStable is deliberately shaped so a new surface cannot adopt it
 // without answering both questions: what instant do I display, and how
 // do exact ties order?
+//
+// Order is the one ordering rule for activity surfaces (ADR-128): the
+// entity-calendar instant, then the real order inside a same-instant group
+// whose every row has a recorded stamp, then the cause-before-effect rank,
+// then insertion order.
 package timeline
 
 import (
@@ -41,4 +46,43 @@ func SortStable[E any](events []E, at func(E) time.Time, tieLess func(a, b E) bo
 		}
 		return tieLess(events[i], events[j])
 	})
+}
+
+// Order sorts activity rows ascending, by the one rule every activity
+// surface shares (ADR-128, from ADR-104's 2026-07-29 amendment):
+//
+//  1. at, the instant the row shows on the entity's calendar, at full
+//     precision;
+//  2. inside a group of rows at exactly the same instant, the real order
+//     (recorded), but only when EVERY row in the group has a recorded
+//     stamp. A group with a bare row is legacy data, and placing bare rows
+//     among stamped ones would make up a sequence, so it keeps rule 3;
+//  3. tieLess, the cause-before-effect rank;
+//  4. insertion order.
+//
+// recorded returns the zero time for a row with no real-world stamp. Rows
+// with equal recorded stamps (written in one transaction) keep rule 3's
+// order.
+func Order[E any](rows []E, at, recorded func(E) time.Time, tieLess func(a, b E) bool) {
+	SortStable(rows, at, tieLess)
+	for lo := 0; lo < len(rows); {
+		hi := lo + 1
+		for hi < len(rows) && at(rows[hi]).Equal(at(rows[lo])) {
+			hi++
+		}
+		complete := true
+		for i := lo; i < hi; i++ {
+			if recorded(rows[i]).IsZero() {
+				complete = false
+				break
+			}
+		}
+		if complete && hi-lo > 1 {
+			group := rows[lo:hi]
+			sort.SliceStable(group, func(a, b int) bool {
+				return recorded(group[a]).Before(recorded(group[b]))
+			})
+		}
+		lo = hi
+	}
 }
