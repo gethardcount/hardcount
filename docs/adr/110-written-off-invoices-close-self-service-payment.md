@@ -243,7 +243,10 @@ What changes:
   in `invoiceTerminal.ts`. `invoiceDueCents`
   says what is owed: nothing on a void, `amount_due` otherwise (a write-off
   stays on the books, as above). `invoiceRowAmount` names the figure ("$29.00
-  due", "$29.00 paid", or the bare amount on a draft, void or write-off). The
+  due", "$29.00 paid", or the bare amount on a draft, void or write-off).
+  "Paid" is the payment plus the customer credit applied, because credit
+  lowers `amount_due` and never reaches `amount_paid`: an invoice a prepaid
+  commit paid in full read "$0.00 paid". The
   action gates (`invoiceCanCollect`, `invoiceAwaitingPayment`,
   `invoicePaymentInFlight`) moved there from the invoice page.
 - The payment chip beside an invoice's badge is gone on a write-off too, not
@@ -260,9 +263,10 @@ What changes:
 - The server counts the same way. Home's failed payments and the dunning
   at-risk total cover open invoices only. "Recovered" and the recovery rate
   count only runs a payment closed: `resolution = payment_recovered` with
-  `amount_paid_cents > 0`. A credit note or customer credit that leaves
-  nothing due also closes the run as `payment_recovered` (ADR-061, amendment
-  2026-10-19). That invoice is paid with nothing paid for it, so its run
-  counts as resolved, not recovered.
+  `amount_paid_cents > 0`. A run settled with no payment also closes as
+  `payment_recovered`: by a credit note that leaves nothing due (ADR-061,
+  amendment 2026-10-19), or by customer credit that a retry applies. That
+  run counts as resolved, not recovered. Recovered means a payment collected
+  money; credit is not a payment, even credit the customer bought.
   `GET /v1/dunning/stats` adds `recovered_count`; `resolved_count` keeps its
   meaning (every resolved run).

@@ -60,11 +60,16 @@ const noRawScrollPane = {
 // for itself and most forgot the terminal states. The helpers in src/lib
 // (invoiceTerminal, statusLabels, status) are the only readers; screens call
 // them. Fixtures and src/lib are exempt below.
-const noRawInvoiceMoneyRead = {
-  selector: "MemberExpression[property.name=/^(payment_status|amount_due_cents)$/]",
-  message:
-    'Read an invoice\'s payment_status or amount_due_cents through a helper in src/lib (invoiceTerminal: invoiceDueCents, invoiceRowAmount, invoiceCanCollect…; statusLabels: invoiceStatus, invoicePaymentChip). Raw, a voided or written-off invoice reads as owed.',
-}
+// Every way of reading the field: `inv.field`, `inv['field']`, and
+// destructuring (`const { field } = inv`, or in a parameter). An object
+// literal that sends the field is not a read and passes.
+const rawInvoiceMoneyMessage =
+  'Read an invoice\'s payment_status or amount_due_cents through a helper in src/lib (invoiceTerminal: invoiceDueCents, invoiceRowAmount, invoiceCanCollect…; statusLabels: invoiceStatus, invoicePaymentChip). Raw, a voided or written-off invoice reads as owed.'
+const noRawInvoiceMoneyRead = [
+  "MemberExpression[property.name=/^(payment_status|amount_due_cents)$/]",
+  "MemberExpression[computed=true][property.value=/^(payment_status|amount_due_cents)$/]",
+  "ObjectPattern > Property[key.name=/^(payment_status|amount_due_cents)$/]",
+].map(selector => ({ selector, message: rawInvoiceMoneyMessage }))
 
 export default defineConfig([
   globalIgnores(['dist']),
@@ -81,7 +86,7 @@ export default defineConfig([
       globals: globals.browser,
     },
     rules: {
-      'no-restricted-syntax': [...noWallClockNow, noRawScrollPane, noRawInvoiceMoneyRead],
+      'no-restricted-syntax': [...noWallClockNow, noRawScrollPane, ...noRawInvoiceMoneyRead],
       // HMR ergonomics only (fast-refresh works best when component files
       // export only components) — zero runtime correctness. shadcn-style
       // component files and context/hook co-location trip it ~40×; the
@@ -117,7 +122,7 @@ export default defineConfig([
       'src/components/Combobox.tsx',
     ],
     rules: {
-      'no-restricted-syntax': [...noWallClockNow, noRawInvoiceMoneyRead],
+      'no-restricted-syntax': [...noWallClockNow, ...noRawInvoiceMoneyRead],
     },
   },
   {

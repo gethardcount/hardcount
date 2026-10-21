@@ -1313,7 +1313,7 @@ export default function InvoiceDetailPage() {
                   <Separator />
                   <div className="flex justify-between text-sm font-semibold">
                     <span>Amount due</span>
-                    <span className="font-mono tabular-nums">$0.00</span>
+                    <span className="font-mono tabular-nums">{formatCents(invoiceDueCents(invoice), invoice.currency)}</span>
                   </div>
                 </>
               ) : (() => {

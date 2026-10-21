@@ -103,9 +103,9 @@ type Stats struct {
 	// void or a write-off.
 	ResolvedCount int `json:"resolved_count"`
 	// RecoveredCount is the resolved runs a payment closed: resolution
-	// payment_recovered, with money paid on the invoice. A waiver by credit
-	// note or customer credit is resolved, not recovered. The Dunning page's
-	// "Recovered" card.
+	// payment_recovered, with money paid on the invoice. A run settled with
+	// no payment (a credit note, or customer credit applied at a retry) is
+	// resolved, not recovered. The Dunning page's "Recovered" card.
 	RecoveredCount int   `json:"recovered_count"`
 	AtRiskCents    int64 `json:"at_risk_cents"`
 	// Currency scopes AtRiskCents to the tenant's default currency — one

@@ -92,12 +92,17 @@ export function invoiceDueCents(inv: InvoiceMoneyInput): number {
 
 /**
  * The amount a row shows beside the invoice's status badge, with the word that
- * says what it is. Open: "$29.00 due". Paid: "$29.00 paid", from
- * amount_paid_cents, because the settle zeroed amount_due. Draft, void and
- * write-off: the invoice amount, bare; the badge beside it says which.
+ * says what it is. Open: "$29.00 due". Paid: "$29.00 paid", what the payment
+ * and the customer credit applied paid together, because the settle zeroed
+ * amount_due and credit never reaches amount_paid: an invoice a prepaid
+ * commit paid in full read "$0.00 paid". Draft, void and write-off: the
+ * invoice amount, bare; the badge beside it says which.
  */
 export function invoiceRowAmount(inv: InvoiceMoneyInput): string {
-  if (inv.status === 'paid') return `${formatCents(inv.amount_paid_cents ?? 0, inv.currency)} paid`
+  if (inv.status === 'paid') {
+    const paid = (inv.amount_paid_cents ?? 0) + (inv.credits_applied_cents ?? 0)
+    return `${formatCents(paid, inv.currency)} paid`
+  }
   const amount = formatCents(inv.amount_due_cents, inv.currency)
   return inv.status === 'finalized' ? `${amount} due` : amount
 }

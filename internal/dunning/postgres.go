@@ -1123,7 +1123,8 @@ func (s *PostgresStore) ListEvents(ctx context.Context, tenantID, runID string) 
 // credit note or customer credit that leaves nothing due marks the invoice
 // paid with amount_paid 0 and closes its run as payment_recovered too
 // (ADR-061, 2026-10-19), from the note, the dunning retry or the paid check;
-// the resolution alone cannot tell a waiver from a payment (review of #1328).
+// the resolution alone cannot tell a settle with no payment from a payment
+// (review of #1328). Credit is not a payment, even credit the customer bought.
 //
 // Single tenant-scoped query (RLS handles tenant_id), no pagination,
 // no client-side derivation. Cards stay accurate regardless of how

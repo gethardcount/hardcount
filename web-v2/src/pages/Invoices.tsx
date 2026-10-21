@@ -105,6 +105,7 @@ export default function InvoicesPage() {
     dir: 'desc',
   })
   const {
+    // eslint-disable-next-line no-restricted-syntax -- the URL's filter value, not an invoice's field
     search, status: statusFilter, payment_status: paymentStatusFilter,
     customer: customerFilter, overdue: overdueFilter, dateFrom, dateTo, sort: sortKey,
   } = urlState
