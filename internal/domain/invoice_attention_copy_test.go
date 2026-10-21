@@ -448,3 +448,52 @@ func TestCommitExposureCopy_ThreeLinesOnNoPaymentMethod(t *testing.T) {
 	}
 	checkShape(t, att.Message)
 }
+
+// TestPausedCollectionCopy_OpenRunKeepsRetrying (sweep A2, 2026-10-21): a
+// collection pause keeps NEW invoices as drafts, but a dunning run already
+// open on an invoice keeps retrying it, as Stripe keeps retrying invoices
+// created before a pause. The paused notices said "adding a card won't charge
+// this invoice" and "won't be charged automatically" whatever the run was
+// doing, so an operator was told a charge would not happen that the next
+// retry made. With an open run, both notices say the retries continue and the
+// Details say how to stop them; without one, the old copy stays (it is true).
+func TestPausedCollectionCopy_OpenRunKeepsRetrying(t *testing.T) {
+	const (
+		noCardRetrying   = "Collection is paused, but payment retries for this invoice continue, so the next retry charges a card the customer adds."
+		noCardStopped    = "Collection is paused on the subscription, so adding a card won't charge this invoice until you resume it."
+		withCardRetrying = "Collection is paused, but payment retries for this invoice continue, so the next retry charges the card on file."
+		withCardStopped  = "Collection is paused on the subscription, so this invoice won't be charged automatically; use Charge now to collect it anyway."
+		howToStop        = "To stop the retries, void this invoice or mark it uncollectible."
+	)
+	cases := []struct {
+		name     string
+		hasCard  bool
+		retrying bool
+		reason   AttentionReason
+		line1    string
+		stopHint bool
+	}{
+		{"no card, run retrying", false, true, AttentionReasonNoPaymentMethod, noCardRetrying, true},
+		{"no card, no open run", false, false, AttentionReasonNoPaymentMethod, noCardStopped, false},
+		{"card on file, run retrying", true, true, AttentionReasonCollectionPaused, withCardRetrying, true},
+		{"card on file, no open run", true, false, AttentionReasonCollectionPaused, withCardStopped, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			att := ClassifyInvoiceAttention(noPMInvoice(false), AttentionContext{
+				HasPaymentMethod: tc.hasCard, CollectionPaused: true, DunningRetrying: tc.retrying,
+				CustomerHasEmail: true,
+			})
+			if att == nil || att.Reason != tc.reason {
+				t.Fatalf("got %+v, want %s", att, tc.reason)
+			}
+			if got := strings.Split(att.Message, "\n")[0]; got != tc.line1 {
+				t.Errorf("line 1 =\n%q\nwant\n%q", got, tc.line1)
+			}
+			checkShape(t, att.Message)
+			if has := strings.Contains(att.Detail, howToStop); has != tc.stopHint {
+				t.Errorf("detail says how to stop the retries = %v, want %v:\n%s", has, tc.stopHint, att.Detail)
+			}
+		})
+	}
+}
