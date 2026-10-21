@@ -59,9 +59,13 @@ func (m dunningMovers) GetTerminalState(ctx context.Context, tenantID, id string
 	if err != nil {
 		return dunning.SubscriptionTerminalState{}, err
 	}
-	return dunning.SubscriptionTerminalState{
+	st := dunning.SubscriptionTerminalState{
 		Terminated: sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived,
-	}, nil
+	}
+	if sub.CurrentBillingPeriodStart != nil {
+		st.PeriodStart = *sub.CurrentBillingPeriodStart
+	}
+	return st, nil
 }
 
 // writeOff bridges invoice.Service to dunning's write-off port.

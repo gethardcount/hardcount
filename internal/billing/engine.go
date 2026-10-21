@@ -164,6 +164,11 @@ func (e *Engine) dispatchEvent(ctx context.Context, tenantID, eventType string, 
 // The operator HTTP path and the tax-retry auto-finalize get their row from
 // invoice.Service.Finalize; engine invoices never pass through Finalize — they
 // are born finalized — so without this they leave no audit trace at all.
+//
+// born_finalized marks the row as one of those: the invoice was finalized in
+// the statement that created it, never a draft someone finalized. The
+// activity line reads it to say why the invoice exists (P-1, ADR-128); the
+// rows invoice.Service.Finalize writes never carry it.
 func finalizeAuditEntry(inv domain.Invoice) (audit.Entry, bool) {
 	if inv.Status != domain.InvoiceFinalized {
 		return audit.Entry{}, false
@@ -179,6 +184,7 @@ func finalizeAuditEntry(inv domain.Invoice) (audit.Entry, bool) {
 			"total_amount_cents": inv.TotalAmountCents,
 			"currency":           inv.Currency,
 			"triggered_by":       string(inv.BillingReason),
+			"born_finalized":     true,
 		},
 	}, true
 }
@@ -635,10 +641,10 @@ type InvoiceWriter interface {
 	// invoice visible with no record of what created it if the write failed).
 	CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	// CreateInvoiceWithLineItemsTx is the in-tx variant — used by BillOnCreateTx
-	// so the cross-interval plan-swap can insert the new-period invoice on the
-	// coordinator's tx, atomically with the plan write + watermark advance. The
-	// finalize audit row rides this same tx too (emitted by the caller right
-	// after the insert), so it commits atomically with the swap.
+	// and BillOnPlanSwapTx; the latter inserts the cross-interval swap's invoice
+	// on the coordinator's tx, atomically with the plan write + watermark
+	// advance. The finalize audit row rides this same tx too (emitted by the
+	// caller right after the insert), so it commits atomically with the swap.
 	CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
 	GetInvoice(ctx context.Context, tenantID, id string) (domain.Invoice, error)
 	// FindFundingInvoicesForPeriod returns EVERY non-voided/non-uncollectible
@@ -2649,6 +2655,9 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 					"customer_id":  sub.CustomerID,
 					"triggered_by": "schedule",
 				}
+				if sub.TrialEndAt != nil {
+					meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
+				}
 				_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 			}
 			// ADR-031 trial-end in_advance coverage now rides the
@@ -3687,8 +3696,9 @@ func (e *Engine) BillOnPlanSwapTx(ctx context.Context, tx *sql.Tx, before, after
 // caller persists (BillOnCreate via the store's own tx, BillOnCreateTx on a
 // coordinator tx) and finalizes. Returns ok=false (nil error) for the no-op
 // cases: inactive sub, no in_advance items, or zero subtotal. The returned
-// invoice has no InvoiceNumber and carries CreatedAt == effective-now.
-// startAt is the instant the pause is read at (see BillOnCreateTx).
+// invoice has no InvoiceNumber and carries IssuedAt == CreatedAt == startAt,
+// the instant the billed period began (see BillOnCreateTx); the pause is read
+// as it stood then, and DueAt counts the net terms from it.
 //
 // carry is lines another window owes that this invoice bills beside the base:
 // the old period's usage on a plan swap (BillOnPlanSwapTx). They count toward
@@ -3702,7 +3712,13 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 		return domain.Invoice{}, nil, false, fmt.Errorf("subscription has no billing period set")
 	}
 
-	now := e.effectiveNow(ctx, sub)
+	// The invoice is issued when its period began. Every caller passes that
+	// instant: effective-now for create, activate, early trial end and the
+	// plan swap; trial_end_at for the trial-expiry scans; the cycle close for
+	// the engine's own trial flip. Reading the clock here instead dated a
+	// day-1 invoice swept by a long advance at the advance's target, after
+	// the cycle invoices it preceded (B12, P-3).
+	now := startAt
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
 
@@ -3867,8 +3883,9 @@ func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, ad
 func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscription, inv domain.Invoice) {
 	// The finalize AUDIT row rode the invoice-create tx (ADR-090 shared fate):
 	// the own-tx callers (BillOnCreate) emit it via finalizeAuditEmit, and the
-	// coordinator-tx caller (the cross-interval swap through BillOnCreateTx) emits
-	// it on the coordinator tx. So this post-commit path fires only the external,
+	// coordinator-tx callers (BillOnCreateTx, the cross-interval swap through
+	// BillOnPlanSwapTx, the cancel through BillFinalOnImmediateCancelTx) emit it
+	// on the coordinator tx. So this post-commit path fires only the external,
 	// best-effort effects — WEBHOOK, tax commit, auto-charge — none of which may
 	// ride a DB tx.
 	e.dispatchInvoiceFinalized(ctx, sub, inv)
@@ -4590,7 +4607,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		// Atomic path (CancelAtomicWithBill): insert on the caller's coordinator
 		// tx. No idempotent-skip — a unique violation poisons the caller's tx, so
 		// surface it and let the cancel roll back (same contract as the swap
-		// path's BillOnCreateTx). The external finalize (webhook + tax commit +
+		// path's BillOnPlanSwapTx). The external finalize (webhook + tax commit +
 		// auto-charge) runs post-commit via FinalizeOnCreateInvoice; the AUDIT row
 		// rides THIS coordinator tx so it commits atomically with the cancel.
 		created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, invToCreate, lineItems)

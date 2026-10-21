@@ -88,10 +88,14 @@ type ChargeHoldClaimer interface {
 }
 
 // SubscriptionTerminalState reports whether a subscription can still be
-// acted on. Only Terminated is needed: `canceled` and `archived` are the
-// two states in which BOTH movers refuse.
+// acted on. Terminated: `canceled` and `archived` are the two states in
+// which BOTH movers refuse.
 type SubscriptionTerminalState struct {
 	Terminated bool
+	// PeriodStart is the start of the subscription's current billing
+	// period, zero when it has none. A final action is never dated before
+	// it (applySubscriptionAction).
+	PeriodStart time.Time
 }
 
 // SubscriptionStateReader answers "is there anything left to do to this
@@ -995,6 +999,17 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	if now.IsZero() {
 		now = s.clock.Now(ctx)
 	}
+	// The final actions happen at the escalation's instant, not wherever the
+	// advance landed: rebind ctx's instant to it, keeping the clock, so the
+	// subscription's pause or cancel and the invoice's write-off below (each
+	// re-binds and inherits it) are dated with the escalated event. The
+	// subscription's action never goes before its current period, though
+	// (applySubscriptionAction). The inline path already arrives bound to its
+	// retry slot; exhaust-on-entry arrives at frozen_time. Wall-clock runs
+	// carry no Sim and are untouched.
+	if sim, ok := clock.SimOf(ctx); ok {
+		ctx = clock.WithSim(ctx, clock.Sim{At: now, TestClockID: sim.TestClockID})
+	}
 
 	// Late paid re-check — the terminal action (cancel in
 	// particular) is IRREVERSIBLE, and the tick-start paid-pre-check goes stale
@@ -1335,6 +1350,20 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 			// collection left to pause, so nothing applied and the email
 			// stays silent about it.
 			return action == domain.SubActionCancel, false
+		}
+		// On a test clock the action is dated at the escalation (exhaustRun),
+		// and that can be before the current period began: one advance bills
+		// the next renewal (the catchup's cycle phase) before it runs the
+		// dunning work due before it, and an exhaustion re-driven in a later
+		// advance keeps the earlier instant. A cancel dated before
+		// current_period_start bills no final invoice and gives the period's
+		// prebill no relief, since both read it as outside the period; a
+		// pause would read as earlier than the renewal it followed. So the
+		// action lands at the period's start: none of the period used, its
+		// prebill relieved in full. The write-off and the escalation keep
+		// their instant; only this ctx moves.
+		if sim, ok := clock.SimOf(ctx); ok && sim.At.Before(st.PeriodStart) {
+			ctx = clock.WithSim(ctx, clock.Sim{At: st.PeriodStart, TestClockID: sim.TestClockID})
 		}
 	}
 
