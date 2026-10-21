@@ -549,18 +549,27 @@ func (s *Service) customerOnTestClock(ctx context.Context, tenantID, customerID 
 }
 
 // requireSubscription confirms an operator-supplied subscription id exists in
-// the caller's tenant and mode. Same reason as the customer read above: the
-// foreign key on invoices.subscription_id is on the id alone. Unwired reader
-// (narrow unit tests) skips the read.
-func (s *Service) requireSubscription(ctx context.Context, tenantID, subscriptionID string) error {
+// the caller's tenant and mode, and that it belongs to this customer. Same
+// reason as the customer read above: the foreign key on
+// invoices.subscription_id is on the id alone, so it says nothing about
+// tenant, mode or owner. Dunning, the collection-paused gate, the test clock
+// and the cycle slot all act on the invoice's subscription, so another
+// customer's id would make this invoice act on that customer's account.
+// Both columns are write-once, so checking here at create closes it.
+// Unwired reader (narrow unit tests) skips the read.
+func (s *Service) requireSubscription(ctx context.Context, tenantID, customerID, subscriptionID string) error {
 	if s.subPauseReader == nil || subscriptionID == "" {
 		return nil
 	}
-	if _, err := s.subPauseReader.Get(ctx, tenantID, subscriptionID); err != nil {
+	sub, err := s.subPauseReader.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return errs.NotFound("subscription")
 		}
 		return fmt.Errorf("get subscription: %w", err)
+	}
+	if sub.CustomerID != customerID {
+		return errs.Invalid("subscription_id", "subscription does not belong to the requested customer")
 	}
 	return nil
 }
@@ -608,7 +617,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	if err := s.requireSubscription(ctx, tenantID, input.SubscriptionID); err != nil {
+	if err := s.requireSubscription(ctx, tenantID, input.CustomerID, input.SubscriptionID); err != nil {
 		return domain.Invoice{}, err
 	}
 	// SubscriptionID is OPTIONAL: cycle invoices carry a subscription, one-off
@@ -672,6 +681,25 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 
 	ctx = s.bindForCreate(ctx, tenantID, input)
 	now := s.clock.Now(ctx)
+
+	// Validate and build every line before the invoice number is taken: a
+	// refused line must not use one up. The commit-expiry check reads the
+	// clock bound just above.
+	items := make([]domain.InvoiceLineItem, 0, len(input.LineItems))
+	var subtotal int64
+	for i, liInput := range input.LineItems {
+		li, err := buildLineItem(liInput, currency)
+		if err != nil {
+			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1, err)
+		}
+		// Compose-time expiry sanity (ADR-078); re-checked at finalize.
+		if li.CommitExpiresAt != nil && !li.CommitExpiresAt.After(now) {
+			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1,
+				errs.Invalid("commit_expires_at", "must be in the future"))
+		}
+		subtotal += li.AmountCents
+		items = append(items, li)
+	}
 	// One-off invoices that omit a billing window default to "now → now" so
 	// the NOT NULL period columns get sane values. Cycle invoices always
 	// pass an explicit window from the engine.
@@ -728,28 +756,13 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		return s.store.CreateAudited(ctx, tenantID, inv, s.createEmission(ctx, 0))
 	}
 
-	// Atomic create-with-lines: validate + build every line, sum the
-	// subtotal, and persist header + items in one transaction. This closes
-	// the partial-failure window the old create-then-loop-AddLineItem flow
-	// had (a network drop mid-loop left a draft with some-but-not-all lines).
-	// Tax stays 0 here by design — it's computed at finalize for manual
-	// invoices (see Finalize → ComputeTaxForInvoice). Totals therefore equal
-	// the subtotal; finalize rewrites them once tax is known.
-	items := make([]domain.InvoiceLineItem, 0, len(input.LineItems))
-	var subtotal int64
-	for i, liInput := range input.LineItems {
-		li, err := buildLineItem(liInput, currency)
-		if err != nil {
-			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1, err)
-		}
-		// Compose-time expiry sanity (ADR-078); re-checked at finalize.
-		if li.CommitExpiresAt != nil && !li.CommitExpiresAt.After(s.clock.Now(ctx)) {
-			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1,
-				errs.Invalid("commit_expires_at", "must be in the future"))
-		}
-		subtotal += li.AmountCents
-		items = append(items, li)
-	}
+	// Atomic create-with-lines: header + items persist in one transaction
+	// (lines were validated above). This closes the partial-failure window
+	// the old create-then-loop-AddLineItem flow had (a network drop mid-loop
+	// left a draft with some-but-not-all lines). Tax stays 0 here by design —
+	// it's computed at finalize for manual invoices (see Finalize →
+	// ComputeTaxForInvoice). Totals therefore equal the subtotal; finalize
+	// rewrites them once tax is known.
 	inv.SubtotalCents = subtotal
 	inv.TotalAmountCents = subtotal
 	inv.AmountDueCents = subtotal
@@ -2186,8 +2199,8 @@ func (s *Service) lineItemAddedEmission(ctx context.Context) func(tx *sql.Tx, it
 // buildLineItem validates an AddLineItemInput and returns the domain line
 // item with its amount computed. Shared by AddLineItem (incremental add) and
 // Create (atomic create-with-lines) so both paths apply identical rules:
-// description required, quantity > 0, unit_amount > 0, line_type defaulting
-// to add_on. currency stamps the per-line currency column the store
+// description required, quantity > 0, unit_amount > 0, line_type one of
+// add_on (the default), base_fee, usage. currency stamps the per-line currency column the store
 // persists; pass "" when a downstream store call derives it from the
 // invoice.
 func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineItem, error) {
@@ -2205,18 +2218,17 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	lineType := strings.TrimSpace(input.LineType)
 	if lineType == "" {
 		// add_on is the default for operator-added line items (one-off invoice
-		// composer, ad-hoc charges). Engine-driven cycle invoices always pass
-		// an explicit type (base_fee / usage). The DB CHECK accepts only:
-		// base_fee, usage, add_on, discount, tax — so the previous "manual"
-		// fallback would have been rejected by Postgres on insert.
+		// composer, ad-hoc charges).
 		lineType = string(domain.LineTypeAddOn)
 	}
 	switch domain.InvoiceLineItemType(lineType) {
-	case domain.LineTypeBaseFee, domain.LineTypeUsage, domain.LineTypeAddOn, domain.LineTypeDiscount, domain.LineTypeTax:
-		// Matches the DB CHECK — an unknown value used to sail through
-		// here and surface as a raw constraint violation (500).
+	case domain.LineTypeBaseFee, domain.LineTypeUsage, domain.LineTypeAddOn:
+		// Quantity and unit amount are positive, so every line adds money.
+		// A "discount" line would raise the total, and a "tax" line would
+		// be taxed again at finalize, so neither is accepted. The DB CHECK
+		// still allows both: rows written before this rule may exist.
 	default:
-		return domain.InvoiceLineItem{}, errs.Invalid("line_type", "must be one of: base_fee, usage, add_on, discount, tax")
+		return domain.InvoiceLineItem{}, errs.Invalid("line_type", "must be one of: add_on, base_fee, usage")
 	}
 
 	amountCents := input.Quantity * input.UnitAmountCents

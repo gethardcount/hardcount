@@ -452,11 +452,9 @@ const (
 type InvoiceLineItemType string
 
 const (
-	LineTypeBaseFee  InvoiceLineItemType = "base_fee"
-	LineTypeUsage    InvoiceLineItemType = "usage"
-	LineTypeAddOn    InvoiceLineItemType = "add_on"
-	LineTypeDiscount InvoiceLineItemType = "discount"
-	LineTypeTax      InvoiceLineItemType = "tax"
+	LineTypeBaseFee InvoiceLineItemType = "base_fee"
+	LineTypeUsage   InvoiceLineItemType = "usage"
+	LineTypeAddOn   InvoiceLineItemType = "add_on"
 )
 
 // InvoiceTaxRetryUpdate is the snapshot UpdateTaxAtomic writes to a

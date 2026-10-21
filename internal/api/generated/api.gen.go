@@ -934,11 +934,9 @@ func (e InvoiceDisputeStatus) Valid() bool {
 
 // Defines values for InvoiceLineItemInputLineType.
 const (
-	InvoiceLineItemInputLineTypeAddOn    InvoiceLineItemInputLineType = "add_on"
-	InvoiceLineItemInputLineTypeBaseFee  InvoiceLineItemInputLineType = "base_fee"
-	InvoiceLineItemInputLineTypeDiscount InvoiceLineItemInputLineType = "discount"
-	InvoiceLineItemInputLineTypeTax      InvoiceLineItemInputLineType = "tax"
-	InvoiceLineItemInputLineTypeUsage    InvoiceLineItemInputLineType = "usage"
+	InvoiceLineItemInputLineTypeAddOn   InvoiceLineItemInputLineType = "add_on"
+	InvoiceLineItemInputLineTypeBaseFee InvoiceLineItemInputLineType = "base_fee"
+	InvoiceLineItemInputLineTypeUsage   InvoiceLineItemInputLineType = "usage"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceLineItemInputLineType enum.
@@ -947,10 +945,6 @@ func (e InvoiceLineItemInputLineType) Valid() bool {
 	case InvoiceLineItemInputLineTypeAddOn:
 		return true
 	case InvoiceLineItemInputLineTypeBaseFee:
-		return true
-	case InvoiceLineItemInputLineTypeDiscount:
-		return true
-	case InvoiceLineItemInputLineTypeTax:
 		return true
 	case InvoiceLineItemInputLineTypeUsage:
 		return true
@@ -4848,7 +4842,7 @@ type InvoiceCreateRequest struct {
 	// NetPaymentTermDays Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms.
 	NetPaymentTermDays int `json:"net_payment_term_days,omitempty"`
 
-	// SubscriptionId Optional. Leave out for a one-off invoice.
+	// SubscriptionId Optional. Must belong to `customer_id`. Leave out for a one-off invoice.
 	SubscriptionId string `json:"subscription_id,omitempty"`
 }
 

@@ -1872,7 +1872,6 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
                 <SelectItem value="add_on">{LINE_TYPE_LABELS.add_on}</SelectItem>
                 <SelectItem value="base_fee">{LINE_TYPE_LABELS.base_fee}</SelectItem>
                 <SelectItem value="usage">{LINE_TYPE_LABELS.usage}</SelectItem>
-                <SelectItem value="discount">{LINE_TYPE_LABELS.discount}</SelectItem>
               </SelectContent>
             </Select>
           </div>
