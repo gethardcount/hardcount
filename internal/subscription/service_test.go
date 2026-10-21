@@ -1208,7 +1208,14 @@ type fakeBiller struct {
 	createTxOK                bool
 	createTxInv               domain.Invoice
 	createTxErr               error
-	finalizeCalls             int
+	// BillOnPlanSwapTx: what it was called with. It answers with the
+	// createTx* fields, the swap's in-tx bill as BillOnCreateTx was before.
+	swapBillCalls        int
+	swapBillBefore       domain.Subscription
+	swapBillAfter        domain.Subscription
+	swapBillAt           time.Time
+	swapAfterCommitCalls int
+	finalizeCalls        int
 	// Cancel relief (BillOnCancelDraftsTx): what it returns, and how often it
 	// ran in the cancel tx.
 	draftTxCalls int
@@ -1285,6 +1292,12 @@ func (f *fakeBiller) FinishRelief(ctx context.Context, _ domain.Subscription, r 
 func (f *fakeBiller) BillOnCreateTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, _ time.Time) (domain.Invoice, bool, error) {
 	f.createTxCalls++
 	return f.createTxInv, f.createTxOK, f.createTxErr
+}
+
+func (f *fakeBiller) BillOnPlanSwapTx(_ context.Context, _ *sql.Tx, before, after domain.Subscription, at time.Time) (domain.Invoice, bool, func(), error) {
+	f.swapBillCalls++
+	f.swapBillBefore, f.swapBillAfter, f.swapBillAt = before, after, at
+	return f.createTxInv, f.createTxOK, func() { f.swapAfterCommitCalls++ }, f.createTxErr
 }
 
 func (f *fakeBiller) ThresholdBilledThroughTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (*time.Time, error) {
@@ -2955,8 +2968,8 @@ func TestPeriodAnchoring(t *testing.T) {
 			t.Errorf("expected 1 BillOnPlanSwapDraftsTx call, got %d", fb.swapDraftTxCalls)
 		}
 		// in_arrears NEW plan: no new-period bill.
-		if fb.calls != 0 || fb.createTxCalls != 0 {
-			t.Errorf("expected no new-period bill (in_arrears NEW), got BillOnCreate=%d BillOnCreateTx=%d", fb.calls, fb.createTxCalls)
+		if fb.calls != 0 || fb.createTxCalls != 0 || fb.swapBillCalls != 0 {
+			t.Errorf("expected no new-period bill (in_arrears NEW), got BillOnCreate=%d BillOnCreateTx=%d BillOnPlanSwapTx=%d", fb.calls, fb.createTxCalls, fb.swapBillCalls)
 		}
 		updated, err := svc.store.Get(ctx, "t1", sub.ID)
 		if err != nil {
@@ -3013,8 +3026,8 @@ func TestPeriodAnchoring(t *testing.T) {
 		if !fb.planSwapAt.Equal(now) {
 			t.Errorf("refund at: got %v want %v", fb.planSwapAt, now)
 		}
-		if fb.createTxCalls != 1 {
-			t.Errorf("expected 1 in-tx BillOnCreateTx call for the new in_advance period, got %d", fb.createTxCalls)
+		if fb.swapBillCalls != 1 || fb.createTxCalls != 0 {
+			t.Errorf("expected 1 in-tx BillOnPlanSwapTx call for the new in_advance period (and no BillOnCreateTx), got %d and %d", fb.swapBillCalls, fb.createTxCalls)
 		}
 		updated, err := svc.store.Get(ctx, "t1", sub.ID)
 		if err != nil {
@@ -3100,7 +3113,7 @@ func TestPeriodAnchoring(t *testing.T) {
 
 // TestUpdateItemTx_CrossIntervalAtomic covers the atomic cross-interval swap
 // (ADR-056): UpdateItemTx restructures the cycle on the caller's tx (plan write
-// + watermark advance + new in_advance invoice via BillOnCreateTx), defers the
+// + watermark advance + swap invoice via BillOnPlanSwapTx), defers the
 // OLD-period refund + the new invoice's finalize to post-commit, and fails loud
 // (so the tx rolls back) when the in-tx bill fails — closing the silent
 // revenue-drop. Control flow is verified here with the in-memory store + fake
@@ -3134,7 +3147,7 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 			t.Fatalf("Create: %v", err)
 		}
 		fb.createTxErr, fb.createTxOK = savedErr, savedOK
-		fb.calls, fb.createTxCalls, fb.finalizeCalls, fb.swapDraftTxCalls, fb.finishCalls = 0, 0, 0, 0, 0
+		fb.calls, fb.createTxCalls, fb.finalizeCalls, fb.swapDraftTxCalls, fb.finishCalls, fb.swapBillCalls = 0, 0, 0, 0, 0, 0
 		return svc, sub
 	}
 
@@ -3154,8 +3167,23 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		if res.Item.PlanID != "p_monthly_adv" {
 			t.Errorf("item plan: got %q want p_monthly_adv", res.Item.PlanID)
 		}
-		if fb.createTxCalls != 1 {
-			t.Errorf("BillOnCreateTx (new period in-tx) calls: got %d want 1", fb.createTxCalls)
+		if fb.swapBillCalls != 1 || fb.createTxCalls != 0 {
+			t.Errorf("BillOnPlanSwapTx (swap invoice in-tx) calls: got %d want 1; BillOnCreateTx got %d want 0", fb.swapBillCalls, fb.createTxCalls)
+		}
+		// before is the pre-swap snapshot (old plan, old period start): the
+		// window [old start, now) the swap closes is priced from it. after is
+		// the prospective sub on the new plan and period.
+		if b := fb.swapBillBefore; len(b.Items) != 1 || b.Items[0].PlanID != "p_yearly_adv" || b.CurrentBillingPeriodStart == nil || !b.CurrentBillingPeriodStart.Equal(*sub.CurrentBillingPeriodStart) {
+			t.Errorf("BillOnPlanSwapTx before = items %+v period start %v, want the old plan p_yearly_adv from %v", b.Items, b.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodStart)
+		}
+		if a := fb.swapBillAfter; len(a.Items) != 1 || a.Items[0].PlanID != "p_monthly_adv" || a.CurrentBillingPeriodStart == nil || !a.CurrentBillingPeriodStart.Equal(now) {
+			t.Errorf("BillOnPlanSwapTx after = items %+v period start %v, want the new plan p_monthly_adv from %v", a.Items, a.CurrentBillingPeriodStart, now)
+		}
+		if !fb.swapBillAt.Equal(now) {
+			t.Errorf("BillOnPlanSwapTx at = %v, want %v", fb.swapBillAt, now)
+		}
+		if fb.swapAfterCommitCalls != 0 {
+			t.Errorf("the swap bill's afterCommit ran %d times before commit, want 0", fb.swapAfterCommitCalls)
 		}
 		if res.crossAxisNewInvoice == nil || res.crossAxisNewInvoice.ID != "vlx_inv_swap" {
 			t.Errorf("crossAxisNewInvoice should carry the new invoice for post-commit finalize; got %+v", res.crossAxisNewInvoice)
@@ -3178,6 +3206,11 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		if expEnd := now.AddDate(0, 1, 0); updated.CurrentBillingPeriodEnd == nil || !updated.CurrentBillingPeriodEnd.Equal(expEnd) {
 			t.Errorf("period_end: got %v want %v", updated.CurrentBillingPeriodEnd, expEnd)
 		}
+		// The handler finalizes after commit; only then does afterCommit run.
+		svc.FinalizeCrossIntervalSwap(ctx, "t1", sub, res)
+		if fb.swapAfterCommitCalls != 1 {
+			t.Errorf("FinalizeCrossIntervalSwap ran the swap bill's afterCommit %d times, want 1", fb.swapAfterCommitCalls)
+		}
 	})
 
 	t.Run("in-tx bill failure returns error (drives the handler tx rollback)", func(t *testing.T) {
@@ -3189,11 +3222,11 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		}); err == nil {
 			t.Fatal("expected error when the in-tx new-period bill fails (so the tx rolls back the whole swap)")
 		}
-		if fb.createTxCalls != 1 {
-			t.Errorf("BillOnCreateTx calls: got %d want 1", fb.createTxCalls)
+		if fb.swapBillCalls != 1 {
+			t.Errorf("BillOnPlanSwapTx calls: got %d want 1", fb.swapBillCalls)
 		}
-		if fb.finishCalls != 0 || fb.finalizeCalls != 0 {
-			t.Errorf("post-commit steps must not run on in-tx failure; finish=%d finalize=%d", fb.finishCalls, fb.finalizeCalls)
+		if fb.finishCalls != 0 || fb.finalizeCalls != 0 || fb.swapAfterCommitCalls != 0 {
+			t.Errorf("post-commit steps must not run on in-tx failure; finish=%d finalize=%d afterCommit=%d", fb.finishCalls, fb.finalizeCalls, fb.swapAfterCommitCalls)
 		}
 	})
 
@@ -3240,8 +3273,8 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 		}); err == nil {
 			t.Fatal("expected mixed-interval swap to be rejected")
 		}
-		if fb.createTxCalls != 0 {
-			t.Errorf("rejected swap must not bill a new period; BillOnCreateTx called %d", fb.createTxCalls)
+		if fb.createTxCalls != 0 || fb.swapBillCalls != 0 {
+			t.Errorf("rejected swap must not bill a new period; BillOnCreateTx called %d, BillOnPlanSwapTx %d", fb.createTxCalls, fb.swapBillCalls)
 		}
 		if it, _ := svc.store.GetItem(ctx, "t1", sub.Items[0].ID); it.PlanID != "p_m1" {
 			t.Errorf("item must be unchanged after rejection; got %q", it.PlanID)
