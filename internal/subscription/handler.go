@@ -1287,8 +1287,8 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 	// Skip the legacy delta-proration emission when the service used
 	// the cross-axis orchestrator. The orchestrator already issued
 	// the refund credit (for OLD in_advance unused) and — when NEW is
-	// in_advance — billed the new in_advance period synchronously via
-	// BillOnCreate. Firing handleItemProration on top would emit a
+	// in_advance — billed the new in_advance period, with the old period's
+	// usage up to the swap, synchronously via BillOnPlanSwapTx. Firing handleItemProration on top would emit a
 	// second credit against the same OLD period; the gates inside
 	// handleItemProration aren't tight enough (a freshly auto-charged
 	// new in_advance invoice would pass the paid-check), so an
