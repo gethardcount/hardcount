@@ -312,3 +312,194 @@ func TestExpireCredits_NoGrace_HoldIsTheOwedClose(t *testing.T) {
 		t.Fatalf("no-subscription customer's grant consumed=%d, want 700: nothing is owed, so it is retired now", got)
 	}
 }
+
+// One liveness rule (ADR-071 §2, amended 2026-10-22): a credit block is live
+// at t when t <= expires_at. A dashboard grant "valid through Nov 30" is sent
+// as the local midnight after Nov 30, and the period invoice is issued at
+// that same midnight, so the boundary instant itself must count as live.
+
+// TestApplyToInvoice_PeriodInvoiceIssuedAtTheExpiryInstantDrawsTheGrant: a
+// period invoice and a threshold invoice issued exactly at the grant's
+// expires_at draw the grant, however late they are collected. A manual
+// invoice collected after that instant draws nothing (control).
+//
+// Fails before the fix: the drain took only blocks with expires_at after the
+// draw instant. Mutation: put `expires_at > $3` back in drainPositiveBlocks.
+func TestApplyToInvoice_PeriodInvoiceIssuedAtTheExpiryInstantDrawsTheGrant(t *testing.T) {
+	db, ctx, tenantID, cust, store, svc, invoiceStore := expirySetup(t, "expiry_boundary_draw")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	expires := now.Add(-3 * time.Hour)
+
+	cases := []struct {
+		name   string
+		reason domain.InvoiceBillingReason
+		drawn  int64
+	}{
+		{"cycle", domain.BillingReasonSubscriptionCycle, 2000},
+		{"threshold", domain.BillingReasonThreshold, 2000},
+		{"manual", domain.BillingReasonManual, 0},
+	}
+	for i, tc := range cases {
+		custID := cust.ID
+		if i > 0 {
+			custID = holdCustomer(t, ctx, db, tenantID, "boundary_"+tc.name)
+		}
+		seedExpiredGrant(t, db, ctx, svc, tenantID, custID, 2000, expires)
+		inv := seedPeriodInvoice(t, ctx, invoiceStore, tenantID, custID, "",
+			tc.reason, domain.InvoiceFinalized, domain.InvoiceTaxOK, expires)
+		if _, err := store.ApplyToInvoiceAtomic(ctx, tenantID, custID, inv.ID, "apply", inv.AmountDueCents, now); err != nil {
+			t.Fatalf("%s: apply: %v", tc.name, err)
+		}
+		got, err := invoiceStore.Get(ctx, tenantID, inv.ID)
+		if err != nil {
+			t.Fatalf("%s: get invoice: %v", tc.name, err)
+		}
+		if got.CreditsAppliedCents != tc.drawn || got.AmountDueCents != 5000-tc.drawn {
+			t.Errorf("%s: credits applied/amount due = %d/%d, want %d/%d", tc.name, got.CreditsAppliedCents, got.AmountDueCents, tc.drawn, 5000-tc.drawn)
+		}
+	}
+}
+
+// TestExpireCredits_HoldsAGrantExpiringAtTheDueInstant: the subscription is
+// due exactly when the grant expires, and its close failed. The close draws
+// on the grant (it is live at the period end), so the sweep must hold it.
+// Once the close has run, nothing is owed and the grant is retired.
+//
+// Fails before the fix: arm (i) of the hold was `due < expires_at`.
+// Mutation: put `<` back in arm (i) of domain.CreditDrawOwedSQL.
+func TestExpireCredits_HoldsAGrantExpiringAtTheDueInstant(t *testing.T) {
+	db, ctx, tenantID, cust, _, svc, _ := expirySetup(t, "expiry_hold_due_instant")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	due := now.Add(-2 * time.Hour)
+
+	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", due, "")
+	recordFailure(t, db, ctx, tenantID, sub, due, now)
+	grant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 5000, due)
+
+	expireAll(t, ctx, svc)
+	if got := grantConsumed(t, db, ctx, grant); got != 0 {
+		t.Fatalf("grant consumed=%d after the sweep, want 0: the close due at its expires_at still draws on it", got)
+	}
+
+	setNextBilling(t, db, ctx, sub, now.Add(30*24*time.Hour))
+	expireAll(t, ctx, svc)
+	if sum, entries, total := customerLedgerFacts(t, db, ctx, cust.ID); sum != 0 || entries != 1 || total != 5000 {
+		t.Fatalf("after the close: sum=%d expiry entries=%d total=%d, want 0/1/5000", sum, entries, total)
+	}
+}
+
+// TestExpireCredits_HoldsAGrantExpiringAtAPeriodInvoiceIssue: the close ran
+// at the grant's expires_at, but its invoice is a tax-pending draft. The
+// draft, and then the queued finalized invoice, still draw on the grant, so
+// the sweep holds it until the invoice is settled.
+//
+// Fails before the fix: arm (ii) of the hold was `issued_at < expires_at`.
+// Mutation: put `<` back in arm (ii) of domain.CreditDrawOwedSQL.
+func TestExpireCredits_HoldsAGrantExpiringAtAPeriodInvoiceIssue(t *testing.T) {
+	db, ctx, tenantID, cust, _, svc, invoiceStore := expirySetup(t, "expiry_hold_issue_instant")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	issued := now.Add(-3 * time.Hour)
+
+	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", issued.AddDate(0, 1, 0), "")
+	grant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 4000, issued)
+	draft := seedPeriodInvoice(t, ctx, invoiceStore, tenantID, cust.ID, sub,
+		domain.BillingReasonSubscriptionCycle, domain.InvoiceDraft, domain.InvoiceTaxPending, issued)
+
+	expireAll(t, ctx, svc)
+	if got := grantConsumed(t, db, ctx, grant); got != 0 {
+		t.Fatalf("grant consumed=%d while the draft issued at its expires_at waits for tax, want 0 (held)", got)
+	}
+
+	bypassExec(t, db, ctx, `UPDATE invoices SET tax_status = 'ok', tax_error_code = NULL, tax_pending_reason = '' WHERE id = $1`, draft.ID)
+	fin, err := invoiceStore.UpdateStatus(ctx, tenantID, draft.ID, domain.InvoiceFinalized)
+	if err != nil || !fin.AutoChargePending {
+		t.Fatalf("finalize: queued=%v err=%v, want queued", fin.AutoChargePending, err)
+	}
+	expireAll(t, ctx, svc)
+	if got := grantConsumed(t, db, ctx, grant); got != 0 {
+		t.Fatalf("grant consumed=%d while the finalized invoice is queued, want 0 (held)", got)
+	}
+
+	if _, err := invoiceStore.MarkPaid(ctx, tenantID, draft.ID, "", now); err != nil {
+		t.Fatalf("mark paid: %v", err)
+	}
+	expireAll(t, ctx, svc)
+	if sum, entries, total := customerLedgerFacts(t, db, ctx, cust.ID); sum != 0 || entries != 1 || total != 4000 {
+		t.Fatalf("after the invoice settled: sum=%d expiry entries=%d total=%d, want 0/1/4000", sum, entries, total)
+	}
+}
+
+// TestLivenessAtTheExpiryInstant_DrainSpendableExposureAgree: the drain, the
+// spendable balance and the commit banner apply one rule. At expires_at the
+// grant is live in all three; one microsecond later it is live in none, and
+// the sweep lists it.
+//
+// Fails before the fix: all three treated expires_at itself as expired.
+// Mutations: put `expires_at > $3` back in CommitGrantExposure, or
+// `expires_at <= $3` back in GetSpendableBalance.
+func TestLivenessAtTheExpiryInstant_DrainSpendableExposureAgree(t *testing.T) {
+	db, ctx, tenantID, cust, store, svc, invoiceStore := expirySetup(t, "expiry_boundary_agree")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	expires := now.Add(-3 * time.Hour)
+	after := expires.Add(time.Microsecond)
+
+	grant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 2000, expires)
+	fundingID := "vlx_inv_boundary_fund"
+	bypassExec(t, db, ctx, `UPDATE customer_credit_ledger SET grant_kind = 'commit', source_invoice_id = $1 WHERE id = $2`, fundingID, grant)
+
+	spendable := func(at time.Time) int64 {
+		t.Helper()
+		v, err := store.GetSpendableBalance(ctx, tenantID, cust.ID, at)
+		if err != nil {
+			t.Fatalf("spendable at %v: %v", at, err)
+		}
+		return v
+	}
+	drawable := func(at time.Time) int64 {
+		t.Helper()
+		v, _, err := store.CommitGrantExposure(ctx, tenantID, fundingID, at)
+		if err != nil {
+			t.Fatalf("commit exposure at %v: %v", at, err)
+		}
+		return v
+	}
+	drain := func(at time.Time) int64 {
+		t.Helper()
+		inv := createOpenInvoice(t, ctx, invoiceStore, tenantID, cust.ID, 5000)
+		applied, err := store.ApplyToInvoiceAtomic(ctx, tenantID, cust.ID, inv.ID, "apply", 5000, at)
+		if err != nil {
+			t.Fatalf("apply at %v: %v", at, err)
+		}
+		return applied
+	}
+
+	if got := spendable(expires); got != 2000 {
+		t.Errorf("spendable at expires_at = %d, want 2000", got)
+	}
+	if got := drawable(expires); got != 2000 {
+		t.Errorf("commit drawable at expires_at = %d, want 2000", got)
+	}
+	if got := spendable(after); got != 0 {
+		t.Errorf("spendable 1µs after expires_at = %d, want 0", got)
+	}
+	if got := drawable(after); got != 0 {
+		t.Errorf("commit drawable 1µs after expires_at = %d, want 0", got)
+	}
+	listed, err := store.ListExpiredGrants(ctx)
+	if err != nil {
+		t.Fatalf("list expired grants: %v", err)
+	}
+	found := false
+	for _, g := range listed {
+		found = found || g.ID == grant
+	}
+	if !found {
+		t.Errorf("ListExpiredGrants does not list the grant past its expires_at")
+	}
+	if got := drain(after); got != 0 {
+		t.Errorf("drain 1µs after expires_at = %d, want 0", got)
+	}
+	if got := drain(expires); got != 2000 {
+		t.Errorf("drain at expires_at = %d, want 2000", got)
+	}
+}

@@ -242,20 +242,26 @@ func equalCharges(got []int64, want ...int64) bool {
 // billing. The $49.00 period invoice draws the whole grant, the card is
 // charged $19.00, and nothing is left to expire.
 //
+// A grant that expires exactly at the period end (a dashboard grant valid
+// through the period's last day) is held and drawn the same way.
+//
 // Fails before the fix: the sweep retired the grant, the close drew nothing,
-// and the card was charged $49.00.
+// and the card was charged $49.00. The at-the-period-end case also fails
+// before the 2026-10-22 amendment (the hold and the drain were strict).
 func TestFailedClose_ThenSuccess_DrawsTheGrantLiveAtThePeriodEnd(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		fail func() error
+		name   string
+		fail   func() error
+		expiry time.Duration // after the period end
 	}{
-		{name: "counted failure"},
-		{name: "panic", fail: func() error { panic("plan read panicked (test)") }},
+		{name: "counted failure", expiry: 6 * time.Hour},
+		{name: "panic", fail: func() error { panic("plan read panicked (test)") }, expiry: 6 * time.Hour},
+		{name: "grant expires at the period end"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			x := newExpiryEnv(t, "Expiry Failed Close "+tc.name, nil)
 			sub := x.dueSub(t, "sub-failed-close", x.planBad, x.periodEnd)
-			grant := x.backdatedGrant(t, x.custID, 3000, x.periodEnd.Add(6*time.Hour))
+			grant := x.backdatedGrant(t, x.custID, 3000, x.periodEnd.Add(tc.expiry))
 
 			x.pricing.fail = tc.fail
 			func() {
@@ -510,5 +516,88 @@ func TestExpiryVsCloseCollect_NoGapInTheHandoff(t *testing.T) {
 		if left := grantAmt - want; (left > 0 && (n != 1 || expired != left)) || (left == 0 && n != 0) {
 			t.Errorf("%s: expiry entries=%d expired=%d, want the remainder %d only", label, n, expired, left)
 		}
+	}
+}
+
+// TestCycleClose_GrantValidThroughTheLastDay_PaysThePeriodInvoice: the
+// operator picks "valid through Nov 30" in the dashboard of a New York
+// tenant, which sends Dec 1 00:00 New York, the instant the November period
+// ends and its invoice is issued. On billing day the hourly expiry sweep runs
+// before the close (an independent goroutine can win that race). The grant is
+// held, and the close draws it: the card pays the rest.
+//
+// Control: a grant at Nov 30 23:59:59.999 New York, the shape the dashboard
+// sent before the fix, expired before the period ended. It is retired and the
+// card pays the whole invoice. That 1 ms is why the dashboard now sends the
+// next midnight.
+//
+// Fails before the fix: the hold (`due < expires_at`) and the drain
+// (`expires_at > issued_at`) were both strict, so the sweep retired the grant
+// and the card was charged $49.00.
+func TestCycleClose_GrantValidThroughTheLastDay_PaysThePeriodInvoice(t *testing.T) {
+	x := newExpiryEnv(t, "Expiry Valid Through", nil)
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load zone: %v", err)
+	}
+	settings := tenant.NewSettingsStore(x.db)
+	ts, err := settings.Get(x.ctx, x.tenantID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	ts.Timezone = ny.String()
+	if _, err := settings.Upsert(x.ctx, ts); err != nil {
+		t.Fatalf("set tenant zone: %v", err)
+	}
+	// The November period in New York; in the past, so the wall-clock sweep
+	// (expires_at < NOW()) sees both grants as expired.
+	x.periodStart = time.Date(2025, 11, 1, 0, 0, 0, 0, ny)
+	x.periodEnd = time.Date(2025, 12, 1, 0, 0, 0, 0, ny)
+	x.clock.Set(time.Date(2025, 12, 1, 1, 0, 0, 0, ny))
+
+	sub := x.subFor(t, x.custID, "sub-valid-through", x.planOK)
+	grant := x.backdatedGrant(t, x.custID, 2000, x.periodEnd)
+
+	oldCust := x.customer(t, "valid_through_old_shape")
+	oldSub := x.subFor(t, oldCust, "sub-valid-through-old", x.planOK)
+	oldGrant := x.backdatedGrant(t, oldCust, 2000, x.periodEnd.Add(-time.Millisecond))
+
+	x.expire(t)
+	if got := x.consumed(t, grant); got != 0 {
+		t.Fatalf("grant consumed=%d after the sweep, want 0: the close due at its expires_at draws on it", got)
+	}
+	if got := x.consumed(t, oldGrant); got != 2000 {
+		t.Fatalf("control grant consumed=%d after the sweep, want 2000 retired: it expired 1 ms before the period ended", got)
+	}
+
+	if n, errs := x.eng.RunCycle(x.ctx, 50, nil); n != 2 || len(errs) > 0 {
+		t.Fatalf("close: generated=%d errs=%v, want 2 invoices", n, errs)
+	}
+
+	inv := x.periodInvoice(t, sub.ID)
+	if inv.IssuedAt == nil || !inv.IssuedAt.Equal(x.periodEnd) {
+		t.Fatalf("setup: issued_at = %v, want the period end %v", inv.IssuedAt, x.periodEnd)
+	}
+	if inv.CreditsAppliedCents != 2000 {
+		t.Errorf("credits applied = %d, want 2000 (the grant is valid through the period's last day)", inv.CreditsAppliedCents)
+	}
+	if got := x.charger.charges(inv.ID); !equalCharges(got, 2900) {
+		t.Errorf("card charges = %v, want [2900]", got)
+	}
+	var drawnAt time.Time
+	if err := x.admin.QueryRowContext(x.ctx,
+		`SELECT created_at FROM customer_credit_ledger WHERE invoice_id = $1 AND entry_type = 'usage'`, inv.ID).Scan(&drawnAt); err != nil {
+		t.Fatalf("read usage entry: %v", err)
+	}
+	if !drawnAt.Equal(x.clock.Now(x.ctx)) {
+		t.Errorf("usage entry created_at = %v, want the collection instant %v", drawnAt, x.clock.Now(x.ctx))
+	}
+
+	oldInv := x.periodInvoice(t, oldSub.ID)
+	if oldInv.CreditsAppliedCents != 0 {
+		t.Errorf("control: credits applied = %d, want 0", oldInv.CreditsAppliedCents)
+	}
+	if got := x.charger.charges(oldInv.ID); !equalCharges(got, 4900) {
+		t.Errorf("control: card charges = %v, want [4900]", got)
 	}
 }
