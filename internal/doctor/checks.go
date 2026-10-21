@@ -191,14 +191,18 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		// per meter: under the ADR-066 §4 deferred-bucket protocol one meter
 		// can carry a sum rule (billed on the threshold invoice) and a max
 		// rule (deferred to the cycle invoice, full window), and the max
-		// bucket's window legitimately overlaps the sum bucket's. Lines on
-		// one invoice are excluded (i.id < j.id).
+		// bucket's window legitimately overlaps the sum bucket's. That
+		// exemption is one subscription's: across two subscriptions any
+		// overlap on the meter is the same events billed twice, whatever
+		// the bucket (each pins its rules at its own period start, so a
+		// rule published in between gives the two lines different versions).
+		// Lines on one invoice are excluded (i.id < j.id).
 		SQL: `SELECT a.invoice_id, a.tenant_id, i.subscription_id, a.meter_id, a.rating_rule_version_id, a.billing_period_start, a.billing_period_end, b.invoice_id AS other_invoice_id, j.subscription_id AS other_subscription_id
 		        FROM invoice_line_items a
 		        JOIN invoices i ON i.id = a.invoice_id
 		        JOIN invoices j ON j.customer_id = i.customer_id AND j.tenant_id = i.tenant_id AND j.id <> i.id AND j.subscription_id IS NOT NULL
 		        JOIN invoice_line_items b ON b.invoice_id = j.id AND b.meter_id = a.meter_id AND b.line_type = 'usage'
-		         AND b.rating_rule_version_id IS NOT DISTINCT FROM a.rating_rule_version_id
+		         AND (j.subscription_id <> i.subscription_id OR b.rating_rule_version_id IS NOT DISTINCT FROM a.rating_rule_version_id)
 		       WHERE a.line_type = 'usage' AND i.subscription_id IS NOT NULL
 		         AND i.status NOT IN ('voided','uncollectible') AND j.status NOT IN ('voided','uncollectible')
 		         AND a.billing_period_start IS NOT NULL AND b.billing_period_start IS NOT NULL

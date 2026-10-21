@@ -258,7 +258,13 @@ and is not changed.
 on two live invoices is now scoped per customer, not per subscription
 (`usage_billed_once_per_customer_meter_window`; it was
 `usage_billed_once_per_subscription_meter_window`, ADR-115). Scoped per
-subscription it could not see this double bill.
+subscription it could not see this double bill. Two lines of one
+subscription are still paired only within one rating-rule bucket (the
+ADR-066 §4 deferred max bucket overlaps the sum bucket by design). Two
+lines of different subscriptions are paired across buckets: each
+subscription pins its rules at its own period start, so a rule
+published between the two gives them different versions for the same
+events.
 
 **Residual edge, accepted.** The floor is a single instant, not a cut
 of every other subscription's interval. Say an older subscription

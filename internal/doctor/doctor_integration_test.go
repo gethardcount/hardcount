@@ -104,6 +104,10 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	//             customer and meter, so both bill the same events).
 	//   doc_ya/doc_yb — the same pair with B starting where A ended
 	//             [t1,P1): NOT flagged.
+	//   doc_za/doc_zb — the doc_x pair with a rule version published between
+	//             A's period start and B's, so the two lines carry different
+	//             buckets → still flagged (the bucket exemption is one
+	//             subscription's).
 	p0, t1, p1 := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	seedSub := func(id string) {
 		mustExec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time,
@@ -147,6 +151,12 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	seedInvoice("vlx_inv_doc_yb_c", "vlx_sub_doc_yb", "subscription_cycle", p0, p1)
 	seedUsageLine("vlx_inv_doc_ya_f", "mtr_doc_y", "rrv_doc_sum", p0, t1)
 	seedUsageLine("vlx_inv_doc_yb_c", "mtr_doc_y", "rrv_doc_sum", t1, p1)
+	seedSub("vlx_sub_doc_za")
+	seedSub("vlx_sub_doc_zb")
+	seedInvoice("vlx_inv_doc_za_f", "vlx_sub_doc_za", "subscription_cancel", p0, t1)
+	seedInvoice("vlx_inv_doc_zb_c", "vlx_sub_doc_zb", "subscription_cycle", p0, p1)
+	seedUsageLine("vlx_inv_doc_za_f", "mtr_doc_z", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_zb_c", "mtr_doc_z", "rrv_doc_sum2", p0, p1)
 
 	// SB-1: an active run with no next action is invisible to both due-run
 	// pickers forever — flagged. Control: an escalated run with no next action
@@ -211,7 +221,7 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 		"usage_billed_once_per_customer_meter_window": false,
 		"dunning_active_run_without_next_action":      false,
 	}
-	crossSub := false
+	crossSub, crossSubOtherBucket := false, false
 	for _, v := range res.Violations {
 		if _, ok := want[v.Check.Name]; ok && strings.Contains(v.RowID+v.Detail, "doc1") {
 			want[v.Check.Name] = true
@@ -230,6 +240,8 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 				want[v.Check.Name] = true
 			case strings.Contains(v.RowID, "doc_xa"):
 				crossSub = true
+			case strings.Contains(v.RowID, "doc_za"):
+				crossSubOtherBucket = true
 			case strings.Contains(v.RowID+v.Detail, "doc_y"):
 				t.Errorf("false positive: a recreated subscription that starts where its predecessor ended is flagged: %s %s", v.RowID, v.Detail)
 			case strings.Contains(v.RowID+v.Detail, "doc_res"):
@@ -241,6 +253,9 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	}
 	if !crossSub {
 		t.Error("two subscriptions of one customer billing the same usage instant of a meter are NOT caught by usage_billed_once_per_customer_meter_window: the check pairs invoices of one subscription only")
+	}
+	if !crossSubOtherBucket {
+		t.Error("two subscriptions of one customer billing the same usage instant of a meter under different rule versions are NOT caught: the same-bucket requirement must apply within one subscription only")
 	}
 	for name, caught := range want {
 		if !caught {
