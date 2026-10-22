@@ -4,11 +4,12 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatInTimeZone } from 'date-fns-tz'
 import { toast } from 'sonner'
-import { api, formatDateTime, formatRate, getTenantTimezone, formatCents } from '@/lib/api'
+import { api, formatDateTime, getTenantTimezone } from '@/lib/api'
 import { startOfDayInTZ, endOfDayInTZ } from '@/lib/dates'
 import type { AuditEntry } from '@/lib/api'
 import { downloadServerCSV } from '@/lib/csv'
 import {
+  auditAmount,
   describeAction,
   resourceLink,
   HIGH_SEVERITY,
@@ -175,12 +176,12 @@ function formatMetadata(meta: Record<string, unknown> | undefined): { label: str
     if (SIM_CONTEXT_KEYS.has(key)) continue
     const label = fixAcronyms(key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))
     if (typeof val === 'number' && key.includes('cents')) {
-      items.push({ label: label.replace(' Cents', ''), value: formatCents(val) })
+      items.push({ label: label.replace(' Cents', ''), value: auditAmount(val, meta.currency) })
     } else if (typeof val === 'string' && key.includes('cents') && val !== '' && Number.isFinite(Number(val))) {
       // Decimal per-unit rates serialize as strings (e.g. "0.0003" cents).
       // toFixed(2) would collapse sub-cent rates to $0.00 — render at full
       // precision instead.
-      items.push({ label: label.replace(' Cents', ''), value: formatRate(val) })
+      items.push({ label: label.replace(' Cents', ''), value: auditAmount(val, meta.currency) })
     } else if (val !== null && typeof val === 'object') {
       // Structured values (e.g. the settings-change {field: {from, to}} map)
       // — String(val) renders "[object Object]"; show the JSON instead.
