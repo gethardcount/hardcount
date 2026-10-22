@@ -1236,6 +1236,34 @@ const balanceWriteOffColumns = `COALESCE(SUM(CASE WHEN entry_type = 'expiry' THE
 			                   AND COALESCE(metadata->>'reason', '') NOT IN ('commit_void_retire', 'commit_refund_retire')
 			              THEN ABS(amount_cents) ELSE 0 END), 0)`
 
+// customerCurrencySQL is the currency the customer whose id is customerRef
+// is billed in (CreditBalance.Currency). The ledger has no currency column
+// (ADR-100), so a balance reads in the customer's. The first two arms are the
+// order the engine stamps an invoice's currency in (Engine.invoiceCurrency):
+// the billing profile, then the plan of the live subscription. A customer
+// with neither takes the newest invoice's currency, then the workspace
+// default; the dashboard's customer page resolves the same order
+// (web-v2/src/lib/customerCurrency.ts). ADR-100 keeps a customer's live
+// subscriptions in one currency, so which live item is read does not matter.
+// $1 is the tenant id.
+func customerCurrencySQL(customerRef string) string {
+	return `UPPER(COALESCE(
+		(SELECT NULLIF(bp.currency, '') FROM customer_billing_profiles bp
+		  WHERE bp.customer_id = ` + customerRef + `),
+		(SELECT p.currency FROM subscriptions s
+		   JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
+		   JOIN plans p ON p.id = si.plan_id
+		  WHERE s.customer_id = ` + customerRef + ` AND s.status IN ('active', 'trialing')
+		  ORDER BY s.current_billing_period_start DESC NULLS LAST, s.created_at DESC
+		  LIMIT 1),
+		(SELECT i.currency FROM invoices i
+		  WHERE i.customer_id = ` + customerRef + `
+		  ORDER BY i.created_at DESC
+		  LIMIT 1),
+		(SELECT NULLIF(ts.default_currency, '') FROM tenant_settings ts WHERE ts.tenant_id = $1),
+		'USD'))`
+}
+
 func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1251,9 +1279,10 @@ func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID str
 			COALESCE(SUM(amount_cents), 0),
 			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
-			`+balanceWriteOffColumns+`
+			`+balanceWriteOffColumns+`,
+			`+customerCurrencySQL("$2")+`
 		FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2
-	`, tenantID, customerID).Scan(&b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted)
+	`, tenantID, customerID).Scan(&b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted, &b.Currency)
 
 	return b, err
 }
@@ -1300,7 +1329,8 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 			COALESCE(SUM(amount_cents), 0),
 			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
-			`+balanceWriteOffColumns+`
+			`+balanceWriteOffColumns+`,
+			`+customerCurrencySQL("customer_credit_ledger.customer_id")+`
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1
 		GROUP BY customer_id
@@ -1314,7 +1344,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 	var balances []domain.CreditBalance
 	for rows.Next() {
 		var b domain.CreditBalance
-		if err := rows.Scan(&b.CustomerID, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted); err != nil {
+		if err := rows.Scan(&b.CustomerID, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted, &b.Currency); err != nil {
 			return nil, err
 		}
 		balances = append(balances, b)

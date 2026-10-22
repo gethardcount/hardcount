@@ -13,6 +13,8 @@
  */
 export interface CreditBalance {
   customer_id: string;
+  /** The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default. */
+  currency: string;
   balance_cents: number;
   /** Every credit added: grants, positive adjustments, and credit given back when an invoice it was applied to was voided. */
   total_granted: number;

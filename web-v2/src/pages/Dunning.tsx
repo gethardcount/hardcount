@@ -6,7 +6,6 @@ import { toast } from 'sonner'
 import {
   api,
   formatDateTime,
-  formatCents,
   type DunningRun,
   type DunningEvent,
   type Invoice,
@@ -243,7 +242,7 @@ function RunsTab() {
     // One figure per currency (mixed currencies cannot be added). A
     // default-only figure read "At risk (CAD) CA$0.00" while USD runs were
     // active once the workspace default changed.
-    { label: 'At risk', value: stats ? atRiskText(stats) : formatCents(0), color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-500/10', ring: 'ring-red-200 dark:ring-red-500/20' },
+    { label: 'At risk', value: stats ? atRiskText(stats) : '\u2014', color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-500/10', ring: 'ring-red-200 dark:ring-red-500/20' },
   ]
 
   const totalPages = Math.ceil(total / RUNS_PAGE_SIZE)

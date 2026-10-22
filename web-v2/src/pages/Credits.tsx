@@ -8,8 +8,9 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { api, formatCents, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
-import { amountInputToCents } from '@/lib/money'
+import { api, formatCents, formatCentsBare, formatDate, formatDateTime, getActiveCurrency, getCurrencySymbol } from '@/lib/api'
+import { amountInputToCents, amountsByCurrencyText, sumByCurrency } from '@/lib/money'
+import { useCustomerCurrency } from '@/hooks/useCustomerCurrency'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { endOfDayInTZ } from '@/lib/dates'
 import type { Customer, CreditBalance } from '@/lib/api'
@@ -233,8 +234,14 @@ export default function CreditsPage() {
     setUrlState({ customer: '' })
   }
 
-  const totalOutstanding = balances.reduce((sum, b) => sum + b.balance_cents, 0)
+  // Each balance is in its customer's currency (CreditBalance.currency), so
+  // the page total is one figure per currency, never one sum.
+  const totalOutstanding = amountsByCurrencyText(sumByCurrency(balances.map(b => ({ currency: b.currency, amount_cents: b.balance_cents }))))
+    ?? formatCents(0, getActiveCurrency())
   const selectedBalance = balances.find(b => b.customer_id === selectedCustomerId) || null
+  // A customer with no ledger row has no balance row either: amounts are bare.
+  const selectedMoney = (cents: number) =>
+    selectedBalance ? formatCents(cents, selectedBalance.currency) : formatCentsBare(cents)
   const selectedCustomer = selectedCustomerId ? customerMap[selectedCustomerId] : null
 
   // entry-type filtering happens SERVER-SIDE now (query param above);
@@ -279,7 +286,7 @@ export default function CreditsPage() {
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">Credit balance</p>
             <p className={cn('text-3xl font-semibold mt-1', (selectedBalance?.balance_cents || 0) > 0 ? 'text-emerald-600' : 'text-muted-foreground')}>
-              {formatCents(selectedBalance?.balance_cents || 0)}
+              {selectedMoney(selectedBalance?.balance_cents || 0)}
             </p>
           </div>
           <div className="flex items-center gap-2 mt-1">
@@ -342,10 +349,11 @@ export default function CreditsPage() {
                       e.description,
                       (e.amount_cents / 100).toFixed(2),
                       (e.balance_after / 100).toFixed(2),
+                      selectedBalance?.currency ?? '',
                       e.invoice_id || '',
                     ])
                     downloadCSV(`credits-${selectedCustomer?.external_id || 'customer'}.csv`,
-                      ['Date', 'Type', 'Description', 'Amount', 'Balance', 'Invoice ID'], rows)
+                      ['Date', 'Type', 'Description', 'Amount', 'Balance', 'Currency', 'Invoice ID'], rows)
                   })()
                 }}>
                   <Download size={14} className="mr-1" /> CSV
@@ -412,9 +420,9 @@ export default function CreditsPage() {
                           })()}
                         </TableCell>
                         <TableCell className={cn('text-right tabular-nums font-mono text-sm', entry.amount_cents >= 0 ? 'text-emerald-600' : 'text-destructive')}>
-                          {entry.amount_cents >= 0 ? '+' : ''}{formatCents(entry.amount_cents)}
+                          {entry.amount_cents >= 0 ? '+' : ''}{selectedMoney(entry.amount_cents)}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums font-mono text-sm">{formatCents(entry.balance_after)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-mono text-sm">{selectedMoney(entry.balance_after)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -505,7 +513,7 @@ export default function CreditsPage() {
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Credits</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Balance a customer can spend. Velox uses it to pay their invoices before charging their card{customersWithCredits.length > 0 ? ` · ${formatCents(totalOutstanding)} across ${customersWithCredits.length} customer${customersWithCredits.length !== 1 ? 's' : ''}` : ''}
+            Balance a customer can spend. Velox uses it to pay their invoices before charging their card{customersWithCredits.length > 0 ? ` · ${totalOutstanding} across ${customersWithCredits.length} customer${customersWithCredits.length !== 1 ? 's' : ''}` : ''}
           </p>
         </div>
         {customersWithCredits.length > 0 && (
@@ -567,7 +575,7 @@ export default function CreditsPage() {
                     <TableCell className={cn('text-right tabular-nums font-mono text-sm',
                       balance.balance_cents > 0 ? 'text-emerald-600' : balance.balance_cents === 0 ? 'text-muted-foreground' : 'text-destructive'
                     )}>
-                      {formatCents(balance.balance_cents)}
+                      {formatCents(balance.balance_cents, balance.currency)}
                     </TableCell>
                     <TableCell className="text-right">
                       <ChevronRight size={16} className="text-muted-foreground inline" />
@@ -594,8 +602,8 @@ export default function CreditsPage() {
 // ---- Grant / Deduct Dialog ----
 
 // Exported for the customer page's Credits section (Grant credits there).
-// currency: the customer's currency when the caller knows it; the amount
-// label and the confirm use it instead of the workspace default.
+// currency: the customer's currency when the caller knows it; otherwise the
+// dialog resolves it for the picked customer.
 export function CreditDialog({ mode, customerId, customerName, customers, currency, open, onOpenChange, onDone }: {
   mode: 'grant' | 'deduct'
   customerId: string
@@ -651,6 +659,12 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
   const [idemKey] = useState(() => crypto.randomUUID())
 
   const effectiveCustomerId = selectedCustomer || customerId
+  // The currency the Amount field and the confirm name: the caller's when it
+  // knows it, else the picked customer's (lib/customerCurrency). Credit has no
+  // currency of its own; it pays the customer's invoices 1:1 (ADR-100). With
+  // no customer picked, or a read failed, the amount has no symbol.
+  const resolvedCurrency = useCustomerCurrency(effectiveCustomerId || undefined)
+  const dialogCurrency = effectiveCustomerId ? (currency ?? resolvedCurrency?.currency) : undefined
   // The confirm step names the customer; with the server-searched picker
   // there's no local list to look it up in, so fetch the picked one.
   const { data: pickedData } = useQuery({
@@ -752,7 +766,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                 name="amount"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Amount ({getCurrencySymbol(currency).trim()})</FormLabel>
+                    <FormLabel>Amount{dialogCurrency ? ` (${getCurrencySymbol(dialogCurrency).trim()})` : ''}</FormLabel>
                     <FormControl>
                       <Input type="number" step="0.01" min="0.01" max={999999.99} placeholder="50.00" {...field} />
                     </FormControl>
@@ -845,7 +859,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
           <AlertDialogHeader>
             <AlertDialogTitle>{isDeduct ? 'Confirm deduction' : 'Confirm credit grant'}</AlertDialogTitle>
             <AlertDialogDescription>
-              {isDeduct ? 'Deduct' : 'Grant'} {formatCents(confirmCents, currency)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
+              {isDeduct ? 'Deduct' : 'Grant'} {dialogCurrency ? formatCents(confirmCents, dialogCurrency) : formatCentsBare(confirmCents)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

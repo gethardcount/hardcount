@@ -10,7 +10,7 @@ import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useEffectiveNowResolver, useTestClocks } from '@/hooks/useClockFrozenMap'
 import { useAuth } from '@/contexts/AuthContext'
 import { NoticeRow } from '@/components/NoticeRow'
-import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
+import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
 import { SIMULATED_TOTALS_SENTENCE, SIMULATED_TOTALS_TITLE, showSimulatedTotalsNote } from '@/lib/homeNotices'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
@@ -238,14 +238,14 @@ export default function DashboardPage() {
               value={formatCents(overview.mrr, overview.currency)}
               current={overview.mrr}
               previous={overview.mrr_prev}
-              hint={`ARR ${formatCents(overview.arr, overview.currency)}`}
+              hint={currencyScopedHint(`ARR ${formatCents(overview.arr, overview.currency)}`, overview.currency)}
             />
             <TrendCard
               label="Revenue"
               value={formatCents(overview.revenue, overview.currency)}
               current={overview.revenue}
               previous={overview.revenue_prev}
-              hint={`${overview.paid_invoices} ${overview.paid_invoices === 1 ? 'invoice' : 'invoices'} paid`}
+              hint={currencyScopedHint(`${overview.paid_invoices} ${overview.paid_invoices === 1 ? 'invoice' : 'invoices'} paid`, overview.currency)}
             />
             <TrendCard
               label="Customers"
@@ -303,7 +303,7 @@ export default function DashboardPage() {
                         width={55}
                       />
                       <Tooltip
-                        formatter={(value) => [formatCents(Number(value)), 'Revenue']}
+                        formatter={(value) => [formatCents(Number(value), overview.currency), 'Revenue']}
                         labelFormatter={(label) => revenueBucketLabel(String(label))}
                         contentStyle={tooltipStyle(theme)}
                         itemStyle={{ color: theme.tooltipText }}
