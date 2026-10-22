@@ -1,23 +1,18 @@
 # LiteLLM integration
 
 LiteLLM is an open-source proxy that sits between your app and many AI
-providers. This page connects it to Velox, so that every AI call your
-customers make becomes usage in Velox. You write no code: you add a few
-lines to the proxy's config file.
-
-Think of it as a receipt printer on the proxy. After each AI call, LiteLLM
-sends Velox a record of the tokens used, and Velox turns it into usage
-events for that customer.
-
-**Who it is for:** teams that already run a LiteLLM proxy. Not using
-LiteLLM? Send usage with the API instead: see [Send usage and get your
-first invoice](../first-invoice.md).
+providers. This page connects it to Velox, so that your customers' AI calls
+become usage in Velox. You add a few lines to the proxy's config file and
+pass each customer's external ID as `user` on every call (step 3). Not
+using LiteLLM? Send usage with the API instead: see [Send usage and get
+your first invoice](../first-invoice.md).
 
 ## Before you start
 
 Set these up before LiteLLM sends its first call. Usage that arrives
-before the customer or the meter exists is held, not billed: see
-[Usage for a customer Velox does not know yet](#usage-for-a-customer-velox-does-not-know-yet).
+before the customer or the meter exists is held, and once released it is
+usually not invoiced, because it predates the subscription
+([held usage](#usage-for-a-customer-velox-does-not-know-yet)).
 
 1. **Velox running, and a secret API key.** A publishable key cannot send
    usage. The commands below use the variables from [the first invoice
@@ -35,21 +30,10 @@ before the customer or the meter exists is held, not billed: see
    invoice. [The first invoice page](../first-invoice.md), steps 2 to 4,
    shows both calls.
 
-> **Create the customer first.** If LiteLLM sends usage for a `user` that
-> Velox does not know, Velox holds that usage: it keeps it, does not bill
-> it, and shows it on the **Usage** page. After you create the customer,
-> you release it. Usage from before the customer's subscription started
-> is stored but not invoiced, so creating customers first is still the
-> way to bill every call.
-
 ## 1. Load prices for your models
 
-The easiest way is a recipe: a ready-made pricing setup that Velox creates
-in one call. It creates the `tokens` meter (a counter for tokens), a price
-for each model and kind of token, and a monthly plan. Use
-`anthropic_style` for Claude models or `openai_style` for OpenAI models.
-[AI pricing](../ai-pricing.md#ready-made-recipes) lists the models each one
-prices.
+Apply a recipe: `anthropic_style` for Claude, `openai_style` for OpenAI
+([what each creates and prices](../ai-pricing.md#ready-made-recipes)).
 
 ```bash
 curl -s -X POST "$VELOX/v1/recipes/anthropic_style/instantiate" \
@@ -59,9 +43,6 @@ curl -s -X POST "$VELOX/v1/recipes/anthropic_style/instantiate" \
 ```
 
 **You see:** the plan ID, such as `vlx_pln_…`.
-
-The API key picks test or live mode: `vlx_secret_test_…` or
-`vlx_secret_live_…`. There is no `livemode` field in the request.
 
 You can also create the meter by hand. You then also need a price for each
 model and kind of token
@@ -105,8 +86,7 @@ callback_settings:
 - **`max_retries` and `retry_delay`:** keep these. LiteLLM's default is no
   retries, so one failed send loses the batch. Velox answers 503 when its
   database is briefly out of reach, such as during a restart. Four retries
-  5, 10, 20 and 40 seconds apart cover that. Sending a batch again is safe,
-  because Velox counts each record once.
+  5, 10, 20 and 40 seconds apart cover that.
 
 The older form (`success_callback: ["generic"]` with
 `GENERIC_LOGGER_ENDPOINT` and `GENERIC_LOGGER_HEADERS`) still works on
@@ -135,9 +115,8 @@ response = litellm.completion(
 The proxy logs that value as `end_user`, and Velox reads it from there. A
 record you build by hand can send `user` instead.
 
-A call without `user` is refused with `payload.user is required`. The rest
-of the batch is still accepted. The refusal is a row in the `errors` list
-of the 200 response (see [Response](#response)).
+A call without `user` is refused, and the refused row is lost
+([Response](#response)).
 
 ### Clients that cannot set `user`: Claude Code and Codex
 
@@ -208,12 +187,10 @@ Each event also carries these labels (dimensions):
   ([more](../ai-pricing.md#see-your-margin)).
 - `provider`: the provider, from LiteLLM's `custom_llm_provider`.
 - `team_id`, when the call has one in `metadata`.
-- `request_tags`, only when the tags arrive under `metadata`. A current
-  proxy sends its tags outside `metadata`, so they are not a label today.
 
-Each event also keeps the LiteLLM call ID, LiteLLM's own cost figure (for
-reference only), and the call's original metadata under
-`litellm_metadata.*`.
+Velox keeps the call ID only in the idempotency keys (`<call>`, above).
+LiteLLM's `response_cost` and the call's other metadata
+are not stored ([what cost is saved](#things-to-know)).
 
 **Cache writes** (Anthropic prompt caching) cost more than input: 1.25
 times for the 5-minute lifetime and 2 times for the 1-hour one. LiteLLM
@@ -450,5 +427,4 @@ of them.
   several tenants must send each tenant's usage with that tenant's key. A
   field in the call's metadata cannot choose the tenant.
 
-Related: [ADR-044](../adr/044-canonical-ai-token-metering-model.md), the
-decision behind one `tokens` meter with a `token_type` label.
+**Next:** [see your margin per customer](../ai-pricing.md#see-your-margin).

@@ -4,9 +4,7 @@ The Velox API is how your code talks to Velox: you create customers, send
 usage, and read invoices with plain HTTP requests and JSON. Everything the dashboard does
 goes through the same API.
 
-**Who it is for:** developers connecting their product to Velox. New to
-Velox? Start with [Send usage and get your first invoice](first-invoice.md),
-then come back here for the details.
+New to Velox? Start with [Send usage and get your first invoice](first-invoice.md).
 
 ## Make your first call
 
@@ -19,22 +17,7 @@ Every call needs three things:
   key from your server. See [API keys](api-keys.md).
 - **`Content-Type: application/json`** on calls that send a body.
 
-Create a test customer:
-
-```bash
-export VELOX=http://localhost:8080
-export VELOX_KEY=vlx_secret_test_…   # your test key
-
-curl -s -X POST "$VELOX/v1/customers" \
-  -H "Authorization: Bearer $VELOX_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"external_id": "cust_123", "display_name": "Acme Inc"}'
-```
-
-**You see:** status `201` and the new customer as JSON, with an `id` such as
-`vlx_cus_…` and `"status": "active"`. The `external_id` is your own ID for
-the customer, such as the user ID in your database. Run it again with the
-same `external_id` and you get `409` with code `already_exists`.
+For a worked sequence of calls, see [first invoice](first-invoice.md#steps).
 
 ## The full reference
 
@@ -103,9 +86,9 @@ the call returns `409` with code `unbilled_period`.
 | `POST` | `/v1/billing/run` | Bill this account's subscriptions that are due now |
 | `GET` | `/v1/billing/preview/{sub_id}` | Preview the next invoice without creating it |
 
-A period is due `INVOICE_GRACE_PERIOD` after it ends. `/v1/billing/run`
-skips subscriptions that are waiting after a failed attempt, and ones set
-aside after too many failed attempts (`retry-billing` brings them back).
+`/v1/billing/run` skips subscriptions that are waiting after a failed
+attempt, and ones set aside after too many failed attempts (`retry-billing`
+brings them back).
 
 ### Credits and refunds
 
@@ -121,8 +104,7 @@ To stop serving a customer when credit runs out, use the live balance. See
 
 ### Test clocks
 
-A test clock is a pretend clock for test customers, so a month of billing
-takes seconds.
+See [test clock](glossary.md#testing-with-simulated-time).
 
 | Method | Path | What it does |
 |---|---|---|
@@ -135,7 +117,7 @@ takes seconds.
 |---|---|---|
 | `GET` | `/v1/dunning/runs` | List dunning runs (Velox retrying a failed payment and emailing the customer) |
 | `POST` | `/v1/webhook-endpoints/endpoints` | Register a URL in your app that Velox calls when something happens. See [Webhooks](webhooks.md). |
-| `GET` | `/v1/audit-log` | Search the audit log, a record of every change that cannot be edited |
+| `GET` | `/v1/audit-log` | Search the audit log: who changed what, and when. Entries cannot be edited. |
 
 ## Sending usage safely
 
@@ -165,9 +147,8 @@ resending events with the same keys never counts them twice. See
 **The `Idempotency-Key` header is something else.** It is separate from
 the event key and does not replace it. It saves one HTTP response for 24
 hours, so a retried call gets the same answer. The event key stops an event
-from being counted twice, forever. On the usage routes, Velox does not save
-a `5xx` response under the header's key, so a retry with the same key runs
-again. On other routes, a `5xx` response is saved and replayed on purpose.
+from being counted twice, forever. The usage routes do not save a `5xx`
+under the header's key, so a retry runs again.
 
 ### Late usage
 
@@ -259,9 +240,7 @@ The 502 codes:
 
 Request bodies are limited to 1 MB, and Stripe webhook bodies to 64 KB. Only
 the two routes in the 413 row return 413. Other routes do not promise a
-specific status for a body that is too large. An oversized usage batch sent
-with an `Idempotency-Key` header gets `400` with `type` `bad_request` in the
-smaller body described below, not 413.
+specific status for a body that is too large.
 
 <details>
 <summary><strong>Less common error shapes</strong></summary>
@@ -303,3 +282,5 @@ The OpenAPI file lists these too, but your code does not need them:
   `/v1/checkout/status/{customerID}`, and
   `/v1/webhook-endpoints/events/{id}/deliveries` and `/replay` (use
   `/v1/webhook_events/{id}/...`).
+
+**Next:** let your app react when an invoice is paid or a payment fails: [Webhooks](webhooks.md).

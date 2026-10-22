@@ -4,9 +4,6 @@ An API key is the password your server sends with every API call. It tells
 Velox which account the call is for, and whether it works on test data or
 live data.
 
-**Who it is for:** developers who call the Velox API from their own code or
-from a terminal.
-
 ## Get a key
 
 You already have one if you ran the [quick start](quick-start.md): it
@@ -100,5 +97,4 @@ To turn a key off without a replacement, click **Revoke**, or call
 Velox stores only a salted SHA-256 hash of each key, never the key itself.
 That is why a key is shown only once, when it is created.
 
-Related: to add a second account to one Velox server, see
-[Add a second account](../CONTRIBUTING.md#add-a-second-account).
+**Next:** [make your first API call](api-surface.md#make-your-first-call).

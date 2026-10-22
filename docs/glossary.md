@@ -1,10 +1,8 @@
 # Glossary
 
-The words you meet in the Velox docs and dashboard, each in one plain
-sentence first, then the detail. Words from the code and the operations
-docs are in the [contributor glossary](dev/glossary.md). For the big picture
-first, read [How Velox
-works](how-velox-works.md). Back to the [docs index](README.md).
+Words used in the Velox docs and dashboard. For the big picture, read
+[How Velox works](how-velox-works.md). Words from the code and ops docs:
+[contributor glossary](dev/glossary.md).
 
 ## Accounts and access
 
@@ -178,7 +176,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
 - **parked invoice**: An invoice whose charge result is unknown and that has
   no PaymentIntent ID recorded, so Velox cannot yet tell if the customer
   paid. Nothing charges it. Velox lists the customer's payments in Stripe
-  every hour: a payment that appears is recorded, and if none has appeared
+  on every billing run: a payment that appears is recorded, and if none has appeared
   24 hours after the charge, the invoice is charged again as usual. An
   operator can write it off meanwhile.
   [More](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)
@@ -255,9 +253,4 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   "Simulated", and Home leaves them out of its totals.
   [More](adr/030-simulated-time-everywhere-on-clock-pinned-entities.md)
 
-## Project terms
-
-- **design partner (DP)**: An early customer who works with the team to
-  shape the product. Many features in Velox wait until a design partner
-  asks for them, for example roles and permissions (RBAC) or Helm charts.
-  [More](roadmap.md#not-planned-for-now)
+**Next:** see these words in action in the [quick start](quick-start.md).
