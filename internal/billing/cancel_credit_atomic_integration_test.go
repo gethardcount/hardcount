@@ -26,13 +26,6 @@ import (
 // production creditGrantAdapter in internal/api/adapters.go).
 type cnGrantAdapter struct{ svc *credit.Service }
 
-func (a *cnGrantAdapter) GrantForCreditNote(ctx context.Context, tenantID, creditNoteID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNote(ctx, tenantID, creditNoteID, credit.GrantInput{
-		CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID,
-	})
-	return err
-}
-
 func (a *cnGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, in creditnote.CreditGrantInput) error {
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.GrantInput{
 		CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID,
@@ -50,13 +43,6 @@ func (a *cnGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *s
 		return 0, err
 	}
 	return res.RemainingAfterCents, nil
-}
-
-func (a *cnGrantAdapter) Grant(ctx context.Context, tenantID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.Grant(ctx, tenantID, credit.GrantInput{
-		CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID,
-	})
-	return err
 }
 
 var errInjectedDraftFail = errors.New("injected cancel-credit draft create failure")
@@ -93,8 +79,6 @@ func TestCancelCredit_DraftFailure_RealTxRollsBackCancel(t *testing.T) {
 	pricingStore := pricing.NewPostgresStore(db)
 	subStore := subscription.NewPostgresStore(db)
 	invoiceStore := invoice.NewPostgresStore(db)
-	creditStore := credit.NewPostgresStore(db)
-	creditSvc := credit.NewService(creditStore)
 
 	tenantID := testutil.CreateTestTenant(t, db, "Cancel Credit Rollback")
 	plan, err := pricingStore.CreatePlan(ctx, tenantID, domain.Plan{
@@ -110,7 +94,6 @@ func TestCancelCredit_DraftFailure_RealTxRollsBackCancel(t *testing.T) {
 	cancelAt := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)
 
 	e := newRealEngine(db, clock.NewFake(periodStart.Add(time.Hour)))
-	e.SetCreditGranter(creditSvc)
 	e.SetCreditNoteAdjuster(&failingDraftAdjuster{err: errInjectedDraftFail})
 	// Real headroom reader (required post-#442); no prior CNs exist, so the
 	// cap stays the full invoice total — the draft failure under test is
@@ -207,7 +190,6 @@ func TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers(t *testing.
 	creditNoteSvc.SetNumberGenerator(settingsStore)
 
 	e := newRealEngine(db, clock.NewFake(periodStart.Add(time.Hour)))
-	e.SetCreditGranter(creditSvc)
 	e.SetInvoiceVoider(invoiceSvc)
 	e.SetCreditNoteAdjuster(creditNoteSvc)
 	e.SetCreditHeadroomReader(creditNoteSvc)

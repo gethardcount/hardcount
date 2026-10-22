@@ -48,12 +48,6 @@ type Store interface {
 	// past their expiry at `at` that the expiry sweep has not written off:
 	// the amount a draw at that instant could use.
 	GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (int64, error)
-	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error)
-	// GetByCreditNoteSource fetches the grant row created by a specific
-	// credit-note Issue(). Used by GrantForCreditNote to recover from
-	// ErrAlreadyExists on retry (the partial unique index from migration
-	// 0093 enforces one grant per (tenant, CN)).
-	GetByCreditNoteSource(ctx context.Context, tenantID, creditNoteID string) (domain.CreditLedgerEntry, error)
 	ListBalances(ctx context.Context, tenantID string) ([]domain.CreditBalance, error)
 	ListEntries(ctx context.Context, filter ListFilter) ([]domain.CreditLedgerEntry, error)
 	// CountEntries returns the TOTAL rows matching the filter (limit/

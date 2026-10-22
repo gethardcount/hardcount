@@ -41,7 +41,7 @@ func TestRemoveItem_ProrationGate(t *testing.T) {
 		invoices := &invoicesMock{
 			sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded, SubtotalCents: 3000, TotalAmountCents: 3000},
 		}
-		h.SetProrationDeps(plans, invoices, &creditsMock{})
+		h.SetProrationDeps(plans, invoices)
 	}
 	remove := func(h *Handler, subID, itemID string) *httptest.ResponseRecorder {
 		rr := httptest.NewRecorder()

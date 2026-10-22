@@ -723,8 +723,9 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 	}
 	switch domain.InvoiceStatus(invStatus) {
 	case domain.InvoiceDraft, domain.InvoiceFinalized:
-		// Payable — draft stays eligible: billOnePeriod applies credits to
-		// tax-pending drafts at build time.
+		// Payable. A draft is admitted, but no caller applies credits to
+		// one: processAutoCharge, the dunning retry and ApplyCreditBalance
+		// each act on a finalized invoice.
 	default:
 		// Paid / voided / uncollectible: nothing to cover — uncollectible
 		// lands here since ADR-113 (no charge path admits it, so credit
@@ -1145,84 +1146,6 @@ func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sq
 // operator's read). The caller surfaces the LIVE remaining so the operator
 // re-decides — never a silent clamp of an approved money document.
 var ErrCommitInsufficientRemaining = errors.New("commit grant has insufficient remaining credits")
-
-// GetByProrationSource returns the credit ledger entry previously written
-// for a specific (subscription, item, change_type, change_at) event, if any.
-// Callers use this after AppendEntry returns ErrAlreadyExists to complete an
-// idempotent retry — the proration dedup partial index ensures uniqueness.
-// change_type disambiguates plan-vs-qty-vs-remove events on the same item at
-// the same wall-clock instant; the item id keeps cross-item changes distinct.
-func (s *PostgresStore) GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var e domain.CreditLedgerEntry
-	var metaJSON []byte
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, customer_id, entry_type, amount_cents, balance_after,
-			description, COALESCE(invoice_id,''), expires_at, metadata, created_at,
-			COALESCE(source_subscription_id,''), COALESCE(source_subscription_item_id,''),
-			source_plan_changed_at, COALESCE(source_change_type,'')
-		FROM customer_credit_ledger
-		WHERE tenant_id = $1 AND source_subscription_id = $2 AND source_subscription_item_id = $3 AND source_change_type = $4 AND source_plan_changed_at = $5
-	`, tenantID, subscriptionID, subscriptionItemID, string(changeType), changeAt,
-	).Scan(&e.ID, &e.TenantID, &e.CustomerID, &e.EntryType,
-		&e.AmountCents, &e.BalanceAfter, &e.Description, &e.InvoiceID,
-		&e.ExpiresAt, &metaJSON, &e.CreatedAt,
-		&e.SourceSubscriptionID, &e.SourceSubscriptionItemID, &e.SourcePlanChangedAt,
-		(*string)(&e.SourceChangeType))
-	if err == sql.ErrNoRows {
-		return domain.CreditLedgerEntry{}, errs.ErrNotFound
-	}
-	if err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	_ = json.Unmarshal(metaJSON, &e.Metadata)
-	return e, nil
-}
-
-// GetByCreditNoteSource fetches the grant row tied to a specific
-// credit-note Issue(). Used by credit.Service.GrantForCreditNote to
-// recover from ErrAlreadyExists on retry — the partial unique index
-// idx_credit_ledger_credit_note_dedup (migration 0093) enforces one
-// grant per (tenant, CN), so a retry that hits this lookup confirms
-// the grant already exists and returns it for the caller to use.
-func (s *PostgresStore) GetByCreditNoteSource(ctx context.Context, tenantID, creditNoteID string) (domain.CreditLedgerEntry, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var e domain.CreditLedgerEntry
-	var metaJSON []byte
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, customer_id, entry_type, amount_cents, balance_after,
-			description, COALESCE(invoice_id,''), expires_at, metadata, created_at,
-			COALESCE(source_subscription_id,''), COALESCE(source_subscription_item_id,''),
-			source_plan_changed_at, COALESCE(source_change_type,''),
-			COALESCE(source_credit_note_id,'')
-		FROM customer_credit_ledger
-		WHERE tenant_id = $1 AND source_credit_note_id = $2
-	`, tenantID, creditNoteID,
-	).Scan(&e.ID, &e.TenantID, &e.CustomerID, &e.EntryType,
-		&e.AmountCents, &e.BalanceAfter, &e.Description, &e.InvoiceID,
-		&e.ExpiresAt, &metaJSON, &e.CreatedAt,
-		&e.SourceSubscriptionID, &e.SourceSubscriptionItemID, &e.SourcePlanChangedAt,
-		(*string)(&e.SourceChangeType),
-		&e.SourceCreditNoteID)
-	if err == sql.ErrNoRows {
-		return domain.CreditLedgerEntry{}, errs.ErrNotFound
-	}
-	if err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	_ = json.Unmarshal(metaJSON, &e.Metadata)
-	return e, nil
-}
 
 // balanceWriteOffColumns are the CreditBalance totals that take credit away
 // without an invoice using it: expiry, commit retires and operator

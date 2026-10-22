@@ -24,14 +24,6 @@ type ledgerGranter struct{ svc *credit.Service }
 func (g ledgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
 	return credit.GrantInput{CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
 }
-func (g ledgerGranter) Grant(ctx context.Context, tenantID string, i creditnote.CreditGrantInput) error {
-	_, err := g.svc.Grant(ctx, tenantID, g.in(i))
-	return err
-}
-func (g ledgerGranter) GrantForCreditNote(ctx context.Context, tenantID, cnID string, i creditnote.CreditGrantInput) error {
-	_, err := g.svc.GrantForCreditNote(ctx, tenantID, cnID, g.in(i))
-	return err
-}
 func (g ledgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
 	return err

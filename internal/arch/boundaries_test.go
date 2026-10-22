@@ -38,7 +38,7 @@ import (
 var allowedCrossDomainImports = map[string][]string{
 	"analytics":      {"auth"},
 	"audit":          {"auth"},
-	"billing":        {"audit", "auth", "credit", "payment", "subscription", "tax"},
+	"billing":        {"audit", "auth", "payment", "subscription", "tax"},
 	"credit":         {"audit", "auth"},
 	"creditnote":     {"audit", "auth", "tax"},
 	"customer":       {"audit", "auth", "tax"},

@@ -153,31 +153,6 @@ func (m *invoicesMock) NextInvoiceNumberTx(ctx context.Context, _ *sql.Tx, tenan
 	return m.NextInvoiceNumber(ctx, tenantID)
 }
 
-type creditsMock struct {
-	grantErr       error
-	grantCalls     []ProrationGrantInput
-	lookupEntry    domain.CreditLedgerEntry
-	lookupEntryErr error
-}
-
-func (m *creditsMock) GrantProration(_ context.Context, _ string, input ProrationGrantInput) error {
-	m.grantCalls = append(m.grantCalls, input)
-	return m.grantErr
-}
-
-// GrantProrationTx mirrors GrantProration for tx-aware callers. Same
-// rationale as the invoice mock's Tx variant — fake ignores the tx.
-func (m *creditsMock) GrantProrationTx(ctx context.Context, _ *sql.Tx, tenantID string, input ProrationGrantInput) error {
-	return m.GrantProration(ctx, tenantID, input)
-}
-
-func (m *creditsMock) GetByProrationSource(_ context.Context, _, _, _ string, _ domain.ItemChangeType, _ time.Time) (domain.CreditLedgerEntry, error) {
-	if m.lookupEntryErr != nil {
-		return domain.CreditLedgerEntry{}, m.lookupEntryErr
-	}
-	return m.lookupEntry, nil
-}
-
 // Deterministic reference window for proration-AMOUNT tests: a full 30-day
 // calendar month (June 2026) with "now" at the midpoint, so day-counts and the
 // full-cycle proration denominator are exact regardless of wall-clock. (The old
@@ -258,10 +233,9 @@ func TestUpdateItem_ProrationFailureSurfacesAs500(t *testing.T) {
 		nextNumberErr: errors.New("sequence unavailable"),
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
 	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
@@ -342,10 +316,9 @@ func TestUpdateItem_ProrationDedup_UpgradeReturnsExisting(t *testing.T) {
 		lookupInvoice: existingInvoice,
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
 	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
@@ -453,7 +426,6 @@ func TestUpdateItem_ProrationAppliesTax(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	credits := &creditsMock{}
 	taxMock := &prorationTaxApplierMock{
 		result: ProrationTaxResult{
 			TaxFacts: domain.TaxFacts{
@@ -466,7 +438,7 @@ func TestUpdateItem_ProrationAppliesTax(t *testing.T) {
 	}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetProrationTaxApplier(taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
@@ -544,11 +516,10 @@ func TestUpdateItem_ProrationTaxErrorDefersToDraft(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	credits := &creditsMock{}
 	taxMock := &prorationTaxApplierMock{err: errors.New("stripe tax: 503 service unavailable")}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetProrationTaxApplier(taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
@@ -613,7 +584,6 @@ func TestUpdateItem_ProrationDeferredTaxCarriesRetryFacts(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	credits := &creditsMock{}
 	deferredAt := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	taxMock := &prorationTaxApplierMock{
 		result: ProrationTaxResult{
@@ -627,7 +597,7 @@ func TestUpdateItem_ProrationDeferredTaxCarriesRetryFacts(t *testing.T) {
 	}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetProrationTaxApplier(taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
@@ -741,11 +711,10 @@ func TestHandler_UpdateItem_ImmediatePlanChangeFiresItemUpdated(t *testing.T) {
 	// Paid current-period prebill so the immediate upgrade proceeds (an upgrade
 	// against an UNPAID source is blocked per ADR-050).
 	invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
-	credits := &creditsMock{}
 
 	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetEventDispatcher(dispatcher)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
@@ -789,11 +758,10 @@ func TestHandler_UpdateItem_ScheduledPlanChangeFiresPendingChangeScheduled(t *te
 		"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 	}}
 	invoices := &invoicesMock{}
-	credits := &creditsMock{}
 
 	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetEventDispatcher(dispatcher)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: false})
@@ -884,7 +852,7 @@ func TestHandler_CancelPendingItemChange_FiresPendingChangeCanceled(t *testing.T
 
 	dispatcher := &capturingDispatcher{}
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, &invoicesMock{}, &creditsMock{})
+	h.SetProrationDeps(plans, &invoicesMock{})
 	h.SetEventDispatcher(dispatcher)
 
 	req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+"/items/"+itemID+"/pending-change", nil)
@@ -955,10 +923,9 @@ func TestAddItem_ProratesMidCycle(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(AddItemInput{PlanID: "plan_new", Quantity: 1})
 	req := addItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, body)
@@ -990,9 +957,6 @@ func TestAddItem_ProratesMidCycle(t *testing.T) {
 	if inv.AmountDueCents <= 0 {
 		t.Errorf("invoice amount_due: got %d, want > 0", inv.AmountDueCents)
 	}
-	if len(credits.grantCalls) != 0 {
-		t.Errorf("grantCalls: got %d, want 0 — add should bill not credit", len(credits.grantCalls))
-	}
 }
 
 // TestUpdateItem_QuantityIncreaseProratesAsInvoice verifies a mid-cycle qty
@@ -1012,10 +976,9 @@ func TestUpdateItem_QuantityIncreaseProratesAsInvoice(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	// Seed starts at qty=1; bump to 3 → delta = 2 seats × $10 = $20 per full
 	// period, half-period → ~$10.
@@ -1043,9 +1006,6 @@ func TestUpdateItem_QuantityIncreaseProratesAsInvoice(t *testing.T) {
 	if inv.SubtotalCents != 1000 {
 		t.Errorf("invoice subtotal: got %d, want 1000 (2000 delta × 15/30)", inv.SubtotalCents)
 	}
-	if len(credits.grantCalls) != 0 {
-		t.Errorf("grantCalls: got %d, want 0 — qty increase should bill not credit", len(credits.grantCalls))
-	}
 }
 
 // TestUpdateItem_PlanChange_StubPeriod_UsesFullCycleDenominator is the
@@ -1071,10 +1031,9 @@ func TestUpdateItem_PlanChange_StubPeriod_UsesFullCycleDenominator(t *testing.T)
 		"plan_pro":     {ID: "plan_pro", Name: "Pro 50", BaseAmountCents: 5000, Currency: "USD", BaseBillTiming: domain.BillInAdvance, BillingInterval: domain.BillingMonthly},
 	}}
 	invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
 	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
@@ -1118,7 +1077,7 @@ func TestUpdateItem_QuantityDecreaseProratesAsCredit(t *testing.T) {
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	// Drop 3 → 1 = 2 seats × $10 = $20 full-period, half-period → ~$10 credit.
@@ -1172,7 +1131,7 @@ func TestRemoveItem_ProratesAsCredit(t *testing.T) {
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	req := removeItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, firstItemID)
@@ -1219,10 +1178,9 @@ func TestHandleItemProration_DefersOnInArrears(t *testing.T) {
 		"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 10000, Currency: "USD", BaseBillTiming: domain.BillInArrears},
 	}}
 	invoices := &invoicesMock{}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
 	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
@@ -1234,9 +1192,6 @@ func TestHandleItemProration_DefersOnInArrears(t *testing.T) {
 	}
 	if len(invoices.createdInvoices) != 0 {
 		t.Errorf("in_arrears upgrade must NOT emit immediate proration invoice; got %d", len(invoices.createdInvoices))
-	}
-	if len(credits.grantCalls) != 0 {
-		t.Errorf("in_arrears upgrade must NOT emit immediate proration credit; got %d", len(credits.grantCalls))
 	}
 }
 
@@ -1255,10 +1210,9 @@ func TestUpdateItem_QuantityNoOpRejected(t *testing.T) {
 		"plan_seats": {ID: "plan_seats", Name: "Seat", BaseAmountCents: 1000, Currency: "USD"},
 	}}
 	invoices := &invoicesMock{}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	sameQty := int64(1) // seeded qty is 1
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &sameQty})
@@ -1270,7 +1224,7 @@ func TestUpdateItem_QuantityNoOpRejected(t *testing.T) {
 	if rr.Code != http.StatusBadRequest && rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status: got %d, want 400/422 for no-op qty. body=%s", rr.Code, rr.Body.String())
 	}
-	if len(invoices.createdInvoices) != 0 || len(credits.grantCalls) != 0 {
+	if len(invoices.createdInvoices) != 0 {
 		t.Errorf("no-op qty must not trigger proration")
 	}
 }

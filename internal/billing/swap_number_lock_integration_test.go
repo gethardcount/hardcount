@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -43,7 +42,6 @@ func TestCrossIntervalSwap_ReliefAndNewInvoiceNumberOnOneTx(t *testing.T) {
 	pricingStore := pricing.NewPostgresStore(db)
 	subStore := subscription.NewPostgresStore(db)
 	invoiceStore := invoice.NewPostgresStore(db)
-	creditSvc := credit.NewService(credit.NewPostgresStore(db))
 	settingsStore := tenant.NewSettingsStore(db)
 
 	tenantID := testutil.CreateTestTenant(t, db, "Swap Number Lock")
@@ -71,7 +69,6 @@ func TestCrossIntervalSwap_ReliefAndNewInvoiceNumberOnOneTx(t *testing.T) {
 	cnSvc.SetNumberGenerator(settingsStore)
 
 	e := newRealEngine(db, clock.NewFake(periodStart.Add(time.Hour)))
-	e.SetCreditGranter(creditSvc)
 	e.SetCreditNoteAdjuster(cnSvc)
 	e.SetCreditHeadroomReader(cnSvc)
 

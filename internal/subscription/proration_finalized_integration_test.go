@@ -60,7 +60,7 @@ func seatIncreaseOnRealTx(t *testing.T, rec *finalizeRecorderMock) (int, int64, 
 	}}
 	h := NewHandler(svcWithStore(store))
 	h.SetDB(db)
-	h.SetProrationDeps(&plansMock{plans: map[string]domain.Plan{plan.ID: plan}}, invoices, &creditsMock{})
+	h.SetProrationDeps(&plansMock{plans: map[string]domain.Plan{plan.ID: plan}}, invoices)
 	h.SetInvoiceFinalizeRecorder(rec)
 
 	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)

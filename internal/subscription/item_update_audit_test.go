@@ -115,7 +115,7 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 	// Paid current-period prebill so the immediate upgrade proceeds (an upgrade
 	// against an UNPAID source is blocked per ADR-050 — not what these audit
 	// tests are exercising).
-	h.SetProrationDeps(plans, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}, &creditsMock{})
+	h.SetProrationDeps(plans, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}})
 	rec := &capturingAudit{}
 	h.SetAuditLogger(rec)
 
@@ -172,7 +172,7 @@ func TestHandler_UpdateItem_ScheduledPlanChangeAuditNamesBothPlans(t *testing.T)
 		"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 	}}
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}, &creditsMock{})
+	h.SetProrationDeps(plans, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}})
 	rec := &capturingAudit{}
 	h.SetAuditLogger(rec)
 
@@ -224,7 +224,7 @@ func TestHandler_UpdateItem_PlanChangeAuditNoSimContextWhenUnpinned(t *testing.T
 	// Paid current-period prebill so the immediate upgrade proceeds (an upgrade
 	// against an UNPAID source is blocked per ADR-050 — not what these audit
 	// tests are exercising).
-	h.SetProrationDeps(plans, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}, &creditsMock{})
+	h.SetProrationDeps(plans, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}})
 	rec := &capturingAudit{}
 	h.SetAuditLogger(rec)
 

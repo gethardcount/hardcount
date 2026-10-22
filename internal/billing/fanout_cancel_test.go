@@ -62,10 +62,8 @@ func TestBillOnCancel_FansAcrossUpgradeInvoice(t *testing.T) {
 		lineItems: []domain.InvoiceLineItem{baseLine},
 	}
 
-	granter := &fakeCreditGranter{}
 	adjuster := &fakeCreditNoteAdjuster{}
 	e := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, pricing, inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-	e.SetCreditGranter(granter)
 	e.SetCreditNoteAdjuster(adjuster)
 	e.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
@@ -107,8 +105,5 @@ func TestBillOnCancel_FansAcrossUpgradeInvoice(t *testing.T) {
 	}
 	if sum != wantTotal {
 		t.Errorf("credit notes sum to %d, want %d", sum, wantTotal)
-	}
-	if len(granter.grants) != 0 {
-		t.Errorf("paid sources must credit via credit notes (tax-reversed), not bare ledger grants; got %d grants", len(granter.grants))
 	}
 }

@@ -22,7 +22,7 @@ func prorationTaxCommitHandler(t *testing.T, taxMock *prorationTaxApplierMock) (
 	}}
 	invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	h.SetProrationTaxApplier(taxMock)
 	return h, invoices, subID, itemID
 }

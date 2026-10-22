@@ -141,7 +141,6 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
 	e.SetDunningResolver(&testDunningResolver{})
-	e.SetCreditGranter(creditSvc)
 	e.SetInvoiceVoider(invSvc)
 	e.SetCreditNoteAdjuster(cnSvc)
 	e.SetCreditHeadroomReader(cnSvc)

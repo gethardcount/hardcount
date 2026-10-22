@@ -152,51 +152,39 @@ func (f *raceInvoices) SetAutoChargePendingTx(context.Context, *sql.Tx, string, 
 	return nil
 }
 
-// raceCredits records proration credits. Its first grant holds.
+// raceCredit is one proration credit the race rig saw.
+type raceCredit struct{ AmountCents int64 }
+
+// raceCredits records proration credits.
 type raceCredits struct {
 	gate *holdFirst
 	mu   sync.Mutex
-	made []ProrationGrantInput
+	made []raceCredit
 }
 
-func (f *raceCredits) record(in ProrationGrantInput) {
+func (f *raceCredits) record(in raceCredit) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.made = append(f.made, in)
 }
 
-func (f *raceCredits) all() []ProrationGrantInput {
+func (f *raceCredits) all() []raceCredit {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]ProrationGrantInput(nil), f.made...)
+	return append([]raceCredit(nil), f.made...)
 }
 
-func (f *raceCredits) GrantProration(_ context.Context, _ string, in ProrationGrantInput) error {
-	f.record(in)
-	return nil
-}
-
-func (f *raceCredits) GrantProrationTx(_ context.Context, _ *sql.Tx, _ string, in ProrationGrantInput) error {
-	f.gate.wait()
-	f.record(in)
-	return nil
-}
-
-func (f *raceCredits) GetByProrationSource(context.Context, string, string, string, domain.ItemChangeType, time.Time) (domain.CreditLedgerEntry, error) {
-	return domain.CreditLedgerEntry{}, errs.ErrNotFound
-}
-
-// raceCredits is also the credit-note issuer: a decrease credits through a
+// raceCredits is the credit-note issuer: a decrease credits through a
 // credit-note draft on the change's tx, and that first draft holds. Gross
 // equals net here (no tax).
 func (f *raceCredits) CreateAdjustmentDraftTx(_ context.Context, _ *sql.Tx, _, invoiceID string, gross int64, _, _ string) (domain.CreditNote, error) {
 	f.gate.wait()
-	f.record(ProrationGrantInput{AmountCents: gross})
+	f.record(raceCredit{AmountCents: gross})
 	return domain.CreditNote{ID: "vlx_cn_race", InvoiceID: invoiceID, Status: domain.CreditNoteDraft}, nil
 }
 
 func (f *raceCredits) CreateAndIssueAdjustment(_ context.Context, _, invoiceID string, gross int64, _, _ string) (domain.CreditNote, error) {
-	f.record(ProrationGrantInput{AmountCents: gross})
+	f.record(raceCredit{AmountCents: gross})
 	return domain.CreditNote{ID: "vlx_cn_race", InvoiceID: invoiceID}, nil
 }
 
@@ -340,7 +328,7 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 	svc.SetPlanReader(reader)
 	h := NewHandler(svc)
 	h.SetDB(db)
-	h.SetProrationDeps(reader, invoices, credits)
+	h.SetProrationDeps(reader, invoices)
 	h.SetCreditNoteIssuer(credits)
 	h.SetProrationTaxApplier(&raceTax{gate: gate})
 
