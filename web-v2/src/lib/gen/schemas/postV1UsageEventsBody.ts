@@ -19,6 +19,7 @@ export type PostV1UsageEventsBody = {
   quantity: number | string;
   /** Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}). */
   dimensions?: PostV1UsageEventsBodyDimensions;
+  /** Older name for `dimensions`. When both are sent, `dimensions` wins. */
   properties?: PostV1UsageEventsBodyProperties;
   /**
      * Your unique ID for this event. Pick it once, before the

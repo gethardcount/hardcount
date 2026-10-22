@@ -151,7 +151,7 @@ func TestResolveRun_InvoiceActionFailureLeavesRunActive(t *testing.T) {
 			h := NewHandler(svc)
 			h.SetInvoiceVoider(&recordingVoider{err: errBlip})
 
-			body, _ := json.Marshal(resolveInput{Resolution: string(resolution)})
+			body, _ := json.Marshal(ResolveInput{Resolution: string(resolution)})
 			r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", run.ID)
@@ -171,7 +171,7 @@ func TestResolveRun_InvoiceActionFailureLeavesRunActive(t *testing.T) {
 
 // resolveVia drives the operator resolve endpoint for run id.
 func resolveVia(h *Handler, id string, resolution domain.DunningResolution) *httptest.ResponseRecorder {
-	body, _ := json.Marshal(resolveInput{Resolution: string(resolution)})
+	body, _ := json.Marshal(ResolveInput{Resolution: string(resolution)})
 	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id)

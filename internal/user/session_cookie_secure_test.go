@@ -56,7 +56,7 @@ func TestLogin_SessionCookieSecurePerEnvironment(t *testing.T) {
 				h := NewHandler(NewService(store, clock.Real()), session.NewService(&recordingSessionStore{}),
 					session.DefaultCookieConfig(e.appEnv), stubEmailSender{}, "", false)
 
-				body, _ := json.Marshal(loginReq{Email: "op@acme.com", Password: "a-good-password-123"})
+				body, _ := json.Marshal(LoginReq{Email: "op@acme.com", Password: "a-good-password-123"})
 				req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body)))
 				if p.origin != "" {
 					req.Header.Set("Origin", p.origin)

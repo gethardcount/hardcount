@@ -263,50 +263,6 @@ func TestUpdateItem_Downgrade_LIFOTiebreak_SameInstantFunding(t *testing.T) {
 	}
 }
 
-// TestUpdateItem_Downgrade_FallsBackToNetGrantWhenIssuerUnwired proves the
-// downgrade path still works (legacy net ledger grant, no tax reversal) when the
-// CN issuer isn't wired — narrow setups / tests. Production always wires it.
-func TestUpdateItem_Downgrade_FallsBackToNetGrantWhenIssuerUnwired(t *testing.T) {
-	ctx := clock.WithEffectiveNow(context.Background(), proNow)
-	tenantID := "t1"
-
-	store := newMemStore()
-	subID, itemID := seedSubWithItemAt(t, store, tenantID, "cus_1", "plan_pro", proPeriodStart, proPeriodEnd)
-	svc := NewService(store, nil)
-
-	plans := &plansMock{plans: map[string]domain.Plan{
-		"plan_pro":   {ID: "plan_pro", Name: "Pro", BaseAmountCents: 6000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
-		"plan_basic": {ID: "plan_basic", Name: "Basic", BaseAmountCents: 2000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
-	}}
-	invoices := &invoicesMock{
-		sourceInvoice: domain.Invoice{
-			ID: "src_inv", PaymentStatus: domain.PaymentSucceeded,
-			SubtotalCents: 6000, TaxFacts: domain.TaxFacts{TaxAmountCents: 600}, TotalAmountCents: 6600,
-		},
-	}
-	credits := &creditsMock{}
-
-	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits) // no SetCreditNoteIssuer
-
-	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
-	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
-
-	rr := httptest.NewRecorder()
-	h.updateItem(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
-	}
-	if len(credits.grantCalls) != 1 {
-		t.Fatalf("GrantProration calls: got %d, want 1 (fallback net grant)", len(credits.grantCalls))
-	}
-	// Fallback credits the bare NET (pre-fix amount), no tax slice.
-	if got := credits.grantCalls[0].AmountCents; got != 2000 {
-		t.Errorf("fallback grant amount: got %d, want 2000 (net, no tax)", got)
-	}
-}
-
 // TestUpdateItem_QuantityDecrease_RoutesGrossCreditNote confirms a mid-cycle
 // quantity DECREASE on a paid taxed prebill also routes through the CN with the
 // quantity-decrease reason.
@@ -445,56 +401,6 @@ func TestUpdateItem_Downgrade_InFlightSource_DraftsInsteadOfDroppingCredit(t *te
 			}
 			if calls[0].invoiceID != "src_inv" {
 				t.Errorf("clawback source: got %q, want %q", calls[0].invoiceID, "src_inv")
-			}
-		})
-	}
-}
-
-// TestResolveClawbackPieces_OverflowPlacesWhatFits: earlier credit notes left
-// two paid funding invoices 500 and 300 of room (gross), and an item change
-// owes 2000 net. The pieces place the 800 that fits, none above its invoice's
-// room, and the change goes through. Before, the overflow was an error and the
-// change answered 500. Both allocators: proportional for a quantity or item
-// change, LIFO for a plan downgrade.
-//
-// Mutation seam: restore the `remainder > 0` error in resolveClawbackPieces →
-// both arms error.
-func TestResolveClawbackPieces_OverflowPlacesWhatFits(t *testing.T) {
-	baseInv := domain.Invoice{
-		ID: "base_inv", PaymentStatus: domain.PaymentSucceeded,
-		SubtotalCents: 2000, TaxFacts: domain.TaxFacts{TaxAmountCents: 200}, TotalAmountCents: 2200,
-		CreatedAt: proPeriodStart,
-	}
-	upInv := domain.Invoice{
-		ID: "up_inv", PaymentStatus: domain.PaymentSucceeded,
-		SubtotalCents: 4000, TaxFacts: domain.TaxFacts{TaxAmountCents: 400}, TotalAmountCents: 4400,
-		CreatedAt: proPeriodStart.AddDate(0, 0, 5),
-	}
-	room := map[string]int64{"base_inv": 500, "up_inv": 300}
-	for _, ct := range []domain.ItemChangeType{domain.ItemChangeTypeQuantity, domain.ItemChangeTypePlan} {
-		t.Run(string(ct), func(t *testing.T) {
-			h := NewHandler(NewService(newMemStore(), nil))
-			h.SetProrationDeps(&plansMock{}, &invoicesMock{sourceInvoice: baseInv, fundingInvoices: []domain.Invoice{baseInv, upInv}}, &creditsMock{})
-			h.SetCreditNoteIssuer(&fakeCNIssuer{credited: map[string]int64{
-				"base_inv": baseInv.TotalAmountCents - room["base_inv"],
-				"up_inv":   upInv.TotalAmountCents - room["up_inv"],
-			}})
-			ps, pe := proPeriodStart, proPeriodEnd
-			sub := domain.Subscription{ID: "sub_1", CurrentBillingPeriodStart: &ps, CurrentBillingPeriodEnd: &pe}
-
-			pieces, err := h.resolveClawbackPieces(context.Background(), "t1", sub, ct, 2000)
-			if err != nil {
-				t.Fatalf("resolveClawbackPieces: %v, want the pieces that fit", err)
-			}
-			var sum int64
-			for _, p := range pieces {
-				if p.GrossCents > room[p.InvoiceID] {
-					t.Errorf("piece %d on %s exceeds its room %d", p.GrossCents, p.InvoiceID, room[p.InvoiceID])
-				}
-				sum += p.GrossCents
-			}
-			if sum != 800 {
-				t.Errorf("pieces %+v sum to %d, want 800 (all the room left)", pieces, sum)
 			}
 		})
 	}

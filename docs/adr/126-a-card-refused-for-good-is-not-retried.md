@@ -1,7 +1,7 @@
 # ADR-126: A card the bank refused for good is not retried until another card is the default
 
 **Date:** 2026-10-18
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-22)
 
 ## Summary
 
@@ -101,6 +101,10 @@ customer as a plain decline, never with the reason
    switch happen in the attach's own transaction (`paymentmethods` `Upsert`).
    Every way a card is saved goes through it: the setup link, the
    payment-update link, the hosted invoice page and the dashboard's Add card.
+   (Amended 2026-10-22: a card saved through a setup or update link now
+   becomes the default whatever the old default's state, ADR-021. This rule
+   still decides for a card paid on the hosted page and a SetupIntent Velox
+   did not create.)
    This holds for the store's insert path and for a card already on file
    being saved again, so the customer always keeps exactly one default.
    A working default is never replaced (ADR-021, amended).
@@ -154,7 +158,11 @@ customer as a plain decline, never with the reason
 - **E. Make every newly saved card the default.** Rejected: that changes
   ADR-021 for every customer, including one whose default card works.
   Replacing only a card the bank refused for good is the smallest change
-  that makes the customer's own action work.
+  that makes the customer's own action work. (Amended 2026-10-22: partly
+  adopted, for setup and update links only, after an ordinary decline left
+  the customer's new card beside the declining one. A card paid on the
+  hosted page is still added beside a working default. See ADR-021's
+  2026-10-22 amendment.)
 
 ## Consequences
 
@@ -184,9 +192,6 @@ customer as a plain decline, never with the reason
   keyed on Stripe's payment method ID. If the customer saves the refused card
   again and Stripe makes a new payment method for it, the next retry charges
   it once, the bank refuses it again, and retries skip it from then on.
-- **Replacing the default does not update Stripe's own default** for the
-  customer, as a first card's default does not. Velox charges the card it
-  names, so this changes only what the Stripe dashboard shows.
 - **`authentication_required` keeps the normal schedule.** It needs the
   customer to confirm the payment, not a new card. It needs its own copy.
 - **Codes outside Stripe's list keep the normal schedule**, among them

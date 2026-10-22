@@ -43,6 +43,15 @@ test('pause words never promise a charge on resume', () => {
   assert.match(PAUSE_DIALOG_SENTENCE, /finalize them to collect/)
 })
 
+// A pause does not stop a dunning run already open on an unpaid invoice
+// (ADR-036 amendment 2026-10-22; Stripe keeps retrying invoices created
+// before a pause too). The dialog is where the operator decides, so it says
+// the retries continue and how to stop them.
+test('pause dialog says retries already running continue', () => {
+  assert.match(PAUSE_DIALOG_SENTENCE, /retries already running on unpaid invoices continue/i)
+  assert.match(PAUSE_DIALOG_SENTENCE, /To stop them, void each invoice or mark it uncollectible\./)
+})
+
 // Mid-period item changes: only advance-billed plans settle the difference
 // at once; arrears-billed plans bill each part of the period at its end.
 test('item change words follow the plan bill timing', () => {
