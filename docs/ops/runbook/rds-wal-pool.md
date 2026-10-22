@@ -3,11 +3,7 @@
 Postgres writes every change to its write-ahead log (WAL) in 64 MB files
 called segments, and keeps a pool of ready-made ones. On RDS with default
 settings that pool can run dry after a quiet spell, and every commit then
-waits while a new file is written. This page is for that stall. Back to the
-[runbook index](index.md).
-
-The full story, with the evidence, is
-[RFM-001: WAL pool exhaustion](../../failure-modes/rfm-001-wal-pool-exhaustion.md).
+waits while a new file is written. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -20,31 +16,10 @@ about 5 s, until the next checkpoint refills the pool.
 
 ## Why
 
-Measured on the benchmark rig (2026-08-17, `db.m7g.4xlarge`, 100 GB gp3,
-PG 16.14, 12,000 events/s, 1-second instrumentation). The tail events the
-third run caught are **WAL segment creation under `WALWriteLock`.**
-
-- RDS uses 64 MB WAL segments and keeps a pool of pre-made ones.
-- Recycling at each checkpoint completion refills the pool to about one
-  checkpoint's worth. By the recycling arithmetic in `xlog.c`, that leaves
-  less than one segment of margin at this write rate.
-- When the pool runs dry, the committing backend that needs the next
-  segment writes 64 MB of zeros and fsyncs it. Every other commit waits.
-
-Two things drain the pool, both after a quiet spell:
-
-1. Small checkpoints lower the checkpointer's distance estimate, so fewer
-   old segments are recycled. `min_wal_size` (RDS default 192 MB) is the
-   floor that would stop it.
-2. RDS's retained segments (`wal_keep_size` 2 GB) sit inside the
-   `max_wal_size` window after an idle period. So the pool on resume is
-   shallower than in steady state, and the first timer-driven checkpoint
-   refills too late. `max_wal_size` bounds the depth.
-
-Both were reproduced on demand; neither setting alone was enough
-(provocation arms A–C in
-[sustained-throughput.md](../../benchmarks/sustained-throughput.md), third
-run).
+After a quiet spell RDS's pool of ready WAL files runs dry, and each commit
+that needs a new 64 MB file makes every other commit wait. Mechanism and
+evidence:
+[RFM-001](../../failure-modes/rfm-001-wal-pool-exhaustion.md).
 
 ## Check
 
@@ -60,10 +35,6 @@ How to see it if you suspect it:
 - Performance Insights at 1 s usually misses the 0.2 s stalls, and a
   `WALWrite` pile-up alone does not prove it is this.
 
-Numbers and the full attribution:
-[sustained-throughput.md](../../benchmarks/sustained-throughput.md), third
-run.
-
 ## Fix
 
 In the instance's parameter group, set:
@@ -76,7 +47,7 @@ In the instance's parameter group, set:
 | 25,000 events/s | 29.6 MB/s | **24–32 GB**, or shorten `checkpoint_timeout`. The pool at 16 GB still hit zero twice in 35 minutes |
 
 Both settings are dynamic (no reboot). The cost is disk: `pg_wal` stays
-near that size permanently. Two cautions:
+near that size. Crash recovery can also take a little longer. Two cautions:
 
 1. **Raising the setting does not create segments.** The pool grows only
    as segments are created, one commit pause of about 0.25 s per 64 MB
@@ -100,11 +71,3 @@ near that size permanently. Two cautions:
 Check the Postgres log at peak. Checkpoints should read
 `checkpoint starting: time`, not `wal`. A WAL-driven checkpoint puts you
 back on the one-segment margin.
-
-Verified on the rig, one series each, on `db.m7g.4xlarge` + 100 GB gp3:
-
-- With the pool at depth, the idle-then-resume recipe did not stall. That
-  same recipe stalled stock, floor-only, depth-only and freshly raised
-  settings (worst 10-s p99 24.7 ms against 162–254 ms).
-- A 5 × 10 min series at 12,000 events/s ran with all checkpoints
-  time-driven, no tail window, and the pool never below 45 segments.

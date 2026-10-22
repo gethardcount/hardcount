@@ -2,7 +2,7 @@
 
 Autovacuum is Postgres's background cleanup. On a large table that only
 grows, such as `usage_events`, one of its passes can briefly use all of the
-disk's write capacity. This page is for the stall that causes. Back to the
+disk's write capacity, and every commit stalls. Back to the
 [runbook index](index.md).
 
 ## Symptom

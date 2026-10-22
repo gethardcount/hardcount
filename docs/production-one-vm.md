@@ -1,12 +1,10 @@
 # Run Velox in production on one VM
 
-This page takes a fresh Linux server to a Velox that bills real customers. It is for the engineer who installs Velox for a small team.
+This page takes a fresh Linux server to a Velox that bills real customers, with Docker Compose.
 
-One VM is a supported production setup. Velox is down while it restarts, for example during an upgrade. When that is no longer acceptable, run two or more copies: see [High availability](ops/high-availability.md).
+Velox is down while it restarts. If that is not acceptable, see [High availability](ops/high-availability.md).
 
-Tested on a €6.49/month Hetzner CX23; see [How much traffic Velox handles](scale.md#what-one-small-server-handles).
-
-Think of it as getting a car ready for the road. The [install guide](../deploy/compose/README.md) gives you a car that runs. This page adds the number plates (a web address with HTTPS), the lights (email), the fuel (Stripe) and the spare wheel (backups).
+Load-tested on a €6.49/month Hetzner CX23 (ingest, billing and dashboard calls, without HTTPS, Stripe or email): see [How much traffic Velox handles](scale.md#what-one-small-server-handles).
 
 At the end you have:
 
@@ -66,9 +64,9 @@ A release is a tested version with a number, such as `v0.8.2`. Production runs a
    |---|---|
    | `POSTGRES_PASSWORD` | The database admin password |
    | `VELOX_APP_DB_PASSWORD` | The password of the limited database user that API requests run as |
-   | `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data and Stripe keys. Without it, a backup cannot be read. |
+   | `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data and Stripe keys |
    | `VELOX_BOOTSTRAP_TOKEN` | Lets you create the first account in step 2 |
-   | `VELOX_IMAGE`, `VELOX_DASHBOARD_IMAGE` | Run the published release images instead of building from source |
+   | `VELOX_IMAGE`, `VELOX_DASHBOARD_IMAGE` | Run the published release images instead of [building from source](../deploy/compose/README.md#build-from-source-instead) |
    | `NGINX_HTTP_PORT=127.0.0.1:8080` | Velox listens only on the VM itself, on port 8080. The HTTPS server in step 3 sits in front of it. |
 
 3. Start Velox.
@@ -89,7 +87,7 @@ A release is a tested version with a number, such as `v0.8.2`. Production runs a
 
    **You see:** perhaps a few `curl: (22) The requested URL returned error: 502` lines, then `{"checks":{"api":"ok","database":"ok","scheduler":"..."},"status":"ok"}`. If the command ends with no `"status":"ok"`, see the fixes linked below.
 
-If a step fails, the [install guide](../deploy/compose/README.md#if-something-goes-wrong) lists each start-up error and its fix.
+If a step fails, [If something goes wrong](../deploy/compose/README.md#if-something-goes-wrong) lists each start-up error and its fix.
 
 ## 2. Create your account and first login
 
@@ -135,7 +133,7 @@ Caddy is a web server that gets a free HTTPS certificate from Let's Encrypt and 
 
    **You see:** the dashboard, in test mode. Nothing in test mode charges real money.
 
-`APP_ENV=production` is already set in `.env`. It always marks the sign-in cookie `Secure`, so browsers keep it only on HTTPS and at `http://localhost`. Sign in at your `https://` address. Through an SSH tunnel to `http://localhost:8080`, sign-in works in Chrome and Firefox but not in Safari, which does not keep a `Secure` cookie over plain HTTP, even at localhost.
+`.env` sets `APP_ENV=production`, so the sign-in cookie is `Secure`: sign in at your `https://` address ([before HTTPS](../deploy/compose/README.md#sign-in-before-https)).
 
 Velox reads each visitor's real address from the headers Caddy and nginx forward. Caddy's requests reach Velox through Docker's private network, which the Compose stack's default `TRUST_PROXY` already trusts, so leave that setting as it is.
 
@@ -155,14 +153,7 @@ Emails and Stripe send people to pages in Velox: your customers to the invoice p
    docker compose up -d
    ```
 
-   **You see:** `velox-api` is recreated.
-
-   | Setting | What breaks without it |
-   |---|---|
-   | `HOSTED_INVOICE_BASE_URL` | Invoice, receipt and reminder emails go out without the link to view and pay the invoice. |
-   | `PAYMENT_UPDATE_URL` | Emails asking a customer to add a card are not sent. |
-   | `DASHBOARD_BASE_URL` | Password-reset and team-invite emails are not sent. |
-   | `CUSTOMER_PORTAL_URL` | After a customer saves a card on Stripe's page, Stripe sends them to `http://localhost:5173`, which does not exist on your server. The card is still saved. |
+   **You see:** `velox-api` is recreated. What each one is for: [Email setup](ops/email-setup.md#what-breaks-when-a-setting-is-missing).
 
 2. Check the start-up log.
 
@@ -226,7 +217,7 @@ Velox sends invoices, receipts, payment reminders, password resets and team invi
 
    **You see:** the reset email arrives within a few minutes, and its link opens `https://billing.example.com/reset-password`. If it does not arrive, check spam, then `docker compose logs velox-api`.
 
-Releases from v0.8.0 on also have **Settings → Email**. It shows whether each email setting is in place and has a **Send test email** button.
+**Settings → Email** shows whether each email setting is in place and has a **Send test email** button.
 
 Settings for each provider, sender-domain setup (SPF and DKIM) and bounce handling are in [Email setup](ops/email-setup.md).
 
@@ -256,7 +247,7 @@ To check a whole charge in test mode, from saving a card to a refund, follow [St
 Two things must be backed up, and kept apart:
 
 - **The database.** It holds every customer, invoice and payment.
-- **The `.env` file.** It holds `VELOX_ENCRYPTION_KEY`. Without that key, the encrypted parts of a backup (customer details, Stripe keys) cannot be read. Copy `.env` to your password manager or a secrets store now, not next to the backups.
+- **The `.env` file.** It holds `VELOX_ENCRYPTION_KEY`, without which a backup cannot be read ([why](ops/backup-considerations.md#1-keep-the-encryption-key)). Copy `.env` to your password manager or a secrets store now, not next to the backups.
 
 The repository ships `scripts/backup.sh`. It dumps the database, checks that the dump can be read, and deletes dumps older than 30 days. The commands below run it in a Postgres 16 container, so the VM needs no Postgres tools.
 
@@ -303,7 +294,7 @@ The repository ships `scripts/backup.sh`. It dumps the database, checks that the
 
 ### Test a restore
 
-A backup counts only once you have restored it. This test restores the newest dump into a second, empty database on the same server. Your live data is not touched.
+This test restores the newest dump into a second, empty database on the same server. Your live data is not touched.
 
 1. Restore into a test database.
 
@@ -348,7 +339,7 @@ Anyone who can open your address and knows a team member's password can sign in.
 - **Passwords are stored only as bcrypt hashes,** which are slow to crack.
 - **About 30,000 common leaked passwords are refused** when a password is set or reset.
 - **Sign-in is rate-limited:** one address can try only so many times a minute.
-- **Repeated wrong passwords slow down,** from one address or spread over many, instead of locking the account. A browser that signed in before is not slowed by other people's guesses ([how it works](self-host.md#repeated-wrong-passwords)).
+- **Repeated wrong passwords slow down,** from one address or spread over many, instead of locking the account. A browser that signed in before is not slowed by other people's guesses ([how it works](ops/runbook/sign-in-throttled.md)).
 - **The sign-in cookie travels only over HTTPS** outside `localhost`, because `.env` sets `APP_ENV=production` ([step 3](#3-add-https-with-caddy)).
 
 Velox has no two-factor sign-in yet, so a stolen password is enough to sign in. If your team wants a second factor, you can put sign-in behind your own SSO or VPN. This is optional: Velox runs in production without it.
@@ -383,7 +374,7 @@ Check each line before the first real customer.
 
 ## Upgrade to a new release
 
-Velox is down while the new version starts. Database changes (migrations) run by themselves as it starts.
+Database changes (migrations) run by themselves as the new version starts.
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every release between yours and the new one.
 2. Take a backup. If the upgrade goes wrong, it is how you go back ([Going back](#going-back)).
@@ -482,7 +473,4 @@ To go back with a restore:
 
 Do not run v0.8.x's `migrate rollback` or `migrate force` on a database v0.9.0 took over. If one runs, v0.9.0 refuses to start until the records agree again; see [Two migration records](ops/runbook/migration-failed-midway.md#two-migration-records).
 
-## Related
-
-- [Install on one VM](../deploy/compose/README.md): each install step explained, and fixes for start-up errors.
-- [Self-host](self-host.md): every setting, Postgres, and what to monitor.
+**Next:** send your first usage event and bill it: [First invoice](first-invoice.md).

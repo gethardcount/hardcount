@@ -1,9 +1,7 @@
 # Test-clock advance hung
 
-A test clock is a pretend clock for test customers. Moving it forward (an
-advance) bills the skipped time, so you can see a month of billing in
-minutes. This page is for an advance that does not finish. Back to the
-[runbook index](index.md).
+Moving a [test clock](../../glossary.md#testing-with-simulated-time) forward
+(an advance) bills the skipped time. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -48,8 +46,7 @@ GROUP BY s.id, s.next_billing_at, tc.updated_at;
    to `advancing` and resumes the catch-up from where it stopped.
    Delete the clock only as a last resort: deleting a clock removes all of
    its simulated data.
-3. If a deploy abandoned the advance, restart one replica. Until recovery
-   runs on a schedule, this is the operator's job.
+3. If a deploy abandoned the advance, restart one replica.
 
 ## Verify
 
