@@ -519,7 +519,9 @@ test('grant credits and see the balance', async ({ page }) => {
 // A credit expiry picked as a day is valid through that day: the dashboard
 // sends the midnight that starts the next day in the workspace zone (the
 // instant a period ending that night issues its invoice, so the credit pays
-// it), and shows the stored instant as the picked day, "Valid through".
+// it), and shows the stored instant as the picked day, "Valid through". An
+// instant that is not a workspace midnight (an API grant) reads "Expires"
+// with its time instead.
 // ADR-071 §2, amended 2026-10-22. The screenshots go with the activity shots,
 // which CI uploads on every run.
 const VALID_THROUGH_SHOTS = path.join(import.meta.dirname, '..', 'activity-shots')
@@ -598,12 +600,20 @@ test('a commit line valid through a picked day is sent as the next midnight and 
   const commit = grants.grants.find(g => g.grant_kind === 'commit')
   expect(commit?.expires_at && Date.parse(commit.expires_at)).toBe(Date.parse(body.line_items[0].commit_expires_at!))
 
+  // An API grant that stops at 17:17 UTC, a midnight in no zone.
+  const midDay = new Date(Date.now() + 50 * 86_400_000)
+  midDay.setUTCHours(17, 17, 0, 0)
+  await api('POST', '/credits/grant', { customer_id: customer.id, amount_cents: 1000, description: 'E2E mid-day expiry', expires_at: midDay.toISOString() })
+
   // A fresh load reads the grant the finalize just wrote.
   await page.reload()
   const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
-  await expect(credits.getByRole('columnheader', { name: 'Valid through' })).toBeVisible()
+  await expect(credits.getByRole('columnheader', { name: 'Expiry' })).toBeVisible()
   const row = credits.getByRole('row').filter({ hasText: 'Commit' })
-  await expect(row).toContainText(printedDay(picked))
+  await expect(row).toContainText(`Valid through ${printedDay(picked)}`)
+  const midDayRow = credits.getByRole('row').filter({ hasText: 'E2E mid-day expiry' })
+  await expect(midDayRow).toContainText('Expires ')
+  await expect(midDayRow).not.toContainText('Valid through')
   await credits.screenshot({ path: path.join(VALID_THROUGH_SHOTS, 'credit-valid-through-commit.png'), animations: 'disabled' })
 })
 

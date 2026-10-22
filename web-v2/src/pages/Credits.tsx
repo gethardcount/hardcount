@@ -11,7 +11,7 @@ import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { api, formatCents, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
 import { amountInputToCents } from '@/lib/money'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
-import { lastValidInstant, startOfNextDayInTZ } from '@/lib/dates'
+import { creditExpiryLabel, startOfNextDayInTZ } from '@/lib/dates'
 import type { Customer, CreditBalance } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { downloadCSV } from '@/lib/csv'
@@ -404,7 +404,7 @@ export default function CreditsPage() {
                                 )}
                                 {entry.expires_at && !expired && (
                                   <span className="block text-xs text-muted-foreground mt-0.5">
-                                    Valid through {formatDate(lastValidInstant(entry.expires_at))}
+                                    {creditExpiryLabel(entry.expires_at)}
                                   </span>
                                 )}
                               </>

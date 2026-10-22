@@ -1,6 +1,6 @@
 import { format } from 'date-fns'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
-import { getTenantTimezone } from '@/lib/api'
+import { formatDateTime, getTenantTimezone } from '@/lib/api'
 import type { EffectiveNow } from './effectiveNow'
 
 // Date helpers that interpret operator-picked civil dates in tenant
@@ -32,7 +32,7 @@ export function endOfDayInTZ(yyyymmdd: string, timezone?: string): string {
 // is issued) at that same instant, so the credit pays November's invoice.
 // endOfDayInTZ (23:59:59.999) fell 1 ms short of it. The day step runs on
 // UTC civil fields, never a browser-local Date, so the browser's own zone
-// can't move it.
+// can't move it. creditExpiryLabel reads the stored instant back.
 export function startOfNextDayInTZ(yyyymmdd: string, timezone?: string): string {
   const tz = timezone || tenantTZ()
   const [y, m, d] = yyyymmdd.split('-').map(Number)
@@ -40,12 +40,19 @@ export function startOfNextDayInTZ(yyyymmdd: string, timezone?: string): string 
   return fromZonedTime(`${next} 00:00:00.000`, tz).toISOString()
 }
 
-// lastValidInstant is the instant 1 ms before a credit's expires_at, for
-// display: formatDate of it names the last day the credit is valid. A grant
-// sent as Dec 1 00:00 then reads "Valid through Nov 30", and so does one
-// saved before startOfNextDayInTZ existed (Nov 30 23:59:59.999).
-export function lastValidInstant(expiresAtISO: string): string {
-  return new Date(Date.parse(expiresAtISO) - 1).toISOString()
+// creditExpiryLabel reads a credit's stored expires_at. When it is a midnight
+// in the tenant zone, the shape startOfNextDayInTZ sends, it names the day
+// before: Dec 1 00:00 reads "Valid through Nov 30". Any other instant (an API
+// grant at 17:00, a dashboard grant saved at 23:59:59.999 before
+// startOfNextDayInTZ existed, a midnight that DST skipped) reads "Expires"
+// with its time, since the credit is not valid through the end of that day.
+export function creditExpiryLabel(expiresAtISO: string, timezone?: string): string {
+  const tz = timezone || tenantTZ()
+  const at = new Date(expiresAtISO)
+  if (formatInTimeZone(at, tz, 'HH:mm:ss.SSS') === '00:00:00.000') {
+    return `Valid through ${formatInTimeZone(new Date(at.getTime() - 1), tz, 'MMM d, yyyy')}`
+  }
+  return `Expires ${formatDateTime(expiresAtISO, tz)}`
 }
 
 // startOfDayInTZ returns UTC ISO 8601 of "yyyy-mm-dd at 00:00:00.000
@@ -153,14 +160,15 @@ export function formatYMDInTZ(iso: string, timezone?: string): string {
   return formatInTimeZone(new Date(iso), tz, 'yyyy-MM-dd')
 }
 
-// isAfterCivilToday reports whether a picked yyyy-mm-dd is a later civil day
-// than "today" in tenant TZ, where today is the civil date of `nowMs` (the
-// entity's effective now, so a test clock is honoured). Use it to validate a
-// date that endOfDayInTZ or startOfNextDayInTZ will resolve in the same zone. Taking today from
-// toISOString() (the UTC date) instead made a New York evening count as
-// tomorrow, so tomorrow's date was refused as "not in the future".
-export function isAfterCivilToday(yyyymmdd: string, nowMs: number, timezone?: string): boolean {
-  return yyyymmdd > formatYMDInTZ(new Date(nowMs).toISOString(), timezone)
+// isBeforeCivilToday reports whether a picked yyyy-mm-dd is an earlier civil
+// day than "today" in tenant TZ, where today is the civil date of `nowMs` (the
+// entity's effective now, so a test clock is honoured). A credit expiry picker
+// refuses only those: today is a valid "valid through" day, since
+// startOfNextDayInTZ resolves it to tonight's midnight. Taking today from
+// toISOString() (the UTC date) instead would make a New York evening count as
+// tomorrow, and refuse today.
+export function isBeforeCivilToday(yyyymmdd: string, nowMs: number, timezone?: string): boolean {
+  return yyyymmdd < formatYMDInTZ(new Date(nowMs).toISOString(), timezone)
 }
 
 // calendarDaysUntil counts CALENDAR days from the anchor's civil date to the

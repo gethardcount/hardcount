@@ -13,7 +13,7 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
-import { isAfterCivilToday, startOfDayInTZ, startOfNextDayInTZ } from '@/lib/dates'
+import { isBeforeCivilToday, startOfDayInTZ, startOfNextDayInTZ } from '@/lib/dates'
 import { Checkbox } from '@/components/ui/checkbox'
 import { MarginCard } from '@/components/MarginCard'
 import { Layout } from '@/components/Layout'
@@ -1857,10 +1857,11 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
         } else {
           commitGranted = granted
           if (l.commitExpiresAt) {
-            // "Future" is judged in tenant TZ, the zone startOfNextDayInTZ
-            // resolves the expiry in below: valid through the picked day.
-            if (!isAfterCivilToday(l.commitExpiresAt, now)) {
-              errs.commit = 'Credit expiry must be a future date'
+            // "Today" is judged in tenant TZ, the zone startOfNextDayInTZ
+            // resolves the expiry in below: valid through the picked day, so
+            // today is a valid pick, as in the grant dialog.
+            if (isBeforeCivilToday(l.commitExpiresAt, now)) {
+              errs.commit = 'Credit expiry must be today or later'
             } else {
               commitExpires = startOfNextDayInTZ(l.commitExpiresAt)
             }

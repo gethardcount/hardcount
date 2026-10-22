@@ -182,9 +182,16 @@ treated it as live, so at that one instant neither took the grant.
 at the next local midnight. So a grant "through Nov 30" was 1 ms short of
 the invoice issued Dec 1 00:00 and paid nothing: the card was charged in
 full. The dashboard now sends the local midnight after the picked day
-(`startOfNextDayInTZ`), and shows a stored instant as the day before it
-("Valid through Nov 30"). With that send, `expires_at` equals the issue
+(`startOfNextDayInTZ`). With that send, `expires_at` equals the issue
 instant, so the boundary has to count as live.
+
+**What the dashboard shows.** A stored `expires_at` that is a midnight in
+the tenant zone reads as the day before it: Dec 1 00:00 reads "Valid
+through Nov 30". Any other instant reads "Expires" with its date and time
+(`creditExpiryLabel`), because the credit is not valid through the end of
+that day. Two examples are an API grant that stops at 17:00 and a
+dashboard grant saved at 23:59:59.999 before this change, which misses the
+invoice issued at the next midnight.
 
 **Why the hold arms move too.** With `expires_at` equal to the due
 instant, a strict arm (i) is false. The hourly sweep (`expires_at < now`)
@@ -205,13 +212,34 @@ on a fact. The CHANGELOG tells operators to grant them again if needed.
 The API passes any instant through unchanged.
 
 **In advance.** An in-advance cycle invoice issued Dec 1 also carries
-December's base fee, and a grant "through Nov 30" can pay all of it,
-because a draw takes the whole invoice. That is the same as an API grant
-that expires one second after the close; this change does not add it.
+December's base fee, and a draw takes the whole invoice. So a grant
+"through Nov 30" can now pay December's base fee too. Before this change
+no dashboard grant could pay the next period's in-advance base fee; now
+every one that is live at the close can. An API grant that expires after
+the close always could. Stripe's condition above works the same way: it
+tests the invoice's `period_end` against `expires_at`.
 
 A mid-period `cancel_at` invoice still tests expiry when it is collected
-(the residual named in §2). In a zone where DST skips midnight,
-`fromZonedTime` and Go's `time.Date` both move forward to the same instant.
+(the residual named in §2).
+
+**Residual: a midnight that DST skips.** Where a zone skips midnight, the
+dashboard (`fromZonedTime`, date-fns-tz 3.2.0) and Go's `time.Date` do not
+always resolve it to the same instant:
+
+| Zone and date | Go `time.Date` | `fromZonedTime` |
+|---|---|---|
+| Africa/Cairo, 2026-04-24 00:00 | 22:00Z (01:00 local) | 21:00Z (23:00 the day before) |
+| Asia/Beirut, 2026-03-29 00:00 | 22:00Z (01:00 local) | 21:00Z (23:00 the day before) |
+| America/Santiago, 2026-09-06 00:00 | 03:00Z (23:00 the day before) | 03:00Z (23:00 the day before) |
+| America/Havana, 2026-03-08 00:00 | 04:00Z (23:00 the day before) | 04:00Z (23:00 the day before) |
+
+In Cairo and Beirut the dashboard's instant is an hour before Go's period
+end. A grant valid through the day before the change then pays nothing for
+a period that ends at that midnight. That happens once a year, and only for
+an anniversary period that ends on that day, since a calendar period ends
+on the 1st. The dashboard reads such a grant as "Expires" with its time,
+not "Valid through". Copying Go's resolution zone by zone in the client is
+not worth it.
 
 Tests (real Postgres): `TestApplyToInvoice_PeriodInvoiceIssuedAtTheExpiryInstantDrawsTheGrant`,
 `TestExpireCredits_HoldsAGrantExpiringAtTheDueInstant`,
