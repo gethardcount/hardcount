@@ -186,8 +186,13 @@ An event counts toward the billing period its `timestamp` falls in.
   `POST /v1/invoices/{id}/line-items`, then
   `POST /v1/invoices/{id}/finalize`.
 - The same applies after a spend-threshold invoice (an invoice made early
-  because spend crossed a limit). Usage stamped before it that arrives later
-  is not on the period-end invoice either. Bill it the same way.
+  because spend crossed a limit). Usage of a sum or count meter stamped
+  before it that arrives later is not on the period-end invoice either.
+  But if the spend-threshold invoice is voided or written off before the
+  period-end invoice is built, the period-end invoice bills all the
+  period's usage, late events included. So the answer flags such an event
+  only when the spend-threshold invoice is already paid: a paid invoice
+  cannot be voided or written off. Bill a flagged event the same way.
 - These build the ended period's invoice at once, with no grace period:
   - an immediate cancel;
   - any other change to a subscription, through the API or the dashboard
@@ -200,7 +205,7 @@ An event counts toward the billing period its `timestamp` falls in.
   inside it, the run waits until the grace ends, then pauses or cancels.
 
 The metric `velox_usage_after_close_total{origin}` counts the events
-written after their period's invoice. `velox_usage_late_event_total`
+flagged `after_close`. Usage on a canceled subscription is not flagged. `velox_usage_late_event_total`
 counts events, not sent through the backfill route, whose `timestamp` is
 more than 24 hours older than their arrival. It does not say whether an
 event missed an invoice.

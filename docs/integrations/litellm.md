@@ -315,9 +315,15 @@ period its time falls in, the same rule as any late usage (see
   built: stored, but no subscription invoice includes it. For a customer
   created after the calls, this is the usual case. Bill it with a one-off
   invoice if it should be charged.
+- Inside the current period, but before the end of a spend-threshold
+  invoice of that period: that invoice already covered the time. If it is
+  paid, no invoice includes the event, as above. If it is not paid yet, the
+  period's invoice includes it only if the spend-threshold invoice is
+  voided or written off first.
 
 The release answer counts each kind (`in_open_period`, `not_on_plan`,
-`outside_open_period`). Events whose meter still does not exist, or whose
+`outside_open_period`, and `pending_threshold_invoice` for the unpaid
+spend-threshold case; the paid case counts as `outside_open_period`). Events whose meter still does not exist, or whose
 time is after the customer's current time (a customer on a test clock set
 in the past), stay held, counted in `still_held`.
 

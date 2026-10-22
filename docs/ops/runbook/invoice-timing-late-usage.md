@@ -38,12 +38,20 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
 - **Once the invoice is built it does not change.** Usage stamped inside
   its period that arrives later is stored, but billed on no invoice, now or
   later. After a spend-threshold invoice, usage stamped before it that
-  arrives later is not on the period-end invoice either. Velox says so when
-  it writes such an event: the answer carries `billing_status:
-  "after_close"` (an `after_close` count on a batch or a LiteLLM
-  delivery), `velox_usage_after_close_total` counts it, and a WARN line
-  names the customer, meter and timestamp. There is no list of such events
-  yet. Usage on a canceled subscription is not flagged.
+  arrives later is not on the period-end invoice either (sum and count
+  meters). Velox says so when it writes such an event: the answer carries
+  `billing_status: "after_close"` (an `after_close` count on a batch or a
+  LiteLLM delivery), `velox_usage_after_close_total` counts it, and a WARN
+  line names the customer, meter and timestamp. There is no list of such
+  events yet.
+- **What is not flagged.** Usage on a canceled subscription. And usage
+  stamped before a spend-threshold invoice that is not paid yet: if that
+  invoice is voided or written off before the period-end invoice is built,
+  the period-end invoice bills all the period's usage again, late events
+  included. So an event is flagged only after a paid spend-threshold
+  invoice, which cannot be voided or written off. If you void or write off
+  a spend-threshold invoice, do not bill its usage with a one-off invoice:
+  the period-end invoice does.
 - **During the grace the subscription still shows the ended period.** Spend
   thresholds and the live credit balance do not count the new period's
   usage until the invoice is built.
@@ -101,6 +109,9 @@ curl -sS "$API/v1/customers/$CUSTOMER/usage?from=$BILLING_PERIOD_START&to=$BILLI
   `POST /v1/invoices/{id}/finalize`.
 - For a max or last meter, the late events may change nothing; check the
   events before you bill.
+- An event flagged `after_close` is billed on no invoice, so bill it. A
+  late event that is not flagged may still be on the period-end invoice;
+  compare before you bill.
 
 **A pipeline that often delivers later than the grace.** Raise
 `INVOICE_GRACE_PERIOD` above its worst delay (at most `72h`) and restart.

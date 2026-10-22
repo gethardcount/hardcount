@@ -242,8 +242,12 @@ period holds it. "Already invoiced" means either:
 
 - the event is before the subscription's current period start, and not
   before its trial end (trial usage is free) or its start; or
-- the event is before the subscription's threshold watermark (a threshold
-  fire with no reset), and every bucket of the meter is sum or count.
+- the event is before the end of a **paid** threshold invoice of the
+  subscription's current period (a threshold fire with no reset), and
+  every bucket of the meter is sum or count. These invoices are read for
+  every active and trialing subscription, whether or not it still has
+  thresholds: the close keys its watermark on the invoices, not on the
+  setting.
 
 Two kinds of meter are never flagged, because a later close can still
 bill the event:
@@ -255,11 +259,23 @@ bill the event:
 An event at or after the current period end (the grace) is never flagged:
 the next close bills it.
 
+An event before the end of a threshold invoice that is **not paid yet**
+is not flagged either. The close's watermark counts every threshold
+invoice that is not voided or written off (#243): if that invoice is
+voided or written off before the close, the close bills the period's sum
+and count usage from the period start, the event included. A paid invoice
+can be neither voided nor written off (the status write refuses both), so
+its end is a watermark the close never goes below. If the unpaid invoice
+is paid instead, the event is billed nowhere and was not flagged: a missed
+flag, not a wrong one.
+
 **Why the flag is never false.** Ingest reads the periods before it writes
 the event. Every writer of a period start, and the threshold watermark
 invoice, commits in the transaction that froze that window, after reading
 its usage. So a read that shows the window frozen means it was frozen
-before the event existed. A close that commits between the read and the
+before the event existed. A frozen window must also stay frozen: a built
+period invoice is never re-opened, and a threshold window counts only
+once its invoice is paid (above). A close that commits between the read and the
 write is not seen, and that event goes unflagged; a missed flag is
 accepted, a wrong one is not. Only the write flags. A replay answers with
 the original row and no `billing_status`, because recomputing the status
@@ -272,15 +288,21 @@ subscription's final period that arrives after its final invoice stays
 silent. A failed read of the periods refuses the request with 503
 `ingest_unavailable`, like a failed customer or meter lookup, so nothing is
 written without its signal. The read costs one tenant transaction per
-customer per request (plus one per subscription with a threshold, and one
-per meter when an event could be after_close). Measured locally on the
-close-lag rig: single ingest went from about 2.5 ms to 3.4 ms per event; a
-1,000-event batch for one customer was unchanged (about 240 ms).
+customer per request, plus one per active or trialing subscription for its
+threshold invoices, and one per meter when an event could be after_close.
+Measured locally on the close-lag rig with one subscription: single ingest
+went from about 2.5 ms to about 4.2 ms per event (about 0.7 ms of it is the
+threshold-invoice read); a 1,000-event batch for one customer was
+unchanged (about 240 ms).
 
-The held-usage release (ADR-122) uses the same rule. A released row at or
-after the period end, before that period's invoice, belongs to the next
-period: `in_open_period` when the subscription continues past the end and
-its plan from then on prices the meter.
+The held-usage release (ADR-122) uses the same rule and the same reads,
+made before it writes. A released row at or after the period end, before
+that period's invoice, belongs to the next period: `in_open_period` when
+the subscription continues past the end and its plan from then on prices
+the meter. A row the rule calls after_close counts as
+`outside_open_period`. A row before the end of an unpaid threshold invoice
+counts as `pending_threshold_invoice`: the period's invoice bills it only
+if that threshold invoice is voided or written off first.
 
 ## References
 

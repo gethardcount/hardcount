@@ -103,7 +103,12 @@ release it once with an honest statement of what it will bill.
    (`outside_open_period`). The plan check reads each item's current plan,
    so a row from before a mid-period plan change is judged by the new plan. The second kind is not billed by a subscription
    invoice unless that period's invoice is not built yet; the operator bills
-   it with a one-off invoice, as for any late usage (ADR-120).
+   it with a one-off invoice, as for any late usage (ADR-120). Since
+   2026-10-22 the counts follow ADR-120's after-close rule, spend-threshold
+   invoices included: a sum or count row before the end of a paid one
+   counts as `outside_open_period`, and before the end of an unpaid one as
+   `pending_threshold_invoice` (billed by the period's invoice only if that
+   threshold invoice is voided or written off first).
 5. **Discard.** `POST /v1/usage-events/held/discard` marks rows discarded.
    They are kept as a record and never billed. Audited.
 6. **A resend after the customer exists.** The LiteLLM door ingests through
