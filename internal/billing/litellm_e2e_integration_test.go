@@ -165,6 +165,27 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 		t.Fatalf("/spend body: got %s, want accepted=4 (input+cache_write_5m+cache_write_1h+output)", got)
 	}
 
+	// A Claude Code /v1/messages call (call_type anthropic_messages), shaped
+	// like the LiteLLM 1.83.9 proxy record in
+	// internal/integrations/litellm/testdata/litellm-1.83.9-proxy-messages-split.json
+	// and scaled by 100. Before 2026-10-22 Velox skipped this call type and
+	// billed nothing. At claude-sonnet-4.5's rates: 100,000 input → 30¢,
+	// 500,000 cache reads at $0.30/M → 15¢, 4M 5m writes → 1500¢, 6M 1h
+	// writes → 3600¢, 50,000 output → 75¢: 5220¢.
+	messagesBody := fmt.Sprintf(`{
+		"id":"chatcmpl-wedge-messages","call_type":"anthropic_messages","status":"success","cache_hit":null,
+		"model":"anthropic/claude-sonnet-4-5-20250929","custom_llm_provider":"anthropic",
+		"end_user":"cus_wedge","prompt_tokens":10600000,"completion_tokens":50000,"total_tokens":10650000,
+		"metadata":{"usage_object":{"prompt_tokens":10600000,"completion_tokens":50000,"total_tokens":10650000,
+			"cache_creation_input_tokens":10000000,"cache_read_input_tokens":500000,
+			"prompt_tokens_details":{"cached_tokens":500000,"cache_creation_tokens":10000000,"text_tokens":100000,
+				"cache_creation_token_details":{"ephemeral_5m_input_tokens":4000000,"ephemeral_1h_input_tokens":6000000}}}},
+		"startTime":%d.25,"endTime":%d
+	}`, eventTS, eventTS)
+	if got := post(messagesBody); !strings.Contains(got, `"accepted":5`) {
+		t.Fatalf("/spend body: got %s, want accepted=5 (input+cache_read+cache_write_5m+cache_write_1h+output)", got)
+	}
+
 	// 3b. Verify the events landed with the canonical family + token roles.
 	events, err := usageStore.AggregateByPricingRules(ctx, tenantID, cust.ID, plan.MeterIDs[0], domain.AggSum, periodStart, periodEnd)
 	if err != nil {
@@ -198,11 +219,12 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	}
 	// Call 1: input 300¢ + cache_read 30¢ + output 1500¢ = 1830¢. Call 2:
 	// 30¢ + 1500¢ + 3600¢ + 75¢ = 5205¢ (it billed 3105¢ before the split).
-	// Base $0, no tax.
-	const wantCents = 1830 + 5205
+	// Call 3, the /v1/messages call: 5220¢ (0¢ before 2026-10-22). Base $0,
+	// no tax.
+	const wantCents = 1830 + 5205 + 5220
 	if inv.SubtotalCents != wantCents {
 		items, _ := invoiceStore.ListLineItems(ctx, tenantID, inv.ID)
-		t.Errorf("invoice subtotal: got %d¢, want %d¢ (1830 for the cache-read call + 5205 for the cache-write call). Lines: %+v", inv.SubtotalCents, wantCents, items)
+		t.Errorf("invoice subtotal: got %d¢, want %d¢ (1830 for the cache-read call + 5205 for the cache-write call + 5220 for the /v1/messages call). Lines: %+v", inv.SubtotalCents, wantCents, items)
 	}
 	t.Logf("wedge e2e: dated model ids normalized, 5 token roles rated, invoice $%.2f", float64(inv.SubtotalCents)/100)
 }

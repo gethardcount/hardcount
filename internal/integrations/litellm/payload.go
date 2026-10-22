@@ -230,6 +230,8 @@ const (
 	// UnsplitNotInPrompt: the cache writes do not fit inside prompt_tokens
 	// minus the cache reads, so prompt_tokens cannot include them.
 	UnsplitNotInPrompt = "not_in_prompt"
+	// UnsplitNoCount: STUB for the failing-first commit.
+	UnsplitNoCount = "no_count"
 )
 
 // cacheWriteTokens is the cache-write count: the larger of the two places

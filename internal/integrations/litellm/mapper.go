@@ -29,6 +29,10 @@ const (
 	TokenTypeCacheWrite1h = "cache_write_1h"
 )
 
+// nonTokenCallTypes: STUB for the failing-first commit (today's allowlist
+// still decides). Replaced by the skip list in the fix.
+var nonTokenCallTypes = map[string]struct{}{}
+
 // SkipReason says why a record maps to no events. The handler counts every
 // skipped record in SpendResponse.Skipped.
 type SkipReason string
