@@ -221,6 +221,36 @@ func TestUpFailedFileLeavesNothing(t *testing.T) {
 	}
 }
 
+// A baseline that fails partway leaves nothing: not the tables before the
+// failing statement, and no row 180. The baseline is hand-edited source,
+// and an edit that commits partway would leave tables goose has no record
+// of, which every later command refuses. Mutation: a COMMIT after
+// CREATE TABLE public.tenants in the baseline; tenants then stays.
+func TestUpFailedBaselineLeavesNothing(t *testing.T) {
+	dsn, db := scratchDB(t, "velox_migrate_baseline_fails")
+	ctx := context.Background()
+	// The baseline creates tenants long before webhook_events.
+	mustExec(t, db, `CREATE TABLE public.webhook_events (id int)`)
+	err := up(ctx, dsn, noFiles)
+	var fe *FileError
+	if !errors.As(err, &fe) || fe.Version != baselineVersion {
+		t.Fatalf("want a FileError for 180, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "none of the baseline was applied") {
+		t.Errorf("message: %v", err)
+	}
+	if tableExists(t, db, "public.tenants") || gooseRows(t, db, baselineVersion) != 0 {
+		t.Fatal("the failed baseline left its tables or row 180")
+	}
+	mustExec(t, db, `DROP TABLE public.webhook_events`)
+	if err := up(ctx, dsn, noFiles); err != nil {
+		t.Fatalf("Up on the emptied database: %v", err)
+	}
+	if !tableExists(t, db, "public.tenants") || gooseRows(t, db, baselineVersion) != 1 {
+		t.Fatal("the baseline did not apply")
+	}
+}
+
 // blockTable holds ACCESS SHARE on a table, the way an open SELECT does.
 func blockTable(t *testing.T, db *sql.DB, table string) (release func()) {
 	t.Helper()
@@ -550,6 +580,23 @@ func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
 		{"goose table with only row 0, left by an earlier attempt", func(t *testing.T, db *sql.DB) {
 			buildV08(t, db)
 			recordGoose(t, db)
+		}},
+		// v0.8.x created its tables unqualified, so an install could keep
+		// them in the admin user's own schema, which Postgres's default
+		// search_path ("$user", public) lists before public. public is
+		// then empty, and only the search_path finds the tables.
+		{"Velox 0.8.x database outside public", func(t *testing.T, db *sql.DB) {
+			mustExec(t, db, `DROP TABLE public.goose_db_version`)
+			mustExec(t, db, `DO $$ BEGIN EXECUTE format('ALTER SCHEMA public RENAME TO %I', current_user); END $$`)
+			mustExec(t, db, `CREATE SCHEMA public`)
+			for _, ext := range []string{"pgcrypto", "citext", "btree_gist"} {
+				mustExec(t, db, `ALTER EXTENSION `+ext+` SET SCHEMA public`)
+			}
+			mustExec(t, db, `CREATE TABLE schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL)`)
+			mustExec(t, db, `INSERT INTO schema_migrations VALUES (180, false)`)
+			if tableExists(t, db, "public.tenants") || !tableExists(t, db, "tenants") {
+				t.Fatal("setup: tenants should be outside public, on the search_path")
+			}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
